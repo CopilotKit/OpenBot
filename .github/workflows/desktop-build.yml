@@ -93,10 +93,22 @@ jobs:
         with:
           workspaces: desktop/src-tauri
           key: ${{ matrix.platform }}
-      - if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      # The Linux system libraries, from the .deb files an earlier run kept (install-linux-build-deps.sh).
+      # Not for a release, like the caches above: the script then downloads them as it always did.
+      # Keyed by the runner image, whose package lists say which versions install.
+      - name: Name the runner image
+        id: image
+        if: matrix.platform == 'linux' && inputs.channel != 'release'
+        run: echo "image=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+      - name: Cache the Linux system libraries
+        if: matrix.platform == 'linux' && inputs.channel != 'release'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apt-archives
+          key: desktop-apt-${{ runner.arch }}-${{ steps.image.outputs.image }}-${{ hashFiles('desktop/scripts/install-linux-build-deps.sh') }}
+      - name: Install the Linux system libraries
+        if: matrix.platform == 'linux'
+        run: bash desktop/scripts/install-linux-build-deps.sh "$RUNNER_TEMP/apt-archives"
       - run: bun install --frozen-lockfile
         working-directory: desktop
       - run: bun run typecheck
@@ -270,44 +282,10 @@ jobs:
           print(f"Verified packaged Mac version: {build['version']}")
           PY
       # Frontend assets and platform dependencies are ready after the packaged build.
-      # Include main.rs regressions as well as lib.rs; ignored live tests remain opt-in, apart from
-      # the image download's on Linux, below.
+      # Include main.rs regressions as well as lib.rs; ignored live tests remain opt-in. The ones
+      # that need the runner's Docker run beside this build, in desktop.yml's live jobs.
       - name: Rust regression tests
         run: cargo test --locked --lib --bins
-        working-directory: desktop/src-tauri
-      # The back end's image download against a real containerd: the k3s node the CLI creates, a
-      # registry and a throttling proxy, on the runner's Docker. Linux runners have Docker; the
-      # others do not.
-      - name: Back end image download regression tests
-        if: matrix.platform == 'linux'
-        run: cargo test --locked --lib local_images::live -- --ignored --test-threads=1
-        working-directory: desktop/src-tauri
-      # An announced release's images downloaded while the version that runs stays up, against the
-      # same node, registry and proxy, with Docker as OpenBot's engine: the update afterwards
-      # downloads nothing, and a disk short of room downloads nothing at all.
-      - name: Update download ahead regression tests
-        if: matrix.platform == 'linux'
-        run: cargo test --locked --lib update_ready::live -- --ignored --test-threads=1
-        working-directory: desktop/src-tauri
-      # The AI connection changed in the app, on the runner's Docker with this tree's Compose file:
-      # a plan's engine starts alone and stops alone, the picked Bot restarts alone, and the
-      # database never stops.
-      - name: AI connection change regression tests
-        if: matrix.platform == 'linux'
-        run: cargo test --locked --lib ai_connection::tests::real_engine -- --ignored --test-threads=1
-        working-directory: desktop/src-tauri
-      # OpenBot's machine on Windows shares one network namespace with every WSL distro, so a
-      # stopped machine's port rules outlive it. Reproduced on real netavark, both generations
-      # Podman runs on WSL, in a privileged lab on the runner's Docker, then cleared.
-      - name: Stale port rule regression tests
-        if: matrix.platform == 'linux'
-        run: cargo test --locked --lib netavark_rules::live -- --ignored --test-threads=1
-        working-directory: desktop/src-tauri
-      # The folder sandbox on the runner's Docker: what a Bot is told when its command fails, runs
-      # too long or out of memory, or cannot start, for each way that happens.
-      - name: Folder sandbox answer regression tests
-        if: matrix.platform == 'linux'
-        run: cargo test --locked --lib host_access::live -- --ignored --test-threads=1
         working-directory: desktop/src-tauri
       # The binary run as the Recorder's browsers run it: the native messaging host Chrome starts, and
       # the install that writes its manifests. The host name and extension id come from

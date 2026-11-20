@@ -11,12 +11,12 @@ set -uo pipefail
 
 BUNDLE_ID=ai.copilotkit.openbot.desktop
 ROOT="${OPENBOT_ROOT:-$HOME/OpenBot}"
-APP=/Applications/OpenBot.app
+APP="${OPENBOT_APP:-/Applications/OpenBot.app}"
 CLI_CONFIG="$HOME/Library/Preferences/copilotkit-config-nodejs"
 # Compose projects: earlier apps used the folder's name, current ones `openbot-desktop`.
 PROJECTS=(openbot openbot-desktop)
 MACHINE=openbot # the Podman machine OpenBot creates (acquire::MACHINE)
-APP_PROCESS="OpenBot.app/Contents/MacOS/openbot-desktop"
+APP_PROCESS="${APP##*/}/Contents/MacOS/openbot-desktop"
 
 dry=0 yes=0 remove_app=0 images=0
 for arg in "$@"; do
@@ -52,6 +52,18 @@ cli() {
   else
     npx --yes copilotkit "$@"
   fi
+}
+
+# `local delete` for OpenBot's stack, waiting out a CLI that is busy. The CLI's answer is left in `out`.
+delete_stack() {
+  local attempt
+  for attempt in 1 2 3 4; do
+    out=$(cli local delete --stack "$stack" --confirm-delete "$stack" --json 2>&1) && return 0
+    grep -q local_command_busy <<<"$out" && ((attempt < 4)) || return 1
+    echo "    CLI busy, retrying in 30s"
+    sleep 30
+  done
+  return 1
 }
 
 engines=()
@@ -104,20 +116,28 @@ if [[ -z "$stack" ]]; then
 elif ((dry)); then
   echo "    would run: copilotkit local delete --stack $stack --confirm-delete $stack --json"
 else
-  for attempt in 1 2 3 4; do
-    out=$(cli local delete --stack "$stack" --confirm-delete "$stack" --json 2>&1) && {
-      echo "    deleted $stack"
-      break
-    }
-    if grep -q local_command_busy <<<"$out" && ((attempt < 4)); then
-      echo "    CLI busy, retrying in 30s"
-      sleep 30
-      continue
-    fi
+  deleted=0
+  delete_stack && deleted=1
+  # Quit stops OpenBot's Podman machine with the stack, and the CLI deletes a stack only through an
+  # engine that answers (`docker_unavailable`). Removing the machine below would then leave the
+  # CLI's record of the stack behind, so the machine is started for the delete first.
+  if ((!deleted)) && grep -q docker_unavailable <<<"$out" &&
+    command -v podman >/dev/null && podman machine inspect "$MACHINE" >/dev/null 2>&1; then
+    echo "    the engine did not answer; starting the Podman machine $MACHINE to delete the stack"
+    podman machine start "$MACHINE" >/dev/null 2>&1 || echo "    could not start $MACHINE"
+    delete_stack && deleted=1
+  fi
+  if ((deleted)); then
+    echo "    deleted $stack"
+  else
     echo "    could not delete $stack:"
     tail -5 <<<"$out" | sed 's/^/      /'
-    break
-  done
+    # The CLI has no command that removes a stack's record without an engine that answers.
+    echo "    left behind: the CLI's record of $stack (localStacks in $CLI_CONFIG/config.json)"
+    echo "    and its folder $CLI_CONFIG/local-evaluation/$stack. OpenBot's next setup on a new"
+    echo "    Podman machine forgets them; anywhere else, once the engine answers, run:"
+    echo "      copilotkit local delete --stack $stack --confirm-delete $stack"
+  fi
 fi
 
 say "Signing the CopilotKit CLI out and clearing the evaluation agreement"
@@ -190,4 +210,6 @@ say "Done. Open OpenBot from /Applications to start from the beginning."
 # Docker Desktop keeps serving the folder it last mounted, so a reinstall into the recreated
 # ~/OpenBot can fail with "bind source path does not exist" until Docker looks again. A new
 # person's machine never had the folder, so restarting Docker Desktop is what makes this fresh.
-((${#engines[@]})) && echo "    Restart Docker Desktop before reinstalling, or the first Start can fail with \"bind source path does not exist\"."
+if ((${#engines[@]})); then
+  echo "    Restart Docker Desktop before reinstalling, or the first Start can fail with \"bind source path does not exist\"."
+fi

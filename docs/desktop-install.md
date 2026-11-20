@@ -197,6 +197,35 @@ fill a gap. Three rules hold that boundary:
   a declined administrator prompt is asked again the same way. The restart after it is the one
   step that waits for the person's click: OpenBot never restarts the computer on its own, because
   the person may have unsaved work open.
+- **On Windows, the engine's disk follows the install folder.** OpenBot's Podman machine is a WSL
+  disk of about 40 GB. By default, Podman puts that disk in the user profile, usually on C:, for
+  every install folder.
+  - **`XDG_DATA_HOME`, on `podman machine init` only:** on Windows, Podman reads it for its data
+    folder, and init puts a new machine's disk there. No flag or `containers.conf` key sets this
+    location. OpenBot sets it to `<install>\engine` (the machine home) for init alone
+    (`engine::podman_command`, `use_machine_home` in `main.rs`). Every later command finds the disk
+    through WSL and the absolute paths in the machine's config, which stays in
+    `%USERPROFILE%\.config`.
+  - **Every other Podman command keeps Podman's default data folder.** Podman keeps state there
+    that the person's own Podman and the uninstaller share: the API proxy's record
+    (`win-sshproxy.tid`, which stop reads to end the proxy on `\\.\pipe\podman-openbot`), and the
+    user-mode networking distribution `podman-net-usermode` with its count of machines and its lock.
+    For the same reason, init runs without `--user-mode-networking`, and `podman machine set
+    --user-mode-networking` turns it on right after, so `podman-net-usermode` is made in the default
+    folder, not in the install folder.
+  - **A drive that cannot hold a WSL disk** (a network share, a removable drive, exFAT, FAT32)
+    keeps the disk in the user profile (`windows::holds_wsl_disk`). Install does not stop, and the
+    `create-machine` row says where the disk is. An installation saved on Docker Desktop has no
+    machine home.
+  - **The space check measures the machine's drive:** the WSL `BasePath` of an existing machine,
+    else the machine home, else the user profile (`early_downloads::disk_place`).
+  - **An existing machine moves only on a click.** The move runs `wsl --shutdown`, which stops
+    every WSL distro on the computer, Docker Desktop included. If the install folder's drive has
+    room and this WSL supports `wsl --manage --move`, the space message offers **Move OpenBot's
+    storage to F:** (`move_engine_here`, `[engine move]` in the log).
+  - **The download cache stays in `~/OpenBot/openbot-engine`.** It holds Compose, which
+    `podman compose` runs. If the cache moves, every existing install loses `podman compose` until
+    Install runs again.
 - **License work after acceptance.** Intelligence setup waits for the evaluation agreement, and
   uses the version of the terms the person accepted.
 - **One engine for both.** OpenBot and Intelligence share one container engine. The app uses, in
@@ -311,6 +340,10 @@ fill a gap. Three rules hold that boundary:
 | `~/OpenBot/.env` | Settings only. A person's own `COMPOSIO_API_KEY` goes here and always wins |
 | Protected store (see `vault.rs`) | Model keys, service tokens and a provisioned Composio key |
 | `%LOCALAPPDATA%\OpenBot` (Windows) | Recorder host files, and the browser profile earlier versions kept in `local-computer` |
+| `<install>\engine` (Windows) | The disk of the Podman machine `openbot`: `containers\podman\machine\wsl\wsldist\openbot\ext4.vhdx`. It holds the images, containers and data, about 40 GB (`engine::machine_home`) |
+| `%USERPROFILE%\.local\share\containers\...` (Windows) | The same disk, when the install folder's drive cannot hold a WSL disk: a network share, a removable drive, exFAT or FAT32 |
+| `%USERPROFILE%\.config` (Windows) | Podman's config for the machine, with absolute paths to its disk |
+| `~/OpenBot/openbot-engine` | The engine download cache: the Podman installer and Compose. It stays here for every install folder (`early_downloads::cache`) |
 
 ## Apps through Composio
 

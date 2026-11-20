@@ -105,6 +105,7 @@ if (root)
         <div className="mx-auto grid max-w-2xl gap-6" data-screen="agents">
           <BotDelegation
             agent={{ id: DELEGATION.botId } as unknown as AgentProfile}
+            offerTaskThreads
           />
         </div>
         <div

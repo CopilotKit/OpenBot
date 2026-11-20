@@ -1,5 +1,7 @@
 ag-ui-claude-sdk==0.1.5
 claude-agent-sdk==0.2.182
 fastapi
+# Passes Claude Code's model calls on to OpenBot's model gateway (src/run_model_proxy.py).
+httpx>=0.28.1,<0.29
 python-multipart
 uvicorn[standard]

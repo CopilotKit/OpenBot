@@ -33,6 +33,7 @@ not touch the same lines:
 | `learning.yaml` | OpenBot's side of Automatic learning: Learning settings, each person's spaces and sharing choices, sharing requests, and the skills delivered to Bots |
 | `memory.yaml` | A person's memories and memory sources |
 | `agents.yaml` | The agents Bots hand work to (`bot-agents`), their callback tokens, and each Bot's delegation |
+| `management.yaml` | Connecting a self-hosted OpenBot to CopilotKit's management service: where it stands, starting and stopping it |
 
 An area file holds its operations under `paths`, and under `components` the schemas, parameters,
 responses and examples only it uses. Inside the file, refer to them as usual
