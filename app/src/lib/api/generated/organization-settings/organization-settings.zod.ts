@@ -71,6 +71,12 @@ export const GetDeploymentResponse = zod
     authProviders: zod
       .array(zod.enum(["google", "microsoft", "okta"]))
       .describe("The social sign-ins offered, by id."),
+    hostedSignIn: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Whether people sign in through OpenBot by CopilotKit's own sign-in, with their account there. The sign-in starts at /api/auth/hosted/sign-in. Absent or false, people sign in only the ways authProviders and ssoConfigured say.",
+      ),
     ssoConfigured: zod
       .boolean()
       .describe(
