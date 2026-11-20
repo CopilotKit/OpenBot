@@ -165,6 +165,12 @@ jobs:
         if: matrix.suite == 'engines'
         run: cargo test --locked --lib netavark_rules::live -- --ignored --test-threads=1
         working-directory: desktop/src-tauri
+      # A backend node pruned while it was stopped, on the runner's Docker: a k3d-shaped node, its
+      # network, image volume and tools container, stopped and pruned, then found gone.
+      - name: Pruned backend node regression tests
+        if: matrix.suite == 'engines'
+        run: cargo test --locked --lib local_eval::stack_lost_live::engine -- --ignored --test-threads=1
+        working-directory: desktop/src-tauri
       # The folder sandbox on the runner's Docker: what a Bot is told when its command fails, runs
       # too long or out of memory, or cannot start, for each way that happens.
       - name: Folder sandbox answer regression tests

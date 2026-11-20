@@ -134,6 +134,7 @@ type Props = {
   status?: boolean;
   onStart?: (startable: Startable) => Promise<StartOutcome>;
   onForgotten?: () => void;
+  installAgain?: () => Promise<boolean>;
   pollDelays?: number[];
   roomEveryMs?: number;
 };
@@ -146,6 +147,7 @@ function Holder(props: Props) {
     connected: props.connected ?? false,
     onStart: props.onStart ?? (async () => "started"),
     onForgotten: props.onForgotten,
+    installAgain: props.installAgain,
     pollDelays: props.pollDelays ?? [0, 0, 0],
     roomEveryMs: props.roomEveryMs,
   });
@@ -1341,6 +1343,57 @@ test("a lost backend offers Start fresh, which sets OpenBot up again and opens i
   await userEvent.click(screen.getByRole("button", { name: "Start fresh" }));
   await waitFor(() => expect(started).toEqual([startableUrls]));
   expect(forgotten).toBe(1);
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "set_up_local_eval",
+    "connect_local_eval",
+    "run_local_eval:status",
+  ]);
+});
+
+/**
+ * A Mac on Docker Desktop, Desktop 1.1.2: `docker container prune` removed the backend's stopped
+ * node, every status failed "local-command-failed, no stack", and Retry failed the same way five
+ * times. The native side now says only the backend is gone (`backend-gone`: its cluster is gone,
+ * OpenBot's own database is not). The card says what went and what stays, offers Set up again in
+ * place of Retry, and Set up again sets the backend up, connects it, waits for it and opens OpenBot.
+ */
+test("a backend whose node was removed offers Set up again, which sets it up and opens OpenBot", async () => {
+  const gone = report({
+    outcome: "failed",
+    stack: null,
+    reason: "backend-gone",
+  });
+  invokeHandler = answers({
+    run_local_eval: [gone, ready],
+    set_up_local_eval: [report()],
+    connect_local_eval: [connection()],
+  });
+  const started: Startable[] = [];
+  let installs = 0;
+  const screen = view({
+    stack: "local-044466e209069a0812bc9764",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+    installAgain: async () => {
+      installs += 1;
+      return true;
+    },
+  });
+  await screen.findByText(
+    "Your conversations and what your Bots remember are gone from this computer. Set up again to carry on. Your Bots, settings, sign-in and AI connection stay.",
+  );
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Start fresh" })).toBeNull();
+
+  await userEvent.click(screen.getByRole("button", { name: "Set up again" }));
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  // OpenBot's own installation is left as it is: Start, not a first install, moves it forward.
+  // A folder still on 1.0.3 under Desktop 1.1.2 failed that first install every time.
+  expect(installs).toBe(0);
   expect(commands()).toEqual([
     "run_local_eval:status",
     "set_up_local_eval",

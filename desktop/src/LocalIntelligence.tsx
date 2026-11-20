@@ -1131,16 +1131,25 @@ export function useLocalSequence({
    * itself when its cluster is gone (`lost_stack` in local_eval.rs) and sets up a new one, and
    * connect, wait and start follow as on a first setup: one journey forward. The sign-in and the AI
    * connection are kept: neither was in what went.
+   *
+   * The same for a backend whose cluster alone is gone (`backend-gone`), as after
+   * `docker container prune` removed its stopped node: setup makes the cluster again for the same
+   * stack, with its saved licence and keys, so OpenBot's own data and its link to the backend stay.
+   * OpenBot's own installation is left as it is there, never installed again: a Mac whose folder
+   * was still on 1.0.3 under Desktop 1.1.2 failed a first install that asked for a Bot 1.0.3 did
+   * not have, while Start takes the update path, moving the folder to this app's release first.
    */
   async function startFresh() {
     if (now.current.running) return;
+    // Only the backend went: OpenBot's own installation is as it was, and is not installed again.
+    const backendOnly = now.current.blocked?.reason === "backend-gone";
     halt();
     const token = generation.current;
     go.current = true;
     latest.current.onForgotten();
     // Nothing of the lost backend's rows is left to show: the install's rows come first.
     update(idle);
-    if (!(await latest.current.installAgain())) return;
+    if (!backendOnly && !(await latest.current.installAgain())) return;
     // Stopped or left while it installed.
     if (generation.current !== token) return;
     void run("setup");
@@ -1497,10 +1506,11 @@ export function LocalNeeds({
   const reason = sequence.blocked?.reason;
   if (reason === "authentication-required")
     return <SignInToCopilotKit onSignedIn={sequence.retry} />;
-  if (reason === "stack-lost")
+  if (reason === "stack-lost" || reason === "backend-gone")
     return (
       <StartFresh
         said={explain ? (sequence.blocked?.said ?? null) : null}
+        label={reason === "backend-gone" ? "Set up again" : "Start fresh"}
         onStartFresh={sequence.startFresh}
       />
     );
@@ -1520,21 +1530,27 @@ function needsPerson(sequence: LocalSequence): boolean {
   return (
     reason === "authentication-required" ||
     reason === "eula-acceptance-required" ||
-    reason === "stack-lost"
+    reason === "stack-lost" ||
+    reason === "backend-gone"
   );
 }
 
-/** The backend is gone: Retry would only ask again about it, so Start fresh is the one way on. */
+/** The backend is gone: Retry would only ask again about it, so setting up again is the one way on. */
 function backendLost(sequence: LocalSequence): boolean {
-  return sequence.stopped && sequence.blocked?.reason === "stack-lost";
+  const reason = sequence.blocked?.reason;
+  return (
+    sequence.stopped && (reason === "stack-lost" || reason === "backend-gone")
+  );
 }
 
 /** The one way on once the backend is gone: set OpenBot up again. What is gone is said with it. */
 function StartFresh({
   said,
+  label,
   onStartFresh,
 }: {
   said: string | null;
+  label: string;
   onStartFresh: () => void;
 }) {
   return (
@@ -1542,7 +1558,7 @@ function StartFresh({
       {said && <p>{said}</p>}
       <div className="row">
         <button type="button" onClick={onStartFresh}>
-          Start fresh
+          {label}
         </button>
       </div>
     </div>
