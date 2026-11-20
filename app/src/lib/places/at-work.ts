@@ -41,6 +41,8 @@ function rowOfChannel(channel: ChannelSummary): AtWorkRow {
  * Everything running on its own right now, one row per conversation: a conversation owed work by
  * another Bot or a routine, then each working task whose conversation is not already there. A Bot
  * answering the message the person just sent is not listed: that reply shows in its conversation.
+ * That includes a task the server reads as working only because its Bot is answering them
+ * (`answeringYou`).
  * Rows with a start time come first, the longest-running at the top; the rest keep the order the
  * list gave them.
  */
@@ -53,7 +55,8 @@ export function atWork(
     .map(rowOfChannel);
   const seen = new Set(rows.map((row) => row.channelId));
   for (const { task, status } of tasks) {
-    if (status !== "working" || seen.has(task.channelId)) continue;
+    if (status !== "working" || task.answeringYou || seen.has(task.channelId))
+      continue;
     seen.add(task.channelId);
     const listedChannel = channels.find(
       (channel) => channel.id === task.channelId,
