@@ -411,14 +411,17 @@ describe("CI's wiring of the shards to the total", () => {
     );
   });
 
-  // Skipped would read as a pass to anything that requires the check.
+  // Skipped would read as a pass to anything that requires the check. It is skipped only when
+  // `changes` found the suite was not needed, and then no shard ran either.
   test("the total is the `tests` check, runs even when a shard failed, and verify needs it", () => {
     const total = jobs["test-total"]!;
     expect(total.name).toBe("tests");
-    expect(total.needs).toEqual(["test"]);
-    expect(total.if).toBe("always()");
+    expect(total.needs).toEqual(["changes", "test"]);
+    expect(total.if).toBe("always() && needs.changes.outputs.suite == 'true'");
+    expect(jobs.test!.if).toBe("needs.changes.outputs.suite == 'true'");
     expect(jobs.verify!.needs).toContain("test-total");
     expect(jobs.verify!.needs).toContain("test");
+    expect(jobs.verify!.needs).toContain("changes");
   });
 });
 
