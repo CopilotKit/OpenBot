@@ -130,6 +130,16 @@ type Props = {
    * the screen is what the person came to type into (the full-size view of a Bot's screen).
    */
   autoFocus?: boolean;
+  /**
+   * Where the stream is, under the organization's API address, when it is not a Bot's computer's: the
+   * Windows computer's screen (`/windows-computer/screen`).
+   */
+  socketPath?: string;
+  /**
+   * Nothing the person does here is sent: a screen to watch, such as the Windows computer's, which the
+   * person takes over at the computer itself. Overrides `driving`.
+   */
+  viewOnly?: boolean;
   ref?: Ref<LiveScreenHandle>;
 };
 
@@ -141,7 +151,9 @@ type FrameMessage = {
 
 export function LiveScreen({
   computerId,
-  driving,
+  driving: drivingProp,
+  socketPath,
+  viewOnly = false,
   onProblem,
   onReconnecting,
   retryKey = 0,
@@ -149,6 +161,7 @@ export function LiveScreen({
   autoFocus = false,
   ref,
 }: Props) {
+  const driving = drivingProp && !viewOnly;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   /** Keys sent down to the remote browser, by code, whose release goes there too, wherever the focus is by then. */
@@ -383,7 +396,8 @@ export function LiveScreen({
         const socket = new WebSocket(
           socketUrl(
             apiSocketPath(
-              `/computers/${encodeURIComponent(computerId)}/screen`,
+              socketPath ??
+                `/computers/${encodeURIComponent(computerId)}/screen`,
             ),
           ),
         );
@@ -410,6 +424,7 @@ export function LiveScreen({
         };
       },
       verifyOwnership: async () => {
+        if (viewOnly) return false;
         const state = await readControl(computerId);
         return state?.holder === "human" && !state.transitioning;
       },
