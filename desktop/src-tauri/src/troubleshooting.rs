@@ -321,7 +321,7 @@ pub fn speech_log(current: &Path, max_bytes: u64) -> Vec<(PathBuf, String)> {
 }
 
 /// What the engine's measurement says when it didn't finish by the deadline.
-pub const NOT_MEASURED: &str = "not measured";
+pub const NOT_MEASURED: &str = "Couldn't measure it in time";
 
 /**
 The engine's version, size and disk use, asked at once, each on a thread of its own and stopped at

@@ -27339,12 +27339,15 @@ fn main() {
                 "missing {expected:?} in\n{missing}"
             );
         }
-        assert!(
-            text.contains(
-                "## Model provider errors (server log)\n\nCouldn't read the server's log in time.\n"
-            ),
-            "{text}"
-        );
+        for expected in [
+            "Container engine: docker. Couldn't measure it in time.\n",
+            "Couldn't collect: the container engine's version, the container engine's disk use, \
+             the container engine's CPUs, memory and free disk, the server's log. See What \
+             couldn't be collected.\n",
+            "## Model provider errors (server log)\n\nCouldn't read the server's log in time.\n",
+        ] {
+            assert!(text.contains(expected), "missing {expected:?} in\n{text}");
+        }
 
         // Every engine command was stopped: none lived to write that it outlived the gathering.
         std::thread::sleep(
