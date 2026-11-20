@@ -39,7 +39,7 @@ import {
 } from "../../shared/release-manifest";
 import { BackupTargetRefused, confirmBackupTarget } from "./backup-target";
 import type { ManagementClient } from "./client";
-import type { Agent } from "./config";
+import type { ReadyAgent } from "./config";
 import { Flux } from "./flux";
 import { operationId, runJob } from "./jobs";
 import { CommandFailed, type Kube, run } from "./kube";
@@ -103,7 +103,7 @@ export class ManagementAgent {
     null;
 
   constructor(
-    private readonly agent: Agent,
+    private readonly agent: ReadyAgent,
     private readonly kube: Kube,
     private readonly client: ManagementClient,
     private readonly log: Log = (message, fields) =>
