@@ -520,24 +520,28 @@ describe("the rules name the jobs the workflows run", () => {
     );
   });
 
-  test("ci.yml: the WebKit job's Playwright image is the playwright-core the root pins", () => {
+  test("ci.yml: each real-browser job's Playwright image is the playwright-core the root pins", () => {
     // The image's browsers are the builds of its own Playwright version, and playwright-core
     // launches only its own builds, so a bump of one without the other fails the job.
     const parsed = Bun.YAML.parse(
       readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8"),
     ) as { jobs: Record<string, { env?: Record<string, string> }> };
-    const image =
-      parsed.jobs["app-browser-webkit"]?.env?.PLAYWRIGHT_IMAGE ?? "";
     const root = JSON.parse(
       readFileSync(join(ROOT, "package.json"), "utf8"),
     ) as { dependencies?: Record<string, string> };
     const version = root.dependencies?.["playwright-core"];
     expect(version).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(image).toMatch(
-      new RegExp(
-        `^mcr\\.microsoft\\.com/playwright:v${version?.replaceAll(".", "\\.")}-noble@sha256:[0-9a-f]{64}$`,
-      ),
-    );
+    for (const job of [
+      "app-browser",
+      "app-browser-webkit",
+      "app-browser-desktop",
+    ]) {
+      expect(parsed.jobs[job]?.env?.PLAYWRIGHT_IMAGE ?? "").toMatch(
+        new RegExp(
+          `^mcr\\.microsoft\\.com/playwright:v${version?.replaceAll(".", "\\.")}-noble@sha256:[0-9a-f]{64}$`,
+        ),
+      );
+    }
   });
 
   test("desktop.yml: core, each platform the shared build makes, and the live tests beside them", () => {
