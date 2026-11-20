@@ -193,13 +193,32 @@ paths:
       summary: List an organization's members
       description: >-
         Return one page of the organization's members, in the order they
-        joined. Any member can read it. A missing cursor starts at the first
-        page and nextCursor null ends the list.
+        joined. Any member can read it. search narrows the list to the
+        members whose name or address matches it, ignoring case, best matches
+        first: those whose name, a word of their name (a first or a last name)
+        or their address starts with it, then those whose name or address
+        holds it, each group in alphabetical order of name, then address. A
+        search finds only this organization's current members: never somebody
+        it removed, somebody turned away from this OpenBot, or a member of
+        another organization only. A missing cursor starts
+        at the first page and nextCursor null ends the list. A cursor belongs
+        to the search that made it, so changing the search starts again
+        without one.
       security:
         - webSession: []
         - appOAuth: [organizations:read]
         - apiKey: []
       parameters:
+        - name: search
+          in: query
+          description: >-
+            The start of a name, a first or last name, or an address, or a
+            part of one, matched without regard to case. Leading and trailing
+            spaces are ignored; empty lists everybody.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
         - $ref: './common.yaml#/components/parameters/Limit'
         - $ref: './common.yaml#/components/parameters/Cursor'
       responses:

@@ -173,7 +173,7 @@ export const CreateOrganizationResponse = zod.object({
 });
 
 /**
- * Return one page of the organization's members, in the order they joined. Any member can read it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's members, in the order they joined. Any member can read it. search narrows the list to the members whose name or address matches it, ignoring case, best matches first: those whose name, a word of their name (a first or a last name) or their address starts with it, then those whose name or address holds it, each group in alphabetical order of name, then address. A search finds only this organization's current members: never somebody it removed, somebody turned away from this OpenBot, or a member of another organization only. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List an organization's members
  */
 
@@ -186,6 +186,11 @@ export const ListOrganizationMembersParams = zod.object({
     ),
 });
 
+export const listOrganizationMembersQuerySearchMax = 200;
+
+export const listOrganizationMembersQuerySearchRegExp = new RegExp(
+  "^[^\\x00]*$",
+);
 export const listOrganizationMembersQueryLimitDefault = 50;
 export const listOrganizationMembersQueryLimitMax = 100;
 
@@ -196,6 +201,14 @@ export const listOrganizationMembersQueryCursorRegExp = new RegExp(
 );
 
 export const ListOrganizationMembersQueryParams = zod.object({
+  search: zod
+    .string()
+    .max(listOrganizationMembersQuerySearchMax)
+    .regex(listOrganizationMembersQuerySearchRegExp)
+    .optional()
+    .describe(
+      "The start of a name, a first or last name, or an address, or a part of one, matched without regard to case. Leading and trailing spaces are ignored; empty lists everybody.",
+    ),
   limit: zod
     .int()
     .min(1)
