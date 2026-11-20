@@ -15,6 +15,7 @@ export * from "./components/components.zod";
 export * from "./computers/computers.zod";
 export * from "./connections/connections.zod";
 export * from "./conversations/conversations.zod";
+export * from "./copilotkit-management/copilotkit-management.zod";
 export * from "./credentials/credentials.zod";
 export * from "./deliveries/deliveries.zod";
 export * from "./destinations/destinations.zod";
