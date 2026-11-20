@@ -97,18 +97,26 @@
     left: --spacing(3);
     height: auto;
     padding: 0;
+    /* Room on the right for the notches and the resize rail that hang past its edge. */
+    clip-path: inset(0 -48px 0 0 round 18px 0 0 18px);
+    transition-property: left, right, width, clip-path;
   }
 
   /*
    * Collapsed, the sidebar slides out past the window's left edge. The rule above pins it 12px in,
    * which also overrode the primitive's own way out, so the page grew under a sidebar that stayed.
-   * Out by its width, the 12px frame and the 30px notches that hang past its right edge, and a
-   * little more, so no tip of them is left showing.
+   *
+   * It moves by its width, exactly as far as the page's left edge does, so the two stay joined all
+   * the way. Going further, to hide the notches, opened a strip of the dark field between them that
+   * grew to 50px mid-slide. Instead the clip holds at the window's left edge while the sidebar slides
+   * under it: the inset grows by what the sidebar moves, with the window's 18px corners, and on the
+   * right it closes over the notches and the rail. Both use the primitive's 200ms linear easing.
    */
   :root:not([data-skin])
     [data-slot="sidebar"][data-state="collapsed"]
     [data-slot="sidebar-container"] {
-    left: calc(var(--sidebar-width) * -1 - 48px);
+    left: calc(--spacing(3) - var(--sidebar-width));
+    clip-path: inset(0 0 0 var(--sidebar-width) round 18px 0 0 18px);
   }
 
   :root:not([data-skin]) [data-slot="sidebar-inner"] {
@@ -162,10 +170,25 @@
     height: 16px;
     pointer-events: none;
     background-color: var(--frame);
+    transition: scale 200ms linear;
+  }
+
+  /*
+   * They shrink into the page's corner while its own corners round, so one shape turns into the
+   * other. Fading them instead left a grey patch: the dark notch half see-through over the page.
+   */
+  :root:not([data-skin])
+    [data-slot="sidebar"][data-state="collapsed"]
+    [data-slot="sidebar-container"]::before,
+  :root:not([data-skin])
+    [data-slot="sidebar"][data-state="collapsed"]
+    [data-slot="sidebar-container"]::after {
+    scale: 0;
   }
 
   :root:not([data-skin]) [data-slot="sidebar-container"]::before {
     top: 0;
+    transform-origin: left top;
     mask:
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath transform='matrix(-1 0 0 1 30 0)' d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
       no-repeat center / 100% 100%;
@@ -173,6 +196,7 @@
 
   :root:not([data-skin]) [data-slot="sidebar-container"]::after {
     bottom: 0;
+    transform-origin: left bottom;
     mask:
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath transform='matrix(-1 0 0 -1 30 16)' d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
       no-repeat center / 100% 100%;
@@ -185,6 +209,7 @@
     border-radius: 0 18px 18px 0;
     box-shadow: none;
     isolation: isolate;
+    transition: border-radius 200ms linear;
   }
 
   :root:not([data-skin])

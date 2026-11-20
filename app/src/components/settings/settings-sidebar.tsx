@@ -2,6 +2,7 @@ import {
   IconArrowLeft,
   IconBell,
   IconBuilding,
+  IconChevronLeft,
   IconKey,
   IconLayoutGrid,
   IconListCheck,
@@ -194,10 +195,16 @@ export function SettingsSidebar({
       <SidebarHeader className="h-12 p-2">
         <SidebarMenu>
           <SidebarMenuItem>
+            {/*
+             * Figma's "Navigation / Back" in OpenBot's own look: a chevron, the words in semibold,
+             * and the sidebar's white pill under the pointer. The skins keep their arrow and fill.
+             */}
             <SidebarMenuButton
+              className="own:h-9 own:rounded-full own:px-2 own:font-semibold own:hover:bg-sidebar-item-hover"
               render={(props) => (
                 <Link {...appLinkOptions} {...props}>
-                  <IconArrowLeft className="mr-2 h-4 w-4" />
+                  <IconArrowLeft className="mr-2 h-4 w-4 own:hidden" />
+                  <IconChevronLeft className="hidden own:mr-1 own:block own:size-5" />
                   Back to app
                 </Link>
               )}
@@ -225,7 +232,7 @@ export function SettingsSidebar({
                      * which the frame's notch marks. The skins keep their fill and 16px glyphs.
                      */}
                     <SidebarMenuButton
-                      className="own:rounded-full own:hover:bg-sidebar-item-hover own:data-[status=active]:hover:bg-transparent"
+                      className="own:h-9 own:rounded-full own:px-2 own:py-1 own:hover:bg-sidebar-item-hover own:data-[status=active]:hover:bg-transparent"
                       render={(props) => (
                         <Link
                           {...option.linkOptions}

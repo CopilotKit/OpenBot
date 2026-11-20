@@ -100,7 +100,7 @@ export function AccountMenu({ children }: { children: ReactNode }) {
             <DropdownMenuTrigger
               ref={ref}
               render={
-                <SidebarMenuButton className="hover:bg-sidebar-item-hover h-10 own:rounded-full" />
+                <SidebarMenuButton className="hover:bg-sidebar-item-hover h-10 own:h-11 own:rounded-full own:p-2" />
               }
             />
           }

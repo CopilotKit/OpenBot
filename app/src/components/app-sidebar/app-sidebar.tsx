@@ -396,7 +396,7 @@ function PrimaryNavItem({
         // No hover fill under a pointer that has not moved since the page changed (see
         // usePointerRestingSinceNavigation). In OpenBot's own look the hover is Figma's white pill,
         // and the open page's row takes none.
-        className="hover:bg-sidebar-item-hover h-9 group-data-[pointer-resting]/footer-menu:hover:bg-transparent own:rounded-full own:data-[status=active]:hover:bg-transparent"
+        className="hover:bg-sidebar-item-hover h-9 group-data-[pointer-resting]/footer-menu:hover:bg-transparent own:rounded-full own:px-2 own:py-1 own:data-[status=active]:hover:bg-transparent"
         render={(props) => <Link {...props} to={item.to} />}
         tooltip={tooltip}
       >
