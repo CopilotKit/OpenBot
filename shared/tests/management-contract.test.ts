@@ -380,3 +380,25 @@ describe("enrollment contract", () => {
     ).toBe(true);
   });
 });
+
+test("an install's status reads with its window, and without one from a service before it was added", () => {
+  const status = {
+    enrolled: true,
+    agentConnected: true,
+    lastHeartbeatAt: "2026-11-20T10:31:12Z",
+    agentVersion: "0.4.0",
+  };
+  expect(InstallStatus.safeParse(status).success).toBe(true);
+  expect(
+    InstallStatus.safeParse({
+      ...status,
+      window: { weekday: 2, startUtc: "14:00", hours: 4 },
+    }).success,
+  ).toBe(true);
+  expect(
+    InstallStatus.safeParse({
+      ...status,
+      window: { weekday: 2, startUtc: "14:00", hours: 2 },
+    }).success,
+  ).toBe(false);
+});

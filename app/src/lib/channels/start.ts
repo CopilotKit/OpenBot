@@ -12,7 +12,7 @@ import {
   sendGroupMessageMutationOptions,
 } from "@/lib/groups";
 import { saveConversationModel } from "@/lib/models/mutations";
-import type { ConversationModel } from "@/lib/models/queries";
+import type { ConversationModelInput } from "@/lib/models/queries";
 import { newId } from "@/lib/new-id";
 import {
   createChannelMutationOptions,
@@ -88,9 +88,9 @@ export async function startGroupWith(input: {
  */
 export async function startWithModel(input: {
   /** Null, or both halves null, when everything is the default and nothing needs saving. */
-  pick: ConversationModel | null;
+  pick: ConversationModelInput | null;
   create: () => Promise<{ id: string }>;
-  save: (channelId: string, pick: ConversationModel) => Promise<unknown>;
+  save: (channelId: string, pick: ConversationModelInput) => Promise<unknown>;
   /** Sends the files held for the first message to the new channel. Absent when there are none. */
   upload?: (channelId: string) => Promise<void>;
   discard: (channelId: string) => Promise<void>;
@@ -137,7 +137,7 @@ export function useStartChannel() {
     agentId: string,
     text: string,
     /** A model and effort picked before the conversation existed, saved before its first message runs. */
-    pick?: ConversationModel | null,
+    pick?: ConversationModelInput | null,
     /** The placeholder this was started behind, if any; see the hook's own comment. */
     pendingId?: string,
     /** Files a held composer kept for the first message (`holdsFilesUntilSent`), not yet uploaded. */
@@ -220,7 +220,7 @@ export function useStartChannel() {
     startChosen: (
       agentId: string,
       text: string,
-      pick?: ConversationModel | null,
+      pick?: ConversationModelInput | null,
       pendingId?: string,
       files?: readonly Attachment[],
     ) =>

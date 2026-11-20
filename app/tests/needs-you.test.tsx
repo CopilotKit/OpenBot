@@ -14,6 +14,7 @@ import {
   createRoute,
   createRouter,
   RouterProvider,
+  useParams,
 } from "@tanstack/react-router";
 import {
   cleanup,
@@ -22,7 +23,9 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { useState } from "react";
 import { BotRoster } from "@/components/bots/bot-roster";
+import { takeFirstMessage } from "@/components/channels/transcript-messages";
 import { BotNeedsYou } from "@/components/needs-you/board";
 import { taskKeys } from "@/lib/tasks/queries";
 import { queryClient } from "@/query-client";
@@ -167,6 +170,8 @@ let waitingBots: ReturnType<typeof attentionOf>[] = [];
 let requests: unknown[] = [];
 /** What the Inbox Bot's Activity lists under way: a hand-off that ran out of tries, when a test says. */
 let stalled: ReturnType<typeof activityOf>["inProgress"] = [];
+/** Whether the server runs task threads (OPENBOT_TASK_THREADS). Off, as a server is by default. */
+let taskThreads = false;
 const sent: { method: string; path: string }[] = [];
 
 function serving() {
@@ -184,12 +189,24 @@ function serving() {
         ? problem(500, "Server error")
         : Response.json({ error: "Server error" }, { status: 500 });
     const started = path.startsWith(`${CHECK_IN_ITEMS_PATH}/`)
-      ? path.slice(CHECK_IN_ITEMS_PATH.length).match(/^\/(.+)\/start$/)
+      ? path
+          .slice(CHECK_IN_ITEMS_PATH.length)
+          .match(/^\/(.+)\/(start|work-on)$/)
       : null;
     if (started) {
       const found = items.find((entry) => entry.id === started[1]);
       if (!found) return Response.json({ error: "Not open" }, { status: 404 });
       items = items.filter((entry) => entry !== found);
+      // Work on it, on a server with task threads off: no task, the person's own conversation.
+      if (started[2] === "work-on" && !taskThreads)
+        return Response.json({
+          checkInItem: { ...found, status: "started" },
+          task: null,
+          conversation: {
+            id: `own-${found.botId}`,
+            message: `${found.title}\n\n${found.detail}${found.sourceLink ? `\n\nSource: ${found.sourceLink}` : ""}`,
+          },
+        });
       const opened = task({
         id: `task-${found.id}`,
         agentId: found.botId,
@@ -202,6 +219,7 @@ function serving() {
       return Response.json({
         checkInItem: { ...found, status: "started" },
         task: { id: opened.id, conversationId: opened.channelId },
+        ...(started[2] === "work-on" ? { conversation: null } : {}),
       });
     }
     const hidden = path.startsWith(`${CHECK_IN_ITEMS_PATH}/`)
@@ -300,6 +318,7 @@ beforeEach(() => {
   waitingBots = [];
   stalled = [];
   requests = [];
+  taskThreads = false;
   // Work on it, Dismiss and a task's actions invalidate the app's one cache, so the lists draw from it.
   queryClient.clear();
 });
@@ -337,7 +356,7 @@ async function drawAll(duet: TasksView = "up_next") {
     createRoute({
       getParentRoute: () => rootRoute,
       path: "/channel/$channelId",
-      component: () => null,
+      component: OpenedConversation,
     }),
   ]);
   const router = createRouter({
@@ -352,7 +371,21 @@ async function drawAll(duet: TasksView = "up_next") {
     </QueryClientProvider>,
   );
   const region = (name: string) => within(view.getByRole("region", { name }));
-  return { view, region };
+  return { view, region, router };
+}
+
+/**
+ * A conversation's screen, as far as these tests need it: which conversation it is, and the message
+ * it was opened to send, taken as the real screen takes it (`takeFirstMessage`).
+ */
+function OpenedConversation() {
+  const { channelId } = useParams({ strict: false }) as { channelId: string };
+  const [first] = useState(() => takeFirstMessage(channelId));
+  return (
+    <section aria-label={`Conversation ${channelId}`}>
+      <p>{first?.text ?? "Nothing to send"}</p>
+    </section>
+  );
 }
 
 /** OpenFuse's bell, opened: its sheet of what every Bot waits on the person for. */
@@ -451,16 +484,44 @@ test("Dismiss takes an item off the Bots page, the Bot's page and OpenDuet at on
   expect(view.getAllByText("Renew the studio insurance")).toHaveLength(3);
 });
 
-test("Work on it takes the item off and shows its task, Working, opening its own conversation", async () => {
+/*
+ * Task threads are off unless the server turns them on, and Work on it used to open one anyway: the
+ * item became a task in a conversation of its own. Now the work happens where every other request
+ * does, in the person's own conversation with the Bot, sent there as their message.
+ */
+test("with task threads off, Work on it opens the person's own conversation with the Bot and sends the item there, and opens no task", async () => {
   items = [item({ id: "s1", title: "Send Dana the Q3 numbers" })];
   serving();
-  const { view, region } = await drawAll();
+  const { view, region, router } = await drawAll();
+  fireEvent.click(
+    await region("Bots page").findByRole("button", { name: "Work on it" }),
+  );
+  const opened = await view.findByRole("region", {
+    name: "Conversation own-inbox",
+  });
+  expect(router.state.location.pathname).toBe("/channel/own-inbox");
+  expect(opened.textContent).toBe(
+    "Send Dana the Q3 numbers\n\nDana asked for the Q3 numbers by Friday.\n\nSource: https://mail.example.com/1",
+  );
+  expect(sent).toEqual([
+    { method: "POST", path: `${CHECK_IN_ITEMS_PATH}/s1/work-on` },
+  ]);
+  expect(tasks).toEqual([]);
+});
+
+test("with task threads on, Work on it takes the item off and shows its task, Working, opening its own conversation", async () => {
+  taskThreads = true;
+  items = [item({ id: "s1", title: "Send Dana the Q3 numbers" })];
+  serving();
+  const { view, region, router } = await drawAll();
   const bots = region("Bots page");
   fireEvent.click(await bots.findByRole("button", { name: "Work on it" }));
   await waitFor(() => expect(bots.getByText("Working")).toBeTruthy());
   expect(sent).toEqual([
-    { method: "POST", path: `${CHECK_IN_ITEMS_PATH}/s1/start` },
+    { method: "POST", path: `${CHECK_IN_ITEMS_PATH}/s1/work-on` },
   ]);
+  // It stays where it was: the task's card is the way into its conversation.
+  expect(router.state.location.pathname).toBe("/");
   // The item became the task: nothing left to start or dismiss for it anywhere.
   expect(view.queryAllByRole("button", { name: "Work on it" })).toHaveLength(0);
   expect(bots.getByText("Just started.")).toBeTruthy();

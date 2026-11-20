@@ -555,6 +555,10 @@ export async function runAgent(
     botId: botIdOf(input.messages ?? []),
     route: runRoute(props),
     threadId: input.threadId,
+    ...(typeof props.openbotOrganization === "string" &&
+    props.openbotOrganization
+      ? { organization: props.openbotOrganization }
+      : {}),
     signal: options.signal,
   };
   const emit = options.emit;

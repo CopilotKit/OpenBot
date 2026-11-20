@@ -15,6 +15,7 @@ from pathlib import Path
 # one level above /app/src in the image the Dockerfile builds.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import bot_settings
+from run_model_key import RunModelKey
 
 from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 from fastapi import FastAPI, Request
@@ -361,6 +362,8 @@ builder.add_edge("tools", "answer")
 graph = builder.compile(checkpointer=MemorySaver())
 
 app = FastAPI()
+# Each run's model calls carry its own gateway token, in its organization. See run_model_key.py.
+app.add_middleware(RunModelKey)
 
 
 @app.middleware("http")

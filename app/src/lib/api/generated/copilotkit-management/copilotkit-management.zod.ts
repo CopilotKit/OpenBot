@@ -21,6 +21,15 @@ export const getManagementEnrollmentResponseUserCodeRegExp = new RegExp(
   "^[A-Z0-9]{4}-[A-Z0-9]{4}$",
 );
 
+export const getManagementEnrollmentResponseWindowWeekdayMin = 0;
+export const getManagementEnrollmentResponseWindowWeekdayMax = 6;
+
+export const getManagementEnrollmentResponseWindowStartUtcRegExp = new RegExp(
+  "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+);
+export const getManagementEnrollmentResponseWindowHoursMin = 4;
+export const getManagementEnrollmentResponseWindowHoursMax = 168;
+
 export const GetManagementEnrollmentResponse = zod
   .object({
     state: zod
@@ -70,6 +79,34 @@ export const GetManagementEnrollmentResponse = zod
       .describe(
         "A sentence a person reads beside helmCommand, present only when this OpenBot isn't a published release (a build of main or a development build). No published agent chart matches such a build, so helmCommand names no chart version and Helm installs the newest published one. Absent on a release.",
       ),
+    installName: zod
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "The name this OpenBot gave itself when it asked to be connected, which the approval page shows the approver, so they can match it. Present while waiting for approval.",
+      ),
+    window: zod
+      .object({
+        weekday: zod
+          .int()
+          .min(getManagementEnrollmentResponseWindowWeekdayMin)
+          .max(getManagementEnrollmentResponseWindowWeekdayMax)
+          .describe("The day it starts, 0 for Sunday to 6 for Saturday."),
+        startUtc: zod
+          .string()
+          .regex(getManagementEnrollmentResponseWindowStartUtcRegExp)
+          .describe("When it starts, as HH:MM in UTC."),
+        hours: zod
+          .number()
+          .min(getManagementEnrollmentResponseWindowHoursMin)
+          .max(getManagementEnrollmentResponseWindowHoursMax)
+          .describe("How many hours it lasts."),
+      })
+      .optional()
+      .describe(
+        "The weekly maintenance window the managed updates service upgrades this OpenBot in, as the service last reported it, once connected. It is agreed for each install; the default is Tuesdays from 14:00 UTC for four hours.",
+      ),
     lastHeartbeatAt: zod.iso
       .datetime({ offset: true })
       .optional()
@@ -87,6 +124,12 @@ export const GetManagementEnrollmentResponse = zod
       .optional()
       .describe(
         "What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, the management service out of reach, a connected agent that has stopped reporting in, or a Stop the service couldn't be told about. Absent when nothing did.",
+      ),
+    lastErrorCode: zod
+      .string()
+      .optional()
+      .describe(
+        "Which refusal lastError is, where a client acts on it. not-entitled: this OpenBot's licence doesn't include managed updates, so connecting again fails the same way until they are added to it. A later OpenBot may add a code; read one you don't know as no code.",
       ),
   })
   .describe(
@@ -122,6 +165,15 @@ export const StartManagementEnrollmentHeader = zod.object({
 export const startManagementEnrollmentResponseUserCodeRegExp = new RegExp(
   "^[A-Z0-9]{4}-[A-Z0-9]{4}$",
 );
+
+export const startManagementEnrollmentResponseWindowWeekdayMin = 0;
+export const startManagementEnrollmentResponseWindowWeekdayMax = 6;
+
+export const startManagementEnrollmentResponseWindowStartUtcRegExp = new RegExp(
+  "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+);
+export const startManagementEnrollmentResponseWindowHoursMin = 4;
+export const startManagementEnrollmentResponseWindowHoursMax = 168;
 
 export const StartManagementEnrollmentResponse = zod
   .object({
@@ -172,6 +224,34 @@ export const StartManagementEnrollmentResponse = zod
       .describe(
         "A sentence a person reads beside helmCommand, present only when this OpenBot isn't a published release (a build of main or a development build). No published agent chart matches such a build, so helmCommand names no chart version and Helm installs the newest published one. Absent on a release.",
       ),
+    installName: zod
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "The name this OpenBot gave itself when it asked to be connected, which the approval page shows the approver, so they can match it. Present while waiting for approval.",
+      ),
+    window: zod
+      .object({
+        weekday: zod
+          .int()
+          .min(startManagementEnrollmentResponseWindowWeekdayMin)
+          .max(startManagementEnrollmentResponseWindowWeekdayMax)
+          .describe("The day it starts, 0 for Sunday to 6 for Saturday."),
+        startUtc: zod
+          .string()
+          .regex(startManagementEnrollmentResponseWindowStartUtcRegExp)
+          .describe("When it starts, as HH:MM in UTC."),
+        hours: zod
+          .number()
+          .min(startManagementEnrollmentResponseWindowHoursMin)
+          .max(startManagementEnrollmentResponseWindowHoursMax)
+          .describe("How many hours it lasts."),
+      })
+      .optional()
+      .describe(
+        "The weekly maintenance window the managed updates service upgrades this OpenBot in, as the service last reported it, once connected. It is agreed for each install; the default is Tuesdays from 14:00 UTC for four hours.",
+      ),
     lastHeartbeatAt: zod.iso
       .datetime({ offset: true })
       .optional()
@@ -189,6 +269,12 @@ export const StartManagementEnrollmentResponse = zod
       .optional()
       .describe(
         "What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, the management service out of reach, a connected agent that has stopped reporting in, or a Stop the service couldn't be told about. Absent when nothing did.",
+      ),
+    lastErrorCode: zod
+      .string()
+      .optional()
+      .describe(
+        "Which refusal lastError is, where a client acts on it. not-entitled: this OpenBot's licence doesn't include managed updates, so connecting again fails the same way until they are added to it. A later OpenBot may add a code; read one you don't know as no code.",
       ),
   })
   .describe(

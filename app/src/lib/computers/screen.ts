@@ -6,6 +6,7 @@ import {
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import type { ComputerState } from "./queries";
+import { settledRefusal } from "./refusal";
 
 /**
  * One frame of a Bot's screen.
@@ -79,23 +80,28 @@ export async function readScreenshot(
  * that is said on its own. The server answers at once with the computer's state (`starting` for one
  * it has just started) and does not wait for it to come up.
  *
- * Fails closed: nothing when the server could not be asked or has no such route, and the screen then
- * says the computer is off, which it is.
+ * Fails closed: no state when the server could not be asked or has no such route, and the screen then
+ * says the computer is off, which it is. A refusal asking again can't change (`settledRefusal`: the
+ * organization is at its computer limit, say) comes back as `refused`, so the screen says why the
+ * computer stays off instead of promising it starts with the Bot's next action.
  */
 export async function startComputer(
   computerId: string,
-): Promise<ComputerState | null> {
+): Promise<{ state: ComputerState | null; refused?: ClientError }> {
   try {
     const body: { state?: unknown } = await wakeComputer(
       organizationId(),
       computerId,
       { "Idempotency-Key": idempotencyKey() },
     );
-    return COMPUTER_STATES.includes(body?.state as ComputerState)
-      ? (body?.state as ComputerState)
-      : null;
-  } catch {
-    return null;
+    return {
+      state: COMPUTER_STATES.includes(body?.state as ComputerState)
+        ? (body?.state as ComputerState)
+        : null,
+    };
+  } catch (error) {
+    const refused = settledRefusal(error);
+    return refused ? { state: null, refused } : { state: null };
   }
 }
 

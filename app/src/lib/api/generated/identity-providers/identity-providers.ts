@@ -25,6 +25,7 @@ import type {
   IdempotencyConflictResponse,
   IdentityProviderConflictResponse,
   IdentityProviderNotFoundResponse,
+  IdentityProviderNotRemovableResponse,
   IdentityProviderPage,
   IdentityProviderResponse,
   InvalidRequestResponse,
@@ -83,7 +84,7 @@ export const getListIdentityProvidersUrl = (
 };
 
 /**
- * Return one page of the identity providers registered for single sign-on, by email domain: a company's own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the identity providers registered for single sign-on, by email domain: a company's own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Where this OpenBot may keep more than one organization, the list in any organization but `default` also holds the providers registered for the whole OpenBot, marked deployment: they count for this organization's Require SSO only while it has no provider of its own, and can't be removed here. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List identity providers
  */
 export const listIdentityProviders = async (
@@ -475,7 +476,7 @@ export const getDeleteIdentityProviderUrl = (
 };
 
 /**
- * Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider already removed is not found.
+ * Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider registered for the whole OpenBot (deployment) is removed only where it was registered: in any other organization it is refused with 403. A provider already removed is not found.
  * @summary Remove an identity provider
  */
 export const deleteIdentityProvider = async (
@@ -522,7 +523,7 @@ export const getDeleteIdentityProviderMutationOptions = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
-    | AdminOnlyResponse
+    | IdentityProviderNotRemovableResponse
     | IdentityProviderNotFoundResponse
     | IdempotencyConflictResponse
     | ServerErrorResponse
@@ -575,7 +576,7 @@ export type DeleteIdentityProviderMutationResult = NonNullable<
 export type DeleteIdentityProviderMutationError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
-  | AdminOnlyResponse
+  | IdentityProviderNotRemovableResponse
   | IdentityProviderNotFoundResponse
   | IdempotencyConflictResponse
   | ServerErrorResponse
@@ -593,7 +594,7 @@ export const useDeleteIdentityProvider = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
-    | AdminOnlyResponse
+    | IdentityProviderNotRemovableResponse
     | IdentityProviderNotFoundResponse
     | IdempotencyConflictResponse
     | ServerErrorResponse

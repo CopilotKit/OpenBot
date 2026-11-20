@@ -17,7 +17,8 @@ import {
 } from "../shared/generated/recorder";
 import {
   OpenBotError,
-  ORGANIZATION_ID,
+  DEFAULT_ORGANIZATION_ID,
+  organizationOf,
   updateRequiredSentence,
 } from "../shared/openbot-client";
 import { normaliseOpenBotOrigin } from "../shared/origin";
@@ -79,6 +80,22 @@ type ConnectionDeps = {
    * sent. The popup's own Desktop connect reaches it through the router, as an approved Connect does. */
   connected: () => Promise<void>;
 };
+
+/**
+ * The organization a grant says the connection was made in, kept on the stored connection so every later request goes
+ * there. A code is exchanged at `default`, because the code itself names the organization it was made for. A grant that
+ * names none (an OpenBot older than organizations) keeps nothing, and the connection works in `default` as before.
+ */
+function grantOrganization(
+  grant: RecorderConnectionGrant,
+): Pick<ConnectionRecord, "organizationId" | "organizationName"> {
+  return {
+    ...(grant.organizationId ? { organizationId: grant.organizationId } : {}),
+    ...(grant.organizationName
+      ? { organizationName: grant.organizationName }
+      : {}),
+  };
+}
 
 const PENDING_MAX_AGE_MS = 5 * 60 * 1000;
 const OUT_OF_DATE =
@@ -190,7 +207,9 @@ async function keepAlive(deps: ConnectionDeps): Promise<void> {
   const connection = await currentConnection();
   if (!connection) return;
   try {
-    await getRecorderIdentity(ORGANIZATION_ID, { target: connection });
+    await getRecorderIdentity(organizationOf(connection), {
+      target: connection,
+    });
   } catch (error) {
     if (error instanceof OpenBotError && error.signedOut)
       await deps.connectionLost({
@@ -355,7 +374,7 @@ async function approve(
   let exchanged: RecorderConnectionGrant;
   try {
     exchanged = await exchangeRecorderConnectCode(
-      ORGANIZATION_ID,
+      DEFAULT_ORGANIZATION_ID,
       {
         code: pending.code,
         label,
@@ -382,6 +401,7 @@ async function approve(
     user: exchanged.user,
     via: pending.via,
     connectedAt: Date.now(),
+    ...grantOrganization(exchanged),
   };
   // Checked again in the job that stores it: a pin that landed during the exchange keeps it out, and the token OpenBot
   // just made is revoked there. The connection it replaces is read in the same job.
@@ -400,7 +420,10 @@ async function approve(
   await clearPendingConnect(pending);
   if ((await readLocal("notice"))?.kind === "signed-out")
     await removeLocal("notice");
-  return { ok: true };
+  // The Connect page says where this browser now records.
+  return connection.organizationName
+    ? { ok: true, organizationName: connection.organizationName }
+    : { ok: true };
 }
 
 /**
@@ -634,7 +657,7 @@ async function trustedConnect(
   let exchanged: RecorderConnectionGrant;
   try {
     exchanged = await exchangeRecorderConnectCode(
-      ORGANIZATION_ID,
+      DEFAULT_ORGANIZATION_ID,
       {
         code,
         label: defaultBrowserName(),
@@ -661,6 +684,7 @@ async function trustedConnect(
     user: exchanged.user,
     via: "web",
     connectedAt: Date.now(),
+    ...grantOrganization(exchanged),
   };
   const kept = await serially(async (): Promise<ExternalResponse | null> => {
     if (!allowsOpenBot(await deps.readPolicy(), origin))
@@ -798,7 +822,7 @@ function sameOrigin(raw: string, origin: string): boolean {
 /** Best effort: OpenBot revokes the token (the person can also revoke it in OpenBot). */
 async function revoke(connection: ConnectionRecord): Promise<void> {
   try {
-    await deleteCurrentRecorderConnection(ORGANIZATION_ID, {
+    await deleteCurrentRecorderConnection(organizationOf(connection), {
       target: connection,
     });
   } catch {
@@ -885,7 +909,7 @@ async function desktopConnect(
   let exchanged: RecorderConnectionGrant;
   try {
     exchanged = await exchangeRecorderConnectCode(
-      ORGANIZATION_ID,
+      DEFAULT_ORGANIZATION_ID,
       {
         code: handoff.code,
         label: defaultBrowserName(),
@@ -914,6 +938,7 @@ async function desktopConnect(
     user: exchanged.user,
     via: "desktop",
     connectedAt: Date.now(),
+    ...grantOrganization(exchanged),
   };
   // This job is the queued one that stores it: the launcher's connection, or a pin elsewhere, that came while OpenBot
   // answered keeps it out, and the token OpenBot just made is revoked.

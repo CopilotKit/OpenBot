@@ -1,7 +1,11 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { replaceModelChoice } from "@/lib/api/generated/models/models";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
-import { type ConversationModel, modelKeys } from "./queries";
+import {
+  type ConversationModel,
+  type ConversationModelInput,
+  modelKeys,
+} from "./queries";
 
 const FALLBACK = "Couldn't save the model. Try again.";
 
@@ -15,13 +19,13 @@ const FALLBACK = "Couldn't save the model. Try again.";
  */
 export async function saveConversationModel(
   channelId: string,
-  pick: ConversationModel,
+  pick: ConversationModelInput,
 ): Promise<ConversationModel> {
   return replaceModelChoice(
     organizationId(),
     "me",
     channelId,
-    { model: pick.model, effort: pick.effort },
+    pick,
     { "Idempotency-Key": idempotencyKey() },
     { fallback: FALLBACK },
   );
@@ -29,8 +33,10 @@ export async function saveConversationModel(
 
 export function setConversationModelMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (variables: { channelId: string; pick: ConversationModel }) =>
-      saveConversationModel(variables.channelId, variables.pick),
+    mutationFn: (variables: {
+      channelId: string;
+      pick: ConversationModelInput;
+    }) => saveConversationModel(variables.channelId, variables.pick),
     onSettled: (_data, _error, variables) =>
       queryClient.invalidateQueries({
         queryKey: modelKeys.conversation(variables.channelId),

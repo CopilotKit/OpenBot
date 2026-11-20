@@ -41,6 +41,7 @@ roots:
   - me
   - oauth
   - organization-slugs
+  - platform
   - runtime
 
 # Exactly these, which Intelligence answers itself.

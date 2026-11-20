@@ -1,11 +1,18 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
+import type { AgentProfile } from "@/lib/agents/queries";
 import { queryClient } from "@/query-client";
-import { type ModelPick, requestFor, shownPick } from "./effort";
+import {
+  type ModelPick,
+  offeredBotDefault,
+  requestFor,
+  shownPick,
+} from "./effort";
 import { setConversationModelMutationOptions } from "./mutations";
 import {
   type ConversationModel,
+  type ConversationModelInput,
   conversationModelQueryOptions,
   type ModelCatalogue,
   type ModelExposure,
@@ -63,6 +70,7 @@ export function useConversationModel(
     ...conversationModelQueryOptions(channelId),
     enabled: choosable,
   });
+  const botDefault = offeredBotDefault(saved.data?.defaultModel, catalogue);
   const save = useMutation(setConversationModelMutationOptions(queryClient));
   const pendingSave = useRef<Promise<ConversationModel> | null>(null);
   const picked = save.isPending ? save.variables.pick : saved.data;
@@ -108,9 +116,11 @@ export function useConversationModel(
       .fetchQuery({ ...modelCatalogueQueryOptions(), staleTime: 0 })
       .then((fresh) => {
         if (fresh.models.some((option) => option.id === before)) return;
+        const defaultModel =
+          offeredBotDefault(data.defaultModel, fresh)?.model ?? fresh.default;
         const now =
-          fresh.models.find((option) => option.id === fresh.default)?.label ??
-          fresh.default;
+          fresh.models.find((option) => option.id === defaultModel)?.label ??
+          defaultModel;
         setWithdrawn({
           channelId,
           model: before,
@@ -136,11 +146,12 @@ export function useConversationModel(
   }, [choosable, saved.data, save.isPending]);
 
   return {
+    defaultModel: botDefault?.model,
     /** What the picker shows. Undefined until both the catalogue and the pick have loaded. */
     value:
       choosable && saved.data === undefined
         ? undefined
-        : shownPick(picked, catalogue),
+        : shownPick(picked, catalogue, botDefault),
     saving: save.isPending,
     /**
      * What the composer says about the pick: the chosen model doesn't work with this Bot yet, or
@@ -150,8 +161,12 @@ export function useConversationModel(
       (!save.isPending && saved.data?.unverified && catalogue
         ? unverifiedModelNotice(
             saved.data.unverified.label,
-            catalogue.models.find((option) => option.id === catalogue.default)
-              ?.label ?? catalogue.default,
+            catalogue.models.find(
+              (option) =>
+                option.id === (botDefault?.model ?? catalogue.default),
+            )?.label ??
+              botDefault?.model ??
+              catalogue.default,
           )
         : null) ??
       (withdrawn?.channelId === channelId ? withdrawn.notice : null),
@@ -171,7 +186,7 @@ export function useConversationModel(
       await checking.current;
     },
     choose: (pick: ModelPick) => {
-      const requested = requestFor(pick, catalogue);
+      const requested = requestFor(pick, catalogue, botDefault);
       // The person's own choice: whatever it turns into on the server is theirs, not withdrawn.
       known.current = { channelId, model: requested.model };
       setWithdrawn(null);
@@ -208,20 +223,26 @@ export function useConversationModel(
  * The pick for a conversation that does not exist yet. Held here until the first message creates
  * the conversation, which saves it before that message runs (`lib/channels/start.ts`).
  */
-export function useDraftModel(catalogue: ModelCatalogue | undefined) {
-  const [picked, setPicked] = useState<ConversationModel>({
+export function useDraftModel(
+  catalogue: ModelCatalogue | undefined,
+  botModel?: AgentProfile["defaultModel"],
+) {
+  const botDefault = offeredBotDefault(botModel, catalogue);
+  const [picked, setPicked] = useState<ConversationModelInput>({
     model: null,
     effort: null,
   });
-  const value = shownPick(picked, catalogue);
-  const requested = value ? requestFor(value, catalogue) : null;
+  const value = shownPick(picked, catalogue, botDefault);
+  const requested = value ? requestFor(value, catalogue, botDefault) : null;
   return {
+    defaultModel: botDefault?.model,
     value,
     /** What to save with the new conversation: nothing, when both are the defaults. */
     requested:
       requested && (requested.model !== null || requested.effort !== null)
         ? requested
         : null,
-    choose: (pick: ModelPick) => setPicked(requestFor(pick, catalogue)),
+    choose: (pick: ModelPick) =>
+      setPicked(requestFor(pick, catalogue, botDefault)),
   };
 }

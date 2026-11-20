@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 import {
   type ReactNode,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -17,6 +18,7 @@ import type { TranscriptItem } from "@/components/channels/tool-activity";
 import { ToolLine } from "@/components/channels/tool-line";
 import { type ApprovalInboxData, approvalInboxOptions } from "@/lib/approvals";
 import { briefDuration, useSecondsSince } from "@/lib/elapsed";
+import { subscribeToQueryCache } from "@/lib/query-cache-store";
 import {
   type BotTask,
   type TaskTurn,
@@ -37,7 +39,7 @@ import { stepsIn, type TurnWork } from "./turn-work";
  */
 
 const NOTHING_WAITING: ReadonlySet<string> = new Set();
-const NO_CLIENT = () => () => undefined;
+const NOTHING_TO_LEAVE = () => undefined;
 
 /**
  * The tool calls held for the person's approval, by id: the approval inbox's open requests, as the
@@ -48,9 +50,14 @@ export function useWaitingToolCalls(
   client: QueryClient | undefined,
 ): ReadonlySet<string> {
   const key = approvalInboxOptions().queryKey;
-  const inbox = useSyncExternalStore(
-    client ? (change) => client.getQueryCache().subscribe(change) : NO_CLIENT,
-    () => client?.getQueryData<ApprovalInboxData>(key),
+  // Told after a render that changed the cache, not during it: see `subscribeToQueryCache`.
+  const subscribe = useCallback(
+    (change: () => void) =>
+      client ? subscribeToQueryCache(client, change) : NOTHING_TO_LEAVE,
+    [client],
+  );
+  const inbox = useSyncExternalStore(subscribe, () =>
+    client?.getQueryData<ApprovalInboxData>(key),
   );
   return useMemo(() => {
     const ids = (inbox?.requests ?? []).flatMap((request) =>

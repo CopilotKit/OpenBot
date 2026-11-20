@@ -204,7 +204,10 @@ function NewConversation({ composition }: { composition: string }) {
     ...modelCatalogueQueryOptions(),
     enabled: pickable,
   });
-  const draftModel = useDraftModel(pickable ? models.data : undefined);
+  const draftModel = useDraftModel(
+    pickable ? models.data : undefined,
+    pickable ? selected[0]?.defaultModel : undefined,
+  );
   // A group's first message goes to all of its Bots, so no one Bot's commands are offered.
   const skillCommands = useSkillCommands(
     group ? "" : (recipients[0]?.id ?? ""),
@@ -419,6 +422,7 @@ function NewConversation({ composition }: { composition: string }) {
         modelPicker={
           <ModelPicker
             catalogue={pickable ? models.data : undefined}
+            defaultModel={draftModel.defaultModel}
             onChange={draftModel.choose}
             value={draftModel.value}
           />
