@@ -37,6 +37,10 @@ import {
   getListOrganizationsMockHandler,
 } from "@/lib/api/generated/organizations/organizations.msw";
 import {
+  ListOrganizationMembersQueryParams,
+  ListOrganizationMembersResponse,
+} from "@/lib/api/generated/organizations/organizations.zod";
+import {
   getGetPersonMockHandler,
   getGetPersonResponseMock,
 } from "@/lib/api/generated/people/people.msw";
@@ -119,6 +123,12 @@ let writes: {
 }[];
 /** Every request, method and path. */
 let requests: string[];
+/** Every read of an organization's members: which organization, and what was searched for. */
+let searches: {
+  organization: string;
+  search: string | undefined;
+  limit: number;
+}[];
 
 const stored = (
   id: string,
@@ -172,6 +182,41 @@ function teamOf(organizationId: string, teamId: string) {
   const team = organization.teams.find((one) => one.id === teamId);
   if (!team) notFound("Couldn't find that team.");
   return { organization, team: team as StoredTeam };
+}
+
+/**
+ * The server's search of an organization's members (listOrganizationMembers with search), as the
+ * spec says it: a name, a word of it or an address starting with what was typed first, then any
+ * that hold it, ignoring case, each group by name and then address. Over one organization's own
+ * people and nobody else's.
+ */
+function searched(people: readonly Person[], typed: string): Person[] {
+  const wanted = typed.toLowerCase();
+  const rank = (person: Person) => {
+    const name = person.name.toLowerCase();
+    const email = person.email.toLowerCase();
+    if (
+      name.startsWith(wanted) ||
+      name.includes(` ${wanted}`) ||
+      email.startsWith(wanted)
+    )
+      return 0;
+    return name.includes(wanted) || email.includes(wanted) ? 1 : undefined;
+  };
+  return people
+    .flatMap((person) => {
+      const found = rank(person);
+      return found === undefined ? [] : [{ person, found }];
+    })
+    .sort(
+      (a, b) =>
+        a.found - b.found ||
+        a.person.name
+          .toLowerCase()
+          .localeCompare(b.person.name.toLowerCase()) ||
+        a.person.email.localeCompare(b.person.email),
+    )
+    .map(({ person }) => person);
 }
 
 const memberOf = (
@@ -277,10 +322,26 @@ const server = setupServer(
     canCreate: false,
     nextCursor: null,
   })),
-  getListOrganizationMembersMockHandler(({ params }) => {
+  getListOrganizationMembersMockHandler(({ params, request }) => {
     const organization = organizationOf(params.organizationId);
-    return {
-      members: organization.people.map(
+    // The request as the spec takes it, and the answer as the spec gives it: a fake that drifts
+    // from the generated schema fails here, not in the screen.
+    const asked = Object.fromEntries(new URL(request.url).searchParams);
+    // A whole number in the address, as the server reads one.
+    const query = ListOrganizationMembersQueryParams.parse({
+      ...asked,
+      ...(asked.limit === undefined ? {} : { limit: Number(asked.limit) }),
+    });
+    searches.push({
+      organization: params.organizationId,
+      search: query.search,
+      limit: query.limit,
+    });
+    const found = query.search?.trim()
+      ? searched(organization.people, query.search.trim()).slice(0, query.limit)
+      : organization.people;
+    return ListOrganizationMembersResponse.parse({
+      members: found.map(
         (person): OrganizationMember => ({
           id: person.id,
           email: person.email,
@@ -293,7 +354,7 @@ const server = setupServer(
         }),
       ),
       nextCursor: null,
-    };
+    });
   }),
   getGetPersonMockHandler(({ params }) => {
     const organization = organizationOf(params.organizationId);
@@ -350,6 +411,7 @@ beforeEach(() => {
   me = DANA;
   writes = [];
   requests = [];
+  searches = [];
   organizations = {
     [ACME]: {
       people: [DANA, SAM, PRIYA, TOM],
@@ -452,6 +514,45 @@ function open(start = "/teams", { sidebar = false } = {}) {
 const KEY = expect.stringMatching(/^[0-9a-f]{32}$/);
 const teamsPath = (organization: string) =>
   `/api/v2/organizations/${organization}/teams`;
+
+/** The Add people dialog's type-ahead box. */
+function box(dialog: HTMLElement): HTMLInputElement {
+  return within(dialog).getByRole("combobox", {
+    name: "Name or email",
+  }) as HTMLInputElement;
+}
+
+/** The people the box lists, by name, as they are offered. */
+function offered(dialog: HTMLElement): string[] {
+  return within(dialog)
+    .queryAllByRole("option")
+    .map((option) => option.querySelector("p")?.textContent ?? "");
+}
+
+/** Type into the box until `name` is highlighted, then press Enter, and wait for them to be added. */
+async function addThroughTheBox(
+  dialog: HTMLElement,
+  person: ReturnType<typeof userEvent.setup>,
+  typed: string,
+  name: string,
+) {
+  await person.type(box(dialog), typed);
+  await waitFor(() =>
+    expect(highlighted(dialog)?.textContent ?? "").toContain(name),
+  );
+  await person.keyboard("{Enter}");
+  expect(
+    await within(
+      within(dialog).getByRole("region", { name: /^Added to / }),
+    ).findByText(name),
+  ).toBeTruthy();
+}
+
+/** The option the box points at (aria-activedescendant), if any. */
+function highlighted(dialog: HTMLElement): HTMLElement | null {
+  const id = box(dialog).getAttribute("aria-activedescendant");
+  return id ? dialog.ownerDocument.getElementById(id) : null;
+}
 
 /** A row of the page, by the name it is titled with. */
 function row(view: ReturnType<typeof render>, title: string): HTMLElement {
@@ -650,14 +751,7 @@ test("a maintainer who isn't an admin renames their team, adds a person, makes t
   const dialog = await view.findByRole("dialog", {
     name: "Add people to Sales Europe",
   });
-  await person.click(
-    await within(dialog).findByRole("button", { name: "Add Priya Nair" }),
-  );
-  await waitFor(() =>
-    expect(
-      within(dialog).queryByRole("button", { name: "Add Priya Nair" }),
-    ).toBeNull(),
-  );
+  await addThroughTheBox(dialog, person, "priya", "Priya Nair");
   await person.click(within(dialog).getByRole("button", { name: "Done" }));
   await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
 
@@ -818,26 +912,17 @@ test("somebody who manages a team adds a person from the organization, makes the
   const dialog = await view.findByRole("dialog", {
     name: "Add people to Sales",
   });
-  // The organization's members who are not in the team yet, and nobody who is.
-  const offered = await within(dialog).findByRole("list", {
-    name: "People to add",
-  });
-  expect(
-    within(offered)
-      .getAllByRole("listitem")
-      .map((item) => item.querySelector("[data-slot=item-title]")?.textContent),
-  ).toEqual(["Priya Nair", "Tom Becker"]);
-  await person.type(within(dialog).getByLabelText("Search people"), "pri");
-  expect(within(offered).getAllByRole("listitem")).toHaveLength(1);
+  // Chosen with the pointer this time: typed, then pressed in the list.
+  await person.type(box(dialog), "pri");
   await person.click(
-    within(dialog).getByRole("button", { name: "Add Priya Nair" }),
+    await within(dialog).findByRole("option", { name: /Priya Nair/ }),
   );
-  // She is in, so she is no longer offered.
-  await waitFor(() =>
-    expect(
-      within(dialog).queryByRole("button", { name: "Add Priya Nair" }),
-    ).toBeNull(),
-  );
+  // She is in, and listed as added.
+  expect(
+    await within(
+      within(dialog).getByRole("region", { name: "Added to Sales" }),
+    ).findByText("Priya Nair"),
+  ).toBeTruthy();
   await person.click(within(dialog).getByRole("button", { name: "Done" }));
   await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
   expect(await view.findByText("Priya Nair")).toBeTruthy();
@@ -1052,3 +1137,248 @@ test("switching organization drops the other organization's teams, and a team of
   setCurrentOrganization(ACME);
   expect(everythingCached()).not.toContain("Litigation");
 }, 20_000);
+
+/** Opens a team's Add people dialog, as somebody who manages it. */
+async function openAddPeople(path: string, team: string) {
+  const opened = open(path);
+  await opened.view.findByRole("heading", { level: 1, name: team });
+  await opened.person.click(
+    await opened.view.findByRole("button", { name: "Add person" }),
+  );
+  const dialog = await opened.view.findByRole("dialog", {
+    name: `Add people to ${team}`,
+  });
+  return { ...opened, dialog };
+}
+
+test("typing in Add people asks the server for this organization's members that match, from the first letter, best first, with what matched in bold", async () => {
+  const { dialog, person } = await openAddPeople("/teams/team_sales", "Sales");
+  // Nothing is loaded before anything is typed: the box asks as it is typed into.
+  expect(within(dialog).queryByRole("listbox")).toBeNull();
+  expect(box(dialog).getAttribute("aria-expanded")).toBe("false");
+
+  // One letter is enough. "o" starts Sam's last name and is inside Tom's first.
+  await person.type(box(dialog), "o");
+  await waitFor(() =>
+    expect(offered(dialog)).toEqual(["Sam Ortiz", "Tom Becker"]),
+  );
+  expect(box(dialog).getAttribute("aria-expanded")).toBe("true");
+  expect(box(dialog).getAttribute("aria-autocomplete")).toBe("both");
+  expect(box(dialog).getAttribute("aria-controls")).toBe(
+    within(dialog).getByRole("listbox").id,
+  );
+  // What matched is drawn in bold: the start of "Ortiz", the "o" in "Tom".
+  const marks = within(dialog)
+    .getAllByRole("option")
+    .map((option) => option.querySelector("mark")?.textContent);
+  expect(marks).toEqual(["O", "o"]);
+  // How many were found is said to a screen reader.
+  expect(within(dialog).getByRole("status").textContent).toBe("2 people found");
+
+  await person.type(box(dialog), "rt");
+  await waitFor(() => expect(offered(dialog)).toEqual(["Sam Ortiz"]));
+
+  // Every read was a search of this organization, a page of eight at most: nobody was loaded
+  // whole, and no other organization was asked.
+  expect(searches.length).toBeGreaterThan(0);
+  for (const read of searches) {
+    expect(read.organization).toBe(ACME);
+    expect(read.search?.length).toBeGreaterThan(0);
+    expect(read.limit).toBe(8);
+  }
+  expect(searches.at(-1)?.search).toBe("ort");
+});
+
+test("Add people is driven from the keyboard: the best match completes in the box, Enter adds, Tab takes the completion, Escape closes then clears, and the box keeps focus throughout", async () => {
+  const { dialog, person, view } = await openAddPeople(
+    "/teams/team_sales",
+    "Sales",
+  );
+  const input = box(dialog);
+  expect(document.activeElement).toBe(input);
+
+  // "pr": Priya is highlighted, and the rest of her name is completed, selected after the caret.
+  await person.type(input, "pr");
+  await waitFor(() => expect(input.value).toBe("priya Nair"));
+  expect([input.selectionStart, input.selectionEnd]).toEqual([2, 10]);
+  expect(highlighted(dialog)?.textContent).toContain("Priya Nair");
+  expect(highlighted(dialog)?.getAttribute("aria-selected")).toBe("true");
+
+  // Deleting never completes: Backspace takes away the completion, and it doesn't come back.
+  await person.keyboard("{Backspace}");
+  expect(input.value).toBe("pr");
+  await new Promise((settle) => setTimeout(settle, 300));
+  expect(input.value).toBe("pr");
+  // Typing on completes again, and the next letter keeps the same person.
+  await person.keyboard("i");
+  await waitFor(() => expect(input.value).toBe("priya Nair"));
+  expect([input.selectionStart, input.selectionEnd]).toEqual([3, 10]);
+
+  // Enter adds her, empties the box and keeps it focused, ready for the next person.
+  await person.keyboard("{Enter}");
+  expect(
+    await within(
+      within(dialog).getByRole("region", { name: "Added to Sales" }),
+    ).findByText("Priya Nair"),
+  ).toBeTruthy();
+  expect(input.value).toBe("");
+  expect(document.activeElement).toBe(input);
+  expect(within(dialog).getByRole("status").textContent).toBe(
+    "Priya Nair added to Sales",
+  );
+
+  // "to": Tab takes the completion into the box; Enter then adds Tom.
+  await person.type(input, "to");
+  await waitFor(() => expect(input.value).toBe("tom Becker"));
+  await person.keyboard("{Tab}");
+  expect(input.value).toBe("tom Becker");
+  expect(document.activeElement).toBe(input);
+  await waitFor(() => expect(searches.at(-1)?.search).toBe("tom becker"));
+  await waitFor(() =>
+    expect(highlighted(dialog)?.textContent).toContain("Tom Becker"),
+  );
+  await person.keyboard("{Enter}");
+  await waitFor(() => expect(input.value).toBe(""));
+  expect(document.activeElement).toBe(input);
+
+  await person.type(input, "zz");
+  expect(
+    await within(dialog).findByText(
+      "Nobody in this organization matches “zz”.",
+    ),
+  ).toBeTruthy();
+  // Escape closes the list and keeps what was typed, then empties the box, then closes the dialog.
+  await person.keyboard("{Escape}");
+  expect(input.getAttribute("aria-expanded")).toBe("false");
+  expect(input.value).toBe("zz");
+  expect(view.getByRole("dialog")).toBeTruthy();
+  await person.keyboard("{Escape}");
+  expect(input.value).toBe("");
+  expect(view.getByRole("dialog")).toBeTruthy();
+  await person.keyboard("{Escape}");
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+
+  const members = `${teamsPath(ACME)}/team_sales/members`;
+  expect(writes).toEqual([
+    {
+      method: "PUT",
+      path: `${members}/priya`,
+      key: KEY,
+      body: { role: "member" },
+    },
+    {
+      method: "PUT",
+      path: `${members}/tom`,
+      key: KEY,
+      body: { role: "member" },
+    },
+  ]);
+  // Both are in the team.
+  expect(await view.findByText("Tom Becker")).toBeTruthy();
+});
+
+test("Add people lists who is in the team already as such, never highlights or adds them, and arrows move only between the people who can be added", async () => {
+  const { dialog, person } = await openAddPeople("/teams/team_sales", "Sales");
+  const input = box(dialog);
+  // "o": Sam is in Sales, Tom is not.
+  await person.type(input, "o");
+  await waitFor(() =>
+    expect(offered(dialog)).toEqual(["Sam Ortiz", "Tom Becker"]),
+  );
+  const sam = within(dialog).getByRole("option", { name: /Sam Ortiz/ });
+  expect(sam.getAttribute("aria-disabled")).toBe("true");
+  expect(sam.textContent).toContain("In this team");
+  // The highlight starts on Tom, the first who can be added, and the arrows keep it there.
+  expect(highlighted(dialog)?.textContent).toContain("Tom Becker");
+  await person.keyboard("{ArrowDown}");
+  expect(highlighted(dialog)?.textContent).toContain("Tom Becker");
+  await person.keyboard("{ArrowUp}");
+  expect(highlighted(dialog)?.textContent).toContain("Tom Becker");
+  // Pressing Sam does nothing.
+  await person.click(sam);
+  expect(writes).toEqual([]);
+
+  // Once Tom is added, both are in the team, and Enter adds nobody.
+  await person.keyboard("{Enter}");
+  await waitFor(() => expect(writes).toHaveLength(1));
+  await person.type(input, "o");
+  await waitFor(() =>
+    expect(
+      within(dialog)
+        .getAllByRole("option")
+        .map((option) => option.getAttribute("aria-disabled")),
+    ).toEqual(["true", "true"]),
+  );
+  expect(input.getAttribute("aria-activedescendant")).toBeNull();
+  await person.keyboard("{Enter}");
+  expect(writes).toHaveLength(1);
+});
+
+test("Add people never offers somebody from another organization: each organization's box searches its own members", async () => {
+  // Acme's box: Ines is in Harbor Legal only, and is not found.
+  const acme = await openAddPeople("/teams/team_sales", "Sales");
+  await acme.person.type(box(acme.dialog), "ines");
+  expect(
+    await within(acme.dialog).findByText(
+      "Nobody in this organization matches “ines”.",
+    ),
+  ).toBeTruthy();
+  expect(offered(acme.dialog)).toEqual([]);
+  cleanup();
+
+  // Harbor Legal's box, as Ines who runs it: Sam is in Acme only, and is not found; Dana, who is
+  // in both, is found here as Harbor's own.
+  me = INES;
+  setCurrentOrganization(HARBOR);
+  const harbor = await openAddPeople("/teams/team_litigation", "Litigation");
+  await harbor.person.type(box(harbor.dialog), "sam");
+  expect(
+    await within(harbor.dialog).findByText(
+      "Nobody in this organization matches “sam”.",
+    ),
+  ).toBeTruthy();
+  await harbor.person.clear(box(harbor.dialog));
+  await harbor.person.type(box(harbor.dialog), "da");
+  await waitFor(() =>
+    expect(offered(harbor.dialog)).toEqual(["Dana Whitfield"]),
+  );
+
+  expect(
+    searches
+      .filter((read) => read.search === "ines")
+      .map((read) => read.organization),
+  ).toEqual([ACME]);
+  expect(
+    new Set(
+      searches
+        .filter((read) => read.search === "sam" || read.search === "da")
+        .map((read) => read.organization),
+    ),
+  ).toEqual(new Set([HARBOR]));
+});
+
+test("Add people says when the search fails, and in words", async () => {
+  server.use(
+    getListOrganizationMembersMockHandler(() => {
+      throw HttpResponse.json(
+        {
+          type: "about:blank",
+          title: "Service unavailable",
+          status: 503,
+          detail: "Couldn't search people. Try again in a moment.",
+        },
+        {
+          status: 503,
+          headers: { "content-type": "application/problem+json" },
+        },
+      );
+    }),
+  );
+  const { dialog, person } = await openAddPeople("/teams/team_sales", "Sales");
+  await person.type(box(dialog), "pr");
+  expect(
+    (await within(dialog).findByRole("alert", {}, { timeout: 5_000 }))
+      .textContent,
+  ).toBe("Couldn't search people. Try again in a moment.");
+  expect(writes).toEqual([]);
+}, 10_000);

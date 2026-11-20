@@ -186,7 +186,11 @@ const PUBLISHED: TeamBot = teamBotOf("expenses", "Expenses", {
 });
 
 /** What the API answers for one read, or undefined for an address these screens never ask. */
-function answer(path: string, persona: Persona): unknown {
+function answer(
+  path: string,
+  persona: Persona,
+  query = new URLSearchParams(),
+): unknown {
   const me = signedIn(persona);
   const admin = me === DANA;
   const teams = teamsFor(persona);
@@ -212,9 +216,28 @@ function answer(path: string, persona: Persona): unknown {
       ),
       nextCursor: null,
     };
-  if (path === `${ORGANIZATION}/members`)
+  if (path === `${ORGANIZATION}/members`) {
+    // The server's search: a name, a word of it or an address starting with it first, then any
+    // that hold it, ignoring case.
+    const typed = query.get("search")?.trim().toLowerCase() ?? "";
+    const rank = (one: (typeof PEOPLE)[number]) => {
+      const name = one.name.toLowerCase();
+      const email = one.email.toLowerCase();
+      if (
+        name.startsWith(typed) ||
+        name.includes(` ${typed}`) ||
+        email.startsWith(typed)
+      )
+        return 0;
+      return name.includes(typed) || email.includes(typed) ? 1 : 2;
+    };
+    const found = typed
+      ? PEOPLE.filter((one) => rank(one) < 2).sort(
+          (a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name),
+        )
+      : PEOPLE;
     return {
-      members: PEOPLE.map(
+      members: found.map(
         (one): OrganizationMember => ({
           id: one.id,
           email: one.email,
@@ -228,6 +251,7 @@ function answer(path: string, persona: Persona): unknown {
       ),
       nextCursor: null,
     };
+  }
   if (path === `${ORGANIZATION}/teams`)
     return { teams, canCreate: admin, nextCursor: null };
   const one = /\/teams\/([^/]+)(\/members)?$/.exec(path);
@@ -474,12 +498,75 @@ const SCREENS: Screen[] = [
     path: "/teams/team_finance",
     ready: (page) => page.getByText("Tom Becker").waitFor(),
   },
+  // Adding people: the box as it opens, what typing finds (with the long name, and people in the
+  // team already), the best match completed in the box, nobody found, and somebody just added.
   {
     name: "add-person-dialog",
     path: "/teams/team_sales",
     ready: async (page) => {
       await page.getByRole("button", { name: "Add person" }).click();
-      await page.getByRole("button", { name: "Add Tom Becker" }).waitFor();
+      await page.getByRole("combobox", { name: "Name or email" }).waitFor();
+    },
+  },
+  {
+    name: "add-person-dialog-results",
+    path: "/teams/team_sales",
+    ready: async (page) => {
+      await page.getByRole("button", { name: "Add person" }).click();
+      await page.getByRole("combobox", { name: "Name or email" }).fill("a");
+      await page.getByRole("option", { name: /Tom Becker/ }).waitFor();
+    },
+  },
+  {
+    name: "add-person-dialog-completion",
+    path: "/teams/team_sales",
+    ready: async (page) => {
+      await page.getByRole("button", { name: "Add person" }).click();
+      await page
+        .getByRole("combobox", { name: "Name or email" })
+        .pressSequentially("to");
+      await page.getByRole("option", { name: /Tom Becker/ }).waitFor();
+      await page
+        .getByRole("combobox", { name: "Name or email" })
+        .and(page.locator("[value='tom Becker']"))
+        .waitFor();
+    },
+  },
+  {
+    name: "add-person-dialog-no-match",
+    path: "/teams/team_sales",
+    ready: async (page) => {
+      await page.getByRole("button", { name: "Add person" }).click();
+      await page.getByRole("combobox", { name: "Name or email" }).fill("zzz");
+      await page.getByText(/^Nobody in this organization matches/).waitFor();
+    },
+  },
+  // Escape closes the list and leaves the dialog open, in a real browser's own key handling.
+  {
+    name: "add-person-dialog-escape",
+    path: "/teams/team_sales",
+    ready: async (page) => {
+      await page.getByRole("button", { name: "Add person" }).click();
+      const box = page.getByRole("combobox", { name: "Name or email" });
+      await box.pressSequentially("to");
+      await page.getByRole("option", { name: /Tom Becker/ }).waitFor();
+      await box.press("Escape");
+      await page
+        .locator("[role=combobox][aria-expanded=false][value=to]")
+        .waitFor();
+      await page.getByRole("dialog", { name: "Add people to Sales" }).waitFor();
+    },
+  },
+  {
+    name: "add-person-dialog-added",
+    path: "/teams/team_sales",
+    ready: async (page) => {
+      await page.getByRole("button", { name: "Add person" }).click();
+      const box = page.getByRole("combobox", { name: "Name or email" });
+      await box.pressSequentially("to");
+      await page.getByRole("option", { name: /Tom Becker/ }).waitFor();
+      await box.press("Enter");
+      await page.getByRole("region", { name: "Added to Sales" }).waitFor();
     },
   },
   {
@@ -558,7 +645,29 @@ async function open(
     if (path.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     if (path.startsWith("/api/")) {
-      const body = answer(path, persona);
+      // Adding somebody to a team: the person, in the team as a member.
+      const added = /\/teams\/[^/]+\/members\/([^/]+)$/.exec(path);
+      if (route.request().method() === "PUT" && added) {
+        const who = PEOPLE.find((one) => one.id === added[1]);
+        return who
+          ? route.fulfill({
+              json: {
+                member: {
+                  ...who,
+                  image: null,
+                  role: "member",
+                  isCaller: false,
+                  joinedAt: "2026-11-19T09:00:00.000Z",
+                },
+              },
+            })
+          : route.fulfill({ status: 404, json: { detail: "Not found." } });
+      }
+      const body = answer(
+        path,
+        persona,
+        new URL(route.request().url()).searchParams,
+      );
       return body === undefined
         ? route.fulfill({ status: 404, json: { detail: "Not found." } })
         : route.fulfill({ json: body });
