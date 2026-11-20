@@ -58,6 +58,7 @@ import {
   memberControl,
   memberLine,
   personName,
+  removeMemberWords,
   roleChangeQuestion,
   roleInSentence,
   roleName,
@@ -560,8 +561,7 @@ function RemoveMemberDialog({
             Remove {personName(member)} from {organization.name}?
           </DialogTitle>
           <DialogDescription>
-            They keep their account and their other organizations. What they
-            made here stays here.
+            {removeMemberWords(member, organization.name)}
           </DialogDescription>
         </DialogHeader>
         {remove.error ? (
