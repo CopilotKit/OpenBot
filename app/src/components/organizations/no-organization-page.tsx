@@ -7,7 +7,8 @@ import { CopilotKitMark } from "@/components/auth/provider-logo";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { hostedSignInAddress } from "@/lib/auth/hosted";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { IN_NONE, organizationKeys } from "@/lib/organizations/queries";
+import { IN_NONE } from "@/lib/organizations/in-no-organization";
+import { organizationKeys } from "@/lib/organizations/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
