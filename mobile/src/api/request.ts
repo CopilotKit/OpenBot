@@ -23,6 +23,7 @@ import {
   type OrganizationChoices,
 } from "../organization";
 import { clientHeaders } from "../release";
+import { reportOrganizationGone } from "../organization-gone";
 import { reportSessionRefused } from "../session-refused";
 import type { Deployment } from "./generated/model";
 import { getDeployment } from "./generated/organization-settings/organization-settings";
@@ -61,6 +62,9 @@ export const ORGANIZATION_ID = "{organizationId}";
  */
 export const DEPLOYMENT_ORGANIZATION_ID = "default";
 
+/** The API's code for an organization that isn't there for the person asking: never theirs, left, or deleted. */
+const ORGANIZATION_NOT_FOUND = "ORGANIZATION_NOT_FOUND";
+
 /** {@link ORGANIZATION_ID} as a generated call writes it into an address: each parameter is encoded as one segment. */
 const WRITTEN = `/api/v2/organizations/${encodeURIComponent(ORGANIZATION_ID)}`;
 
@@ -92,15 +96,28 @@ async function everyOrganization(): Promise<ListedOrganization[]> {
   return listed;
 }
 
+/** Who the sign-in client says is signed in, by their account's id: the root layout says (`setSignedInPerson`). */
+let signedInPerson: string | undefined;
+
+/**
+ * Say who is signed in, as the sign-in client reports them, or that nobody is. Each person's pick of organization is
+ * their own (../organization.ts), so the phone works in the one this person picked, never the last person's.
+ */
+export function setSignedInPerson(person: string | undefined): void {
+  signedInPerson = person || undefined;
+}
+
 const organizations = createOrganizationChoice(
   everyOrganization,
   // Read off the module when used, so a phone with nowhere to keep it (a test that stands in for sign-in) keeps nothing.
   {
-    read: async () => (await auth.organizationStore?.read()) ?? null,
-    write: async (id) => {
-      await auth.organizationStore?.write(id);
+    read: async (person) =>
+      (await auth.organizationStore?.read(person)) ?? null,
+    write: async (person, id) => {
+      await auth.organizationStore?.write(person, id);
     },
   },
+  () => signedInPerson,
 );
 
 /** An address with its organization filled in, for whoever holds `cookie`. Any other address is left as it is. */
@@ -247,6 +264,15 @@ export async function apiRequest<T>(
     const { said, code, minimumVersion, security } = refusal(body);
     // Sent as somebody signed in and refused as nobody: the session is gone, and the app reads it again.
     if (response.status === 401 && cookie) reportSessionRefused();
+    // The organization the person works in isn't there for them any more: forgotten, so the next request reads their
+    // organizations again and works in another of theirs, and Home is told.
+    if (
+      code === ORGANIZATION_NOT_FOUND &&
+      cookie &&
+      organization &&
+      (await organizations.gone(organization, cookie))
+    )
+      reportOrganizationGone();
     if (code === CLIENT_UPDATE_REQUIRED) {
       // A minimum raised for a security problem is always said in the app's own words for it.
       const detail = security

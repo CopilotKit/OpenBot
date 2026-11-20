@@ -54,11 +54,16 @@ export async function signInEnterprise(email: string) {
 }
 
 /**
- * Where the person's pick of organization is kept on this phone (../organization.ts): beside the session, one place for
- * each OpenBot, as sign-in keeps its own.
+ * Where each person's pick of organization is kept on this phone (../organization.ts): beside the session, one place
+ * for each OpenBot and each person on it, so a phone people share opens in each one's own pick.
  */
-const PICKED_ORGANIZATION = `openbot-${endpoint.host.replace(/[^a-zA-Z0-9_-]/g, "-")}-organization`;
+const pickedOrganization = (person: string) =>
+  `openbot-${endpoint.host}-organization-${person}`.replace(
+    /[^a-zA-Z0-9._-]/g,
+    "-",
+  );
 export const organizationStore: OrganizationStore = {
-  read: () => SecureStore.getItemAsync(PICKED_ORGANIZATION),
-  write: (id) => SecureStore.setItemAsync(PICKED_ORGANIZATION, id),
+  read: (person) => SecureStore.getItemAsync(pickedOrganization(person)),
+  write: (person, id) =>
+    SecureStore.setItemAsync(pickedOrganization(person), id),
 };
