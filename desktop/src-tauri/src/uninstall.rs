@@ -77,8 +77,9 @@ pub trait Computer {
     fn stop_containers(&mut self, name: &str) -> Result<(), String>;
     /// Every one of OpenBot's port rules in the machine `name` removed, when its containers wouldn't stop.
     fn clear_port_rules(&mut self, name: &str) -> Result<(), String>;
-    /// OpenBot's files in the installation folder `root` (`remove_installation`).
-    fn remove_installation(&mut self, root: &Path) -> Result<(), String>;
+    /// OpenBot's files in the installation folder `root` (`remove_installation`). With
+    /// `keep_engine`, its `engine` folder stays: WSL may still have the machine whose disk is there.
+    fn remove_installation(&mut self, root: &Path, keep_engine: bool) -> Result<(), String>;
 }
 
 /// Stop what OpenBot runs for the installation at `root`, and with `delete_data` remove it, saying
@@ -136,6 +137,8 @@ pub fn stop_with(
     }
 
     let own = crate::acquire::MACHINE;
+    // Whether OpenBot's machine is gone, so nothing in WSL uses the disk in `<install>\engine`.
+    let mut machine_gone = false;
     match computer.machine(own) {
         Ok(Some(running)) => {
             // Before the machine goes, its containers stop, and their port rules go with them. In
@@ -169,6 +172,7 @@ pub fn stop_with(
             if asked.delete_data {
                 say("Removing the software OpenBot runs on.");
                 let removed = computer.remove_machine(own);
+                machine_gone = removed.is_ok();
                 note(
                     &mut failures,
                     "Couldn't remove the software OpenBot runs on.",
@@ -177,7 +181,10 @@ pub fn stop_with(
                 );
             }
         }
-        Ok(None) => log::info!("[uninstall] no Podman machine named {own}"),
+        Ok(None) => {
+            log::info!("[uninstall] no Podman machine named {own}");
+            machine_gone = true;
+        }
         Err(error) => note(
             &mut failures,
             "Couldn't check the software OpenBot runs on.",
@@ -189,7 +196,10 @@ pub fn stop_with(
     // Last, once nothing of OpenBot's runs from it.
     if asked.delete_data {
         say("Removing OpenBot's files.");
-        let removed = computer.remove_installation(root);
+        if !machine_gone {
+            log::warn!("[uninstall] {own} was not removed, so its engine folder stays");
+        }
+        let removed = computer.remove_installation(root, !machine_gone);
         note(
             &mut failures,
             "Couldn't remove all of OpenBot's files.",
@@ -220,15 +230,21 @@ const RECORDS: [&str; 3] = [
 
 /// The installation's own files besides `upgrade::KEPT` and every `.openbot…` record: its settings
 /// and keys, the backend's tool's project and the sign-in store the containers keep there, the log of
-/// processes an older version ran, and the engine tools OpenBot downloaded.
-const OWN: [&str; 6] = [
+/// processes an older version ran, the engine tools OpenBot downloaded, and `engine`, where Windows
+/// keeps OpenBot's Podman machine disk. `stop_with` removes the machine first, and that deletes the
+/// disk, but Podman can leave the folders around it.
+const OWN: [&str; 7] = [
     ".env",
     ".secrets",
     ".copilotkit",
     ".langchain",
     ".logs",
     "openbot-engine",
+    ENGINE,
 ];
+
+/// The folder in an installation where Windows keeps OpenBot's Podman machine disk.
+const ENGINE: &str = "engine";
 
 /// Whether the entry `name` in an installation folder is OpenBot's own.
 fn openbots(name: &str) -> bool {
@@ -248,7 +264,11 @@ go (`openbots`): a file of the person's stays, and with it the folder. The backe
 a `.gitignore` in the folder it runs in, which goes only when nothing but it is left. Links are
 removed as links, never followed.
 */
-pub fn remove_installation(root: &Path, home: Option<&Path>) -> Result<(), String> {
+pub fn remove_installation(
+    root: &Path,
+    home: Option<&Path>,
+    keep_engine: bool,
+) -> Result<(), String> {
     if !root.is_absolute() || root.parent().is_none() {
         return Err(format!("{} is not a folder OpenBot made", root.display()));
     }
@@ -281,7 +301,11 @@ pub fn remove_installation(root: &Path, home: Option<&Path>) -> Result<(), Strin
     };
     let mut failed = Vec::new();
     for entry in entries(root)? {
-        if openbots(&entry.file_name().to_string_lossy()) {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if keep_engine && name == ENGINE {
+            continue;
+        }
+        if openbots(&name) {
             if let Err(error) = remove(&entry) {
                 failed.push(error);
             }
@@ -362,7 +386,7 @@ mod tests {
             self.result(format!("delete backend {}", root.display()))
         }
         fn machine(&mut self, name: &str) -> Result<Option<bool>, String> {
-            self.calls.push(format!("machine {name}"));
+            self.result(format!("machine {name}"))?;
             Ok(self.machine)
         }
         fn stop_machine(&mut self, name: &str) -> Result<(), String> {
@@ -377,8 +401,9 @@ mod tests {
         fn clear_port_rules(&mut self, name: &str) -> Result<(), String> {
             self.result(format!("clear port rules {name}"))
         }
-        fn remove_installation(&mut self, root: &Path) -> Result<(), String> {
-            self.result(format!("remove installation {}", root.display()))
+        fn remove_installation(&mut self, root: &Path, keep_engine: bool) -> Result<(), String> {
+            let keeping = if keep_engine { " keeping engine" } else { "" };
+            self.result(format!("remove installation {}{keeping}", root.display()))
         }
     }
 
@@ -454,6 +479,45 @@ mod tests {
                 "Removing the software OpenBot runs on.",
                 "Removing OpenBot's files.",
             ]
+        );
+    }
+
+    /// The machine's disk is in `<install>\engine` on Windows. When `podman machine rm` fails, WSL
+    /// still has the machine, so its folder stays: deleting the disk of a machine WSL still has
+    /// leaves WSL with a machine that cannot start. OpenBot's other files still go. A machine that
+    /// could not be found at all keeps the folder too.
+    #[test]
+    fn the_engine_folder_stays_when_the_machine_was_not_removed() {
+        let mut computer = Recorded {
+            failing: vec!["remove machine"],
+            ..Recorded::with_machine(false)
+        };
+        let (_, failures) = run(&mut computer, DELETE);
+        assert_eq!(
+            computer.calls.last().map(String::as_str),
+            Some("remove installation /home/a/OpenBot keeping engine")
+        );
+        assert_eq!(
+            failures,
+            ["Couldn't remove the software OpenBot runs on. Uninstalling anyway."]
+        );
+
+        let mut computer = Recorded {
+            failing: vec!["machine openbot"],
+            ..Recorded::with_machine(false)
+        };
+        run(&mut computer, DELETE);
+        assert_eq!(
+            computer.calls.last().map(String::as_str),
+            Some("remove installation /home/a/OpenBot keeping engine")
+        );
+
+        // No machine at all: nothing in WSL uses the folder, so it goes.
+        let mut computer = Recorded::default();
+        run(&mut computer, DELETE);
+        assert_eq!(
+            computer.calls.last().map(String::as_str),
+            Some("remove installation /home/a/OpenBot")
         );
     }
 
@@ -677,10 +741,47 @@ mod tests {
         (home, root)
     }
 
+    /// The engine folder in `root`, as `podman machine rm` can leave it: the machine's folder,
+    /// empty, with the disk already gone. Returns the engine folder.
+    fn engine_left_by_podman(root: &Path) -> std::path::PathBuf {
+        let engine = root.join("engine");
+        std::fs::create_dir_all(engine.join("containers/podman/machine/wsl/wsldist/openbot"))
+            .unwrap();
+        engine
+    }
+
+    /// The machine's disk is in `<install>\engine`. Once the machine is removed, the folder Podman
+    /// leaves there goes with OpenBot's other files, and a file of the person's still stays.
+    #[test]
+    fn deleting_the_data_removes_the_engine_folder() {
+        let (home, root) = installation("uninstall-engine-folder");
+        let engine = engine_left_by_podman(&root);
+        std::fs::write(root.join("notes.txt"), "mine").unwrap();
+        remove_installation(&root, Some(&home), false).unwrap();
+        assert!(!engine.exists(), "{:?}", std::fs::read_dir(&engine).ok());
+        assert!(root.join("notes.txt").exists());
+
+        // Kept when WSL may still have the machine: OpenBot's other files go, the engine folder stays.
+        let (home_kept, root_kept) = installation("uninstall-engine-folder-kept");
+        let kept = engine_left_by_podman(&root_kept);
+        remove_installation(&root_kept, Some(&home_kept), true).unwrap();
+        assert!(kept.exists());
+        assert!(!root_kept.join(".env").exists());
+        let _ = std::fs::remove_dir_all(home_kept);
+
+        // With nothing of the person's in it, the installation folder goes too.
+        let (home_alone, root_alone) = installation("uninstall-engine-folder-alone");
+        engine_left_by_podman(&root_alone);
+        remove_installation(&root_alone, Some(&home_alone), false).unwrap();
+        assert!(!root_alone.exists());
+        let _ = std::fs::remove_dir_all(home);
+        let _ = std::fs::remove_dir_all(home_alone);
+    }
+
     #[test]
     fn deleting_the_data_removes_the_whole_installation_folder_openbot_made() {
         let (home, root) = installation("uninstall-whole-folder");
-        remove_installation(&root, Some(&home)).unwrap();
+        remove_installation(&root, Some(&home), false).unwrap();
         assert!(!root.exists(), "{:?}", std::fs::read_dir(&root).ok());
         assert!(home.exists());
         let _ = std::fs::remove_dir_all(home);
@@ -692,7 +793,7 @@ mod tests {
         let (home, root) = installation("uninstall-persons-file");
         std::fs::write(root.join("notes.txt"), "mine").unwrap();
         std::fs::create_dir_all(root.join("photos")).unwrap();
-        remove_installation(&root, Some(&home)).unwrap();
+        remove_installation(&root, Some(&home), false).unwrap();
         let mut left: Vec<String> = std::fs::read_dir(&root)
             .unwrap()
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
@@ -712,20 +813,22 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, "x").unwrap();
         }
-        assert!(remove_installation(&home, Some(&home)).is_err());
-        assert!(remove_installation(home.parent().unwrap(), Some(&home)).is_err());
+        assert!(remove_installation(&home, Some(&home), false).is_err());
+        assert!(remove_installation(home.parent().unwrap(), Some(&home), false).is_err());
         assert!(home.join(".env").exists());
         let drive = Path::new(if cfg!(windows) { "C:\\" } else { "/" });
-        assert!(remove_installation(drive, Some(&home)).is_err());
-        assert!(remove_installation(Path::new("OpenBot"), Some(&home)).is_err());
+        assert!(remove_installation(drive, Some(&home), false).is_err());
+        assert!(remove_installation(Path::new("OpenBot"), Some(&home), false).is_err());
 
         // A folder with none of OpenBot's records: nothing in it goes.
+        let engine = engine_left_by_podman(&root);
         for record in RECORDS {
             std::fs::remove_file(root.join(record)).unwrap();
         }
-        remove_installation(&root, Some(&home)).unwrap();
+        remove_installation(&root, Some(&home), false).unwrap();
         assert!(root.join(".env").exists());
         assert!(root.join(".secrets").exists());
+        assert!(engine.exists());
         let _ = std::fs::remove_dir_all(home);
     }
 
