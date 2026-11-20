@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   type Change,
@@ -12,6 +12,7 @@ import {
   isDocs,
   isTestFile,
   type PullRequest,
+  PYTHON_HARNESSES,
   SHARDS,
   SUITE_RULE,
 } from "./ci-changes";
@@ -235,7 +236,7 @@ describe("a pull request push", () => {
       deps({
         // c2 skipped the harnesses; they last passed on m0, and the harness changed since.
         passed: {
-          c2: ALL_CI.filter((name) => name !== "python harness regressions"),
+          c2: ALL_CI.filter((name) => !name.startsWith("python harness (")),
           m0: ALL_CI,
         },
         changes: { c2: [], m0: ["agent-crewai/src/agent.py"] },
@@ -502,6 +503,21 @@ describe("the rules name the jobs the workflows run", () => {
     expect(
       names.filter((name) => name.startsWith("tests (shard")),
     ).toHaveLength(SHARDS);
+  });
+
+  test("ci.yml: the harness matrix is every harness with tests, and the rule waits on each", () => {
+    const names = jobNames("ci.yml");
+    const withTests = readdirSync(ROOT)
+      .filter(
+        (dir) =>
+          dir.startsWith("agent-") &&
+          existsSync(join(ROOT, dir, "requirements-test.txt")),
+      )
+      .sort();
+    expect([...PYTHON_HARNESSES].sort()).toEqual(withTests);
+    expect(names.filter((name) => name.startsWith("python harness ("))).toEqual(
+      PYTHON_HARNESSES.map((harness) => `python harness (${harness})`),
+    );
   });
 
   test("desktop.yml: core, and each platform the shared build makes", () => {

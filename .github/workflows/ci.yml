@@ -544,11 +544,34 @@ jobs:
       - run: npm test
         working-directory: agent-langgraph-ts
 
+  # One job per harness, side by side: each is a fresh venv, its own requirements and its own tests,
+  # so nothing is shared between them and run in a row they took ten minutes. The list is
+  # PYTHON_HARNESSES in scripts/ci-changes.ts, which waits on each of these jobs by name.
+  #
+  # pip, not uv: the images install with pip from the same unpinned files, so the tests resolve what
+  # ships. The pip cache holds downloads and wheels only, keyed per harness on its requirement
+  # files; the resolve still runs every time, so a new release upstream is still picked up.
   python-harness:
-    name: python harness regressions
+    name: python harness (${{ matrix.harness }})
     needs: changes
     if: needs.changes.outputs.python_harness == 'true'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        harness:
+          - agent-crewai
+          - agent-claude-sdk
+          - agent-langgraph-agui
+          - agent-llamaindex
+          - agent-agno
+          - agent-strands
+          - agent-pydantic-ai
+          - agent-adk
+          - agent-antigravity
+          - agent-langroid
+          - agent-ag2
+          - agent-microsoft
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -556,93 +579,31 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ${{ matrix.harness }}/requirements*.txt
+      - name: Regressions
+        env:
+          HARNESS: ${{ matrix.harness }}
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --requirement "$HARNESS/requirements.txt" --requirement "$HARNESS/requirements-test.txt"
+          python -m pytest "$HARNESS/tests" -q
+
+  # The Compose file the harnesses are picked through, checked once rather than per harness.
+  python-harness-compose:
+    name: compose config
+    needs: changes
+    if: needs.changes.outputs.python_harness == 'true'
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
-      - name: CrewAI provider-boundary regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-crewai
-          . .venv-crewai/bin/activate
-          python -m pip install --requirement agent-crewai/requirements.txt --requirement agent-crewai/requirements-test.txt
-          python -m pytest agent-crewai/tests -q
-      - name: Claude client-tool continuation regressions
-        run: |
-          set -euo pipefail
-          python -m venv .venv-claude-sdk
-          . .venv-claude-sdk/bin/activate
-          python -m pip install --requirement agent-claude-sdk/requirements.txt --requirement agent-claude-sdk/requirements-test.txt
-          python -m pytest agent-claude-sdk/tests -q
-      - name: LangGraph AG-UI provider-boundary regressions
-        run: |
-          set -euo pipefail
-          python -m venv .venv-langgraph-agui
-          . .venv-langgraph-agui/bin/activate
-          python -m pip install --requirement agent-langgraph-agui/requirements.txt --requirement agent-langgraph-agui/requirements-test.txt
-          python -m pytest agent-langgraph-agui/tests -q
-      - name: LlamaIndex model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-llamaindex
-          . .venv-llamaindex/bin/activate
-          python -m pip install --requirement agent-llamaindex/requirements.txt --requirement agent-llamaindex/requirements-test.txt
-          python -m pytest agent-llamaindex/tests -q
-      - name: Agno model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-agno
-          . .venv-agno/bin/activate
-          python -m pip install --requirement agent-agno/requirements.txt --requirement agent-agno/requirements-test.txt
-          python -m pytest agent-agno/tests -q
-      - name: Strands model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-strands
-          . .venv-strands/bin/activate
-          python -m pip install --requirement agent-strands/requirements.txt --requirement agent-strands/requirements-test.txt
-          python -m pytest agent-strands/tests -q
-      - name: Pydantic AI model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-pydantic-ai
-          . .venv-pydantic-ai/bin/activate
-          python -m pip install --requirement agent-pydantic-ai/requirements.txt --requirement agent-pydantic-ai/requirements-test.txt
-          python -m pytest agent-pydantic-ai/tests -q
-      - name: Google ADK tool-call regressions
-        run: |
-          set -euo pipefail
-          python -m venv .venv-adk
-          . .venv-adk/bin/activate
-          python -m pip install --requirement agent-adk/requirements.txt --requirement agent-adk/requirements-test.txt
-          python -m pytest agent-adk/tests -q
-      - name: Antigravity provider pin and token gate
-        run: |
-          set -euo pipefail
-          python -m venv .venv-antigravity
-          . .venv-antigravity/bin/activate
-          python -m pip install --requirement agent-antigravity/requirements.txt --requirement agent-antigravity/requirements-test.txt
-          python -m pytest agent-antigravity/tests -q
-      - name: Langroid model-choice and tool-call regressions
-        run: |
-          set -euo pipefail
-          python -m venv .venv-langroid
-          . .venv-langroid/bin/activate
-          python -m pip install --requirement agent-langroid/requirements.txt --requirement agent-langroid/requirements-test.txt
-          python -m pytest agent-langroid/tests -q
-      - name: AG2 model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-ag2
-          . .venv-ag2/bin/activate
-          python -m pip install --requirement agent-ag2/requirements.txt --requirement agent-ag2/requirements-test.txt
-          python -m pytest agent-ag2/tests -q
-      - name: Microsoft Agent Framework model-choice regression
-        run: |
-          set -euo pipefail
-          python -m venv .venv-microsoft
-          . .venv-microsoft/bin/activate
-          python -m pip install --requirement agent-microsoft/requirements.txt --requirement agent-microsoft/requirements-test.txt
-          python -m pytest agent-microsoft/tests -q
       - run: bun install --frozen-lockfile
       - run: bun test tests/compose.test.ts
       - run: docker compose --env-file /dev/null --profile harness config --format json >/dev/null
@@ -741,7 +702,7 @@ jobs:
     name: verify
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'openbot-ubuntu-16core' }}
     if: always()
-    needs: [changes, static, api, mobile, app-browser, test, test-total, changed-tests, startup, langgraph-ts, python-harness, build, component-dockerfiles]
+    needs: [changes, static, api, mobile, app-browser, test, test-total, changed-tests, startup, langgraph-ts, python-harness, python-harness-compose, build, component-dockerfiles]
     steps:
       - name: Require every check
         env:

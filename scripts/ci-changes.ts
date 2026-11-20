@@ -117,6 +117,22 @@ const pythonHarness = matcher(
   "bun.lock",
 );
 
+/** The harnesses ci.yml's `python-harness` matrix tests, one job each. */
+export const PYTHON_HARNESSES = [
+  "agent-crewai",
+  "agent-claude-sdk",
+  "agent-langgraph-agui",
+  "agent-llamaindex",
+  "agent-agno",
+  "agent-strands",
+  "agent-pydantic-ai",
+  "agent-adk",
+  "agent-antigravity",
+  "agent-langroid",
+  "agent-ag2",
+  "agent-microsoft",
+];
+
 export const CI_RULES: Rule[] = [
   {
     output: "static",
@@ -154,7 +170,10 @@ export const CI_RULES: Rule[] = [
   },
   {
     output: "python_harness",
-    checks: ["python harness regressions"],
+    checks: [
+      ...PYTHON_HARNESSES.map((harness) => `python harness (${harness})`),
+      "compose config",
+    ],
     // Of the tests, only the harnesses' own: the suite's and the TypeScript engine's run elsewhere.
     reads: (path) =>
       (!isDocs(path) &&
