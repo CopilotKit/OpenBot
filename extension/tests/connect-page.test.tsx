@@ -231,3 +231,12 @@ test("the browser name input is capped at 80 characters", async () => {
   )) as HTMLInputElement;
   expect(input.maxLength).toBe(80);
 });
+
+test("connected, it says which organization this browser records into when OpenBot named one", async () => {
+  decideAnswer = { ok: true, organizationName: "Harbor Research" };
+  const { findByRole, findByText } = render(<ConnectPage />);
+  fireEvent.click(await findByRole("button", { name: "Connect" }));
+  await findByText(
+    "Connected as Google Chrome on macOS. It records into Harbor Research. You can close this tab.",
+  );
+});
