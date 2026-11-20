@@ -138,6 +138,7 @@ paths:
   /api/v2/organizations/{organizationId}/audit-events/export: { $ref: './audit-events.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1audit-events~1export' }
   /api/v2/organizations/{organizationId}/audit-events/vocabulary: { $ref: './audit-events.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1audit-events~1vocabulary' }
   /api/v2/organizations/{organizationId}/audit-events/ask: { $ref: './audit-events.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1audit-events~1ask' }
+  /api/v2/organizations/{organizationId}/deployment/audit-events: { $ref: './audit-events.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1deployment~1audit-events' }
   /api/v2/organizations/{organizationId}/people: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people' }
   /api/v2/organizations/{organizationId}/people/{personId}: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}' }
   /api/v2/organizations/{organizationId}/people/{personId}/revoke-access: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1revoke-access' }

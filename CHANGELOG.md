@@ -77,6 +77,12 @@ unless you rely on task threads.
   `/api/intelligence/client/websocket`, for a caller who is a member of that organization.
 - **Push notifications per organization.** A phone registered under an organization's address gets
   push notifications from the person's Bots in that organization only.
+- **This OpenBot's own audit trail.** `GET /api/v2/organizations/{organizationId}/deployment/audit-events`
+  (`listDeploymentAuditEvents`) lists what happened to the installation and to no organization, for
+  the admin who runs it. Where OpenBot keeps one organization, those events stay on its trail.
+- **Require SSO per organization.** Where OpenBot may keep more than one organization, each one's
+  admins require single sign-on of its own members, and saving it signs out only that
+  organization's members. Where it keeps one, the rule still holds for everybody.
 - New optional fields: `organizationId` on a conversation event and on a Recorder connection.
 
 ### Bots and models
