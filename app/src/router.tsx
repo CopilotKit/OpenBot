@@ -1,4 +1,5 @@
 import { createRouter } from "@tanstack/react-router";
+import { trackSidebarHistory } from "@/components/layout/sidebar-history";
 import { ReportedErrorComponent } from "./lib/error-reporting";
 import { parseSearchText } from "./lib/search-text";
 import type { RouterContext } from "./router-context";
@@ -16,6 +17,9 @@ export const router = createRouter({
   // The router's own error screen, which also tells OpenBot what it caught (lib/error-reporting.tsx).
   defaultErrorComponent: ReportedErrorComponent,
 });
+
+// The router can be inspected without a browser or a history (for example in route tests).
+if (router.history) trackSidebarHistory(router.history);
 
 declare module "@tanstack/react-router" {
   interface Register {

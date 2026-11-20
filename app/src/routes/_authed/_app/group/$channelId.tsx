@@ -23,7 +23,7 @@ function RouteComponent() {
         className="sticky top-0 flex min-h-12 flex-row items-center gap-1.5 border-b border-border px-3 py-2"
         data-slot="conversation-header"
       >
-        <SidebarToggle />
+        <SidebarToggle conversationHeader />
         <ChannelAvatar
           participantIds={channel.data?.agentIds ?? []}
           size={22}

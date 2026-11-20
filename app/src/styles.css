@@ -57,6 +57,14 @@
   padding-left: 80px;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-desktop-titlebar="overlay"]
+    [data-slot="sidebar-wrapper"]:has([data-app-sidebar])
+    > main {
+    transition: padding-top 240ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+}
+
 :root[data-desktop-titlebar="overlay"]
   [data-slot="sidebar-wrapper"]:has(
     > [data-slot="sidebar"][data-state="collapsed"]
@@ -445,4 +453,32 @@
     opacity: 0;
     transform: translateY(3px);
   }
+}
+
+/* Use the same 40px row and 6px inset as the expanded menu's icon column. */
+[data-app-sidebar] {
+  --sidebar-icon-control: 2.5rem;
+  --sidebar-icon-padding: 0.375rem;
+}
+
+/* The page's inset border and 49px conversation header meet the rail at 50px. */
+[data-collapsible="icon"]
+  [data-app-sidebar]
+  [data-slot="sidebar-header"]::after {
+  bottom: 6px;
+}
+
+:root[data-desktop-titlebar="overlay"]
+  [data-app-sidebar]
+  [data-slot="sidebar-header"] {
+  padding-left: 0.25rem;
+  padding-top: 2.5rem;
+  height: 5.75rem;
+}
+
+:root[data-desktop-titlebar="overlay"]
+  [data-collapsible="icon"]
+  [data-app-sidebar]
+  [data-slot="sidebar-header"]::after {
+  bottom: 2px;
 }

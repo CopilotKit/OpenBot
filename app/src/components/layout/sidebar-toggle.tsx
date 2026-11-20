@@ -1,6 +1,5 @@
 import { IconLayoutSidebar } from "@tabler/icons-react";
-import type { ReactNode } from "react";
-
+import { type ReactNode, useContext } from "react";
 import { Button } from "@/components/ui/button";
 import { useOptionalSidebar } from "@/components/ui/sidebar";
 import {
@@ -9,6 +8,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import {
+  SidebarHistoryButtons,
+  SidebarHistoryContext,
+} from "./sidebar-history";
 
 /**
  * ⌘ on Apple platforms, Ctrl everywhere else. The primitive's listener accepts either modifier, so
@@ -69,9 +72,16 @@ export function useSidebarToggleVisible(): boolean {
  * its own children after the prop spread, including an `sr-only` "Toggle Sidebar" that would
  * contradict the label below. The state still belongs to the primitive: `toggleSidebar` is its hook.
  */
-export function SidebarToggle({ className }: { className?: string }) {
+export function SidebarToggle({
+  className,
+  conversationHeader = false,
+}: {
+  className?: string;
+  conversationHeader?: boolean;
+}) {
   const sidebar = useOptionalSidebar();
   const visible = useSidebarToggleVisible();
+  const hasHistory = useContext(SidebarHistoryContext);
   if (!sidebar || !visible) return null;
   const { isMobile, open, openMobile, toggleSidebar } = sidebar;
 
@@ -81,26 +91,34 @@ export function SidebarToggle({ className }: { className?: string }) {
     : "Show sidebar";
 
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            aria-label={label}
-            className={cn("text-muted-foreground", className)}
-            onClick={toggleSidebar}
-            size="icon"
-            variant="ghost"
-          >
-            <IconLayoutSidebar className="size-4.5" />
-          </Button>
-        }
-      />
-      {/* An accelerator nobody is told about is not a feature. */}
-      <TooltipContent side="bottom">
-        {label}
-        <span className="text-background/60">{SHORTCUT_LABEL}</span>
-      </TooltipContent>
-    </Tooltip>
+    <>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              aria-label={label}
+              className={cn(
+                "cursor-pointer text-muted-foreground hover:bg-foreground/5",
+                className,
+              )}
+              onClick={toggleSidebar}
+              size="icon"
+              variant="ghost"
+            >
+              <IconLayoutSidebar className="size-4.5" />
+            </Button>
+          }
+        />
+        {/* An accelerator nobody is told about is not a feature. */}
+        <TooltipContent side="bottom">
+          {label}
+          <span className="text-background/60">{SHORTCUT_LABEL}</span>
+        </TooltipContent>
+      </Tooltip>
+      {hasHistory && !isMobile ? (
+        <SidebarHistoryButtons divided trailingDivider={conversationHeader} />
+      ) : null}
+    </>
   );
 }
 

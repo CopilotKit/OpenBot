@@ -151,6 +151,10 @@ async function open(engine: BrowserType, path: string): Promise<Page> {
       body: `<!doctype html><html lang="en" class="light"><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>`,
     });
   });
+  // Inverted layout places navigation directly over the account menu.
+  await page.addInitScript(() => {
+    localStorage.setItem("openbot-sidebar-inverted", "true");
+  });
   await page.goto(`${ORIGIN}${path}`, { waitUntil: "domcontentloaded" });
   return page;
 }
@@ -158,9 +162,10 @@ async function open(engine: BrowserType, path: string): Promise<Page> {
 /** What the sidebar's rows say about themselves, and the fill each is drawn with. */
 async function rows(page: Page) {
   return page.evaluate(() => {
-    const footer = document.querySelector("[data-sidebar=footer]");
     const links = [
-      ...(footer?.querySelectorAll<HTMLAnchorElement>("a[href]") ?? []),
+      ...document.querySelectorAll<HTMLAnchorElement>(
+        "[data-sidebar=menu-button][href]",
+      ),
     ];
     return {
       marked: links
@@ -189,7 +194,7 @@ describe.skipIf(!asked)("the sidebar on the invitations page", () => {
       await account.waitFor();
       await style(page);
       await page.waitForFunction(() =>
-        [...document.querySelectorAll("[data-sidebar=footer] a")].some(
+        [...document.querySelectorAll("[data-sidebar=menu-button][href]")].some(
           (link) => (link as HTMLElement).dataset.status === "active",
         ),
       );
@@ -201,7 +206,7 @@ describe.skipIf(!asked)("the sidebar on the invitations page", () => {
       await style(page);
       const box = await entry.boundingBox();
       const bots = await page
-        .locator("[data-sidebar=footer] a", { hasText: "Bots" })
+        .locator("[data-sidebar=menu-button][href]", { hasText: "Bots" })
         .boundingBox();
       // The premise: the menu opens over the rows above it, and Invitations sits over Bots.
       expect(box && bots).toBeTruthy();
@@ -240,7 +245,7 @@ describe.skipIf(!asked)("the sidebar on the invitations page", () => {
 
       // The pointer moves: the row it is on fills, as hover always did.
       const botsNow = await page
-        .locator("[data-sidebar=footer] a", { hasText: "Bots" })
+        .locator("[data-sidebar=menu-button][href]", { hasText: "Bots" })
         .boundingBox();
       await page.mouse.move(
         (botsNow?.x ?? 0) + 40,

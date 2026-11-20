@@ -34,11 +34,11 @@ export function ChannelItemContent({
       <div className="shrink-0">
         <ChannelAvatar
           participantIds={participantIds}
-          size={32}
+          size={28}
           typing={busy}
         />
       </div>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 overflow-hidden transition-opacity duration-150 motion-reduce:transition-none group-data-[collapsible=icon]:opacity-0">
         <div className="flex items-center gap-1.5">
           <span
             className={`min-w-0 flex-1 truncate ${emphasis === "agent" ? primaryText : secondaryText}`}

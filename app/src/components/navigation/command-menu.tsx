@@ -45,9 +45,10 @@ import { cn } from "@/lib/utils";
  */
 
 /* Opened from any skin's navigation and from Cmd/Ctrl+K, so the open state lives outside them all. */
-let open = false;
+type CommandMenuMode = "all" | "conversations";
+let open: CommandMenuMode | null = null;
 const listeners = new Set<() => void>();
-function setOpen(next: boolean) {
+function setOpen(next: CommandMenuMode | null) {
   open = next;
   for (const listener of listeners) listener();
 }
@@ -58,7 +59,19 @@ function subscribe(listener: () => void) {
 
 /** Opens the menu. A frame's own entry calls this, after closing its mobile sidebar. */
 export function openCommandMenu() {
-  setOpen(true);
+  setOpen("all");
+}
+
+export function openConversationSearch() {
+  setOpen("conversations");
+}
+
+export function useCommandMenuMode() {
+  return useSyncExternalStore(
+    subscribe,
+    () => open,
+    () => null,
+  );
 }
 
 /*
@@ -132,18 +145,35 @@ function useDebounced(value: string, ms: number) {
 }
 
 export function CommandMenu() {
-  const isOpen = useSyncExternalStore(subscribe, () => open);
+  const mode = useCommandMenuMode();
   // Closed when the signed-in layout goes, so it never reopens by itself later.
-  useEffect(() => () => setOpen(false), []);
-  useHotkey("command-menu", () => setOpen(!open));
+  useEffect(() => () => setOpen(null), []);
+  useHotkey("command-menu", () => setOpen(open ? null : "all"));
   return (
-    <Dialog onOpenChange={setOpen} open={isOpen}>
-      {isOpen ? <CommandMenuBody onClose={() => setOpen(false)} /> : null}
+    <Dialog
+      onOpenChange={(next) => {
+        if (!next) setOpen(null);
+      }}
+      open={mode !== null}
+    >
+      {mode ? (
+        <CommandMenuBody key={mode} mode={mode} onClose={() => setOpen(null)} />
+      ) : null}
     </Dialog>
   );
 }
 
-function CommandMenuBody({ onClose }: { onClose: () => void }) {
+function CommandMenuBody({
+  mode,
+  onClose,
+}: {
+  mode: CommandMenuMode;
+  onClose: () => void;
+}) {
+  const conversationsOnly = mode === "conversations";
+  const placeholder = conversationsOnly
+    ? "Search conversations"
+    : "Search pages, Bots and conversations";
   const navigate = useNavigate();
   const id = useId();
   const [query, setQuery] = useState("");
@@ -155,7 +185,10 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
   const settledText = useDebounced(trimmed, SEARCH_DEBOUNCE_MS);
 
   const navigation = useNavigationItems().filter(isNavigationLink);
-  const bots = useQuery(agentListQueryOptions());
+  const bots = useQuery({
+    ...agentListQueryOptions(),
+    enabled: !conversationsOnly,
+  });
   const recent = useInfiniteQuery({
     ...channelListQueryOptions(),
     enabled: !searching,
@@ -174,24 +207,26 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
     run();
   };
 
-  const pages: Result[] = [
-    {
-      id: "new-conversation",
-      group: "Pages" as const,
-      label: "New conversation",
-      icon: IconPlus,
-      go: go(() => void navigate({ to: "/channel/new" })),
-    },
-    ...navigation.map((item) => ({
-      id: `page-${item.id}`,
-      group: "Pages" as const,
-      label: item.label,
-      icon: item.icon,
-      go: go(() => void navigate({ to: item.to })),
-    })),
-  ].filter((result) => !trimmed || matches(result.label, trimmed));
+  const pages: Result[] = conversationsOnly
+    ? []
+    : [
+        {
+          id: "new-conversation",
+          group: "Pages" as const,
+          label: "New conversation",
+          icon: IconPlus,
+          go: go(() => void navigate({ to: "/channel/new" })),
+        },
+        ...navigation.map((item) => ({
+          id: `page-${item.id}`,
+          group: "Pages" as const,
+          label: item.label,
+          icon: item.icon,
+          go: go(() => void navigate({ to: item.to })),
+        })),
+      ].filter((result) => !trimmed || matches(result.label, trimmed));
 
-  const botResults: Result[] = (bots.data ?? [])
+  const botResults: Result[] = (conversationsOnly ? [] : (bots.data ?? []))
     .filter((bot) => !trimmed || matches(bot.name, trimmed))
     .map((bot) => ({
       id: `bot-${bot.id}`,
@@ -285,7 +320,9 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
     : searchPending && !conversationResults.length
       ? "Searching conversations…"
       : searchFailed
-        ? "Couldn't search conversations."
+        ? search.isFetchNextPageError
+          ? "Couldn't load more results."
+          : "Couldn't search conversations."
         : `${results.length} ${results.length === 1 ? "result" : "results"}`;
 
   const groups = (["Pages", "Bots", "Conversations"] as const)
@@ -297,16 +334,29 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
 
   return (
     <DialogContent
-      className="top-[12svh] max-h-[76svh] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-xl"
+      className={cn(
+        "max-h-[76svh] gap-0 overflow-hidden p-0 sm:max-w-xl",
+        !conversationsOnly && "top-[12svh] translate-y-0",
+      )}
       finalFocus={() => !navigated.current}
       showCloseButton={false}
     >
-      <DialogTitle className="sr-only">Command palette</DialogTitle>
+      <DialogTitle className="sr-only">
+        {conversationsOnly ? "Search conversations" : "Command palette"}
+      </DialogTitle>
       <DialogDescription className="sr-only">
-        Open a page, a Bot or a conversation. Conversations are searched by
-        their names and recent messages.
+        {conversationsOnly
+          ? "Search by conversation name or recent messages."
+          : "Open a page, a Bot or a conversation. Conversations are searched by their names and recent messages."}
       </DialogDescription>
-      <div className="flex items-center gap-2 border-border border-b px-3">
+      <div
+        className={cn(
+          "flex items-center gap-2 px-3",
+          conversationsOnly
+            ? "mx-2 mt-2 rounded-lg border border-border/60 bg-muted/45"
+            : "border-border border-b",
+        )}
+      >
         <IconSearch
           aria-hidden="true"
           className="size-4 shrink-0 text-muted-foreground"
@@ -318,12 +368,15 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
           aria-autocomplete="list"
           aria-controls={`${id}-list`}
           aria-expanded="true"
-          aria-label="Search pages, Bots and conversations"
+          aria-label={placeholder}
           autoComplete="off"
-          className="h-12 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-sm"
+          className={cn(
+            "min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-sm",
+            conversationsOnly ? "h-10" : "h-12",
+          )}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Search pages, Bots and conversations"
+          placeholder={placeholder}
           role="combobox"
           spellCheck={false}
           type="text"
@@ -361,6 +414,7 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
                     aria-selected={isActive}
                     className={cn(
                       "flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 text-sm",
+                      conversationsOnly && "rounded-lg px-2.5",
                       isActive ? "bg-muted text-foreground" : "text-foreground",
                     )}
                     id={`${id}-${result.id}`}
@@ -388,7 +442,9 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
         </div>
         {/* Outside the list: a button is not an option. The pages and Bots stay whatever this says. */}
         <ConversationsNote
-          failed={searchFailed}
+          failed={searchFailed && !search.isFetchNextPageError}
+          failureMessage={conversationsOnly ? search.error?.message : undefined}
+          failedPage={!searchSettling && search.isFetchNextPageError}
           hasMore={searching && !searchSettling && search.hasNextPage}
           loadingMore={search.isFetchingNextPage}
           none={
@@ -397,25 +453,35 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
             search.isSuccess &&
             !conversationResults.length
           }
-          onLoadMore={() => void search.fetchNextPage()}
+          onLoadMore={() => void search.fetchNextPage({ cancelRefetch: false })}
           onRetry={() => void search.refetch()}
           pending={searchPending && !conversationResults.length}
           shortQuery={trimmed.length > 0 && !searching}
         />
+        {conversationsOnly &&
+        !trimmed &&
+        !recent.isPending &&
+        !results.length ? (
+          <p className="px-2 py-4 text-sm text-muted-foreground">
+            No recent conversations.
+          </p>
+        ) : null}
         {!results.length && !searching && trimmed.length > 1 ? (
           <p className="px-2 py-6 text-center text-muted-foreground text-sm">
             No matches.
           </p>
         ) : null}
       </div>
-      <div className="flex items-center justify-between gap-2 border-border border-t px-3 py-2 text-muted-foreground text-xs">
-        <span>Searches conversation names and recent messages.</span>
-        <span className="hidden gap-1 sm:flex">
-          <kbd className="rounded border bg-muted px-1 font-sans">↑↓</kbd>
-          <kbd className="rounded border bg-muted px-1 font-sans">Enter</kbd>
-          <kbd className="rounded border bg-muted px-1 font-sans">Esc</kbd>
-        </span>
-      </div>
+      {!conversationsOnly ? (
+        <div className="flex items-center justify-between gap-2 border-border border-t px-3 py-2 text-muted-foreground text-xs">
+          <span>Searches conversation names and recent messages.</span>
+          <span className="hidden gap-1 sm:flex">
+            <kbd className="rounded border bg-muted px-1 font-sans">↑↓</kbd>
+            <kbd className="rounded border bg-muted px-1 font-sans">Enter</kbd>
+            <kbd className="rounded border bg-muted px-1 font-sans">Esc</kbd>
+          </span>
+        </div>
+      ) : null}
     </DialogContent>
   );
 }
@@ -424,6 +490,8 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
 function ConversationsNote({
   pending,
   failed,
+  failureMessage,
+  failedPage,
   none,
   shortQuery,
   hasMore,
@@ -433,6 +501,8 @@ function ConversationsNote({
 }: {
   pending: boolean;
   failed: boolean;
+  failureMessage?: string;
+  failedPage: boolean;
   none: boolean;
   shortQuery: boolean;
   hasMore: boolean;
@@ -449,8 +519,8 @@ function ConversationsNote({
   if (failed)
     return (
       <div className="flex items-center justify-between gap-2 px-2 py-1.5">
-        <p className="text-destructive text-sm">
-          Couldn't search conversations.
+        <p role="alert" className="text-destructive text-sm">
+          {failureMessage || "Couldn't search conversations."}
         </p>
         <Button onClick={onRetry} size="sm" type="button" variant="outline">
           Retry
@@ -461,6 +531,11 @@ function ConversationsNote({
   if (hasMore)
     return (
       <div className="px-2 py-1">
+        {failedPage ? (
+          <p role="alert" className="text-destructive text-sm">
+            Couldn't load more results.
+          </p>
+        ) : null}
         <Button
           disabled={loadingMore}
           onClick={onLoadMore}
@@ -468,7 +543,11 @@ function ConversationsNote({
           type="button"
           variant="ghost"
         >
-          {loadingMore ? "Loading…" : "Load more results"}
+          {loadingMore
+            ? "Loading…"
+            : failedPage
+              ? "Retry"
+              : "Load more results"}
         </Button>
       </div>
     );
