@@ -1889,7 +1889,6 @@ async fn windows_blocker_from<R: tauri::Runtime>(
         let outcome = match &result {
             Ok(None) => Outcome::Ready,
             Ok(Some(win::Blocker::WslAbsent)) => Outcome::WslAbsent,
-            Ok(Some(win::Blocker::WslOne)) => Outcome::WslOne,
             Ok(Some(win::Blocker::WslNoKernel)) => Outcome::WslNoKernel,
             Ok(Some(win::Blocker::VirtualMachinePlatformDisabled)) => {
                 Outcome::VirtualMachinePlatformDisabled

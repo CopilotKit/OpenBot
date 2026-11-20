@@ -1481,7 +1481,6 @@ pub enum EngineInstallOutcome {
 pub enum WindowsStageOutcome {
     Ready,
     WslAbsent,
-    WslOne,
     WslNoKernel,
     VirtualMachinePlatformDisabled,
     VirtualizationDisabled,
@@ -1504,8 +1503,6 @@ pub enum WindowsProbeKind {
     WslService,
     /// The Virtual Machine Platform optional feature's state (CIM, through Windows servicing).
     VirtualMachinePlatformFeature,
-    /// The default WSL version, from the registry.
-    DefaultWslVersion,
     /// `wsl.exe --version`.
     WslVersion,
     /// `wsl.exe --system`, which starts WSL's own VM.
@@ -1515,13 +1512,12 @@ pub enum WindowsProbeKind {
 }
 
 impl WindowsProbeKind {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 8] = [
         Self::Virtualization,
         Self::Administrator,
         Self::WslFeature,
         Self::WslService,
         Self::VirtualMachinePlatformFeature,
-        Self::DefaultWslVersion,
         Self::WslVersion,
         Self::WslSystemStart,
         Self::Docker,
@@ -1534,7 +1530,6 @@ impl WindowsProbeKind {
             Self::WslFeature => "wsl_feature",
             Self::WslService => "wsl_service",
             Self::VirtualMachinePlatformFeature => "virtual_machine_platform_feature",
-            Self::DefaultWslVersion => "default_wsl_version",
             Self::WslVersion => "wsl_version",
             Self::WslSystemStart => "wsl_system_start",
             Self::Docker => "docker",
@@ -1839,7 +1834,7 @@ pub fn schema_json() -> serde_json::Value {
             "model_chosen": { "provider": ["openai", "anthropic", "google", "xai", "compatible", "none"], "credential_path": ["subscription", "api_key", "oauth", "none"], "custom_base_url": "bool" },
             "engine_detected": { "engine": ["docker", "podman", "none"], "responding": "bool" },
             "engine_installed": { "engine": ["docker", "podman", "none"], "outcome": ["success", "failure"] },
-            "windows_stage": { "outcome": ["ready", "wsl_absent", "wsl_one", "wsl_no_kernel", "virtual_machine_platform_disabled", "virtualization_disabled", "nested_virtualization_unavailable", "not_administrator", "check_failed"] },
+            "windows_stage": { "outcome": ["ready", "wsl_absent", "wsl_no_kernel", "virtual_machine_platform_disabled", "virtualization_disabled", "nested_virtualization_unavailable", "not_administrator", "check_failed"] },
             "windows_probe": {
                 "probe": WindowsProbeKind::ALL.map(WindowsProbeKind::as_str),
                 "outcome": ["slow", "timed_out"],
