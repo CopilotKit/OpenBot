@@ -229,7 +229,10 @@ fn recovery_a_pruned_backend_is_found_gone_and_set_up_again() {
         .expect("setting up again should run");
     println!("set up again: {}", said(&again));
     assert_eq!(again.outcome, Outcome::Completed);
-    assert_eq!(again.stack.as_ref().map(|stack| stack.id.as_str()), Some(id.as_str()));
+    assert_eq!(
+        again.stack.as_ref().map(|stack| stack.id.as_str()),
+        Some(id.as_str())
+    );
     let status = run_installed("stack-lost-live", Action::Status, &stack).unwrap();
     println!("status after: {}", said(&status));
     assert_eq!(status.readiness, Readiness::Ready);

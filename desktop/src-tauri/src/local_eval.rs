@@ -6907,7 +6907,9 @@ mod tests {
 
         assert!(!private.join("backups").exists());
         assert!(private.join("secrets.json").exists());
-        let recovery = config.join("local-evaluation-recovery").join(stack.as_str());
+        let recovery = config
+            .join("local-evaluation-recovery")
+            .join(stack.as_str());
         let kept: Vec<_> = std::fs::read_dir(&recovery)
             .unwrap()
             .map(|entry| entry.unwrap().path())
