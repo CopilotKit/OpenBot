@@ -5344,10 +5344,13 @@ pub fn cluster_gone_at(
     Some(cluster_gone_in(&list(address)?, stack))
 }
 
-/// `cluster_gone`, from the container names the engine listed, one per line.
+/// `cluster_gone`, from the container names the engine listed, one per line: gone when there is
+/// no `k3d-<stack>-server-0`, the one node the CLI makes and asks about (its ownership check). k3d's
+/// tools container, `k3d-<stack>-tools`, can outlive it: on the cloud Mac it was still running
+/// after Quit stopped the node, so a prune of stopped containers leaves it there and takes the node.
 pub fn cluster_gone_in(names: &str, stack: &StackId) -> bool {
-    let prefix = format!("k3d-{}-", stack.as_str());
-    !names.lines().any(|name| name.trim().starts_with(&prefix))
+    let node = format!("k3d-{}-server-0", stack.as_str());
+    !names.lines().any(|name| name.trim() == node)
 }
 
 /**
@@ -6843,6 +6846,11 @@ mod tests {
         // Another stack's cluster, or a container that only mentions the id, is not this one's.
         assert!(cluster_gone_in("k3d-local-0000-server-0\nmy-web\n", &stack));
         assert!(cluster_gone_in("local-1915a7aafba78d6207a561b0\n", &stack));
+        // k3d's tools container, still running after the node was stopped and pruned, is not it.
+        assert!(cluster_gone_in(
+            "k3d-local-1915a7aafba78d6207a561b0-tools\n",
+            &stack
+        ));
     }
 
     /// A Mac on Docker Desktop, Desktop 1.1.2: `docker container prune` removed the backend's

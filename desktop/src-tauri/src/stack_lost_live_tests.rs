@@ -72,6 +72,20 @@ impl Node {
             NGINX,
         ]);
         assert!(started, "the node should start: {said}");
+        // k3d's tools container, which outlived the node on the cloud Mac: a prune of stopped
+        // containers leaves it, since it is still running.
+        let (tools, said) = docker(&[
+            "run",
+            "-d",
+            "--name",
+            &format!("k3d-{id}-tools"),
+            "--label",
+            &format!("k3d.cluster={id}"),
+            "--network",
+            &network,
+            NGINX,
+        ]);
+        assert!(tools, "the tools container should start: {said}");
         node
     }
 
@@ -91,6 +105,7 @@ impl Drop for Node {
     fn drop(&mut self) {
         let id = self.stack.as_str();
         let _ = docker(&["rm", "-f", "-v", &format!("k3d-{id}-server-0")]);
+        let _ = docker(&["rm", "-f", "-v", &format!("k3d-{id}-tools")]);
         let _ = docker(&["network", "rm", &format!("k3d-{id}")]);
         let _ = docker(&["volume", "rm", &format!("k3d-{id}-images")]);
     }
