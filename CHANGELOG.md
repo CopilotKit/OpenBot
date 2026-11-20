@@ -92,6 +92,9 @@ unless you rely on task threads.
 
 ### OpenBot Desktop
 
+- **OpenBot Desktop's back end moves to CopilotKit Intelligence 0.17.0-rc.4.** The bundled CLI
+  moves to `copilotkit@3e64135`, so an install or update runs Intelligence 0.17.0-rc.4, the same
+  release the Kubernetes bundle installs.
 - **Approved folders survive a server restart.** A restart of OpenBot's server, Restart in the Status
   window among them, dropped every folder approved in Settings > Computer: Settings read "No folders
   approved" and a Bot was told its folder access had ended. OpenBot Desktop now holds the folders
