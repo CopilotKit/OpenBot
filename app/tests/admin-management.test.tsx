@@ -185,14 +185,18 @@ test("where it doesn't apply, the page says so and offers nothing to press", asy
 test("not connected offers Connect, which starts connecting with an Idempotency-Key", async () => {
   const view = await draw(ManagementPage);
   expect(await view.findByText("Not connected")).toBeTruthy();
-  // The approval page signs people in with the account the licence is under, not OpenBot's own
-  // sign-in, so the screen never sends an admin to their OpenBot account.
+  // What CopilotKit gets, and who sets the window, said before Connect: the approval page's words.
+  const before = view.getByText(/CopilotKit sees this install's version/);
+  expect(before.textContent).toContain(
+    "CopilotKit sees this install's version and health, and upgrades it during a maintenance window. The window is agreed with CopilotKit; the default is Tuesdays, 14:00 to 18:00 UTC.",
+  );
+  // The approval page signs people in with the CopilotKit account the licence is under.
+  expect(before.textContent).toContain(
+    "the CopilotKit account your licence is under",
+  );
   expect(
-    view.getByText(
-      "An admin of the organization your OpenBot licence is for approves a code on the approval page. Then you install the management agent with one Helm command.",
-    ),
-  ).toBeTruthy();
-  expect(view.queryByText(/OpenBot account/)).toBeNull();
+    view.queryByText(/OpenBot account|OpenBot by CopilotKit account/),
+  ).toBeNull();
   fireEvent.click(view.getByRole("button", { name: "Connect" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toMatchObject({ method: "POST", path: ENROLLMENT });
@@ -201,8 +205,11 @@ test("not connected offers Connect, which starts connecting with an Idempotency-
   expect(await view.findByText("WDJB-MJHT")).toBeTruthy();
 });
 
-test("waiting for approval shows the code, its page and when it expires, and Cancel stops it", async () => {
-  answer = { status: 200, body: WAITING_FOR_APPROVAL };
+test("waiting for approval shows the code, the install's name, its page and when it expires, and Cancel stops it at once", async () => {
+  answer = {
+    status: 200,
+    body: { ...WAITING_FOR_APPROVAL, installName: "Acme production" },
+  };
   const view = await draw(ManagementPage);
   expect(await view.findByText("WDJB-MJHT")).toBeTruthy();
   const page = view.getByRole("button", { name: "Open the approval page" });
@@ -214,10 +221,11 @@ test("waiting for approval shows the code, its page and when it expires, and Can
   expect(view.getByRole("button", { name: "Copy the code" })).toBeTruthy();
   expect(
     view.getByText(
-      "Sign in on the approval page with your OpenBot by CopilotKit account, the one your licence is under, as an admin of that organization. Then confirm this code. OpenBot carries on by itself once it's approved.",
+      "Open the approval page and sign in to CopilotKit as an admin of the organization your licence belongs to. Check the code matches, then approve it. This page moves on by itself.",
     ),
   ).toBeTruthy();
-  expect(view.queryByText(/OpenBot account/)).toBeNull();
+  // Next to the code, so the admin can match it to what the approval page shows.
+  expect(view.getByText("Acme production")).toBeTruthy();
 
   answer = { status: 200, body: { state: "not-connected" } };
   fireEvent.click(view.getByRole("button", { name: "Cancel" }));
@@ -237,9 +245,19 @@ test("waiting for the agent shows the Helm command to copy, and nothing secret",
     },
   };
   const view = await draw(ManagementPage);
-  expect(await view.findByText(HELM)).toBeTruthy();
+  await view.findByText("Step 2 of 2: install the management agent");
+  // One flag per line with backslash line endings, which still pastes as one command.
+  const shown = document.querySelector("[data-management-helm]")?.textContent;
+  expect(shown).toBe(
+    [
+      "helm install openbot-agent oci://ghcr.io/copilotkit/charts/openbot-agent \\",
+      "  --namespace openbot-system \\",
+      "  --create-namespace \\",
+      "  --set enrollment.serverUrl=http://openbot-server-internal.openbot.svc:9464",
+    ].join("\n"),
+  );
   expect(
-    view.getByText("Step 2 of 2: install the management agent"),
+    view.getByText(/This page updates itself when the agent reports in\./),
   ).toBeTruthy();
   expect(view.getByRole("button", { name: "Copy the command" })).toBeTruthy();
   expect(view.getByText("6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d")).toBeTruthy();
@@ -272,7 +290,7 @@ test("on a build that isn't a release, the server's note sits beside the command
     },
   };
   const release = await draw(ManagementPage);
-  expect(await release.findByText(HELM)).toBeTruthy();
+  await release.findByText("Step 2 of 2: install the management agent");
   expect(release.queryByText(NOTE)).toBeNull();
 });
 
@@ -284,10 +302,15 @@ test("connected shows the last heartbeat, the agent's version and how to disconn
       installId: "6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d",
       lastHeartbeatAt: new Date(Date.now() - 2 * 60_000).toISOString(),
       agentVersion: "0.4.0",
+      window: { weekday: 4, startUtc: "22:30", hours: 6 },
     },
   };
   const view = await draw(ManagementPage);
   expect(await view.findByText("Connected")).toBeTruthy();
+  // The install's own window, as the service reports it.
+  expect(
+    view.getByText("Thursdays, 22:30 UTC to 04:30 UTC the next day"),
+  ).toBeTruthy();
   expect(view.getByText("2 minutes ago")).toBeTruthy();
   expect(view.getByText("0.4.0")).toBeTruthy();
   expect(
@@ -323,6 +346,13 @@ test("Disconnect after uninstalling forgets the connection and goes back to not 
   await view.findByText("Not reporting");
   answer = { status: 200, body: { state: "not-connected" } };
   fireEvent.click(view.getByRole("button", { name: "Disconnect" }));
+  // A confirmation first: coming back needs a new code and a new approval.
+  expect(await view.findByText("Disconnect managed updates?")).toBeTruthy();
+  expect(writes).toHaveLength(0);
+  const confirm = view
+    .getAllByRole("button", { name: "Disconnect" })
+    .find((button) => button.closest("[role=dialog]"));
+  fireEvent.click(confirm as HTMLElement);
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toMatchObject({ method: "DELETE", path: ENROLLMENT });
   expect(writes[0]?.idempotencyKey).toMatch(/^[0-9a-f]{32}$/);
@@ -340,6 +370,11 @@ test("a Disconnect refused while the agent still reports in says why", async () 
     "The management agent is still reporting in. Uninstall it with Helm first, then choose Disconnect.";
   writeAnswer = problem(409, "MANAGEMENT_AGENT_REPORTING", refusal);
   fireEvent.click(view.getByRole("button", { name: "Disconnect" }));
+  fireEvent.click(
+    (await view.findAllByRole("button", { name: "Disconnect" })).find(
+      (button) => button.closest("[role=dialog]"),
+    ) as HTMLElement,
+  );
   expect((await view.findByRole("alert")).textContent).toBe(refusal);
   expect(view.getByText("Connected")).toBeTruthy();
 });
@@ -395,4 +430,83 @@ test("a state this app doesn't know reads as not connected", async () => {
   answer = { status: 200, body: { state: "paused-by-copilotkit" } };
   const view = await draw(ManagementPage);
   expect(await view.findByText("Not connected")).toBeTruthy();
+});
+
+test("Disconnect waits for its confirmation, and Keep managed updates changes nothing", async () => {
+  answer = { status: 200, body: CONNECTED_SILENT };
+  const view = await draw(ManagementPage);
+  await view.findByText("Not reporting");
+  fireEvent.click(view.getByRole("button", { name: "Disconnect" }));
+  fireEvent.click(
+    await view.findByRole("button", { name: "Keep managed updates" }),
+  );
+  await waitFor(() =>
+    expect(view.queryByText("Disconnect managed updates?")).toBeNull(),
+  );
+  expect(writes).toHaveLength(0);
+});
+
+test("once the code is approved, Cancel asks first, and only Stop connecting stops it", async () => {
+  answer = {
+    status: 200,
+    body: {
+      state: "waiting-for-agent",
+      installId: "6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d",
+      helmCommand: HELM,
+    },
+  };
+  const view = await draw(ManagementPage);
+  await view.findByText("Step 2 of 2: install the management agent");
+  fireEvent.click(view.getByRole("button", { name: "Cancel" }));
+  expect(await view.findByText("Stop connecting?")).toBeTruthy();
+  expect(writes).toHaveLength(0);
+  answer = { status: 200, body: { state: "not-connected" } };
+  fireEvent.click(view.getByRole("button", { name: "Stop connecting" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ method: "DELETE", path: ENROLLMENT });
+});
+
+test("a licence without managed updates offers no Connect, and links to CopilotKit's contact page", async () => {
+  answer = {
+    status: 200,
+    body: {
+      state: "not-connected",
+      lastError: "Your licence doesn't include managed updates.",
+      lastErrorCode: "not-entitled",
+    },
+  };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Not in your licence")).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
+  expect(
+    view.getByText(/Your licence doesn't include managed updates\./),
+  ).toBeTruthy();
+  expect(
+    view
+      .getByRole("link", { name: "copilotkit.ai/contact-us" })
+      .getAttribute("href"),
+  ).toBe("https://www.copilotkit.ai/contact-us");
+  // Said once, in the state itself, not again as an error above it.
+  expect(view.queryByRole("alert")).toBeNull();
+});
+
+test("a Connect refused for the licence shows the not-in-your-licence state at once", async () => {
+  writeAnswer = problem(
+    409,
+    "MANAGEMENT_REFUSED",
+    "Your licence doesn't include managed updates.",
+  );
+  const view = await draw(ManagementPage);
+  fireEvent.click(await view.findByRole("button", { name: "Connect" }));
+  // The server keeps the refusal, and the page reads it again after the refused write.
+  answer = {
+    status: 200,
+    body: {
+      state: "not-connected",
+      lastError: "Your licence doesn't include managed updates.",
+      lastErrorCode: "not-entitled",
+    },
+  };
+  expect(await view.findByText("Not in your licence")).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
 });

@@ -29,10 +29,16 @@ export type ManagementStatus = {
   helmCommand?: string;
   /** On a build that isn't a release: which agent the command installs, in the server's own sentence. */
   helmCommandNote?: string;
+  /** The name the approval page shows the approver, so the admin can match it. */
+  installName?: string;
+  /** The install's maintenance window, once connected. */
+  window?: { weekday: number; startUtc: string; hours: number };
   lastHeartbeatAt?: string;
   agentVersion?: string;
   /** What went wrong with the last attempt, in the server's own sentence. */
   lastError?: string;
+  /** not-entitled: the licence doesn't include managed updates, so Connect isn't offered. */
+  lastErrorCode?: string;
 };
 
 /**

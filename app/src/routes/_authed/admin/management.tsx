@@ -1,11 +1,13 @@
 import {
   IconAlertTriangle,
+  IconCalendarTime,
   IconCircleCheck,
   IconClock,
   IconCloudCog,
   IconFingerprint,
   IconHeartbeat,
   IconInfoCircle,
+  IconLock,
   IconTag,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -21,6 +23,15 @@ import {
 import { copyText } from "@/components/settings/linked-accounts";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Item,
   ItemActions,
   ItemContent,
@@ -28,6 +39,11 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import {
+  helmLines,
+  MANAGEMENT_SENTENCE,
+  windowText,
+} from "@/lib/management/format";
 import {
   cancelManagementMutationOptions,
   startManagementMutationOptions,
@@ -44,8 +60,21 @@ export const Route = createFileRoute("/_authed/admin/management")({
 });
 
 const TITLE = "Managed updates";
-const DESCRIPTION =
-  "Let OpenBot by CopilotKit keep OpenBot up to date in your own cluster.";
+const DESCRIPTION = MANAGEMENT_SENTENCE;
+
+/** What CopilotKit gets, said before Connect: the same words as the approval page. */
+const CONSENT =
+  "CopilotKit sees this install's version and health, and upgrades it during a maintenance window.";
+/** Who sets the window and its default (the service's DEFAULT_WINDOW, set per install by its operators). */
+const WINDOW_AGREED =
+  "The window is agreed with CopilotKit; the default is Tuesdays, 14:00 to 18:00 UTC.";
+/** Where to ask for managed updates: CopilotKit's own contact page, linked from copilotkit.ai. */
+const CONTACT_URL = "https://www.copilotkit.ai/contact-us";
+const NOT_ENTITLED = "Your licence doesn't include managed updates.";
+const APPROVE_STEP =
+  "Open the approval page and sign in to CopilotKit as an admin of the organization your licence belongs to. Check the code matches, then approve it. This page moves on by itself.";
+const INSTALL_STEP =
+  "Run this command where kubectl reaches OpenBot's cluster. It holds nothing secret. This page updates itself when the agent reports in.";
 
 /**
  * Admin, Managed updates: connecting a self-hosted OpenBot to CopilotKit's management service, in
@@ -66,6 +95,10 @@ export function ManagementPage() {
   const start = useMutation(startManagementMutationOptions(queryClient));
   const cancel = useMutation(cancelManagementMutationOptions(queryClient));
   const failure = start.error ?? cancel.error;
+  // Disconnect, and Stop once the code is approved, both cost a new code and a new approval.
+  const [confirming, setConfirming] = useState<
+    "disconnect" | "stop-approved" | null
+  >(null);
 
   if (management.isPending) return <PageShell title={TITLE}>{null}</PageShell>;
   if (management.error)
@@ -85,23 +118,28 @@ export function ManagementPage() {
     );
 
   const status = management.data.status;
+  const notEntitled =
+    status.state === "not-connected" && status.lastErrorCode === "not-entitled";
   const cancelButton = (
     <Button
       disabled={cancel.isPending}
-      onClick={() => cancel.mutate()}
+      onClick={() =>
+        status.state === "waiting-for-agent"
+          ? setConfirming("stop-approved")
+          : cancel.mutate()
+      }
       size="sm"
       variant="outline"
     >
       {cancel.isPending ? "Cancelling…" : "Cancel"}
     </Button>
   );
+  // The not-entitled refusal is the state itself below, so it isn't said twice.
+  const notice = notEntitled ? null : (failure?.message ?? status.lastError);
 
   return (
     <PageShell description={DESCRIPTION} title={TITLE}>
-      {failure ? <Notice>{failure.message}</Notice> : null}
-      {status.lastError && !failure ? (
-        <Notice>{status.lastError}</Notice>
-      ) : null}
+      {notice ? <Notice>{notice}</Notice> : null}
       {status.state === "waiting-for-approval" ? (
         <WaitingForApproval cancelButton={cancelButton} status={status} />
       ) : status.state === "waiting-for-agent" ? (
@@ -111,7 +149,7 @@ export function ManagementPage() {
           disconnectButton={
             <Button
               disabled={cancel.isPending}
-              onClick={() => cancel.mutate()}
+              onClick={() => setConfirming("disconnect")}
               size="sm"
               variant="outline"
             >
@@ -120,6 +158,20 @@ export function ManagementPage() {
           }
           status={status}
         />
+      ) : notEntitled ? (
+        // No Connect: it would fail the same way until the licence includes managed updates.
+        <PageEmpty icon={IconLock} title="Not in your licence">
+          {NOT_ENTITLED} To add them, get in touch at{" "}
+          <a
+            className="underline underline-offset-2"
+            href={CONTACT_URL}
+            rel="noreferrer"
+            target="_blank"
+          >
+            copilotkit.ai/contact-us
+          </a>
+          .
+        </PageEmpty>
       ) : (
         <PageEmpty
           action={
@@ -130,19 +182,74 @@ export function ManagementPage() {
           icon={IconCloudCog}
           title="Not connected"
         >
-          An admin of the organization your OpenBot licence is for approves a
-          code on the approval page. Then you install the management agent with
-          one Helm command.
+          {CONSENT} {WINDOW_AGREED} To connect, you approve a code with the
+          CopilotKit account your licence is under, then install the management
+          agent with one Helm command.
         </PageEmpty>
       )}
+      <ConfirmDialog
+        confirming={confirming}
+        onClose={() => setConfirming(null)}
+        onConfirm={() => {
+          setConfirming(null);
+          cancel.mutate();
+        }}
+      />
     </PageShell>
+  );
+}
+
+/** Disconnect, or Stop once the code is approved: both cost a new code and a new approval. */
+function ConfirmDialog({
+  confirming,
+  onClose,
+  onConfirm,
+}: {
+  confirming: "disconnect" | "stop-approved" | null;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const disconnect = confirming === "disconnect";
+  return (
+    <Dialog
+      onOpenChange={(open) => (open ? undefined : onClose())}
+      open={confirming !== null}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {disconnect ? "Disconnect managed updates?" : "Stop connecting?"}
+          </DialogTitle>
+        </DialogHeader>
+        <DialogBody className="mt-4">
+          <DialogDescription>
+            {disconnect
+              ? "OpenBot stops getting managed updates, and you upgrade it yourself. Connecting again needs a new code and a new approval."
+              : "The code is already approved. Stopping forgets it, and connecting again needs a new code and a new approval."}
+          </DialogDescription>
+        </DialogBody>
+        <DialogFooter className="mt-4">
+          <Button onClick={onClose} size="sm" type="button" variant="outline">
+            {disconnect ? "Keep managed updates" : "Keep connecting"}
+          </Button>
+          <Button
+            onClick={onConfirm}
+            size="sm"
+            type="button"
+            variant="destructive"
+          >
+            {disconnect ? "Disconnect" : "Stop connecting"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 /** Something went wrong, in the server's own sentence. */
 function Notice({ children }: { children: React.ReactNode }) {
   return (
-    <p className="mb-4 text-destructive text-sm" role="alert">
+    <p className="text-destructive text-sm" role="alert">
       {children}
     </p>
   );
@@ -182,7 +289,7 @@ function WaitingForApproval({
   const page = status.verificationUriComplete ?? status.verificationUri;
   return (
     <PageSection
-      description="Sign in on the approval page with your OpenBot by CopilotKit account, the one your licence is under, as an admin of that organization. Then confirm this code. OpenBot carries on by itself once it's approved."
+      description={APPROVE_STEP}
       title="Step 1 of 2: approve the code"
     >
       <PageCard
@@ -215,6 +322,14 @@ function WaitingForApproval({
             <CopyButton label="Copy the code" text={status.userCode} />
           ) : null}
         </div>
+        {status.installName ? (
+          <p className="mt-3 text-muted-foreground text-sm">
+            Install name{" "}
+            <span className="font-medium text-foreground">
+              {status.installName}
+            </span>
+          </p>
+        ) : null}
         {status.expiresAt ? (
           <p className="mt-3 flex items-center gap-1.5 text-muted-foreground text-sm">
             <IconClock className="size-4" />
@@ -235,7 +350,7 @@ function WaitingForAgent({
 }) {
   return (
     <PageSection
-      description="Run this command where kubectl reaches OpenBot's cluster. It holds nothing secret. The agent collects its one-time token from OpenBot and reports in."
+      description={INSTALL_STEP}
       title="Step 2 of 2: install the management agent"
     >
       <PageCard className="mt-4" footer={cancelButton}>
@@ -244,10 +359,13 @@ function WaitingForAgent({
             className="min-w-0 flex-1 whitespace-pre-wrap break-words rounded bg-muted px-3 py-2 font-mono text-xs leading-relaxed"
             data-management-helm=""
           >
-            {status.helmCommand}
+            {status.helmCommand ? helmLines(status.helmCommand) : null}
           </pre>
           {status.helmCommand ? (
-            <CopyButton label="Copy the command" text={status.helmCommand} />
+            <CopyButton
+              label="Copy the command"
+              text={helmLines(status.helmCommand)}
+            />
           ) : null}
         </div>
         {/* On a build that isn't a release, the server's sentence about which agent this installs. */}
@@ -299,6 +417,11 @@ function Connected({
       title: "Agent version",
       value: status.agentVersion ?? "Not reported",
       icon: IconTag,
+    },
+    {
+      title: "Maintenance window",
+      value: status.window ? windowText(status.window) : "Not reported yet",
+      icon: IconCalendarTime,
     },
     {
       title: "Install ID",

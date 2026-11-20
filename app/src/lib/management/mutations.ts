@@ -25,7 +25,8 @@ export function startManagementMutationOptions(queryClient: QueryClient) {
         { fallback: FALLBACK },
       );
     },
-    onSuccess: () => invalidateManagement(queryClient),
+    // Also after a refusal: the server keeps the not-entitled one, and the screen drops Connect.
+    onSettled: () => invalidateManagement(queryClient),
   });
 }
 

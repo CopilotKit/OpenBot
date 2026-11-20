@@ -15,6 +15,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
 import { managePaths } from "@/lib/manage-paths";
+import { MANAGEMENT_SENTENCE } from "@/lib/management/format";
 import { managementQueryOptions } from "@/lib/management/queries";
 import { primitive, VAULT } from "@/lib/primitives";
 
@@ -203,8 +204,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
  */
 export const MANAGEMENT_ENTRY: AdminEntry = {
   title: "Managed updates",
-  description:
-    "Let OpenBot by CopilotKit keep OpenBot up to date in your cluster.",
+  description: MANAGEMENT_SENTENCE,
   icon: IconCloudCog,
   linkOptions: { to: "/admin/management" },
 };
