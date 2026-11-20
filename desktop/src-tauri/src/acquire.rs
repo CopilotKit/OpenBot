@@ -1323,7 +1323,7 @@ fn explain_machine_error(error: &str) -> String {
     if error.contains(KEY_SHARED) {
         return "Windows won't use a file OpenBot needs, because other accounts on this computer \
                 can open it. Open Technical details to see the file and the account. Remove that \
-                account's access, then try again."
+                account's access, then Retry."
             .into();
     }
     if error.contains("not enough space") || error.contains("no space left") {
@@ -1962,7 +1962,7 @@ mod tests {
             problem.said,
             "Windows won't use a file OpenBot needs, because other accounts on this computer can \
              open it. Open Technical details to see the file and the account. Remove that account's \
-             access, then try again."
+             access, then Retry."
         );
         assert!(
             problem.detail.unwrap_or_default().contains(why),
