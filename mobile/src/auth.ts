@@ -2,6 +2,7 @@ import { expoClient } from "@better-auth/expo/client";
 import { ssoClient } from "@better-auth/sso/client";
 import { createAuthClient } from "better-auth/react";
 import * as SecureStore from "expo-secure-store";
+import * as WebBrowser from "expo-web-browser";
 import type { OrganizationStore } from "./organization";
 import { clientHeaders } from "./release";
 
@@ -67,3 +68,14 @@ export const organizationStore: OrganizationStore = {
   write: (person, id) =>
     SecureStore.setItemAsync(pickedOrganization(person), id),
 };
+
+/**
+ * Renew a hosted OpenBot's sign-in: its hosted sign-in (`signIn`, a path on this OpenBot) opened in the in-app browser,
+ * as sign-in itself is. Somebody still signed in to OpenBot by CopilotKit goes through it with nothing to type; it
+ * resolves when the browser comes back or is closed, and the request is then sent again.
+ */
+export async function renewHostedSignIn(signIn: string): Promise<void> {
+  const address = new URL(signIn, serverUrl);
+  address.searchParams.set("returnTo", "openbotmobile://renewed");
+  await WebBrowser.openAuthSessionAsync(address.href, "openbotmobile://");
+}
