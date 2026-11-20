@@ -1743,7 +1743,7 @@ paths:
         - People
       operationId: getCompanySignIn
       summary: Read whether a person must use their company sign-in here
-      description: Return whether this organization requires its members to sign in through their company's identity provider, whether the person has, and the providers they can use for it. Any member may read their own, as me or by their own id. It answers even while the organization holds them out for not having signed in that way, when every other request they make in it is refused with SSO_REQUIRED. To use a provider, they sign in through it by its id (POST /api/auth/sign-in/sso with providerId).
+      description: Return whether this organization requires its members to sign in through their company's identity provider, whether the person has, and the providers they can use for it. Any member may read their own, as me or by their own id. It answers even while the organization holds them out for not having signed in that way, when every other request they make in it is refused with SSO_REQUIRED. To use a provider, they sign in through it by its id (POST /api/auth/sign-in/sso with providerId) in a browser where they are signed in, or from an app through createCompanySignInTicket.
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -1773,6 +1773,62 @@ paths:
           $ref: '#/components/responses/OrganizationNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/company-sign-in/tickets:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    post:
+      tags:
+        - People
+      operationId: createCompanySignInTicket
+      summary: Get a ticket to link a company account from an app
+      description: 'Return an address for a browser to link the person''s company account at one of the organization''s identity providers, for an app that has no browser session to carry, such as the phone. The app opens it in the system browser, and the person signs in through the provider there. The address carries a ticket, never the app''s own sign-in. The ticket is the person''s, for this organization and this provider, lasts two minutes, and opens once. Signing in through the provider then links the company account as a signed-in browser''s sign-in does: the provider must give the person''s own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - people:write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCompanySignInTicketRequest'
+            examples:
+              okta:
+                value:
+                  providerId: acme-okta
+      responses:
+        '201':
+          description: The address to open in the system browser, shown this once.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanySignInTicket'
+              examples:
+                ticket:
+                  $ref: '#/components/examples/CompanySignInTicketExample'
+        '400':
+          $ref: '#/components/responses/InvalidCompanySignInTicket'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CompanySignInTicketForbidden'
+        '404':
+          $ref: '#/components/responses/CompanySignInProviderNotFound'
+        '409':
+          $ref: '#/components/responses/CompanySignInTicketConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/SignInUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/deployment:
@@ -24278,6 +24334,31 @@ components:
               domain:
                 type: string
                 description: The email domain it signs in.
+    CreateCompanySignInTicketRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - providerId
+      properties:
+        providerId:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: The identity provider to sign in through, one getCompanySignIn lists.
+    CompanySignInTicket:
+      type: object
+      required:
+        - url
+        - expiresAt
+      properties:
+        url:
+          type: string
+          format: uri
+          description: The address to open in the system browser. It carries the ticket, a credential shown this once.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the ticket stops opening.
     AttachmentLimits:
       type: object
       description: 'How large a file attached to a message may be, by kind, in bytes. An upload over its kind''s limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a document (a PDF, or a Word, Excel or PowerPoint file) and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot''s model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.'
@@ -38117,6 +38198,100 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    InvalidCompanySignInTicket:
+      description: No providerId was sent, or the body or the Idempotency-Key is malformed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noProvider:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Name the identity provider to sign in through, as providerId.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CompanySignInTicketForbidden:
+      description: The ticket is for somebody else, or the request is signed in with an API key, which never links a company account.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            someoneElse:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can link their company account.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            apiKey:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Link your company account from OpenBot or its app, not with an API key.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CompanySignInProviderNotFound:
+      description: The organization does not exist or the caller is not in it, or no identity provider by that id counts for it.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            organization:
+              value:
+                type: https://open.bot/errors/organization-not-found
+                title: Organization not found.
+                status: 404
+                detail: Couldn't find that organization.
+                code: ORGANIZATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            provider:
+              value:
+                type: https://open.bot/errors/identity-provider-not-found
+                title: Identity provider not found.
+                status: 404
+                detail: This organization has no such identity provider for signing in.
+                code: IDENTITY_PROVIDER_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CompanySignInTicketConflict:
+      description: 'The Idempotency-Key was used already. A ticket is a credential shown once, so its answer is never given again: ask with a new key.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used already. Ask again with a new one.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     NoBotToAnswer:
       description: 'No Bot can answer the message: the caller has none, none offers every skill asked for, or more than one has the name the message used. Or the Idempotency-Key was already used for a different request.'
       content:
@@ -43326,6 +43501,11 @@ components:
             domain: acme.com
           - id: example-entra
             domain: example.com
+    CompanySignInTicketExample:
+      summary: An address the phone opens in the system browser.
+      value:
+        url: https://openbot.acme.com/api/auth/company-sign-in/link?ticket=cst_EXAMPLEEXAMPLEEXAMPLEEXAMPLE
+        expiresAt: '2026-11-20T06:02:00.000Z'
     ConversationPageExample:
       summary: One page of conversations, and the last.
       value:

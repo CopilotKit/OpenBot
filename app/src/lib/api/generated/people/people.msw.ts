@@ -7,6 +7,8 @@ import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 import type {
   AdvanceOnboardingRequest,
   CompanySignIn,
+  CompanySignInTicket,
+  CreateCompanySignInTicketRequest,
   GetPersonResponse,
   OnboardingResponse,
   PersonPage,
@@ -162,6 +164,12 @@ export const getGetCompanySignInResponseMock = (): CompanySignIn => ({
     { id: "example-entra", domain: "example.com" },
   ],
 });
+
+export const getCreateCompanySignInTicketResponseMock =
+  (): CompanySignInTicket => ({
+    url: "https://openbot.acme.com/api/auth/company-sign-in/link?ticket=cst_EXAMPLEEXAMPLEEXAMPLEEXAMPLE",
+    expiresAt: "2026-11-20T06:02:00.000Z",
+  });
 
 export const getListPeopleMockHandler = (
   overrideResponse?:
@@ -554,6 +562,45 @@ export const getGetCompanySignInMockHandler = (
     options,
   );
 };
+
+export const getCreateCompanySignInTicketMockHandler = (
+  overrideResponse?:
+    | CompanySignInTicket
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; personId: string },
+            CreateCompanySignInTicketRequest
+          >
+        >[0],
+      ) => Promise<CompanySignInTicket> | CompanySignInTicket),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<
+    { organizationId: string; personId: string },
+    CreateCompanySignInTicketRequest
+  >(
+    "*/api/v2/organizations/:organizationId/people/:personId/company-sign-in/tickets",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; personId: string },
+          CreateCompanySignInTicketRequest
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getCreateCompanySignInTicketResponseMock(),
+        { status: 201 },
+      );
+    },
+    options,
+  );
+};
 export const getPeopleMock = () => [
   getListPeopleMockHandler(),
   getGetPersonMockHandler(),
@@ -567,4 +614,5 @@ export const getPeopleMock = () => [
   getGetPreferencesMockHandler(),
   getUpdatePreferencesMockHandler(),
   getGetCompanySignInMockHandler(),
+  getCreateCompanySignInTicketMockHandler(),
 ];
