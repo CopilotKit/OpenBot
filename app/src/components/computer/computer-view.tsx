@@ -190,10 +190,11 @@ function NothingToSee({
   page?: { url?: string; title?: string } | undefined;
 }) {
   if (!settled && !problem && blocked)
-    return (
+    // Inside the tile's own button nothing is drawn: the tile draws it beside the button, over the screen, so its
+    // link is a link of its own (`BlockedTile`).
+    return inButton ? null : (
       <ComputerBlocked
         className="absolute inset-0"
-        inline={inButton}
         refusal={blocked}
         title={`Can't start ${owner} computer`}
       />
@@ -911,6 +912,18 @@ export function ComputerView({
               />
             )}
           </button>
+          {/*
+            A computer refused a start: said over the tile, beside its button rather than in it, so the admin's way to
+            Computers is a link that can be pressed. Compact, so the whole sentence and the link fit the tile.
+          */}
+          {!settled && startBlocked ? (
+            <ComputerBlocked
+              className="absolute inset-0 bg-background"
+              compact
+              refusal={startBlocked}
+              title={`Can't start ${owner} computer`}
+            />
+          ) : null}
           {/* Nothing to take on a computer that was refused a start: there is no screen to drive. */}
           {!settled &&
           !startBlocked &&

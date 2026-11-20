@@ -2,6 +2,14 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+} from "@tanstack/react-router";
+import {
   act,
   cleanup,
   fireEvent,
@@ -13,6 +21,7 @@ import type { ReactElement } from "react";
 import { ToolLine } from "@/components/channels/tool-line";
 import { ComputerView } from "@/components/computer/computer-view";
 import type { Problem } from "@/lib/api/generated/model";
+import { authKeys } from "@/lib/auth/queries";
 
 test("a call turned away by a computer still starting reads as not done yet, not as a failure", () => {
   const view = render(
@@ -426,6 +435,84 @@ test("a computer the organization has no room for says why it stays off, calmly,
   expect(within(full).queryByText(/Couldn't load the Bot's browser/)).toBe(
     null,
   );
+});
+
+test("beside a conversation, a computer at the limit shows the whole sentence and, to an admin, a link to Computers that opens it, with no control bar over them", async () => {
+  // The end-to-end run: "General Assistant has control · Take control" sat over the blocked state, cutting its
+  // sentence and covering the admin's Open Computers, which could not be clicked.
+  const atLimit =
+    "This organization already has 1 computer, the most OpenBot allows it. Ask an admin to make room.";
+  globalThis.fetch = (async (input, init) => {
+    const path = String(input);
+    if (path.endsWith("/wake") && init?.method === "POST") {
+      const refusal: Problem = {
+        type: "https://open.bot/errors/test",
+        title: atLimit,
+        status: 429,
+        detail: atLimit,
+        code: "COMPUTER_LIMIT_REACHED",
+        category: "rate_limit",
+        retryable: false,
+        requestId: "req_test",
+        traceId: "trace_test",
+      };
+      return new Response(JSON.stringify(refusal), {
+        status: 429,
+        headers: { "content-type": "application/problem+json" },
+      });
+    }
+    if (path.endsWith("/status"))
+      return Response.json({ botId: "sales", state: "absent" });
+    if (path.endsWith("/screenshot"))
+      return Response.json({ ready: false, state: "absent" });
+    if (path.endsWith("/control")) return Response.json(control);
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
+    },
+  });
+  client.setQueryData(authKeys.currentUser(), {
+    id: "dana",
+    email: "dana@example.com",
+    role: "admin",
+    onboarding: null,
+  });
+  const root = createRootRoute({ component: Outlet });
+  const conversation = createRoute({
+    getParentRoute: () => root,
+    path: "/",
+    component: () => (
+      <ComputerView active computerId="sales" intervalMs={10} name="Sales" />
+    ),
+  });
+  const computers = createRoute({
+    getParentRoute: () => root,
+    path: "/admin/computers",
+    component: () => <p>Computers page</p>,
+  });
+  const router = createRouter({
+    routeTree: root.addChildren([conversation, computers]),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+
+  const link = await view.findByRole("link", { name: "Open Computers" });
+  // The whole sentence, and no bar over it offering to take a computer that can't start.
+  expect(view.getByText(atLimit)).toBeDefined();
+  expect(view.getByText("Can't start Sales's computer")).toBeDefined();
+  expect(view.queryByRole("button", { name: "Take control" })).toBeNull();
+  expect(view.queryByText(/has control/)).toBeNull();
+  // A link of its own, not inside the tile's button, and it goes there.
+  expect(link.closest("button")).toBeNull();
+  fireEvent.click(link);
+  expect(await view.findByText("Computers page")).toBeDefined();
 });
 
 test("a live stream that drops shows a quiet badge, not the Retry panel", async () => {
