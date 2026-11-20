@@ -17,7 +17,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CompanySignInSection } from "@/components/settings/company-sign-in";
 import type { CompanySignIn, Problem } from "@/lib/api/generated/model";
@@ -49,8 +49,14 @@ const HARBOR = { id: "org_harbor", slug: "harbor", name: "Harbor Legal" };
 const HELD_OUT =
   "This organization requires signing in through your company's identity provider. Sign in with your work email to continue.";
 
+/** Ines's own organization, beside Harbor, which requires nothing of how she signs in. */
+const OWN = { id: "org_ines", slug: "ines", name: "Ines's organization" };
+
 let openbot: ReturnType<typeof Bun.serve>;
 let heldOut: boolean;
+/** Whether she has her own organization too, and which one her session works in. */
+let ownToo: boolean;
+let active: string;
 let signIn: CompanySignIn;
 let requests: string[];
 let linked: unknown[];
@@ -89,12 +95,51 @@ async function answer(request: Request): Promise<Response> {
     return json(
       ListOrganizationsResponse.parse({
         organizations: [
-          { ...HARBOR, role: "member", active: true, personal: false },
+          {
+            ...HARBOR,
+            role: "member",
+            active: active === HARBOR.id,
+            personal: false,
+          },
+          ...(ownToo
+            ? [
+                {
+                  ...OWN,
+                  role: "owner",
+                  active: active === OWN.id,
+                  personal: true,
+                },
+              ]
+            : []),
         ],
         canCreate: true,
         nextCursor: null,
       }),
     );
+  if (
+    path === "/api/auth/organization/set-active" &&
+    request.method === "POST"
+  ) {
+    active = ((await request.json()) as { organizationId: string })
+      .organizationId;
+    return json({ id: active });
+  }
+  // Her own organization requires nothing: the app opens there.
+  if (path === `/api/v2/organizations/${OWN.id}/people/me`)
+    return json({
+      person: {
+        id: "ines",
+        email: "ines@gmail.example",
+        name: "Ines Duarte",
+        needsName: false,
+        image: null,
+        role: "owner",
+        onboarding: null,
+      },
+      openbotVersion: null,
+    });
+  if (path === `/api/v2/organizations/${OWN.id}/shortened-tool-names`)
+    return json({ tools: [] });
   if (path === `/api/v2/organizations/${HARBOR.id}/people/me/company-sign-in`)
     // Answered even while she is held out: it is how the page knows the way in.
     return json(GetCompanySignInResponse.parse(signIn));
@@ -117,6 +162,8 @@ beforeAll(() => {
 });
 beforeEach(() => {
   heldOut = true;
+  ownToo = false;
+  active = HARBOR.id;
   signIn = {
     required: true,
     met: false,
@@ -224,6 +271,35 @@ test("a company with two providers offers a link through each, by the domain eac
       { providerId: "anchor-entra", callbackURL: location.href },
     ]),
   );
+});
+
+test("held out of one organization, she switches to another of hers from the page, and the app opens there", async () => {
+  ownToo = true;
+  const { view, person } = openApp();
+  await view.findByRole("heading", { name: "Sign in with your company" });
+  await person.click(
+    await view.findByRole("button", { name: "Switch organization" }),
+  );
+  const menu = await view.findByRole("menu");
+  // Her other organizations, not the one holding her out.
+  expect(within(menu).queryByText(HARBOR.name)).toBeNull();
+  await person.click(
+    within(menu).getByRole("menuitem", { name: "Ines's organization" }),
+  );
+  expect(await view.findByText("The app")).toBeTruthy();
+  expect(active).toBe(OWN.id);
+  expect(
+    view.queryByRole("heading", { name: "Sign in with your company" }),
+  ).toBe(null);
+});
+
+test("held out of her only organization, the page offers no switch", async () => {
+  const { view } = openApp();
+  await view.findByRole("button", { name: "Link your company account" });
+  await settleReactWork();
+  expect(
+    view.queryByRole("button", { name: "Switch organization" }),
+  ).toBeNull();
 });
 
 /** Settings, General's section, in Harbor. */
