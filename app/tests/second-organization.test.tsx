@@ -14,12 +14,13 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { agentKeys } from "@/lib/agents/queries";
+import { ListIdentityProvidersResponse } from "@/lib/api/generated/identity-providers/identity-providers.zod";
 import { authKeys } from "@/lib/auth/queries";
-import { readThreadMessages } from "@/lib/copilot/thread-messages";
 import { CopilotProvider } from "@/lib/copilot/provider";
+import { readThreadMessages } from "@/lib/copilot/thread-messages";
 import {
   deploymentCapabilitiesQueryOptions,
   deploymentKeys,
@@ -170,6 +171,51 @@ test("Harbor's admin registers Harbor's own identity providers, which sign in Ha
   expect(document.body.textContent).not.toMatch(
     /apply to everyone who signs in here/,
   );
+});
+
+test("in Harbor, the providers set up for all of OpenBot are listed as counting there too, with nothing to remove them", async () => {
+  setCurrentOrganization(HARBOR.id);
+  answer = (path) =>
+    path === `/api/v2/organizations/${HARBOR.id}/identity-providers`
+      ? Response.json(
+          ListIdentityProvidersResponse.parse({
+            identityProviders: [
+              {
+                id: "harbor-okta",
+                issuer: "https://harbor.okta.com",
+                domain: "harborlegal.com",
+                protocol: "oidc",
+                registeredBy: INES.id,
+                deployment: false,
+              },
+              {
+                id: "company-entra",
+                issuer: "https://login.microsoftonline.com/tenant/v2.0",
+                domain: "example.com",
+                protocol: "oidc",
+                registeredBy: null,
+                deployment: true,
+              },
+            ],
+            nextCursor: null,
+          }),
+        )
+      : problem(NOT_FOUND);
+  const view = identityProviders();
+  await view.findByText("harbor-okta");
+  // Harbor's own, to remove; the deployment's, read-only in a section of its own.
+  expect(view.getByRole("button", { name: "Remove" })).toBeTruthy();
+  const everybody = view
+    .getByRole("heading", { name: "For all of OpenBot" })
+    .closest("section") as HTMLElement;
+  expect(within(everybody).getByText("company-entra")).toBeTruthy();
+  expect(
+    within(everybody).getByText(
+      "Set up for everyone who signs in to OpenBot. They count for this organization too. Ask whoever runs OpenBot to change one.",
+    ),
+  ).toBeTruthy();
+  expect(within(everybody).queryByRole("button")).toBeNull();
+  expect(view.getAllByRole("button", { name: "Remove" })).toHaveLength(1);
 });
 
 test("an admin of `default` who doesn't run OpenBot reads that its identity providers are set up for all of OpenBot, with no error and nothing to press", async () => {
