@@ -1,0 +1,54 @@
+name: Contributor CI
+
+# CI from pull requests opened from forks goes second (scripts/contributor-ci.ts). When a job of
+# CopilotKit's own has waited more than three minutes for a runner, the fork runs in progress or
+# queued are cancelled, with a comment on each pull request; once nothing of CopilotKit's is
+# waiting, they are re-run one at a time. Nothing here checks out or runs a pull request's code:
+# it reads and acts on runs through the API only.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Say what would be paused or re-run, and do nothing.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contributor-ci
+  cancel-in-progress: false
+
+jobs:
+  yield:
+    name: make way for CopilotKit's runs
+    runs-on: openbot-ubuntu-16core
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # To cancel and re-run contributors' runs.
+      actions: write
+      # To say so on the pull request.
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          no-cache: true
+      - name: Pause or resume contributor CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = true ]; then
+            bun scripts/contributor-ci.ts --dry-run
+          else
+            bun scripts/contributor-ci.ts
+          fi
