@@ -57,6 +57,8 @@ export type AuthProviderId = "google" | "microsoft" | "okta";
 /** What the sign-in screen may offer, answered by the process that knows. */
 export type SignInOptions = {
   providers: AuthProviderId[];
+  /** Whether people sign in through the hosted sign-in, with their account with OpenBot by CopilotKit. */
+  hosted: boolean;
   /**
    * Whether any enterprise identity provider is registered.
    *
@@ -73,6 +75,7 @@ async function signInOptions(): Promise<SignInOptions> {
   const body = await readDeployment({ fallback: "Could not load sign-in" });
   return {
     providers: body.authProviders,
+    hosted: body.hostedSignIn === true,
     sso: body.ssoConfigured,
     ssoRequired: body.ssoRequired,
   };

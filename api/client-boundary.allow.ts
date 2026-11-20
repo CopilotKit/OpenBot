@@ -210,6 +210,12 @@ export const ALLOWED: Allowed[] = [
     why: "Better Auth's own address for the organization a session works in, which switching sets",
   },
   {
+    file: "app/src/lib/auth/hosted.ts",
+    what: "/api/auth/hosted/sign-in",
+    rule: "sign-in-protocol",
+    why: "a hosted OpenBot's sign-in, opened as a page that leaves for OpenBot by CopilotKit's own sign-in and comes back",
+  },
+  {
     file: "app/src/lib/auth/resume.ts",
     what: "/api/plugins/arcade/verify",
     rule: "sign-in-protocol",
