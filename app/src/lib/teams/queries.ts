@@ -49,7 +49,8 @@ export const teamKeys = {
   list: () => ["teams", "list"] as const,
   detail: (teamId: string) => ["teams", "detail", teamId] as const,
   members: (teamId: string) => ["teams", "members", teamId] as const,
-  people: () => ["teams", "people"] as const,
+  /** The organization's members matching what was typed, keyed by it as sent. */
+  peopleSearch: (search: string) => ["teams", "people", { search }] as const,
 };
 
 const FALLBACK = "Couldn't load teams. Try again in a moment.";
@@ -113,19 +114,35 @@ export function teamMembersQueryOptions(teamId: string) {
   });
 }
 
-/** Every member of the organization, to choose from when adding somebody to a team. */
-export function organizationPeopleQueryOptions() {
+/** How many people a search for somebody to add offers at once: enough to choose from, few enough to read. */
+export const PEOPLE_OFFERED = 8;
+
+const SEARCH_FALLBACK = "Couldn't search people. Try again in a moment.";
+
+/** What a search for somebody to add is sent as: what was typed, without spaces around it or case. */
+export function peopleSearchText(typed: string): string {
+  return typed.trim().toLowerCase();
+}
+
+/**
+ * The members of the organization whose name or address matches what somebody typed, best matches
+ * first: the server's search (listOrganizationMembers with search), which finds only this
+ * organization's current members. One page of {@link PEOPLE_OFFERED}, for choosing who to add to a
+ * team. A search that is typed past is cancelled, through the signal, before its answer arrives.
+ */
+export function peopleSearchQueryOptions(search: string) {
   return queryOptions({
-    queryKey: teamKeys.people(),
-    queryFn: ({ signal }): Promise<OrganizationPerson[]> =>
-      everyPage(async (cursor) => {
-        const page = await listOrganizationMembers(
+    queryKey: teamKeys.peopleSearch(search),
+    queryFn: async ({ signal }): Promise<OrganizationPerson[]> =>
+      (
+        await listOrganizationMembers(
           organizationId(),
-          { limit: 100, ...(cursor ? { cursor } : {}) },
-          { signal, fallback: FALLBACK },
-        );
-        return { items: page.members, nextCursor: page.nextCursor };
-      }),
+          { search, limit: PEOPLE_OFFERED },
+          { signal, fallback: SEARCH_FALLBACK },
+        )
+      ).members,
+    // What somebody types again a moment later is answered from what was found.
+    staleTime: 30_000,
   });
 }
 
