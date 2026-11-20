@@ -49,6 +49,13 @@ const completed = JSON.stringify({
 type Script = "bash" | "pwsh";
 
 /**
+ * How long one reset may take. pwsh's own start takes seconds, and more on a busy CI runner: under
+ * bun's default 5 seconds a pwsh case failed on main with nothing printed yet, though it passed on
+ * its own pull request. The script itself does little; these limits are for a slow machine.
+ */
+const limits: Record<Script, number> = { bash: 30_000, pwsh: 120_000 };
+
+/**
  * Runs the reset unattended. The machine OpenBot made is there and stopped, as Quit leaves it.
  *
  * @param script - The Mac script under bash, or the Windows one under pwsh.
@@ -109,7 +116,12 @@ exit 0`,
           join(import.meta.dir, "reset-test-machine.ps1"),
           "-Yes",
         ];
+  // Synchronous: this returns only once the script, and every stand-in it ran, has exited. Each
+  // stand-in appends its line to the call log before it does anything else, so the log is whole
+  // when it is read below. A script that hangs is killed short of the test's own limit, so the test
+  // fails with what it printed rather than being cut off.
   const run = Bun.spawnSync(command, {
+    timeout: limits[script] - 10_000,
     env: {
       ...process.env,
       HOME: home,
@@ -164,6 +176,7 @@ for (const script of scripts) {
       expect(out).toContain(`deleted ${STACK}`);
       expect(out).not.toContain("left behind");
     },
+    limits[script],
   );
 
   test.skipIf(process.platform === "win32")(
@@ -181,6 +194,7 @@ for (const script of scripts) {
       // The reset still goes on to remove the machine.
       expect(calls).toContain("podman machine rm -f openbot");
     },
+    limits[script],
   );
 
   test.skipIf(process.platform === "win32")(
@@ -192,5 +206,6 @@ for (const script of scripts) {
       expect(calls.filter((call) => call === deleteCall)).toHaveLength(1);
       expect(out).toContain(`deleted ${STACK}`);
     },
+    limits[script],
   );
 }
