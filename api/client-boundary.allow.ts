@@ -210,6 +210,12 @@ export const ALLOWED: Allowed[] = [
     why: "Better Auth's own address for the organization a session works in, which switching sets",
   },
   {
+    file: "mobile/src/api/request.ts",
+    what: "/api/auth/hosted/sign-in",
+    rule: "sign-in-protocol",
+    why: "where the phone renews a hosted OpenBot's sign-in when the server names no other, opened in the in-app browser",
+  },
+  {
     file: "app/src/lib/auth/hosted.ts",
     what: "/api/auth/hosted/sign-in",
     rule: "sign-in-protocol",

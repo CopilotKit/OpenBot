@@ -8,7 +8,7 @@
  * cookie) and expo-crypto's randomUUID are the platform here, so those two modules are stood in for with the values the
  * platform gives. Everything between a screen's call and the network is the app's own code.
  */
-import { afterAll, beforeEach, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import fixture from "../../shared/fixtures/client-version/cases.json";
@@ -46,6 +46,19 @@ let outsideDefault = false;
 let removedFromWork = false;
 /** The signed-in person is in no organization here: never added, or removed from the last one. */
 let inNone = false;
+/** A hosted OpenBot's invitations: whether the admin's proof is good, what landed, and each POST's key. */
+const hosted = {
+  proofValid: true,
+  /** The first POST lands even though it is answered for renewal (the answer came back on another hop). */
+  landsAnyway: false,
+  /** Whether renewing in the in-app browser renews the proof. */
+  renewalWorks: true,
+  invitations: [] as string[],
+  answered: new Map<string, unknown>(),
+  posts: [] as (string | null)[],
+};
+/** Each time the phone opened the hosted sign-in to renew. */
+const renewed: string[] = [];
 /** Which app each request named itself as (the OpenBot-Client header), in the order they arrived. */
 const named: (string | null)[] = [];
 /** What this stand-in answers at `deployment`: one of the fixture's real answers, or a status. */
@@ -139,6 +152,55 @@ const server = Bun.serve({
           headers: { "content-type": "application/problem+json" },
         },
       );
+    if (url.pathname === `${ORG}/invitations` && request.method === "POST") {
+      const key = request.headers.get("idempotency-key");
+      hosted.posts.push(key);
+      const repeat = key ? hosted.answered.get(key) : undefined;
+      if (repeat && hosted.proofValid)
+        return Response.json(repeat, { status: 201 });
+      const land = () => {
+        const { email } = JSON.parse(text) as { email: string };
+        hosted.invitations.push(email);
+        const answer = {
+          invitation: {
+            id: `inv_${hosted.invitations.length}`,
+            email,
+            role: "member",
+            status: "pending",
+            invitedBy: { name: "Ada", email: "ada@example.test" },
+            createdAt: "2026-11-20T09:00:00.000Z",
+            expiresAt: "2026-11-27T09:00:00.000Z",
+          },
+          delivery: "emailed",
+        };
+        if (key) hosted.answered.set(key, answer);
+        return answer;
+      };
+      if (!hosted.proofValid) {
+        if (hosted.landsAnyway && !repeat) land();
+        return Response.json(
+          {
+            type: "https://open.bot/errors/hosted-sign-in-renewal-required",
+            title: "Your sign-in needs renewing.",
+            status: 401,
+            detail: "Your sign-in needs renewing.",
+            code: "HOSTED_SIGN_IN_RENEWAL_REQUIRED",
+            category: "auth",
+            retryable: true,
+            requestId: "req_example",
+            traceId: "trace_example",
+          },
+          {
+            status: 401,
+            headers: {
+              "content-type": "application/problem+json",
+              "OpenBot-Sign-In": "/api/auth/hosted/sign-in",
+            },
+          },
+        );
+      }
+      return Response.json(land(), { status: 201 });
+    }
     if (url.pathname === `${ORG}/bots/proof-expired`)
       return Response.json(
         {
@@ -352,6 +414,11 @@ const secure = new Map<string, string>();
 mock.module("../src/auth", () => ({
   serverUrl,
   authClient: { getCookie: () => cookie },
+  // The in-app browser through the hosted sign-in, as OpenBot by CopilotKit answers somebody still signed in there.
+  renewHostedSignIn: async (signIn: string) => {
+    renewed.push(signIn);
+    if (hosted.renewalWorks) hosted.proofValid = true;
+  },
   // Each person's pick, kept by who they are, as src/auth.ts keeps it in the phone's secure store.
   organizationStore: {
     read: async (person: string) => secure.get(person) ?? null,
@@ -396,6 +463,10 @@ const { listInvitations } = await import(
 const { NOT_IN_ORGANIZATION } = await import("../src/organization");
 const { onSessionRefused } = await import("../src/session-refused");
 const { onOrganizationGone } = await import("../src/organization-gone");
+const { onRenewalNeedsClick } = await import("../src/renewal");
+const { createOrganizationInvitation } = await import(
+  "../src/api/generated/organizations/organizations"
+);
 
 const { checkVersion } = await import("../src/version-check");
 const { onUpdateRequired } = await import("../src/client-version");
@@ -409,6 +480,13 @@ beforeEach(() => {
   outsideDefault = false;
   removedFromWork = false;
   inNone = false;
+  hosted.proofValid = true;
+  hosted.landsAnyway = false;
+  hosted.renewalWorks = true;
+  hosted.invitations = [];
+  hosted.answered = new Map();
+  hosted.posts = [];
+  renewed.length = 0;
   setSignedInPerson("ada");
   cookie = COOKIE;
   deploymentAnswer = { status: 200, body: fixture.deployments.current };
@@ -959,4 +1037,61 @@ test("a sign-in that needs renewing is not taken for being signed out", async ()
   } finally {
     stop();
   }
+});
+
+/*
+ * A hosted OpenBot's proof ran out under an admin's invite. The phone renews in the in-app browser and sends the invite
+ * again, once, with the Idempotency-Key it was sent with: it lands exactly once, and a write that landed the first time
+ * is answered as a repeat.
+ */
+describe("renewing a hosted OpenBot's sign-in", () => {
+  const invite = () =>
+    createOrganizationInvitation(ORGANIZATION_ID, {
+      email: "kit@example.com",
+      role: "member",
+    });
+
+  test("an invite refused for renewal is renewed in the in-app browser and sent again with the same key, landing once", async () => {
+    setSignedInPerson("fay");
+    cookie = "better-auth.session_token=signed-in-fay";
+    hosted.proofValid = false;
+    const answer = await invite();
+    expect(answer.invitation.email).toBe("kit@example.com");
+    expect(renewed).toEqual(["/api/auth/hosted/sign-in"]);
+    expect(hosted.posts).toHaveLength(2);
+    expect(hosted.posts[1]).toBe(hosted.posts[0] as string);
+    expect(hosted.invitations).toEqual(["kit@example.com"]);
+  });
+
+  test("an invite that landed before the renewal is answered as a repeat when sent again, and lands once", async () => {
+    setSignedInPerson("fay");
+    cookie = "better-auth.session_token=signed-in-fay-2";
+    hosted.proofValid = false;
+    hosted.landsAnyway = true;
+    const answer = await invite();
+    expect(answer.invitation.id).toBe("inv_1");
+    expect(hosted.posts).toHaveLength(2);
+    expect(hosted.invitations).toEqual(["kit@example.com"]);
+  });
+
+  test("a renewal that doesn't take offers Sign in again, renewing once and never in a loop", async () => {
+    setSignedInPerson("fay");
+    cookie = "better-auth.session_token=signed-in-fay-3";
+    hosted.proofValid = false;
+    hosted.renewalWorks = false;
+    const offered: string[] = [];
+    const stop = onRenewalNeedsClick((signIn) => offered.push(signIn));
+    try {
+      const refused = await invite().catch((error: unknown) => error);
+      expect(refused).toMatchObject({
+        status: 401,
+        code: "HOSTED_SIGN_IN_RENEWAL_REQUIRED",
+      });
+      expect(renewed).toHaveLength(1);
+      expect(offered).toEqual(["/api/auth/hosted/sign-in"]);
+      expect(hosted.invitations).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
 });
