@@ -110,7 +110,13 @@ export async function readDeployment(options: {
       throw error;
     const own = (await listOrganizations({ limit: 1 }, undefined, options))
       .organizations[0];
-    if (!own) throw error;
+    // In no organization (removed from the last one): what this OpenBot offers anybody, asked as nobody, so the
+    // sign-in screen and the page for somebody in no organization can still offer a way back in.
+    if (!own)
+      return getDeployment(DEPLOYMENT_ORGANIZATION, {
+        ...options,
+        credentials: "omit",
+      });
     return getDeployment(own.id, options);
   }
 }
