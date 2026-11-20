@@ -37345,6 +37345,12 @@ components:
           type: string
           minLength: 1
           description: The version of the agent that last reported in, once connected.
+        upgrades:
+          type: string
+          x-extensible-enum:
+            - 'on'
+            - not-set-up
+          description: 'Whether the managed updates service can upgrade this OpenBot, as the agent last reported, once connected. on: upgrades are set up, and happen in the maintenance window. not-set-up: the agent is connected and reports health, but upgrading needs a one-time setup in the cluster first. Absent when the agent hasn''t said (an older agent). A later OpenBot may add a value; read one you don''t know as absent.'
         lastError:
           type: string
           minLength: 1
@@ -47121,6 +47127,8 @@ components:
         installId: 6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d
         lastHeartbeatAt: '2026-11-20T10:31:12Z'
         agentVersion: 0.4.0
+        upgrades: not-set-up
+        agentInstalledByChart: true
     ManagementConnectingExample:
       value:
         state: connecting

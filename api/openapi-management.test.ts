@@ -105,6 +105,9 @@ test("connecting by licence: the answer says whether the chart installed the age
   const properties =
     spec.components.schemas.ManagementEnrollment?.properties ?? {};
   expect(properties.agentInstalledByChart).toMatchObject({ type: "boolean" });
+  expect(properties.upgrades).toMatchObject({
+    "x-extensible-enum": ["on", "not-set-up"],
+  });
   expect(properties.lastErrorCode).toMatchObject({
     "x-extensible-enum": ["not-entitled", "invalid-licence", "unreachable"],
   });

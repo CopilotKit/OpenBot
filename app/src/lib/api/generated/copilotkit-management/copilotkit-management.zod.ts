@@ -124,6 +124,12 @@ export const GetManagementEnrollmentResponse = zod
       .describe(
         "The version of the agent that last reported in, once connected.",
       ),
+    upgrades: zod
+      .string()
+      .optional()
+      .describe(
+        "Whether the managed updates service can upgrade this OpenBot, as the agent last reported, once connected. on: upgrades are set up, and happen in the maintenance window. not-set-up: the agent is connected and reports health, but upgrading needs a one-time setup in the cluster first. Absent when the agent hasn't said (an older agent). A later OpenBot may add a value; read one you don't know as absent.",
+      ),
     lastError: zod
       .string()
       .min(1)
@@ -274,6 +280,12 @@ export const StartManagementEnrollmentResponse = zod
       .optional()
       .describe(
         "The version of the agent that last reported in, once connected.",
+      ),
+    upgrades: zod
+      .string()
+      .optional()
+      .describe(
+        "Whether the managed updates service can upgrade this OpenBot, as the agent last reported, once connected. on: upgrades are set up, and happen in the maintenance window. not-set-up: the agent is connected and reports health, but upgrading needs a one-time setup in the cluster first. Absent when the agent hasn't said (an older agent). A later OpenBot may add a value; read one you don't know as absent.",
       ),
     lastError: zod
       .string()

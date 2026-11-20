@@ -50,6 +50,8 @@ export interface ManagementEnrollment {
    * @minLength 1
    */
   agentVersion?: string;
+  /** Whether the managed updates service can upgrade this OpenBot, as the agent last reported, once connected. on: upgrades are set up, and happen in the maintenance window. not-set-up: the agent is connected and reports health, but upgrading needs a one-time setup in the cluster first. Absent when the agent hasn't said (an older agent). A later OpenBot may add a value; read one you don't know as absent. */
+  upgrades?: string;
   /**
    * What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, the management service out of reach, a connected agent that has stopped reporting in, or a Stop the service couldn't be told about. Absent when nothing did.
    * @minLength 1
