@@ -27,6 +27,16 @@ export function reportCompanyLinked(): void {
   for (const listener of [...listeners]) listener();
 }
 
+/**
+ * Leave the linked screen for Home without a second Home: back down to the Home already open beneath it, or, when the
+ * link started the app, Home in its place. A redirect replaced the linked screen with a new Home above the first, which
+ * showed a back arrow to the same screen. Expo Router's `dismissTo` does both: it dismisses to the href when the stack
+ * holds it, and replaces the current screen with it when it doesn't.
+ */
+export function backToHome(router: { dismissTo: (href: "/") => void }): void {
+  router.dismissTo("/");
+}
+
 /** Hear each time it happens. Returns how to stop hearing. */
 export function onCompanyLinked(listener: Listener): () => void {
   listeners.add(listener);

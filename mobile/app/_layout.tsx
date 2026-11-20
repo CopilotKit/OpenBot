@@ -60,6 +60,11 @@ function Layout() {
         <Stack.Screen name="memory" options={{ title: "Memory" }} />
         <Stack.Screen name="rules" options={{ title: "Custom rules" }} />
         <Stack.Screen name="plugins" options={{ title: "Plugins" }} />
+        {/* Only the way back to Home after linking the company account: never seen, so no header flashes. */}
+        <Stack.Screen
+          name="company-sign-in/linked"
+          options={{ headerShown: false, animation: "none" }}
+        />
       </Stack>
       <VersionGate verdict={verdict} onRetry={() => void check()} />
     </View>

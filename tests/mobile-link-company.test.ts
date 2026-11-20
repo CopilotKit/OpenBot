@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { homeView } from "../mobile/src/home-view";
 import {
+  backToHome,
   linkCompanyAccount,
   onCompanyLinked,
   RETURN_ADDRESS,
@@ -71,6 +72,36 @@ test("the browser's session ends at OpenBot's linked deep link, and that link op
   expect(homeView(true, undefined, { required: true, met: true })).toBe(
     "working",
   );
+});
+
+/**
+ * A stack as Expo Router's documents its calls (expo-router/build/imperative-api.d.ts): `replace` swaps the top screen,
+ * `dismissTo` pops down to the href when the stack holds it and otherwise replaces the top screen with it.
+ */
+function stack(...screens: string[]) {
+  return {
+    screens,
+    replace(href: string) {
+      screens.splice(screens.length - 1, 1, href);
+    },
+    dismissTo(href: string) {
+      const at = screens.lastIndexOf(href);
+      if (at === -1) this.replace(href);
+      else screens.splice(at + 1);
+    },
+  };
+}
+
+test("back from the linked deep link, Home is the only screen: no second Home and no back arrow", () => {
+  // The phone end-to-end run: the linked screen redirected (a replace) to a new Home above the one beneath it.
+  const opened = stack("/", "/company-sign-in/linked");
+  backToHome(opened);
+  expect(opened.screens).toEqual(["/"]);
+
+  // The link started the app: Home takes the linked screen's place.
+  const started = stack("/company-sign-in/linked");
+  backToHome(started);
+  expect(started.screens).toEqual(["/"]);
 });
 
 test("a provider that no longer counts is answered as stale, so the providers are read again, and nothing opens", async () => {
