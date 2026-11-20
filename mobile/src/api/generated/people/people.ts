@@ -4,6 +4,8 @@
 import type {
   AdvanceOnboardingRequest,
   CompanySignIn,
+  CompanySignInTicket,
+  CreateCompanySignInTicketRequest,
   GetPersonResponse,
   ListPeopleParams,
   OnboardingResponse,
@@ -414,7 +416,7 @@ export const getGetCompanySignInUrl = (
 };
 
 /**
- * Return whether this organization requires its members to sign in through their company's identity provider, whether the person has, and the providers they can use for it. Any member may read their own, as me or by their own id. It answers even while the organization holds them out for not having signed in that way, when every other request they make in it is refused with SSO_REQUIRED. To use a provider, they sign in through it by its id (POST /api/auth/sign-in/sso with providerId).
+ * Return whether this organization requires its members to sign in through their company's identity provider, whether the person has, and the providers they can use for it. Any member may read their own, as me or by their own id. It answers even while the organization holds them out for not having signed in that way, when every other request they make in it is refused with SSO_REQUIRED. To use a provider, they sign in through it by its id (POST /api/auth/sign-in/sso with providerId) in a browser where they are signed in, or from an app through createCompanySignInTicket.
  * @summary Read whether a person must use their company sign-in here
  */
 export const getCompanySignIn = async (
@@ -427,6 +429,58 @@ export const getCompanySignIn = async (
     {
       ...options,
       method: "GET",
+    },
+  );
+};
+
+export const getCreateCompanySignInTicketUrl = (
+  organizationId: string,
+  personId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/company-sign-in/tickets`;
+};
+
+/**
+ * Return an address for a browser to link the person's company account at one of the organization's identity providers, for an app that has no browser session to carry, such as the phone. The app opens it in the system browser, and the person signs in through the provider there. The address carries a ticket, never the app's own sign-in. The ticket is the person's, for this organization and this provider, lasts two minutes, and opens once. Signing in through the provider then links the company account as a signed-in browser's sign-in does: the provider must give the person's own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key.
+ * @summary Get a ticket to link a company account from an app
+ */
+export const createCompanySignInTicket = async (
+  organizationId: string,
+  personId: string,
+  createCompanySignInTicketRequest: CreateCompanySignInTicketRequest,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<CompanySignInTicket> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<CompanySignInTicket>(
+    getCreateCompanySignInTicketUrl(organizationId, personId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(createCompanySignInTicketRequest),
     },
   );
 };

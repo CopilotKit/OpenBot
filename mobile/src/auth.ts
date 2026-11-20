@@ -55,20 +55,15 @@ export async function signInEnterprise(email: string) {
 }
 
 /**
- * Link the signed-in person's company account: sign in, while signed in, through one of their organization's identity
- * providers by its id, in the system browser as sign-in itself is. The server links what the provider vouches for to the
- * account they have, and the app is back with both. By the id, not an address: somebody who joined with a personal
- * address has none at the company's domain.
+ * Open an address in the system browser's sign-in session (ASWebAuthenticationSession on iOS, Custom Tabs on Android),
+ * never a web view: a company's sign-in is entered where the person can see whose page it is. Resolves when it comes
+ * back to `returnTo` or is closed. Linking the company account opens its single-use ticket here (../link-company.ts).
  */
-export async function linkCompanyAccount(providerId: string) {
-  const result = await authClient.signIn.sso({
-    providerId,
-    callbackURL: "openbotmobile://",
-  });
-  if (result.error)
-    throw new Error(
-      result.error.message ?? "Couldn't start signing in with your company.",
-    );
+export async function openInSystemBrowser(
+  url: string,
+  returnTo: string,
+): Promise<void> {
+  await WebBrowser.openAuthSessionAsync(url, returnTo);
 }
 
 /**

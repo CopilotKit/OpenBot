@@ -253,6 +253,15 @@ const server = Bun.serve({
       body: text ? JSON.parse(text) : null,
     });
     const route = `${request.method} ${url.pathname}`;
+    // A single-use ticket to link the company account, a new one for every request, as createCompanySignInTicket answers.
+    if (route === `POST ${ORG}/people/me/company-sign-in/tickets`)
+      return Response.json(
+        {
+          url: `${url.origin}/api/auth/company-sign-in/ticket/t${seen.length}`,
+          expiresAt: new Date(Date.now() + 120_000).toISOString(),
+        },
+        { status: 201 },
+      );
     if (removedFromWork && url.pathname.startsWith(`${ORG}/`))
       return Response.json(
         {
@@ -556,6 +565,40 @@ test("every write carries an Idempotency-Key of its own, and a retry's own key i
     contentType: "application/json",
     body: { token: "ExponentPushToken[x]", projectId: "p", platform: "ios" },
   });
+});
+
+test("Link your company account asks for a ticket where the person works, a new one with a key of its own on every tap, and opens each in the system browser", async () => {
+  const { createCompanySignInTicket } = await import(
+    "../src/api/generated/people/people"
+  );
+  const { linkCompanyAccount } = await import("../src/link-company");
+  const opened: string[] = [];
+  const steps = {
+    ticket: (providerId: string) =>
+      createCompanySignInTicket(ORGANIZATION_ID, "me", { providerId }),
+    open: async (url: string) => {
+      opened.push(url);
+    },
+  };
+  expect(await linkCompanyAccount("harbor-okta", steps)).toBe("opened");
+  expect(await linkCompanyAccount("harbor-okta", steps)).toBe("opened");
+  const tickets = seen.filter(
+    (request) => request.path === `${ORG}/people/me/company-sign-in/tickets`,
+  );
+  expect(tickets).toHaveLength(2);
+  for (const ticket of tickets)
+    expect(ticket).toMatchObject({
+      method: "POST",
+      cookie: COOKIE,
+      contentType: "application/json",
+      body: { providerId: "harbor-okta" },
+    });
+  // Never sent again with the same key: a replay is refused, so each tap is a request of its own.
+  expect(tickets[0]?.key).toMatch(/^[0-9a-f-]{36}$/);
+  expect(tickets[0]?.key).not.toBe(tickets[1]?.key);
+  expect(opened).toHaveLength(2);
+  expect(opened[0]).not.toBe(opened[1]);
+  expect(opened[0]).toContain("/api/auth/company-sign-in/ticket/");
 });
 
 test("a list is read page by page to its end, and a cursor handed back twice ends it", async () => {

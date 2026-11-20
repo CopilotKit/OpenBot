@@ -16,10 +16,13 @@ import {
   readDeployment,
 } from "../src/api";
 import { listConversations } from "../src/api/generated/conversations/conversations";
-import { getCompanySignIn } from "../src/api/generated/people/people";
+import {
+  createCompanySignInTicket,
+  getCompanySignIn,
+} from "../src/api/generated/people/people";
 import {
   authClient,
-  linkCompanyAccount,
+  openInSystemBrowser,
   renewHostedSignIn,
   serverUrl,
   signIn,
@@ -27,6 +30,7 @@ import {
 } from "../src/auth";
 import { HELD_OUT, linkButtons } from "../src/company-sign-in";
 import { homeView } from "../src/home-view";
+import { linkCompanyAccount } from "../src/link-company";
 import { registerPush, unregisterPush } from "../src/notifications";
 import { onOrganizationGone } from "../src/organization-gone";
 import { onRenewalNeedsClick } from "../src/renewal";
@@ -230,8 +234,18 @@ export default function Home() {
               title={link.title}
               onPress={() => {
                 void act(async () => {
-                  // The company's sign-in in the system browser, then back here signed in with both.
-                  await linkCompanyAccount(link.providerId);
+                  /*
+                   * A single-use ticket, asked for on this tap and opened at once in the system browser, which signs in
+                   * through the company's provider as this person. Back here, the company sign-in is read again: `met`
+                   * says whether it took. A provider that no longer counts reads the list again instead.
+                   */
+                  await linkCompanyAccount(link.providerId, {
+                    ticket: (providerId) =>
+                      createCompanySignInTicket(ORGANIZATION_ID, "me", {
+                        providerId,
+                      }),
+                    open: openInSystemBrowser,
+                  });
                   await refreshOrganizations();
                   await companySignIn.refresh();
                 });

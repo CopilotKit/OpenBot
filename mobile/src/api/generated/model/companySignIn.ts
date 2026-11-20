@@ -11,6 +11,6 @@ export interface CompanySignIn {
   required: boolean;
   /** Whether the person has: they signed in through one of providers, or with the same identity at the same issuer another way, or they are the admin who runs this OpenBot. While required is true and met is false, the organization holds them out. */
   met: boolean;
-  /** The identity providers that count for this organization: its own, and where this OpenBot may keep more than one organization, those registered for the whole OpenBot. Empty when there are none. */
+  /** The identity providers that count for this organization: its own, or, where it has none and this OpenBot may keep more than one organization, those registered for the whole OpenBot. Empty when there are none. */
   providers: CompanySignInProvidersItem[];
 }
