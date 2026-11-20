@@ -944,6 +944,7 @@ export * from "./listConversationMessagesParams";
 export * from "./listConversationsParams";
 export * from "./listCredentialsParams";
 export * from "./listDeliveriesParams";
+export * from "./listDeploymentAuditEventsParams";
 export * from "./listDestinationsParams";
 export * from "./listDevicesParams";
 export * from "./listedRecorderConnection";
