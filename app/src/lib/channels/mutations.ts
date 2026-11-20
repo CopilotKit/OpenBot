@@ -3,6 +3,7 @@ import {
   mutationOptions,
   type QueryClient,
 } from "@tanstack/react-query";
+import { agentKeys } from "@/lib/agents/queries";
 import {
   createConversation,
   deleteConversation,
@@ -220,12 +221,14 @@ export function deleteChannelMutationOptions(
     },
     // The roster, its searches and the Bots panel's lists only. The open channel's detail query would refetch into the
     // fresh 404 and flash an error before the navigate-home lands; left alone, it keeps its cache
-    // and the navigation happens with nothing to complain about.
+    // and the navigation happens with nothing to complain about. The Bots list too: its
+    // `lastConversationAt` orders the Bots panel and may have been this conversation's.
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: channelKeys.list() }),
         queryClient.invalidateQueries({ queryKey: channelKeys.searches() }),
         queryClient.invalidateQueries({ queryKey: channelKeys.byBots() }),
+        queryClient.invalidateQueries({ queryKey: agentKeys.lists() }),
       ]),
   });
 }
