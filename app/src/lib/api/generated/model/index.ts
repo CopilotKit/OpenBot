@@ -1179,6 +1179,7 @@ export * from "./recorderConnectionNotFoundResponse";
 export * from "./recorderConnectionPage";
 export * from "./recorderConnectionVia";
 export * from "./recorderIdentity";
+export * from "./recorderIdentityOrganization";
 export * from "./recorderJsonOnlyResponse";
 export * from "./recorderLearning";
 export * from "./recorderLearningLearning";
