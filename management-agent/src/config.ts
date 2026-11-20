@@ -86,8 +86,10 @@ export interface Credentials {
 export interface Agent {
   config: AgentConfig;
   credentials: Credentials;
-  /** Complete Job manifests with `__OPERATION__` where the operation's id goes. */
-  jobs: { backup: string; supportBundle: string };
+  /** Complete Job manifests with `__OPERATION__` where the operation's id goes. `backupTarget`
+   * asks the cloud where the configured backup target answers (backup-target.ts); a chart from
+   * before the backup target guard has none, and every cloud-kind backup is then refused. */
+  jobs: { backup: string; backupTarget?: string; supportBundle: string };
 }
 
 export const CONFIG_DIRECTORY = "/etc/openbot-agent";
@@ -120,6 +122,7 @@ export function loadAgent(
     },
     jobs: {
       backup: readFileSync(join(configDirectory, "backup-job.yaml"), "utf8"),
+      backupTarget: optional(join(configDirectory, "backup-target-job.yaml")),
       supportBundle: readFileSync(
         join(configDirectory, "support-bundle-job.yaml"),
         "utf8",
