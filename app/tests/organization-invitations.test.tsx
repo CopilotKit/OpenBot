@@ -34,6 +34,7 @@ import { Toaster } from "@/components/ui/toast";
 import type { PersonRole } from "@/lib/api/generated/model";
 import { getGetDeploymentResponseMock } from "@/lib/api/generated/organization-settings/organization-settings.msw";
 import { GetDeploymentResponse } from "@/lib/api/generated/organization-settings/organization-settings.zod";
+import { ListOrganizationMembersResponse } from "@/lib/api/generated/organizations/organizations.zod";
 import { signedInUser } from "@/lib/auth/queries";
 import {
   currentOrganizationId,
@@ -50,8 +51,12 @@ import {
   type SentInvitation,
 } from "@/lib/organizations/queries";
 import {
+  givableRoles,
+  initialsOf,
   invitationLink,
   memberControl,
+  memberLine,
+  personName,
   receivedInvitationLine,
   roleName,
   sentInvitationLine,
@@ -125,6 +130,22 @@ const member = (
   assignableRoles: [],
 });
 
+/**
+ * A member at OpenBot by CopilotKit, on a hosted OpenBot, who hasn't opened OpenBot yet, as the
+ * server answers them: their id there, an empty address when none is known, and nothing to change.
+ */
+const notOpened = (
+  id: string,
+  name: string | null,
+  email: string,
+  role: OrganizationMemberSummary["role"],
+): OrganizationMemberSummary => ({
+  ...member(id, name, role),
+  email,
+  removable: false,
+  notOpenedYet: true,
+});
+
 const ROLES = ["owner", "admin", "member"] as const;
 
 /**
@@ -137,6 +158,8 @@ function asListed(
   asker: Listed["role"],
   all: OrganizationMemberSummary[],
 ): OrganizationMemberSummary {
+  // Nobody may give a role to somebody who hasn't opened OpenBot yet, as the spec says.
+  if (one.notOpenedYet) return { ...one, assignableRoles: [] };
   const others = ROLES.filter((role) => role !== one.role);
   const owners = all.filter((each) => each.role === "owner").length;
   const assignableRoles =
@@ -372,12 +395,17 @@ async function answer(
       here.name = (body as { name: string }).name;
       return Response.json({ organization: listed(here) });
     }
-    if (rest === "members" && method === "GET")
-      return page(
+    if (rest === "members" && method === "GET") {
+      // Answered as the API answers it, checked against the schema generated from the spec.
+      const answered = page(
         "members",
         server.members.map((one) => asListed(one, here.role, server.members)),
         url,
       );
+      return Response.json(
+        ListOrganizationMembersResponse.parse(await answered.json()),
+      );
+    }
     const removed = /^members\/([^/]+)$/.exec(rest as string);
     if (removed && method === "PATCH") {
       const no = refused();
@@ -616,6 +644,59 @@ describe("the words and the controls", () => {
     expect(
       memberControl(row("dana", "owner"), { id: "dana", role: "owner" }),
     ).toBeNull();
+  });
+
+  test("somebody who hasn't opened OpenBot yet is offered no role, and removal only where the server says they can be removed", () => {
+    const waiting = notOpened(
+      "cpk_ola",
+      "Ola Berg",
+      "ola@example.com",
+      "member",
+    );
+    for (const role of ["owner", "admin"]) {
+      // As the server answers today: not removable, so no Remove.
+      expect(memberControl(waiting, { id: "dana", role })).toBeNull();
+      // Once it says they can be removed, Remove is offered like on any other row.
+      expect(
+        memberControl({ ...waiting, removable: true }, { id: "dana", role }),
+      ).toBe("remove");
+    }
+    // A plain member removes nobody, not-opened or not.
+    expect(
+      memberControl(
+        { ...waiting, removable: true },
+        { id: "dana", role: "member" },
+      ),
+    ).toBeNull();
+    // Roles to give, as a server that got it wrong might say: still no Role menu.
+    const withRoles = { ...waiting, assignableRoles: ["admin"] };
+    expect(givableRoles(withRoles)).toEqual([]);
+    expect(givableRoles({ ...withRoles, notOpenedYet: undefined })).toEqual([
+      "admin",
+    ]);
+  });
+
+  test("a member's name and second line, with or without a name or an address", () => {
+    expect(personName({ name: "Ola Berg", email: "" })).toBe("Ola Berg");
+    expect(personName({ name: null, email: "sam@example.com" })).toBe(
+      "sam@example.com",
+    );
+    expect(personName({ name: " ", email: "" })).toBe("Unnamed member");
+    expect(initialsOf({ name: null, email: "" })).toBe("");
+    expect(initialsOf({ name: "Ola Berg", email: "" })).toBe("OB");
+    expect(memberLine(member("lee", "Lee Park", "admin"))).toBe(
+      "lee@example.com · Admin",
+    );
+    expect(memberLine(member("sam", null, "member"))).toBe("Member");
+    expect(
+      memberLine(notOpened("cpk_ola", "Ola Berg", "ola@example.com", "owner")),
+    ).toBe("ola@example.com · Owner · Hasn't opened OpenBot yet");
+    expect(memberLine(notOpened("cpk_kim", "Kim Lee", "", "member"))).toBe(
+      "Member · Hasn't opened OpenBot yet",
+    );
+    expect(memberLine(notOpened("cpk_anon", null, "", "admin"))).toBe(
+      "Admin · Hasn't opened OpenBot yet",
+    );
   });
 });
 
@@ -1001,6 +1082,92 @@ describe("organization settings, for its owner", () => {
     await waitFor(() => expect(page.queryByText("sam@example.com")).toBeNull());
     expect(writes.at(-1)).toMatchObject({
       request: `DELETE /api/v2/organizations/${ACME.id}/members/sam`,
+      keyed: true,
+    });
+  });
+
+  test("somebody who hasn't opened OpenBot yet is listed with their role, and their row offers nothing while the server says they can't be removed", async () => {
+    server.hosted = true;
+    server.members = [
+      ...server.members,
+      notOpened("cpk_ola", "Ola Berg", "ola@example.com", "admin"),
+      notOpened("cpk_kim", "Kim Lee", "", "member"),
+      notOpened("cpk_anon", null, "", "member"),
+    ];
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    await page.findByText("Ola Berg");
+
+    const rowOf = (name: string) =>
+      page
+        .getByText(name, { selector: "[data-slot=item-title] span" })
+        .closest("[data-slot=item]") as HTMLElement;
+    const lineOf = (name: string) =>
+      within(rowOf(name)).getByText(/Hasn't opened OpenBot yet/).textContent;
+    // The role from the answer, the address when there is one, and that they haven't opened it.
+    expect(lineOf("Ola Berg")).toBe(
+      "ola@example.com · Admin · Hasn't opened OpenBot yet",
+    );
+    // No address: the name, and never an empty " · ".
+    expect(lineOf("Kim Lee")).toBe("Member · Hasn't opened OpenBot yet");
+    // Neither a name nor an address: a neutral label, and a person's mark for initials.
+    expect(lineOf("Unnamed member")).toBe("Member · Hasn't opened OpenBot yet");
+    expect(rowOf("Unnamed member").querySelector("svg")).toBeTruthy();
+
+    for (const name of ["Ola Berg", "Kim Lee", "Unnamed member"]) {
+      const row = within(rowOf(name));
+      // No role to change, nobody to remove, and no page of theirs to open.
+      expect(row.queryByRole("button")).toBeNull();
+      expect(row.queryByRole("link")).toBeNull();
+    }
+    // Everybody else's row is as it was.
+    expect(
+      page.getByRole("button", { name: "Change role for Lee Park" }),
+    ).toBeTruthy();
+    expect(page.getByRole("button", { name: "Remove Lee Park" })).toBeTruthy();
+    expect(sentWrites()).toEqual([]);
+  });
+
+  test("somebody who hasn't opened OpenBot yet is removed, after asking, once the server says they can be", async () => {
+    server.hosted = true;
+    server.members = [
+      ...server.members,
+      {
+        ...notOpened("cpk_cara", "Cara Invitee", "", "member"),
+        removable: true,
+      },
+    ];
+    const app = await open("/settings/organization");
+    const page = within(await app.view.findByRole("main"));
+    const row = (
+      await page.findByText("Cara Invitee", {
+        selector: "[data-slot=item-title] span",
+      })
+    ).closest("[data-slot=item]") as HTMLElement;
+    expect(
+      within(row).getByText("Member · Hasn't opened OpenBot yet"),
+    ).toBeTruthy();
+    // Still no Role menu: only Remove.
+    expect(
+      within(row)
+        .getAllByRole("button")
+        .map(
+          (button) => button.getAttribute("aria-label") ?? button.textContent,
+        ),
+    ).toEqual(["Remove Cara Invitee"]);
+
+    await app.person.click(
+      within(row).getByRole("button", { name: "Remove Cara Invitee" }),
+    );
+    const dialog = await app.view.findByRole("dialog", {
+      name: "Remove Cara Invitee from Acme?",
+    });
+    await app.person.click(
+      within(dialog).getByRole("button", { name: "Remove" }),
+    );
+    await waitFor(() => expect(page.queryByText("Cara Invitee")).toBeNull());
+    expect(writes.at(-1)).toMatchObject({
+      request: `DELETE /api/v2/organizations/${ACME.id}/members/cpk_cara`,
       keyed: true,
     });
   });

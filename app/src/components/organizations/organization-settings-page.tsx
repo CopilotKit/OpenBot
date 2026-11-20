@@ -56,6 +56,7 @@ import {
 import {
   givableRoles,
   memberControl,
+  memberLine,
   personName,
   roleChangeQuestion,
   roleInSentence,
@@ -329,10 +330,15 @@ function MembersSection({
                         </span>
                       ) : null}
                     </ItemTitle>
-                    <ItemDescription className="line-clamp-1 break-all">
-                      {member.name?.trim()
-                        ? `${member.email} · ${roleName(member.role)}`
-                        : roleName(member.role)}
+                    {/* Not opened yet wraps whole words onto a second line, never cut off. */}
+                    <ItemDescription
+                      className={
+                        member.notOpenedYet
+                          ? "line-clamp-2 break-words"
+                          : "line-clamp-1 break-all"
+                      }
+                    >
+                      {memberLine(member)}
                     </ItemDescription>
                   </ItemContent>
                   {control || roles.length > 0 ? (
