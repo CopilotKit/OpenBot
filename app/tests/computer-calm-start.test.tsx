@@ -11,6 +11,7 @@ import {
 import type { ReactElement } from "react";
 import { ToolLine } from "@/components/channels/tool-line";
 import { ComputerView } from "@/components/computer/computer-view";
+import type { Problem } from "@/lib/api/generated/model";
 
 test("a call turned away by a computer still starting reads as not done yet, not as a failure", () => {
   const view = render(
@@ -354,6 +355,57 @@ test("a server with no way to start a computer leaves the screen as it was: off,
     console.error = originalError;
     console.warn = originalWarn;
   }
+});
+
+test("a computer the organization has no room for says why it stays off, calmly, instead of that it starts when the Bot uses it", async () => {
+  const atLimit =
+    "This organization already has 1 computer, the most OpenBot allows it. Ask an admin to make room.";
+  let asked = 0;
+  globalThis.fetch = (async (input, init) => {
+    const path = String(input);
+    if (path.endsWith("/wake") && init?.method === "POST") {
+      asked += 1;
+      const refusal: Problem = {
+        type: "https://open.bot/errors/test",
+        title: atLimit,
+        status: 429,
+        detail: atLimit,
+        code: "COMPUTER_LIMIT_REACHED",
+        category: "rate_limit",
+        retryable: false,
+        requestId: "req_test",
+        traceId: "trace_test",
+      };
+      return new Response(JSON.stringify(refusal), {
+        status: 429,
+        headers: { "content-type": "application/problem+json" },
+      });
+    }
+    if (path.endsWith("/status"))
+      return Response.json({ botId: "sales", state: "absent" });
+    if (path.endsWith("/screenshot"))
+      return Response.json({ ready: false, state: "absent" });
+    if (path.endsWith("/control")) return Response.json(control);
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+
+  const view = renderWithQueries(
+    <ComputerView active computerId="sales" intervalMs={10} name="Sales" />,
+  );
+
+  const sentence = await view.findByText(atLimit);
+  const blocked = sentence.closest("[data-slot=computer-blocked]");
+  expect(blocked?.textContent).toContain("Can't start Sales's computer");
+  // It won't start when the Bot next uses it either, so that is not said; nor is it a problem in red.
+  expect(view.queryByText(/is off/)).toBeNull();
+  expect(view.queryByText(/can't show the screen/i)).toBeNull();
+  expect(view.queryByRole("alert")).toBeNull();
+  // Many polls later it is still said, and the start was asked for once.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  });
+  expect(view.getByText(atLimit)).toBeDefined();
+  expect(asked).toBe(1);
 });
 
 test("a live stream that drops shows a quiet badge, not the Retry panel", async () => {
