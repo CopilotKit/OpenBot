@@ -354,4 +354,23 @@ describe("backup target guard", () => {
       expect(refused.message).toContain("does not report its database");
     }
   });
+
+  test("with no backup chosen, a migrating upgrade is refused before the cluster is asked anything", async () => {
+    const kube = new Proxy({} as Kube, {
+      get: () => {
+        throw new Error("the cluster was asked");
+      },
+    });
+    const refused = await confirmBackupTarget({
+      kube,
+      kind: "none",
+      template: "kind: Job",
+      operation: "261120060000-a1b2c3",
+      timeoutSeconds: 600,
+      identity: null,
+    }).catch((error) => error);
+    expect(refused).toBeInstanceOf(BackupTargetRefused);
+    expect(refused.mismatch).toBe(false);
+    expect(refused.message).toContain("no backup is configured");
+  });
 });
