@@ -1014,6 +1014,7 @@ export * from "./managementConflictResponse";
 export * from "./managementEnrollment";
 export * from "./managementServiceFailedResponse";
 export * from "./managementUnavailableResponse";
+export * from "./managementWindow";
 export * from "./markConversationReadHeaders";
 export * from "./memory";
 export * from "./memoryFormedBy";

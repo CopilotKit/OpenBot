@@ -85,3 +85,14 @@ test("stopping a connection whose agent was uninstalled asks CopilotKit's servic
     spec.paths[`${base}/enrollment`]?.delete?.responses?.["502"]?.$ref,
   ).toBe("#/components/responses/ManagementServiceFailed");
 });
+
+test("the answer can carry the install's name and its maintenance window, and the not-entitled refusal's code", () => {
+  const properties =
+    spec.components.schemas.ManagementEnrollment?.properties ?? {};
+  expect(Object.keys(properties)).toEqual(
+    expect.arrayContaining(["installName", "window", "lastErrorCode"]),
+  );
+  expect(properties.lastErrorCode).toMatchObject({
+    "x-extensible-enum": ["not-entitled"],
+  });
+});

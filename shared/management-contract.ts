@@ -486,6 +486,11 @@ export const InstallStatus = z.strictObject({
   agentConnected: z.boolean(),
   lastHeartbeatAt: isoTime.nullable(),
   agentVersion: text.nullable(),
+  /**
+   * The install's current maintenance window (the service's default unless an operator set one).
+   * The service always sends it; optional so a server reads a service from before it was added.
+   */
+  window: MaintenanceWindow.optional(),
 });
 export type InstallStatus = z.infer<typeof InstallStatus>;
 
