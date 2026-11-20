@@ -95,6 +95,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the sidebar takes only the conversation events of the organization the person works in.
 - **A person outside `default` signs in with nothing refused on the way**: what OpenBot offers is
   read as anybody until their organization is known.
+- **Adding people to a team finds them as you type.** Add person searches the organization's own
+  members by name or email from the first letter, best matches first, and completes the best one in
+  the box: Tab takes it, Enter adds, the arrow keys move through the list. Several people can be
+  added in a row, and somebody already in the team is shown as such.
 
 ### The phone app
 

@@ -2,7 +2,6 @@ import {
   IconBuilding,
   IconChevronDown,
   IconChevronRight,
-  IconUser,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -56,7 +55,6 @@ import {
 } from "@/lib/organizations/queries";
 import {
   givableRoles,
-  initialsOf,
   memberControl,
   memberLine,
   personName,
@@ -66,6 +64,7 @@ import {
   roleName,
 } from "@/lib/organizations/words";
 import { queryClient } from "@/query-client";
+import { PersonAvatar } from "./person-avatar";
 import { SentInvitationsSection } from "./sent-invitations-section";
 
 /** The API's cap on an organization's name, so the field stops where the server does. */
@@ -258,25 +257,6 @@ function RenameOrganizationDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-/**
- * A person's picture, or their initials on the tint the account row uses, or a person's mark for
- * somebody OpenBot knows neither a name nor an address for.
- */
-function PersonAvatar({ person }: { person: OrganizationMemberSummary }) {
-  const initials = initialsOf(person);
-  return (
-    <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted-foreground/10 text-foreground/70 text-xs">
-      {person.image ? (
-        <img alt="" className="size-full object-cover" src={person.image} />
-      ) : initials ? (
-        initials
-      ) : (
-        <IconUser aria-hidden="true" className="size-4" />
-      )}
-    </div>
   );
 }
 
