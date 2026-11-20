@@ -5175,7 +5175,9 @@ fn lost_stack(
         let shared = paths.iter().any(|path| !is_here(path));
         let files = private_files(&private);
         if refused_engine
-            && (files != PrivateFiles::Missing || shared || private.join(STACK_ENGINE_FILE).exists())
+            && (files != PrivateFiles::Missing
+                || shared
+                || private.join(STACK_ENGINE_FILE).exists())
         {
             return Ok(None);
         }
