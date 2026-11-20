@@ -160,11 +160,27 @@ export interface RecorderConnectionGrant {
   token: string;
   connection: RecorderConnection;
   user: RecorderUser;
+  /** The organization the connection works in, the one the connect code was made in. The Recorder names it in every address it calls from now on. Absent from a server that keeps every connection in `default`. */
+  organizationId?: string;
+  /** What people call that organization, so the Recorder can say where it records. Absent from a server that keeps every connection in `default`. */
+  organizationName?: string;
 }
+
+/**
+ * The organization this connection records into, so the Recorder can say where it records. Absent from a server that keeps every connection in `default`.
+ */
+export type RecorderIdentityOrganization = {
+  /** The organization's id. Opaque. */
+  id: string;
+  /** What people call it. */
+  name: string;
+};
 
 export interface RecorderIdentity {
   user: RecorderUser;
   connectionId: string;
+  /** The organization this connection records into, so the Recorder can say where it records. Absent from a server that keeps every connection in `default`. */
+  organization?: RecorderIdentityOrganization;
 }
 
 /**
@@ -398,7 +414,7 @@ export type RecorderOriginRefusedResponse = Problem;
 export type RecorderSignedOutResponse = RecorderProblem;
 
 /**
- * The caller holds no role in this organization.
+ * The caller holds no role in this organization, or the organization requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED).
  */
 export type ForbiddenResponse = Problem;
 

@@ -10,7 +10,7 @@ import type { OrganizationSettingValuesModelAllowlist } from "./organizationSett
  */
 export interface OrganizationSettingValues {
   readonly context?: OrganizationSettingsContext;
-  /** Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in. */
+  /** Whether people must sign in through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in. */
   ssoRequired?: boolean;
   /** Whether what Bots do on their computers is recorded, to read in computer actions. */
   actionRecording?: boolean;
