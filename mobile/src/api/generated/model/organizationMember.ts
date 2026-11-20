@@ -28,4 +28,6 @@ export interface OrganizationMember {
   role: PersonRoleAnswer;
   /** When they became a member. */
   joinedAt: string;
+  /** True for somebody who is a member of the organization where it is kept, at OpenBot by CopilotKit on a hosted OpenBot, and hasn't opened OpenBot yet. Until they do, they have no OpenBot account: id is their id there, email is empty when none is known, and they can't be given another role or removed here (removable is false and assignableRoles is empty). Absent for everybody else. */
+  notOpenedYet?: boolean;
 }

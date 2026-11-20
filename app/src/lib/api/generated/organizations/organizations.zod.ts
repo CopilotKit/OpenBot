@@ -258,6 +258,12 @@ export const ListOrganizationMembersResponse = zod.object({
           joinedAt: zod.iso
             .datetime({ offset: true })
             .describe("When they became a member."),
+          notOpenedYet: zod
+            .boolean()
+            .optional()
+            .describe(
+              "True for somebody who is a member of the organization where it is kept, at OpenBot by CopilotKit on a hosted OpenBot, and hasn't opened OpenBot yet. Until they do, they have no OpenBot account: id is their id there, email is empty when none is known, and they can't be given another role or removed here (removable is false and assignableRoles is empty). Absent for everybody else.",
+            ),
         })
         .describe("One member of an organization."),
     )
@@ -451,6 +457,12 @@ export const UpdateOrganizationMemberResponse = zod.object({
       joinedAt: zod.iso
         .datetime({ offset: true })
         .describe("When they became a member."),
+      notOpenedYet: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True for somebody who is a member of the organization where it is kept, at OpenBot by CopilotKit on a hosted OpenBot, and hasn't opened OpenBot yet. Until they do, they have no OpenBot account: id is their id there, email is empty when none is known, and they can't be given another role or removed here (removable is false and assignableRoles is empty). Absent for everybody else.",
+        ),
     })
     .describe("One member of an organization."),
 });

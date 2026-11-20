@@ -49,6 +49,9 @@ unless you rely on task threads.
 - **Require SSO per organization.** Where OpenBot may keep more than one organization, each one's
   admins require single sign-on of its own members, and saving it signs out only that
   organization's members. Where it keeps one, the rule still holds for everybody.
+- **Members who haven't opened OpenBot yet.** On a hosted OpenBot, an organization's members list
+  includes people who are members at OpenBot by CopilotKit and haven't opened OpenBot yet, marked
+  `notOpenedYet`. They can't be given another role or removed until they do.
 - **The Recorder can say which organization it records into.** Who a Recorder acts as carries its
   `organization`, with its id and name, and a new Recorder connection carries `organizationName`.
 - New optional fields: `organizationId` on a conversation event and on a Recorder connection, and
