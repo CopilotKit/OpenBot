@@ -196,7 +196,8 @@ async function shoot(page: Page, step: string, name: string) {
 function footerOf(page: Page, text: string) {
   return page
     .getByRole("button", { name: `Send queued message now: ${text}` })
-    .evaluate((sendNow) => {
+    .evaluate((element) => {
+      const sendNow = element as HTMLElement;
       const footer = sendNow.parentElement as HTMLElement;
       const status = footer.querySelector('[role="status"]') as HTMLElement;
       const remove = [...footer.querySelectorAll("button")].find(
