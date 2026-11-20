@@ -1,3 +1,4 @@
+import { readItemDetail } from "@openbot/shared/check-in-message";
 import {
   IconArrowUpRight,
   IconDots,
@@ -34,19 +35,34 @@ import { queryClient } from "@/query-client";
  *
  * Which Bot found it is the group's header where the row sits in one (`inGroup`), and said on the
  * row otherwise. Each row has its own request, so dismissing one leaves the others' buttons alone.
+ *
+ * The same row is the card a check-in's message draws for the item in its conversation
+ * (`inConversation`, see `CheckInItems`): one component, so the two places cannot come to offer
+ * different answers or send them differently.
  */
 export function SuggestionRow({
   suggestion,
   botName,
   setting,
   inGroup = false,
+  inConversation = false,
 }: {
   suggestion: ProactiveSuggestion;
-  /** The Bot it came from, said on the row unless the row sits under that Bot's header. */
-  botName: string;
+  /**
+   * The Bot it came from, said on the row unless the row sits under that Bot's header. Left out
+   * where the row is drawn in the Bot's own conversation.
+   */
+  botName?: string;
   /** The check-in that found it, when it is still there to turn off. */
   setting?: ProactiveSetting;
   inGroup?: boolean;
+  /**
+   * Drawn under the Bot's own message about it. Why it was raised is read in full, as part of what
+   * the Bot is saying, and what the Bot would do about it has a line of its own under that, where
+   * the item's detail says so (its second paragraph: see `readItemDetail`). The Bot and the time
+   * are left to the message above, which says both. On the board the detail stays one line.
+   */
+  inConversation?: boolean;
 }) {
   const act = useMutation(resolveSuggestionMutationOptions(queryClient));
   const stop = useMutation(changeProactiveSettingMutationOptions(queryClient));
@@ -54,6 +70,7 @@ export function SuggestionRow({
   const site = suggestion.sourceLink ? sourceSite(suggestion.sourceLink) : null;
   const initial = (suggestion.sourceApp ?? "").trim().charAt(0).toUpperCase();
   const error = act.error ?? stop.error;
+  const said = inConversation ? readItemDetail(suggestion.detail) : null;
   return (
     <BoardRow
       actions={
@@ -107,7 +124,7 @@ export function SuggestionRow({
           ) : null}
         </>
       }
-      detail={suggestion.detail}
+      detail={said ? said.why : suggestion.detail}
       icon={
         initial ? (
           <span aria-hidden className="font-medium">
@@ -117,12 +134,18 @@ export function SuggestionRow({
           <IconRadar />
         )
       }
+      readDetail={inConversation}
+      wouldDo={said?.wouldDo}
       meta={[
         suggestion.sourceApp ? (
           <MetaTag key="app">{suggestion.sourceApp}</MetaTag>
         ) : null,
-        inGroup ? null : <span key="bot">{botName}</span>,
-        <span key="when">{relativeTime(suggestion.createdAt)}</span>,
+        inGroup || inConversation || !botName ? null : (
+          <span key="bot">{botName}</span>
+        ),
+        inConversation ? null : (
+          <span key="when">{relativeTime(suggestion.createdAt)}</span>
+        ),
         suggestion.sourceLink ? (
           <a
             className="inline-flex items-center gap-0.5 hover:text-foreground"

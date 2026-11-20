@@ -1,3 +1,4 @@
+import { checkInWords } from "@openbot/shared/check-in-message";
 import { IconLogout, IconPlus, IconSearch } from "@tabler/icons-react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import {
@@ -112,9 +113,13 @@ export function matchingChannels(
     return channels;
   }
   return channels.filter((channel) =>
-    [channel.name, channel.summary, channel.opening, channel.lastMessage].some(
-      (field) => field?.toLowerCase().includes(needle),
-    ),
+    [
+      channel.name,
+      channel.summary,
+      channel.opening,
+      // What the last message says, as the row shows it: a check-in's sentence, not its marker.
+      checkInWords(channel.lastMessage ?? ""),
+    ].some((field) => field?.toLowerCase().includes(needle)),
   );
 }
 

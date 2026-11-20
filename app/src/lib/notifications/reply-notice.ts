@@ -1,3 +1,4 @@
+import { checkInWords } from "@openbot/shared/check-in-message";
 import type { QueryClient } from "@tanstack/react-query";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import {
@@ -51,11 +52,15 @@ export function replyNotice(
   const agentId = activity.lastMessageAgentId;
   const bot = bots?.find((each) => each.botId === agentId);
   const name = bot?.name ?? agents?.find((each) => each.id === agentId)?.name;
-  // A server older than `firstLine` sends only the preview, every line run into one.
-  const body =
+  /*
+   * A server older than `firstLine` sends only the preview, every line run into one. Either way a
+   * check-in speaking first is announced by the Bot's sentence, never by the marker in front of it.
+   */
+  const body = checkInWords(
     typeof activity.firstLine === "string"
       ? activity.firstLine
-      : (activity.lastMessage ?? "");
+      : (activity.lastMessage ?? ""),
+  );
   return {
     title: name ? `${name} replied` : "Your Bot replied",
     body,
