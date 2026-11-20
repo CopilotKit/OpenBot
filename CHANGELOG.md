@@ -34,6 +34,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
     extension, so the role that owns OpenBot's database creates it without a superuser.
   - `0148_recorder_capture_passes` keeps the passes that let a Recorder's socket through the
     gateway relay.
+- **`OPENBOT_MULTIPLE_ORGANIZATIONS` is no longer read: `OPENBOT_ORGANIZATION_AUTHORITY` says
+  how many organizations an OpenBot holds.** A self-hosted OpenBot that held more than one with
+  `OPENBOT_MULTIPLE_ORGANIZATIONS=true` sets `OPENBOT_ORGANIZATION_AUTHORITY=intelligence-platform`
+  and `INTELLIGENCE_PLATFORM_TOKEN` (or `INTELLIGENCE_PLATFORM_TOKEN_FILE`), the platform service
+  token its Intelligence was given, before upgrading. At the first start each organization it held
+  is given an Intelligence organization of its own, with its members and Bots where they were. Left
+  as it was, it refuses to start and says what to set. Unset, an OpenBot keeps one organization, as
+  before. See [configuration](docs/configuration.md#general-variables).
 - **Deprecated.** Each still works, answers with `Deprecation` and `Sunset` headers, and is
   removed no earlier than its sunset, and only once nothing uses it.
   - `PATCH /api/v2/organizations/{organizationId}/people/{personId} body role`: Sunset 2028-05-19.
