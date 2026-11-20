@@ -1670,16 +1670,8 @@ fn engine_answer_by(
     Some((succeeded, String::from_utf8_lossy(&stdout).into_owned()))
 }
 
-/// `args` on the engine, within `limit`: its stdout when it succeeded, or nothing.
-fn engine_output(
-    address: &crate::engine::Address,
-    args: &[&str],
-    limit: Duration,
-) -> Option<String> {
-    engine_output_by(address, args, limit, None)
-}
-
-/// `engine_output`, also stopped at `deadline` when there is one.
+/// `args` on the engine, within `limit` and, when there is one, by `deadline`: its stdout when it
+/// succeeded, or nothing.
 fn engine_output_by(
     address: &crate::engine::Address,
     args: &[&str],
