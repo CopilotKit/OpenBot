@@ -37,6 +37,7 @@ import {
   type IdentityProviderInput,
   registerIdentityProviderMutationOptions,
 } from "@/lib/identity-providers/mutations";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { identityProviderListQueryOptions } from "@/lib/identity-providers/queries";
 import { identityProviderWords } from "@/lib/identity-providers/words";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
@@ -63,7 +64,10 @@ function IdentityProvidersPage() {
   // Outside `default`, an organization's providers are its own: they apply to its members.
   const organizationOnly =
     organization !== undefined && organization !== ONLY_ORGANIZATION;
-  const words = identityProviderWords(organizationOnly);
+  // A hosted OpenBot: people also sign in with their OpenBot by CopilotKit account, set in no environment of theirs.
+  const hosted =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
+  const words = identityProviderWords(organizationOnly, hosted);
   const providers = useQuery(identityProviderListQueryOptions());
   const register = useMutation(
     registerIdentityProviderMutationOptions(queryClient),
@@ -143,10 +147,7 @@ function IdentityProvidersPage() {
       description={words.description}
       title="Identity providers"
     >
-      <PageSection
-        description="Google, Microsoft and Okta are set in the environment. They don't show here."
-        title="Registered"
-      >
+      <PageSection description={words.registeredDescription} title="Registered">
         {failure ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             {failure.message}
