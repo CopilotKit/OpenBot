@@ -1190,7 +1190,8 @@ export function PluginPage({
                   <ConnectionStateUnreadable />
                 ) : (
                   <Item size="sm">
-                    <ItemContent>
+                    {/* Room to read the words on a phone: the status and Connect go under them there. */}
+                    <ItemContent className="min-w-40">
                       <ItemTitle>Your account</ItemTitle>
                       <ItemDescription>
                         {personal

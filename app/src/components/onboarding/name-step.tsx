@@ -67,6 +67,7 @@ export function useNameStep({
                 setDraft(event.target.value);
                 save.reset();
               }}
+              placeholder="Enter your name"
               required
               value={name}
             />

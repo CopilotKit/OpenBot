@@ -65,6 +65,7 @@ import {
 } from "../browser/browser-nav-item";
 import { OpenBotLogo } from "../edition/openbot-logo";
 import { navigationRender } from "../edition/team-features-dialog";
+import { SidebarToggle } from "../layout/sidebar-toggle";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import {
@@ -474,7 +475,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
        * (styles.css, `data-titlebar-band`). Admin's and Settings' headers keep Back to app on the
        * buttons' row, as Figma draws them.
        */}
-      <SidebarHeader className="h-12 p-2" data-titlebar-band="">
+      <SidebarHeader className="relative h-12 p-2" data-titlebar-band="">
+        {/*
+         * Figma's Mac window: Hide sidebar on the window buttons' row, just after them. Only there,
+         * in OpenBot's own look: the buttons' middle is 20.5px down the sidebar and the last one ends
+         * about 60px in (`TRAFFIC_LIGHTS`). In a browser the main column's toggle is the only one.
+         */}
+        <SidebarToggle
+          always
+          className="absolute top-[6.5px] left-[73px] hidden size-7 hover:bg-foreground/5 dark:hover:bg-foreground/5 own:in-data-[desktop-titlebar=overlay]:inline-flex"
+        />
         <SidebarMenu>
           <SidebarMenuItem className="flex flex-row gap-1.5">
             {/* The same hover as every other row in the sidebar, not the menu button's accent tint. */}

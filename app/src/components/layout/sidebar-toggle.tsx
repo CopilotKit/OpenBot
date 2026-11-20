@@ -69,10 +69,20 @@ export function useSidebarToggleVisible(): boolean {
  * its own children after the prop spread, including an `sr-only` "Toggle Sidebar" that would
  * contradict the label below. The state still belongs to the primitive: `toggleSidebar` is its hook.
  */
-export function SidebarToggle({ className }: { className?: string }) {
+export function SidebarToggle({
+  always = false,
+  className,
+}: {
+  /**
+   * Draw it while the sidebar is showing too. For a place inside the sidebar, which hides along with
+   * it: the toggle in the main column is still the way back.
+   */
+  always?: boolean;
+  className?: string;
+}) {
   const sidebar = useOptionalSidebar();
   const visible = useSidebarToggleVisible();
-  if (!sidebar || !visible) return null;
+  if (!sidebar || !(visible || always)) return null;
   const { isMobile, open, openMobile, toggleSidebar } = sidebar;
 
   // The label says what the click will do, not what is on screen.

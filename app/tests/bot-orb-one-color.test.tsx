@@ -177,59 +177,95 @@ async function open(theme: Theme): Promise<Page> {
 /**
  * The color a person sees in a Bot's orb on this surface: the mean of the pixels inside the middle
  * three quarters of its disc, in OKLab. The disc's rim and the glow around it are left out.
+ *
+ * The disc is found where the layout put it, not at the middle of a screenshot of it. A line of
+ * text 1.35 times its size is a fraction of a pixel tall, so an orb below one sits off the pixel
+ * grid. An element's screenshot snaps outward to whole pixels, and its middle then missed the
+ * disc's by most of a device pixel. That was enough to turn a palette with a sharp sweep across it
+ * by 12° with nothing drawn differently.
  */
 async function colorOf(tab: Page, bot: Bot, surface: Surface): Promise<Lab> {
   const orb = tab.locator(
     `[data-bot="${bot.id}"][data-surface="${surface}"] [role="img"][data-variant]`,
   );
-  const shot = (await orb.screenshot()).toString("base64");
-  return tab.evaluate(async (png) => {
-    const image = new Image();
-    image.src = `data:image/png;base64,${png}`;
-    await image.decode();
-    const canvas = document.createElement("canvas");
-    canvas.width = image.width;
-    canvas.height = image.height;
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("No canvas");
-    context.drawImage(image, 0, 0);
-    const { data, width, height } = context.getImageData(
-      0,
-      0,
-      image.width,
-      image.height,
-    );
-    const linear = (channel: number) => {
-      const c = channel / 255;
-      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  const box = await orb.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      x: rect.x + window.scrollX,
+      y: rect.y + window.scrollY,
+      width: rect.width,
+      height: rect.height,
     };
-    const radius = (Math.min(width, height) / 2) * 0.75;
-    let r = 0;
-    let g = 0;
-    let b = 0;
-    let n = 0;
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        if (Math.hypot(x + 0.5 - width / 2, y + 0.5 - height / 2) > radius)
-          continue;
-        const at = (y * width + x) * 4;
-        r += linear(data[at]);
-        g += linear(data[at + 1]);
-        b += linear(data[at + 2]);
-        n++;
+  });
+  const clip = {
+    x: Math.floor(box.x),
+    y: Math.floor(box.y),
+    width: Math.ceil(box.x + box.width) - Math.floor(box.x),
+    height: Math.ceil(box.y + box.height) - Math.floor(box.y),
+  };
+  const shot = (await tab.screenshot({ clip, fullPage: true })).toString(
+    "base64",
+  );
+  return tab.evaluate(
+    async ({ png, box, clip }) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${png}`;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("No canvas");
+      context.drawImage(image, 0, 0);
+      const { data, width, height } = context.getImageData(
+        0,
+        0,
+        image.width,
+        image.height,
+      );
+      const linear = (channel: number) => {
+        const c = channel / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      };
+      // Device pixels per CSS pixel, and the disc's middle and radius in the shot's device pixels.
+      const scale = width / clip.width;
+      const middleX = (box.x - clip.x + box.width / 2) * scale;
+      const middleY = (box.y - clip.y + box.height / 2) * scale;
+      const radius = (Math.min(box.width, box.height) / 2) * scale * 0.75;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let n = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (Math.hypot(x + 0.5 - middleX, y + 0.5 - middleY) > radius)
+            continue;
+          const at = (y * width + x) * 4;
+          r += linear(data[at]);
+          g += linear(data[at + 1]);
+          b += linear(data[at + 2]);
+          n++;
+        }
       }
-    }
-    [r, g, b] = [r / n, g / n, b / n];
-    // Linear sRGB to OKLab (https://bottosson.github.io/posts/oklab/).
-    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
-    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
-    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-    return [
-      0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
-      1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
-      0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
-    ] as [number, number, number];
-  }, shot);
+      [r, g, b] = [r / n, g / n, b / n];
+      // Linear sRGB to OKLab (https://bottosson.github.io/posts/oklab/).
+      const l = Math.cbrt(
+        0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
+      );
+      const m = Math.cbrt(
+        0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
+      );
+      const s = Math.cbrt(
+        0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b,
+      );
+      return [
+        0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+        1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+        0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+      ] as [number, number, number];
+    },
+    { png: shot, box, clip },
+  );
 }
 
 /** How far apart two colors are, in OKLab, ×100: about 2 is the least a person notices side by side. */
