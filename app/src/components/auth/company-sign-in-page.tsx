@@ -1,17 +1,39 @@
-import { useQuery } from "@tanstack/react-query";
+import {
+  IconBuilding,
+  IconChevronDown,
+  IconUserCircle,
+} from "@tabler/icons-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { useSignOut } from "@/components/app-sidebar/use-sign-out";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { companySignInQueryOptions } from "@/lib/auth/company-sign-in";
+import { useCurrentOrganizationId } from "@/lib/organizations/current";
+import { switchOrganizationMutationOptions } from "@/lib/organizations/mutations";
+import { useOrganizationChoices } from "@/lib/organizations/queries";
+import { queryClient } from "@/query-client";
 import { LinkCompanyAccount } from "./link-company-account";
+
+export const SWITCH_ORGANIZATION = "Switch organization";
 
 /**
  * The page for a member an organization holds out until they sign in through their company's identity provider
- * (Require SSO): somebody who joined by invitation, signed in some other way. Every screen of the organization is
+ * (Require SSO): somebody who joined by invitation, signed in some other way. Every screen of that organization is
  * refused to them, so this stands in for whichever one they opened, in the sign-in screen's own layout.
  *
  * It says why in the server's own sentence, and offers the way in: Link your company account, through a provider that
- * counts for the organization, which the server tells them even while it holds them out. Sign out is always there.
+ * counts for the organization, which the server tells them even while it holds them out. The rule is that one
+ * organization's, so they keep working in their others: Switch organization lists those, as the account menu does,
+ * and opens the app in the one they pick. Sign out is always there.
  */
 export function CompanySignInPage({ refusal }: { refusal: string }) {
   const signOut = useSignOut();
@@ -32,6 +54,7 @@ export function CompanySignInPage({ refusal }: { refusal: string }) {
         </p>
         <div className="mt-8 flex w-full flex-col gap-2">
           <LinkCompanyAccount providers={providers} size="lg" />
+          <OtherOrganizations />
           <Button
             className="h-10 w-full tracking-tight"
             disabled={signOut.pending}
@@ -44,5 +67,73 @@ export function CompanySignInPage({ refusal }: { refusal: string }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The person's other organizations, to work in one of them instead. Nothing when they have none. Once the server has
+ * switched, the app opens at home in the one they picked: the page they were on may be the held organization's own.
+ */
+function OtherOrganizations() {
+  const router = useRouter();
+  const navigate = useNavigate();
+  const current = useCurrentOrganizationId();
+  const others = (useOrganizationChoices()?.organizations ?? []).filter(
+    (organization) => organization.id !== current,
+  );
+  const switched = switchOrganizationMutationOptions(queryClient);
+  const switching = useMutation({
+    ...switched,
+    /*
+     * Home, and the sign-in gate asked again, only once the app works in the one they picked: asked sooner, the gate
+     * asks in the held organization and is refused again. Here rather than on the call, whose callbacks are lost
+     * when the refusal draws this page afresh.
+     */
+    onSuccess: async (...done) => {
+      await switched.onSuccess?.(...done);
+      await navigate({ to: "/" });
+      await router.invalidate();
+    },
+  });
+  if (others.length === 0) return null;
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              className="h-10 w-full tracking-tight"
+              disabled={switching.isPending}
+              size="lg"
+              variant="outline"
+            />
+          }
+        >
+          {switching.isPending ? "Switching…" : SWITCH_ORGANIZATION}
+          <IconChevronDown className="text-muted-foreground" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent className="w-(--anchor-width)">
+          <DropdownMenuGroup>
+            <DropdownMenuLabel className="px-2">
+              Organizations
+            </DropdownMenuLabel>
+            {others.map((organization) => (
+              <DropdownMenuItem
+                key={organization.id}
+                onClick={() => switching.mutate(organization.id)}
+              >
+                {organization.personal ? <IconUserCircle /> : <IconBuilding />}
+                <span className="min-w-0 truncate">{organization.name}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {switching.error ? (
+        <p className="text-center text-destructive text-sm" role="alert">
+          {switching.error.message}
+        </p>
+      ) : null}
+    </>
   );
 }
