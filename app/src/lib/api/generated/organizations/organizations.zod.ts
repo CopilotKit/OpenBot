@@ -69,9 +69,9 @@ export const ListOrganizationsResponse = zod.object({
             .describe("Its short name, which also addresses it."),
           name: zod.string().describe("What people call it."),
           role: zod
-            .enum(["owner", "admin", "member"])
+            .string()
             .describe(
-              "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+              "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
             ),
           active: zod
             .boolean()
@@ -118,7 +118,7 @@ export const CreateOrganizationHeader = zod.object({
 export const createOrganizationBodyNameMax = 100;
 
 export const createOrganizationBodyNameRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createOrganizationBodySlugMin = 2;
 export const createOrganizationBodySlugMax = 48;
@@ -157,9 +157,9 @@ export const CreateOrganizationResponse = zod.object({
       slug: zod.string().describe("Its short name, which also addresses it."),
       name: zod.string().describe("What people call it."),
       role: zod
-        .enum(["owner", "admin", "member"])
+        .string()
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+          "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
       active: zod
         .boolean()
@@ -173,7 +173,7 @@ export const CreateOrganizationResponse = zod.object({
 });
 
 /**
- * Return one page of the organization's members, in the order they joined. Any member can read it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's members, in the order they joined. Any member can read it. search narrows the list to the members whose name or address matches it, ignoring case, best matches first: those whose name, a word of their name (a first or a last name) or their address starts with it, then those whose name or address holds it, each group in alphabetical order of name, then address. A search finds only this organization's current members: never somebody it removed, somebody turned away from this OpenBot, or a member of another organization only. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List an organization's members
  */
 
@@ -186,6 +186,11 @@ export const ListOrganizationMembersParams = zod.object({
     ),
 });
 
+export const listOrganizationMembersQuerySearchMax = 200;
+
+export const listOrganizationMembersQuerySearchRegExp = new RegExp(
+  "^[^\\x00]*$",
+);
 export const listOrganizationMembersQueryLimitDefault = 50;
 export const listOrganizationMembersQueryLimitMax = 100;
 
@@ -196,6 +201,14 @@ export const listOrganizationMembersQueryCursorRegExp = new RegExp(
 );
 
 export const ListOrganizationMembersQueryParams = zod.object({
+  search: zod
+    .string()
+    .max(listOrganizationMembersQuerySearchMax)
+    .regex(listOrganizationMembersQuerySearchRegExp)
+    .optional()
+    .describe(
+      "The start of a name, a first or last name, or an address, or a part of one, matched without regard to case. Leading and trailing spaces are ignored; empty lists everybody.",
+    ),
   limit: zod
     .int()
     .min(1)
@@ -232,9 +245,9 @@ export const ListOrganizationMembersResponse = zod.object({
           assignableRoles: zod
             .array(
               zod
-                .enum(["owner", "admin", "member"])
+                .string()
                 .describe(
-                  "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+                  "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
                 ),
             )
             .describe(
@@ -251,13 +264,19 @@ export const ListOrganizationMembersResponse = zod.object({
             .nullable()
             .describe("Their picture's address, when they have one."),
           role: zod
-            .enum(["owner", "admin", "member"])
+            .string()
             .describe(
-              "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+              "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
             ),
           joinedAt: zod.iso
             .datetime({ offset: true })
             .describe("When they became a member."),
+          notOpenedYet: zod
+            .boolean()
+            .optional()
+            .describe(
+              "True for somebody who is a member of the organization where it is kept, at OpenBot by CopilotKit on a hosted OpenBot, and hasn't opened OpenBot yet. Until they do, they have no OpenBot account: id is their id there, and email is empty when none is known. An owner or an admin removes them by that id, as any member (removable says whether they can be). They can't be given another role here until they open OpenBot (assignableRoles is empty). Absent for everybody else.",
+            ),
         })
         .describe("One member of an organization."),
     )
@@ -301,7 +320,7 @@ export const UpdateOrganizationHeader = zod.object({
 export const updateOrganizationBodyNameMax = 100;
 
 export const updateOrganizationBodyNameRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const UpdateOrganizationBody = zod.object({
@@ -325,9 +344,9 @@ export const UpdateOrganizationResponse = zod.object({
       slug: zod.string().describe("Its short name, which also addresses it."),
       name: zod.string().describe("What people call it."),
       role: zod
-        .enum(["owner", "admin", "member"])
+        .string()
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+          "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
       active: zod
         .boolean()
@@ -339,6 +358,34 @@ export const UpdateOrganizationResponse = zod.object({
       "One organization, as one of its members sees it. role and active are the server's verdicts about the caller.",
     ),
 });
+
+/**
+ * Delete the organization and what is in it. Nobody can work in it again: its Bots stop, its computers are removed, the API keys made in it stop working, and it leaves every member's list of organizations. Its members keep their accounts and their other organizations. Only an owner of this organization can. A person's own organization and `default` stay, and are refused. A repeated request with the same Idempotency-Key returns the first result.
+ * @summary Delete an organization
+ */
+
+export const DeleteOrganizationParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+});
+
+export const deleteOrganizationHeaderIdempotencyKeyMax = 128;
+
+export const DeleteOrganizationHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(deleteOrganizationHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const DeleteOrganizationResponse = zod.void();
 
 /**
  * Give a member of the organization another role. An owner or an admin changes anybody between admin and member. Only an owner makes somebody an owner, or changes an owner's role, their own included, and the organization always keeps an owner: the last one cannot step down. A person's own organization keeps exactly its one owner. The members list says which roles the caller may give each member, as assignableRoles. A repeated request with the same Idempotency-Key and body returns the first result.
@@ -397,9 +444,9 @@ export const UpdateOrganizationMemberResponse = zod.object({
       assignableRoles: zod
         .array(
           zod
-            .enum(["owner", "admin", "member"])
+            .string()
             .describe(
-              "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+              "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
             ),
         )
         .describe(
@@ -416,13 +463,19 @@ export const UpdateOrganizationMemberResponse = zod.object({
         .nullable()
         .describe("Their picture's address, when they have one."),
       role: zod
-        .enum(["owner", "admin", "member"])
+        .string()
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+          "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
       joinedAt: zod.iso
         .datetime({ offset: true })
         .describe("When they became a member."),
+      notOpenedYet: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True for somebody who is a member of the organization where it is kept, at OpenBot by CopilotKit on a hosted OpenBot, and hasn't opened OpenBot yet. Until they do, they have no OpenBot account: id is their id there, and email is empty when none is known. An owner or an admin removes them by that id, as any member (removable says whether they can be). They can't be given another role here until they open OpenBot (assignableRoles is empty). Absent for everybody else.",
+        ),
     })
     .describe("One member of an organization."),
 });
@@ -525,7 +578,7 @@ export const ListOrganizationInvitationsResponse = zod.object({
             .enum(["admin", "member"])
             .describe("A role an admin can give a person."),
           status: zod
-            .enum(["pending", "expired", "declined"])
+            .string()
             .describe(
               "pending while it waits for an answer, expired once its seven days ran out, declined when the person turned it down.",
             ),
@@ -614,7 +667,7 @@ export const CreateOrganizationInvitationResponse = zod.object({
         .enum(["admin", "member"])
         .describe("A role an admin can give a person."),
       status: zod
-        .enum(["pending", "expired", "declined"])
+        .string()
         .describe(
           "pending while it waits for an answer, expired once its seven days ran out, declined when the person turned it down.",
         ),
@@ -736,7 +789,7 @@ export const ListInvitationsResponse = zod.object({
             .enum(["admin", "member"])
             .describe("A role an admin can give a person."),
           status: zod
-            .enum(["pending", "expired", "accepted", "declined", "canceled"])
+            .string()
             .describe(
               "pending while it can still be answered. expired once its seven days ran out, accepted or declined once the person answered, canceled when the organization took it back.",
             ),
@@ -805,7 +858,7 @@ export const GetInvitationResponse = zod.object({
         .enum(["admin", "member"])
         .describe("A role an admin can give a person."),
       status: zod
-        .enum(["pending", "expired", "accepted", "declined", "canceled"])
+        .string()
         .describe(
           "pending while it can still be answered. expired once its seven days ran out, accepted or declined once the person answered, canceled when the organization took it back.",
         ),
@@ -873,9 +926,9 @@ export const AcceptInvitationResponse = zod.object({
       slug: zod.string().describe("Its short name, which also addresses it."),
       name: zod.string().describe("What people call it."),
       role: zod
-        .enum(["owner", "admin", "member"])
+        .string()
         .describe(
-          "The person's role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.",
+          "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
       active: zod
         .boolean()

@@ -164,6 +164,41 @@ describe("toMessageContent", () => {
     expect(parts[0]?.type).toBe("document");
   });
 
+  /*
+   * THE SIZE AND THE TYPE THE SERVER FOUND GO WITH THE PART, so a transcript can decide how to draw
+   * a picture without fetching it. Pictures go up to 100MB, and a tile that downloads the whole file
+   * to draw a 128px thumbnail costs every reader that much on first paint.
+   */
+  test("a stored picture carries its size and the type the server found", () => {
+    const picture = attachment({
+      id: "att_big",
+      type: "image",
+      size: 99_553_808,
+      source: {
+        type: "url",
+        value: "https://example.test/placeholder",
+        mimeType: "image/png",
+      },
+      metadata: { attachmentId: "att_big", filename: "site-survey.png" },
+    });
+
+    const [part] = toMessageContent("", [picture]) as unknown[];
+
+    expect(part).toEqual({
+      type: "image",
+      source: {
+        type: "url",
+        value: attachmentUrl("att_big"),
+        mimeType: "image/png",
+      },
+      metadata: {
+        attachmentId: "att_big",
+        filename: "site-survey.png",
+        sizeBytes: 99_553_808,
+      },
+    });
+  });
+
   test("the ref's id comes from metadata.attachmentId, not attachment.id", () => {
     const image = attachment({
       // The SDK's own client-side upload placeholder — must never reach the wire.

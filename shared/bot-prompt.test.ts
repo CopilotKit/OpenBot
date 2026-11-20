@@ -273,6 +273,75 @@ describe("how a Bot asks, and how an unattended run ends", () => {
     );
   });
 
+  test("what is private in an app the Bot holds nothing for starts with that app's card, and so does a not-found that could be private", () => {
+    // Found on the Desktop: a Bot made to follow a company's repositories held no GitHub tools,
+    // searched the web, met a private repository as GitHub's 404 and told the person it was
+    // probably private or did not exist. The card that connects GitHub was one call away.
+    for (const brought of [false, true]) {
+      const [howTo] = workingGuidance({ brought, untrusted: "" });
+      const said = flat(howTo ?? "");
+      expect(said).toContain(
+        "when a request needs that private content from an app you hold no tools for, call show_app_access with that app's name before you look on the web",
+      );
+      expect(said).toContain("the web shows only the public part");
+      // A 404 from a site that hides what is private is not an answer, and neither is a guess. Only
+      // on the web: a not-found from the app's own tools is the app answering for their account.
+      expect(said).toContain(
+        "when something of theirs you looked for on the web comes back not found, or with no access, and could be private to them",
+      );
+      expect(said).toContain("their team's repository that answers 404");
+      expect(said).toContain(
+        "that has not shown it is missing, so never say it does not exist",
+      );
+      expect(said).toContain(
+        "never leave the person only a guess that it is private",
+      );
+      // Being told it is private is the same cue, never news that asks nothing.
+      expect(said).toContain(
+        "call it too when the person tells you something is private",
+      );
+      expect(said).toContain("call it once for each app");
+      // A Bot that does not hold the card still names the app to connect.
+      expect(said).toContain(
+        "or you do not hold that tool, call no card: say which app would need connecting",
+      );
+      // Beside the rule that nothing found is not nothing there, before the work: a 404 page is
+      // an answer that came back, not a failed call.
+      const card = said.indexOf("show_app_access");
+      expect(card).toBeGreaterThan(said.indexOf("a search that finds nothing"));
+      expect(card).toBeLessThan(said.indexOf("when a call fails"));
+    }
+  });
+
+  test("only what is private to the person or their team gets the card: anything public still goes to the web", () => {
+    // A rule for "what is kept in an app" also covers a public repository's release, a public
+    // document and a dead public link, which would stall on a card the person never needed.
+    const said = flat(HOW_TO_WORK_GUIDANCE);
+    expect(said).toContain(
+      "private to them or their team: their own repositories, mail, files, documents and workspace data",
+    );
+    expect(said).toContain(
+      "anything public still goes to the web first, with no card: an open-source project, a public page or document, a link anyone can open",
+    );
+    expect(said).toContain(
+      "a public link that comes back not found is just not found: say so",
+    );
+    // Never the old, unscoped wording.
+    expect(said).not.toContain("when a request needs what is in an app");
+  });
+
+  test("a run nobody is watching shows no card, and says which app needs connecting instead", () => {
+    // A routine holds the card tool too, and a card there reaches nobody. Worded with the routine's
+    // own first sentence, so the two read as one cue.
+    const said = flat(HOW_TO_WORK_GUIDANCE);
+    expect(said).toContain(
+      "when nobody is watching this run, or you do not hold that tool, call no card: say which app would need connecting",
+    );
+    expect(flat(runModeGuidance("routine"))).toStartWith(
+      "nobody is watching this run",
+    );
+  });
+
   test("a claim needs a tool result, and an app change is read back once before it is called done", () => {
     const said = flat(HOW_TO_WORK_GUIDANCE);
     expect(said).toContain(
@@ -398,6 +467,45 @@ describe("how a Bot asks, and how an unattended run ends", () => {
     // On apps no test asks about.
     for (const app of ["gmail", "sheets", "slack", "smartlead"])
       expect(said).not.toContain(app);
+  });
+
+  test("a Bot talks about its work in plain words, never its tools' names or machinery", () => {
+    // Found on the Desktop: replies named "run_subagent", "delegate" and "deferred tools", and read
+    // like a debug log. The rule covers what a Bot can do, what it did and what failed, on every
+    // harness, and is shown with the words to use instead.
+    const said = flat(REPLY_GUIDANCE);
+    expect(said).toContain(
+      "talk about your work in the person's words, never in your own machinery's",
+    );
+    expect(said).toContain(
+      "say what you can do, what you did and what did not work as things done in their apps",
+    );
+    expect(said).toContain("'i looked into each account separately'");
+    expect(said).toContain("'i've started this as a task'");
+    expect(said).toContain(
+      "never name a tool, a function or an app action's code name, in code formatting or otherwise",
+    );
+    expect(said).toContain(
+      "never say how your tools are found, loaded, handed out or run",
+    );
+    expect(said).toContain("never quote an error the way a tool gave it");
+    // Said once, in the reply rules: the sources section points at it rather than saying it again.
+    expect(flat(PROVENANCE_GUIDANCE)).not.toContain("never name a tool");
+    expect(flat(PROVENANCE_GUIDANCE)).toContain(
+      "cite it in plain words, as the reply rules below say",
+    );
+  });
+
+  test("the working rules give a Bot no app action's code name to repeat, and no word for how tools load", () => {
+    // The rule used to name GMAIL_GET_PROFILE as what not to say, which is one more name to say.
+    for (const model of ["claude-sonnet-5-5", "gpt-5.6-terra"])
+      for (const brought of [false, true]) {
+        const rules = workingGuidance({ brought, untrusted: "", model }).join(
+          "\n",
+        );
+        expect(rules.toLowerCase()).not.toContain("deferred");
+        expect(rules).not.toMatch(/\b[A-Z]+_[A-Z_]{3,}\b/);
+      }
   });
 
   test("an inference, however likely, is still called unconfirmed, on every model", () => {

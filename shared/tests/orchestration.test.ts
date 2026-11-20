@@ -160,6 +160,18 @@ describe("how a Bot answers a short ask itself", () => {
  * order itself, and wrote 👍 as a reply beside its 👍 reaction.
  */
 describe("how a Bot that holds delegate is told to work", () => {
+  test("the tool is named where it is called, never as what the Bot is", () => {
+    // "When you hold delegate, you are the person's point of contact" is a sentence a Bot can say
+    // back about itself, and the section is only given to a run that holds the tool.
+    expect(DELEGATING_GUIDANCE).not.toContain("When you hold");
+    expect(
+      DELEGATING_GUIDANCE.startsWith("You are the person's point of contact,"),
+    ).toBe(true);
+    expect(DELEGATING_GUIDANCE).toContain(
+      "Hand the other work the person asked for to a task with delegate",
+    );
+  });
+
   test("a brief is not told to stop short: the work's own checks stay in it", () => {
     // Told to end a brief at what to check, Claude wrote shorter briefs: of 24 replayed briefs for
     // "emails from the last day", 4 kept a rolling 24 hours (17 without the line), and the task then
@@ -237,6 +249,38 @@ describe("how a Bot that holds delegate is told to work", () => {
     expect(DELEGATING_GUIDANCE).toContain("exactly one of these three things");
     expect(DELEGATING_GUIDANCE).toContain(
       "Never react to a message you answer or hand to a task",
+    );
+  });
+
+  test("an answer to what a task reported goes to that task, never a reaction", () => {
+    // Found on the Desktop: a task reported a repository as probably private, the person said "it's
+    // private", and the Bot reacted 👍. That was the one fact the task needed.
+    const paragraphs = DELEGATING_GUIDANCE.split("\n\n");
+    const react =
+      paragraphs.find((paragraph) => paragraph.startsWith("- React with")) ??
+      "";
+    expect(react).toContain(
+      "or to one that answers what a task reported, such as that something it could not find is private",
+    );
+    expect(react).toContain(
+      "that is more for the task, and goes to it with follow_up",
+    );
+    const pointed =
+      paragraphs.find((paragraph) =>
+        paragraph.includes("pass it on with follow_up, naming that task"),
+      ) ?? "";
+    expect(pointed).toContain("or answers what it reported");
+    expect(pointed).toContain('"it\'s private"');
+  });
+
+  test("a brief asks for all the person asked for, never only what seems reachable", () => {
+    // Found on the Desktop: holding no GitHub tools, a Bot briefed its tasks to read a company's
+    // "public repositories", so neither task asked for GitHub and both missed the private one.
+    expect(DELEGATING_GUIDANCE).toContain(
+      "Brief all of what they asked for, never narrowed to what you guess can be reached, such as only what is public",
+    );
+    expect(DELEGATING_GUIDANCE).toContain(
+      "the task asks the person for an app it needs",
     );
   });
 

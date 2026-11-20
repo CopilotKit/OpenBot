@@ -81,5 +81,12 @@ export function apiKeyListQueryOptions() {
         throw error;
       }
     },
+    /*
+     * A key's last use changes away from this screen: a script used it while the person was in
+     * their terminal. Coming back to the window, or to the screen, asks again, so "Never used" is
+     * not drawn from the list read before.
+     */
+    refetchOnWindowFocus: "always",
+    refetchOnMount: "always",
   });
 }

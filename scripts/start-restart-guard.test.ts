@@ -86,6 +86,7 @@ async function runStart({
     "WORKER_SHARED_SECRET=worker-secret",
     "MANAGED_AGENT_TOKEN=managed-token",
     "AGENT_TOOL_TOKEN=agent-tool-token",
+    "OPENBOT_INSTALL_TOKEN=install-token",
     "MANAGED_AGENT_AG_UI_URL=http://127.0.0.1:4201/",
     "OPENBOT_ONE_COMPUTER_EACH=true",
     "DATABASE_URL=postgres://openbot:openbot@localhost:5432/openbot",
@@ -670,6 +671,70 @@ describe("start.sh runtime health", () => {
   });
 });
 
+/**
+ * The personal edition only admits requests carrying its install's token. start.sh runs the server
+ * in a container, single-user unless `.env` signs people in, so it mints the token once, keeps it in
+ * `.env` like the other secrets it generates, hands it to the server, sends it on its own checks of
+ * the server, and opens a single-user OpenBot through the address that lets a browser in.
+ */
+describe("start.sh and the install's token", () => {
+  test("mints it once, writes it to .env and hands it to the server", async () => {
+    const result = await runStart({ omitFromEnv: ["OPENBOT_INSTALL_TOKEN"] });
+    expect(result.exitCode).toBe(0);
+    const minted = /^OPENBOT_INSTALL_TOKEN=([0-9a-f]{64})$/m.exec(
+      result.envFile,
+    )?.[1];
+    expect(minted).toBeDefined();
+    expect(
+      serverSetting(result.serverEnvironment, "OPENBOT_INSTALL_TOKEN"),
+    ).toBe(minted);
+    expect(result.stdout).toContain(
+      "a secret was generated this run, so the server is restarted",
+    );
+  });
+
+  test("keeps the one .env already has", async () => {
+    const result = await runStart();
+    expect(result.exitCode).toBe(0);
+    expect(result.envFile.match(/^OPENBOT_INSTALL_TOKEN=/gm)).toEqual([
+      "OPENBOT_INSTALL_TOKEN=",
+    ]);
+    expect(
+      serverSetting(result.serverEnvironment, "OPENBOT_INSTALL_TOKEN"),
+    ).toBe("install-token");
+    expect(result.stdout).not.toContain("a secret was generated this run");
+  });
+
+  test("asks the server as its one person with it", async () => {
+    const result = await runStart();
+    expect(result.exitCode).toBe(0);
+    const asked = result.curlLog
+      .split("\n")
+      .filter((line) => line.includes("/api/copilotkit/info"));
+    expect(asked.length).toBeGreaterThan(0);
+    for (const line of asked)
+      expect(line).toContain("X-OpenBot-Install-Token: install-token");
+  });
+
+  test("opens a single-user OpenBot through the address that lets the browser in", async () => {
+    const result = await runStart({
+      settings: { OPENBOT_SINGLE_USER: "true" },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(
+      "Ready. http://localhost:3010/api/install/enter?token=install-token&to=/",
+    );
+  });
+
+  test("opens one where people sign in at its own address", async () => {
+    const result = await runStart();
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Ready. http://localhost:3010");
+    expect(result.stdout).not.toContain("/api/install/enter");
+    expect(result.stdout).not.toContain("install-token");
+  });
+});
+
 describe("start.sh under the wrong shell", () => {
   /**
    * THE WRONG INVOCATION SAYS SO, AND SAYING NOTHING IS THE DEFECT.
@@ -838,6 +903,8 @@ describe("start.sh and the managed Bot", () => {
    * The managed Bot is the LangGraph harness (agent-langgraph-agui), on whichever provider
    * BOT_PROVIDER names. agent-bot, an OpenAI-only proof of concept, and the TypeScript
    * agent-langgraph were retired, so neither is started or waited for, whichever provider is picked.
+   * The TypeScript LangGraph engine (agent-langgraph-ts), which new Bots run on, starts beside the
+   * managed Bot, is waited for on its own port, and the server is told where it is.
    */
   test.each([
     ["the default provider", {}],
@@ -855,12 +922,16 @@ describe("start.sh and the managed Bot", () => {
       stderr: "",
     });
     expect(result.dockerLog).toContain(
-      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui",
+      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui agent-langgraph-ts",
     );
-    expect(result.dockerLog).not.toMatch(/agent-bot|agent-langgraph(?!-agui)/);
+    expect(result.dockerLog).not.toMatch(
+      /agent-bot|agent-langgraph(?!-agui|-ts)/,
+    );
     expect(result.curlLog).toContain("http://127.0.0.1:4201/health");
+    expect(result.curlLog).toContain("http://127.0.0.1:4215/health");
     expect(result.curlLog).not.toContain(":4200/health");
     expect(result.stdout).toContain("agent-langgraph-agui ready");
+    expect(result.stdout).toContain("agent-langgraph-ts ready");
     expect(result.stdout).not.toMatch(/agent-bot/);
     expect(result.stdout).toContain(
       "managed coworker endpoint: http://127.0.0.1:4201/",
@@ -981,7 +1052,7 @@ describe("start.sh and the OpenBot images", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.dockerLog).toContain(
-      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui tool=http://server:3001/api/agent-tools/call network=openbot_default tag=",
+      "compose up -d --build postgres supervisor agent-computer agent-langgraph-agui agent-langgraph-ts tool=http://server:3001/api/agent-tools/call network=openbot_default tag=",
     );
   });
 

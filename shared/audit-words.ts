@@ -49,6 +49,7 @@ const ACTIONS: Readonly<Record<string, string>> = {
  * its stored name.
  */
 export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
+  "ai_connection.replaced": "Change the AI provider",
   "configuration.changed": "Change a setting",
   "credential.created": "Save a credential",
   "credential.rotated": "Replace a credential",
@@ -123,6 +124,7 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "computer.updated": "Update the computer",
   "computer.suspended": "Turn off an idle computer",
   "computer.resumed": "Start a computer again",
+  "computer.limit_reached": "Start a new computer",
   "computer.policy_loaded": "Start the computer",
   "computer.policy_changed": "Change the boundaries",
   "computer.policy_translated": "Write a boundary from a description",

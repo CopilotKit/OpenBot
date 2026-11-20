@@ -23,6 +23,7 @@ import {
   type Shortfall,
   setUpLocalEval,
   signInToCopilotKit,
+  type UpdateState,
   updateStepSaid,
   wakeEngine,
 } from "./localEvalCli";
@@ -31,6 +32,7 @@ import {
   localReadiness,
   onInstalledReleaseSaid,
   podmanTooSmallSaid,
+  resourcesShortSaid,
 } from "./localReadiness";
 import { PodmanTooSmall, usePodmanPlan } from "./PodmanTooSmall";
 import {
@@ -139,6 +141,36 @@ function isReady(report: LocalReport): boolean {
     openBot: "connected",
     provider: "validated",
   }).open;
+}
+
+/*
+ * A back end that runs but does not answer yet because some of its services are still coming up:
+ * `degraded`, its checks failing, and a service the CLI saw running or pending but not ready. It
+ * gets there on its own, so it is waited on like one that says `starting`. Found in a dogfooding
+ * report on a Mac: the server stopped mid-use, and on Retry six of eight services were ready and
+ * the other two were running but not ready yet. The window gave up on the first answer.
+ *
+ * Not a back end with a disk OpenBot found short (`shortfall`), or with an update on record: those
+ * do not come back by themselves, and their rows say what to do. Not one the CLI did not say the
+ * services of, as an older one does not: nothing says it is on its way.
+ */
+function servicesComingUp(report: LocalReport): boolean {
+  if (
+    report.outcome !== "completed" ||
+    report.reason !== null ||
+    report.readiness !== "degraded" ||
+    report.checksPassed === true ||
+    report.shortfall ||
+    (report.licence !== "valid" && report.licence !== "unknown") ||
+    report.stack?.unfinishedUpdate
+  ) {
+    return false;
+  }
+  return (report.stack?.observed?.services ?? []).some(
+    (service) =>
+      !service.ready &&
+      (service.phase === "Running" || service.phase === "Pending"),
+  );
 }
 
 type State = {
@@ -264,6 +296,29 @@ function updateFailedSaid(step: string | null, runsWhatItHad = true): string {
 /** An update of the back end that stopped downloading: they run the version they had. */
 const UPDATE_STALLED_SAID =
   "The update of OpenBot's services stopped downloading, so they run the version they had. OpenBot picks up the download the next time it starts.";
+
+/**
+ * An update that failed after it began updating the data (`UpdateState`), said in place of "so they
+ * run the version they had", which is no longer true. `migrated`: the data is on the new release,
+ * and only the new services' start did not finish. `migrating`: it stopped part-way through the
+ * data. Either way `local update` resumes from the record, and the next Start runs it.
+ *
+ * Found on a Mac, rc.11 to rc.13: the CLI was stopped at `migrated` and the repair after it failed.
+ * The row said the services ran the version they had; the next launch finished the update.
+ */
+const UPDATE_PAST_DATA_SAID: Partial<Record<UpdateState, string>> = {
+  migrated:
+    "The update of OpenBot's services didn't finish starting. Your data is kept, and OpenBot finishes the update the next time it starts.",
+  migrating:
+    "The update of OpenBot's services stopped while updating your data. Your data is kept, and OpenBot picks up the update the next time it starts.",
+};
+
+/** The note on the update's row: nothing was updated, or the update began and did not finish. */
+function updateNote(said: string): string {
+  return Object.values(UPDATE_PAST_DATA_SAID).includes(said)
+    ? "Not finished"
+    : "Not updated";
+}
 
 export type LocalSequence = State & {
   /** Set up, connected and reported ready and valid, and waiting for the go-ahead to start. */
@@ -551,8 +606,18 @@ export function useLocalSequence({
     const unfollowSteps = followUpdateSteps(started.attempt, token, updating);
     let updated = false;
     let stalled = false;
+    // Not started, for lack of room (`local_eval::update_room`): nothing changed, and the run stops
+    // here with what is short, before OpenBot's own update.
+    let short: Shortfall | null = null;
     try {
-      updated = (await started.report).outcome === "completed";
+      const answer = await started.report;
+      updated = answer.outcome === "completed";
+      if (
+        answer.reason === "resources-short" &&
+        answer.shortfall?.updating === true
+      ) {
+        short = answer.shortfall;
+      }
     } catch (error) {
       updated = false;
       stalled =
@@ -568,6 +633,20 @@ export function useLocalSequence({
     if (generation.current === token)
       update({ trailKind: null, since: Date.now() });
     if (generation.current !== token) return false;
+    if (short) {
+      update({
+        detail: null,
+        download: null,
+        updating: false,
+        running: false,
+        blocked: {
+          said: resourcesShortSaid(short),
+          reason: "resources-short",
+          shortfall: short,
+        },
+      });
+      return false;
+    }
     update({
       detail: null,
       download: null,
@@ -620,7 +699,8 @@ export function useLocalSequence({
 
   /**
    * Status until the CLI reports ready and valid, or anything that waiting will not change.
-   * Only "starting" is waited on: unknown is what an older CLI always says. A stopped stack is
+   * Only "starting" is waited on, and a back end whose services are still coming up
+   * (`servicesComingUp`): unknown is what an older CLI always says. A stopped stack is
    * started once, as its own readiness row offers.
    */
   async function waitForReady(
@@ -715,7 +795,14 @@ export function useLocalSequence({
         !woken &&
         found.readiness === "degraded" &&
         found.checksPassed !== true;
-      if (failedTo && (failedStep || leftNotWorking)) {
+      // An update that got as far as the data does not leave the version they had.
+      const pastData =
+        !leftNotWorking && unfinished?.state
+          ? UPDATE_PAST_DATA_SAID[unfinished.state]
+          : undefined;
+      if (failedTo && pastData) {
+        update({ updateFailed: pastData, updateBroke: false });
+      } else if (failedTo && (failedStep || leftNotWorking)) {
         update({
           updateFailed: updateFailedSaid(failedStep ?? null, !leftNotWorking),
           updateBroke: leftNotWorking,
@@ -761,12 +848,16 @@ export function useLocalSequence({
       }
       const waking =
         woken && found.readiness === "degraded" && unfinished !== null;
+      const comingUp = servicesComingUp(found);
       if (
         !waking &&
+        !comingUp &&
         (found.readiness !== "starting" || row.state === "blocked")
       ) {
         return stuck(found);
       }
+      // Still not working when the time is up: said as it is, and the log says how long it waited.
+      if (comingUp && tries >= pollDelays.length) return stuck(found);
       if (tries >= pollDelays.length) {
         const timedOut =
           "OpenBot didn't get ready in time. Retry to check again.";
@@ -1057,7 +1148,7 @@ export function useLocalSequence({
                 : { step: label, ok: true, detail: "" };
       if (phase !== "wait" || !state.updateFailed) return [row];
       // Failed only when it left the services not working, which stops the Start. Otherwise a
-      // note: the services run the version they had, and the Start carries on over them.
+      // note: the services run the version they had, or the next Start finishes the update.
       return [
         row,
         state.updateBroke
@@ -1065,7 +1156,7 @@ export function useLocalSequence({
           : {
               step: UPDATING,
               ok: true,
-              note: "Not updated",
+              note: updateNote(state.updateFailed),
               detail: state.updateFailed,
             },
       ];
@@ -1099,9 +1190,16 @@ export function LocalIntelligence({
   open = [],
   releaseDue = false,
   waitingOn = null,
+  room = null,
 }: {
   sequence: LocalSequence;
   offerStart?: boolean;
+  /**
+   * An update this computer has no room for (`local_eval::update_room`), said with its figures
+   * under the screen's heading, with Retry beside it. The row that stopped says why in a few
+   * words, the rows hold no Retry of their own, and the logs are offered once, here.
+   */
+  room?: { reason: string; logs: Problem } | null;
   /**
    * What the person has to choose before the sequence can go on, when it stopped for that: its
    * row waits on them, with no Failed and no Retry (leftover data, `StartFresh`).
@@ -1137,14 +1235,18 @@ export function LocalIntelligence({
       ? sequence.steps.map((row) =>
           row.ok ? row : { ...row, ok: true, waiting: true, detail: waitingOn },
         )
-      : plan && tooSmall
-        ? // What happened on the row; what to do in the card under it.
-          sequence.steps.map((row) =>
-            row.ok
-              ? row
-              : { ...row, detail: podmanTooSmallSaid(tooSmall, plan) },
+      : room && stopped
+        ? sequence.steps.map((row) =>
+            row.ok ? row : { ...row, detail: room.reason },
           )
-        : sequence.steps;
+        : plan && tooSmall
+          ? // What happened on the row; what to do in the card under it.
+            sequence.steps.map((row) =>
+              row.ok
+                ? row
+                : { ...row, detail: podmanTooSmallSaid(tooSmall, plan) },
+            )
+          : sequence.steps;
 
   return (
     <section aria-label="OpenBot on this computer">
@@ -1159,7 +1261,9 @@ export function LocalIntelligence({
       <SetupProgress steps={rows} showElapsed={!journeying} />
       {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />
-      {stopped && problem && !waitingOn && <Failure problem={problem} />}
+      {stopped && problem && !waitingOn && !room && (
+        <Failure problem={problem} />
+      )}
       {plan && tooSmall && !waitingOn && (
         <PodmanTooSmall
           key={plan.machine}
@@ -1169,7 +1273,7 @@ export function LocalIntelligence({
         />
       )}
       {/* Nothing else to offer under a too-small Podman machine: its card holds Retry. */}
-      {!(plan && tooSmall) && (
+      {!(plan && tooSmall) && !(room && stopped) && (
         <div className="row">
           {running && at !== "start" && (
             <button type="button" className="quiet" onClick={sequence.cancel}>
@@ -1187,11 +1291,15 @@ export function LocalIntelligence({
             </p>
           )}
           {/* A Podman machine too small has its Retry in its card (`PodmanTooSmall`). */}
-          {stopped && !waitingOn && !backendLost(sequence) && !plan && (
-            <button type="button" onClick={sequence.retry}>
-              Retry
-            </button>
-          )}
+          {stopped &&
+            !waitingOn &&
+            !room &&
+            !backendLost(sequence) &&
+            !plan && (
+              <button type="button" onClick={sequence.retry}>
+                Retry
+              </button>
+            )}
           {offerStart && !running && at === null && (
             <button type="button" onClick={sequence.start}>
               Start OpenBot
@@ -1199,6 +1307,21 @@ export function LocalIntelligence({
           )}
         </div>
       )}
+      {/* A stop said on its row ("Retry. If it stops again, copy the logs below.") has its logs
+          here, under Retry, as the status card on the other screens has (`LocalStatus`). A failure
+          with a problem has them in its own card (`Failure`), a stop the person clears (signing
+          in, the agreement, Start fresh) has its own action instead, and their own Cancel is no
+          failure to troubleshoot. */}
+      {stopped && room && <TroubleshootingLogs problem={room.logs} />}
+      {stopped &&
+        !room &&
+        !problem &&
+        !waitingOn &&
+        !needsPerson(sequence) &&
+        sequence.blocked &&
+        sequence.blocked.said !== said("cancelled") && (
+          <TroubleshootingLogs problem={{ said: sequence.blocked.said }} />
+        )}
     </section>
   );
 }

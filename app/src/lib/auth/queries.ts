@@ -2,6 +2,7 @@ import { type QueryClient, queryOptions } from "@tanstack/react-query";
 import type { GetPersonResponse } from "@/lib/api/generated/model";
 import { getPerson } from "@/lib/api/generated/people/people";
 import { ClientError } from "@/lib/client";
+import { knownRole } from "./roles";
 import { readDeployment } from "@/lib/deployment/queries";
 import { currentOrganizationId } from "@/lib/organizations/current";
 import { ensureCurrentOrganization } from "@/lib/organizations/queries";
@@ -125,10 +126,31 @@ async function currentUser(
     name: person.name,
     needsName: person.needsName,
     image: person.image,
-    role: person.role,
+    // A role a newer server names that this app doesn't know is read as a member.
+    role: knownRole(person.role),
     onboarding: person.onboarding,
     openbotVersion: answer.openbotVersion,
   };
+}
+
+/**
+ * What OpenBot on one computer answers a request that does not come from its app. The personal
+ * edition only admits requests carrying its install's token, which only its app has, so a browser
+ * opened at the same address is refused this, word for word, on every request.
+ */
+export const ONLY_ITS_OWN_APP =
+  "This OpenBot only answers its own app. Open it from the OpenBot app, or use an API key.";
+
+/**
+ * Whether a refusal is that one: a 403 with that sentence. Never the status alone, which every
+ * other refusal by permission shares.
+ */
+export function refusedForNotBeingItsApp(error: unknown): boolean {
+  return (
+    error instanceof ClientError &&
+    error.status === 403 &&
+    error.message === ONLY_ITS_OWN_APP
+  );
 }
 
 export function currentUserQueryOptions() {

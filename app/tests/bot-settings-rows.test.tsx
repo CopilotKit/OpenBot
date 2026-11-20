@@ -36,8 +36,11 @@ afterAll(async () => {
 });
 
 const originalFetch = global.fetch;
+/** How the Bot is set to work, as its delegation answers. */
+let delegationMode: "self" | "orchestrate" = "self";
 afterEach(() => {
   global.fetch = originalFetch;
+  delegationMode = "self";
 });
 
 const BOT: AgentProfile = {
@@ -93,7 +96,7 @@ function serving(
     if (url.endsWith("/bots/expenses/delegation")) {
       return Response.json({
         botId: "expenses",
-        mode: "self",
+        mode: delegationMode,
         model: null,
         effort: null,
         instructions: "",
@@ -265,6 +268,18 @@ test("the rows for routines, reach, memory, approvals and agents say what this B
   await row("Memory", "1 source", "memory");
   await row("Approvals", "1 rule", "approvals");
   await row("Agents", "Does the work itself on OpenBot", "agents");
+});
+
+/*
+ * Task threads are hidden for now (`TASK_THREADS_OFFERED`), and OpenBot runs every Bot as one that
+ * does the work itself, so a Bot set to hand work out says what it does now.
+ */
+test("a Bot set to hand work to agents has the Agents row of a Bot that does the work itself", async () => {
+  delegationMode = "orchestrate";
+  serving("user");
+  const view = draw(BOT);
+  expect(await view.findByText("Does the work itself on OpenBot")).toBeTruthy();
+  expect(view.queryByText(/Hands work to/)).toBeNull();
 });
 
 /** The personal starter on the harness picked at setup, as OpenBot Desktop on Windows starts it. */

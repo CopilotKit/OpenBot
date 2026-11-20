@@ -1,18 +1,24 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { BotLookProvider } from "../components/agents/bot-look";
+import { OpenFromApp } from "../components/desktop/open-from-app";
 import { TeamFeaturesDialog } from "../components/edition/team-features-dialog";
 import { CommandMenu } from "../components/navigation/command-menu";
 import { NewOrganizationDialog } from "../components/organizations/new-organization-dialog";
 import { OrganizationBoundary } from "../components/organizations/organization-boundary";
+import { ReportedErrorComponent } from "../lib/error-reporting";
 import {
   connectedThroughDesktop,
   signOutThroughDesktop,
 } from "../lib/auth/mutations";
-import { needsOnboarding, signedInUser } from "../lib/auth/queries";
-import { rememberInvitationLink } from "../lib/organizations/invitation-link";
+import {
+  needsOnboarding,
+  refusedForNotBeingItsApp,
+  signedInUser,
+} from "../lib/auth/queries";
 import { CopilotProvider } from "../lib/copilot/provider";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
+import { rememberInvitationLink } from "../lib/organizations/invitation-link";
 import { learnShortenedToolNames } from "../lib/plugins/tool-names";
 import { SkinAccountSync } from "../skins/account-sync";
 import { useActiveSkin } from "../skins/registry";
@@ -46,6 +52,18 @@ export const Route = createFileRoute("/_authed")({
     // Before any conversation is drawn, so a long-named action's step never shows its cut name.
     await learnShortenedToolNames(context.queryClient);
   },
+  /*
+   * A browser opened at the address of OpenBot on one computer is refused on the first question,
+   * who is signed in: OpenBot answers only its own app there. It is told to open the app instead.
+   * Every other failure is the router's own error screen, as it was, and is told to OpenBot
+   * (lib/error-reporting.tsx). The refusal is OpenBot answering as it should, and is not.
+   */
+  errorComponent: (props) =>
+    refusedForNotBeingItsApp(props.error) ? (
+      <OpenFromApp />
+    ) : (
+      <ReportedErrorComponent {...props} />
+    ),
   // Mounted INSIDE the authed boundary, not at the root: the runtime endpoint requires a session, so
   // a provider above the sign-in gate would open a run for a visitor who has not signed in yet.
   component: () => (

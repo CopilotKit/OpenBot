@@ -1,5 +1,6 @@
 import {
   IconArrowUpRight,
+  IconClock,
   IconCube,
   IconDeviceDesktop,
   IconFileText,
@@ -13,6 +14,7 @@ import { ChannelAvatar } from "@/components/channels/avatar";
 import { setupSummary } from "@/lib/agents/bot-summaries";
 import { agentQueryOptions } from "@/lib/agents/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { briefDuration } from "@/lib/elapsed";
 import { markFor } from "@/lib/marks";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { type BotTask, taskTurnsQueryOptions } from "@/lib/tasks/queries";
@@ -24,7 +26,8 @@ import { type Output, type Source, useThreadWork } from "./thread-work";
  * each a short list of one-line rows that open what they name.
  *
  * Who ran it is the Bot and what runs it (its framework, or built in). The model is the one the
- * task's latest turn used, as the server recorded it (listTaskTurns). Sources and outputs are read
+ * task's latest turn used, and how long it worked is its turns' time added up, both as the server
+ * recorded them (listTaskTurns). Sources and outputs are read
  * from the thread itself (`threadWorkOf`). The Bot's computer is named only when the task used it.
  */
 
@@ -195,6 +198,10 @@ export function TaskDetails({ task }: { task: BotTask }) {
     taskTurnsQueryOptions(task.id, task.status === "working"),
   );
   const model = turns?.findLast((turn) => turn.model)?.model ?? null;
+  // Its turns' time, added up. A subagent a turn started worked inside that turn, so it is in here.
+  const worked = turns?.length
+    ? turns.reduce((sum, turn) => sum + turn.workedSeconds, 0)
+    : null;
   /*
    * While the task works or waits on the person, what it has not made or read it may still: "yet".
    * Once it has ended (done, couldn't finish or stopped), nothing is coming.
@@ -214,6 +221,17 @@ export function TaskDetails({ task }: { task: BotTask }) {
               {bot ? setupSummary(bot, personal ? "personal" : "team") : null}
             </span>
             {model ? <ModelLine model={model} /> : null}
+            {worked !== null ? (
+              <span
+                className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs"
+                data-slot="task-worked"
+              >
+                <IconClock aria-hidden className="size-3.5 shrink-0" />
+                <span className="truncate">
+                  Worked for {briefDuration(worked)}
+                </span>
+              </span>
+            ) : null}
             {task.agent ? (
               // A task the Bot handed to one of its agents: the agent did the work.
               <span

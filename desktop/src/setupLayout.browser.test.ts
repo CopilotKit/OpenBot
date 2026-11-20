@@ -61,6 +61,7 @@ type Page = {
 type Browser = {
   newPage(options: {
     viewport: { width: number; height: number };
+    colorScheme?: "light" | "dark";
   }): Promise<Page>;
   close(): Promise<void>;
 };
@@ -82,12 +83,41 @@ const emit = (name, payload) => {
   for (const listener of fake.listeners[name] ?? []) listener({ payload });
 };
 fake.emit = emit;
-const relaunch = location.hash === "#start";
+// A relaunch whose update this computer has no room for: OpenBot's own (Windows, C: at 7.4 GB), or
+// the back end's, which the window runs first (a Mac at 8.2 GB).
+const updateShort = location.hash === "#update-short";
+const backEndShort = location.hash === "#backend-short";
+// This app too old for its OpenBot, as the shell says it: connected to an OpenBot (such as OpenBot
+// Cloud) that needs a newer app; one whose sign-in ended, as it always was; and the OpenBot on
+// this computer needing a newer app once Start has it running.
+const CONNECTED_PROBLEMS = {
+  "#connect-app-too-old": { said: "The OpenBot at openbot.example.com needs a newer version of this app. Update OpenBot, then connect again.", kind: "app-too-old" },
+  "#connect-app-too-old-security": { said: "This version of OpenBot has a security problem. Update to keep using it.", kind: "app-too-old-security" },
+  "#connect-session-ended": { said: "Your sign-in to openbot.example.com has ended. Sign in again to keep going.", kind: "session-ended" },
+};
+const connectedProblem = CONNECTED_PROBLEMS[location.hash];
+// The same, for a minimum raised because of a security problem.
+const localSecurity = location.hash === "#local-app-too-old-security";
+const localTooOld = location.hash === "#local-app-too-old" || localSecurity;
+// Start finding the release on this computer needs a newer launcher contract than this app speaks.
+const launcherAhead = location.hash === "#local-launcher-ahead";
+// A launch that finds this computer's OpenBot already running, and that it needs a newer app.
+const runningTooOld = location.hash === "#local-app-too-old-running";
+// The same launch, where showing it fails as it could before: the slot the card above lands in.
+const runningFails = location.hash === "#local-running-fails";
+// The update feed has a newer version, so the offer at the top shows too.
+const offered = location.search === "?offer";
+// A build that never updates itself (internal, candidate, or without the updater).
+const internal = location.search === "?internal";
+// Found running by the launch is a relaunch too: an installation set up and started before.
+const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld || runningTooOld || launcherAhead;
 const signingIn = location.hash === "#signin";
 const installing = location.hash === "#licence-installing";
 const pausing = location.hash === "#pause-podman";
 // Signed in already, the CLI taking two seconds to say so, as on Windows G.
 const slowCheck = location.hash === "#licence-slow";
+// A first install whose connect step stops partway, as on a Mac on 1.1.0-rc.1.
+const connectFails = location.hash === "#connect-fails";
 const licence = location.hash === "#licence" || installing || slowCheck;
 let finishInstall;
 const installed = new Promise((resolve) => (finishInstall = resolve));
@@ -111,8 +141,31 @@ fake.finishInstall = () => finishInstall(null);
 const none = { openai: false, anthropic: false };
 export function convertFileSrc(path) { return path; }
 fake.calls = [];
-export async function invoke(command) {
+// The pages opened in the person's browser, by address.
+fake.opened = [];
+export async function invoke(command, args) {
   fake.calls.push(command);
+  if (command === "plugin:opener|open_url") fake.opened.push(args.url);
+  if (connectedProblem && command === "connection")
+    return { mode: "connected", address: "https://openbot.example.com", signedIn: true };
+  if (connectedProblem && command === "show_connected") throw connectedProblem;
+  if ((runningTooOld || runningFails) && command === "already_running") return true;
+  if (runningFails && command === "show_openbot")
+    throw { said: "Part of OpenBot needs recovery. Try starting OpenBot once more." };
+  if (localSecurity && command === "show_openbot")
+    throw {
+      said: "This version of OpenBot has a security problem. Update to keep using it.",
+      detail: "the deployment's minimumClients.desktop is 1.2.0, raised for a security problem (securityMinimumClients); this app is desktop/1.1.0 and speaks v2",
+      kind: "app-too-old-security",
+    };
+  if ((localTooOld || runningTooOld) && command === "show_openbot")
+    throw {
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      detail: "the deployment's minimumClients.desktop is 1.2.0; this app is desktop/1.1.0 and speaks v2",
+      kind: "app-too-old",
+    };
+  if ((connectedProblem || localTooOld || runningTooOld || launcherAhead) && command === "app_update_offer")
+    return { version: offered ? "1.2.0" : null, current: "1.1.0", installing: null, updatesItself: !internal, ready: null };
   switch (command) {
     case "windows_restart_pending":
     case "take_ai_connection_change":
@@ -130,8 +183,13 @@ export async function invoke(command) {
           }
         : { values: {}, saved: { modelApiKeys: none, modelSessions: none } };
     case "upgrade_due":
-      return relaunch ? { from: "1.0.0", to: "1.0.1" } : null;
+      return relaunch && !localTooOld && !runningTooOld && !launcherAhead ? { from: "1.0.0", to: "1.0.1" } : null;
     case "upgrade_and_start":
+      if (updateShort)
+        throw {
+          said: "There isn't room on this computer for the update, so nothing changed.",
+          shortfall: { podman: true, cpu: false, memory: false, disk: true, diskGb: "7.4", wsl: true, drive: "C:", freeOnDrive: true, updating: true, neededGb: "13" },
+        };
       return new Promise(() => {});
     case "providers":
       // As provider::catalogue lists them.
@@ -168,12 +226,59 @@ export async function invoke(command) {
     case "local_eval_download":
       return fake.download;
     case "connect_local_eval":
-      return { outcome: "completed", stack, reason: null, conflicted: false };
+      return connectFails
+        ? { outcome: "failed", stack: null, reason: "local-command-failed", conflicted: false }
+        : { outcome: "completed", stack, reason: null, conflicted: false };
     case "run_local_eval":
+      if (backEndShort && args.action === "update")
+        return {
+          outcome: "blocked", stack: null, reason: "resources-short", readiness: "unknown", licence: "unknown", licenceExpiresAt: null, checksPassed: false,
+          shortfall: { podman: true, cpu: false, memory: false, disk: true, diskGb: "8.2", freeOnDrive: true, mac: true, updating: true, neededGb: "13" },
+        };
+      if (backEndShort) return { ...status("ready", "valid"), updateTo: "0.16.0-rc.13" };
+      // The Status window's services, stopped until the main window's Start brings them up.
+      if (location.search === "?started" && !fake.up) return status("stopped", "valid");
       return status("ready", "valid");
-    // OpenBot's own start, the step's last row: it stays there for the test to look at.
+    // OpenBot's own start, the step's last row: it stays there for the test to look at. Running,
+    // when the window is about to find it needs a newer app. Refused, when the release laid out
+    // needs a newer launcher contract than this app speaks.
     case "start_stack":
-      return new Promise(() => {});
+      if (launcherAhead)
+        throw {
+          said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+          detail: "OpenBot v1.3.0 needs launcherApi 2; this app is v1.1.1 and speaks launcherApi 1",
+          kind: "app-too-old",
+        };
+      return localTooOld ? null : new Promise(() => {});
+    // The Status window (\`#status\`): everything running, or, at \`?stopped#status\`, all of it
+    // stopped as Stop leaves it, the software OpenBot runs on still running. At
+    // \`?updating#status\`, stopped by an update of OpenBot. At \`?started#status\`, stopped until
+    // \`__fake.up\`, as when the main window's Start brings everything up.
+    case "desktop_status": {
+      const stopped =
+        location.search === "?stopped" ||
+        location.search === "?updating" ||
+        (location.search === "?started" && !fake.up);
+      return {
+        updating: location.search === "?updating",
+        openbotRunning: !stopped,
+        openbotHeld: !stopped,
+        processes: [],
+        containers: stopped ? [] : [
+          { name: "openbot-desktop-server-1", memoryBytes: 200000000 },
+          { name: "openbot-desktop-worker-1", memoryBytes: 50000000 },
+          { name: "openbot-desktop-postgres-1", memoryBytes: 150000000 },
+        ],
+        intelligenceStack: "local-abc123",
+        intelligenceContainers: stopped ? [] : [{ name: "k3d-local-abc123-server-0", memoryBytes: 2400000000 }],
+        engine: "docker",
+        root: "/Users/you/OpenBot",
+        appPort: stopped ? null : 3010,
+        version: "1.1.0",
+        build: "internal",
+        logFolder: "/Users/you/Library/Logs/ai.copilotkit.openbot.desktop",
+      };
+    }
     // Usage data as a first run finds it: shared until the person says otherwise.
     case "plugin:openbot-desktop|usage_data":
       return { shared: true, offByEnvironment: false };
@@ -202,7 +307,8 @@ async function buildWindow(): Promise<Window> {
     entrypoints: [new URL("./main.tsx", import.meta.url).pathname],
     target: "browser",
     format: "esm",
-    define: { "process.env.NODE_ENV": '"production"' },
+    // Vite's build-time values, none of them set, as a build without a whitelabel support page.
+    define: { "process.env.NODE_ENV": '"production"', "import.meta.env": "{}" },
     plugins: [
       {
         name: "scripted-native-side",
@@ -225,7 +331,7 @@ async function buildWindow(): Promise<Window> {
               args.path === "event"
                 ? FAKE_EVENT
                 : args.path === "mark"
-                  ? "export const Mark = () => null; export const ButtonMark = () => null;"
+                  ? "export const Mark = () => null; export const ButtonMark = () => null; export const MarkImage = () => null;"
                   : FAKE_CORE,
             loader: "js",
           }));
@@ -742,39 +848,159 @@ describe.skipIf(!asked)("the background row under the step's button", () => {
  */
 describe.skipIf(!asked)("the first screen at the window's default size", () => {
   // The window opens at 1000x800 (tauri.conf.json); a title bar takes some of that. Seen on
-  // Windows: once the first screen listed where OpenBot runs and what Self-hosted needs, the card
+  // Windows: once the first screen listed where OpenBot runs and what this computer needs, the card
   // showed a scrollbar for a few pixels at that size. Everything on it has to show without one.
-  test("at 1000x760, everything on it shows without the card scrolling", async () => {
+  for (const theme of ["light", "dark"] as const) {
+    test(`at 1000x760 (${theme}), everything on it shows without the card scrolling, OpenBot for Business's two ways stacked`, async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 760 },
+        colorScheme: theme,
+      });
+      try {
+        await open(page);
+        await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+        await page.waitForTimeout(400);
+        const shape = await page.evaluate(() => {
+          const card = document.querySelector("main > .sheet") as HTMLElement;
+          const group = document.querySelector(".tile-group") as HTMLElement;
+          const [cloud, own] = [
+            ...document.querySelectorAll(".tile-option"),
+          ].map((option) => option.getBoundingClientRect());
+          const marks = [...document.querySelectorAll(".cloud-mark")].map(
+            (mark) => mark.getBoundingClientRect(),
+          );
+          const box = group.getBoundingClientRect();
+          return {
+            overflow: card.scrollHeight - card.clientHeight,
+            // One above the other, the same width, inside the Business card.
+            stacked:
+              !!cloud &&
+              !!own &&
+              own.top >= cloud.bottom &&
+              cloud.width === own.width &&
+              own.right <= box.right &&
+              own.bottom <= box.bottom,
+            // The four clouds' marks on Self-Hosted's own line, inside its row.
+            marks:
+              marks.length === 4 &&
+              !!own &&
+              marks.every(
+                (mark) =>
+                  mark.top >= own.top &&
+                  mark.bottom <= own.bottom &&
+                  mark.right <= own.right &&
+                  mark.top === marks[0]?.top,
+              ),
+            // Each choice's name and line on one line.
+            oneLine: [...document.querySelectorAll(".tile-option-text")].every(
+              (text) => text.getBoundingClientRect().height <= 21,
+            ),
+          };
+        });
+        const { overflow, ...laid } = shape;
+        expect(overflow).toBeLessThanOrEqual(0);
+        expect(laid).toEqual({ stacked: true, marks: true, oneLine: true });
+        // And connecting to a company's own OpenBot, by the link under the rows: the address and Connect.
+        await page.getByRole("button", { name: "Connect to it" }).click();
+        await page.getByLabel("OpenBot address", { exact: true }).waitFor();
+        await page.waitForTimeout(400);
+        expect(
+          await page.evaluate(() => {
+            const card = document.querySelector("main > .sheet") as HTMLElement;
+            return card.scrollHeight - card.clientHeight;
+          }),
+        ).toBeLessThanOrEqual(0);
+        expect(
+          await page.getByRole("button", { name: "Connect" }).count(),
+        ).toBe(1);
+      } finally {
+        await page.close();
+      }
+    });
+  }
+
+  /*
+   * OpenBot for Business books a call: either of its two ways to run, picked, shows the app's
+   * OpenBot for Business view, what it adds and the booking calendar, where it used to show an
+   * address field. Taller than the window, it scrolls in the card as any tall step does; the page
+   * never does, nothing runs off the card's side, and the calendar takes the height Calendly reports.
+   */
+  test("at 1000x760, OpenBot for Business shows its booker in the card, which scrolls, and no address field", async () => {
     const page = await browser.newPage({
       viewport: { width: 1000, height: 760 },
     });
     try {
+      await routeCalendar(page);
       await open(page);
       await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
-      await page.waitForTimeout(400);
-      const overflow = await page.evaluate(() => {
-        const card = document.querySelector("main > .sheet") as HTMLElement;
-        return card.scrollHeight - card.clientHeight;
-      });
-      expect(overflow).toBeLessThanOrEqual(0);
-      // And with the other choice picked, OpenBot for Business: its address field and Connect.
-      await page.getByText("OpenBot for Business").click();
-      await page.getByLabel("OpenBot address", { exact: true }).waitFor();
-      await page.waitForTimeout(400);
+      await page.getByText("Your own cloud or on-prem.").click();
+      await page.locator(".tile-option.chosen").waitFor();
+      await page.getByText("We run it for you.").click();
+      await page
+        .locator(
+          '.booking-calendar[data-ready] iframe[title="Booking calendar"]',
+        )
+        .waitFor();
       expect(
-        await page.evaluate(() => {
-          const card = document.querySelector("main > .sheet") as HTMLElement;
-          return card.scrollHeight - card.clientHeight;
-        }),
-      ).toBeLessThanOrEqual(0);
-      expect(await page.getByRole("button", { name: "Connect" }).count()).toBe(
-        1,
-      );
+        await page.getByLabel("OpenBot address", { exact: true }).count(),
+      ).toBe(0);
+      expect(
+        await page
+          .getByRole("button", { name: "Connect", exact: true })
+          .count(),
+      ).toBe(0);
+      expect(
+        await page.getByText("A full audit trail, with export").count(),
+      ).toBe(1);
+      const shape = await page.evaluate(() => {
+        const card = document.querySelector("main > .sheet") as HTMLElement;
+        const frame = document.querySelector(
+          'iframe[title="Booking calendar"]',
+        ) as HTMLElement;
+        const wider = [...card.querySelectorAll("*")].filter(
+          (element) =>
+            element.getBoundingClientRect().right >
+            card.getBoundingClientRect().right + 0.5,
+        );
+        return {
+          page: document.documentElement.scrollHeight,
+          cardScrolls: card.scrollHeight > card.clientHeight + 1,
+          sideways: card.scrollWidth - card.clientWidth,
+          wider: wider.map((element) => element.className),
+          frame: frame.getBoundingClientRect().height,
+        };
+      });
+      expect(shape.page).toBeLessThanOrEqual(760);
+      expect(shape.cardScrolls).toBe(true);
+      expect(shape.sideways).toBeLessThanOrEqual(0);
+      expect(shape.wider).toEqual([]);
+      expect(shape.frame).toBe(660);
+      // The way to connect is still under the rows, and leads to the address.
+      await page.getByRole("button", { name: "Connect to it" }).click();
+      await page.getByLabel("OpenBot address", { exact: true }).waitFor();
+      expect(
+        await page.locator('iframe[title="Booking calendar"]').count(),
+      ).toBe(0);
     } finally {
       await page.close();
     }
   });
 });
+
+/**
+ * Calendly, as far as the window can tell: a page in the calendar's frame that says its height, as
+ * Calendly's inline embed does once it is drawn. The real one is on the web, which a test never is.
+ */
+async function routeCalendar(page: Page) {
+  await page.route("https://calendly.com/**", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: `<!doctype html><body style="margin:0;height:660px;background:#fff"><script>
+        parent.postMessage({ event: "calendly.page_height", payload: { height: "660px" } }, "*");
+      </script></body>`,
+    }),
+  );
+}
 
 describe.skipIf(!asked)("the first screen while its downloads run", () => {
   for (const [width, height] of [
@@ -1056,8 +1282,8 @@ describe.skipIf(!asked)("the offer to pause the person's Podman", () => {
 });
 
 /** Goes from the first screen to "Connect your AI", as a first run does. */
-async function toTheAiStep(page: Page) {
-  await open(page);
+async function toTheAiStep(page: Page, hash = "") {
+  await open(page, hash);
   await page.getByRole("button", { name: "Install", exact: true }).click();
   await page.getByRole("heading", { name: "Connect your AI" }).waitFor();
   // The entrance animation settles before anything is measured.
@@ -1385,6 +1611,165 @@ describe.skipIf(!asked)("Finishing setup's usage data choice", () => {
   }
 });
 
+/*
+ * Seen on a Mac's first install: on Finishing setup, "Connecting OpenBot" stopped with "Setup
+ * stopped partway through with an error. Retry. If it stops again, copy the logs below.", and the
+ * card had nothing below it but Retry. The logs it names are in the card now, and in view.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of the stopped card.
+ */
+describe.skipIf(!asked)("Finishing setup when a step stops", () => {
+  test("offers the logs its sentence names, in view", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 1000, height: 800 },
+    });
+    try {
+      await toTheAiStep(page, "#connect-fails");
+      await page.getByText("Anthropic", { exact: true }).click();
+      await page
+        .getByRole("tab", { name: "Use an API key", exact: true })
+        .click();
+      await page
+        .getByLabel("Anthropic API key", { exact: true })
+        .fill("a-key-for-this-test");
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await page.getByRole("heading", { name: "Finishing setup" }).waitFor();
+      await page.evaluate(() =>
+        (
+          globalThis as unknown as { __fake: { finishSetUp: () => void } }
+        ).__fake.finishSetUp(),
+      );
+      await page.getByRole("button", { name: "Retry", exact: true }).waitFor();
+      await page.waitForTimeout(600);
+      const shots = process.env.OPENBOT_APP_SHOTS;
+      if (shots)
+        await page.screenshot({
+          path: `${shots}/finishing-setup-stopped-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}.png`,
+        });
+      const connect = await page
+        .getByRole("listitem", { name: "Connecting OpenBot" })
+        .textContent();
+      expect(connect).toContain("copy the logs below");
+      const copy = page.getByRole("button", { name: "Copy logs", exact: true });
+      expect(await copy.count()).toBe(1);
+      expect(
+        await page
+          .getByRole("button", { name: "Save to a file", exact: true })
+          .count(),
+      ).toBe(1);
+      // In the window as it opens, under the row that names it: nothing to scroll to.
+      const [row, button] = await Promise.all([
+        page
+          .getByRole("listitem", { name: "Connecting OpenBot" })
+          .boundingBox(),
+        copy.boundingBox(),
+      ]);
+      expect(button).not.toBeNull();
+      expect(button?.y ?? 0).toBeGreaterThan(row?.y ?? 0);
+      expect((button?.y ?? 0) + (button?.height ?? 0)).toBeLessThanOrEqual(800);
+    } finally {
+      await page.close();
+    }
+  }, 40_000);
+});
+
+/*
+ * An update this computer has no room for. On Windows the sentence with the figures sat at the foot
+ * of the window, in a "That didn't finish" box under "OpenBot is stopped / ready to reopen", a row
+ * that said "OpenBot did not start." and a second copy of the logs. What it needs is the heading and
+ * the sentence under it, with Retry beside it, in the window as it opens; the row that stopped says
+ * why; the logs are offered once. For OpenBot's own update, and for the back end's, which the window
+ * runs first. `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each, light and dark.
+ */
+describe.skipIf(!asked)("an update this computer has no room for", () => {
+  const cases = [
+    {
+      hash: "#update-short",
+      said: "This computer has 7.4 GB of free space on drive C:, and OpenBot needs about 13 GB to update. Free up some space, then Retry.",
+    },
+    {
+      hash: "#backend-short",
+      said: "This Mac has 8.2 GB of free space, and OpenBot needs about 13 GB to update. Free up some space, then Retry.",
+    },
+  ];
+  for (const { hash, said } of cases)
+    for (const colorScheme of ["light", "dark"] as const)
+      test(`says what it needs first, with Retry beside it (${hash.slice(1)}, ${colorScheme})`, async () => {
+        const page = await browser.newPage({
+          viewport: { width: 1000, height: 800 },
+          colorScheme,
+        });
+        try {
+          await open(page, hash);
+          // Stopped, whatever it is headed.
+          await page
+            .getByRole("button", { name: "Retry", exact: true })
+            .waitFor();
+          await page.waitForTimeout(600);
+          const shots = process.env.OPENBOT_APP_SHOTS;
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/no-room-${hash.slice(1)}-${colorScheme}-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}.png`,
+            });
+          const seen = await page.evaluate(() => {
+            const box = (element: Element | null | undefined) => {
+              const rect = element?.getBoundingClientRect();
+              return rect ? { top: rect.top, bottom: rect.bottom } : null;
+            };
+            const lede = document.querySelector("main .lede");
+            const retry = [...document.querySelectorAll("main button")].filter(
+              (button) => button.textContent === "Retry",
+            );
+            const failed = [...document.querySelectorAll("main li")].filter(
+              (row) => row.textContent?.includes("Failed"),
+            );
+            const named = (label: string) =>
+              [...document.querySelectorAll("main button")].filter(
+                (button) => button.textContent === label,
+              ).length;
+            const ledeBox = box(lede);
+            const retryBox = box(retry[0]);
+            const rowsBox = box(document.querySelector("main li"));
+            const text = document.querySelector("main")?.textContent ?? "";
+            return {
+              heading: document.querySelector("main h1")?.textContent,
+              lede: lede?.textContent,
+              retries: retry.length,
+              // Retry under the sentence and above the rows, in the window as it opens.
+              retryUnderSentence: (retryBox?.top ?? 0) > (ledeBox?.bottom ?? 0),
+              retryAboveRows: (retryBox?.bottom ?? 0) < (rowsBox?.top ?? 0),
+              retryInView: (retryBox?.bottom ?? 900) <= 800,
+              failedRows: failed.length,
+              failedRowSaysWhy: failed.some((row) =>
+                row.textContent?.includes("Not enough free space to update."),
+              ),
+              saysDidNotStart: text.includes("did not start"),
+              saysDidNotFinish: text.includes("That didn’t finish"),
+              saysReadyToReopen: text.includes("ready to reopen"),
+              copyLogs: named("Copy logs"),
+              saveToAFile: named("Save to a file"),
+            };
+          });
+          expect(seen).toEqual({
+            heading: "OpenBot needs more free space to update",
+            lede: said,
+            retries: 1,
+            retryUnderSentence: true,
+            retryAboveRows: true,
+            retryInView: true,
+            failedRows: 1,
+            failedRowSaysWhy: true,
+            saysDidNotStart: false,
+            saysDidNotFinish: false,
+            saysReadyToReopen: false,
+            copyLogs: 1,
+            saveToAFile: 1,
+          });
+        } finally {
+          await page.close();
+        }
+      }, 40_000);
+});
+
 /** Opens a relaunch whose Start updates OpenBot, at its last step, OpenBot opening. */
 async function toStart(page: Page) {
   await open(page, "#start");
@@ -1421,7 +1806,7 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
         card: document.querySelector(".journey-time")?.textContent ?? "",
       }));
       // This Start updates OpenBot, and its heading says so.
-      expect(said.heading).toBe("Updating OpenBot");
+      expect(said.heading).toBe("Updating OpenBot (Self-Contained)");
       expect(said.lede).toBe("OpenBot is getting ready and opens by itself.");
       expect(said.lede).not.toMatch(/minute|second|hour/i);
       expect(said.card).toMatch(/left/);
@@ -1601,6 +1986,171 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
   }, 30_000);
 });
 
+/*
+ * A dogfooding report: the screen OpenBot Desktop shows while it updates OpenBot is a strange one
+ * for an app, and said nothing of why. It is headed as the self-contained OpenBot's update now, and
+ * under its progress says that everything runs on this computer, then offers OpenBot for Business
+ * with a link to book a demo. That adds no click and no scroll: at the window's default size (1000x800
+ * less a title bar), in light and dark, the card shows whole, the progress first, the note under it.
+ * Docker Desktop's three-line hand-off makes the journey 44px taller, which scrolled the card by
+ * 12px: while it shows, the note keeps its heading and the pitch and leaves out the sentence between.
+ * Run with `OPENBOT_APP_ENGINE=webkit` too, the engine the Mac window draws with.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each, taken before anything is asserted.
+ */
+const DOCKER_STARTING =
+  "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in, do that there. OpenBot comes back when Docker is ready.";
+
+/** The update screen as a person sees it: its words, and where the progress and the note sit. */
+function updateScreen(page: Page) {
+  return page.evaluate(() => {
+    const sheet = document.querySelector("main > .sheet") as HTMLElement;
+    const note = document.querySelector(
+      "main > .sheet > .self-contained",
+    ) as HTMLElement | null;
+    const journey = document.querySelector(".journey");
+    const why = note?.querySelector(".self-contained-why") as HTMLElement;
+    const box = (element: Element | null | undefined) => {
+      const rect = element?.getBoundingClientRect();
+      return rect ? { top: rect.top, bottom: rect.bottom } : null;
+    };
+    return {
+      heading: document.querySelector("main h1")?.textContent,
+      // What shows, as a person reads it.
+      note: note?.innerText ?? null,
+      // Whether the sentence that says why shows.
+      said: Boolean(why && why.offsetHeight > 0),
+      noteBox: box(note),
+      sheetBox: box(sheet),
+      journey: box(journey),
+      journeyHeight: journey?.getBoundingClientRect().height ?? 0,
+      rows: box(document.querySelector('[aria-label="Opening OpenBot"]')),
+      scrolls: sheet.scrollHeight - sheet.clientHeight,
+      page: document.documentElement.scrollHeight,
+      window: window.innerHeight,
+      cut: note ? note.scrollWidth > note.clientWidth : null,
+      buttons: note?.querySelectorAll("button").length ?? null,
+      link: note?.querySelector("a")?.getAttribute("href") ?? null,
+    };
+  });
+}
+
+/** The progress first, the note under it, all of the card in the window, nothing scrolled. */
+function expectWholeUnderProgress(
+  seen: Awaited<ReturnType<typeof updateScreen>>,
+) {
+  const { journey, rows, noteBox, sheetBox } = seen;
+  expect(journey && rows && noteBox && sheetBox).toBeTruthy();
+  if (journey && rows && noteBox && sheetBox) {
+    expect(noteBox.top).toBeGreaterThan(journey.bottom);
+    expect(noteBox.top).toBeGreaterThan(rows.bottom);
+    expect(noteBox.bottom).toBeLessThanOrEqual(sheetBox.bottom);
+    expect(sheetBox.bottom).toBeLessThanOrEqual(seen.window);
+  }
+  expect(seen.scrolls).toBeLessThanOrEqual(0);
+  expect(seen.page).toBeLessThanOrEqual(seen.window);
+  expect(seen.cut).toBe(false);
+}
+
+describe.skipIf(!asked)(
+  "the Start screen that updates OpenBot says why",
+  () => {
+    for (const scheme of ["light", "dark"] as const) {
+      test(`in ${scheme}, at 1000x760, it says it runs on this computer under the progress, whole and without a scroll`, async () => {
+        const page = await browser.newPage({
+          viewport: { width: 1000, height: 760 },
+          colorScheme: scheme,
+        });
+        try {
+          await toStart(page);
+          // OpenBot updating itself, its download under way, as in the report.
+          await emitProgress(page, {
+            step: "release",
+            ok: true,
+            running: true,
+            detail: "Downloading the update.",
+          });
+          await page
+            .locator(".journey-said", { hasText: "Downloading the update" })
+            .waitFor();
+          await page.waitForTimeout(400);
+          const shots = process.env.OPENBOT_APP_SHOTS;
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/update-screen-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}-${scheme}.png`,
+            });
+
+          const seen = await updateScreen(page);
+          expect(seen.heading).toBe("Updating OpenBot (Self-Contained)");
+          expect(seen.note).toContain("Everything runs on this computer");
+          expect(seen.note).toContain("This OpenBot is self-contained.");
+          expect(seen.said).toBe(true);
+          expect(seen.note).toContain("OpenBot for Business");
+          expect(seen.note).not.toMatch(/—/);
+          // Nothing to click to go on: its one link opens a page, and the update carries on.
+          expect(seen.buttons).toBe(0);
+          expect(seen.link).toBe("https://open.bot/business");
+          expectWholeUnderProgress(seen);
+
+          // Docker Desktop's hand-off, its three lines, while the update waits on Docker: the
+          // journey grows 44px. The note says less while it shows, and the card still doesn't scroll.
+          await emitProgress(page, {
+            step: "engine",
+            ok: true,
+            running: true,
+            elsewhere: true,
+            detail: DOCKER_STARTING,
+          });
+          await page.locator(".journey.handing-off").waitFor();
+          await page.waitForTimeout(400);
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/update-screen-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}-${scheme}-docker.png`,
+            });
+          const handingOff = await updateScreen(page);
+          expect(handingOff.journeyHeight).toBe(seen.journeyHeight + 44);
+          expect(handingOff.heading).toBe("Updating OpenBot (Self-Contained)");
+          expect(handingOff.note).toContain("Everything runs on this computer");
+          expect(handingOff.said).toBe(false);
+          expect(handingOff.note).toContain("OpenBot for Business");
+          expect(handingOff.link).toBe("https://open.bot/business");
+          expectWholeUnderProgress(handingOff);
+
+          // Docker answers and the hand-off goes: the note says all of it again.
+          await emitProgress(page, {
+            step: "engine",
+            ok: true,
+            running: false,
+            detail: "Docker is answering.",
+          });
+          await page
+            .locator(".journey.handing-off")
+            .waitFor({ state: "hidden" });
+          expect((await updateScreen(page)).said).toBe(true);
+
+          // Book a demo opens OpenBot for Business's page in the person's browser.
+          await page.getByRole("link", { name: "Book a demo" }).click();
+          await page.waitForTimeout(200);
+          expect(
+            await page.evaluate(
+              () =>
+                (globalThis as unknown as { __fake: { opened: string[] } })
+                  .__fake.opened,
+            ),
+          ).toEqual(["https://open.bot/business"]);
+          // Still the update, on the same screen.
+          expect(
+            await page.evaluate(
+              () => document.querySelector("main h1")?.textContent,
+            ),
+          ).toBe("Updating OpenBot (Self-Contained)");
+        } finally {
+          await page.close();
+        }
+      }, 30_000);
+    }
+  },
+);
+
 describe.skipIf(!asked)(
   "the account step for a person already signed in",
   () => {
@@ -1666,5 +2216,425 @@ describe.skipIf(!asked)(
         await page.close();
       }
     }, 30_000);
+  },
+);
+
+/*
+ * When this app is too old for its OpenBot (`client_version.rs`), the window says the shell's
+ * sentence and offers its one way on, Update and restart, in view and uncovered, without outgrowing
+ * the window. Beside them problems the screen always had, a sign-in that ended and a found-running
+ * OpenBot that fails to show, for comparison. With `OPENBOT_SHOTS_DIR` set, each is
+ * saved there in light and dark, at the window's default size.
+ */
+describe.skipIf(!asked)("an OpenBot this app is too old for", () => {
+  const shots = process.env.OPENBOT_SHOTS_DIR;
+  const states: {
+    name: string;
+    at: string;
+    said: string;
+    way: { role: "button" | "link"; name: string };
+    /** The window's heading, where the state's screen is OpenBot on this computer running. */
+    heading?: string;
+  }[] = [
+    {
+      name: "connected-app-too-old",
+      at: "#connect-app-too-old",
+      said: "needs a newer version of this app. Update OpenBot, then connect again.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "connected-app-too-old-with-offer",
+      at: "?offer#connect-app-too-old",
+      said: "needs a newer version of this app. Update OpenBot, then connect again.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "connected-app-too-old-security",
+      at: "#connect-app-too-old-security",
+      said: "This version of OpenBot has a security problem. Update to keep using it.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "local-app-too-old-security",
+      at: "#local-app-too-old-security",
+      said: "This version of OpenBot has a security problem. Update to keep using it.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "local-app-too-old",
+      at: "#local-app-too-old",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      way: { role: "button", name: "Update and restart" },
+      heading: "Update OpenBot",
+    },
+    // Found running by a launch that did not start it: the same screen as when Start finds it.
+    {
+      // Start refused: the release on this computer needs a newer launcher contract (launcherApi).
+      name: "local-launcher-ahead",
+      at: "#local-launcher-ahead",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "local-launcher-ahead-with-offer",
+      at: "?offer#local-launcher-ahead",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      way: { role: "button", name: "Update and restart" },
+    },
+    {
+      name: "local-app-too-old-found-running",
+      at: "?offer#local-app-too-old-running",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+      way: { role: "button", name: "Update and restart" },
+      heading: "Update OpenBot",
+    },
+    {
+      name: "existing-found-running-fails",
+      at: "#local-running-fails",
+      said: "Part of OpenBot needs recovery. Try starting OpenBot once more.",
+      way: { role: "button", name: "Install" },
+    },
+    {
+      name: "existing-session-ended",
+      at: "#connect-session-ended",
+      said: "Your sign-in to openbot.example.com has ended.",
+      way: { role: "button", name: "Sign in again" },
+    },
+  ];
+  for (const state of states) {
+    for (const [width, height] of [
+      [1000, 800],
+      [720, 560],
+    ] as const) {
+      test(`${state.name} at ${width}x${height}: the sentence and its way on are in view`, async () => {
+        for (const colorScheme of ["light", "dark"] as const) {
+          const page = await browser.newPage({
+            viewport: { width, height },
+            colorScheme,
+          });
+          try {
+            await open(page, state.at);
+            await page.getByText(state.said, { exact: false }).waitFor();
+            // The card's entrance, and the update offer's first answer, settled.
+            await page.waitForTimeout(1200);
+            // The card's own way on: the last of its name, under the offer at the top when there is one.
+            const way = await page.evaluate(({ role, name }) => {
+              const found = [
+                ...document.querySelectorAll(role === "link" ? "a" : "button"),
+              ].filter((element) => element.textContent?.trim() === name);
+              const element = found.at(-1);
+              if (!element) return null;
+              // A step taller than the window scrolls inside its card: there, it is reached so.
+              element.scrollIntoView({ block: "nearest" });
+              const box = element.getBoundingClientRect();
+              const top = document.elementFromPoint(
+                box.left + box.width / 2,
+                box.top + box.height / 2,
+              );
+              return {
+                y: box.top,
+                bottom: box.bottom,
+                covered: !(top && (top === element || element.contains(top))),
+                enabled: !(element as HTMLButtonElement).disabled,
+              };
+            }, state.way);
+            expect({ state: state.name, found: way !== null }).toEqual({
+              state: state.name,
+              found: true,
+            });
+            expect(way?.y ?? -1).toBeGreaterThanOrEqual(0);
+            expect(way?.bottom ?? height + 1).toBeLessThanOrEqual(height);
+            expect({ state: state.name, covered: way?.covered }).toEqual({
+              state: state.name,
+              covered: false,
+            });
+            expect(way?.enabled).toBe(true);
+            // Running, so never "OpenBot is stopped" with a Start: Show OpenBot and Stop OpenBot.
+            if (state.heading) {
+              const screen = await page.evaluate(() => ({
+                heading: document.querySelector("h1")?.textContent?.trim(),
+                buttons: [...document.querySelectorAll("button")].map(
+                  (button) => button.textContent?.trim(),
+                ),
+              }));
+              expect(screen.heading).toBe(state.heading);
+              expect(screen.buttons).not.toContain("Start OpenBot");
+              expect(screen.buttons).toContain("Show OpenBot");
+              expect(screen.buttons).toContain("Stop OpenBot");
+            }
+            // One Update and restart: the offer at the top stands back while the card says why.
+            if (state.way.name === "Update and restart")
+              expect(
+                await page.evaluate(
+                  () =>
+                    [...document.querySelectorAll("button")].filter(
+                      (button) =>
+                        button.textContent?.trim() === "Update and restart",
+                    ).length,
+                ),
+              ).toBe(1);
+            const fits = await page.evaluate(() => ({
+              page: document.documentElement.scrollHeight,
+              window: window.innerHeight,
+              wide: document.documentElement.scrollWidth,
+              across: window.innerWidth,
+            }));
+            expect(fits.page).toBeLessThanOrEqual(fits.window);
+            expect(fits.wide).toBeLessThanOrEqual(fits.across);
+            if (shots && width === 1000)
+              await page.screenshot({
+                path: `${shots}/${state.name}-${colorScheme}.png`,
+              });
+          } finally {
+            await page.close();
+          }
+        }
+      }, 30_000);
+    }
+  }
+
+  /*
+   * On a build that never updates itself, the line that says so is part of the notice, in the
+   * notice's type, on the connect screen as on the screen for the OpenBot on this computer. Seen on
+   * a Mac: on the connect screen it sat under the notice in body type.
+   */
+  for (const state of [
+    {
+      name: "connected-app-too-old-internal",
+      at: "?internal#connect-app-too-old",
+      said: "needs a newer version of this app. Update OpenBot, then connect again.",
+    },
+    {
+      name: "local-app-too-old-internal",
+      at: "?internal#local-app-too-old",
+      said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
+    },
+  ]) {
+    test(`${state.name}: "doesn't update itself" is in the notice, in the notice's type`, async () => {
+      for (const colorScheme of ["light", "dark"] as const) {
+        const page = await browser.newPage({
+          viewport: { width: 1000, height: 800 },
+          colorScheme,
+        });
+        try {
+          await open(page, state.at);
+          await page.getByText(state.said, { exact: false }).waitFor();
+          // The update's own line (Updates, folded under the buttons, says it too).
+          await page
+            .locator('p[role="status"]', { hasText: "doesn't update itself" })
+            .waitFor();
+          await page.waitForTimeout(1200);
+          const placed = await page.evaluate((said) => {
+            const notice = [...document.querySelectorAll(".local-alert")].find(
+              (element) => element.textContent?.includes(said),
+            );
+            const sentence = [...(notice?.querySelectorAll("p") ?? [])].find(
+              (element) => element.textContent?.includes(said),
+            );
+            const line = [
+              ...document.querySelectorAll('p[role="status"]'),
+            ].find((element) =>
+              element.textContent?.includes("doesn't update itself"),
+            );
+            const size = (element: Element | undefined) =>
+              element ? getComputedStyle(element).fontSize : null;
+            return {
+              inside: Boolean(notice && line && notice.contains(line)),
+              line: size(line),
+              notice: size(sentence),
+              updates: [...document.querySelectorAll("button")].filter(
+                (button) => button.textContent?.trim() === "Update and restart",
+              ).length,
+            };
+          }, state.said);
+          expect(placed.notice).not.toBeNull();
+          expect(placed).toEqual({
+            inside: true,
+            line: placed.notice,
+            notice: placed.notice,
+            updates: 0,
+          });
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/${state.name}-${colorScheme}.png`,
+            });
+        } finally {
+          await page.close();
+        }
+      }
+    }, 30_000);
+  }
+});
+
+/*
+ * After Stop, the Status window's App row said Stopped and offered nothing, while the services row
+ * under it offered Start. The App row offers Start now, laid out as the services row's: the same
+ * button, as far under its heading, at the same left edge. In the window's own size, light and dark.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of the window, stopped and running.
+ */
+describe.skipIf(!asked)("the Status window after Stop", () => {
+  for (const colorScheme of ["light", "dark"] as const)
+    test(`the App row offers Start as the services row does (${colorScheme})`, async () => {
+      const shots = process.env.OPENBOT_APP_SHOTS;
+      const engine = process.env.OPENBOT_APP_ENGINE ?? "chromium";
+      for (const state of ["running", "stopped"] as const) {
+        const page = await browser.newPage({
+          viewport: { width: 640, height: 720 },
+          colorScheme,
+        });
+        try {
+          await open(page, state === "stopped" ? "?stopped#status" : "#status");
+          await page.getByRole("region", { name: "App" }).waitFor();
+          await page.waitForTimeout(400);
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/status-${state}-${colorScheme}-${engine}.png`,
+            });
+          if (state === "running") continue;
+          const seen = await page.evaluate(() => {
+            const part = (name: string) => {
+              const section = document.querySelector(
+                `section[aria-label="${name}"]`,
+              );
+              const head = section?.querySelector(".status-head");
+              const buttons = [...(section?.querySelectorAll("button") ?? [])];
+              const button = buttons[0]?.getBoundingClientRect();
+              const top = head?.getBoundingClientRect();
+              // Whole pixels: Chromium on Linux lays a 40 px button out at 39.99998.
+              const px = (value: number | undefined) =>
+                value === undefined ? null : Math.round(value);
+              return {
+                said: buttons.map((one) => one.textContent),
+                left: px(button?.left),
+                width: px(button?.width),
+                height: px(button?.height),
+                underHead:
+                  button && top ? Math.round(button.top - top.bottom) : null,
+                className: buttons[0]?.className,
+              };
+            };
+            return { app: part("App"), services: part("OpenBot's services") };
+          });
+          expect(seen.app.said).toEqual(["Start"]);
+          expect(seen.services.said).toEqual(["Start"]);
+          expect(seen.app.className).toBe(seen.services.className);
+          expect(seen.app.left).toBe(seen.services.left);
+          expect(seen.app.width).toBe(seen.services.width);
+          expect(seen.app.height).toBe(seen.services.height);
+          expect(seen.app.underHead).toBe(seen.services.underHead);
+        } finally {
+          await page.close();
+        }
+      }
+    }, 30_000);
+});
+
+/*
+ * Two states the Mac and Windows pass found. Opened while OpenBot updated itself, the App row said
+ * Stopped and offered Start: it says Updating now, with nothing to press. And after the App row's
+ * Start brought everything up in the main window, the services row still said Stopped, with Start,
+ * until Refresh: told the Start finished (`status:refresh`), it reads its readiness again. Each
+ * screenshot is taken before anything is asserted, so a run against the earlier window keeps its
+ * look too. `OPENBOT_APP_SHOTS=<folder>` keeps them, light and dark.
+ */
+describe.skipIf(!asked)(
+  "the Status window through an update and a start",
+  () => {
+    const shots = process.env.OPENBOT_APP_SHOTS;
+    const engine = process.env.OPENBOT_APP_ENGINE ?? "chromium";
+    const shoot = (page: Page, name: string, colorScheme: string) =>
+      shots
+        ? page.screenshot({
+            path: `${shots}/status-${name}-${colorScheme}-${engine}.png`,
+          })
+        : null;
+    const appRow = (page: Page) =>
+      page.evaluate(() => {
+        const section = document.querySelector('section[aria-label="App"]');
+        return {
+          state: section?.querySelector(".status-state")?.textContent ?? null,
+          buttons: [...(section?.querySelectorAll("button") ?? [])].map(
+            (button) => button.textContent,
+          ),
+        };
+      });
+    const servicesRow = (page: Page) =>
+      page.evaluate(() => {
+        const section = document.querySelector(
+          `section[aria-label="OpenBot's services"]`,
+        );
+        return {
+          state: section?.querySelector(".status-state")?.textContent ?? null,
+          buttons: [...(section?.querySelectorAll("button") ?? [])].map(
+            (button) => button.textContent,
+          ),
+        };
+      });
+
+    for (const colorScheme of ["light", "dark"] as const) {
+      test(`while OpenBot updates, the App row says Updating and nothing offers Start (${colorScheme})`, async () => {
+        const page = await browser.newPage({
+          viewport: { width: 640, height: 720 },
+          colorScheme,
+        });
+        try {
+          await open(page, "?updating#status");
+          await page.getByRole("region", { name: "App" }).waitFor();
+          await page.waitForTimeout(400);
+          await shoot(page, "updating", colorScheme);
+          expect(await appRow(page)).toEqual({
+            state: "Updating",
+            buttons: [],
+          });
+          // Nor the services row: the update starts what it needs.
+          expect(await servicesRow(page)).toEqual({
+            state: "Stopped",
+            buttons: [],
+          });
+        } finally {
+          await page.close();
+        }
+      }, 30_000);
+
+      test(`once a start finishes, the services row follows without Refresh (${colorScheme})`, async () => {
+        const page = await browser.newPage({
+          viewport: { width: 640, height: 720 },
+          colorScheme,
+        });
+        try {
+          await open(page, "?started#status");
+          await page.getByRole("region", { name: "App" }).waitFor();
+          await page.waitForTimeout(400);
+          // The main window's Start brings everything up; the window's own reading sees the parts.
+          await page.evaluate(() => {
+            (globalThis as unknown as { __fake: { up: boolean } }).__fake.up =
+              true;
+          });
+          await page
+            .locator('section[aria-label="App"] .status-state', {
+              hasText: "Running",
+            })
+            .waitFor();
+          await page.waitForTimeout(400);
+          // Told the Start finished, as the native side tells it.
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as {
+                __fake: { emit: (name: string, payload: unknown) => void };
+              }
+            ).__fake.emit("status:refresh", null),
+          );
+          await page.waitForTimeout(1500);
+          await shoot(page, "started", colorScheme);
+          expect((await appRow(page)).buttons).toEqual(["Restart", "Stop"]);
+          expect(await servicesRow(page)).toEqual({
+            state: "Ready · 2.4 GB",
+            buttons: ["Restart", "Stop"],
+          });
+        } finally {
+          await page.close();
+        }
+      }, 40_000);
+    }
   },
 );

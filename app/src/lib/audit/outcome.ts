@@ -49,6 +49,11 @@ export const REFUSED_EVENT_TYPES = [
   "bot.isolation_refused",
   /** A run that would have sent more tools than its model accepts, never sent to it. */
   "agent.tool_limit_refused",
+  /**
+   * A new computer refused because a limit on computers was reached: the organization's, the person's in it, or
+   * OpenBot's own. Nothing was started.
+   */
+  "computer.limit_reached",
 ] as const;
 
 /**

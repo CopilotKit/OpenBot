@@ -24,13 +24,14 @@ import { Route as ConnectedAccountRoute } from "@/routes/_authed/_app/connection
 import { ME_PATH, meBody } from "./accounts-api";
 import { type AppsFixture, answerAppsApi, type TodayServer } from "./apps-api";
 import {
-  authorizationsResponse,
   authorizationStartResponse,
+  authorizationsResponse,
   confirmationResponse,
   connectionPage,
   connectionsProblem,
   disconnectPreviewResponse,
   MY_CONNECTIONS_PATH,
+  startResponse,
 } from "./connections-api";
 
 /**
@@ -58,6 +59,7 @@ afterAll(async () => {
 });
 
 const APP = "gmail";
+const CONSENT_URL = "https://vendor.invalid/consent";
 
 function captureRouteState(route: object): Record<string, unknown> {
   return { ...route, options: { ...(route as { options: object }).options } };
@@ -162,9 +164,11 @@ function install(setup: Setup) {
     if (path.endsWith("/connect") && setup.connectRefusal) {
       return connectionsProblem(503, setup.connectRefusal);
     }
+    if (path.endsWith("/connect") && init?.method === "POST")
+      return startResponse({ authorizationUrl: CONSENT_URL });
     if (path.endsWith("/authorize")) {
       authorizeCalls.push(String(init?.body));
-      return authorizationStartResponse("https://vendor.invalid/consent");
+      return authorizationStartResponse(CONSENT_URL);
     }
     if (path === ME_PATH)
       return json(
@@ -820,5 +824,121 @@ test("a refused Connect that names an address shows it whole and lets it wrap", 
     expect(notice.className.split(/\s+/)).toContain("break-words");
   } finally {
     window.open = realOpen;
+  }
+});
+
+/*
+ * ---- OpenBot Desktop: the window finishes the consent its person's browser came back from ----
+ *
+ * The window sends the consent to the person's default browser, and the personal edition admits only
+ * requests carrying its install's token, which that browser does not have. So the server holds the
+ * browser's return and hands it back to the window, and the window, back in front, opens the
+ * verifier itself to finish it. Once per consent, and only in the Desktop window.
+ */
+
+const VERIFIER = "/api/plugins/arcade/verify";
+
+/** Every page address the screen sends this window to, in order, instead of going there. */
+function watchNavigation() {
+  const navigations: string[] = [];
+  Object.defineProperty(window.location, "href", {
+    configurable: true,
+    get: () => "about:blank",
+    set: (value: string) => {
+      navigations.push(String(value));
+    },
+  });
+  return {
+    navigations,
+    restore: () => {
+      delete (window.location as unknown as Record<string, unknown>).href;
+    },
+  };
+}
+
+function inDesktopWindow() {
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+    invoke: async () => null,
+    transformCallback: () => 0,
+  };
+  return () => {
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  };
+}
+
+async function authorizeSendEmail(view: ReturnType<typeof render>) {
+  await waitFor(() => row(view, "Gmail.SendEmail"));
+  fireEvent.click(view.getByText("Authorize"));
+  fireEvent.click(await view.findByText("Continue to consent"));
+}
+
+test("in OpenBot Desktop, an authorized action is finished at the verifier once the window is back in front", async () => {
+  install({ provider: "arcade", connected: true, grants: GMAIL });
+  const leave = inDesktopWindow();
+  const watched = watchNavigation();
+  try {
+    const view = renderScreen();
+    await authorizeSendEmail(view);
+    await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
+
+    window.dispatchEvent(new Event("focus"));
+    expect(watched.navigations).toEqual([CONSENT_URL, VERIFIER]);
+    // Once per consent: a later focus goes nowhere.
+    window.dispatchEvent(new Event("focus"));
+    expect(watched.navigations).toEqual([CONSENT_URL, VERIFIER]);
+  } finally {
+    watched.restore();
+    leave();
+  }
+});
+
+test("in OpenBot Desktop, connecting an app on Arcade is finished at the verifier the same way", async () => {
+  install({ provider: "arcade", connected: false, grants: GMAIL });
+  const leave = inDesktopWindow();
+  const watched = watchNavigation();
+  try {
+    const view = renderScreen();
+    fireEvent.click(await view.findByRole("button", { name: "Connect" }));
+    await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
+
+    window.dispatchEvent(new Event("focus"));
+    expect(watched.navigations).toEqual([CONSENT_URL, VERIFIER]);
+  } finally {
+    watched.restore();
+    leave();
+  }
+});
+
+test("in a browser the consent comes back to the verifier by itself, so focus opens nothing", async () => {
+  install({ provider: "arcade", connected: true, grants: GMAIL });
+  const watched = watchNavigation();
+  try {
+    const view = renderScreen();
+    await authorizeSendEmail(view);
+    await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
+
+    window.dispatchEvent(new Event("focus"));
+    expect(watched.navigations).toEqual([CONSENT_URL]);
+  } finally {
+    watched.restore();
+  }
+});
+
+test("in OpenBot Desktop, a Composio consent is confirmed on return and never opens the verifier", async () => {
+  install({ provider: "composio", connected: false });
+  const leave = inDesktopWindow();
+  const watched = watchNavigation();
+  try {
+    const view = renderScreen();
+    fireEvent.click(await view.findByRole("button", { name: "Connect" }));
+    // Through Composio, OpenBot's step comes first, in the window as anywhere else.
+    fireEvent.click(await view.findByRole("button", { name: "Continue now" }));
+    await waitFor(() => expect(watched.navigations).toEqual([CONSENT_URL]));
+
+    window.dispatchEvent(new Event("focus"));
+    expect(watched.navigations).toEqual([CONSENT_URL]);
+  } finally {
+    watched.restore();
+    leave();
   }
 });

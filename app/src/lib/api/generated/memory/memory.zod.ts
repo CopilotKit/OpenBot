@@ -453,7 +453,7 @@ export const ListMemorySourcesResponse = zod.object({
           .record(zod.string(), zod.unknown())
           .describe("What the action is called with."),
         enabled: zod.boolean(),
-        syncStatus: zod.enum(["idle", "running", "succeeded", "error"]),
+        syncStatus: zod.string(),
         syncError: zod
           .string()
           .nullable()
@@ -568,7 +568,7 @@ export const CreateMemorySourceResponse = zod.object({
         .record(zod.string(), zod.unknown())
         .describe("What the action is called with."),
       enabled: zod.boolean(),
-      syncStatus: zod.enum(["idle", "running", "succeeded", "error"]),
+      syncStatus: zod.string(),
       syncError: zod
         .string()
         .nullable()
@@ -646,7 +646,7 @@ export const UpdateMemorySourceResponse = zod
       .record(zod.string(), zod.unknown())
       .describe("What the action is called with."),
     enabled: zod.boolean(),
-    syncStatus: zod.enum(["idle", "running", "succeeded", "error"]),
+    syncStatus: zod.string(),
     syncError: zod
       .string()
       .nullable()
@@ -775,7 +775,7 @@ export const SyncMemorySourceResponse = zod.object({
         .record(zod.string(), zod.unknown())
         .describe("What the action is called with."),
       enabled: zod.boolean(),
-      syncStatus: zod.enum(["idle", "running", "succeeded", "error"]),
+      syncStatus: zod.string(),
       syncError: zod
         .string()
         .nullable()

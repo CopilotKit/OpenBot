@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the identity providers registered for single sign-on, by email domain: a company's own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the identity providers registered for single sign-on, by email domain: a company's own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Where this OpenBot may keep more than one organization, the list in any organization but `default` also holds the providers registered for the whole OpenBot, marked deployment: they count for this organization's Require SSO only while it has no provider of its own, and can't be removed here. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List identity providers
  */
 
@@ -71,6 +71,12 @@ export const ListIdentityProvidersResponse = zod.object({
             .describe(
               "The id of the person who registered it, while they still have an account here. Null once they are gone; the provider stays.",
             ),
+          deployment: zod
+            .boolean()
+            .optional()
+            .describe(
+              "True for a provider registered for the whole OpenBot, listed in another organization: it counts for that organization's Require SSO only while the organization has no provider of its own, and can't be removed from it. False or absent for the organization's own.",
+            ),
         })
         .describe(
           "A company's own identity provider, registered for single sign-on at its email domain. Never its client secret or signing certificate.",
@@ -116,12 +122,12 @@ export const CreateIdentityProviderHeader = zod.object({
 export const createIdentityProviderBodyOneIdMax = 200;
 
 export const createIdentityProviderBodyOneIdRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createIdentityProviderBodyOneDomainMax = 2048;
 
 export const createIdentityProviderBodyOneDomainRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createIdentityProviderBodyOneIssuerMax = 2048;
 
@@ -136,17 +142,17 @@ export const createIdentityProviderBodyOneEntryPointRegExp = new RegExp(
 export const createIdentityProviderBodyOneMetadataMax = 200000;
 
 export const createIdentityProviderBodyOneMetadataRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createIdentityProviderBodyTwoIdMax = 200;
 
 export const createIdentityProviderBodyTwoIdRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createIdentityProviderBodyTwoDomainMax = 2048;
 
 export const createIdentityProviderBodyTwoDomainRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createIdentityProviderBodyTwoIssuerMax = 2048;
 
@@ -156,12 +162,12 @@ export const createIdentityProviderBodyTwoIssuerRegExp = new RegExp(
 export const createIdentityProviderBodyTwoClientIdMax = 2048;
 
 export const createIdentityProviderBodyTwoClientIdRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createIdentityProviderBodyTwoClientSecretMax = 2048;
 
 export const createIdentityProviderBodyTwoClientSecretRegExp = new RegExp(
-  "^[^\\x00]*\\S[^\\x00]*$",
+  "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
 export const CreateIdentityProviderBody = zod
@@ -259,6 +265,12 @@ export const CreateIdentityProviderResponse = zod.object({
         .describe(
           "The id of the person who registered it, while they still have an account here. Null once they are gone; the provider stays.",
         ),
+      deployment: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True for a provider registered for the whole OpenBot, listed in another organization: it counts for that organization's Require SSO only while the organization has no provider of its own, and can't be removed from it. False or absent for the organization's own.",
+        ),
     })
     .describe(
       "A company's own identity provider, registered for single sign-on at its email domain. Never its client secret or signing certificate.",
@@ -266,7 +278,7 @@ export const CreateIdentityProviderResponse = zod.object({
 });
 
 /**
- * Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider already removed is not found.
+ * Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider registered for the whole OpenBot (deployment) is removed only where it was registered: in any other organization it is refused with 403. A provider already removed is not found.
  * @summary Remove an identity provider
  */
 

@@ -106,6 +106,7 @@ const routine = (overrides: Partial<RoutineRecord> = {}): RoutineRecord => ({
   id: "routine-1",
   botId: "bot-1",
   schedule: "Weekdays at 09:00",
+  cron: "0 9 * * 1-5",
   timezone: "UTC",
   instruction: "Check the queue.",
   title: null,

@@ -15,6 +15,7 @@ from pathlib import Path
 # one level above /app/src in the image the Dockerfile builds.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from model_providers import bot_settings
+from run_model_key import RunModelKey
 
 from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 from fastapi import FastAPI, Request
@@ -104,8 +105,10 @@ def _resolve_provider(provider: str):
 # `gpt-5.6-*` and every `gpt-6*` take function tools only on the Responses API, and the `-pro` and
 # `-codex` models are not served on Chat Completions at all. OpenAI's own words: "GPT-6 Astra,
 # GPT-6.1 Sol, and GPT-6.1 Terra support Chat Completions, but tool calling requires Responses."
+# `gpt-5.4*` and `gpt-5.5*` take tools on Chat Completions only without a reasoning effort: with one,
+# "Function tools with reasoning_effort are not supported for gpt-5.5 in /v1/chat/completions."
 _RESPONSES_API_MODEL = re.compile(
-    r"^gpt-5\.[6-9]|^gpt-[6-9]|^(?:gpt-[\d.]+|o\d+)-pro\b|^gpt-[\d.]+-codex\b"
+    r"^gpt-5\.[4-9]|^gpt-[6-9]|^(?:gpt-[\d.]+|o\d+)-pro\b|^gpt-[\d.]+-codex\b"
 )
 
 # The efforts each integration takes, as its own field declares them: `reasoning_effort` (alias
@@ -359,6 +362,8 @@ builder.add_edge("tools", "answer")
 graph = builder.compile(checkpointer=MemorySaver())
 
 app = FastAPI()
+# Each run's model calls carry its own gateway token, in its organization. See run_model_key.py.
+app.add_middleware(RunModelKey)
 
 
 @app.middleware("http")

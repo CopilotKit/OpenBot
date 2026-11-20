@@ -37,7 +37,10 @@ export function ToolLine({
    * not happen, so its line says what was attempted. Without it the label is used.
    */
   attempted?: string;
-  /** What it was done to. Muted, and truncated rather than wrapped. */
+  /**
+   * What it was done to. Muted, and truncated rather than wrapped, except on a refused or failed
+   * step, where it is the reason and wraps in full.
+   */
   detail?: string;
   running?: boolean;
   /** A policy or a boundary said no. Final: nothing the Bot does differently will help. */
@@ -81,11 +84,19 @@ export function ToolLine({
       ? "text-amber-600 dark:text-amber-500"
       : "text-muted-foreground";
 
+  /*
+   * A REFUSED OR FAILED STEP'S DETAIL IS THE REASON, AND A REASON CUT OFF SAYS NOTHING. Truncated,
+   * "budget.xlsx can't be sent. Bots c..." left a person on a phone not knowing why, nor what would
+   * work. So on those rows the detail wraps in full, and the row wraps too, putting it under the
+   * label when it does not fit beside it. Every other row keeps one line, its detail truncated.
+   */
+  const saysWhy = (refused === true || failed === true) && Boolean(detail);
+
   const text = (
     <span
       className={`inline-flex min-w-0 max-w-full items-baseline gap-1.5 text-sm ${tone} ${
         running ? "tool-line-running" : ""
-      }`}
+      } ${saysWhy ? "flex-wrap" : ""}`}
     >
       {icon ? <span className="shrink-0 self-center">{icon}</span> : null}
       {/*
@@ -113,7 +124,13 @@ export function ToolLine({
                   : label}
       </span>
       {detail ? (
-        <span className="min-w-0 shrink-[100] truncate opacity-70">
+        <span
+          className={
+            saysWhy
+              ? "min-w-0 break-words opacity-70"
+              : "min-w-0 shrink-[100] truncate opacity-70"
+          }
+        >
           {detail}
         </span>
       ) : null}

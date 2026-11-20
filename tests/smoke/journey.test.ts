@@ -40,7 +40,9 @@ import { beforeAll, describe, expect, test } from "bun:test";
  *   OPENBOT_SMOKE_COOKIE='better-auth.session_token=...' bun run test:smoke
  *
  * A deployment with no sign-in (`OPENBOT_SINGLE_USER`) answers without one, and the journey runs as
- * its one person. Otherwise, without the cookie the run stops before the first test with a sentence
+ * its one person. It only admits requests carrying its install's token, so `OPENBOT_INSTALL_TOKEN`
+ * (the value `scripts/start.sh` wrote into `.env`) is sent as `X-OpenBot-Install-Token` when it is set.
+ * Otherwise, without the cookie the run stops before the first test with a sentence
  * naming it, rather than skipping the half that matters and reporting the other half as a pass. A
  * journey that did not act on a computer has not been run.
  */
@@ -49,6 +51,7 @@ const asked = process.env.OPENBOT_SMOKE === "1";
 const API = process.env.OPENBOT_API_URL ?? "http://localhost:3001";
 const BOT = process.env.OPENBOT_SMOKE_BOT ?? "risk-analyst";
 const COOKIE = process.env.OPENBOT_SMOKE_COOKIE ?? "";
+const INSTALL_TOKEN = process.env.OPENBOT_INSTALL_TOKEN ?? "";
 const ORGANIZATION = `/api/v2/organizations/${process.env.OPENBOT_SMOKE_ORGANIZATION ?? "default"}`;
 
 /** Long enough for a computer to be created and Chromium to answer on a cold deployment. */
@@ -63,6 +66,7 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
       // Every write is one this journey means to make once.
       ...(write ? { "idempotency-key": crypto.randomUUID() } : {}),
       ...(COOKIE ? { cookie: COOKIE } : {}),
+      ...(INSTALL_TOKEN ? { "x-openbot-install-token": INSTALL_TOKEN } : {}),
       ...(init?.headers ?? {}),
     },
   });

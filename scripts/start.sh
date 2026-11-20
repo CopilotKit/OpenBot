@@ -74,6 +74,7 @@ APP_PORT="$(setting APP_PORT 3010)"
 SERVER_PORT="$(setting SERVER_PORT 3001)"
 COMPUTER_PORT="$(setting COMPUTER_PORT 4100)"
 LANGGRAPH_PORT="$(setting LANGGRAPH_PORT 4201)"
+LANGGRAPH_TS_PORT="$(setting LANGGRAPH_TS_PORT 4215)"
 SUPERVISOR_PORT="$(setting SUPERVISOR_PORT 4500)"
 # Through `setting`, like every other key here, so `.env` counts as the comment above says and as
 # docs/configuration.md tells people to rely on. Read from the environment alone, `false` in `.env`
@@ -103,12 +104,16 @@ COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
 EDITION="$(setting OPENBOT_EDITION team)"
 if [ "$EDITION" = "personal" ]; then
   MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "")"
+  LANGGRAPH_TS_AG_UI_URL="$(setting LANGGRAPH_TS_AG_UI_URL "")"
   COMPUTER_PERSON_ID=personal
 else
   MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "http://127.0.0.1:${LANGGRAPH_PORT}/")"
+  # The TypeScript LangGraph engine, which new Bots run on, beside the managed Bot. Unset, the
+  # server runs new Bots on its built-in engine instead.
+  LANGGRAPH_TS_AG_UI_URL="$(setting LANGGRAPH_TS_AG_UI_URL "http://127.0.0.1:${LANGGRAPH_TS_PORT}/")"
   COMPUTER_PERSON_ID=
 fi
-export MANAGED_AGENT_AG_UI_URL COMPUTER_PERSON_ID
+export MANAGED_AGENT_AG_UI_URL LANGGRAPH_TS_AG_UI_URL COMPUTER_PERSON_ID
 
 # Whether this run minted a secret that something already running may not have.
 #
@@ -162,6 +167,43 @@ if [ -z "$AGENT_TOOL_TOKEN" ]; then
 fi
 export AGENT_TOOL_TOKEN
 
+# The install's own token. The server here runs in a container and, unless `.env` signs people in,
+# for one person, and the personal edition only admits requests carrying its install's token: a
+# browser once, through the address printed at the end, which leaves it a cookie, and this script's
+# own checks of the server in a header. Generated once and kept in .env with the secrets above, so a
+# browser that has been let in stays let in. A server where people sign in ignores it.
+OPENBOT_INSTALL_TOKEN="$(setting OPENBOT_INSTALL_TOKEN "")"
+if [ -z "$OPENBOT_INSTALL_TOKEN" ]; then
+  SECRETS_ROTATED=true
+  OPENBOT_INSTALL_TOKEN="$(openssl rand -hex 32)"
+  if grep -qE '^OPENBOT_INSTALL_TOKEN=' "$ROOT/.env"; then
+    tmp="$(mktemp)"
+    grep -vE '^OPENBOT_INSTALL_TOKEN=' "$ROOT/.env" > "$tmp"
+    printf 'OPENBOT_INSTALL_TOKEN=%s\n' "$OPENBOT_INSTALL_TOKEN" >> "$tmp"
+    mv "$tmp" "$ROOT/.env"
+  else
+    printf '\nOPENBOT_INSTALL_TOKEN=%s\n' "$OPENBOT_INSTALL_TOKEN" >> "$ROOT/.env"
+  fi
+  printf '\033[2m%s\033[0m\n' "Generated OPENBOT_INSTALL_TOKEN and wrote it to .env."
+fi
+export OPENBOT_INSTALL_TOKEN
+# Sent on every request this script makes of the server. Harmless where it is not asked for.
+INSTALL_TOKEN_HEADER="X-OpenBot-Install-Token: $OPENBOT_INSTALL_TOKEN"
+
+# The token as it goes in an address: every byte but the unreserved ones percent-encoded. One this
+# script generated is hex and comes out as it went in.
+url_encoded() {
+  local text="$1" out="" char i
+  for ((i = 0; i < ${#text}; i++)); do
+    char="${text:i:1}"
+    case "$char" in
+      [a-zA-Z0-9.~_-]) out="$out$char" ;;
+      *) out="$out$(printf '%%%02X' "'$char")" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
 green() { printf '\033[32m%s\033[0m\n' "$1"; }
 red()   { printf '\033[31m%s\033[0m\n' "$1"; }
 info()  { printf '\033[2m%s\033[0m\n' "$1"; }
@@ -184,7 +226,7 @@ identifies_as_openbot() {
   case "$name" in
     # A field of this server's own payload. A stray 200 does not carry it.
     server)
-      curl -fsS --max-time 3 "http://localhost:$port/api/copilotkit/info" 2>/dev/null \
+      curl -fsS --max-time 3 -H "$INSTALL_TOKEN_HEADER" "http://localhost:$port/api/copilotkit/info" 2>/dev/null \
         | grep -q '"licenseStatus"'
       ;;
     # The app is static HTML with nothing to interrogate, so its title is the identity available.
@@ -339,12 +381,13 @@ SERVICES+=(agent-computer)
 # The managed coworker is the LangGraph harness, on whichever provider BOT_PROVIDER names.
 if [ "$EDITION" = "personal" ]; then
   info "  agent-langgraph-agui: skipped for the personal edition (its Bot runs in the server)"
+  info "  agent-langgraph-ts: skipped for the personal edition (its Bot runs in the server)"
 else
-  SERVICES+=(agent-langgraph-agui)
+  SERVICES+=(agent-langgraph-agui agent-langgraph-ts)
 fi
 
 export SUPERVISOR_TOKEN COMPUTER_TOKEN
-export COMPUTER_PORT LANGGRAPH_PORT SUPERVISOR_PORT
+export COMPUTER_PORT LANGGRAPH_PORT LANGGRAPH_TS_PORT SUPERVISOR_PORT
 # Quiet progress, because stdout is /dev/null while stderr is still the terminal. Seeing that
 # terminal, newer Compose (v5 and later) picks its interactive build display and tries to draw it on
 # stdout, and stops with "failed to get console: provided file is not a console". An environment
@@ -382,6 +425,7 @@ done
 wait_for "http://localhost:$COMPUTER_PORT/health" "agent-computer"
 if [ "$EDITION" != "personal" ]; then
   wait_for "http://127.0.0.1:$LANGGRAPH_PORT/health" "agent-langgraph-agui"
+  wait_for "http://127.0.0.1:$LANGGRAPH_TS_PORT/health" "agent-langgraph-ts"
 fi
 
 # Resolved at the top, where the default that .env deliberately does not carry is applied. Reading
@@ -541,7 +585,7 @@ done
 green "  coworker tables migrated"
 
 info "3/4  Runtime health"
-INFO="$(curl -fsS --max-time 8 "http://localhost:$SERVER_PORT/api/copilotkit/info")"
+INFO="$(curl -fsS --max-time 8 -H "$INSTALL_TOKEN_HEADER" "http://localhost:$SERVER_PORT/api/copilotkit/info")"
 # Read with Bun, which every run of this script already needs, rather than python3, which not every
 # machine has. On Windows `python3` is usually the Microsoft Store alias, which prints "Python was not
 # found" and exits 49, so the run stopped here with the server and worker up and the app never
@@ -550,10 +594,11 @@ INFO="$(curl -fsS --max-time 8 "http://localhost:$SERVER_PORT/api/copilotkit/inf
 # So the list is checked where there is one person who is always signed in (the personal edition,
 # or OPENBOT_SINGLE_USER), and where people sign in an empty list is what a healthy server answers.
 if [ "$EDITION" = "personal" ] || [ "$(setting OPENBOT_SINGLE_USER "")" = "true" ]; then
-  LISTS_BOTS=true
+  SINGLE_USER=true
 else
-  LISTS_BOTS=false
+  SINGLE_USER=false
 fi
+LISTS_BOTS="$SINGLE_USER"
 bun run - "$INFO" "$LISTS_BOTS" <<'JS'
 const info = JSON.parse(process.argv[2]);
 const listsBots = process.argv[3] === "true";
@@ -581,9 +626,22 @@ if ! identifies_as_openbot "$APP_PORT" app; then
 fi
 wait_for_openbot "$APP_PORT" app
 
+# Where people sign in, the app's own address. For one person, the address that lets a browser in:
+# it leaves the browser the install's cookie and goes on to the app, and every page after it carries
+# that cookie.
+READY_LINE="Ready. http://localhost:$APP_PORT"
+if [ "$SINGLE_USER" = "true" ]; then
+  READY_LINE="$READY_LINE/api/install/enter?token=$(url_encoded "$OPENBOT_INSTALL_TOKEN")&to=/"
+fi
+
 cat <<EOF
 
-$(green "Ready. http://localhost:$APP_PORT")
+$(green "$READY_LINE")
+EOF
+if [ "$SINGLE_USER" = "true" ]; then
+  info "  Open that address first in each browser: this OpenBot only admits requests carrying its install's token."
+fi
+cat <<EOF
 
 Next steps:
 

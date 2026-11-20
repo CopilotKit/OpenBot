@@ -950,6 +950,49 @@ test("a result whose task now needs the person doesn't read as done above its ca
   await waitFor(() => expect(doneLink.getAttribute("data-state")).toBe("done"));
 });
 
+test("a result whose task the person then stopped reads stopped, not done, away from its card", async () => {
+  task = {
+    ...task,
+    status: "failed",
+    next: null,
+    failure: "you stopped it",
+    failedAt: ago(1),
+    stoppedAt: ago(1),
+    workingSince: null,
+  };
+  const view = draw(
+    <TaskReport kind="result" taskId="task-1">
+      <p>The guide covers refunds in France and Germany so far.</p>
+    </TaskReport>,
+  );
+  const link = await view.findByRole("link", {
+    name: /Order heirloom tomato seeds/,
+  });
+  await waitFor(() => expect(link.getAttribute("data-state")).toBe("stopped"));
+});
+
+test("a result directly under its task's card leads with no second link to the task", async () => {
+  task = { ...task, status: "ready_for_review", next: null, failure: null };
+  const view = draw(
+    <>
+      <TaskReport kind="result" taskId="task-1" underCard>
+        <p>Your order is confirmed: FH-2041.</p>
+      </TaskReport>
+      <TaskReport kind="result" taskId="task-1">
+        <p>It ships on Thursday.</p>
+      </TaskReport>
+    </>,
+  );
+  // The task is read: the result away from its card leads with its link.
+  const link = await view.findByRole("link", {
+    name: /Order heirloom tomato seeds/,
+  });
+  expect(view.getAllByRole("link")).toEqual([link]);
+  expect(
+    view.getByText("It ships on Thursday.").closest("[data-slot=task-report]"),
+  ).toBe(link.closest("[data-slot=task-report]"));
+});
+
 test("Stop on a working task's card stops it through the API, and the card reads Stopped at once with no Stop left on it", async () => {
   task = {
     ...task,

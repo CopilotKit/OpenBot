@@ -8,7 +8,13 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
@@ -128,6 +134,65 @@ test("lists the person's keys with when each was made, last used and expires", a
   expect(unused?.textContent).not.toContain("Expires");
 
   expect(requests).toContain(`GET ${KEYS}?limit=100`);
+});
+
+/*
+ * REPORTED: a script used a key and the screen still said "Never used". The API records the use at
+ * once; the screen was drawing the list it had read before. Coming back to it asks again.
+ */
+function keysUsedAfterTheFirstRead() {
+  const [example] = getListApiKeysResponseMock().apiKeys;
+  let used = false;
+  server.use(
+    getListApiKeysMockHandler(() => ({
+      apiKeys: [
+        {
+          ...example,
+          lastUsedAt: used ? new Date().toISOString() : null,
+        },
+      ],
+      nextCursor: null,
+    })),
+  );
+  return () => {
+    used = true;
+  };
+}
+
+const lastUsedLine = (view: ReturnType<typeof render>) =>
+  view.getByText("Nightly report").closest('[data-slot="item"]')?.textContent;
+
+test("coming back to the window asks for the list again, so a key's last use shows", async () => {
+  const useKey = keysUsedAfterTheFirstRead();
+  const view = draw();
+  await view.findByText("Nightly report");
+  expect(lastUsedLine(view)).toContain("Never used");
+
+  useKey();
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"));
+  });
+
+  await waitFor(() => expect(lastUsedLine(view)).toContain("Last used"));
+  expect(
+    requests.filter((line) => line === `GET ${KEYS}?limit=100`),
+  ).toHaveLength(2);
+});
+
+test("opening the screen again asks for the list again, so a key's last use shows", async () => {
+  const useKey = keysUsedAfterTheFirstRead();
+  const first = draw();
+  await first.findByText("Nightly report");
+  expect(lastUsedLine(first)).toContain("Never used");
+  first.unmount();
+
+  useKey();
+  const again = draw();
+
+  await waitFor(() => expect(lastUsedLine(again)).toContain("Last used"));
+  expect(
+    requests.filter((line) => line === `GET ${KEYS}?limit=100`),
+  ).toHaveLength(2);
 });
 
 test("reads every page of the list", async () => {

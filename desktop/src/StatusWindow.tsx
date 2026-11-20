@@ -1,8 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SECURITY_FLOOR_SENTENCE } from "../../shared/security-floor";
 import { type LocalReadiness, runLocalEval } from "./localEvalCli";
+import { asProblem, problemSaid, TroubleshootingLogs } from "./Problem";
 import { type PartGroup, partLabel } from "./partNames";
-import { TroubleshootingLogs } from "./Problem";
+import { useBelowSecurityFloor } from "./SecurityFloor";
 import { StatusLine } from "./SetupProgress";
 
 /** The Status window is the setup page at this hash, in a window of its own. */
@@ -29,7 +32,15 @@ export type DesktopStatus = {
   build: string;
   /** Where this app writes its log file. */
   logFolder?: string | null;
+  /** OpenBot is updating itself: it stops and starts again on its own meanwhile. */
+  updating?: boolean;
 };
+
+/**
+ * Said by the native side when this window should read everything again: a start, a stop or an
+ * update finished, or the window was shown again (`status_changed`).
+ */
+export const STATUS_REFRESH_EVENT = "status:refresh";
 
 /** "1.2 GB", "340 MB": decimal, as macOS reports memory and disk. */
 export function formatBytes(bytes: number): string {
@@ -76,7 +87,7 @@ export function diagnostics(
     `OpenBot Desktop ${status.version} (${status.build})`,
     `Installed in ${status.root}${status.appPort ? `, app on port ${status.appPort}` : ""}`,
     `Container engine: ${status.engine ?? "not answering"}`,
-    `OpenBot: ${status.openbotRunning ? "running" : "stopped"}`,
+    `OpenBot: ${status.updating ? "updating" : status.openbotRunning ? "running" : "stopped"}`,
     `  processes: ${parts(status.processes)}`,
     `  containers: ${parts(status.containers)}`,
     status.intelligenceStack
@@ -92,6 +103,7 @@ export function diagnostics(
 const ENGINE = "Software OpenBot runs on";
 
 type Busy =
+  | "openbot-start"
   | "openbot-restart"
   | "openbot-stop"
   | "intelligence-restart"
@@ -105,6 +117,7 @@ type Busy =
 const SERVICES = "OpenBot's services";
 
 const BUSY_SAID: Record<Busy, string> = {
+  "openbot-start": "Starting OpenBot…",
   "openbot-restart": "Restarting OpenBot…",
   "openbot-stop": "Stopping OpenBot…",
   "intelligence-restart": `Restarting ${SERVICES}…`,
@@ -113,7 +126,7 @@ const BUSY_SAID: Record<Busy, string> = {
 };
 
 /**
- * What OpenBot is running, what each part costs, and Restart and Stop for each.
+ * What OpenBot is running, what each part costs, and Start, Restart and Stop for each.
  *
  * Memory is read every few seconds while the window shows; it is Docker's figure per container,
  * OpenBot's own server among them. Intelligence's readiness is the CLI's, asked only on
@@ -127,6 +140,9 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
   const [said, setSaid] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const stack = useRef<string | null>(null);
+  // Below the security floor nothing starts here: Start and Restart are not offered, and the
+  // window says why (`security_floor.rs`).
+  const belowFloor = useBelowSecurityFloor() === true;
 
   const read = useCallback(async () => {
     try {
@@ -153,10 +169,31 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
     }
   }, []);
 
+  /*
+   * One refresh at a time. Asked again while one runs, it runs once more after it: two at once
+   * would ask the CLI twice together, and the second would be refused as busy.
+   */
+  const refreshing = useRef<Promise<void> | null>(null);
+  const askedAgain = useRef(false);
   const refresh = useCallback(async () => {
-    setSaid(null);
-    await read();
-    await checkIntelligence();
+    if (refreshing.current) {
+      askedAgain.current = true;
+      return refreshing.current;
+    }
+    const run = (async () => {
+      do {
+        askedAgain.current = false;
+        setSaid(null);
+        await read();
+        await checkIntelligence();
+      } while (askedAgain.current);
+    })();
+    refreshing.current = run;
+    try {
+      await run;
+    } finally {
+      refreshing.current = null;
+    }
   }, [read, checkIntelligence]);
 
   useEffect(() => {
@@ -169,22 +206,43 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
       if (document.visibilityState === "visible") void refresh();
     };
     document.addEventListener("visibilitychange", shown);
+    /*
+     * And when the native side says so: a start, a stop or an update finished, or the window was
+     * shown again. The services' readiness is asked only then. Seen on a Mac and on Windows: after
+     * the App row's Start brought everything up, the services row said Stopped, with Start, until
+     * Refresh. On Windows a window shown again is not told it is visible.
+     */
+    const told = listen(STATUS_REFRESH_EVENT, () => void refresh()).catch(
+      () => null,
+    );
     return () => {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", shown);
+      void told.then((unlisten) => unlisten?.());
     };
   }, [read, refresh, readEveryMs]);
 
   async function act(what: Busy, run: () => Promise<unknown>) {
     setBusy(what);
     setSaid(null);
+    let failed: { thrown: unknown } | null = null;
     try {
       await run();
-    } catch {
-      setSaid(`${BUSY_SAID[what].replace("…", "")} did not finish. Try again.`);
+    } catch (thrown) {
+      failed = { thrown };
     } finally {
       setBusy(null);
       await refresh();
+    }
+    // Said after the refresh, which clears what the window said: said before it, it never showed.
+    // A failure with its own sentence (Restart's) says what to do; a bare one, that it failed.
+    if (failed) {
+      const { thrown } = failed;
+      setSaid(
+        thrown && typeof thrown === "object" && "said" in thrown
+          ? problemSaid(asProblem(thrown))
+          : `${BUSY_SAID[what].replace("…", "")} did not finish. Try again.`,
+      );
     }
   }
 
@@ -203,6 +261,7 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
     : null;
   const intelligenceRunning =
     (status?.intelligenceContainers.length ?? 0) > 0 && readiness !== "stopped";
+  const updating = status?.updating === true;
 
   return (
     <main>
@@ -221,9 +280,14 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
               <div className="status-head">
                 <h2>App</h2>
                 <span className="status-state">
-                  {status.openbotRunning ? "Running" : "Stopped"}
+                  {updating
+                    ? "Updating"
+                    : status.openbotRunning
+                      ? "Running"
+                      : "Stopped"}
                   {openbotMemory !== null &&
                     status.openbotRunning &&
+                    !updating &&
                     ` · ${formatBytes(openbotMemory)}`}
                 </span>
               </div>
@@ -231,10 +295,37 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
                 group="bots"
                 parts={[...status.processes, ...status.containers]}
               />
-              {status.openbotRunning && (
+              {/* Updating, OpenBot stops and starts again on its own, as the main window says: no
+                  Start, Restart or Stop here meanwhile. Seen on a Mac, opened mid-update, this row
+                  said Stopped and offered Start. */}
+              {updating && (
+                <p className="footnote">
+                  OpenBot is updating and opens by itself when it's done.
+                </p>
+              )}
+              {/* Stopped, Start is the main window's own Start OpenBot, run there: the services
+                  first, then OpenBot. After Stop this row offered nothing, and the services' Start
+                  below brought up only the services. Below the floor nothing starts here. */}
+              {!status.openbotRunning && !updating && !belowFloor && (
                 <div className="row">
-                  {/* Restart is Compose restarting the server's container this session started. */}
-                  {status.openbotHeld && (
+                  <button
+                    type="button"
+                    className="quiet"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      act("openbot-start", () =>
+                        invoke("start_openbot_from_status"),
+                      )
+                    }
+                  >
+                    Start
+                  </button>
+                </div>
+              )}
+              {status.openbotRunning && !updating && (
+                <div className="row">
+                  {/* Restart makes the server's container again from .env, as Start does. */}
+                  {status.openbotHeld && !belowFloor && (
                     <button
                       type="button"
                       className="quiet"
@@ -285,51 +376,72 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
                   group="back-end"
                   parts={status.intelligenceContainers}
                 />
-                <div className="row">
-                  {intelligenceRunning ? (
-                    <>
+                {/* Stopped during an update of OpenBot, nothing: the update starts what it needs,
+                    as the App row says. Seen on a Mac, both rows offered Start mid-update. */}
+                {!(updating && !belowFloor && !intelligenceRunning) && (
+                  <div className="row">
+                    {belowFloor ? (
+                      intelligenceRunning && (
+                        <button
+                          type="button"
+                          className="quiet"
+                          disabled={busy !== null}
+                          onClick={() =>
+                            act("intelligence-stop", () => intelligence("stop"))
+                          }
+                        >
+                          Stop
+                        </button>
+                      )
+                    ) : intelligenceRunning ? (
+                      <>
+                        <button
+                          type="button"
+                          className="quiet"
+                          disabled={busy !== null}
+                          onClick={() =>
+                            act("intelligence-restart", async () => {
+                              await intelligence("stop");
+                              await intelligence("start");
+                            })
+                          }
+                        >
+                          Restart
+                        </button>
+                        <button
+                          type="button"
+                          className="quiet"
+                          disabled={busy !== null}
+                          onClick={() =>
+                            act("intelligence-stop", () => intelligence("stop"))
+                          }
+                        >
+                          Stop
+                        </button>
+                      </>
+                    ) : (
                       <button
                         type="button"
                         className="quiet"
                         disabled={busy !== null}
                         onClick={() =>
-                          act("intelligence-restart", async () => {
-                            await intelligence("stop");
-                            await intelligence("start");
-                          })
+                          act("intelligence-start", () => intelligence("start"))
                         }
                       >
-                        Restart
+                        Start
                       </button>
-                      <button
-                        type="button"
-                        className="quiet"
-                        disabled={busy !== null}
-                        onClick={() =>
-                          act("intelligence-stop", () => intelligence("stop"))
-                        }
-                      >
-                        Stop
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      className="quiet"
-                      disabled={busy !== null}
-                      onClick={() =>
-                        act("intelligence-start", () => intelligence("start"))
-                      }
-                    >
-                      Start
-                    </button>
-                  )}
-                </div>
-                {status.openbotRunning && (
-                  <p className="footnote">
-                    OpenBot needs these services while it runs. Stopping them
-                    frees memory until you start them again here.
-                  </p>
+                    )}
+                  </div>
+                )}
+                {belowFloor ? (
+                  <p className="footnote">{SECURITY_FLOOR_SENTENCE}</p>
+                ) : (
+                  status.openbotRunning && (
+                    <p className="footnote">
+                      OpenBot needs these services while it runs. Stopping them
+                      frees memory until you start them again here.
+                    </p>
+                  )
                 )}
               </section>
             )}

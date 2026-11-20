@@ -10,9 +10,13 @@ info:
 
     An OpenBot install holds one or more organizations, and a person may be a member of several. Where an install allows more than one, everybody has an organization of their own, made for them when they first sign in, and joins others by invitation. Otherwise, and on an install for one person with no sign-in, everybody works in the organization `default`. organizationId is an organization's id or its slug, and the caller must be a member of it: an organization the caller is not in answers exactly as one that does not exist, `default` included.
 
-    A program of your own signs its requests in one of two ways. An API key acts as the person who made it, in every organization they are a member of, like a personal access token: the address names the organization each request is for. Keys start `obk_` and are sent as `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2 and on the socket a join token is spent on (createConversationJoinToken). To get a first key, sign in to OpenBot's web app, open Settings, then API keys, and create one. The key is shown once. Only a person signed in to the web app can make or delete keys: a key or an app's sign-in cannot. An app that signs people in uses OAuth 2.1 instead, described under the appOAuth security scheme: its client ids, redirect addresses, endpoints, how long tokens last and the four addresses outside /api/v2 a token also works at.
+    A program of your own signs its requests in one of two ways. An API key acts as the person who made it, in the organization it was made in, like a personal access token: the address names the organization each request is for. Keys start `obk_` and are sent as `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2 and on the socket a join token is spent on (createConversationJoinToken). To get a first key, sign in to OpenBot's web app, open Settings, then API keys, and create one. The key is shown once. Only a person signed in to the web app can make or delete keys: a key or an app's sign-in cannot. An app that signs people in uses OAuth 2.1 instead, described under the appOAuth security scheme: its client ids, redirect addresses, endpoints, how long tokens last and the four addresses outside /api/v2 a token also works at.
 
     An install for one person on one computer has no sign-in. It signs nobody in, so it has neither OAuth nor API keys, and the operations that manage keys and sessions answer 503 with the code SIGN_IN_UNAVAILABLE.
+
+    An organization can require its members to sign in through their company's identity provider. A member who hasn't is held out of it: every operation under its address answers 403 with the code SSO_REQUIRED (category permission, not retryable), whose detail tells them to sign in with their work email. getCompanySignIn alone still answers, and says which providers they can use.
+
+    OpenBot's own apps name themselves on every request in the header `OpenBot-Client`: `<kind>/<version>`, where kind is web, desktop, mobile or recorder, such as `OpenBot-Client: desktop/1.1.0`. A header may name more than one, separated by spaces: OpenBot Desktop adds its own to the one its window's page sent. getDeployment says which API versions this OpenBot serves and the oldest release of each app it serves (minimumClients). Every other operation under /api/v2 refuses an app older than that with 400 and the code CLIENT_UPDATE_REQUIRED, whose problem names the app (client) and its minimum (minimumVersion) and whose detail tells the person to update OpenBot. When that minimum was raised because of a security problem in older releases, the problem also says security: true, and getDeployment lists it under securityMinimumClients. A program of your own need not send the header; without it nothing is refused for a version.
 
     This file is the single source of truth: the clients, the server's types, the docs and the contract tests are all generated from it or checked against it. A change that breaks an existing client fails the pull request.
 servers:
@@ -34,7 +38,7 @@ tags:
   - name: Identity providers
     description: The companies' own identity providers registered for single sign-on, by email domain. Only an administrator manages them.
   - name: API keys
-    description: The keys a person makes for automation. A key acts as them, in every organization they are a member of, on the API, and only a person signed in to OpenBot can make or manage one.
+    description: The keys a person makes for automation. A key acts as them, in the organization it was made in, on the API, and only a person signed in to OpenBot can make or manage one.
   - name: Sessions
     description: Where a person is signed in to OpenBot, so they can see each browser and device and sign one out.
   - name: Organization settings
@@ -117,6 +121,8 @@ tags:
     description: 'The facts a person''s Bots remember about them, and the app actions those facts are read in from. Each person''s are theirs alone: an administrator can''t read them either.'
   - name: Agents
     description: 'The agents an organization''s Bots hand work to: OpenBot''s own, a framework OpenBot runs, or an agent somebody runs at its own address. An administrator adds the organization''s, and anybody may add a private one for their own Bots. A Bot''s delegation says whether it works on one agent or hands work to several, and which.'
+  - name: CopilotKit management
+    description: Connecting a self-hosted OpenBot to CopilotKit's management service, which keeps it up to date in the company's own cluster through an agent installed there. Only the administrators of the organization `default` manage it, and only on the team edition a company runs itself.
 paths:
   /api/v2/organizations/{organizationId}/reactions:
     parameters:
@@ -643,6 +649,52 @@ paths:
           $ref: '#/components/responses/ModelNotConfigured'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/deployment/audit-events:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Audit events
+      operationId: listDeploymentAuditEvents
+      summary: List this OpenBot's own audit events
+      description: 'Return one page of this OpenBot''s own trail, newest first: what happened to the installation and to no organization. That includes what the server found when it started, a Recorder connect code nobody knows, identity providers registered or removed, and the configuration making somebody the admin who runs this OpenBot. Where this OpenBot keeps one organization, those events are on that organization''s trail, and this list is empty. Only the admin who runs this OpenBot may read it. Where it keeps one organization, that is the organization''s admins. Where it may hold several, it is the people its configuration names (INITIAL_ADMIN_EMAILS), asking in an organization they administer, and any other admin is refused. eventType, from and to narrow the events as they do on an organization''s trail. A missing cursor starts at the newest event, and nextCursor null ends the list. A cursor belongs to the filters that made it, so changing a filter starts again without one; limit may change from page to page. Events older than the audit retention window are removed, as they are from every organization''s trail.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - audit-events:read
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/AuditEventTypes'
+        - $ref: '#/components/parameters/AuditFrom'
+        - $ref: '#/components/parameters/AuditTo'
+      responses:
+        '200':
+          description: One page of this OpenBot's own audit events.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEventPage'
+              examples:
+                firstPage:
+                  $ref: '#/components/examples/AuditEventPageFirst'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/people:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -737,7 +789,7 @@ paths:
         - People
       operationId: updatePerson
       summary: Change a person
-      description: Change what is sent and leave the rest. A person changes their own name, and nobody else's. An administrator changes anybody's role, but not their own away from administrator, and not the role of somebody the deployment's configuration names as an administrator. Asking for the role a person already has changes nothing and records nothing.
+      description: 'Change what is sent and leave the rest. A person changes their own name, and nobody else''s. An administrator changes anybody''s role, but not their own away from administrator, and not the role of somebody the deployment''s configuration names as an administrator. Asking for the role a person already has changes nothing and records nothing. role is deprecated: change a member''s role with updateOrganizationMember instead.'
       security:
         - webSession: []
         - appOAuth:
@@ -1205,7 +1257,7 @@ paths:
         - API keys
       operationId: createApiKey
       summary: Make an API key
-      description: 'Make an API key that acts as the person, in every organization they are a member of, on the API. The key itself is in this answer and never again: OpenBot keeps only a hash of it. Only the person themselves may make one, signed in to OpenBot: a key can never make another key, and neither can an app''s sign-in. A key ends when it expires, when it is deleted, or when an administrator removes the person.'
+      description: 'Make an API key that acts as the person on the API, in this organization only: the one it was made in. In any other organization it is refused as if the organization did not exist. The key itself is in this answer and never again: OpenBot keeps only a hash of it. Only the person themselves may make one, signed in to OpenBot: a key can never make another key, and neither can an app''s sign-in. A key ends when it expires, when it is deleted, or when an administrator removes the person.'
       security:
         - webSession: []
       parameters:
@@ -1556,7 +1608,7 @@ paths:
         - Identity providers
       operationId: listIdentityProviders
       summary: List identity providers
-      description: 'Return one page of the identity providers registered for single sign-on, by email domain: a company''s own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.'
+      description: 'Return one page of the identity providers registered for single sign-on, by email domain: a company''s own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Where this OpenBot may keep more than one organization, the list in any organization but `default` also holds the providers registered for the whole OpenBot, marked deployment: they count for this organization''s Require SSO only while it has no provider of its own, and can''t be removed here. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.'
       security:
         - webSession: []
         - appOAuth:
@@ -1657,7 +1709,7 @@ paths:
         - Identity providers
       operationId: deleteIdentityProvider
       summary: Remove an identity provider
-      description: Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider already removed is not found.
+      description: 'Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider registered for the whole OpenBot (deployment) is removed only where it was registered: in any other organization it is refused with 403. A provider already removed is not found.'
       security:
         - webSession: []
         - appOAuth:
@@ -1673,13 +1725,114 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/AdminOnly'
+          $ref: '#/components/responses/IdentityProviderNotRemovable'
         '404':
           $ref: '#/components/responses/IdentityProviderNotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/company-sign-in:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    get:
+      tags:
+        - People
+      operationId: getCompanySignIn
+      summary: Read whether a person must use their company sign-in here
+      description: Return whether this organization requires its members to sign in through their company's identity provider, whether the person has, and the providers they can use for it. Any member may read their own, as me or by their own id. It answers even while the organization holds them out for not having signed in that way, when every other request they make in it is refused with SSO_REQUIRED. To use a provider, they sign in through it by its id (POST /api/auth/sign-in/sso with providerId) in a browser where they are signed in, or from an app through createCompanySignInTicket.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - people:read
+        - apiKey: []
+      responses:
+        '200':
+          description: Whether the person must use their company sign-in here.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanySignIn'
+              examples:
+                required:
+                  $ref: '#/components/examples/CompanySignInExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/company-sign-in/tickets:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/PersonId'
+    post:
+      tags:
+        - People
+      operationId: createCompanySignInTicket
+      summary: Get a ticket to link a company account from an app
+      description: 'Return an address for a browser to link the person''s company account at one of the organization''s identity providers, for an app that has no browser session to carry, such as the phone. The app opens it in the system browser, and the person signs in through the provider there. Sent with returnTo app, the browser goes back to the phone app once the account is linked. The address carries a ticket, never the app''s own sign-in. The ticket is the person''s, for this organization and this provider, lasts two minutes, and opens once. Signing in through the provider then links the company account as a signed-in browser''s sign-in does: the provider must give the person''s own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - people:write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCompanySignInTicketRequest'
+            examples:
+              okta:
+                value:
+                  providerId: acme-okta
+              fromThePhone:
+                value:
+                  providerId: acme-okta
+                  returnTo: app
+      responses:
+        '201':
+          description: The address to open in the system browser, shown this once.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanySignInTicket'
+              examples:
+                ticket:
+                  $ref: '#/components/examples/CompanySignInTicketExample'
+        '400':
+          $ref: '#/components/responses/InvalidCompanySignInTicket'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CompanySignInTicketForbidden'
+        '404':
+          $ref: '#/components/responses/CompanySignInProviderNotFound'
+        '409':
+          $ref: '#/components/responses/CompanySignInTicketConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/SignInUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/deployment:
@@ -1690,7 +1843,7 @@ paths:
         - Organization settings
       operationId: getDeployment
       summary: Read what this OpenBot offers
-      description: 'Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no version: only whether single sign-on is set up and required.'
+      description: 'Return what this OpenBot offers and how people sign in to it: the edition, the features the apps draw, how large an attached file may be, and the sign-in options. Anybody may read it, signed in or not, because the sign-in screen reads it first. Signed in, it is answered in an organization the caller is a member of, and an organization they are not in, the organization `default` included, answers exactly as one that does not exist. Nobody signed in reads it in the organization `default`. It names no identity provider and no build: only whether single sign-on is set up and required, and which API versions and which releases of each OpenBot app it serves. It is never refused for the app''s version, so an app reads it first to learn whether it, or the OpenBot, needs an update.'
       x-openbot-singleton: true
       security:
         - {}
@@ -1756,7 +1909,7 @@ paths:
         - Organization settings
       operationId: updateOrganizationSettings
       summary: Change the organization's settings
-      description: 'Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment''s configuration names and the caller. Requiring single sign-on applies to signing in to the whole OpenBot, so it is set only in the organization `default`: sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.'
+      description: 'Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment''s configuration names and the caller. Where this OpenBot may keep more than one organization, requiring single sign-on is each organization''s own rule: its members sign in through an identity provider, and saving it signs out only this organization''s members who signed in another way. Where it keeps only one organization, that organization''s rule holds for everybody who signs in, and sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.'
       security:
         - webSession: []
         - appOAuth:
@@ -3519,7 +3672,7 @@ paths:
         - Conversations
       operationId: getAttachment
       summary: Download an attachment
-      description: Return the bytes of a file attached to a message, in the type OpenBot recognised it as. Only somebody in the conversation it was sent in, or the person still holding it to send, can read it.
+      description: Return the bytes of a file attached to a message, in the type OpenBot recognised it as. Only somebody in the conversation it was sent in, or the person still holding it to send, can read it. A picture is served to open in place. Every other file, a PDF or a Word, Excel or PowerPoint file among them, is served as a download.
       security:
         - webSession: []
         - appOAuth:
@@ -4114,6 +4267,14 @@ paths:
                   kind: model
                   provider: openai
                   secret: sk-example
+              serverToServerClient:
+                value:
+                  kind: mcp_oauth_client
+                  provider: shopify
+                  keyId: server-to-server
+                  metadata:
+                    clientId: example-client-id
+                  secret: example-client-secret
       responses:
         '201':
           description: The credential, as kept. Never its secret.
@@ -4367,6 +4528,131 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/ai-connection:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Models
+      operationId: getAiConnection
+      summary: Read how OpenBot reaches its AI provider
+      description: Return the AI provider OpenBot's Bots run on, the way OpenBot signs in to it, the model or address host where one was named, and whether a run can use it now. Never a key. Also which other connections still have a key kept, so they can be used again without pasting it. Where whoever runs OpenBot sets the provider, editable is false and the connection can't be changed here. Only an administrator of the organization may read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - ai-connection:read
+        - apiKey: []
+      responses:
+        '200':
+          description: How OpenBot reaches its AI provider. Never a key.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiConnection'
+              examples:
+                apiKey:
+                  $ref: '#/components/examples/AiConnectionExample'
+                endpoint:
+                  $ref: '#/components/examples/AiConnectionEndpointExample'
+                fixed:
+                  $ref: '#/components/examples/AiConnectionFixedExample'
+                none:
+                  $ref: '#/components/examples/AiConnectionNoneExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    put:
+      tags:
+        - Models
+      operationId: replaceAiConnection
+      summary: Change how OpenBot reaches its AI provider
+      description: 'Switch the AI provider OpenBot''s Bots run on, with no restart. OpenBot checks the connection with the provider first: a key, an address or a sign-in it can''t use is refused, nothing is saved, and the connection in use keeps running. Once saved, the next run uses it, and runs already going finish on the one they started with. A key goes into the organization''s vault and is never sent back; the key of the connection it replaces stays kept, so it can be used again (saved). Recorded on the audit trail, never with a key. Only an administrator of the organization may change it, and not where whoever runs OpenBot sets the provider.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - ai-connection:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiConnectionInput'
+            examples:
+              apiKey:
+                value:
+                  provider: anthropic
+                  login: api-key
+                  apiKey: sk-ant-example
+              savedKey:
+                value:
+                  provider: openai
+                  login: api-key
+                  useSavedKey: true
+              endpoint:
+                value:
+                  provider: google
+                  login: endpoint
+                  apiKey: example-gemini-key
+                  baseUrl: https://generativelanguage.googleapis.com/v1beta/openai
+                  model: gemini-3-pro
+              signIn:
+                value:
+                  provider: xai
+                  login: oauth
+                  model: grok-5
+              plan:
+                value:
+                  provider: anthropic
+                  login: plan
+      responses:
+        '200':
+          description: The connection, as saved and in use. Never a key.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiConnection'
+              examples:
+                apiKey:
+                  $ref: '#/components/examples/AiConnectionExample'
+                endpoint:
+                  $ref: '#/components/examples/AiConnectionEndpointExample'
+        '400':
+          $ref: '#/components/responses/InvalidAiConnection'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/AiConnectionFixed'
+        '422':
+          $ref: '#/components/responses/AiConnectionRefused'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/CredentialsUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/apps:
@@ -7794,7 +8080,7 @@ paths:
         - Devices
       operationId: listDevices
       summary: List a person's devices
-      description: Return one page of the phones a person registered for push notifications, the first registered first. Never a device's push token. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.
+      description: Return one page of the phones a person registered for push notifications in this organization, the first registered first. Never a device's push token. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.
       security:
         - webSession: []
         - appOAuth:
@@ -7838,7 +8124,7 @@ paths:
         - Devices
       operationId: registerDevice
       summary: Register a device for push notifications
-      description: Register one of the person's phones for push notifications under the id the app made for it, or replace what that id holds. The app sends its current push token every time it starts, so a token that changed replaces the old one and the device is never registered twice. Answers 200 whether the id was new or held a registration already. A token another account holds moves only once that account signed out on the phone. Only the person themselves may register their devices, and only where this deployment sends push notifications (listNotificationTransports).
+      description: Register one of the person's phones for push notifications under the id the app made for it, or replace what that id holds. A device is registered in one organization, the one the address names, and gets push notifications only from the person's Bots there. A person in several organizations registers the phone in each one they want notifications from, under the same id. The app sends its current push token every time it starts, so a token that changed replaces the old one and the device is never registered twice. Answers 200 whether the id was new or held a registration already. A token another account holds moves only once that account signed out on the phone. Only the person themselves may register their devices, and only where this deployment sends push notifications (listNotificationTransports).
       security:
         - webSession: []
         - appOAuth:
@@ -7890,7 +8176,7 @@ paths:
         - Devices
       operationId: deleteDevice
       summary: Stop push notifications to a device
-      description: Stop sending push notifications to one of the person's phones. The app does this when the person signs out on it, so another account can register the phone after them. Only the person themselves may remove their devices. A device already removed is not found, which a client can read as done.
+      description: Stop sending push notifications to one of the person's phones from this organization. Its registrations in the person's other organizations stay. The app does this in each organization when the person signs out on it, so another account can register the phone after them. Only the person themselves may remove their devices. A device already removed is not found, which a client can read as done.
       security:
         - webSession: []
         - appOAuth:
@@ -8482,7 +8768,7 @@ paths:
         - Routines
       operationId: createRoutine
       summary: Create a routine
-      description: 'Create a routine owned by the caller: the Bot carries out the instruction on the schedule and posts in the conversation, which must be one the caller and the Bot share. With goalId it is the routine that runs that goal on a schedule. A person may have 20 routines switched on, and a routine runs at most once an hour. There is no operation to change a routine: that is done by asking its Bot. A repeated request with the same Idempotency-Key and body returns the first result.'
+      description: 'Create a routine owned by the caller: the Bot carries out the instruction on the schedule and posts in the conversation, which must be one the caller and the Bot share. With goalId it is the routine that runs that goal on a schedule. A person may have 20 routines switched on, and a routine runs at most once an hour. updateRoutine changes one. A repeated request with the same Idempotency-Key and body returns the first result.'
       security:
         - webSession: []
         - appOAuth:
@@ -8536,6 +8822,57 @@ paths:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
       - $ref: '#/components/parameters/RoutineId'
+    patch:
+      tags:
+        - Routines
+      operationId: updateRoutine
+      summary: Change a routine
+      description: 'Change one of the caller''s routines: its name, what the Bot does, its schedule or its time zone. Only the fields sent change. It keeps its id, its conversation and its runs. A new schedule or time zone follows the same rules as a new routine''s, and its next run is worked out from now. One that does not exist, or is somebody else''s, is not found. A repeated request with the same Idempotency-Key and body returns the first result.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - routines:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRoutineRequest'
+            examples:
+              request:
+                value:
+                  instruction: Summarize my unread mail, today's calendar and the weather.
+                  cron: 30 8 * * 1-5
+      responses:
+        '200':
+          description: The routine, as saved.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoutineResponse'
+              examples:
+                answer:
+                  $ref: '#/components/examples/RoutineResponseExample'
+        '400':
+          $ref: '#/components/responses/InvalidRoutine'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/RoutineNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
     delete:
       tags:
         - Routines
@@ -10202,13 +10539,20 @@ paths:
         - Organizations
       operationId: listOrganizationMembers
       summary: List an organization's members
-      description: Return one page of the organization's members, in the order they joined. Any member can read it. A missing cursor starts at the first page and nextCursor null ends the list.
+      description: 'Return one page of the organization''s members, in the order they joined. Any member can read it. search narrows the list to the members whose name or address matches it, ignoring case, best matches first: those whose name, a word of their name (a first or a last name) or their address starts with it, then those whose name or address holds it, each group in alphabetical order of name, then address. A search finds only this organization''s current members: never somebody it removed, somebody turned away from this OpenBot, or a member of another organization only. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.'
       security:
         - webSession: []
         - appOAuth:
             - organizations:read
         - apiKey: []
       parameters:
+        - name: search
+          in: query
+          description: The start of a name, a first or last name, or an address, or a part of one, matched without regard to case. Leading and trailing spaces are ignored; empty lists everybody.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
@@ -10287,6 +10631,41 @@ paths:
           $ref: '#/components/responses/IdempotencyConflict'
         '500':
           $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Organizations
+      operationId: deleteOrganization
+      summary: Delete an organization
+      description: 'Delete the organization and what is in it. Nobody can work in it again: its Bots stop, its computers are removed, the API keys made in it stop working, and it leaves every member''s list of organizations. Its members keep their accounts and their other organizations. Only an owner of this organization can. A person''s own organization and `default` stay, and are refused. A repeated request with the same Idempotency-Key returns the first result.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The organization is deleted.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/OwnerOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/OrganizationStays'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/OrganizationNotDeleted'
         default:
           $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/members/{personId}:
@@ -17510,6 +17889,94 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/app-errors:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Product events
+      operationId: recordAppError
+      summary: Report an error the app did not handle
+      description: 'Tell OpenBot about an error the app hit and did not handle: one its error screen caught, or one the page threw or left unhandled. OpenBot forwards it with the rest of its product telemetry, so the app never holds a telemetry key, and takes out of its message and stack anything that could name a person, quote what they wrote, or carry a secret before it leaves. It is best effort: a client sends one per error, waits on nothing, and sends it with keepalive. Where this OpenBot has product telemetry switched off, it is accepted and dropped.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppError'
+            examples:
+              errorScreen:
+                $ref: '#/components/examples/AppErrorBoundary'
+      responses:
+        '204':
+          description: The error is accepted.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/nudge-events:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - Product events
+      operationId: recordNudgeEvent
+      summary: Record what the caller did with a nudge
+      description: 'Tell OpenBot that a nudge (a notice OpenBot shows a person once, such as the ask to star OpenBot on GitHub) was shown to the caller, that they followed it, or that they dismissed it, and where. OpenBot adds the moment that made it due, from what it already knows about the caller, so the counts say which moment works. It is best effort: a client sends one per show or answer and waits on nothing. Saving the answer is a separate change to the caller''s preferences (`dismissedNotices`). The event counts for the caller and names nothing else. Where this OpenBot has product telemetry switched off, it is accepted and dropped.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - conversations:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NudgeEvent'
+            examples:
+              clicked:
+                $ref: '#/components/examples/NudgeClicked'
+      responses:
+        '204':
+          description: The event is accepted.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/settings/learning:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -19931,6 +20398,127 @@ paths:
           $ref: '#/components/responses/ServerError'
         default:
           $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/management:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - CopilotKit management
+      operationId: getManagementEnrollment
+      summary: Read whether this OpenBot is connected to CopilotKit management
+      description: 'Return where connecting this OpenBot to CopilotKit''s management service stands: not connected; waiting for somebody at CopilotKit''s page to approve the code; waiting for the management agent to be installed in the cluster with the Helm command given; or connected, with the agent''s last heartbeat and version. Management is for the whole OpenBot, so it is answered only in the organization `default`, and only to its administrators. It applies only to the team edition that a company runs itself: on the personal edition, on OpenBot Cloud, and in any other organization it answers 404 with the code MANAGEMENT_UNAVAILABLE, which a client reads as nothing to show.'
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth:
+            - settings:read
+        - apiKey: []
+      responses:
+        '200':
+          description: Where connecting this OpenBot stands.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagementEnrollment'
+              examples:
+                notConnected:
+                  $ref: '#/components/examples/ManagementNotConnectedExample'
+                waitingForApproval:
+                  $ref: '#/components/examples/ManagementWaitingForApprovalExample'
+                waitingForAgent:
+                  $ref: '#/components/examples/ManagementWaitingForAgentExample'
+                connected:
+                  $ref: '#/components/examples/ManagementConnectedExample'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/ManagementUnavailable'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/management/enrollment:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    post:
+      tags:
+        - CopilotKit management
+      operationId: startManagementEnrollment
+      summary: Start connecting this OpenBot to CopilotKit management
+      description: Ask CopilotKit's management service to connect this OpenBot. OpenBot sends its CopilotKit licence and its name, and gets back a short code and the page where somebody signed in to CopilotKit, as an admin of the organization the licence names, approves it (the OAuth device authorization grant, RFC 8628). OpenBot then waits for the approval on its own; read getManagementEnrollment to follow it. Once approved, the answer carries the Helm command that installs the management agent, with nothing secret in it. Started again while it is already waiting, it changes nothing and answers where it stands. Already connected answers 409. Only an administrator of the organization `default` may start it, and only where getManagementEnrollment applies.
+      security:
+        - webSession: []
+        - appOAuth:
+            - settings:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Where connecting this OpenBot stands now.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagementEnrollment'
+              examples:
+                waitingForApproval:
+                  $ref: '#/components/examples/ManagementWaitingForApprovalExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/ManagementUnavailable'
+        '409':
+          $ref: '#/components/responses/ManagementConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/ManagementServiceFailed'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - CopilotKit management
+      operationId: cancelManagementEnrollment
+      summary: Stop connecting this OpenBot to CopilotKit management
+      description: 'Stop a connection that is waiting for approval or for the agent, and forget its code and its one-time token, so the agent can no longer collect it. CopilotKit''s management service is told: a code nobody approved yet is withdrawn, so its approval page refuses it, and an install it already made is retired. Nothing is changed in the cluster. Not connected answers 204 too. Connected, it finishes disconnecting after the management agent is uninstalled with Helm: while the service still hears from the agent it answers 409, and once the agent hasn''t reported in for more than five minutes it retires the install at the service, forgets the connection and answers 204, so OpenBot can be connected again later. Telling the service is best effort: out of reach, OpenBot stops anyway and lastError says the service wasn''t told. Connected with the service out of reach, the last heartbeat OpenBot saw decides, and a recent one answers 502. Only an administrator of the organization `default` may stop it, and only where getManagementEnrollment applies.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - settings:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: OpenBot is not connecting to CopilotKit management.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/ManagementUnavailable'
+        '409':
+          $ref: '#/components/responses/ManagementConflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          $ref: '#/components/responses/ManagementServiceFailed'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
 components:
   securitySchemes:
     webSession:
@@ -19949,7 +20537,7 @@ components:
 
         Endpoints. The authorization server's metadata (RFC 8414) is at `/.well-known/oauth-authorization-server/api/auth`. The person is sent to `/api/auth/oauth2/authorize`. The code is exchanged, and a token refreshed, at `/api/auth/oauth2/token`, with a form-encoded body (`application/x-www-form-urlencoded`) that carries `client_id` and no secret: the token and revocation endpoints take no client authentication (`none` in the metadata's `token_endpoint_auth_methods_supported`). A wrong `code_verifier` is answered 400 `invalid_grant`, and the code cannot be used again. A token is revoked (RFC 7009) at `/api/auth/oauth2/revoke`; revoking a token the server does not know, or one already revoked, answers 200.
 
-        Tokens. An access token starts `oba_` and lasts one hour. A refresh token starts `obr_`, is issued only when the `offline_access` scope is asked for, and rotates on every use: each refresh answers a new refresh token and ends the one it was given. Access tokens work on /api/v2, and on four addresses outside it that an app's screens need, each with the scope given: `GET /api/me`, who is signed in (people:read); the chat runtime at `/api/copilotkit` and everything under it (conversations:write); a file's download at `GET /api/attachments/{attachmentId}`, the address a sent message keeps (conversations:read); and the relayed realtime socket at `/api/intelligence/client/websocket` (conversations:read). They work nowhere else.
+        Tokens. An access token starts `oba_` and lasts one hour. A refresh token starts `obr_`, is issued only when the `offline_access` scope is asked for, and rotates on every use: each refresh answers a new refresh token and ends the one it was given. Access tokens work on /api/v2, and on four addresses outside it that an app's screens need, each with the scope given: `GET /api/me`, who is signed in (people:read); the chat runtime at `/api/copilotkit` and everything under it (conversations:write); a file's download at `GET /api/attachments/{attachmentId}`, the address a sent message keeps (conversations:read); and the relayed realtime socket at `/api/intelligence/client/websocket` (conversations:read), which is also on /api/v2 at `/api/v2/organizations/{organizationId}/realtime/websocket`. They work nowhere else.
 
         Organization. An access token carries no memory of which organization the person is working in. An address under `/api/v2/organizations/{organizationId}` names it. Where an address names none, such as the list of the person's own organizations, an app sends the header `OpenBot-Organization` with the organization's id. It is checked against the person's membership on every request, and an organization they are not in answers not found. With no header, the app works in the person's own organization.
 
@@ -19994,6 +20582,8 @@ components:
             model-catalogue:read: Read the models Bots can run on.
             model-choices:read: Read the model the signed-in person chose for each of their conversations.
             model-choices:write: Choose the model the signed-in person's conversations answer on.
+            ai-connection:read: Read how OpenBot reaches its AI provider, never a key, when the signed-in person is an administrator.
+            ai-connection:write: Change how OpenBot reaches its AI provider, when the signed-in person is an administrator.
             apps:read: Read the apps the organization has added, the directory of apps it can add, and how apps are set up here.
             apps:write: Add, change, refresh and remove apps, when the signed-in person may.
             connections:read: Read the signed-in person's connections to apps, and each app's shared account.
@@ -20047,7 +20637,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: OpenBot API key
-      description: 'Automation. An API key acts as the person who created it, in every organization they are a member of, like a personal access token: the address of each request names the organization, and one the person is not in answers not found. A key starts `obk_` and is sent as `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2 and on the relayed realtime socket at `/api/intelligence/client/websocket`, where a join token the key made is spent (createConversationJoinToken). A person makes one in the web app, signed in, under Settings, then API keys (createApiKey).'
+      description: 'Automation. An API key acts as the person who created it, like a personal access token, in the one organization it was made in. The address of each request names the organization, and any other answers not found. A key starts `obk_` and is sent as `Authorization: Bearer <key>` or in an `x-api-key` header, on /api/v2 (the relayed realtime socket at `/api/v2/organizations/{organizationId}/realtime/websocket` included) and on the relayed realtime socket at `/api/intelligence/client/websocket`, where a join token the key made is spent (createConversationJoinToken). A person makes one in the web app, signed in, under Settings, then API keys (createApiKey).'
     recorderConnection:
       type: http
       scheme: bearer
@@ -20130,7 +20720,7 @@ components:
         type: string
         minLength: 1
         maxLength: 206
-        pattern: ^(organization|team:[^\x00]*\S[^\x00]*|group:[^\x00]*\S[^\x00]*)$
+        pattern: ^(organization|team:[^\x00]*[^\s\x00][^\x00]*|group:[^\x00]*[^\s\x00][^\x00]*)$
     BotId:
       name: botId
       in: path
@@ -21067,13 +21657,14 @@ components:
           $ref: '#/components/schemas/BotInstructions'
         harness:
           type: string
-          description: 'The framework an agent somebody runs themselves is built on, by its id in OpenBot''s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint.'
+          description: 'The framework an agent somebody runs themselves is built on, by its id in OpenBot''s harness list (shared/harnesses.json), which the server checks every create against. Empty means none was named, as for an agent somebody already runs. "byo-url" is not one: it names no framework. Kept only with an endpoint, with one exception: "langgraph-ts" sent with no endpoint asks for a Bot that runs inside OpenBot on OpenBot''s own LangGraph (TypeScript) engine, which is what the New Bot sheet sends. The deployment decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, and an administrator may switch new Bots back to the built-in agent.'
           enum:
             - ''
             - crewai
             - llamaindex
             - agno
             - langgraph
+            - langgraph-ts
             - google-adk
             - antigravity
             - pydantic-ai
@@ -21393,6 +21984,20 @@ components:
         - admin
         - member
       description: 'The person''s role as a member of the organization. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The owner is whoever created the organization; `default` has admins and no owner.'
+    PersonRoleAnswer:
+      type: string
+      x-extensible-enum:
+        - owner
+        - admin
+        - member
+      description: 'The person''s role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn''t know as a member.'
+    NoticeId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+      description: 'A notice OpenBot shows a person once, such as a nudge, by its id: star-on-github is the ask to star OpenBot on GitHub.'
+      example: star-on-github
     AssignableRole:
       type: string
       enum:
@@ -21450,7 +22055,7 @@ components:
             - 'null'
           description: The picture their identity provider gave, when it gave one.
         role:
-          $ref: '#/components/schemas/PersonRole'
+          $ref: '#/components/schemas/PersonRoleAnswer'
         needsName:
           type: boolean
           description: Whether they have still to choose what OpenBot calls them, because their name is missing or is only their address.
@@ -21528,6 +22133,10 @@ components:
           description: What OpenBot calls the person, 1 to 100 characters once trimmed. Only the person themselves may change it.
         role:
           $ref: '#/components/schemas/AssignableRole'
+          deprecated: true
+          x-deprecation-date: '2026-11-19'
+          x-sunset: '2028-05-19'
+          description: Deprecated. Change a member's role with updateOrganizationMember (PATCH /api/v2/organizations/{organizationId}/members/{personId}) instead.
     AdvanceOnboardingRequest:
       type: object
       additionalProperties: false
@@ -21583,6 +22192,7 @@ components:
       required:
         - messageListEmphasis
         - selfHostBannerDismissed
+        - dismissedNotices
         - narration
         - skin
         - proactive
@@ -21592,6 +22202,21 @@ components:
         selfHostBannerDismissed:
           type: boolean
           description: Whether they closed the banner offering help self-hosting OpenBot.
+        dismissedNotices:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          description: The notices they answered, either way, by id. A notice in this list is never shown to them again, on any device. Empty until they answer one.
+          items:
+            $ref: '#/components/schemas/NoticeId'
+        noticesDue:
+          type: array
+          readOnly: true
+          maxItems: 64
+          uniqueItems: true
+          description: The notices OpenBot would show them now, by id, worked out by the server from the edition and how they have used OpenBot. A notice they dismissed is never here. Absent from a server that works out none.
+          items:
+            $ref: '#/components/schemas/NoticeId'
         narration:
           description: Whether they narrate their recordings in OpenBot's browser, which opens the microphone only when on. Null until they choose, which the browser asks before their first recording.
           oneOf:
@@ -21616,6 +22241,13 @@ components:
           $ref: '#/components/schemas/MessageListEmphasis'
         selfHostBannerDismissed:
           type: boolean
+        dismissedNotices:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          description: 'Notices they answered, by id. Added to the ones already dismissed: a notice is never taken back off the list.'
+          items:
+            $ref: '#/components/schemas/NoticeId'
         narration:
           $ref: '#/components/schemas/OnOff'
         skin:
@@ -21662,6 +22294,11 @@ components:
             - 'null'
           format: date-time
           description: When it last signed a request. Null if never.
+        organizationId:
+          type:
+            - string
+            - 'null'
+          description: 'The organization this key acts in: the one it was made in. Null for a key made before keys were bound to an organization, which acts in `default`. Absent from an older server.'
     ApiKeyPage:
       type: object
       required:
@@ -21798,7 +22435,7 @@ components:
           description: Who they are there, such as their GitHub login, when the service said.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - active
             - needs_reconnect
           description: needs_reconnect when the service stopped accepting what the link holds, and linking again mends it.
@@ -21937,6 +22574,9 @@ components:
             - string
             - 'null'
           description: The id of the person who registered it, while they still have an account here. Null once they are gone; the provider stays.
+        deployment:
+          type: boolean
+          description: 'True for a provider registered for the whole OpenBot, listed in another organization: it counts for that organization''s Require SSO only while the organization has no provider of its own, and can''t be removed from it. False or absent for the organization''s own.'
     IdentityProviderPage:
       type: object
       required:
@@ -21966,7 +22606,7 @@ components:
       type: string
       minLength: 1
       maxLength: 2048
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     IdentityProviderAddress:
       type: string
       format: uri
@@ -21999,7 +22639,7 @@ components:
           type: string
           minLength: 1
           maxLength: 200000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The provider's SAML metadata XML, as its identity team supplied it.
     OidcIdentityProviderRequest:
       type: object
@@ -22029,13 +22669,13 @@ components:
       type: string
       minLength: 1
       maxLength: 200
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: An id for the provider, unique in the organization, such as acme-okta.
     IdentityProviderDomains:
       type: string
       minLength: 1
       maxLength: 2048
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: The email domain whose people it signs in, such as acme.com. Several are separated by commas.
     CreateIdentityProviderRequest:
       description: A SAML or an OIDC provider, by protocol.
@@ -22098,12 +22738,15 @@ components:
               - google
               - microsoft
               - okta
+        hostedSignIn:
+          type: boolean
+          description: Whether people sign in through OpenBot by CopilotKit's own sign-in, with their account there. The sign-in starts at /api/auth/hosted/sign-in. Absent or false, people sign in only the ways authProviders and ssoConfigured say.
         ssoConfigured:
           type: boolean
           description: Whether a company's own identity provider is registered, so an email address can be sent to it. Never which.
         ssoRequired:
           type: boolean
-          description: Whether an administrator requires single sign-on; social sign-in then stays only as the configured administrators' way in.
+          description: Whether everybody who signs in to this OpenBot must use single sign-on, because its one organization requires it; social sign-in then stays only as the configured administrators' way in. Where this OpenBot may keep more than one organization, each one requires it of its own members in its settings, and this says false.
         builtInBots:
           type: boolean
           description: Whether a Bot can run inside OpenBot, with no address of its own.
@@ -22113,11 +22756,33 @@ components:
         botComputers:
           type: boolean
           description: 'Whether this OpenBot has computers for Bots at all. False, a Bot has no computer, browser or sign-in to a website, and the computers answer 503 to every call. Not isolatedBots: an OpenBot whose Bots share one computer has computers (true) and cannot give a Bot one of its own (isolatedBots false).'
+        attachmentLimits:
+          $ref: '#/components/schemas/AttachmentLimits'
+        api:
+          type: array
+          description: 'The API versions this OpenBot serves, by major, such as v2. An app that speaks none of them can''t use it: when they are all newer than the app''s, the app needs an update; when they are all older, this OpenBot does. Absent from a release before it was published, which serves v2.'
+          minItems: 1
+          items:
+            type: string
+            pattern: ^v[1-9][0-9]{0,3}$
+        minimumClients:
+          $ref: '#/components/schemas/MinimumClients'
+        securityMinimumClients:
+          $ref: '#/components/schemas/MinimumClients'
+          description: 'The part of minimumClients raised because of a security problem in older releases: for each app named, the minimum is there for security. Absent or empty when none is.'
+        launcherApi:
+          type: integer
+          minimum: 1
+          description: The version of what OpenBot Desktop supplies when it starts this OpenBot on its own computer. It changes when Desktop must supply something new.
+        extensionApi:
+          type: integer
+          minimum: 1
+          description: The version of what the OpenBot Recorder and this OpenBot exchange.
     AllowlistEntry:
       type: string
       minLength: 1
       maxLength: 200
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     OrganizationSettingValues:
       type: object
       description: 'The organization''s settings. Context is read only: it comes back with the settings and is never sent.'
@@ -22128,7 +22793,7 @@ components:
           readOnly: true
         ssoRequired:
           type: boolean
-          description: Whether people must sign in through the company's identity provider. It applies to signing in to the whole OpenBot, so it is set only in the organization `default`. The administrators the deployment's configuration names keep social sign-in as their way in.
+          description: Whether people must sign in through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.
         actionRecording:
           type: boolean
           description: Whether what Bots do on their computers is recorded, to read in computer actions.
@@ -22266,6 +22931,13 @@ components:
         actionRecordRetentionDays:
           type: integer
           description: How many days recorded computer actions are kept.
+        computerMode:
+          type: string
+          enum:
+            - per-person
+            - shared
+            - none
+          description: 'How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person''s Bots run on one computer, so a command one Bot runs can read another person''s files there. That suits a proof of concept, not people''s real work. none: Bots have no computers. Absent from a server that predates it.'
     UpdateOrganizationSettingsRequest:
       allOf:
         - $ref: '#/components/schemas/OrganizationSettingValues'
@@ -22421,7 +23093,7 @@ components:
           propertyNames:
             minLength: 1
             maxLength: 200
-            pattern: ^[^\x00]*\S[^\x00]*$
+            pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           additionalProperties:
             $ref: '#/components/schemas/SwitchValue'
         teams:
@@ -22432,7 +23104,7 @@ components:
           propertyNames:
             minLength: 1
             maxLength: 200
-            pattern: ^[^\x00]*\S[^\x00]*$
+            pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           additionalProperties:
             $ref: '#/components/schemas/SwitchValue'
     CapabilityChange:
@@ -22475,7 +23147,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
     CapabilityChangesToPreview:
       type: object
       additionalProperties: false
@@ -22550,7 +23222,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The change in a sentence or two, at most 1,000 characters once trimmed.
     RuleCheck:
       type: object
@@ -22628,7 +23300,7 @@ components:
           type: boolean
         decidedBy:
           type: string
-          enum:
+          x-extensible-enum:
             - default
             - organization
             - role
@@ -22669,7 +23341,7 @@ components:
                   - string
                   - 'null'
               role:
-                $ref: '#/components/schemas/PersonRole'
+                $ref: '#/components/schemas/PersonRoleAnswer'
               groups:
                 type: array
                 items:
@@ -22825,7 +23497,7 @@ components:
           description: organization, team:<id> for a team, or group:<name> for a directory group.
         scopeKind:
           type: string
-          enum:
+          x-extensible-enum:
             - organization
             - group
             - team
@@ -23281,6 +23953,20 @@ components:
           description: 'What is wrong, item by item, when a refusal has more than one reason: each entry names the item and says what is wrong with it.'
           items:
             type: object
+        client:
+          type: string
+          x-extensible-enum:
+            - web
+            - desktop
+            - mobile
+            - recorder
+          description: On CLIENT_UPDATE_REQUIRED, the app the OpenBot-Client header named that is older than this OpenBot serves. A later OpenBot may name another app; read one you don't know as other.
+        minimumVersion:
+          type: string
+          description: On CLIENT_UPDATE_REQUIRED, the oldest release of that app this OpenBot serves.
+        security:
+          type: boolean
+          description: On CLIENT_UPDATE_REQUIRED, true when the minimum the app is below was raised because of a security problem in older releases.
     ConversationJoinToken:
       type: object
       description: 'What a client needs to watch a conversation live: a token, and the socket and topic to use it on (the threadStream channel of api/asyncapi.yaml).'
@@ -23397,11 +24083,12 @@ components:
       properties:
         kind:
           type: string
-          description: 'model, connector or mcp. The other kinds are written by what they belong to: an app''s registration when it is added, a person''s sign-in when they connect it.'
+          description: 'model, connector, mcp or mcp_oauth_client. mcp_oauth_client is the organization''s own OAuth client for an app that connects with a server-to-server grant: provider is the app''s slug in the app directory, keyId is server-to-server, metadata.clientId is the client''s id and secret is the client''s secret. The organization''s app then connects with that client, and the app is offered to the organization once it is kept. The other kinds are written by what they belong to: an app''s registration when it is added, a person''s sign-in when they connect it.'
           enum:
             - model
             - connector
             - mcp
+            - mcp_oauth_client
         provider:
           type: string
           minLength: 1
@@ -23535,6 +24222,8 @@ components:
           type:
             - string
             - 'null'
+        unverified:
+          $ref: '#/components/schemas/UnverifiedModel'
     ModelChoiceInput:
       type: object
       additionalProperties: false
@@ -23627,6 +24316,103 @@ components:
       minLength: 1
       maxLength: 1000
       description: New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.
+    CompanySignIn:
+      type: object
+      description: Whether a person must sign in through their company's identity provider to work in this organization, and how they can.
+      required:
+        - required
+        - met
+        - providers
+      properties:
+        required:
+          type: boolean
+          description: Whether this organization requires its members to sign in through an identity provider.
+        met:
+          type: boolean
+          description: 'Whether the person has: they signed in through one of providers, or with the same identity at the same issuer another way, or they are the admin who runs this OpenBot. While required is true and met is false, the organization holds them out.'
+        providers:
+          type: array
+          description: 'The identity providers that count for this organization: its own, or, where it has none and this OpenBot may keep more than one organization, those registered for the whole OpenBot. Empty when there are none.'
+          items:
+            type: object
+            required:
+              - id
+              - domain
+            properties:
+              id:
+                type: string
+                description: The provider's id, which signing in through it takes.
+              domain:
+                type: string
+                description: The email domain it signs in.
+    CreateCompanySignInTicketRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - providerId
+      properties:
+        providerId:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: The identity provider to sign in through, one getCompanySignIn lists.
+        returnTo:
+          type: string
+          enum:
+            - app
+          description: 'app when the phone app asks: once the company account is linked, the browser is sent back to the app at openbotmobile://company-sign-in/linked, which ends its sign-in session. Without it the browser stays on a page saying the account is linked. Nothing else is a place to go back to.'
+    CompanySignInTicket:
+      type: object
+      required:
+        - url
+        - expiresAt
+      properties:
+        url:
+          type: string
+          format: uri
+          description: The address to open in the system browser. It carries the ticket, a credential shown this once.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the ticket stops opening.
+    AttachmentLimits:
+      type: object
+      description: 'How large a file attached to a message may be, by kind, in bytes. An upload over its kind''s limit is refused. Absent, as from an older OpenBot, the limits are 8388608 for an image or a document (a PDF, or a Word, Excel or PowerPoint file) and 1048576 for any other file. The limits can rise while OpenBot runs, so a client reads them again rather than keeping them for good. What a Bot''s model is shown of a large file is a separate matter: the file is kept and can be downloaded whatever the model can read of it.'
+      required:
+        - imageBytes
+        - documentBytes
+        - fileBytes
+      properties:
+        imageBytes:
+          type: integer
+          minimum: 1
+          description: The largest image.
+        documentBytes:
+          type: integer
+          minimum: 1
+          description: 'The largest document: a PDF, or a Word, Excel or PowerPoint file (.docx, .xlsx, .pptx).'
+        fileBytes:
+          type: integer
+          minimum: 1
+          description: The largest text file, or a file of any other kind.
+    ClientRelease:
+      type: string
+      description: An OpenBot release, such as 1.1.0.
+      pattern: ^\d{1,6}\.\d{1,6}\.\d{1,6}(-[0-9A-Za-z.-]{1,64})?$
+      examples:
+        - 1.1.0
+    MinimumClients:
+      type: object
+      description: The oldest release of each OpenBot app this OpenBot serves. An app names itself in the OpenBot-Client header, and one older than its minimum here is refused with CLIENT_UPDATE_REQUIRED, everywhere but this deployment answer. An app not listed has no minimum. An OpenBot serves every app released in the last 12 months, so it names one only where its administrator raised it. Absent from a release before it was published.
+      properties:
+        web:
+          $ref: '#/components/schemas/ClientRelease'
+        desktop:
+          $ref: '#/components/schemas/ClientRelease'
+        mobile:
+          $ref: '#/components/schemas/ClientRelease'
+        recorder:
+          $ref: '#/components/schemas/ClientRelease'
     ConversationWork:
       type: object
       description: 'Something still owed an answer in a conversation: another Bot that was asked and has not answered (handoff), or a routine running into it (routine).'
@@ -24013,6 +24799,27 @@ components:
         personId:
           type: string
           description: The person who is now in the conversation.
+    Attachment:
+      type: object
+      description: A file held for a message, or sent with one.
+      required:
+        - id
+        - name
+        - mimeType
+        - sizeBytes
+      properties:
+        id:
+          type: string
+          description: The attachment's id.
+        name:
+          type: string
+          description: The file's name.
+        mimeType:
+          type: string
+          description: The type OpenBot recognised it as.
+        sizeBytes:
+          type: integer
+          minimum: 0
     ConversationMessage:
       type: object
       description: 'One thing said in a conversation: a person''s message, or one Bot''s reply.'
@@ -24051,7 +24858,7 @@ components:
           description: What was said. Empty while another person's Bot is still writing it.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - running
             - waiting
@@ -24066,7 +24873,10 @@ components:
           description: When it was said. Null where the time was not kept.
         reason:
           type: string
-          description: Why a waiting Bot is waiting.
+          description: Why a waiting Bot is waiting, in words for the person reading the conversation.
+        declined:
+          type: boolean
+          description: True on a failed Bot reply in a group that the person whose turn it answered chose not to share. It was a choice, not a fault, and nothing was sent. text says whose choice it was.
         answeredBy:
           type: string
           description: 'For an answer passed on from another Bot: which Bot answered.'
@@ -24085,6 +24895,12 @@ components:
           type: integer
           minimum: 0
           description: How many tools the Bot called in this message, when it called any.
+        files:
+          type: array
+          maxItems: 20
+          description: In a group conversation, the files a Bot sent from its computer with this reply, in the order it sent them. Each is an attachment of the conversation, read at its attachment address by anyone in it.
+          items:
+            $ref: '#/components/schemas/Attachment'
     ConversationMessagePage:
       type: object
       required:
@@ -24151,27 +24967,6 @@ components:
           type: string
           description: Names the message being written, so the files of two windows are counted apart.
           maxLength: 200
-    Attachment:
-      type: object
-      description: A file held for a message, or sent with one.
-      required:
-        - id
-        - name
-        - mimeType
-        - sizeBytes
-      properties:
-        id:
-          type: string
-          description: The attachment's id.
-        name:
-          type: string
-          description: The file's name.
-        mimeType:
-          type: string
-          description: The type OpenBot recognised it as.
-        sizeBytes:
-          type: integer
-          minimum: 0
     VoiceCallRequest:
       type: object
       additionalProperties: false
@@ -24382,7 +25177,7 @@ components:
           description: The id that live updates about this thread carry. Compare an incoming update with this one, and use threadId everywhere else. It is threadId itself in the organization default. Left out by a server that names threads one way only, where it is threadId.
     TaskStatus:
       type: string
-      enum:
+      x-extensible-enum:
         - needs_input
         - working
         - resolved
@@ -24645,6 +25440,149 @@ components:
         text:
           type: string
           description: What was said.
+    UnverifiedModel:
+      type: object
+      description: The model a person chose for this conversation, set aside because it hasn't been checked to work with the client this Bot's harness ships. Runs answer on the default model until it has been. Absent when the choice is in use, or set aside for another reason.
+      required:
+        - model
+        - label
+      properties:
+        model:
+          type: string
+          description: The chosen model's id.
+        label:
+          type: string
+          description: Its name, as a model picker shows it.
+    AiConnectionProvider:
+      type: string
+      description: 'The AI provider OpenBot''s Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI''s API, at an address given.'
+      enum:
+        - openai
+        - anthropic
+        - google
+        - xai
+        - unbiased
+        - openai-compatible
+    AiConnectionLogin:
+      type: string
+      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, openai-compatible). oauth: the person''s Google or xAI sign-in (google, xai).'
+      enum:
+        - plan
+        - api-key
+        - endpoint
+        - oauth
+    AiConnectionSaved:
+      type: object
+      description: A connection with a key still kept in the vault, which can be used again without pasting the key (useSavedKey). Never the key.
+      required:
+        - provider
+        - login
+        - endpointHost
+      properties:
+        provider:
+          $ref: '#/components/schemas/AiConnectionProvider'
+        login:
+          $ref: '#/components/schemas/AiConnectionLogin'
+        endpointHost:
+          type:
+            - string
+            - 'null'
+          description: The host of its address, for an endpoint. Null for an API key.
+    AiConnection:
+      type: object
+      description: 'How OpenBot reaches its AI provider: who, how it signs in, and whether a run can use it now. Never a key.'
+      required:
+        - provider
+        - login
+        - model
+        - endpointHost
+        - keySet
+        - ready
+        - source
+        - editable
+        - saved
+        - changedAt
+      properties:
+        provider:
+          description: The provider. Null while none is chosen yet.
+          oneOf:
+            - $ref: '#/components/schemas/AiConnectionProvider'
+            - type: 'null'
+        login:
+          description: How OpenBot signs in to it. Null while none is chosen yet.
+          oneOf:
+            - $ref: '#/components/schemas/AiConnectionLogin'
+            - type: 'null'
+        model:
+          type:
+            - string
+            - 'null'
+          description: The model named for an endpoint or a sign-in. Null for an API key or a plan, where the model catalogue offers the provider's models.
+        endpointHost:
+          type:
+            - string
+            - 'null'
+          description: The host of the endpoint's address, never its path, query or anything that signs in. Null unless the login is endpoint.
+        keySet:
+          type: boolean
+          description: Whether a live key for this connection is kept in the vault.
+        ready:
+          type: boolean
+          description: 'Whether a run can use it now: its key is kept, its sign-in can be read, or its plan''s engine answers.'
+        source:
+          type: string
+          enum:
+            - stored
+            - environment
+            - none
+          description: 'stored: set here, or carried over from how OpenBot was set up. environment: set by whoever runs OpenBot, in its configuration. none: nothing set yet.'
+        editable:
+          type: boolean
+          description: 'Whether an administrator can change it here. False where whoever runs OpenBot sets the provider: its key is changed in the vault.'
+        saved:
+          type: array
+          description: The connections with a key still kept in the vault, so a switch to one of them needs no key pasted.
+          items:
+            $ref: '#/components/schemas/AiConnectionSaved'
+        changedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When it was last changed. Null if never.
+    AiConnectionInput:
+      type: object
+      additionalProperties: false
+      description: The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased and openai-compatible take endpoint. Any other pair is refused.
+      required:
+        - provider
+        - login
+      properties:
+        provider:
+          $ref: '#/components/schemas/AiConnectionProvider'
+        login:
+          $ref: '#/components/schemas/AiConnectionLogin'
+        apiKey:
+          type: string
+          minLength: 1
+          maxLength: 65536
+          writeOnly: true
+          description: 'The provider''s key. Required for api-key unless useSavedKey; optional for an endpoint that asks for none. Encrypted into the vault before anything else, and never sent back: no answer includes it, now or later.'
+        useSavedKey:
+          type: boolean
+          description: Use the key already kept for this provider (and, for an endpoint, this address) instead of sending one.
+        baseUrl:
+          type: string
+          format: uri
+          maxLength: 2048
+          pattern: ^https?://[^@/?#]+([/?#].*)?$
+          description: The endpoint's address, http or https, with nothing in it that signs in. Required for endpoint.
+        model:
+          type: string
+          minLength: 1
+          maxLength: 500
+          pattern: \S
+          description: The model to run on. Required for endpoint and oauth. Trimmed.
     AppSource:
       type: string
       enum:
@@ -25949,7 +26887,7 @@ components:
               type: string
               minLength: 1
               maxLength: 2000
-              pattern: ^[^\x00]*\S[^\x00]*$
+              pattern: ^[^\x00]*[^\s\x00][^\x00]*$
         approval:
           $ref: '#/components/schemas/SharedAccountApproval'
     BotGrantChangesSaved:
@@ -25984,7 +26922,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What the Bot may do in the app, in a sentence or two, at most 1,000 characters once trimmed.
     BotGrantCheck:
       type: object
@@ -26434,7 +27372,7 @@ components:
         status:
           type: string
           description: 'Read only: waiting, approved, dismissed, or withdrawn by the person who asked. Answering a request is approveAppAccessRequest or dismissAppAccessRequest.'
-          enum:
+          x-extensible-enum:
             - pending
             - approved
             - dismissed
@@ -27097,7 +28035,7 @@ components:
       description: The phone's operating system.
     Device:
       type: object
-      description: A phone that gets push notifications for the person, from every one of their Bots. Never its push token.
+      description: A phone that gets push notifications for the person, from every one of their Bots in the organization it is registered in. Never its push token.
       required:
         - id
         - platform
@@ -27343,7 +28281,7 @@ components:
       description: 'What was sent: a Bot''s reply, a question it asked, an approval it needs, or what the person''s Bots'' check-ins found that needs them.'
     DeliveryState:
       type: string
-      enum:
+      x-extensible-enum:
         - queued
         - running
         - accepted
@@ -27554,12 +28492,11 @@ components:
           type:
             - string
             - 'null'
-          enum:
+          x-extensible-enum:
             - succeeded
             - failed
             - skipped
             - waiting
-            - null
           description: How it ended, or null while it is still open. Only failed is a failure.
         at:
           type:
@@ -27574,6 +28511,7 @@ components:
         - id
         - botId
         - schedule
+        - cron
         - timezone
         - instruction
         - title
@@ -27593,6 +28531,9 @@ components:
         schedule:
           type: string
           description: When it runs, as text to show.
+        cron:
+          type: string
+          description: 'The schedule as it is kept, five cron fields: minute, hour, day of month, month, day of week. What a form that changes the schedule starts from.'
         timezone:
           type: string
           description: The IANA time zone the schedule is read in.
@@ -27697,6 +28638,34 @@ components:
       properties:
         routine:
           $ref: '#/components/schemas/Routine'
+    UpdateRoutineRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: What to change. Only the fields sent change, and at least one must be sent.
+      properties:
+        title:
+          type: string
+          description: A new name, at most 100 characters. Empty takes the name away, and the routine is called by what it does.
+          maxLength: 100
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: \S
+          description: What the Bot does on each run from now on. At most 2,000 characters.
+        cron:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: 'A new schedule, as five cron fields: minute, hour, day of month, month, day of week. The same rules as a new routine''s.'
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: \S
+          description: A new IANA time zone to read the schedule in.
     RoutineSwitch:
       type: object
       required:
@@ -27733,7 +28702,7 @@ components:
           description: The run's id.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - running
             - succeeded
             - failed
@@ -27901,7 +28870,7 @@ components:
           description: When it last ran, or null.
         lastStatus:
           type: string
-          enum:
+          x-extensible-enum:
             - idle
             - running
             - succeeded
@@ -28079,7 +29048,7 @@ components:
           description: Where it can be opened, or null.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - open
             - dismissed
             - started
@@ -28367,7 +29336,7 @@ components:
           description: When it is done. May be empty.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - active
             - paused
             - completed
@@ -28546,7 +29515,7 @@ components:
           description: The run's id.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - running
             - waiting
@@ -29042,7 +30011,7 @@ components:
           type: string
           description: What people call it.
         role:
-          $ref: '#/components/schemas/PersonRole'
+          $ref: '#/components/schemas/PersonRoleAnswer'
         active:
           type: boolean
           description: 'Whether the caller is working in this one: the organization their session works in, or for an app''s token the one its OpenBot-Organization header names, else the caller''s own. Always false for a request made with an API key.'
@@ -29078,7 +30047,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
         slug:
           type: string
@@ -29113,7 +30082,7 @@ components:
           type: array
           description: The roles the caller may give this member, their current one left out. The server's verdict. Empty when the caller may not change this member's role.
           items:
-            $ref: '#/components/schemas/PersonRole'
+            $ref: '#/components/schemas/PersonRoleAnswer'
         id:
           type: string
           description: The person's id.
@@ -29131,11 +30100,14 @@ components:
             - 'null'
           description: Their picture's address, when they have one.
         role:
-          $ref: '#/components/schemas/PersonRole'
+          $ref: '#/components/schemas/PersonRoleAnswer'
         joinedAt:
           type: string
           format: date-time
           description: When they became a member.
+        notOpenedYet:
+          type: boolean
+          description: 'True for somebody who is a member of the organization where it is kept, at OpenBot by CopilotKit on a hosted OpenBot, and hasn''t opened OpenBot yet. Until they do, they have no OpenBot account: id is their id there, and email is empty when none is known. An owner or an admin removes them by that id, as any member (removable says whether they can be). They can''t be given another role here until they open OpenBot (assignableRoles is empty). Absent for everybody else.'
     OrganizationMemberPage:
       type: object
       required:
@@ -29164,7 +30136,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
     UpdateOrganizationMemberRequest:
       type: object
@@ -29218,7 +30190,7 @@ components:
           $ref: '#/components/schemas/AssignableRole'
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending
             - expired
             - declined
@@ -29316,7 +30288,7 @@ components:
           $ref: '#/components/schemas/AssignableRole'
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending
             - expired
             - accepted
@@ -29458,7 +30430,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
         description:
           type: string
@@ -29487,7 +30459,7 @@ components:
           type: string
           minLength: 1
           maxLength: 100
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: What people call it.
         description:
           type:
@@ -29577,7 +30549,7 @@ components:
     ApprovalStatus:
       type: string
       description: Where an approval stands. pending waits for the person. approved and denied are decided, and consumed is started; the server then carries the conversation on. completed is finished.
-      enum:
+      x-extensible-enum:
         - pending
         - approved
         - denied
@@ -29843,7 +30815,7 @@ components:
           type: string
           minLength: 1
           maxLength: 6000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The person's answer. Trimmed.
         inConversation:
           type: boolean
@@ -29969,7 +30941,7 @@ components:
       type: string
       minLength: 1
       maxLength: 300
-      pattern: ^[^\x00]*\S[^\x00]*$
+      pattern: ^[^\x00]*[^\s\x00][^\x00]*$
       description: An exact value, or a pattern where * matches anything, so mcp/gmail/* names every Gmail tool. Trimmed.
     ApprovalRuleInput:
       type: object
@@ -30350,7 +31322,7 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The rule in a sentence or two, at most 1,000 characters once trimmed.
     ApprovalRuleDraftWrittenRow:
       type: object
@@ -30677,7 +31649,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The sentence the rules were written from, at most 2,000 characters once trimmed.
     ApprovalRuleDraftBatch:
       type: object
@@ -30761,7 +31733,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The guidance, at most 2,000 characters once trimmed.
     ReviewerGuidanceCheck:
       type: object
@@ -30832,7 +31804,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The guidance to test, at most 2,000 characters once trimmed.
         limit:
           type: integer
@@ -30996,7 +31968,7 @@ components:
           type: string
           minLength: 1
           maxLength: 80
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: 1 to 80 characters once trimmed.
         description:
           type: string
@@ -31323,7 +32295,7 @@ components:
           type: string
           minLength: 1
           maxLength: 500
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: The question, 1 to 500 characters once trimmed.
     WhatIfInitiator:
       type: string
@@ -31730,7 +32702,7 @@ components:
           description: The id of the person who asked.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending
             - approved
             - declined
@@ -32021,7 +32993,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          pattern: ^[^\x00]*\S[^\x00]*$
+          pattern: ^[^\x00]*[^\s\x00][^\x00]*$
           description: Why the Bot declined, in its own words. The trail keeps the first 500 characters.
         request:
           type: string
@@ -32603,7 +33575,7 @@ components:
           description: 'Who raised it: the Bot (model), a check the page raised, or the person themselves (manual).'
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - waiting
             - taken
             - completed
@@ -32697,7 +33669,7 @@ components:
           description: The image it runs now.
     ComputerState:
       type: string
-      enum:
+      x-extensible-enum:
         - absent
         - starting
         - ready
@@ -33804,7 +34776,7 @@ components:
         - $ref: '#/components/schemas/PersonRealBrowserOpened'
     SignInStatus:
       type: string
-      enum:
+      x-extensible-enum:
         - pending
         - filling
         - code_required
@@ -34265,6 +35237,12 @@ components:
           $ref: '#/components/schemas/RecorderConnection'
         user:
           $ref: '#/components/schemas/RecorderUser'
+        organizationId:
+          type: string
+          description: The organization the connection works in, the one the connect code was made in. The Recorder names it in every address it calls from now on. Absent from a server that keeps every connection in `default`.
+        organizationName:
+          type: string
+          description: What people call that organization, so the Recorder can say where it records. Absent from a server that keeps every connection in `default`.
     RecorderProblem:
       description: 'A problem for the OpenBot Recorder: the shared problem details, with why its connection ended.'
       allOf:
@@ -34288,6 +35266,19 @@ components:
           $ref: '#/components/schemas/RecorderUser'
         connectionId:
           type: string
+        organization:
+          type: object
+          description: The organization this connection records into, so the Recorder can say where it records. Absent from a server that keeps every connection in `default`.
+          required:
+            - id
+            - name
+          properties:
+            id:
+              type: string
+              description: The organization's id. Opaque.
+            name:
+              type: string
+              description: What people call it.
     RecorderLearning:
       type: object
       required:
@@ -34385,6 +35376,80 @@ components:
             - desktop
             - mobile
           description: Where the caller saw or copied it.
+    AppError:
+      type: object
+      description: An error the app hit and did not handle, as the app saw it. OpenBot scrubs and bounds it again before it is sent anywhere.
+      additionalProperties: false
+      required:
+        - source
+        - type
+        - message
+        - surface
+      properties:
+        source:
+          type: string
+          enum:
+            - error_boundary
+            - window_error
+            - unhandled_rejection
+          description: How the app caught it. error_boundary when its error screen was shown, window_error for an error the page threw, and unhandled_rejection for a promise nobody handled.
+        type:
+          type: string
+          description: The error's name, such as TypeError.
+          minLength: 1
+          maxLength: 128
+        message:
+          type: string
+          description: The error's message.
+          maxLength: 2048
+        stack:
+          type: string
+          description: The error's stack, as the browser wrote it.
+          maxLength: 12288
+        surface:
+          type: string
+          enum:
+            - web
+            - desktop
+            - mobile
+          description: Where the app runs.
+        appVersion:
+          type: string
+          description: The release the app was built for, such as 1.1.0-rc.2, when the build knows it.
+          minLength: 1
+          maxLength: 32
+          pattern: ^v?\d+(?:\.\d+){1,3}(?:-[a-z]+(?:\.\d{1,9})?)?$
+    NudgeEvent:
+      type: object
+      description: What the caller did with a nudge, and where. Names nothing about the person, who is the caller. The moment that made the nudge due is added by OpenBot, not sent.
+      additionalProperties: false
+      required:
+        - nudge
+        - action
+        - place
+        - surface
+      properties:
+        nudge:
+          $ref: '#/components/schemas/NoticeId'
+        action:
+          type: string
+          enum:
+            - shown
+            - clicked
+            - dismissed
+          description: shown when the nudge was drawn, clicked when they followed it (for the star nudge, opened the repository), and dismissed when they said Not now.
+        place:
+          type: string
+          enum:
+            - card
+            - settings
+          description: card for the nudge drawn above the message box, settings for its permanent row in Settings, which is never shown as a card.
+        surface:
+          type: string
+          enum:
+            - web
+            - desktop
+          description: Where the caller saw or answered it.
     LearningSpaceId:
       type: string
       description: A Learning space's id in the backend (its container).
@@ -34698,7 +35763,7 @@ components:
           description: Whether it adds a skill, changes one, or removes one.
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - pending_review
             - approved
             - rejected
@@ -34970,7 +36035,7 @@ components:
           format: uuid
         status:
           type: string
-          enum:
+          x-extensible-enum:
             - queued
             - freezing
             - batching
@@ -35523,7 +36588,7 @@ components:
           type: boolean
         syncStatus:
           type: string
-          enum:
+          x-extensible-enum:
             - idle
             - running
             - succeeded
@@ -35829,6 +36894,7 @@ components:
         - llamaindex
         - agno
         - langgraph
+        - langgraph-ts
         - google-adk
         - antigravity
         - pydantic-ai
@@ -36033,6 +37099,60 @@ components:
             minLength: 1
             maxLength: 200
             pattern: \S
+    ManagementEnrollment:
+      type: object
+      description: Where connecting this OpenBot to managed updates stands. Which fields are present depends on state.
+      required:
+        - state
+      properties:
+        state:
+          type: string
+          x-extensible-enum:
+            - not-connected
+            - waiting-for-approval
+            - waiting-for-agent
+            - connected
+          description: 'not-connected: nothing is under way. waiting-for-approval: the code is waiting for somebody to approve it at verificationUri. waiting-for-agent: approved, and waiting for the management agent to be installed with helmCommand and to report in. connected: the agent reports in. A later OpenBot may add a state; read one you don''t know as not connected.'
+        userCode:
+          type: string
+          pattern: ^[A-Z0-9]{4}-[A-Z0-9]{4}$
+          description: The code to approve, while waiting for approval.
+        verificationUri:
+          type: string
+          format: uri
+          description: The page where the code is approved, while waiting for approval.
+        verificationUriComplete:
+          type: string
+          format: uri
+          description: The same page with the code already filled in, while waiting for approval.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the code stops working, while waiting for approval.
+        installId:
+          type: string
+          minLength: 1
+          description: The id the managed updates service gave this OpenBot, once the code is approved.
+        helmCommand:
+          type: string
+          minLength: 1
+          description: 'The command that installs the management agent in this OpenBot''s cluster, while waiting for the agent. It holds nothing secret: the agent collects its one-time token from OpenBot itself. On a release it pins the agent chart to this OpenBot''s own version with --version, so the agent always matches the server that printed it.'
+        helmCommandNote:
+          type: string
+          minLength: 1
+          description: A sentence a person reads beside helmCommand, present only when this OpenBot isn't a published release (a build of main or a development build). No published agent chart matches such a build, so helmCommand names no chart version and Helm installs the newest published one. Absent on a release.
+        lastHeartbeatAt:
+          type: string
+          format: date-time
+          description: When the agent last reported in, once connected.
+        agentVersion:
+          type: string
+          minLength: 1
+          description: The version of the agent that last reported in, once connected.
+        lastError:
+          type: string
+          minLength: 1
+          description: 'What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, the management service out of reach, a connected agent that has stopped reporting in, or a Stop the service couldn''t be told about. Absent when nothing did.'
   responses:
     InvalidRequest:
       description: A parameter is malformed.
@@ -36100,7 +37220,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     Forbidden:
-      description: The caller holds no role in this organization.
+      description: The caller holds no role in this organization, or the organization requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED).
       content:
         application/problem+json:
           schema:
@@ -36113,6 +37233,17 @@ components:
                 status: 403
                 detail: Authorization required.
                 code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            ssoRequired:
+              value:
+                type: https://open.bot/errors/sso-required
+                title: Sign in through your company's identity provider.
+                status: 403
+                detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
+                code: SSO_REQUIRED
                 category: permission
                 retryable: false
                 requestId: req_example
@@ -36148,7 +37279,7 @@ components:
                 traceId: trace_example
                 capability: isolatedComputers
     AdminOnly:
-      description: The caller is not an administrator of the organization, or holds no role in it.
+      description: The caller is not an administrator of the organization, or holds no role in it. Or the organization requires signing in through the company's identity provider and the caller hasn't (SSO_REQUIRED).
       content:
         application/problem+json:
           schema:
@@ -36161,6 +37292,17 @@ components:
                 status: 403
                 detail: Only an admin can do this.
                 code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            ssoRequired:
+              value:
+                type: https://open.bot/errors/sso-required
+                title: Sign in through your company's identity provider.
+                status: 403
+                detail: This organization requires signing in through your company's identity provider. Sign in with your work email to continue.
+                code: SSO_REQUIRED
                 category: permission
                 retryable: false
                 requestId: req_example
@@ -36606,7 +37748,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     SettingsConflict:
-      description: Single sign-on can't be required before an identity provider is registered, ssoRequired was sent in an organization other than `default`, or the Idempotency-Key was used for a different request.
+      description: Single sign-on can't be required before an identity provider is registered, ssoRequired was sent in an organization other than the one this OpenBot keeps, or the Idempotency-Key was used for a different request.
       content:
         application/problem+json:
           schema:
@@ -36778,6 +37920,33 @@ components:
                 retryable: true
                 requestId: req_example
                 traceId: trace_example
+            clientUpdateRequired:
+              value:
+                type: https://open.bot/errors/client-update-required
+                title: This app is too old for this OpenBot.
+                status: 400
+                detail: This OpenBot needs OpenBot Desktop 1.2.0 or later. Update OpenBot, then try again.
+                code: CLIENT_UPDATE_REQUIRED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                client: desktop
+                minimumVersion: 1.2.0
+            clientUpdateRequiredSecurity:
+              value:
+                type: https://open.bot/errors/client-update-required
+                title: This app is too old for this OpenBot.
+                status: 400
+                detail: This version of OpenBot has a security problem. Update to keep using it.
+                code: CLIENT_UPDATE_REQUIRED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                client: desktop
+                minimumVersion: 1.2.0
+                security: true
     ConversationNotFound:
       description: The conversation does not exist, was removed, or the caller is not in it, or the organization does not exist.
       content:
@@ -37014,6 +38183,129 @@ components:
                 code: APP_SERVICE_FAILED
                 category: dependency
                 retryable: true
+                requestId: req_example
+                traceId: trace_example
+    IdentityProviderNotRemovable:
+      description: The caller is not an administrator of the organization, or holds no role in it. Or the provider was registered for the whole OpenBot, so it can't be removed from this organization.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            deployment:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: This identity provider is set up for all of OpenBot, so it can't be removed here. Ask the admin who runs OpenBot.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidCompanySignInTicket:
+      description: No providerId was sent, or the body or the Idempotency-Key is malformed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noProvider:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Name the identity provider to sign in through, as providerId.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CompanySignInTicketForbidden:
+      description: The ticket is for somebody else, or the request is signed in with an API key, which never links a company account.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            someoneElse:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can link their company account.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            apiKey:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Link your company account from OpenBot or its app, not with an API key.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CompanySignInProviderNotFound:
+      description: The organization does not exist or the caller is not in it, or no identity provider by that id counts for it.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            organization:
+              value:
+                type: https://open.bot/errors/organization-not-found
+                title: Organization not found.
+                status: 404
+                detail: Couldn't find that organization.
+                code: ORGANIZATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            provider:
+              value:
+                type: https://open.bot/errors/identity-provider-not-found
+                title: Identity provider not found.
+                status: 404
+                detail: This organization has no such identity provider for signing in.
+                code: IDENTITY_PROVIDER_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CompanySignInTicketConflict:
+      description: 'The Idempotency-Key was used already. A ticket is a credential shown once, so its answer is never given again: ask with a new key.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used already. Ask again with a new one.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
                 requestId: req_example
                 traceId: trace_example
     NoBotToAnswer:
@@ -37255,6 +38547,137 @@ components:
                 code: VALIDATION_ERROR
                 category: validation
                 retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidAiConnection:
+      description: The body is malformed, the provider doesn't take that login, the address isn't http or https or has something in it that signs in, or a key, an address or a model the login needs is missing.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            pair:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Google Gemini doesn't take a plan. Pick an API key or a sign-in.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            keyMissing:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Paste a key, or use the saved key.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            credentialsInAddress:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Take the user name and password out of the address, and paste the key in its own field.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AiConnectionFixed:
+      description: Whoever runs this OpenBot sets its AI provider (editable is false), so it can't be changed here. Or the Idempotency-Key was already used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            fixed:
+              value:
+                type: https://open.bot/errors/ai-connection-fixed
+                title: The AI provider is set by whoever runs OpenBot.
+                status: 409
+                detail: This OpenBot's AI provider is set by whoever runs it. Change its key in the vault.
+                code: AI_CONNECTION_FIXED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    AiConnectionRefused:
+      description: 'OpenBot checked the connection and can''t use it, so nothing was saved and the connection in use keeps running. code says why: AI_CONNECTION_KEY_REFUSED, the provider didn''t accept the key; AI_CONNECTION_UNREACHABLE, the address didn''t answer; AI_CONNECTION_MODEL_UNAVAILABLE, the key can''t use that model; AI_CONNECTION_SIGN_IN_MISSING, there''s no sign-in to read; AI_CONNECTION_ENGINE_NOT_READY, the plan''s engine isn''t answering yet. detail is OpenBot''s own sentence, naming the provider or the host, never what the provider said.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            keyRefused:
+              value:
+                type: https://open.bot/errors/ai-connection-refused
+                title: OpenBot couldn't use that connection.
+                status: 422
+                detail: Anthropic didn't accept that key. Check it and paste it again.
+                code: AI_CONNECTION_KEY_REFUSED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            unreachable:
+              value:
+                type: https://open.bot/errors/ai-connection-refused
+                title: OpenBot couldn't use that connection.
+                status: 422
+                detail: OpenBot couldn't reach api.example.com. Check the address.
+                code: AI_CONNECTION_UNREACHABLE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            modelUnavailable:
+              value:
+                type: https://open.bot/errors/ai-connection-refused
+                title: OpenBot couldn't use that connection.
+                status: 422
+                detail: That key can't use gemini-3-pro. Pick another model.
+                code: AI_CONNECTION_MODEL_UNAVAILABLE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            signInMissing:
+              value:
+                type: https://open.bot/errors/ai-connection-refused
+                title: OpenBot couldn't use that connection.
+                status: 422
+                detail: Sign in to Google first, then try again.
+                code: AI_CONNECTION_SIGN_IN_MISSING
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            engineNotReady:
+              value:
+                type: https://open.bot/errors/ai-connection-refused
+                title: OpenBot couldn't use that connection.
+                status: 422
+                detail: Claude hasn't started yet. Try again in a moment.
+                code: AI_CONNECTION_ENGINE_NOT_READY
+                category: validation
+                retryable: true
                 requestId: req_example
                 traceId: trace_example
     InvalidApp:
@@ -38702,6 +40125,82 @@ components:
                 title: A service OpenBot depends on is unavailable.
                 status: 503
                 detail: The organization couldn't be set up, so it wasn't created. Try again.
+                code: SERVICE_UNAVAILABLE
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    OwnerOnly:
+      description: The caller is not an owner of the organization, or holds no role in it.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notOwner:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an owner can delete this organization.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationStays:
+      description: 'The organization can''t be deleted: it is a person''s own organization, or it is `default`. Or the Idempotency-Key was used for a different request.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            personal:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This is your own organization, so it stays. You can delete organizations you created.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            default:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: This organization comes with OpenBot, so it stays.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    OrganizationNotDeleted:
+      description: This OpenBot could not finish deleting the organization, so it was not deleted. Asking again may work.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unfinished:
+              value:
+                type: https://open.bot/errors/service-unavailable
+                title: A service OpenBot depends on is unavailable.
+                status: 503
+                detail: The organization couldn't be deleted. Try again.
                 code: SERVICE_UNAVAILABLE
                 category: dependency
                 retryable: true
@@ -41166,6 +42665,71 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    ManagementUnavailable:
+      description: 'CopilotKit management doesn''t apply here: the personal edition, OpenBot Cloud, or an organization other than `default`.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: https://open.bot/errors/management-unavailable
+                title: Managed updates aren't available here.
+                status: 404
+                detail: Managed updates aren't available for this OpenBot.
+                code: MANAGEMENT_UNAVAILABLE
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ManagementConflict:
+      description: This OpenBot is already connected, CopilotKit's management service refused to connect it, or the Idempotency-Key was used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            connected:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: OpenBot already gets managed updates. To stop them, uninstall the management agent with Helm.
+                code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            refused:
+              value:
+                type: https://open.bot/errors/management-refused
+                title: The managed updates service refused this OpenBot.
+                status: 409
+                detail: The licence in COPILOTKIT_LICENSE_TOKEN wasn't accepted. Check it, or contact OpenBot by CopilotKit.
+                code: MANAGEMENT_REFUSED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ManagementServiceFailed:
+      description: CopilotKit's management service couldn't be reached, or answered in a way OpenBot doesn't understand.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unreachable:
+              value:
+                type: https://open.bot/errors/management-service-failed
+                title: The managed updates service didn't answer.
+                status: 502
+                detail: Couldn't reach the managed updates service at enroll.bot.copilotkit.ai. Check that OpenBot can reach it, then try again.
+                code: MANAGEMENT_SERVICE_FAILED
+                category: dependency
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
   examples:
     ReactionPageLast:
       summary: Every reaction in a conversation, on one page.
@@ -41441,6 +43005,8 @@ components:
       value:
         messageListEmphasis: thread
         selfHostBannerDismissed: false
+        dismissedNotices: []
+        noticesDue: []
         narration: null
         skin: openbot
         proactive: 'on'
@@ -41454,6 +43020,7 @@ components:
             createdAt: '2026-11-14T09:00:00.000Z'
             expiresAt: '2027-02-12T09:00:00.000Z'
             lastUsedAt: '2026-11-14T09:05:12.000Z'
+            organizationId: Jq3xT9mLw2Vb8RnC5sYd0fKe
         nextCursor: null
     CreatedApiKeyExample:
       summary: A key, made.
@@ -41465,6 +43032,7 @@ components:
           createdAt: '2026-11-14T09:00:00.000Z'
           expiresAt: '2027-02-12T09:00:00.000Z'
           lastUsedAt: null
+          organizationId: Jq3xT9mLw2Vb8RnC5sYd0fKe
         key: obk_XyR2f8Lq0mVt5WcN1pZa7KdJ3hUe9sBg
     SessionPageLast:
       summary: Signed in on a laptop and a phone.
@@ -41524,7 +43092,7 @@ components:
         provider: github
         authorizationUrl: https://github.com/login/oauth/authorize?client_id=Iv23liExample&redirect_uri=https%3A%2F%2Fopenbot.acme.com%2Fapi%2Fidentity%2Fgithub%2Fcallback&state=sealed
     IdentityProviderPageLast:
-      summary: One provider, on one page.
+      summary: The organization's own provider, and one registered for the whole OpenBot.
       value:
         identityProviders:
           - id: acme-okta
@@ -41532,6 +43100,13 @@ components:
             domain: acme.com
             protocol: saml
             registeredBy: 8kq2m4x7p1rvz3a9c5d0
+            deployment: false
+          - id: example-entra
+            issuer: https://login.microsoftonline.com/0d1c2b3a-4f5e-6d7c-8b9a-0f1e2d3c4b5a/v2.0
+            domain: example.com
+            protocol: oidc
+            registeredBy: null
+            deployment: true
         nextCursor: null
     IdentityProviderExample:
       summary: A SAML provider, registered.
@@ -41560,6 +43135,16 @@ components:
         builtInBots: true
         isolatedBots: false
         botComputers: true
+        attachmentLimits:
+          imageBytes: 104857600
+          documentBytes: 104857600
+          fileBytes: 104857600
+        api:
+          - v2
+        minimumClients:
+          desktop: 1.2.0
+        launcherApi: 1
+        extensionApi: 1
     OrganizationSettingsExample:
       summary: The settings, with what an administrator needs beside them.
       value:
@@ -41922,6 +43507,21 @@ components:
       value:
         model: gpt-6.1-pro
         effort: xhigh
+    CompanySignInExample:
+      summary: An organization that requires its company sign-in, which the caller hasn't used yet.
+      value:
+        required: true
+        met: false
+        providers:
+          - id: acme-okta
+            domain: acme.com
+          - id: example-entra
+            domain: example.com
+    CompanySignInTicketExample:
+      summary: An address the phone opens in the system browser.
+      value:
+        url: https://openbot.acme.com/api/auth/company-sign-in/link?ticket=cst_EXAMPLEEXAMPLEEXAMPLEEXAMPLE
+        expiresAt: '2026-11-20T06:02:00.000Z'
     ConversationPageExample:
       summary: One page of conversations, and the last.
       value:
@@ -42146,6 +43746,64 @@ components:
       summary: What was said.
       value:
         text: Remind me to send the forecast on Friday.
+    AiConnectionExample:
+      summary: An Anthropic key, kept, with an OpenAI key still kept from before.
+      value:
+        provider: anthropic
+        login: api-key
+        model: null
+        endpointHost: null
+        keySet: true
+        ready: true
+        source: stored
+        editable: true
+        saved:
+          - provider: openai
+            login: api-key
+            endpointHost: null
+        changedAt: '2026-11-17T09:00:00.000Z'
+    AiConnectionEndpointExample:
+      summary: Google Gemini at its OpenAI-compatible address.
+      value:
+        provider: google
+        login: endpoint
+        model: gemini-3-pro
+        endpointHost: generativelanguage.googleapis.com
+        keySet: true
+        ready: true
+        source: stored
+        editable: true
+        saved:
+          - provider: google
+            login: endpoint
+            endpointHost: generativelanguage.googleapis.com
+        changedAt: '2026-11-17T09:00:00.000Z'
+    AiConnectionFixedExample:
+      summary: A team's OpenBot, where whoever runs it sets the provider.
+      value:
+        provider: openai
+        login: api-key
+        model: null
+        endpointHost: null
+        keySet: true
+        ready: true
+        source: environment
+        editable: false
+        saved: []
+        changedAt: null
+    AiConnectionNoneExample:
+      summary: Nothing chosen yet.
+      value:
+        provider: null
+        login: null
+        model: null
+        endpointHost: null
+        keySet: false
+        ready: false
+        source: none
+        editable: true
+        saved: []
+        changedAt: null
     AppPageExample:
       summary: Every app, on one page.
       value:
@@ -43127,6 +44785,7 @@ components:
           - id: 4a0d6f6e-1c1b-4f3e-8a52-0d9b7c6e5f41
             botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
             schedule: Weekdays at 09:00
+            cron: 0 9 * * 1-5
             timezone: America/New_York
             instruction: Summarize my unread mail and today's calendar.
             title: Morning brief
@@ -43150,6 +44809,7 @@ components:
           id: 4a0d6f6e-1c1b-4f3e-8a52-0d9b7c6e5f41
           botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
           schedule: Weekdays at 09:00
+          cron: 0 9 * * 1-5
           timezone: America/New_York
           instruction: Summarize my unread mail and today's calendar.
           title: Morning brief
@@ -44744,6 +46404,8 @@ components:
           id: 9f8e7d6c-5b4a-4321-8fed-cba987654321
           name: Sam Ortiz
           email: sam@example.com
+        organizationId: Jq3xT9mLw2Vb8RnC5sYd0fKe
+        organizationName: Acme Research
     RecorderIdentityExample:
       summary: Who this Recorder acts as.
       value:
@@ -44752,6 +46414,9 @@ components:
           name: Sam Ortiz
           email: sam@example.com
         connectionId: 4a6f2d1c-9b8e-4c7a-a5d3-1e2f3a4b5c6d
+        organization:
+          id: Jq3xT9mLw2Vb8RnC5sYd0fKe
+          name: Acme Research
     RecorderLearningExample:
       summary: A person whose recordings are learned from.
       value:
@@ -44765,6 +46430,24 @@ components:
         threadId: 6f3d6b1f-6f10-4a53-9d51-5f0d6c0e2f1a
         messageId: msg_0b1c6f0e
         surface: web
+    AppErrorBoundary:
+      summary: An error the web app's error screen caught.
+      value:
+        source: error_boundary
+        type: TypeError
+        message: Cannot read properties of undefined (reading 'title')
+        stack: |-
+          TypeError: Cannot read properties of undefined (reading 'title')
+              at BotCard (/assets/route-app-secondary.js:12:345)
+        surface: web
+        appVersion: 1.1.0-rc.2
+    NudgeClicked:
+      summary: The caller opened OpenBot's repository from the star card, in OpenBot Desktop.
+      value:
+        nudge: star-on-github
+        action: clicked
+        place: card
+        surface: desktop
     LearningConfigurationExample:
       summary: Learning on, every Bot learning into the space OpenBot assigned, people reviewing their own.
       value:
@@ -45167,3 +46850,24 @@ components:
             framework: LangChain
             available: true
         canManage: true
+    ManagementNotConnectedExample:
+      value:
+        state: not-connected
+    ManagementWaitingForApprovalExample:
+      value:
+        state: waiting-for-approval
+        userCode: WDJB-MJHT
+        verificationUri: https://enroll.bot.copilotkit.ai/connect
+        verificationUriComplete: https://enroll.bot.copilotkit.ai/connect?code=WDJB-MJHT
+        expiresAt: '2026-11-20T10:15:00Z'
+    ManagementWaitingForAgentExample:
+      value:
+        state: waiting-for-agent
+        installId: 6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d
+        helmCommand: helm install openbot-agent oci://ghcr.io/copilotkit/charts/openbot-agent --version 1.2.0 --namespace openbot-system --create-namespace --set enrollment.serverUrl=http://openbot-server-internal.openbot.svc:9464
+    ManagementConnectedExample:
+      value:
+        state: connected
+        installId: 6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d
+        lastHeartbeatAt: '2026-11-20T10:31:12Z'
+        agentVersion: 0.4.0

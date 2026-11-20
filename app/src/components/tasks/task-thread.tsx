@@ -458,12 +458,18 @@ export function TaskReport({
   taskId,
   kind,
   words,
+  underCard = false,
   children,
 }: {
   taskId: string;
   kind: DrawnTaskReportKind;
   /** What the report said, as text, to tell a request still waiting from one answered since. */
   words?: string;
+  /**
+   * A result drawn directly under its own task's card (`reportsUnderTheirCards`), which already
+   * says which task it is and leads into its thread.
+   */
+  underCard?: boolean;
   children: ReactNode;
 }) {
   const task = useQuery(taskQueryOptions(taskId));
@@ -482,6 +488,8 @@ export function TaskReport({
      * once, and the link doesn't read as done.
      */
     const failedSince = live === "failed";
+    // A task the person stopped since: its link reads stopped, as its card does, not done.
+    const stoppedSince = live === "stopped";
     const reason =
       failedSince && task.data?.failure
         ? failureSentence(task.data.failure)
@@ -490,7 +498,9 @@ export function TaskReport({
       ? IconHandStop
       : failedSince
         ? IconAlertTriangle
-        : IconCircleCheck;
+        : stoppedSince
+          ? IconPlayerStop
+          : IconCircleCheck;
     return (
       <div
         className="w-full space-y-2"
@@ -500,11 +510,20 @@ export function TaskReport({
         {/*
          * Which task this is, above what it found, and the way into its thread: the words and
          * anything the work drew follow, so the link never lands between a table and a chart.
+         * Directly under the task's own card the card says both, so the task shows once.
          */}
-        {channelId ? (
+        {channelId && !underCard ? (
           <Link
             className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/70 hover:text-foreground"
-            data-state={waiting ? "needs" : failedSince ? "failed" : "done"}
+            data-state={
+              waiting
+                ? "needs"
+                : failedSince
+                  ? "failed"
+                  : stoppedSince
+                    ? "stopped"
+                    : "done"
+            }
             params={{ channelId }}
             to="/channel/$channelId"
           >
@@ -515,7 +534,9 @@ export function TaskReport({
                   ? STATE.needs.text
                   : failedSince
                     ? STATE.failed.text
-                    : "text-emerald-600 dark:text-emerald-400",
+                    : stoppedSince
+                      ? STATE.stopped.text
+                      : "text-emerald-600 dark:text-emerald-400",
               )}
             />
             <span className="truncate">{title ?? "Task"}</span>

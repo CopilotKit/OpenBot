@@ -5,15 +5,4 @@
 /**
  * Where it got to. accepted is the provider taking it without saying yet that it arrived. unknown is a send that may or may not have gone. opted_out is a text message not sent because the person texted STOP.
  */
-export type DeliveryState = (typeof DeliveryState)[keyof typeof DeliveryState];
-
-export const DeliveryState = {
-  queued: "queued",
-  running: "running",
-  accepted: "accepted",
-  sent: "sent",
-  delivered: "delivered",
-  failed: "failed",
-  unknown: "unknown",
-  opted_out: "opted_out",
-} as const;
+export type DeliveryState = string;

@@ -142,13 +142,15 @@
       "includes": [
         "app/src/lib/client.ts",
         "app/src/lib/auth/client.ts",
-        "app/src/components/channels/chat-transcript.tsx",
+        "app/src/lib/plugins/finish-on-return.ts",
+        "app/src/components/channels/attachment-view.tsx",
         "app/src/lib/channels/use-channel-events.ts",
         "app/src/components/computer/live-screen.tsx",
         "app/src/components/computer/live-terminal.tsx",
         "app/src/lib/voice/websocket.ts",
         "mobile/src/api/request.ts",
         "mobile/app/computer.tsx",
+        "mobile/src/security-floor.ts",
         "extension/src/shared/openbot-client.ts",
         "extension/src/main-world/network-hook.ts"
       ],
