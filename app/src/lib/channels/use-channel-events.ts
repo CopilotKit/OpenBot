@@ -5,15 +5,15 @@ import {
 } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { HELD_OUT_NOW, holdOut, SSO_REQUIRED_CLOSE } from "@/lib/auth/held-out";
 import { nudgeMoment } from "@/lib/notices";
-import { currentOrganizationId } from "@/lib/organizations/current";
 import {
   isBotReply,
   noticeChannelEvent,
 } from "@/lib/notifications/reply-notice";
+import { currentOrganizationId } from "@/lib/organizations/current";
 import { apiSocketPath, socketUrl as buildSocketUrl } from "@/lib/socket-url";
 import { type BotTask, taskKeys } from "@/lib/tasks/queries";
-import { type BotLine, botSaidOffTheList } from "./said-off-the-list";
 import {
   type AgentChannel,
   type ChannelPage,
@@ -21,6 +21,7 @@ import {
   type ChannelWork,
   channelKeys,
 } from "./queries";
+import { type BotLine, botSaidOffTheList } from "./said-off-the-list";
 
 /**
  * Keep the roster live.
@@ -612,8 +613,16 @@ export function useChannelEvents() {
       };
 
       // WebSocket needs explicit reconnect handling.
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         if (stopped) return;
+        /*
+         * The organization began to hold the person out until they sign in through their company: the server ends the
+         * socket so, and would refuse it again. Not reconnected; the app gives way to the held page at once.
+         */
+        if (event.code === SSO_REQUIRED_CLOSE) {
+          holdOut(HELD_OUT_NOW);
+          return;
+        }
         retryTimer = window.setTimeout(connect, retryDelay);
         retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
       };

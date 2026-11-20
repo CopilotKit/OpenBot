@@ -3,11 +3,18 @@ import {
   type DefaultedQueryObserverOptions,
   focusManager,
   hashKey,
+  MutationCache,
+  QueryCache,
   QueryClient,
   type QueryKey,
   type QueryObserverOptions,
 } from "@tanstack/react-query";
-import { heldOutBySso } from "@/lib/auth/held-out";
+import {
+  HELD_OUT_NOW,
+  heldOutBySso,
+  holdOut,
+  releaseHold,
+} from "@/lib/auth/held-out";
 import {
   holdReadsWhileConnectionLost,
   retryWhileConnectionLost,
@@ -140,7 +147,18 @@ class OpenBotQueryClient extends QueryClient {
   }
 }
 
+/**
+ * A refusal for being held out, from any read or write while the app is open: the hold began since the page loaded,
+ * and the app gives way to the held page at once (lib/auth/held-out.ts). In the server's own sentence.
+ */
+function holdOutWhenRefusedForIt(error: unknown): void {
+  if (!heldOutBySso(error)) return;
+  holdOut(error instanceof Error ? error.message : HELD_OUT_NOW);
+}
+
 export const queryClient = new OpenBotQueryClient({
+  queryCache: new QueryCache({ onError: holdOutWhenRefusedForIt }),
+  mutationCache: new MutationCache({ onError: holdOutWhenRefusedForIt }),
   defaultOptions: {
     queries: {
       retry: 1,
@@ -158,6 +176,8 @@ holdReadsWhileConnectionLost(queryClient);
  * for the first time drops nothing.
  */
 onOrganizationChange((next, previous) => {
+  // A hold is the organization's that found it: working in another, nothing holds the person out.
+  releaseHold();
   if (next === undefined || previous === undefined) return;
   const left = {
     predicate: (query: { queryKey: QueryKey }) =>

@@ -17,15 +17,21 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { heldPageDeps } from "@/components/auth/company-sign-in-page";
+import type { ServerWebSocket } from "bun";
+import {
+  HeldOutGate,
+  heldPageDeps,
+} from "@/components/auth/company-sign-in-page";
 import { CompanySignInSection } from "@/components/settings/company-sign-in";
 import type { CompanySignIn, Problem } from "@/lib/api/generated/model";
 import { getGetDeploymentResponseMock } from "@/lib/api/generated/organization-settings/organization-settings.msw";
 import { GetDeploymentResponse } from "@/lib/api/generated/organization-settings/organization-settings.zod";
 import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
 import { GetCompanySignInResponse } from "@/lib/api/generated/people/people.zod";
+import { HELD_OUT_NOW, releaseHold } from "@/lib/auth/held-out";
+import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { ReportedErrorComponent } from "@/lib/error-reporting";
 import {
   currentOrganizationId,
@@ -172,14 +178,58 @@ async function answer(request: Request): Promise<Response> {
       status: 403,
       headers: { "content-type": "application/problem+json" },
     });
+  // Not held out (yet): Harbor opens for her as any organization does.
+  if (path === `/api/v2/organizations/${HARBOR.id}/people/me`)
+    return json({
+      person: {
+        id: "ines",
+        email: "ines@gmail.example",
+        name: "Ines Duarte",
+        needsName: false,
+        image: null,
+        role: "member",
+        onboarding: null,
+      },
+      openbotVersion: null,
+    });
+  if (path === `/api/v2/organizations/${HARBOR.id}/shortened-tool-names`)
+    return json({ tools: [] });
+  if (path === `/api/v2/organizations/${HARBOR.id}/conversations`)
+    return json({ conversations: [], nextCursor: null });
   return json({ code: "NOT_FOUND", detail: "Not found.", status: 404 }, 404);
 }
 
+/** The app's conversation events sockets the server has open, which it ends when Harbor begins to hold her out. */
+let sockets: ServerWebSocket<unknown>[] = [];
+
 beforeAll(() => {
-  openbot = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: answer });
+  openbot = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (request, server) => {
+      const path = new URL(request.url).pathname;
+      if (path === `/api/v2/organizations/${HARBOR.id}/conversation-events`) {
+        // As a real OpenBot refuses it: held out, the socket is never opened.
+        if (heldOut) return answer(request);
+        requests.push(`GET ${path}`);
+        if (server.upgrade(request, { data: undefined })) return undefined;
+      }
+      return answer(request);
+    },
+    websocket: {
+      open: (socket) => {
+        sockets.push(socket);
+      },
+      message: () => {},
+      close: (socket) => {
+        sockets = sockets.filter((open) => open !== socket);
+      },
+    },
+  });
   GlobalRegistrator.register({ url: `http://127.0.0.1:${openbot.port}/` });
 });
 beforeEach(() => {
+  releaseHold();
   heldOut = true;
   ownToo = false;
   active = HARBOR.id;
@@ -207,7 +257,16 @@ afterAll(async () => {
   setCurrentOrganization("default");
 });
 
-/** The app opened at home: the real sign-in gate in front of it, and the app's error screen. */
+/** Home, with the conversation events socket every page of the app keeps open. */
+function Home() {
+  useChannelEvents();
+  return <p>The app</p>;
+}
+
+/**
+ * The app opened at home: the real sign-in gate in front of it, the gate that gives way to the held page while it is
+ * open, and the app's error screen.
+ */
 function openApp() {
   const root = createRootRouteWithContext<RouterContext>()({
     component: Outlet,
@@ -216,13 +275,17 @@ function openApp() {
   const authed = createRoute({
     id: "_authed",
     getParentRoute: () => root,
-    component: Outlet,
+    component: () => (
+      <HeldOutGate>
+        <Outlet />
+      </HeldOutGate>
+    ),
     ...{ beforeLoad: gate.beforeLoad, errorComponent: gate.errorComponent },
   } as never) as unknown as AnyRoute;
   const home = createRoute({
     getParentRoute: () => authed,
     path: "/",
-    component: () => <p>The app</p>,
+    component: Home,
   } as never) as unknown as AnyRoute;
   const router = createRouter({
     routeTree: root.addChildren([authed.addChildren([home])]),
@@ -327,6 +390,47 @@ test("held out of her only organization, the page offers no switch", async () =>
   expect(
     view.queryByRole("button", { name: "Switch organization" }),
   ).toBeNull();
+});
+
+/*
+ * The self-hosted end-to-end run: Harbor's admin turned on Require SSO while Ines had OpenBot open. The server closed
+ * her sockets with 4403, but the page stayed on Home until the next load while every request failed.
+ */
+test("Harbor begins to hold her out while the app is open: the socket's close moves her to the held page at once", async () => {
+  heldOut = false;
+  const { view } = openApp();
+  await view.findByText("The app");
+  await waitFor(() => expect(sockets).toHaveLength(1));
+
+  heldOut = true;
+  await act(async () => {
+    sockets[0]?.close(4403, "SSO_REQUIRED");
+    await settleReactWork();
+  });
+  await view.findByRole("heading", { name: "Sign in with your company" });
+  expect(view.getByRole("status").textContent).toBe(HELD_OUT_NOW);
+  expect(
+    await view.findByRole("button", { name: "Link your company account" }),
+  ).toBeTruthy();
+  expect(view.queryByText("The app")).toBeNull();
+  // Not reconnected: the server would refuse it again.
+  await settleReactWork();
+  expect(
+    requests.filter((request) => request.endsWith("/conversation-events")),
+  ).toHaveLength(1);
+});
+
+test("Harbor begins to hold her out while the app is open: the first request refused for it moves her to the held page, in the server's sentence", async () => {
+  heldOut = false;
+  const { view } = openApp();
+  await view.findByText("The app");
+
+  heldOut = true;
+  // Anything the page asks next, as it would on its next read.
+  await act(() => queryClient.refetchQueries());
+  await view.findByRole("heading", { name: "Sign in with your company" });
+  expect(view.getByRole("status").textContent).toBe(HELD_OUT);
+  expect(view.queryByText("The app")).toBeNull();
 });
 
 /** Settings, General's section, in Harbor. */

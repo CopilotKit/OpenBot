@@ -4,6 +4,7 @@ import {
   IconUserCircle,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { type ReactNode, useSyncExternalStore } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { useSignOut } from "@/components/app-sidebar/use-sign-out";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { companySignInQueryOptions } from "@/lib/auth/company-sign-in";
+import { heldOutRefusal, onHoldChange } from "@/lib/auth/held-out";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { switchOrganizationMutationOptions } from "@/lib/organizations/mutations";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
@@ -71,6 +73,23 @@ export function CompanySignInPage({ refusal }: { refusal: string }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The signed-in app, until the organization holds the person out while it is open (lib/auth/held-out.ts): from the
+ * first refusal for it, the held page, at once, in place of every screen of the organization.
+ */
+export function HeldOutGate({ children }: { children: ReactNode }) {
+  const refusal = useSyncExternalStore(
+    onHoldChange,
+    heldOutRefusal,
+    heldOutRefusal,
+  );
+  return refusal === undefined ? (
+    children
+  ) : (
+    <CompanySignInPage refusal={refusal} />
   );
 }
 
