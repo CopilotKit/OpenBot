@@ -5,6 +5,19 @@ step involves a terminal, a tag pushed by hand, or an image built on somebody's 
 
 ## Cutting one
 
+A release is cut by one run of **Release** from the Actions tab
+([`cut-release.yml`](../.github/workflows/cut-release.yml)), described under
+[The Release workflow](#the-release-workflow). Before running it:
+
+1. [Rebuild the changelog from the code](#rebuild-the-changelog-from-the-code), and write the new
+   release's `release-policy.json`, on `main`, as one pull request.
+2. Move the server images to a `main` commit that has that policy. That changes the code they are
+   built from, so it is checked in full like any other change. Release reads the OpenBot commit the
+   server images are built from and refuses one whose policy is not this release's.
+3. Run **Release** with `dry_run` first if you want to see everything it would do, then without.
+
+The steps below are what Release does, and remain the way to do it by hand.
+
 1. Before cutting, [rebuild the changelog from the code](#rebuild-the-changelog-from-the-code).
 2. Check `## Unreleased` in [CHANGELOG.md](../CHANGELOG.md) reads the way you want it to. It is the
    release notes. Nothing is generated from commit subjects, because a commit subject is written for
@@ -52,6 +65,92 @@ which then fails to attach anything because the tag has no release.
 other three are for a release candidate or beta, and are described under
 [Release candidates and betas](#release-candidates-and-betas) and
 [Finishing a candidate](#finishing-a-candidate).
+
+### The Release workflow
+
+**Release** ([`cut-release.yml`](../.github/workflows/cut-release.yml), running
+[`scripts/release-run.ts`](../scripts/release-run.ts)) takes two choices and does the rest in the
+order it has to happen, each step starting only when the one before it has finished:
+
+- `bump`: `patch` or `minor`. It counts for a stable release and for the first candidate.
+- `kind`: `rc` for a release candidate, or `final` for the release itself. From `main`, `final` is a
+  stable release. From `release/X.Y` (**Use workflow from**), it is the final that finishes that
+  branch's candidates.
+- `dry_run`: everything except the merge, so no tag is pushed, nothing is published and Latest does
+  not move.
+
+In order:
+
+1. **Preflight**, before anything is built
+   ([`scripts/release-preflight.ts`](../scripts/release-preflight.ts)). Every check runs, and every
+   problem is printed as one plain sentence, before the run stops:
+   - on `main`, CI passed on the tip (a run still going is waited for, up to 40 minutes);
+   - the version is not tagged and no release PR is open;
+   - `CHANGELOG.md` has notes under `## Unreleased`, and no section for this version yet;
+   - `release-policy.json` on the branch, and at the OpenBot commit the server images are built
+     from, is written for this release and upgrades from the last one. Server images built from a
+     commit whose policy is the previous release's are refused here, in a minute, rather than by
+     their own release checks an hour later;
+   - the server images are built from a commit on the branch, and their checks passed on the commit
+     they would release from;
+   - the `version` in this repository's `package.json`, in the server images' `package.json`, and
+     every chart's `appVersion` agree.
+2. **The server images' release**, started where they are built and waited on. It moves only their
+   version and every chart's `appVersion`, runs the release checks that read those, and builds the
+   server images and their release files at this version. The commit it starts from already passed
+   every check, and a version is all that changes, so the whole suite is not run again. A dry run
+   builds and checks the same way and publishes nothing under the version.
+3. **Create release PR**, on the branch's tip once its CI is green, waited on. A dry run prints the
+   version, the notes and the diff it would propose.
+4. **The merge** of that PR, which publishes. It merges only while the branch is still the commit
+   the PR was cut from: merged onto a branch that has moved, the changelog's promotion is applied to
+   a different `## Unreleased`, and notes land under the wrong heading. If the branch moved, the PR
+   is closed and the run says so; re-run the failed jobs to cut it again on the new tip.
+5. **Publish release**, waited on. The step ends by naming the two signing runs it started.
+6. **Merge back** (a job of its own), once both signing runs have finished and the release is
+   Latest, or as soon as they have finished when `RELEASE_HOLD_LATEST` holds it. In turn, it merges
+   the PR that puts main's images back (after a stable release) or the merge-back PR (after a
+   final), merges the server images' version change, and moves the server images to `main` after
+   that merge, through a pull request every check runs on, merged once they all pass. Left for
+   later, the server images' own checks fail every change there, because the release they must now
+   upgrade from is missing from the policy they build with. A candidate leaves both as they are.
+   The job waits up to six hours for signing; if signing takes longer, re-run the failed jobs once
+   it is done. A merge-back that conflicts, or a pull request whose checks fail, stops the job and
+   is left open for a person.
+
+What stays with people stays as it was. The `macos-signing` and `windows-signing` environments'
+reviewers approve signing, and Release never approves them. Once both signed builds are attached,
+the second signing run makes the release Latest (unless `RELEASE_HOLD_LATEST` lists it), starts
+Downloads sync and removes older installers, exactly as before.
+
+Preflight refuses to start while `main` is red here or where the server images are built, whichever
+branch is being released, since the release ends by merging into both.
+
+**Set up once.** A GitHub App, installed on this repository and where the server images are built:
+
+- where the server images are built: Actions read and write, Checks read, and Contents and Pull
+  requests read and write, to read the commit they release from, start their Release workflow, and
+  open and merge the changes that bring them to the release. It must be allowed to merge into their
+  `main` without a review, once the change's checks pass;
+- on this repository: Contents and Pull requests read and write, to merge the release PR and the
+  merge-back. A merge made with `GITHUB_TOKEN` starts no workflow, and Publish release starts on
+  that merge's push. The App must be allowed to merge into `main` without a review and without the
+  release PR's own checks, as a person's admin merge is today (a bypass on `main`'s protection).
+
+Its client ID is the repository variable `OPENBOT_RELEASE_APP_CLIENT_ID`. The `release` environment,
+limited to `main` and `release/*`, holds its private key as `OPENBOT_RELEASE_APP_PRIVATE_KEY` and the
+name of the repository the server images are built in as `OPENBOT_SERVER_RELEASE_REPOSITORY`, a
+secret only so this repository's public logs mask it.
+
+To run it from a terminal with your own `gh` sign-in, which needs access to both (the dry run starts
+the server images' dry run and Create release PR's dry run, and nothing else):
+
+```sh
+GITHUB_REPOSITORY=CopilotKit/OpenBot SERVER_REPOSITORY=<owner>/<where the server images are built> \
+  RELEASE_REF=main BUMP=patch KIND=final DRY_RUN=true bun scripts/release-run.ts all
+```
+
+`bun scripts/release-run.ts preflight` alone runs only the checks.
 
 ### Rebuild the changelog from the code
 
@@ -1141,8 +1240,9 @@ seen as the source file it removed. Every commit on `main` keeps its own CI run 
 in progress still gets a result. A final's parent is its candidate on `release/X.Y`, which main's CI
 never ran on, so a final always runs the full suite.
 
-**No secrets are required to release.** CI and **Create release PR** use only the built-in
-`GITHUB_TOKEN`. **Publish release**, **Internal build** and the desktop build workflows also pass
+**One secret to release.** **Release** reads the GitHub App's key from the `release` environment
+(see [The Release workflow](#the-release-workflow)), to start the server images' release and to
+merge the release PR. CI and **Create release PR** use only the built-in `GITHUB_TOKEN`. **Publish release**, **Internal build** and the desktop build workflows also pass
 `OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET` to the installer build when it is set, and build without
 it when it is not. Signed desktop builds are the exception: they read the `macos-signing` and
 `windows-signing` environments described above and in [Windows signing](windows-signing.md).

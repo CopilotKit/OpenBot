@@ -1,0 +1,104 @@
+{
+  "comment": "Real inputs for scripts/release-preflight.test.ts. staleInterimPolicy is release-policy.json at 198f3cb0a, the commit the 1.1.2 server images were first built from, still written for v1.1.1. policyFor112 is the one at 8defa5bae, which they moved to. tags is the published release list on the day 1.1.2 was cut.",
+  "staleInterimPolicy": {
+    "$schema": "./shared/release-policy.schema.json",
+    "version": "v1.1.1",
+    "compatibility": {
+      "launcherApi": 1,
+      "configSchema": 1,
+      "extensionApi": 1,
+      "database": {
+        "from": [
+          "0132_bot_task_runs",
+          "0088_approval_reviewer_guidance",
+          "0085_approval_rule_account",
+          "0083_learning_skill_approvals",
+          "0082_routine_goal",
+          "0077_channel_opening"
+        ],
+        "to": "0137_ai_connections",
+        "rollbackCompatible": false
+      },
+      "intelligenceCapabilities": []
+    },
+    "upgrade": {
+      "fromVersions": [
+        "v1.1.0",
+        "v1.0.3",
+        "v1.0.2",
+        "v1.0.1",
+        "v1.0.0",
+        "v0.3.4",
+        "v0.3.3",
+        "v0.3.2",
+        "v0.3.1",
+        "v0.3.0"
+      ],
+      "requiresDowntime": false,
+      "recovery": "restore-backup"
+    }
+  },
+  "policyFor112": {
+    "$schema": "./shared/release-policy.schema.json",
+    "version": "v1.1.2",
+    "compatibility": {
+      "launcherApi": 1,
+      "configSchema": 1,
+      "extensionApi": 1,
+      "database": {
+        "from": [
+          "0137_ai_connections",
+          "0132_bot_task_runs",
+          "0088_approval_reviewer_guidance",
+          "0085_approval_rule_account",
+          "0083_learning_skill_approvals",
+          "0082_routine_goal",
+          "0077_channel_opening"
+        ],
+        "to": "0137_ai_connections",
+        "rollbackCompatible": false
+      },
+      "intelligenceCapabilities": []
+    },
+    "upgrade": {
+      "fromVersions": [
+        "v1.1.1",
+        "v1.1.0",
+        "v1.0.3",
+        "v1.0.2",
+        "v1.0.1",
+        "v1.0.0",
+        "v0.3.4",
+        "v0.3.3",
+        "v0.3.2",
+        "v0.3.1",
+        "v0.3.0"
+      ],
+      "requiresDowntime": false,
+      "recovery": "restore-backup"
+    }
+  },
+  "tags": [
+    "v1.1.1",
+    "v1.1.1-rc.1",
+    "v1.1.0",
+    "v1.1.0-rc.2",
+    "v1.1.0-rc.1",
+    "v1.0.3",
+    "v1.0.3-rc.1",
+    "v1.0.2",
+    "v1.0.2-rc.3",
+    "v1.0.2-rc.2",
+    "v1.0.2-rc.1",
+    "v1.0.1",
+    "v1.0.1-rc.2",
+    "v1.0.1-rc.1",
+    "v1.0.0",
+    "v1.0.0-rc.5",
+    "v0.3.4",
+    "v0.3.3",
+    "v0.2.0",
+    "v0.0.15",
+    "v0.0.9"
+  ]
+}

@@ -1,0 +1,279 @@
+name: Release
+
+# One run cuts a release, in the order it has to happen (scripts/release-run.ts):
+#
+#   1. preflight: every check that can fail fast, before anything is built. The branch's CI is
+#      green on its tip; the version is free and no release PR is open; the notes are there; the
+#      release policy, here and at the OpenBot commit the server images build from, is written for this
+#      release and upgrades from the last one; the server images' main is green; and the versions in
+#      both places and every chart's appVersion agree (scripts/release-preflight.ts).
+#   2. the server images' release, started where they are built and waited on. It moves only their
+#      version, from a commit that already passed every check, so it runs their release checks and
+#      builds the images and release files at this version without running every check again.
+#   3. Create release PR, on this branch's tip once its CI is green, and waited on.
+#   4. the merge of that PR, only while the branch has not moved since it was cut, which is what
+#      publishes: Publish release starts on the push, as it does for a merge by hand.
+#   5. waiting for Publish release, then naming the signing runs it started.
+#   6. once both signing runs have finished and the release is Latest (job `merge back`): the
+#      merge-back into main, the server images' version change, and the server images moved to
+#      main after the merge-back, each merged in turn.
+#
+# What stays with people is what always has: the macOS and Windows signing environments' reviewers
+# approve signing, and nothing here approves them. Making the release Latest, Downloads sync and
+# removing older installers follow the signing runs, as they always have, and RELEASE_HOLD_LATEST
+# holds Latest as it always has.
+#
+# `dry_run` runs every step except the merges: no tag is pushed, nothing is published, and Latest
+# does not move. The server images build and check as a dry run of their own, and Create release PR
+# prints the version, the notes and the diff it would propose without opening a PR.
+#
+# Set up once (docs/releasing.md#the-release-workflow): a GitHub App installed on this repository
+# and where the server images are built, its client ID in the variable OPENBOT_RELEASE_APP_CLIENT_ID,
+# and, in the `release` environment, its private key as OPENBOT_RELEASE_APP_PRIVATE_KEY and the
+# name of the repository the server images are built in as OPENBOT_SERVER_RELEASE_REPOSITORY. The
+# name is a secret only so this repository's public logs mask it.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump (counts only for a stable release or the first candidate)
+        required: true
+        type: choice
+        options: [patch, minor]
+      kind:
+        description: rc for a release candidate; final for the release itself (a stable release from main, or the final that finishes the candidates from release/X.Y)
+        required: true
+        type: choice
+        options: [rc, final]
+      dry_run:
+        description: Run every step except the merge, so nothing is tagged, published or made Latest
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+# One release at a time, never cancelled half way.
+concurrency:
+  group: openbot-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: release
+    # Main and the release branches, as Create release PR. The release PRs' own branches are not.
+    if: >-
+      github.ref == 'refs/heads/main' ||
+      (startsWith(github.ref, 'refs/heads/release/') &&
+        !startsWith(github.ref, 'refs/heads/release/publish/'))
+    runs-on: ubuntu-latest
+    # Mostly waiting: the server images' release, Create release PR and Publish release.
+    timeout-minutes: 360
+    environment: release
+    permissions:
+      contents: read
+      # To start Create release PR and read this repository's runs. Starting a workflow is the one
+      # thing GITHUB_TOKEN may trigger.
+      actions: write
+      pull-requests: read
+    outputs:
+      cut_kind: ${{ steps.preflight.outputs.cut_kind }}
+      version: ${{ steps.preflight.outputs.version }}
+      previous: ${{ steps.preflight.outputs.previous }}
+      prerelease: ${{ steps.preflight.outputs.prerelease }}
+      latest: ${{ steps.preflight.outputs.latest }}
+      tip: ${{ steps.preflight.outputs.tip }}
+      pin: ${{ steps.preflight.outputs.pin }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          no-cache: true
+      # Reads the server images' main and starts their Release workflow there. Nothing else.
+      - id: server-token
+        name: Token for the server images' release
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.OPENBOT_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OPENBOT_RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ secrets.OPENBOT_SERVER_RELEASE_REPOSITORY }}
+          permission-actions: write
+          permission-contents: read
+      # Merges the release PR. A merge made with GITHUB_TOKEN starts no workflow, and Publish release
+      # starts on the push the merge makes, so the merge is the App's.
+      - id: merge-token
+        name: Token for merging the release PR
+        if: ${{ !inputs.dry_run }}
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.OPENBOT_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OPENBOT_RELEASE_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+      - id: preflight
+        name: Preflight
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SERVER_TOKEN: ${{ steps.server-token.outputs.token }}
+          SERVER_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.OPENBOT_SERVER_RELEASE_REPOSITORY }}
+          RELEASE_REF: ${{ github.ref_name }}
+          BUMP: ${{ inputs.bump }}
+          KIND: ${{ inputs.kind }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: bun scripts/release-run.ts preflight
+      - id: server
+        name: The server images' release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SERVER_TOKEN: ${{ steps.server-token.outputs.token }}
+          SERVER_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.OPENBOT_SERVER_RELEASE_REPOSITORY }}
+          RELEASE_REF: ${{ github.ref_name }}
+          BUMP: ${{ inputs.bump }}
+          KIND: ${{ inputs.kind }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CUT_KIND: ${{ steps.preflight.outputs.cut_kind }}
+          VERSION: ${{ steps.preflight.outputs.version }}
+          PREVIOUS: ${{ steps.preflight.outputs.previous }}
+          PRERELEASE: ${{ steps.preflight.outputs.prerelease }}
+          LATEST: ${{ steps.preflight.outputs.latest }}
+          TIP: ${{ steps.preflight.outputs.tip }}
+          PIN: ${{ steps.preflight.outputs.pin }}
+        run: bun scripts/release-run.ts server
+      - id: release-pr
+        name: Create release PR
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SERVER_TOKEN: ${{ steps.server-token.outputs.token }}
+          SERVER_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.OPENBOT_SERVER_RELEASE_REPOSITORY }}
+          RELEASE_REF: ${{ github.ref_name }}
+          BUMP: ${{ inputs.bump }}
+          KIND: ${{ inputs.kind }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CUT_KIND: ${{ steps.preflight.outputs.cut_kind }}
+          VERSION: ${{ steps.preflight.outputs.version }}
+          PREVIOUS: ${{ steps.preflight.outputs.previous }}
+          PRERELEASE: ${{ steps.preflight.outputs.prerelease }}
+          LATEST: ${{ steps.preflight.outputs.latest }}
+          TIP: ${{ steps.preflight.outputs.tip }}
+          PIN: ${{ steps.preflight.outputs.pin }}
+        run: bun scripts/release-run.ts release-pr
+      - id: merge
+        name: Merge the release PR
+        if: ${{ !inputs.dry_run }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MERGE_TOKEN: ${{ steps.merge-token.outputs.token }}
+          SERVER_TOKEN: ${{ steps.server-token.outputs.token }}
+          SERVER_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.OPENBOT_SERVER_RELEASE_REPOSITORY }}
+          RELEASE_REF: ${{ github.ref_name }}
+          BUMP: ${{ inputs.bump }}
+          KIND: ${{ inputs.kind }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CUT_KIND: ${{ steps.preflight.outputs.cut_kind }}
+          VERSION: ${{ steps.preflight.outputs.version }}
+          PREVIOUS: ${{ steps.preflight.outputs.previous }}
+          PRERELEASE: ${{ steps.preflight.outputs.prerelease }}
+          LATEST: ${{ steps.preflight.outputs.latest }}
+          TIP: ${{ steps.preflight.outputs.tip }}
+          PIN: ${{ steps.preflight.outputs.pin }}
+          PR: ${{ steps.release-pr.outputs.pr }}
+          HEAD: ${{ steps.release-pr.outputs.head }}
+          BASE: ${{ steps.release-pr.outputs.base }}
+        run: bun scripts/release-run.ts merge
+      - name: Publish release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SERVER_TOKEN: ${{ steps.server-token.outputs.token }}
+          SERVER_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.OPENBOT_SERVER_RELEASE_REPOSITORY }}
+          RELEASE_REF: ${{ github.ref_name }}
+          BUMP: ${{ inputs.bump }}
+          KIND: ${{ inputs.kind }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CUT_KIND: ${{ steps.preflight.outputs.cut_kind }}
+          VERSION: ${{ steps.preflight.outputs.version }}
+          PREVIOUS: ${{ steps.preflight.outputs.previous }}
+          PRERELEASE: ${{ steps.preflight.outputs.prerelease }}
+          LATEST: ${{ steps.preflight.outputs.latest }}
+          TIP: ${{ steps.preflight.outputs.tip }}
+          PIN: ${{ steps.preflight.outputs.pin }}
+          MERGED: ${{ steps.merge.outputs.merged }}
+        run: bun scripts/release-run.ts publish
+
+  # Once both signing runs have finished, and the release is Latest unless RELEASE_HOLD_LATEST holds
+  # it: the merge-back into main, the server images' version change, and the server images moved to
+  # main after the merge-back, merged once every check on it passes. Left for later, every pull
+  # request where the server images are built fails the check that holds the server to the
+  # published releases, because the release it must now upgrade from is missing from the policy it
+  # builds with. A job of its own, so its six hours start when publishing ends; if signing takes
+  # longer, re-running this job once it is done finishes the release.
+  follow-up:
+    name: merge back
+    needs: release
+    if: needs.release.result == 'success' && needs.release.outputs.prerelease != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: release
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          no-cache: true
+      # Reads where the server images are built, and, outside a dry run, pushes the branch that
+      # moves them to main and merges it and their version change. The PR it opens is the App's,
+      # so every check runs on it.
+      - id: server-token
+        name: Token for the server images' merges
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.OPENBOT_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OPENBOT_RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ secrets.OPENBOT_SERVER_RELEASE_REPOSITORY }}
+          permission-actions: read
+          permission-checks: read
+          permission-contents: ${{ inputs.dry_run && 'read' || 'write' }}
+          permission-pull-requests: ${{ inputs.dry_run && 'read' || 'write' }}
+      - id: merge-token
+        name: Token for merging back into main
+        if: ${{ !inputs.dry_run }}
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.OPENBOT_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OPENBOT_RELEASE_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Merge back, and move the server images to main
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MERGE_TOKEN: ${{ steps.merge-token.outputs.token }}
+          SERVER_TOKEN: ${{ steps.server-token.outputs.token }}
+          SERVER_WRITE_TOKEN: ${{ !inputs.dry_run && steps.server-token.outputs.token || '' }}
+          SERVER_REPOSITORY: ${{ github.repository_owner }}/${{ secrets.OPENBOT_SERVER_RELEASE_REPOSITORY }}
+          HOLD_LATEST: ${{ vars.RELEASE_HOLD_LATEST }}
+          RELEASE_REF: ${{ github.ref_name }}
+          BUMP: ${{ inputs.bump }}
+          KIND: ${{ inputs.kind }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CUT_KIND: ${{ needs.release.outputs.cut_kind }}
+          VERSION: ${{ needs.release.outputs.version }}
+          PREVIOUS: ${{ needs.release.outputs.previous }}
+          PRERELEASE: ${{ needs.release.outputs.prerelease }}
+          LATEST: ${{ needs.release.outputs.latest }}
+          TIP: ${{ needs.release.outputs.tip }}
+          PIN: ${{ needs.release.outputs.pin }}
+        run: bun scripts/release-run.ts follow-up
