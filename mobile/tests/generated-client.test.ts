@@ -44,6 +44,8 @@ let outsideDefault = false;
  * is not found for them, as an organization they are not in never is.
  */
 let removedFromWork = false;
+/** The signed-in person is in no organization here: never added, or removed from the last one. */
+let inNone = false;
 /** Which app each request named itself as (the OpenBot-Client header), in the order they arrived. */
 const named: (string | null)[] = [];
 /** What this stand-in answers at `deployment`: one of the fixture's real answers, or a status. */
@@ -186,6 +188,12 @@ const server = Bun.serve({
           headers: { "content-type": "application/problem+json" },
         },
       );
+    if (route === `GET ${MINE}` && inNone)
+      return Response.json({
+        organizations: [],
+        canCreate: false,
+        nextCursor: null,
+      });
     if (route === `GET ${MINE}` && removedFromWork)
       return Response.json({
         organizations: [
@@ -356,9 +364,11 @@ const {
   ME,
   ORGANIZATION_ID,
   organizationChoices,
+  organizationsHeld,
   readDeployment,
   setSignedInPerson,
 } = await import("../src/api");
+const { homeView } = await import("../src/home-view");
 const { listInvitations } = await import(
   "../src/api/generated/organizations/organizations"
 );
@@ -377,6 +387,7 @@ beforeEach(() => {
   deploymentSentWith.length = 0;
   outsideDefault = false;
   removedFromWork = false;
+  inNone = false;
   setSignedInPerson("ada");
   cookie = COOKIE;
   deploymentAnswer = { status: 200, body: fixture.deployments.current };
@@ -872,4 +883,35 @@ test("on a phone two people share, each opens in their own pick, never the last 
   seen.length = 0;
   await getBot(ORGANIZATION_ID, "a b");
   expect(seen.at(-1)?.path).toBe("/api/v2/organizations/default/bots/a%20b");
+});
+
+/*
+ * REPORTED (fused end-to-end run, Android): left in no organization, Home said so and still offered Needs you,
+ * approvals, Bots, Memory, notifications and conversations, all of which act on an organization. Home for somebody in
+ * no organization is now its own: the sentence, Try again and Sign out. Signing out still works there: there is no
+ * organization to take the phone off.
+ */
+test("somebody signed in to no organization gets Home for nobody's organization, and can still sign out", async () => {
+  setSignedInPerson("dee");
+  cookie = "better-auth.session_token=signed-in-in-none";
+  inNone = true;
+  const failed = await organizationChoices().catch(
+    (error: unknown) => (error as Error).message,
+  );
+  expect(failed).toBe(
+    "You aren't a member of an organization here. Ask an admin to add you.",
+  );
+  expect(homeView(true, failed as string)).toBe("in-no-organization");
+  expect(await organizationsHeld()).toEqual([]);
+
+  // Anybody else: the app, or the sign-in.
+  expect(homeView(true, undefined)).toBe("working");
+  expect(homeView(true, "Couldn't load your organizations. Try again.")).toBe(
+    "working",
+  );
+  expect(homeView(false, failed as string)).toBe("signed-out");
+
+  // Added to one again: Try again reads the list afresh and they work there.
+  inNone = false;
+  expect((await organizationChoices()).currentId).toBe("org_work");
 });

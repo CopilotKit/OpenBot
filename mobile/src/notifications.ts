@@ -4,7 +4,7 @@ import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-import { ApiError, ME, ORGANIZATION_ID, organizationChoices } from "./api";
+import { ApiError, ME, ORGANIZATION_ID, organizationsHeld } from "./api";
 import { deleteDevice, registerDevice } from "./api/generated/devices/devices";
 
 const key = "openbot-device-id";
@@ -56,8 +56,8 @@ export async function registerPush() {
 export async function unregisterPush() {
   const id = await SecureStore.getItemAsync(key);
   if (!id) return;
-  const { organizations } = await organizationChoices();
-  for (const organization of organizations) {
+  // None, for somebody in no organization any more: there is nothing to take the phone off, and they can still sign out.
+  for (const organization of await organizationsHeld()) {
     try {
       await deleteDevice(organization.id, ME, id);
     } catch (error) {
