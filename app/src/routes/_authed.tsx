@@ -1,12 +1,12 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { BotLookProvider } from "../components/agents/bot-look";
+import { HeldOutGate } from "../components/auth/company-sign-in-page";
 import { OpenFromApp } from "../components/desktop/open-from-app";
 import { TeamFeaturesDialog } from "../components/edition/team-features-dialog";
 import { CommandMenu } from "../components/navigation/command-menu";
 import { NewOrganizationDialog } from "../components/organizations/new-organization-dialog";
 import { OrganizationBoundary } from "../components/organizations/organization-boundary";
-import { ReportedErrorComponent } from "../lib/error-reporting";
 import {
   connectedThroughDesktop,
   signOutThroughDesktop,
@@ -17,6 +17,7 @@ import {
   signedInUser,
 } from "../lib/auth/queries";
 import { CopilotProvider } from "../lib/copilot/provider";
+import { ReportedErrorComponent } from "../lib/error-reporting";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
 import { rememberInvitationLink } from "../lib/organizations/invitation-link";
 import { learnShortenedToolNames } from "../lib/plugins/tool-names";
@@ -67,6 +68,15 @@ export const Route = createFileRoute("/_authed")({
   // Mounted INSIDE the authed boundary, not at the root: the runtime endpoint requires a session, so
   // a provider above the sign-in gate would open a run for a visitor who has not signed in yet.
   component: () => (
+    // The held page in place of all of it, the moment the organization holds the person out while it is open.
+    <HeldOutGate>
+      <AuthedApp />
+    </HeldOutGate>
+  ),
+});
+
+function AuthedApp() {
+  return (
     // Built again for each organization the person works in, the conversation that was running too.
     <OrganizationBoundary>
       <CopilotProvider>
@@ -88,8 +98,8 @@ export const Route = createFileRoute("/_authed")({
         </SkinBotLook>
       </CopilotProvider>
     </OrganizationBoundary>
-  ),
-});
+  );
+}
 
 /** Bots are drawn the way the active skin asks for, on every authed page and in every dialog over one. */
 function SkinBotLook({ children }: { children: ReactNode }) {

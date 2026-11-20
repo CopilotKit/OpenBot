@@ -1,3 +1,4 @@
+import { isOpenBotActor } from "@openbot/shared/openbot-actor";
 import {
   IconAlertTriangle,
   IconBan,
@@ -9,7 +10,6 @@ import {
   IconSearch,
   IconX,
 } from "@tabler/icons-react";
-import { isOpenBotActor } from "@openbot/shared/openbot-actor";
 import {
   keepPreviousData,
   useInfiniteQuery,
@@ -271,7 +271,10 @@ export function AuditPage({
   const people = useMemo(
     () =>
       new Map([
-        ...(members ?? []).map((member) => [member.id, member.email] as const),
+        // Somebody who hasn't opened OpenBot yet may have no address, and has done nothing here yet.
+        ...(members ?? [])
+          .filter((member) => member.email.trim())
+          .map((member) => [member.id, member.email] as const),
         ...(reader ? [[reader.id, reader.email] as const] : []),
       ]),
     [members, reader],

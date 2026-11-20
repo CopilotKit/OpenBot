@@ -83,7 +83,12 @@ export type ExchangeResponse = {
   connection: RecorderConnection;
   user: RecorderUser;
 };
-export type RecorderMe = { user: RecorderUser; connectionId: string };
+export type RecorderMe = {
+  user: RecorderUser;
+  connectionId: string;
+  /** The organization the connection records into. Absent from an OpenBot that keeps every connection in `default`. */
+  organization?: { id: string; name: string };
+};
 /** Decision 10, for the person's own Learning space: assigned (it exists), unassigned (Automatic Learning is off, so
  * there is no space), missing (it does not exist and could not be made), learning-off (Intelligence's Learning delivery
  * is off, unlicensed or unavailable, so existence was not checked), unverified (Intelligence could not be asked, or the

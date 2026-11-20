@@ -3,10 +3,18 @@ import {
   type DefaultedQueryObserverOptions,
   focusManager,
   hashKey,
+  MutationCache,
+  QueryCache,
   QueryClient,
   type QueryKey,
   type QueryObserverOptions,
 } from "@tanstack/react-query";
+import {
+  HELD_OUT_NOW,
+  heldOutBySso,
+  holdOut,
+  releaseHold,
+} from "@/lib/auth/held-out";
 import {
   holdReadsWhileConnectionLost,
   retryWhileConnectionLost,
@@ -15,6 +23,7 @@ import {
   currentOrganizationId,
   onOrganizationChange,
 } from "@/lib/organizations/current";
+import { inNoOrganization } from "@/lib/organizations/in-no-organization";
 
 /**
  * What is the same whichever organization the person works in: the list of their organizations,
@@ -74,6 +83,11 @@ focusManager.setEventListener((handleFocus) => {
  * while OpenBot Desktop can't reach the OpenBot it is connected to waits for it instead of failing
  * (`lib/desktop/connection-lost.ts`). Wrapped where options are resolved, so a query that turns its
  * retries off is held the same way.
+ *
+ * Being in no organization is an answer, not a failure: asking again at once says the same and only
+ * holds the page back, so it is never retried. So is being held out until signing in through the
+ * company (`heldOutBySso`). Said here rather than in one query's options, where it
+ * would replace the retry rule this client was given.
  */
 class OpenBotQueryClient extends QueryClient {
   override defaultQueryOptions<
@@ -116,18 +130,35 @@ class OpenBotQueryClient extends QueryClient {
         TQueryKey
       >;
     const resolved = super.defaultQueryOptions(options);
+    const retry = resolved.retry ?? false;
     return {
       ...resolved,
       ...retryWhileConnectionLost<TError>(
         this,
-        resolved.retry ?? false,
+        (failureCount, error) => {
+          if (inNoOrganization(error) || heldOutBySso(error)) return false;
+          if (typeof retry === "function") return retry(failureCount, error);
+          if (typeof retry === "number") return failureCount < retry;
+          return retry;
+        },
         resolved.retryDelay,
       ),
     };
   }
 }
 
+/**
+ * A refusal for being held out, from any read or write while the app is open: the hold began since the page loaded,
+ * and the app gives way to the held page at once (lib/auth/held-out.ts). In the server's own sentence.
+ */
+function holdOutWhenRefusedForIt(error: unknown): void {
+  if (!heldOutBySso(error)) return;
+  holdOut(error instanceof Error ? error.message : HELD_OUT_NOW);
+}
+
 export const queryClient = new OpenBotQueryClient({
+  queryCache: new QueryCache({ onError: holdOutWhenRefusedForIt }),
+  mutationCache: new MutationCache({ onError: holdOutWhenRefusedForIt }),
   defaultOptions: {
     queries: {
       retry: 1,
@@ -145,6 +176,8 @@ holdReadsWhileConnectionLost(queryClient);
  * for the first time drops nothing.
  */
 onOrganizationChange((next, previous) => {
+  // A hold is the organization's that found it: working in another, nothing holds the person out.
+  releaseHold();
   if (next === undefined || previous === undefined) return;
   const left = {
     predicate: (query: { queryKey: QueryKey }) =>

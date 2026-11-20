@@ -37,12 +37,39 @@ export function roleInSentence(role: string): string {
   return `${/^[aeiou]/.test(name) ? "an" : "a"} ${name}`;
 }
 
-/** What somebody is called: their name, or their address until they choose one. */
+/** What a row calls somebody OpenBot knows neither a name nor an address for. */
+export const UNNAMED_PERSON = "Unnamed member";
+
+/** What a member's row says of somebody who is a member and hasn't opened OpenBot yet. */
+export const NOT_OPENED_YET = "Hasn't opened OpenBot yet";
+
+/**
+ * What somebody is called: their name, or their address until they choose one. Somebody who hasn't
+ * opened OpenBot yet may have neither (`notOpenedYet`), and is then a neutral label.
+ */
 export function personName(person: {
   name: string | null;
   email: string;
 }): string {
-  return person.name?.trim() || person.email;
+  return person.name?.trim() || person.email.trim() || UNNAMED_PERSON;
+}
+
+/**
+ * The second line of a member's row: their address when their name is the first line, their role,
+ * and, for somebody who hasn't opened OpenBot yet, that they haven't.
+ */
+export function memberLine(
+  member: Pick<
+    OrganizationMemberSummary,
+    "name" | "email" | "role" | "notOpenedYet"
+  >,
+): string {
+  const parts: string[] = [];
+  const email = member.email.trim();
+  if (member.name?.trim() && email) parts.push(email);
+  parts.push(roleName(member.role));
+  if (member.notOpenedYet) parts.push(NOT_OPENED_YET);
+  return parts.join(" · ");
 }
 
 /** Up to two letters for a person with no picture, as the account row draws them. */
@@ -51,7 +78,8 @@ export function initialsOf(person: {
   email: string;
 }): string {
   const name = person.name?.trim();
-  if (!name) return person.email.slice(0, 2).toUpperCase();
+  // Neither a name nor an address: none, and the row draws a person's mark instead.
+  if (!name) return person.email.trim().slice(0, 2).toUpperCase();
   return name
     .split(/\s+/)
     .slice(0, 2)
@@ -64,6 +92,8 @@ export function initialsOf(person: {
  * anybody else's when they are the owner or an admin, and nothing where the membership cannot end.
  * Whether it can is the server's verdict (`removable`): the owner stays, so nobody is offered to
  * leave their own organization, and so does somebody OpenBot's settings keep as an admin.
+ * That holds for somebody who hasn't opened OpenBot yet too: they are offered for removal when the
+ * server says they can be removed, and not otherwise.
  */
 export function memberControl(
   member: Pick<OrganizationMemberSummary, "id" | "removable">,
@@ -75,13 +105,27 @@ export function memberControl(
 }
 
 /**
+ * What the Remove dialog tells the admin removing somebody. Somebody who hasn't opened OpenBot yet made nothing here, so
+ * it says only what removing them does.
+ */
+export function removeMemberWords(
+  member: Pick<OrganizationMemberSummary, "notOpenedYet">,
+  organizationName: string,
+): string {
+  return member.notOpenedYet
+    ? `This takes them out of ${organizationName}. They haven't opened OpenBot yet.`
+    : "They keep their account and their other organizations. What they made here stays here.";
+}
+
+/**
  * The roles a member's Role menu offers: the server's verdict (`assignableRoles`), less any role a
  * newer server lists that this app doesn't know. The app can't name one it doesn't know, and never
- * sends one back.
+ * sends one back. None for somebody who hasn't opened OpenBot yet: their role is shown, not changed.
  */
 export function givableRoles(
-  member: Pick<OrganizationMemberSummary, "assignableRoles">,
+  member: Pick<OrganizationMemberSummary, "assignableRoles" | "notOpenedYet">,
 ): KnownRole[] {
+  if (member.notOpenedYet) return [];
   return (member.assignableRoles as readonly string[]).filter(isKnownRole);
 }
 

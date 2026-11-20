@@ -66,6 +66,46 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `hostedSignIn` on `deployment`, true where people sign in through OpenBot by CopilotKit's own
   sign-in, starting at `/api/auth/hosted/sign-in`.
 
+### Organizations in the app
+
+- **An owner can delete an organization.** Settings, Organization has a Delete section for its
+  owners, which asks for the organization's name first. A person's own organization and `default`
+  can't be deleted, and the dialog says so. Afterwards the person moves to another of theirs.
+- **Each API key says where it works.** A key's row names the organization it acts in, and a key
+  made before keys belonged to one reads as `default`'s.
+- **Require SSO, per organization.** A member an organization holds out until they sign in through
+  their company gets a page that says why, with Link your company account (one button per
+  provider), Switch organization to their others, and Sign out, where they saw an error box. It
+  takes over at once when the rule is turned on while they have OpenBot open. Settings, General
+  offers the same link, or says the account is linked. Outside `default`, Identity providers lists
+  the organization's own providers, and the ones set up for all of OpenBot read-only; once the
+  organization has its own, the others no longer count for its rule, and each says so.
+- **Members who haven't opened OpenBot yet** show on Settings, Organization as such, with no role to
+  change, and can be removed.
+- **A computer refused for good** (an organization at its computer limit) is a calm state with the
+  server's sentence and no Try again, on Teach a Bot and on a Bot's screen. An admin gets a link to
+  Admin, Computers.
+- **Somebody signed in but in no organization** gets a page that says so, with Try again and Sign
+  out, on every page.
+- **A hosted OpenBot** offers Continue with OpenBot by CopilotKit on the sign-in screen, says an
+  invitation arrives by email from OpenBot by CopilotKit, renews its hosted sign-in when an admin
+  action needs it and sends that action again once, and no longer offers folders from this
+  computer in Admin, Computers.
+- **Learning** names the organization's own default space where it said "Deployment default", and
+  the sidebar takes only the conversation events of the organization the person works in.
+- **A person outside `default` signs in with nothing refused on the way**: what OpenBot offers is
+  read as anybody until their organization is known.
+
+### The phone app
+
+- **It works in one organization at a time.** A person in several picks one on Home, and the pick
+  is kept on the phone for that person and that OpenBot. Removed from it, or with it deleted, they
+  move to another of theirs, or are told they are in none.
+- **Require SSO.** Held out until they sign in through their company, the phone shows why, with Link
+  your company account, Switch organization and Sign out. Link opens a single-use address in the
+  system browser and comes back to the app once the account is linked.
+- Signing out stops push notifications from each of the person's organizations.
+
 ### OpenBot Desktop
 
 - **OpenBot Desktop's back end moves to CopilotKit Intelligence 0.17.0-rc.4.** The bundled CLI
@@ -129,6 +169,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `CHECK_ORIGIN`, even where that setting can't be the cause. Now, when the connection goes through
   OpenBot's own address, it says OpenBot refused it. Only when the connection goes to another
   address does it name the `chrome-extension://` origin an admin must allow there.
+- **The Recorder records into an organization.** The popup and the Connect page name it, and a
+  connection stays with the organization it was made in.
+- **The Recorder and Require SSO.** Held out until they sign in through their company, the popup
+  says so, offers Sign in with your company, and pauses Learning capture with the events kept, where
+  it said it got an answer it didn't know.
 
 ## 1.1.2
 
