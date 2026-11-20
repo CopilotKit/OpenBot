@@ -16292,6 +16292,12 @@ mod tests {
     /// what happened, which then waits for the person's Start.
     #[test]
     fn a_server_that_stops_answering_while_its_container_is_up_is_left_running() {
+        // It replaces PATH with a fake engine, which the tests running beside it would see.
+        if test_support::isolated_process(
+            "tests::a_server_that_stops_answering_while_its_container_is_up_is_left_running",
+        ) {
+            return;
+        }
         use std::io::{BufRead, BufReader, Write};
         let path = SerializedPath::set_with("docker", "server-up");
         let root = temp_root("server-quiet-under-window");
@@ -16411,6 +16417,12 @@ mod tests {
     /// own record still says it is running is a slow engine; one that says stopped is gone.
     #[test]
     fn a_podman_machine_that_stalls_is_a_slow_engine_and_one_that_stopped_is_gone() {
+        // It replaces PATH with a fake engine, which the tests running beside it would see.
+        if test_support::isolated_process(
+            "tests::a_podman_machine_that_stalls_is_a_slow_engine_and_one_that_stopped_is_gone",
+        ) {
+            return;
+        }
         let root = temp_root("server-container-machine");
         std::fs::create_dir_all(&root).unwrap();
         let engine = engine::Address::new(engine::Engine::Podman, Some("openbot-root".into()));
