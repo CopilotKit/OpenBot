@@ -3,8 +3,8 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
-import { ProviderLogo } from "@/components/auth/provider-logo";
-import { Button } from "@/components/ui/button";
+import { CopilotKitMark, ProviderLogo } from "@/components/auth/provider-logo";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -12,9 +12,11 @@ import {
   signInWith,
   signInWithEmailDomain,
 } from "@/lib/auth/client";
+import { hostedSignInAddress } from "@/lib/auth/hosted";
 import { resumeUrlFor, verifierPathFor } from "@/lib/auth/resume";
 import { appConfig } from "@/lib/generated/application-config";
 import { searchTextEntry } from "@/lib/search-text";
+import { cn } from "@/lib/utils";
 import {
   type AuthProviderId,
   authProvidersQueryOptions,
@@ -75,10 +77,13 @@ function SignScreen() {
   const { flow_id: flowId } = Route.useSearch();
   // Which provider is being opened, rather than whether one is: with three buttons, a single
   // boolean would put "Opening…" on all of them.
-  const [opening, setOpening] = useState<AuthProviderId | "sso" | null>(null);
+  const [opening, setOpening] = useState<
+    AuthProviderId | "copilotkit" | "sso" | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const { data: options } = useQuery(authProvidersQueryOptions());
   const providers = options?.providers ?? [];
+  const hosted = options?.hosted === true;
   const [email, setEmail] = useState("");
 
   /**
@@ -130,6 +135,37 @@ function SignScreen() {
 
   const providerButtons = (
     <div className="flex flex-col gap-2">
+      {/*
+       * A hosted OpenBot's own way in, first: the person's account with OpenBot by CopilotKit
+       * (`hostedSignIn`). The same button as the others, as a link that looks like them, because the server takes the
+       * browser on to that sign-in page and back to where sign-in would have brought them. A refusal
+       * lands on the server's own page, which links back here.
+       */}
+      {hosted ? (
+        <a
+          aria-disabled={opening !== null || undefined}
+          className={cn(
+            buttonVariants({ size: "lg", variant: "outline" }),
+            "h-10 w-full justify-start gap-3 px-3 tracking-tight",
+            opening !== null && "pointer-events-none opacity-50",
+          )}
+          href={hostedSignInAddress(
+            resumeUrlFor(window.location.origin, flowId),
+          )}
+          onClick={() => {
+            setError(null);
+            setOpening("copilotkit");
+          }}
+        >
+          <CopilotKitMark />
+          <span className="flex-1 text-center">
+            {opening === "copilotkit"
+              ? "Opening OpenBot by CopilotKit…"
+              : "Continue with OpenBot by CopilotKit"}
+          </span>
+          <span aria-hidden="true" className="size-[18px]" />
+        </a>
+      ) : null}
       {providers.map((provider) => (
         /*
          * Every provider gets the same button, and it is the light-themed outline one
@@ -207,7 +243,7 @@ function SignScreen() {
               account.
             </p>
           ) : null}
-          {providers.length > 0 && !options?.ssoRequired ? (
+          {(providers.length > 0 || hosted) && !options?.ssoRequired ? (
             providerButtons
           ) : options?.sso || options?.ssoRequired ? null : (
             <p className="text-center text-sm text-muted-foreground">
