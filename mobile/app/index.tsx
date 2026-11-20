@@ -11,12 +11,11 @@ import {
 import {
   type ConversationSummary,
   chooseOrganization,
-  deploymentOrganization,
+  readDeployment,
   ORGANIZATION_ID,
   organizationChoices,
 } from "../src/api";
 import { listConversations } from "../src/api/generated/conversations/conversations";
-import { getDeployment } from "../src/api/generated/organization-settings/organization-settings";
 import { authClient, serverUrl, signIn, signInEnterprise } from "../src/auth";
 import { registerPush, unregisterPush } from "../src/notifications";
 import { useLoad } from "../src/use-load";
@@ -36,7 +35,7 @@ export default function Home() {
   }, [session?.user.id]);
   const loadOptions = useCallback(
     // The API's `deployment`, which answers before anybody has signed in: asked of the organization every install has.
-    async () => getDeployment(await deploymentOrganization()),
+    () => readDeployment(false),
     [],
   );
   const options = useLoad(loadOptions, !session);
