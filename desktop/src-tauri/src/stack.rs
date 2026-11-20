@@ -4821,7 +4821,12 @@ pub fn deployment_problem(root: &Path) -> Option<String> {
 
 /// Where the shell keeps the deployment it manages.
 pub fn default_root() -> PathBuf {
-    dirs_home().join("OpenBot")
+    default_root_in(&dirs_home())
+}
+
+/// `default_root` in the home folder `home`.
+pub fn default_root_in(home: &Path) -> PathBuf {
+    home.join("OpenBot")
 }
 
 /// The deployment directory somebody typed, as a path.
