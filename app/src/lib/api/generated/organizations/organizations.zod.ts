@@ -738,6 +738,58 @@ export const CancelOrganizationInvitationHeader = zod.object({
 export const CancelOrganizationInvitationResponse = zod.void();
 
 /**
+ * Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands: on its free trial, on the plan, behind on a payment, or on no plan yet. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.
+ * @summary Read an organization's plan
+ */
+
+export const GetOrganizationPlanParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+});
+
+export const getOrganizationPlanResponseAddCardUrlMax = 2048;
+
+export const GetOrganizationPlanResponse = zod
+  .object({
+    required: zod
+      .boolean()
+      .describe(
+        "True when this OpenBot runs an organization's Bots only while it is on a plan or its free trial.",
+      ),
+    status: zod
+      .string()
+      .describe(
+        "not_required when this OpenBot needs no plan. trialing during the free trial, which a card on file starts. active on the plan. past_due when a payment failed and the card needs updating. none when the organization has no plan or trial yet, or its plan ended. unknown when the plan couldn't be read just now; Bots keep running meanwhile.",
+      ),
+    trialEndsAt: zod.iso
+      .datetime({ offset: true })
+      .nullable()
+      .describe(
+        "When the free trial ends, while status is trialing. Null otherwise.",
+      ),
+    renewsAt: zod.iso
+      .datetime({ offset: true })
+      .nullable()
+      .describe(
+        "When the plan's current month ends, while status is active. Null otherwise.",
+      ),
+    addCardUrl: zod
+      .string()
+      .max(getOrganizationPlanResponseAddCardUrlMax)
+      .nullable()
+      .describe(
+        "Where an owner or an admin goes in the browser to add a card, start the free trial or update the card. A page to open, not an API call. Null for a member, and when the organization needs no card.",
+      ),
+  })
+  .describe(
+    "Whether this OpenBot needs the organization to be on a plan, and where the organization stands. When required is true, its Bots run only while status is trialing or active.",
+  );
+
+/**
  * Return one page of the invitations sent to the caller's email address that they have not answered, the newest first, each with the organization and who invited them. One that ran out of time is listed as expired until it is canceled or replaced. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the caller's invitations
  */

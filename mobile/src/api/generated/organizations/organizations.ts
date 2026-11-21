@@ -15,6 +15,7 @@ import type {
   OrganizationMemberPage,
   OrganizationMemberResponse,
   OrganizationPage,
+  OrganizationPlan,
   OrganizationResponse,
   UpdateOrganizationMemberRequest,
   UpdateOrganizationRequest,
@@ -382,6 +383,27 @@ export const cancelOrganizationInvitation = async (
     {
       ...options,
       method: "DELETE",
+    },
+  );
+};
+
+export const getGetOrganizationPlanUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/plan`;
+};
+
+/**
+ * Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands: on its free trial, on the plan, behind on a payment, or on no plan yet. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.
+ * @summary Read an organization's plan
+ */
+export const getOrganizationPlan = async (
+  organizationId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<OrganizationPlan> => {
+  return apiRequest<OrganizationPlan>(
+    getGetOrganizationPlanUrl(organizationId),
+    {
+      ...options,
+      method: "GET",
     },
   );
 };
