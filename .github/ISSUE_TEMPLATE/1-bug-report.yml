@@ -1,0 +1,97 @@
+name: Bug report
+description: Something in OpenBot does not work the way it should.
+title: "🐛 Bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. Please search the [open issues](https://github.com/CopilotKit/OpenBot/issues) first in case it is already known.
+
+        If this is a security problem, do not open a public issue. [Report it privately](https://github.com/CopilotKit/OpenBot/security/advisories/new) instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, including any error message.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The shortest steps that make it happen. Include the Bot and channel if they matter.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release you installed, the image tag you run, or the commit you built from (`git rev-parse --short HEAD`).
+      placeholder: v0.2.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you run OpenBot
+      options:
+        - Desktop app
+        - Published container image (ghcr.io/copilotkit/openbot)
+        - Helm chart
+        - From a clone (Quick start)
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where it happens
+      multiple: true
+      options:
+        - Web app
+        - Desktop app
+        - Android app
+        - iOS app
+        - Slack
+        - Microsoft Teams
+        - Server or API only
+
+  - type: dropdown
+    id: intelligence
+    attributes:
+      label: CopilotKit Intelligence
+      description: Where the deployment's Intelligence runs. Threads and memory live there, so it matters for those bugs.
+      options:
+        - Managed (copilotkit.ai)
+        - Local, on this machine
+        - Self-hosted
+        - Not sure
+
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and browser
+      placeholder: macOS 26.1, Chrome 141
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Server, worker or browser console output around the failure. Remove keys, tokens and personal data before pasting.
+      render: shell
