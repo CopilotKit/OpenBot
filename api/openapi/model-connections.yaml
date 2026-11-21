@@ -796,17 +796,27 @@ components:
       description: >-
         The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic:
         Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI.
+        trustedrouter: TrustedRouter. openai-compatible: any server that
+        speaks OpenAI's API, at an address given.
+      enum: [openai, anthropic, google, xai, unbiased, trustedrouter, openai-compatible]
+    AiConnectionProviderAnswer:
+      type: string
+      x-extensible-enum: [openai, anthropic, google, xai, unbiased, trustedrouter, openai-compatible]
+      description: >-
+        The AI provider OpenBot's Bots run on, as the server answers it.
+        openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai:
+        xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter.
         openai-compatible: any server that speaks OpenAI's API, at an address
-        given.
-      enum: [openai, anthropic, google, xai, unbiased, openai-compatible]
+        given. The list can grow: a client shows a provider it doesn't know
+        by its id. A request still names one of AiConnectionProvider.
     AiConnectionLogin:
       type: string
       description: >-
         How OpenBot signs in to the provider. plan: the person's Claude or
         ChatGPT plan (openai, anthropic). api-key: a key from the provider
         (openai, anthropic). endpoint: an address and, where it asks for one,
-        a key (google, xai, unbiased, openai-compatible). oauth: the person's
-        Google or xAI sign-in (google, xai).
+        a key (google, xai, unbiased, trustedrouter, openai-compatible).
+        oauth: the person's Google or xAI sign-in (google, xai).
       enum: [plan, api-key, endpoint, oauth]
     AiConnectionSaved:
       type: object
@@ -816,7 +826,7 @@ components:
       required: [provider, login, endpointHost]
       properties:
         provider:
-          $ref: '#/components/schemas/AiConnectionProvider'
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
         login:
           $ref: '#/components/schemas/AiConnectionLogin'
         endpointHost:
@@ -842,7 +852,7 @@ components:
         provider:
           description: The provider. Null while none is chosen yet.
           oneOf:
-            - $ref: '#/components/schemas/AiConnectionProvider'
+            - $ref: '#/components/schemas/AiConnectionProviderAnswer'
             - type: 'null'
         login:
           description: How OpenBot signs in to it. Null while none is chosen yet.
@@ -895,8 +905,9 @@ components:
       additionalProperties: false
       description: >-
         The connection to switch to. openai and anthropic take plan or
-        api-key; google and xai take endpoint or oauth; unbiased and
-        openai-compatible take endpoint. Any other pair is refused.
+        api-key; google and xai take endpoint or oauth; unbiased,
+        trustedrouter and openai-compatible take endpoint. Any other pair is
+        refused.
       required: [provider, login]
       properties:
         provider:
