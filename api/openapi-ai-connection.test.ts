@@ -1,11 +1,15 @@
-import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { parse } from "yaml";
+import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { parse } from 'yaml';
 import {
   GetAiConnectionResponse,
+  GetPersonalAiConnectionResponse,
+  GetPersonalAiSignInResponse,
   ReplaceAiConnectionBody,
-} from "../app/src/lib/api/generated/models/models.zod";
+  ReplacePersonalAiConnectionBody,
+  StartPersonalAiSignInResponse,
+} from '../app/src/lib/api/generated/models/models.zod';
 
 /**
  * The AI connection: one per organization, read and switched by an administrator with no restart.
@@ -34,7 +38,7 @@ type Operation = {
 };
 
 const spec = parse(
-  readFileSync(join(import.meta.dir, "openapi.yaml"), "utf8"),
+  readFileSync(join(import.meta.dir, 'openapi.yaml'), 'utf8'),
 ) as {
   paths: Record<string, Record<string, Operation>>;
   components: {
@@ -44,7 +48,7 @@ const spec = parse(
   };
 };
 
-const PATH = "/api/v2/organizations/{organizationId}/ai-connection";
+const PATH = '/api/v2/organizations/{organizationId}/ai-connection';
 const item = spec.paths[PATH] ?? {};
 const read = item.get;
 const replace = item.put;
@@ -52,13 +56,13 @@ const replace = item.put;
 function response(ref: Response): Response {
   if (!ref.$ref) return ref;
   return spec.components.responses[
-    ref.$ref.replace("#/components/responses/", "")
+    ref.$ref.replace('#/components/responses/', '')
   ] as Response;
 }
 function exampleValue(example: Example): unknown {
   if (!example.$ref) return example.value;
   return spec.components.examples[
-    example.$ref.replace("#/components/examples/", "")
+    example.$ref.replace('#/components/examples/', '')
   ]?.value;
 }
 function propertyNames(
@@ -67,7 +71,7 @@ function propertyNames(
 ): string[] {
   if (!schema) return [];
   if (schema.$ref) {
-    const name = schema.$ref.replace("#/components/schemas/", "");
+    const name = schema.$ref.replace('#/components/schemas/', '');
     if (seen.has(name)) return [];
     seen.add(name);
     return propertyNames(spec.components.schemas[name], seen);
@@ -82,29 +86,29 @@ function propertyNames(
   ];
 }
 
-test("an administrator reads and replaces the one AI connection, a replace taking an Idempotency-Key", () => {
-  expect(read?.operationId).toBe("getAiConnection");
-  expect(replace?.operationId).toBe("replaceAiConnection");
-  expect(read?.tags).toEqual(["Models"]);
-  expect(replace?.tags).toEqual(["Models"]);
-  expect(read?.security).toContainEqual({ appOAuth: ["ai-connection:read"] });
+test('an administrator reads and replaces the one AI connection, a replace taking an Idempotency-Key', () => {
+  expect(read?.operationId).toBe('getAiConnection');
+  expect(replace?.operationId).toBe('replaceAiConnection');
+  expect(read?.tags).toEqual(['Models']);
+  expect(replace?.tags).toEqual(['Models']);
+  expect(read?.security).toContainEqual({ appOAuth: ['ai-connection:read'] });
   expect(replace?.security).toContainEqual({
-    appOAuth: ["ai-connection:write"],
+    appOAuth: ['ai-connection:write'],
   });
-  expect(read?.responses["403"]?.$ref).toContain("AdminOnly");
-  expect(replace?.responses["403"]?.$ref).toContain("AdminOnly");
+  expect(read?.responses['403']?.$ref).toContain('AdminOnly');
+  expect(replace?.responses['403']?.$ref).toContain('AdminOnly');
   expect(replace?.parameters?.map((p) => p.$ref)).toContainEqual(
-    expect.stringContaining("IdempotencyKey"),
+    expect.stringContaining('IdempotencyKey'),
   );
 });
 
-test("no answer has a place for a key, and the key sent is write-only", () => {
+test('no answer has a place for a key, and the key sent is write-only', () => {
   for (const operation of [read, replace]) {
     const body =
-      operation?.responses["200"]?.content?.["application/json"]?.schema;
+      operation?.responses['200']?.content?.['application/json']?.schema;
     expect(body).toBeDefined();
     const names = propertyNames(body);
-    for (const secret of ["apiKey", "secret", "token", "key"]) {
+    for (const secret of ['apiKey', 'secret', 'token', 'key']) {
       expect(names).not.toContain(secret);
     }
   }
@@ -113,39 +117,39 @@ test("no answer has a place for a key, and the key sent is write-only", () => {
     Object.entries(input?.properties ?? {})
       .filter(([, property]) => property.writeOnly)
       .map(([name]) => name),
-  ).toEqual(["apiKey"]);
+  ).toEqual(['apiKey']);
 });
 
 test("a connection OpenBot can't use is refused with one of five reasons, in OpenBot's own words", () => {
-  const refused = response(replace?.responses["422"] ?? {});
+  const refused = response(replace?.responses['422'] ?? {});
   const examples = Object.values(
-    refused.content?.["application/problem+json"]?.examples ?? {},
+    refused.content?.['application/problem+json']?.examples ?? {},
   ).map((example) => exampleValue(example) as { code: string; detail: string });
   expect(examples.map((example) => example.code).sort()).toEqual([
-    "AI_CONNECTION_ENGINE_NOT_READY",
-    "AI_CONNECTION_KEY_REFUSED",
-    "AI_CONNECTION_MODEL_UNAVAILABLE",
-    "AI_CONNECTION_SIGN_IN_MISSING",
-    "AI_CONNECTION_UNREACHABLE",
+    'AI_CONNECTION_ENGINE_NOT_READY',
+    'AI_CONNECTION_KEY_REFUSED',
+    'AI_CONNECTION_MODEL_UNAVAILABLE',
+    'AI_CONNECTION_SIGN_IN_MISSING',
+    'AI_CONNECTION_UNREACHABLE',
   ]);
   for (const example of examples) {
-    expect(example.detail).not.toContain("—");
+    expect(example.detail).not.toContain('—');
     expect(example.detail).toMatch(/\.$/);
   }
-  const fixed = response(replace?.responses["409"] ?? {});
+  const fixed = response(replace?.responses['409'] ?? {});
   const codes = Object.values(
-    fixed.content?.["application/problem+json"]?.examples ?? {},
+    fixed.content?.['application/problem+json']?.examples ?? {},
   ).map((example) => (exampleValue(example) as { code: string }).code);
   expect(codes.sort()).toEqual([
-    "AI_CONNECTION_FIXED",
-    "IDEMPOTENCY_KEY_CONFLICT",
+    'AI_CONNECTION_FIXED',
+    'IDEMPOTENCY_KEY_CONFLICT',
   ]);
 });
 
-test("every example the spec shows is one the generated client accepts", () => {
+test('every example the spec shows is one the generated client accepts', () => {
   const answers = [read, replace].flatMap((operation) =>
     Object.values(
-      operation?.responses["200"]?.content?.["application/json"]?.examples ??
+      operation?.responses['200']?.content?.['application/json']?.examples ??
         {},
     ),
   );
@@ -156,7 +160,7 @@ test("every example the spec shows is one the generated client accepts", () => {
     ).toBe(true);
   }
   const bodies = Object.values(
-    replace?.requestBody?.content["application/json"]?.examples ?? {},
+    replace?.requestBody?.content['application/json']?.examples ?? {},
   );
   expect(bodies.length).toBeGreaterThanOrEqual(4);
   for (const example of bodies) {
@@ -166,20 +170,20 @@ test("every example the spec shows is one the generated client accepts", () => {
   }
 });
 
-test("an endpoint address is http or https with nothing in it that signs in", () => {
+test('an endpoint address is http or https with nothing in it that signs in', () => {
   const endpoint = (baseUrl: string) =>
     ReplaceAiConnectionBody.safeParse({
-      provider: "openai-compatible",
-      login: "endpoint",
+      provider: 'openai-compatible',
+      login: 'endpoint',
       baseUrl,
-      model: "llama-5",
+      model: 'llama-5',
     }).success;
-  expect(endpoint("https://api.example.com/v1")).toBe(true);
-  expect(endpoint("http://127.0.0.1:11434/v1")).toBe(true);
-  expect(endpoint("https://user:secret@api.example.com/v1")).toBe(false);
-  expect(endpoint("https://key@api.example.com")).toBe(false);
-  expect(endpoint("ftp://api.example.com")).toBe(false);
-  expect(endpoint("file:///etc/passwd")).toBe(false);
+  expect(endpoint('https://api.example.com/v1')).toBe(true);
+  expect(endpoint('http://127.0.0.1:11434/v1')).toBe(true);
+  expect(endpoint('https://user:secret@api.example.com/v1')).toBe(false);
+  expect(endpoint('https://key@api.example.com')).toBe(false);
+  expect(endpoint('ftp://api.example.com')).toBe(false);
+  expect(endpoint('file:///etc/passwd')).toBe(false);
   // Unknown fields are refused, so a key can't ride in under another name.
   expect(
     (
@@ -188,4 +192,79 @@ test("an endpoint address is http or https with nothing in it that signs in", ()
       }
     ).additionalProperties,
   ).toBe(false);
+});
+
+const PERSONAL =
+  '/api/v2/organizations/{organizationId}/people/{personId}/ai-connection';
+const personal = spec.paths[PERSONAL] ?? {};
+const signIns = spec.paths[`${PERSONAL}/sign-ins`] ?? {};
+const signIn = spec.paths[`${PERSONAL}/sign-ins/{signInId}`] ?? {};
+
+test("a person's own AI connection is theirs alone: only they read, set, sign in to or remove it", () => {
+  const operations = [
+    personal.get,
+    personal.put,
+    personal.delete,
+    signIns.post,
+    signIn.get,
+  ];
+  expect(operations.map((operation) => operation?.operationId)).toEqual([
+    'getPersonalAiConnection',
+    'replacePersonalAiConnection',
+    'deletePersonalAiConnection',
+    'startPersonalAiSignIn',
+    'getPersonalAiSignIn',
+  ]);
+  for (const operation of operations) {
+    expect(operation?.responses['403']?.$ref).toContain('OwnOnly');
+    const scopes = operation?.security?.flatMap(
+      (scheme) => scheme.appOAuth ?? [],
+    );
+    expect(
+      scopes?.every((scope) => scope.startsWith('personal-ai-connection:')),
+    ).toBe(true);
+  }
+  for (const write of [personal.put, personal.delete, signIns.post]) {
+    expect(write?.parameters?.map((p) => p.$ref)).toContainEqual(
+      expect.stringContaining('IdempotencyKey'),
+    );
+  }
+});
+
+test("no answer about a person's own AI has a place for a key, and every example parses", () => {
+  for (const operation of [
+    personal.get,
+    personal.put,
+    personal.delete,
+    signIns.post,
+    signIn.get,
+  ]) {
+    const success = operation?.responses['200'] ?? operation?.responses['201'];
+    const names = propertyNames(success?.content?.['application/json']?.schema);
+    for (const secret of ['apiKey', 'secret', 'token', 'key', 'deviceCode']) {
+      expect(names).not.toContain(secret);
+    }
+  }
+  const parses = (
+    operation: Operation | undefined,
+    status: string,
+    schema: { safeParse: (value: unknown) => { success: boolean } },
+  ) => {
+    const examples = Object.values(
+      operation?.responses[status]?.content?.['application/json']?.examples ??
+        {},
+    );
+    expect(examples.length).toBeGreaterThan(0);
+    for (const example of examples)
+      expect(schema.safeParse(exampleValue(example)).success).toBe(true);
+  };
+  parses(personal.get, '200', GetPersonalAiConnectionResponse);
+  parses(signIns.post, '201', StartPersonalAiSignInResponse);
+  parses(signIn.get, '200', GetPersonalAiSignInResponse);
+  for (const example of Object.values(
+    personal.put?.requestBody?.content['application/json']?.examples ?? {},
+  ))
+    expect(
+      ReplacePersonalAiConnectionBody.safeParse(exampleValue(example)).success,
+    ).toBe(true);
 });
