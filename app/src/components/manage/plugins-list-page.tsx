@@ -144,6 +144,8 @@ export function PluginsListPage({
   const moreApps = moreAppsRow(
     provider,
     setup.data?.directoryAvailable ?? false,
+    undefined,
+    paths.hosted,
   );
 
   /*

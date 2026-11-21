@@ -84,6 +84,7 @@ import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import {
   askRunLiveness,
+  quietRunPeriod,
   RUN_ENDED_UNHEARD,
   RUN_UNREACHABLE,
   watchQuietRun,
@@ -95,6 +96,7 @@ import {
 } from "@/lib/copilot/repair-history";
 import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
 import {
+  asksToCarryOn,
   failedRunReason,
   followLastRun,
   laterRunFailure,
@@ -786,6 +788,7 @@ export function ChannelChat({
           keptUntil: () => {
             const quiet = watchQuietRun({
               ask: () => askRunLiveness(channel.id),
+              quietMs: quietRunPeriod.ms,
             });
             const hearing = agent.subscribe({
               onEvent: ({ event }) => {
@@ -1500,8 +1503,16 @@ export function ChannelChat({
          */
         const quiet = watchQuietRun({
           ask: () => askRunLiveness(channel.id),
+          quietMs: quietRunPeriod.ms,
         });
         const hearing = target.subscribe({
+          /*
+           * The browser starting the turn's next run (with a step's result) ends the rest, before a
+           * word of it arrives. Found on WebKit with the server killed right after the next run was
+           * sent: nothing of it ever came, the watch was still resting from the run before, and the
+           * server saying it had no run going read as the step still being taken. "Thinking" for good.
+           */
+          onRunInitialized: () => quiet.heard(),
           onEvent: ({ event }) => {
             // Between the server's runs the turn is this browser's (a step it takes, a card the
             // person answers), and quiet there is not a run gone missing.
@@ -2184,11 +2195,14 @@ export function ChannelChat({
             stopped={runError ?? undefined}
             /*
              * A turn cut off part way (its backend stopped answering, its run ended unheard, its
-             * stream broke) is carried on with one press: a short message, as the person, so the Bot
-             * picks the work up with everything it did in front of it.
+             * stream broke, or the server says its reply came back incomplete or its model's
+             * connection dropped and asks for the Bot to carry on) is carried on with one press: a
+             * short message, as the person, so the Bot picks the work up with everything it did in
+             * front of it.
              */
             onCarryOn={
-              runError !== null && CUT_OFF.has(runError)
+              runError !== null &&
+              (CUT_OFF.has(runError) || asksToCarryOn(runError))
                 ? () => askFromComponent(CARRY_ON)
                 : undefined
             }
