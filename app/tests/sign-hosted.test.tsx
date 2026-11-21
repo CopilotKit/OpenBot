@@ -208,6 +208,14 @@ test("somebody with OpenBot at work types its address and the browser goes there
     name: "Your company's OpenBot address",
   });
   expect(document.activeElement).toBe(field);
+  // Said in words anybody can follow, with who to ask.
+  const help = document.getElementById(
+    field.getAttribute("aria-describedby") as string,
+  );
+  expect(help?.textContent).toBe(
+    "Ask your IT team or whoever set up OpenBot at your company for this address.",
+  );
+  expect(document.body.textContent).not.toMatch(/\b(instance|URL|backend)\b/i);
   const go = () =>
     user.click(
       view.getByRole("button", { name: "Go to your company's OpenBot" }),

@@ -15,6 +15,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { hostedSignInAddress } from "@/lib/auth/hosted";
 import { resumeUrlFor } from "@/lib/auth/resume";
@@ -29,6 +30,11 @@ export const CLOUD_SIGN_IN_LINE =
 
 /** OpenBot for Business, in the words OpenBot Desktop's first screen gives it. */
 export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a call.";
+
+/** The field for a company's own OpenBot, in words anybody can follow. */
+export const COMPANY_ADDRESS_LABEL = "Your company's OpenBot address";
+export const COMPANY_ADDRESS_HELP =
+  "Ask your IT team or whoever set up OpenBot at your company for this address.";
 
 /** How the page leaves for another OpenBot's address. A test replaces it to see where it was sent. */
 export const cloudSignInDeps = {
@@ -180,13 +186,20 @@ function GoToCompanyOpenBot() {
         cloudSignInDeps.open(url.href);
       }}
     >
+      <Label className="mb-2" htmlFor="company-openbot-address">
+        {COMPANY_ADDRESS_LABEL}
+      </Label>
       <Input
-        aria-describedby={problem ? "company-openbot-problem" : undefined}
+        aria-describedby={
+          problem
+            ? "company-openbot-help company-openbot-problem"
+            : "company-openbot-help"
+        }
         aria-invalid={problem ? true : undefined}
-        aria-label="Your company's OpenBot address"
         autoCapitalize="none"
         autoComplete="url"
         autoCorrect="off"
+        id="company-openbot-address"
         inputMode="url"
         onChange={(event) => {
           setAddress(event.target.value);
@@ -198,6 +211,12 @@ function GoToCompanyOpenBot() {
         type="text"
         value={address}
       />
+      <p
+        className="mt-2 text-pretty text-muted-foreground text-xs"
+        id="company-openbot-help"
+      >
+        {COMPANY_ADDRESS_HELP}
+      </p>
       {problem ? (
         <p
           className="mt-2 text-destructive text-sm"
