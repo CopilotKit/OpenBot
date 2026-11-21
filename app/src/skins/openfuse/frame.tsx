@@ -199,7 +199,7 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
                 </span>
               </button>
             </div>
-            <div className="absolute top-4 right-0">
+            <div className="absolute top-4 right-0" data-openfuse-bell="">
               <RoundButton
                 icon={IconBell}
                 label={`Needs you, ${waiting} waiting`}
