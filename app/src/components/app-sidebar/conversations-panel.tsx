@@ -248,7 +248,7 @@ function SearchResults({
   if (results.data.length === 0) {
     return (
       <div className="py-4">
-        <Empty className="border border-dashed min-h-[40dvh]">
+        <Empty className="border border-dashed min-h-[40dvh] px-2">
           <EmptyHeader>
             <EmptyTitle>No conversations match your search</EmptyTitle>
             <EmptyDescription className="text-pretty">
@@ -416,7 +416,11 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
                  */}
                 {channels.data?.length === 0 ? (
                   <div className="py-4">
-                    <Empty className="border border-dashed min-h-[40dvh]">
+                    {/*
+                     * Narrow at the sides (`px-2`, where `Empty` has 24px), so the panel at its
+                     * floor still reads "No conversations yet" on one line, not a word a line.
+                     */}
+                    <Empty className="border border-dashed min-h-[40dvh] px-2">
                       <EmptyHeader>
                         <EmptyTitle>No conversations yet</EmptyTitle>
                         <EmptyDescription className="text-pretty">

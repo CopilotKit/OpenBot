@@ -216,6 +216,14 @@ the API apart from the browsers. That is the two Helm charts published with each
 OpenBot alone pointed at an Intelligence that already runs. The `openbot` chart's guide
 (`helm show readme`) covers EKS, GKE, AKS and a plain self-hosted cluster from the same templates.
 
+**CopilotKit management, on by default on Kubernetes.** From the release after v1.1.2, both charts
+install a management agent into `openbot-system`, and a team-licensed install connects to
+CopilotKit's management service by itself. It sends a heartbeat every minute (versions, digests,
+the last migration, pod readiness, upgrade state) and upgrades nothing until you set managed
+upgrades up. `management.enabled=false` (`openbot.management.enabled=false` on the bundle) turns it
+off, and so does Disconnect on Admin → Managed updates. A single container run as above has no
+agent and never connects. See [managed-upgrades.md](managed-upgrades.md) for every field it sends.
+
 **Azure Container Apps.** Managed ingress with TLS and custom domains. Note the **240-second request
 timeout**: the live screen holds a long connection, so expect it to reconnect. Concurrent WebSockets
 are capped at 350 per instance on the basic tier.
