@@ -44729,11 +44729,11 @@ components:
           examples:
             tooMany:
               value:
-                type: https://open.bot/errors/too-many-requests
+                type: https://open.bot/errors/rate-limited
                 title: Too many requests.
                 status: 429
                 detail: That's a lot of uploads at once. Wait a minute, then go on.
-                code: TOO_MANY_REQUESTS
+                code: RATE_LIMITED
                 category: rate_limit
                 retryable: true
                 requestId: req_example
