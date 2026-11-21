@@ -1346,12 +1346,14 @@ test("a launch after the sign-in ended says so once, with the address filled in 
  * to an address. A connection saved to Cloud's own address is then any connection: the address
  * form, filled in. Before the switch, every build offered Sign in to OpenBot Cloud.
  */
-const CLOUD = "https://my.open.bot";
+const CLOUD = "https://api.open.bot";
+/** Where people use OpenBot Cloud in a browser: what the window names and opens. */
+const CLOUD_WEB = "https://my.open.bot";
 
 test("with OpenBot Cloud off, a launch whose sign-in to Cloud's address ended opens on the address form, not on Cloud", async () => {
   expect(process.env.VITE_OPENBOT_CLOUD_ENABLED).toBeUndefined();
   const said =
-    "Your sign-in to my.open.bot has ended. Sign in again to keep going.";
+    "Your sign-in to api.open.bot has ended. Sign in again to keep going.";
   let notices = 0;
   const strays = connectedShell({
     connection: { mode: "connected", address: CLOUD, signedIn: false },
@@ -1518,7 +1520,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
       emptyConfiguration(),
     );
     const said =
-      "OpenBot couldn't reach my.open.bot. Check the address and your network, then try again.";
+      "OpenBot couldn't reach api.open.bot. Check the address and your network, then try again.";
     let checks = 0;
     withLocalCli({
       connection: THIS_COMPUTER,
@@ -1582,9 +1584,97 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     }
   });
 
+  test("OpenBot Cloud on a release this app can't connect to offers it in the browser, where people use it", async () => {
+    setupRootConfiguration("/tmp/cloud-too-old", async () =>
+      emptyConfiguration(),
+    );
+    const said =
+      "The OpenBot at api.open.bot is on a release this app can't connect to yet. Ask whoever runs it to update OpenBot, or open it in your browser.";
+    withLocalCli({
+      connection: THIS_COMPUTER,
+      record_setup_event: null,
+      "plugin:opener|open_url": null,
+      check_openbot_address: () => {
+        throw { said, kind: "too-old" };
+      },
+    });
+    const view = await renderApp();
+    await userEvent.click(view.getByRole("radio", { name: /^OpenBot Cloud/ }));
+    const from = invokeCalls.length;
+    await userEvent.click(
+      view.getByRole("button", { name: "Sign in to OpenBot Cloud" }),
+    );
+    expect((await view.findByRole("alert")).textContent).toBe(said);
+    // This app asked the address for programs; the person is sent to the one for people.
+    expect(asked(from)[0]).toEqual({
+      command: "check_openbot_address",
+      args: { address: CLOUD },
+    });
+    const link = view.getByRole("link", { name: "Open in browser" });
+    expect(link.getAttribute("href")).toBe(CLOUD_WEB);
+    await userEvent.click(link);
+    expect(invokeCalls).toContainEqual({
+      command: "plugin:opener|open_url",
+      args: { url: CLOUD_WEB },
+    });
+  });
+
+  test("a build that names both of its OpenBot Cloud's addresses connects to one and shows the other", async () => {
+    const before = {
+      api: process.env.VITE_OPENBOT_CLOUD_URL,
+      web: process.env.VITE_OPENBOT_CLOUD_WEB_URL,
+    };
+    process.env.VITE_OPENBOT_CLOUD_URL = "https://api.cloud-test.example.com";
+    process.env.VITE_OPENBOT_CLOUD_WEB_URL =
+      "https://my.cloud-test.example.com/";
+    try {
+      setupRootConfiguration("/tmp/cloud-two-addresses", async () =>
+        emptyConfiguration(),
+      );
+      withLocalCli({
+        connection: THIS_COMPUTER,
+        record_setup_event: null,
+        check_openbot_address: (args: { address: string }) => ({
+          address: args.address,
+        }),
+        connect_to_openbot: () => new Promise(() => {}),
+      });
+      const view = await renderApp();
+      await userEvent.click(
+        view.getByRole("radio", { name: /^OpenBot Cloud/ }),
+      );
+      expect(
+        view.getByText(/the same here and at my\.cloud-test\.example\.com\./),
+      ).toBeTruthy();
+      const from = invokeCalls.length;
+      await userEvent.click(
+        view.getByRole("button", { name: "Sign in to OpenBot Cloud" }),
+      );
+      await view.findByText("Finish signing in in your browser.");
+      expect(asked(from)).toEqual([
+        {
+          command: "check_openbot_address",
+          args: { address: "https://api.cloud-test.example.com" },
+        },
+        {
+          command: "connect_to_openbot",
+          args: { address: "https://api.cloud-test.example.com" },
+        },
+      ]);
+    } finally {
+      for (const [name, value] of [
+        ["VITE_OPENBOT_CLOUD_URL", before.api],
+        ["VITE_OPENBOT_CLOUD_WEB_URL", before.web],
+      ] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
   test("a launch whose OpenBot Cloud sign-in ended opens on OpenBot Cloud, with Sign in again", async () => {
     const said =
-      "Your sign-in to my.open.bot has ended. Sign in again to keep going.";
+      "Your sign-in to api.open.bot has ended. Sign in again to keep going.";
     let notices = 0;
     const strays = connectedShell({
       connection: { mode: "connected", address: CLOUD, signedIn: false },
