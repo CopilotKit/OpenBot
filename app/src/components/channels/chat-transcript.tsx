@@ -979,7 +979,9 @@ const TranscriptMessage = memo(function TranscriptMessage({
             variant={isUser ? "muted" : "ghost"}
             className={isUser ? undefined : "w-full"}
           >
-            <BubbleContent className={isUser ? undefined : "w-full"}>
+            <BubbleContent
+              className={cn("text-[1rem]/[1.5]", !isUser && "w-full")}
+            >
               {isUser ? (
                 // A person's own message is shown exactly as they typed it. Rendering it as markdown
                 // would silently reformat what they said, and an asterisk in a sentence is not
