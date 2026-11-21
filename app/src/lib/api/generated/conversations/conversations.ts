@@ -58,6 +58,7 @@ import type {
   NoSpeechResponse,
   OrganizationNotFoundResponse,
   PayloadTooLargeResponse,
+  PlanRequiredResponse,
   RecordConversationActivityHeaders,
   RemoveConversationMemberHeaders,
   RouteConversationMessageHeaders,
@@ -2762,6 +2763,7 @@ export const getSendConversationMessageMutationOptions = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | ConversationNotFoundResponse
     | IdempotencyConflictResponse
@@ -2817,6 +2819,7 @@ export type SendConversationMessageMutationBody =
 export type SendConversationMessageMutationError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
+  | PlanRequiredResponse
   | ForbiddenResponse
   | ConversationNotFoundResponse
   | IdempotencyConflictResponse
@@ -2836,6 +2839,7 @@ export const useSendConversationMessage = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
+    | PlanRequiredResponse
     | ForbiddenResponse
     | ConversationNotFoundResponse
     | IdempotencyConflictResponse

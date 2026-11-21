@@ -2131,6 +2131,7 @@ impl upgrade::Steps for DesktopSteps {
             self.root.to_string_lossy().into(),
             self.harness.clone(),
         ))
+        .map(|_| ())
     }
 
     fn start(&mut self) -> Result<(), Problem> {
@@ -3695,7 +3696,7 @@ async fn prepare_installation(
     app: tauri::AppHandle,
     root: String,
     harness: Option<harness::HarnessChoice>,
-) -> Result<(), Problem> {
+) -> Result<Option<harness::HarnessChoice>, Problem> {
     desktop_connected::local_only(&app)?;
     if app
         .state::<Shell>()
@@ -3758,7 +3759,7 @@ async fn prepare_installation_inner(
     app: tauri::AppHandle,
     root: String,
     harness: Option<harness::HarnessChoice>,
-) -> Result<(), Problem> {
+) -> Result<Option<harness::HarnessChoice>, Problem> {
     let root = stack::root_from(&root);
     tauri::async_runtime::spawn_blocking(move || {
         let shell = app.state::<Shell>();
@@ -3788,9 +3789,16 @@ async fn prepare_installation_inner(
         // And the Compose project it runs as, decided once on that engine and recorded beside it,
         // before anything is created under it. See `stack::project`.
         stack::project(&address, &root)?;
-        harness::picked(harness.as_ref(), &root).map_err(Problem::from)?;
+        // Only a Bot the folder's own release includes: Start moves the folder to this app's
+        // release, and the Bot asked for comes with it (`harness::the_release_includes`).
+        let harness = harness::the_release_includes(
+            harness,
+            preparation::installation(&root).and_then(|installed| installed.harness),
+            &root,
+        );
         let handle = app.clone();
         let _startup = attempt.lock_current()?;
+        // A finished install of that Bot is kept as it is, whatever release the folder is on.
         if preparation::require(&root, Some(&harness), &address).is_ok() {
             preparation::save_selected_root(
                 &app.path()
@@ -3804,8 +3812,9 @@ async fn prepare_installation_inner(
                 true,
                 "OpenBot is already installed.",
             );
-            return Ok(());
+            return Ok(harness);
         }
+        harness::picked(harness.as_ref(), &root).map_err(Problem::from)?;
         preparation::invalidate(&root)?;
         if let Some(problem) = stack::deployment_problem(&root) {
             return Err(Problem::from(problem));
@@ -3899,7 +3908,7 @@ async fn prepare_installation_inner(
             &root,
         )?;
         report_plain(&handle, "installation", true, "OpenBot is installed.");
-        Ok::<(), Problem>(())
+        Ok::<Option<harness::HarnessChoice>, Problem>(harness)
     })
     .await
     .map_err(|error| {
@@ -6283,9 +6292,13 @@ fn stop_local_eval(
     #[cfg(test)]
     INTELLIGENCE_TIMEOUT.with(|used| used.set(Some(limits.timeout)));
     let attempt = format!("openbot-shutdown-{:016x}", rand::random::<u64>());
-    stop_local_eval_with(root, by, local_eval::cancel_all, |stack| {
-        local_eval::stop_for_shutdown(&attempt, stack, by, limits)
-    })
+    stop_local_eval_checking(
+        root,
+        by,
+        local_eval::cancel_all,
+        |stack| local_eval::stop_for_shutdown(&attempt, stack, by, limits),
+        local_eval::cluster_gone,
+    )
 }
 
 #[cfg(test)]
@@ -6320,6 +6333,7 @@ Quit stops the stack itself. That is not a stop that failed, and the Stop does n
 Every way this can fail is said in fixed words. There is no CLI output to repeat, and none would
 be repeated if there were.
 */
+#[cfg(test)]
 fn stop_local_eval_with<A, S>(
     root: &Path,
     by: local_eval::ShutdownBy,
@@ -6330,6 +6344,29 @@ where
     A: FnOnce(),
     S: FnOnce(&local_eval::StackId) -> Result<local_eval::Report, local_eval::Failure>,
 {
+    stop_local_eval_checking(root, by, cancel_all, stop, |_| None)
+}
+
+/**
+`stop_local_eval_with`, asking `gone` (`local_eval::cluster_gone`) about a stop the CLI could only
+fail with no stack, the answer it gives when the stack's cluster is gone. A cluster the engine the
+CLI runs on no longer has is not running, so there is nothing to stop and the stop has done its job.
+Before, Quit failed on it every time: a dogfooding Mac on Docker Desktop (Desktop 1.1.2), whose
+backend node `docker container prune` had removed, said "Local ownership-check failed" at every
+Quit.
+*/
+fn stop_local_eval_checking<A, S, G>(
+    root: &Path,
+    by: local_eval::ShutdownBy,
+    cancel_all: A,
+    stop: S,
+    gone: G,
+) -> Result<(), String>
+where
+    A: FnOnce(),
+    S: FnOnce(&local_eval::StackId) -> Result<local_eval::Report, local_eval::Failure>,
+    G: FnOnce(&local_eval::StackId) -> Option<bool>,
+{
     cancel_all();
     let Some(state) = local_eval_state::read(root, None).filter(|state| state.tied_to_openbot())
     else {
@@ -6337,7 +6374,19 @@ where
     };
     let not_stopped =
         |why: String| format!("the backend's command-line tool did not stop the backend ({why})");
-    match stop(&state.stack_id()) {
+    let stack = state.stack_id();
+    match stop(&stack) {
+        Ok(report)
+            if report.outcome == local_eval::Outcome::Failed
+                && local_eval::failed_without_stack(&report)
+                && gone(&stack) == Some(true) =>
+        {
+            log::warn!(
+                "[local stop] {}'s cluster is gone from the engine the backend runs on; nothing to stop",
+                stack.as_str()
+            );
+            Ok(())
+        }
         Ok(report) => match report.outcome {
             local_eval::Outcome::Completed => Ok(()),
             outcome => Err(not_stopped(match report.reason {
@@ -7978,10 +8027,11 @@ Windows opened a bare browser window of its own. The configuration says `"create
 */
 /**
 Where the main window's buttons sit on macOS: 20pt in from the left, and low enough that their middle
-lines up with the first row of OpenBot's sidebar header (its name and +), which the page
+lines up with the first row of Admin's and Settings' sidebar header (Back to app), which the page
 moves right to clear them (app/src/styles.css, `data-desktop-titlebar`). That row's middle is 32pt
 down (the inset sidebar's 8pt, the header's 8pt, then half its 32pt row), and on macOS 26 the
-circles' middle lands about 1.5pt below `y`, so `y` is 31.
+circles' middle lands about 1.5pt below `y`, so `y` is 31. The app's own sidebar, a strip of
+sections beside a panel, starts below them instead (app/src/components/layout/strip.tsx).
 
 Set on the builder, not per page, because tao keeps it and puts the buttons back after anything that
 moves them (a resize, leaving full screen), and Tauri 2.12 can't change it after the window exists.
@@ -8449,8 +8499,9 @@ fn show_window_title<R: tauri::Runtime>(window: &tauri::Window<R>, shown: bool) 
 /**
 Marks OpenBot's page for the overlay title bar: its styles pad the sidebar's header for the window
 buttons, and the header becomes the drag handle, as does the strip the main column keeps above
-itself while the sidebar is hidden, onboarding's header, which has no sidebar beside it, and every
-place a skin marks `data-desktop-drag` (its top bar, its rail). The
+itself while no sidebar shows beside it (hidden, or a sheet in a narrow window), onboarding's
+header, which has no sidebar beside it, and every place the page marks `data-desktop-drag` (the
+app sidebar's strip and panel, a skin's top bar and rail). The
 sidebar renders after the page loads and again on navigation, so new headers are marked as they
 appear, at most once a frame. Run on macOS only: Windows has its own title bar to drag.
 */
@@ -8462,8 +8513,9 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
     for (const header of document.querySelectorAll(`[data-slot="sidebar-header"]:not([${DRAG}])`)) {
       header.setAttribute(DRAG, "");
     }
-    // A skin draws its own frame, with no sidebar header, and names its own handles: its top bar,
-    // and the rail and sidebar strip under the window's buttons. `data-desktop-drag` carries Tauri's
+    // The app's sidebar of sections, and a skin's own frame, have no sidebar header and name their
+    // own handles: the room above the strip and the panel, a skin's top bar, and the rail and
+    // sidebar strip under the window's buttons. `data-desktop-drag` carries Tauri's
     // value: "deep" drags from anywhere inside but a button or link, bare from the element itself.
     for (const handle of document.querySelectorAll(`[data-desktop-drag]:not([${DRAG}])`)) {
       handle.setAttribute(DRAG, handle.dataset.desktopDrag);
@@ -8473,13 +8525,12 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
     for (const header of document.querySelectorAll(`[data-onboarding-frame] > header:not([${DRAG}])`)) {
       header.setAttribute(DRAG, "");
     }
-    // The main column only while the sidebar is hidden, when its top strip is the one handle left.
-    // With the sidebar showing, a press in its empty margins must not move the window.
+    // The main column only while no sidebar shows beside it (hidden, or a sheet in a narrow
+    // window), when its top strip is the one handle left. With the sidebar showing, a press in its
+    // empty margins must not move the window.
     for (const main of document.querySelectorAll('[data-slot="sidebar-wrapper"] > main')) {
-      const hidden = main.parentElement.querySelector(
-        ':scope > [data-slot="sidebar"][data-state="collapsed"]',
-      );
-      if (hidden) main.setAttribute(DRAG, "");
+      const beside = main.parentElement.querySelector(':scope > [data-slot="sidebar"]');
+      if (!beside || beside.dataset.state === "collapsed") main.setAttribute(DRAG, "");
       else main.removeAttribute(DRAG);
     }
   };
@@ -9630,7 +9681,9 @@ fn save_troubleshooting_logs_now<R: tauri::Runtime>(
 ) -> Result<(), String> {
     use time::macros::format_description;
     let text = gather_troubleshooting_logs(app, failure);
-    let folder = logging::folder(app).map_err(|error| error.to_string())?;
+    let folder = logging::folder(app)
+        .map_err(|error| format!("could not find the log folder: {error}"))
+        .inspect_err(|error| log::warn!("[logs] {error}"))?;
     let stamp = time::OffsetDateTime::now_utc()
         .format(format_description!(
             "[year]-[month]-[day]T[hour]-[minute]-[second]Z"
@@ -9712,6 +9765,28 @@ fn reveal_in_file_manager(path: &Path) -> Result<(), String> {
     revealed.map_err(|error| error.to_string())
 }
 
+/// How long gathering troubleshooting logs waits on the container engine: `troubleshooting::LIMIT`,
+/// or what a test sets.
+fn troubleshooting_limit() -> std::time::Duration {
+    #[cfg(test)]
+    if let Some(limit) = *TROUBLESHOOTING_LIMIT_FOR_TESTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    {
+        return limit;
+    }
+    troubleshooting::LIMIT
+}
+
+#[cfg(test)]
+static TROUBLESHOOTING_LIMIT_FOR_TESTS: std::sync::Mutex<Option<std::time::Duration>> =
+    std::sync::Mutex::new(None);
+
+/**
+Everything for Get Troubleshooting Logs, within `troubleshooting::LIMIT` however stuck the engine,
+the server or a run is: see `troubleshooting`. Asking the engine and reading the server's log each
+happen on a thread of their own, and every command they run is stopped at the deadline.
+*/
 fn gather_troubleshooting_logs<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     failure: Option<String>,
@@ -9719,32 +9794,42 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
     let home = logging::home_folder();
     let folder = logging::folder(app).ok();
     // The engine the back end runs on; before setup has chosen one, whichever is answering.
-    let engine = local_eval::engine_in_use().or_else(|| {
-        let found = engine::detect();
-        found.address.filter(|_| found.responding)
+    let engine: troubleshooting::Ask<engine::Address> = Box::new(|deadline| {
+        if let Some(address) = local_eval::engine_in_use() {
+            return Ok(Some(address));
+        }
+        let found = engine::detect_by(deadline).ok_or(troubleshooting::NoAnswer)?;
+        Ok(found.address.filter(|_| found.responding))
     });
     // The server container's recent log, for what a model provider really said: the server keeps
     // those words in its own log (`model-provider-refused`), and only there. Only an OpenBot this
-    // session started, whose engine and folder it knows, as Restart asks.
-    let server_log = {
-        let shell = app.state::<Shell>();
-        let root = shell.root.lock().unwrap().clone();
-        let address = shell
-            .containers
-            .lock()
-            .unwrap()
-            .as_ref()
-            .filter(|owned| Some(&owned.root) == root.as_ref())
-            .map(|owned| owned.address.clone());
-        match (root, address) {
-            (Some(root), Some(address)) => Some(stack::service_log(
-                &address,
-                &root,
-                "server",
-                troubleshooting::SERVER_LOG_LINES,
-            )),
-            _ => None,
-        }
+    // session started, whose engine and folder it knows, as Restart asks. On the thread too: Stop
+    // holds `containers` while `compose down` waits on the engine.
+    let server_log: troubleshooting::Ask<String> = {
+        let app = app.clone();
+        Box::new(move |deadline| {
+            let shell = app.state::<Shell>();
+            let root = shell.root.lock().unwrap().clone();
+            let address = shell
+                .containers
+                .lock()
+                .unwrap()
+                .as_ref()
+                .filter(|owned| Some(&owned.root) == root.as_ref())
+                .map(|owned| owned.address.clone());
+            match (root, address) {
+                (Some(root), Some(address)) => stack::service_log_by(
+                    &address,
+                    &root,
+                    "server",
+                    troubleshooting::SERVER_LOG_LINES,
+                    deadline,
+                )
+                .map(Some)
+                .ok_or(troubleshooting::NoAnswer),
+                _ => Ok(None),
+            }
+        })
     };
     let text = troubleshooting::gather(troubleshooting::Sources {
         desktop: format!(
@@ -9761,6 +9846,7 @@ fn gather_troubleshooting_logs<R: tauri::Runtime>(
         home: home.as_deref(),
         engine,
         server_log,
+        limit: troubleshooting_limit(),
     });
     log::info!("[logs] gathered troubleshooting logs");
     text
@@ -10986,19 +11072,27 @@ fn local_eval_answer(
         );
     }
     let mut report = local_eval::run_installed(attempt, action, stack)?;
-    if action == local_eval::Action::Status
-        && backend_lost(
-            &report,
-            local_eval_state::read(root, None).as_ref(),
-            stack,
-            || local_eval::cluster_gone(stack),
-        )
-    {
+    if matches!(
+        action,
+        local_eval::Action::Status | local_eval::Action::Start
+    ) && backend_lost(
+        &report,
+        local_eval_state::read(root, None).as_ref(),
+        stack,
+        || {
+            backend_gone(local_eval::stack_recorded(stack), || {
+                local_eval::cluster_gone(stack)
+            })
+        },
+    ) {
+        let kept = openbot_database_kept(root);
         log::warn!(
-            "[local eval] {}'s cluster is gone from OpenBot's engine; offering to start fresh",
-            stack.as_str()
+            "[local eval] {} is gone, its record or its cluster, and OpenBot's own database {}; \
+             offering to set the backend up again",
+            stack.as_str(),
+            if kept { "is still there" } else { "is not" }
         );
-        report.reason = Some(local_eval::Reason::StackLost);
+        report.reason = Some(lost_reason(kept));
     }
     // An Intelligence an older app installed, behind the release this app's CLI installs, or one
     // whose update did not finish: the window updates it before it starts OpenBot on it.
@@ -11018,16 +11112,58 @@ fn local_eval_answer(
     Ok(report)
 }
 
+/// Whether the recorded stack is gone: the CLI no longer records it (`recorded`, from
+/// `local_eval::stack_recorded`), as after `copilotkit local delete`, or the engine the CLI runs on
+/// no longer has its cluster (`cluster_gone`). Unknown when neither can be said.
+fn backend_gone(
+    recorded: Option<bool>,
+    cluster_gone: impl FnOnce() -> Option<bool>,
+) -> Option<bool> {
+    match recorded {
+        Some(false) => Some(true),
+        _ => cluster_gone(),
+    }
+}
+
+/// What the window is told about a backend that is gone (`backend_lost`): with OpenBot's own
+/// database still there, only the backend's data went (`BackendGone`); without it, everything did
+/// (`StackLost`).
+fn lost_reason(openbot_database_kept: bool) -> local_eval::Reason {
+    if openbot_database_kept {
+        local_eval::Reason::BackendGone
+    } else {
+        local_eval::Reason::StackLost
+    }
+}
+
+/// Whether this installation's own database volume is still in the engine OpenBot runs on. False
+/// when that can't be said, so the window never claims Bots are kept when they may not be.
+fn openbot_database_kept(root: &Path) -> bool {
+    let Some(address) = local_eval::engine_in_use() else {
+        return false;
+    };
+    let Ok(secrets) = openbot_desktop_lib::vault::already_given_no_ui(
+        root,
+        &root.join(".env"),
+        &openbot_env::MINTED[..],
+    ) else {
+        return false;
+    };
+    stack::postgres_volume_exists(&address, root, &secrets).unwrap_or(false)
+}
+
 /**
-Whether the backend OpenBot created for this installation is gone, so the window offers to start
-fresh rather than Retry (`local_eval::Reason::StackLost`).
+Whether the backend OpenBot created for this installation is gone, so the window offers to set it
+up again rather than Retry (`local_eval::Reason::StackLost`, `local_eval::Reason::BackendGone`).
 
 Box I: OpenBot's Podman machine was removed and made again, and the backend's cluster, with
 OpenBot's database, went with the old one. The installation still recorded the stack, so every
 status the CLI ran failed at its ownership check ("status 404"), answered `local_command_failed`
 with no stack, and the window said "Setup stopped partway through with an error. Retry." forever.
-Only for a stack OpenBot created and recorded here, asked about by its own id, and only when the
-engine answers and lists none of its cluster's containers.
+The same on a dogfooding Mac with Docker Desktop (Desktop 1.1.2): `docker container prune` removed
+the backend's node container while it was stopped, and Retry, and Quit, failed the same way every
+time. Only for a stack OpenBot created and recorded here, asked about by its own id, and only when
+the engine the CLI runs on answers and lists none of its cluster's containers.
 */
 fn backend_lost(
     report: &local_eval::Report,
@@ -12182,6 +12318,8 @@ fn watch_connections<R: tauri::Runtime>(
         // Since when the server has not answered, and whether setup has been shown for it.
         let mut unanswered_since: Option<std::time::Instant> = None;
         let mut setup_shown = false;
+        // Whether the log has said, for this silence, that the server is up and left to finish.
+        let mut busy_said = false;
 
         loop {
             std::thread::sleep(std::time::Duration::from_secs(2));
@@ -12201,9 +12339,13 @@ fn watch_connections<R: tauri::Runtime>(
             }
             let polled = desktop_connection::poll(&client, server_port, &token);
             if polled.is_ok() {
+                if busy_said {
+                    log::info!("[watch] OpenBot is answering again");
+                }
                 poll_failed = false;
                 unanswered_since = None;
                 setup_shown = false;
+                busy_said = false;
             }
             match polled {
                 Ok(Some(connection)) => {
@@ -12228,6 +12370,18 @@ fn watch_connections<R: tauri::Runtime>(
                         Ok(Unanswered::Stopped) => setup_shown = true,
                         // Still up after all: ask again only after as long a silence again.
                         Ok(Unanswered::Running) => unanswered_since = None,
+                        // Up and not answering: left to finish, and asked about again after as
+                        // long a silence again. Said once a silence, not every ten seconds.
+                        Ok(Unanswered::Busy(said)) => {
+                            if !busy_said {
+                                log::info!(
+                                    "[watch] OpenBot hasn't answered for {}s, and {said}, so it is left to finish",
+                                    since.elapsed().as_secs()
+                                );
+                            }
+                            busy_said = true;
+                            unanswered_since = None;
+                        }
                         Ok(Unanswered::NotNow) => {}
                         Err(error) => log::warn!("[watch] could not show setup: {error}"),
                     }
@@ -12244,8 +12398,44 @@ enum Unanswered {
     Stopped,
     /// OpenBot is running after all.
     Running,
+    /// OpenBot is not answering, and its engine says it is up: busy, or on an engine that is slow.
+    /// The window stays where it is. What the engine said, for the log.
+    Busy(&'static str),
     /// Not the watcher's to decide now: setup is at work, the run is over, or it needs recovery.
     NotNow,
+}
+
+/// How long the watcher gives the engine to say whether the `server` container is up. An engine
+/// that takes longer is there and slow, which is no reason to start OpenBot again.
+const ENGINE_ASKED_WITHIN: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// What the window says when the watcher finds OpenBot's server stopped and staying stopped, so the
+/// person sees what happened in place of a Start that runs by itself.
+fn server_stopped_problem(container: &stack::ServerContainer) -> Option<Problem> {
+    match container {
+        stack::ServerContainer::Exited {
+            out_of_memory: true,
+            code,
+        } => Some(Problem::with(
+            "OpenBot stopped because it ran out of memory. Start it again to continue.",
+            format!(
+                "The engine stopped OpenBot's server container for using too much memory (exit code {}).",
+                code.map_or("unknown".to_owned(), |code| code.to_string())
+            ),
+        )),
+        stack::ServerContainer::Exited { code, .. } => Some(Problem::with(
+            "OpenBot stopped unexpectedly. Start it again to continue.",
+            format!(
+                "OpenBot's server container stopped with exit code {} and was not restarted.",
+                code.map_or("unknown".to_owned(), |code| code.to_string())
+            ),
+        )),
+        stack::ServerContainer::Missing => Some(Problem::with(
+            "OpenBot stopped unexpectedly. Start it again to continue.",
+            "OpenBot's server container is no longer there.",
+        )),
+        stack::ServerContainer::Running | stack::ServerContainer::Restarting => None,
+    }
 }
 
 /**
@@ -12264,6 +12454,15 @@ fn show_setup_when_stopped<R: tauri::Runtime>(
     generation: u64,
 ) -> Result<Unanswered, String> {
     let shell = app.state::<Shell>();
+    /*
+     * The engine's word on the server container, asked before setup's lock so a Start never waits
+     * on a slow engine. Not answering is not the same as not running. Found in a dogfooding report
+     * (Desktop 1.1.2, macOS): the engine stalled for minutes, the server's container stayed up, and
+     * this watcher, asking only the server, sent the window to setup, which started OpenBot again
+     * by itself. That Start recreated the server and ended the Bot turns that were running.
+     */
+    let engine_says = held_engine(&shell, root)
+        .map(|address| stack::server_container(&address, root, ENGINE_ASKED_WITHIN));
     // Busy means setup is at work (a Start, a Stop, an update): it decides what the window shows.
     let _startup = match shell.startup.try_lock() {
         Ok(guard) => guard,
@@ -12280,9 +12479,38 @@ fn show_setup_when_stopped<R: tauri::Runtime>(
     if owned_app(&shell, root, &ports).is_some() {
         return Ok(Unanswered::Running);
     }
+    let stopped = match &engine_says {
+        Some(Ok(stack::ServerContainer::Running)) => {
+            return Ok(Unanswered::Busy("its server container is up"))
+        }
+        Some(Ok(stack::ServerContainer::Restarting)) => {
+            return Ok(Unanswered::Busy(
+                "the engine is restarting its server container",
+            ))
+        }
+        Some(Err(stack::ServerContainerUnknown::Slow)) => {
+            return Ok(Unanswered::Busy(
+                "the engine is too slow to say whether its server container is up",
+            ))
+        }
+        Some(Ok(container)) => {
+            log::info!("[watch] the engine says OpenBot's server container stopped: {container:?}");
+            server_stopped_problem(container)
+        }
+        // The engine itself is gone (Docker quit, its machine stopped): setup, as before.
+        Some(Err(stack::ServerContainerUnknown::Unreachable(error))) => {
+            log::info!("[watch] the engine could not be asked about OpenBot's server: {error}");
+            None
+        }
+        None => None,
+    };
     let window = app
         .get_webview_window("main")
         .ok_or("the OpenBot window is not there")?;
+    // Said on setup, which then waits for the person's Start (`last_failure`).
+    if let Some(problem) = stopped {
+        *shell.last_failure.lock().unwrap() = Some(problem);
+    }
     if window.url().is_ok_and(|url| on_setup_page(app, &url)) {
         return Ok(Unanswered::Stopped);
     }
@@ -16154,6 +16382,211 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// The bug (Desktop 1.1.2, macOS, a dogfooding report): the container engine stalled for
+    /// minutes while the person was away. The server's container stayed up, but nothing it was
+    /// asked was answered, and after ten seconds the watcher, asking only the server, sent the
+    /// window to setup. Setup started OpenBot again by itself, which recreates the server and ends
+    /// every Bot turn that was running. The window showed "Starting OpenBot" with no reason given.
+    ///
+    /// Now the watcher asks the engine too. A server container that is up stays as it is and the
+    /// window stays on OpenBot. One that stopped and stays stopped sends the window to setup with
+    /// what happened, which then waits for the person's Start.
+    #[test]
+    fn a_server_that_stops_answering_while_its_container_is_up_is_left_running() {
+        // It replaces PATH with a fake engine, which the tests running beside it would see.
+        if test_support::isolated_process(
+            "tests::a_server_that_stops_answering_while_its_container_is_up_is_left_running",
+        ) {
+            return;
+        }
+        use std::io::{BufRead, BufReader, Write};
+        let path = SerializedPath::set_with("docker", "server-up");
+        let root = temp_root("server-quiet-under-window");
+        std::fs::create_dir_all(&root).unwrap();
+        let engine = fake_engine(&root.join("engine-record"));
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::fs::write(root.join(".env"), format!("SERVER_PORT={port}\n")).unwrap();
+        let setup = "http://tauri.localhost/setup";
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(root.clone());
+        remember_selected_root(&shell, &root);
+        *shell.setup_url.lock().unwrap() = Some(setup.into());
+        // Start held this run's containers on this engine.
+        *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+            root: root.clone(),
+            address: engine,
+        });
+        shell
+            .generation
+            .store(5, std::sync::atomic::Ordering::SeqCst);
+        let app = tauri::test::mock_builder()
+            .manage(shell)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let home = "http://127.0.0.1:3010/";
+        window.navigate(home.parse().unwrap()).unwrap();
+
+        // The server answers the watcher's first few asks, then nothing more is answered.
+        let server = std::thread::spawn(move || {
+            for _ in 0..3 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                }
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 4\r\nConnection: close\r\n\r\nnull").unwrap();
+            }
+        });
+        watch_connections(
+            app.handle().clone(),
+            root.clone(),
+            "synthetic-run-token".into(),
+            5,
+            port,
+        );
+        server.join().unwrap();
+
+        // Unanswered for well past the point where the watcher used to give up on it.
+        let quiet = std::time::Instant::now();
+        let asked_engine = || {
+            std::fs::read_to_string(root.join("engine-record"))
+                .unwrap_or_default()
+                .lines()
+                .filter(|line| line.ends_with("\tcompose ps -a --format json server"))
+                .count()
+        };
+        while asked_engine() == 0 || quiet.elapsed() < SERVER_GONE_AFTER * 2 {
+            assert!(
+                quiet.elapsed() < SERVER_GONE_AFTER * 2 + std::time::Duration::from_secs(10),
+                "the watcher never asked the engine about the server"
+            );
+            assert_eq!(
+                window.url().unwrap().as_str(),
+                home,
+                "a server whose container is up is not a stopped OpenBot"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert_eq!(window.url().unwrap().as_str(), home);
+        assert!(last_failure_now(app.handle()).is_none());
+
+        // Then the engine stops it for memory, and Docker does not start it again.
+        path.write_binary("docker", "server-oom");
+        let stopped = std::time::Instant::now();
+        while window.url().unwrap().as_str() != setup {
+            assert!(
+                stopped.elapsed() < SERVER_GONE_AFTER * 2 + std::time::Duration::from_secs(10),
+                "the window was still on {} after the server's container stopped",
+                window.url().unwrap()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        // Setup says what happened, and waits for the person's Start rather than starting itself.
+        let problem = last_failure_now(app.handle()).expect("setup is told why OpenBot stopped");
+        assert_eq!(
+            problem.said,
+            "OpenBot stopped because it ran out of memory. Start it again to continue."
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("exit code 137"),
+            "{problem:?}"
+        );
+        app.state::<Shell>()
+            .generation
+            .store(6, std::sync::atomic::Ordering::SeqCst);
+        drop(path);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Found on the real Mac pass of this fix, under Podman: with the engine's machine stalled (its
+    /// VM process stopped, as an overloaded or sleeping machine is), `compose ps` failed after about
+    /// 14 seconds with an ssh handshake reset rather than running out of time. Read as an engine
+    /// that is gone, it sent the window to setup, which started OpenBot again: the same
+    /// "Starting OpenBot · Starting the software OpenBot runs on" the report showed. A machine whose
+    /// own record still says it is running is a slow engine; one that says stopped is gone.
+    #[test]
+    fn a_podman_machine_that_stalls_is_a_slow_engine_and_one_that_stopped_is_gone() {
+        // It replaces PATH with a fake engine, which the tests running beside it would see.
+        if test_support::isolated_process(
+            "tests::a_podman_machine_that_stalls_is_a_slow_engine_and_one_that_stopped_is_gone",
+        ) {
+            return;
+        }
+        let root = temp_root("server-container-machine");
+        std::fs::create_dir_all(&root).unwrap();
+        let engine = engine::Address::new(engine::Engine::Podman, Some("openbot-root".into()));
+
+        let stalled = SerializedPath::set_only_with("podman", "machine-stalled");
+        assert_eq!(
+            stack::server_container(&engine, &root, ENGINE_ASKED_WITHIN),
+            Err(stack::ServerContainerUnknown::Slow)
+        );
+        drop(stalled);
+
+        let stopped = SerializedPath::set_only_with("podman", "machine-stopped");
+        assert!(matches!(
+            stack::server_container(&engine, &root, ENGINE_ASKED_WITHIN),
+            Err(stack::ServerContainerUnknown::Unreachable(said)) if said.contains("handshake failed")
+        ));
+        drop(stopped);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Found on the Windows pass of this fix: after the engine's machine had been stalled, a
+    /// `podman compose ps` the watcher made never returned, and the watcher stopped for good. It
+    /// never said OpenBot was answering again, and would not have noticed it stop. Every engine call
+    /// the watcher makes now gives up at its limit.
+    #[test]
+    fn an_engine_that_never_answers_does_not_hold_the_watcher() {
+        if test_support::isolated_process(
+            "tests::an_engine_that_never_answers_does_not_hold_the_watcher",
+        ) {
+            return;
+        }
+        let root = temp_root("engine-never-answers");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = SerializedPath::set_only_with("docker", "engine-hung");
+        path.write_binary("podman", "machine-hung");
+        let docker = engine::Address::new(engine::Engine::Docker, None);
+        let podman = engine::Address::new(engine::Engine::Podman, Some("openbot-root".into()));
+        let limit = std::time::Duration::from_secs(1);
+        let asked = std::time::Instant::now();
+
+        // What `owned_app` asks: whether the server publishes the ports.
+        assert!(stack::server_publishes_within(&docker, &root, &[3001, 3010], limit).is_err());
+        // What the watcher asks: the server container's state.
+        assert_eq!(
+            stack::server_container(&docker, &root, limit),
+            Err(stack::ServerContainerUnknown::Slow)
+        );
+        // And, when that fails, whether the machine still says it runs. Measured on a Mac with the
+        // machine's VM process stopped: `machine inspect` waits on it too. Not saying in time is
+        // the slow machine it looks like, and the window stays on OpenBot.
+        assert_eq!(
+            stack::server_container(&podman, &root, limit),
+            Err(stack::ServerContainerUnknown::Slow)
+        );
+        assert!(
+            asked.elapsed() < std::time::Duration::from_secs(30),
+            "the engine calls took {:?}",
+            asked.elapsed()
+        );
+        drop(path);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn stop_retains_completed_installation_and_disables_only_automatic_start() {
         let root = local_eval_root(
@@ -18471,6 +18904,146 @@ mod tests {
         assert!(!backend_lost(&unavailable, Some(&created), &asked, || {
             panic!("asked the engine")
         }));
+    }
+
+    /// A Mac on Docker Desktop, Desktop 1.1.2: after `copilotkit local delete`, OpenBot's folder
+    /// still recorded the deleted stack, and every launch's status answered "No recorded local
+    /// stack was found" and stopped there, with no setup. A stack the CLI no longer records is gone,
+    /// whatever the engine holds, and the window offers to set it up again; setup then records the
+    /// stack it makes in place of the stale one.
+    #[test]
+    fn a_stack_the_cli_no_longer_records_is_gone_and_set_up_again() {
+        let answer = serde_json::json!({
+            "version": 1,
+            "command": "local status",
+            "status": "failed",
+            "stack": null,
+            "nextAction": { "reason": "local_command_failed", "resumeCommand": "copilotkit local status --json" },
+            "error": {
+                "code": "LOCAL_COMMAND_FAILED",
+                "message": "No recorded local stack was found. Run `copilotkit local list` or start local setup."
+            },
+            "diagnostics": []
+        });
+        let report =
+            local_eval::normalize(local_eval::Action::Status, 1, answer.to_string().as_bytes())
+                .unwrap();
+        assert!(local_eval::failed_without_stack(&report));
+
+        let stale = local_eval::StackId::parse("local-044466e209069a0812bc9764").unwrap();
+        let listed = serde_json::json!({ "stacks": [{ "id": "local-3922b7cf02730f324df673e2" }] });
+        assert_eq!(local_eval::stack_listed_in(&listed, &stale), Some(false));
+        assert_eq!(
+            local_eval::stack_listed_in(&serde_json::json!({ "stacks": [] }), &stale),
+            Some(false)
+        );
+        assert_eq!(
+            local_eval::stack_listed_in(&serde_json::json!({}), &stale),
+            None
+        );
+        // Not recorded: gone, and the engine isn't even asked.
+        assert_eq!(
+            backend_gone(Some(false), || panic!("asked the engine")),
+            Some(true)
+        );
+        // Recorded, or the CLI couldn't say: the engine decides.
+        assert_eq!(backend_gone(Some(true), || Some(false)), Some(false));
+        assert_eq!(backend_gone(None, || Some(true)), Some(true));
+        assert_eq!(backend_gone(None, || None), None);
+
+        let root = local_eval_root(
+            "openbot-local-eval-stale-marker",
+            Some(local_eval_state::Ownership::Created),
+        );
+        let recorded = local_eval_state::read(&root, None);
+        let asked = local_eval::StackId::parse("local-abc123").unwrap();
+        assert!(backend_lost(&report, recorded.as_ref(), &asked, || {
+            backend_gone(Some(false), || None)
+        }));
+        // Set up again records the new stack in place of the one that is gone.
+        let fresh = local_eval::StackId::parse("local-3922b7cf02730f324df673e2").unwrap();
+        local_eval_state::begin(
+            &root,
+            &fresh,
+            local_eval_state::Ownership::Created,
+            LOCAL_EVAL_PIN,
+        )
+        .unwrap();
+        assert_eq!(
+            local_eval_state::read(&root, None).unwrap().stack_id(),
+            fresh
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// With OpenBot's own database still there, only the backend went (a prune of stopped
+    /// containers on Docker Desktop), and the window says so (`backend-gone`). Without it, or when
+    /// that can't be said, everything went (`stack-lost`, box I).
+    #[test]
+    fn a_lost_backend_says_bots_stay_only_when_openbots_database_is_still_there() {
+        assert_eq!(lost_reason(true), local_eval::Reason::BackendGone);
+        assert_eq!(lost_reason(false), local_eval::Reason::StackLost);
+        assert_eq!(
+            serde_json::to_value(local_eval::Reason::BackendGone).unwrap(),
+            serde_json::json!("backend-gone")
+        );
+    }
+
+    /// A Mac on Docker Desktop, Desktop 1.1.2: `docker container prune` removed the backend's
+    /// stopped node, and every Quit failed at the CLI's ownership check ("local-command-failed, no
+    /// stack"). A cluster the engine no longer has is not running: Stop and Quit have nothing to
+    /// stop, and finish. Any other failed stop is still said.
+    #[test]
+    fn stop_and_quit_finish_when_the_backends_cluster_is_gone() {
+        let root = local_eval_root(
+            "openbot-local-eval-stop-gone",
+            Some(local_eval_state::Ownership::Created),
+        );
+        let no_stack = || {
+            Ok(local_eval_report(
+                local_eval::Outcome::Failed,
+                Some(local_eval::Reason::LocalCommandFailed),
+            ))
+        };
+        for by in [local_eval::ShutdownBy::Stop, local_eval::ShutdownBy::Quit] {
+            let asked = std::cell::RefCell::new(Vec::new());
+            assert_eq!(
+                stop_local_eval_checking(
+                    &root,
+                    by,
+                    || {},
+                    |_| no_stack(),
+                    |stack| {
+                        asked.borrow_mut().push(stack.as_str().to_owned());
+                        Some(true)
+                    }
+                ),
+                Ok(()),
+                "{by:?}"
+            );
+            assert_eq!(asked.into_inner(), ["local-abc123"]);
+            // The cluster is there, or the engine couldn't say: the stop failed, and is said.
+            for gone in [Some(false), None] {
+                assert_eq!(
+                    stop_local_eval_checking(&root, by, || {}, |_| no_stack(), |_| gone),
+                    Err("the backend's command-line tool did not stop the backend (failed: local-command-failed)".into()),
+                    "{by:?} {gone:?}"
+                );
+            }
+        }
+        // A stop that failed some other way never asks the engine.
+        assert!(stop_local_eval_checking(
+            &root,
+            local_eval::ShutdownBy::Quit,
+            || {},
+            |_| Ok(local_eval_report(
+                local_eval::Outcome::Blocked,
+                Some(local_eval::Reason::LocalCommandBusy)
+            )),
+            |_| panic!("asked the engine")
+        )
+        .is_err());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// The tester's Start: Docker Desktop 4.27.2 answered, and Compose v2.24.5 stopped at its first
@@ -27179,5 +27752,236 @@ mod release_1_0_3_quit_notice {
             Some("OpenBot could not confirm all containers stopped.")
         );
         let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[cfg(test)]
+mod troubleshooting_logs_tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+
+    /// How long each fake engine command hangs: longer than the gathering may wait, so a command
+    /// that is not stopped in time is seen. One that outlives it writes `<name>-outlived-<pid>`.
+    const HANG: Duration = Duration::from_secs(30);
+
+    /**
+    `docker` and `podman` that hang on whatever they are asked, as a stalled engine does, except
+    for what answers without the engine: `version` fails at once, as an engine that isn't running
+    does, and Podman lists and inspects its machine, `openbot`, running and rootful, from files on
+    this computer.
+    */
+    const HANGING_ENGINE: &str = r##"
+use std::io::Write;
+fn main() {
+    let me = std::env::current_exe().unwrap();
+    let name = me.file_stem().unwrap().to_string_lossy().into_owned();
+    let asked: Vec<String> = std::env::args().skip(1).collect();
+    let mut log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(me.with_file_name("asked"))
+        .unwrap();
+    writeln!(log, "{name} {}", asked.join(" ")).unwrap();
+    let words: Vec<&str> = asked.iter().map(String::as_str).collect();
+    match words.as_slice() {
+        ["version", ..] => {
+            eprintln!("Cannot connect to the engine");
+            std::process::exit(1);
+        }
+        ["machine", "list", ..] => {
+            println!(r#"[{{"Name":"openbot","Running":true}}]"#);
+            return;
+        }
+        ["machine", "inspect", "openbot"] => {
+            println!(r#"[{{"Name":"openbot","Rootful":true,"ConnectionInfo":{{}}}}]"#);
+            return;
+        }
+        _ => {}
+    }
+    std::thread::sleep(std::time::Duration::from_secs(30));
+    std::fs::write(
+        me.with_file_name(format!("{name}-outlived-{}", std::process::id())),
+        asked.join(" "),
+    )
+    .unwrap();
+}
+"##;
+
+    /// `HANGING_ENGINE` as `docker` and `podman`, first on PATH, and a home folder of its own.
+    /// Sets process environment: only for a test in its own process.
+    fn hanging_engine(label: &str) -> (PathBuf, PathBuf) {
+        let dir = crate::test_support::temp_root(label);
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let source = dir.join("hanging_engine.rs");
+        std::fs::write(&source, HANGING_ENGINE).unwrap();
+        for name in ["docker", "podman"] {
+            crate::test_support::compile_fixture(
+                &source,
+                &bin.join(format!("{name}{}", std::env::consts::EXE_SUFFIX)),
+            );
+        }
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(
+                &std::env::var_os("PATH").unwrap_or_default(),
+            )))
+            .unwrap(),
+        );
+        let home = dir.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }, &home);
+        (dir, bin)
+    }
+
+    /// Get Troubleshooting Logs… as the menu gathers them, timed from when it was asked.
+    fn gathered(app: &tauri::App<tauri::test::MockRuntime>) -> (String, Instant) {
+        let handle = app.handle().clone();
+        let (sender, received) = std::sync::mpsc::channel();
+        let asked = Instant::now();
+        std::thread::spawn(move || {
+            let _ = sender.send(gather_troubleshooting_logs(&handle, None));
+        });
+        let text = received
+            .recv_timeout(Duration::from_secs(28))
+            .unwrap_or_else(|_| panic!("no troubleshooting logs 28s after asking"));
+        let took = asked.elapsed();
+        assert!(took < Duration::from_secs(26), "took {took:?}");
+        (text, asked)
+    }
+
+    /// The "What couldn't be collected" section of `text`.
+    fn not_collected(text: &str) -> &str {
+        let missing = text
+            .split("## What couldn't be collected\n\n")
+            .nth(1)
+            .unwrap_or_else(|| panic!("nothing said about what wasn't collected in\n{text}"));
+        &missing[..missing.find("\n## ").unwrap()]
+    }
+
+    /// Every engine command was stopped: none lived to write that it outlived the gathering.
+    fn none_outlived(bin: &Path, asked: Instant) {
+        std::thread::sleep(
+            (asked + HANG + Duration::from_secs(3)).saturating_duration_since(Instant::now()),
+        );
+        let outlived: Vec<String> = std::fs::read_dir(bin)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("-outlived-"))
+            .collect();
+        assert!(
+            outlived.is_empty(),
+            "still running after the gathering: {outlived:?}"
+        );
+    }
+
+    fn app() -> tauri::App<tauri::test::MockRuntime> {
+        tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap()
+    }
+
+    /**
+    FOUND LIVE, OpenBot Desktop 1.1.2 on a Mac. Docker Desktop stalled while OpenBot ran, and
+    OpenBot > Get Troubleshooting Logs… gave no file and no word until Docker was restarted: the
+    server's log came from `docker compose logs` with no time limit, and the engine's version, disk
+    use and size waited on it after. Now the gathering asks them all at once, stops every engine
+    command at its deadline, and the logs come back then, saying what they couldn't collect.
+
+    Through the menu's own path (`gather_troubleshooting_logs`), on an OpenBot this session started,
+    with the engine it runs on hanging on every command.
+    */
+    #[test]
+    fn troubleshooting_logs_come_back_in_time_from_an_engine_that_hangs() {
+        if crate::test_support::isolated_process(
+            "troubleshooting_logs_tests::troubleshooting_logs_come_back_in_time_from_an_engine_that_hangs",
+        ) {
+            return;
+        }
+        let (dir, bin) = hanging_engine("logs-engine-hangs");
+        let root = dir.join("OpenBot");
+        std::fs::create_dir_all(&root).unwrap();
+        let address = engine::Address::new(engine::Engine::Docker, None);
+        local_eval::use_engine(&address);
+        let app = app();
+        {
+            let shell = app.state::<Shell>();
+            *shell.root.lock().unwrap() = Some(root.clone());
+            *shell.containers.lock().unwrap() = Some(ContainerDeployment {
+                root: root.clone(),
+                address,
+            });
+        }
+
+        let (text, asked) = gathered(&app);
+
+        // The engine was asked, and what it didn't answer is named, near the top.
+        let engine_asked = std::fs::read_to_string(bin.join("asked")).unwrap_or_default();
+        assert!(
+            engine_asked.contains("compose logs --tail 5000 server"),
+            "{engine_asked}"
+        );
+        let missing = not_collected(&text);
+        for expected in [
+            "- The container engine's version: it didn't answer within 20 seconds.\n",
+            "- The container engine's disk use (system df): it didn't answer within 20 seconds.\n",
+            "- The container engine's CPUs, memory and free disk: it didn't answer within 20 \
+             seconds.\n",
+            "- The server's log, for model provider errors: the container engine didn't answer \
+             within 20 seconds.\n",
+        ] {
+            assert!(
+                missing.contains(expected),
+                "missing {expected:?} in\n{missing}"
+            );
+        }
+        for expected in [
+            "Container engine: docker. Couldn't measure it in time.\n",
+            "Couldn't collect: the container engine's version, the container engine's disk use, \
+             the container engine's CPUs, memory and free disk, the server's log. See What \
+             couldn't be collected.\n",
+            "## Model provider errors (server log)\n\nCouldn't read the server's log in time.\n",
+        ] {
+            assert!(text.contains(expected), "missing {expected:?} in\n{text}");
+        }
+        none_outlived(&bin, asked);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /**
+    FOUND ON A REAL WINDOWS BOX, testing the fix above: before setup has chosen an engine, with
+    OpenBot's Podman machine stalled, every gathering left a `podman volume ls` running until the
+    engine came back. Finding which engine is running asked for `machine list` within the deadline,
+    but then for where OpenBot's database is (`acquire::connection_of_machine`) with no time limit.
+    Every podman command of that search now stops at the deadline too.
+    */
+    #[test]
+    fn troubleshooting_logs_before_setup_leave_no_engine_command_running() {
+        if crate::test_support::isolated_process(
+            "troubleshooting_logs_tests::troubleshooting_logs_before_setup_leave_no_engine_command_running",
+        ) {
+            return;
+        }
+        let (dir, bin) = hanging_engine("logs-engine-hangs-before-setup");
+        let app = app();
+
+        let (text, asked) = gathered(&app);
+
+        let engine_asked = std::fs::read_to_string(bin.join("asked")).unwrap_or_default();
+        assert!(engine_asked.contains("volume ls"), "{engine_asked}");
+        assert_eq!(
+            not_collected(&text),
+            "- Which container engine is running: none answered within 20 seconds.\n",
+            "{text}"
+        );
+        assert!(
+            text.contains("Container engine: none answered in time.\n"),
+            "{text}"
+        );
+        none_outlived(&bin, asked);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

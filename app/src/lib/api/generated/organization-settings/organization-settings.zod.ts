@@ -80,12 +80,12 @@ export const GetDeploymentResponse = zod
     ssoConfigured: zod
       .boolean()
       .describe(
-        "Whether a company's own identity provider is registered, so an email address can be sent to it. Never which.",
+        "Whether a company's own identity provider is registered, so an email address can be sent to it. Never which. Always false where hostedSignIn is true.",
       ),
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether everybody who signs in to this OpenBot must use single sign-on, because its one organization requires it; social sign-in then stays only as the configured administrators' way in. Where this OpenBot may keep more than one organization, each one requires it of its own members in its settings, and this says false.",
+        "Whether everybody who signs in to this OpenBot must use single sign-on, because its one organization requires it; social sign-in then stays only as the configured administrators' way in. Where this OpenBot may keep more than one organization, each one requires it of its own members in its settings, and this says false. Always false where hostedSignIn is true.",
       ),
     builtInBots: zod
       .boolean()
@@ -357,7 +357,7 @@ export const GetOrganizationSettingsResponse = zod
   .and(zod.unknown());
 
 /**
- * Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Where this OpenBot may keep more than one organization, requiring single sign-on is each organization's own rule: its members sign in through an identity provider, and saving it signs out only this organization's members who signed in another way. Where it keeps only one organization, that organization's rule holds for everybody who signs in, and sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.
+ * Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment's configuration names and the caller. Where this OpenBot may keep more than one organization, requiring single sign-on is each organization's own rule: its members sign in through an identity provider, and saving it signs out only this organization's members who signed in another way. Where it keeps only one organization, that organization's rule holds for everybody who signs in, and sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), single sign-on can't be required: sending ssoRequired true answers 409 with the code HOSTED_SIGN_IN_ONLY.
  * @summary Change the organization's settings
  */
 

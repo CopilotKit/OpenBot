@@ -7,7 +7,11 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  MutationObserver,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -20,7 +24,9 @@ import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
+import { resetBotMutationOptions } from "@/lib/bot-lifecycle/mutations";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
+import { deleteChannelMutationOptions } from "@/lib/channels/mutations";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
 import {
@@ -30,7 +36,13 @@ import {
   useOpenSection,
 } from "@/lib/sections";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
-import { CONVERSATIONS_PATH, conversationPage } from "./conversations-api";
+import {
+  CONVERSATIONS_PATH,
+  conversationPage,
+  conversationPath,
+  noContent,
+  ORGANIZATION_PATH,
+} from "./conversations-api";
 import { settleReactWork } from "./settle-react-work";
 
 /*
@@ -57,7 +69,12 @@ const originalFetch = globalThis.fetch;
 const originalWebSocket = globalThis.WebSocket;
 const clients: QueryClient[] = [];
 let served: Record<string, (cursor: string | null) => Response>;
+/** Writes the server answers, by method and path; each may change what it lists after. */
+let writes: Record<string, () => Response>;
+/** What the server lists as the Bots when the app reads them again (listBots). */
+let listed: AgentProfile[] | null;
 const asked: string[] = [];
+const BOTS_PATH = `${ORGANIZATION_PATH}/bots`;
 
 beforeAll(() => {
   GlobalRegistrator.register({ url: "http://localhost/", width: 1280 });
@@ -67,9 +84,16 @@ beforeEach(() => {
   window.localStorage.clear();
   asked.length = 0;
   served = {};
+  writes = {};
+  listed = null;
   globalThis.fetch = Object.assign(
-    async (input: RequestInfo | URL) => {
+    async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), "http://localhost/");
+      const method = (init?.method ?? "GET").toUpperCase();
+      const write = writes[`${method} ${url.pathname}`];
+      if (write) return write();
+      if (url.pathname === BOTS_PATH && listed)
+        return Response.json({ bots: listed, nextCursor: null });
       if (url.pathname === CONVERSATIONS_PATH) {
         const botId = url.searchParams.get("botId");
         asked.push(botId ?? "(all)");
@@ -203,7 +227,7 @@ function renderPanel(attention: unknown[] = []) {
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  return { view, router, user: userEvent.setup({ document }) };
+  return { view, router, queryClient, user: userEvent.setup({ document }) };
 }
 
 const botRows = (view: ReturnType<typeof render>) =>
@@ -248,6 +272,122 @@ test("a Bot's conversations under it are titles and times, without the Bot's orb
   const { view } = renderPanel();
   const row = (await view.findByText("Open Acme invoices")).closest("a");
   expect(row?.querySelector("[role=img]")).toBeNull();
+});
+
+test("a Bot's conversations under it are named by slot, for whatever reads the panel", async () => {
+  served.invoice = () =>
+    Response.json(
+      conversationPage([
+        conversation("i1", ["invoice"], "Open Acme invoices"),
+        conversation("i2", ["invoice"], "Vendor follow-up"),
+      ]),
+    );
+  const { view } = renderPanel();
+  await view.findByText("Vendor follow-up");
+  const invoice = view
+    .getByRole("button", { name: "Hide Invoice Review's conversations" })
+    .closest("li");
+  const rows = [
+    ...(invoice?.querySelectorAll<HTMLElement>(
+      "[data-slot=bot-conversation-row]",
+    ) ?? []),
+  ];
+  expect(rows.map((row) => row.getAttribute("href"))).toEqual([
+    "/channel/i1",
+    "/channel/i2",
+  ]);
+});
+
+/** What the server answers a reset with: the counts it deleted. */
+const RESET = {
+  validateOnly: false,
+  deleted: {
+    conversations: 1,
+    sharedConversationsKept: 0,
+    memorySources: 0,
+    memories: 0,
+    routines: 0,
+    responsibilities: 0,
+    followUps: 0,
+    formedMemories: 0,
+    backgroundResearch: 0,
+    standingApprovals: 0,
+  },
+};
+
+/** The Bots as the server lists them once Invoice Review has no conversations left. */
+const withoutInvoiceConversations = () =>
+  BOTS.map((each) =>
+    each.id === "invoice" ? { ...each, lastConversationAt: null } : each,
+  );
+
+test("a Bot that is reset leaves the top of the panel, and its conversations go from under it", async () => {
+  let reset = false;
+  served.invoice = () =>
+    Response.json(
+      conversationPage(
+        reset ? [] : [conversation("i1", ["invoice"], "Open Acme invoices")],
+      ),
+    );
+  writes[`POST ${BOTS_PATH}/invoice/reset`] = () => {
+    reset = true;
+    listed = withoutInvoiceConversations();
+    return Response.json(RESET);
+  };
+  const { view, queryClient } = renderPanel();
+  await view.findByText("Open Acme invoices");
+  expect(botRows(view)[0]).toBe("Invoice Review");
+
+  await new MutationObserver(
+    queryClient,
+    resetBotMutationOptions(queryClient),
+  ).mutate("invoice");
+
+  await waitFor(() =>
+    expect(botRows(view)).toEqual([
+      "Finance Ops",
+      "Research",
+      "Old Helper",
+      "Invoice Review",
+      "Quiet",
+    ]),
+  );
+  const invoice = view
+    .getByRole("button", { name: /Invoice Review's conversations/ })
+    .closest("li");
+  await waitFor(() =>
+    expect(invoice?.textContent).toContain(
+      "No conversations with this Bot yet.",
+    ),
+  );
+  expect(view.queryByText("Open Acme invoices")).toBeNull();
+});
+
+test("deleting a Bot's last conversation moves the Bot down the panel", async () => {
+  let deleted = false;
+  served.invoice = () =>
+    Response.json(
+      conversationPage(
+        deleted ? [] : [conversation("i1", ["invoice"], "Open Acme invoices")],
+      ),
+    );
+  writes[`DELETE ${conversationPath("i1")}`] = () => {
+    deleted = true;
+    listed = withoutInvoiceConversations();
+    return noContent();
+  };
+  const { view, queryClient } = renderPanel();
+  await view.findByText("Open Acme invoices");
+  expect(botRows(view)[0]).toBe("Invoice Review");
+
+  await new MutationObserver(
+    queryClient,
+    deleteChannelMutationOptions(queryClient),
+  ).mutate("i1");
+
+  await waitFor(() => expect(botRows(view)[0]).toBe("Finance Ops"));
+  expect(botRows(view)).toContain("Invoice Review");
+  expect(botRows(view).indexOf("Invoice Review")).toBe(3);
 });
 
 test("the caret opens and closes a Bot, and the Bot's name opens its page", async () => {

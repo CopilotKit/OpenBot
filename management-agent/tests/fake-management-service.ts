@@ -163,7 +163,8 @@ export class FakeManagementService {
 
   constructor(
     private readonly pki: TestPki,
-    private readonly installId: string,
+    /** The install the service accepts heartbeats from: another one is refused, as a revoked one is. */
+    public installId: string,
   ) {}
 
   async start(port = 0, hostname = "127.0.0.1") {

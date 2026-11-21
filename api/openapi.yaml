@@ -1647,7 +1647,7 @@ paths:
         - Identity providers
       operationId: createIdentityProvider
       summary: Register an identity provider
-      description: Register a company's identity provider, so everybody it vouches for at its email domain can sign in. SAML takes the metadata the company's identity team supplies; OIDC takes the issuer, which describes itself, and a client. Only an administrator may register one, signed in to OpenBot rather than with a key or an app's sign-in. The audit trail records who registered it.
+      description: 'Register a company''s identity provider, so everybody it vouches for at its email domain can sign in. SAML takes the metadata the company''s identity team supplies; OIDC takes the issuer, which describes itself, and a client. Only an administrator may register one, signed in to OpenBot rather than with a key or an app''s sign-in. The audit trail records who registered it. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), no organization registers a provider of its own: this answers 409 with the code HOSTED_SIGN_IN_ONLY.'
       security:
         - webSession: []
       parameters:
@@ -1709,7 +1709,7 @@ paths:
         - Identity providers
       operationId: deleteIdentityProvider
       summary: Remove an identity provider
-      description: 'Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider registered for the whole OpenBot (deployment) is removed only where it was registered: in any other organization it is refused with 403. A provider already removed is not found.'
+      description: 'Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider registered for the whole OpenBot (deployment) is removed only where it was registered: in any other organization it is refused with 403. A provider already removed is not found. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), this answers 409 with the code HOSTED_SIGN_IN_ONLY and removes nothing.'
       security:
         - webSession: []
         - appOAuth:
@@ -1729,7 +1729,7 @@ paths:
         '404':
           $ref: '#/components/responses/IdentityProviderNotFound'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/IdentityProviderRemovalConflict'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -1743,7 +1743,7 @@ paths:
         - People
       operationId: getCompanySignIn
       summary: Read whether a person must use their company sign-in here
-      description: Return whether this organization requires its members to sign in through their company's identity provider, whether the person has, and the providers they can use for it. Any member may read their own, as me or by their own id. It answers even while the organization holds them out for not having signed in that way, when every other request they make in it is refused with SSO_REQUIRED. To use a provider, they sign in through it by its id (POST /api/auth/sign-in/sso with providerId) in a browser where they are signed in, or from an app through createCompanySignInTicket.
+      description: 'Return whether this organization requires its members to sign in through their company''s identity provider, whether the person has, and the providers they can use for it. Any member may read their own, as me or by their own id. It answers even while the organization holds them out for not having signed in that way, when every other request they make in it is refused with SSO_REQUIRED. To use a provider, they sign in through it by its id (POST /api/auth/sign-in/sso with providerId) in a browser where they are signed in, or from an app through createCompanySignInTicket. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), no organization requires it: required is false and no providers are listed.'
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -1784,7 +1784,7 @@ paths:
         - People
       operationId: createCompanySignInTicket
       summary: Get a ticket to link a company account from an app
-      description: 'Return an address for a browser to link the person''s company account at one of the organization''s identity providers, for an app that has no browser session to carry, such as the phone. The app opens it in the system browser, and the person signs in through the provider there. Sent with returnTo app, the browser goes back to the phone app once the account is linked. The address carries a ticket, never the app''s own sign-in. The ticket is the person''s, for this organization and this provider, lasts two minutes, and opens once. Signing in through the provider then links the company account as a signed-in browser''s sign-in does: the provider must give the person''s own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key.'
+      description: 'Return an address for a browser to link the person''s company account at one of the organization''s identity providers, for an app that has no browser session to carry, such as the phone. The app opens it in the system browser, and the person signs in through the provider there. Sent with returnTo app, the browser goes back to the phone app once the account is linked. The address carries a ticket, never the app''s own sign-in. The ticket is the person''s, for this organization and this provider, lasts two minutes, and opens once. Signing in through the provider then links the company account as a signed-in browser''s sign-in does: the provider must give the person''s own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), there is no company account to link: this answers 409 with the code HOSTED_SIGN_IN_ONLY.'
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -1909,7 +1909,7 @@ paths:
         - Organization settings
       operationId: updateOrganizationSettings
       summary: Change the organization's settings
-      description: 'Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment''s configuration names and the caller. Where this OpenBot may keep more than one organization, requiring single sign-on is each organization''s own rule: its members sign in through an identity provider, and saving it signs out only this organization''s members who signed in another way. Where it keeps only one organization, that organization''s rule holds for everybody who signs in, and sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.'
+      description: 'Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment''s configuration names and the caller. Where this OpenBot may keep more than one organization, requiring single sign-on is each organization''s own rule: its members sign in through an identity provider, and saving it signs out only this organization''s members who signed in another way. Where it keeps only one organization, that organization''s rule holds for everybody who signs in, and sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), single sign-on can''t be required: sending ssoRequired true answers 409 with the code HOSTED_SIGN_IN_ONLY.'
       security:
         - webSession: []
         - appOAuth:
@@ -3409,6 +3409,8 @@ paths:
           $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '402':
+          $ref: '#/components/responses/PlanRequired'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -10538,7 +10540,7 @@ paths:
         - Organizations
       operationId: createOrganization
       summary: Create an organization
-      description: Create an organization with the caller as its owner. It starts with what a fresh install starts with, its starter Bots included, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
+      description: 'Create an organization with the caller as its owner. It starts with what a fresh install starts with, its starter Bots included, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. An OpenBot may limit how many organizations one person owns, their own included: at the limit the request is refused with 403 and a detail saying so, and nothing is made. Deleting one they created makes room. While another of the caller''s requests is creating one, the request is refused with 409; send it again once that one has answered. Without a slug, one is made from the name. The caller''s session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.'
       security:
         - webSession: []
         - appOAuth:
@@ -10575,7 +10577,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/OrganizationNotAllowed'
         '409':
           $ref: '#/components/responses/OrganizationConflict'
         '500':
@@ -10937,6 +10939,50 @@ paths:
           $ref: '#/components/responses/AdminOnly'
         '404':
           $ref: '#/components/responses/OrganizationOrInvitationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/plan:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Organizations
+      operationId: getOrganizationPlan
+      x-openbot-singleton: true
+      summary: Read an organization's plan
+      description: 'Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands: on its free trial, on the plan, behind on a payment, or on no plan yet. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The organization's plan.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationPlan'
+              examples:
+                trialing:
+                  $ref: '#/components/examples/OrganizationPlanTrialing'
+                noPlan:
+                  $ref: '#/components/examples/OrganizationPlanNone'
+                notRequired:
+                  $ref: '#/components/examples/OrganizationPlanNotRequired'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -22847,10 +22893,10 @@ components:
           description: Whether people sign in through OpenBot by CopilotKit's own sign-in, with their account there. The sign-in starts at /api/auth/hosted/sign-in. Absent or false, people sign in only the ways authProviders and ssoConfigured say.
         ssoConfigured:
           type: boolean
-          description: Whether a company's own identity provider is registered, so an email address can be sent to it. Never which.
+          description: Whether a company's own identity provider is registered, so an email address can be sent to it. Never which. Always false where hostedSignIn is true.
         ssoRequired:
           type: boolean
-          description: Whether everybody who signs in to this OpenBot must use single sign-on, because its one organization requires it; social sign-in then stays only as the configured administrators' way in. Where this OpenBot may keep more than one organization, each one requires it of its own members in its settings, and this says false.
+          description: Whether everybody who signs in to this OpenBot must use single sign-on, because its one organization requires it; social sign-in then stays only as the configured administrators' way in. Where this OpenBot may keep more than one organization, each one requires it of its own members in its settings, and this says false. Always false where hostedSignIn is true.
         builtInBots:
           type: boolean
           description: Whether a Bot can run inside OpenBot, with no address of its own.
@@ -24071,6 +24117,13 @@ components:
         security:
           type: boolean
           description: On CLIENT_UPDATE_REQUIRED, true when the minimum the app is below was raised because of a security problem in older releases.
+        addCardUrl:
+          type:
+            - string
+            - 'null'
+          format: uri-reference
+          maxLength: 2048
+          description: On PLAN_REQUIRED, where an owner or an admin goes in the browser to add a card and start the organization's free trial, or to update the card. Null for a member, who asks an admin.
     ConversationJoinToken:
       type: object
       description: 'What a client needs to watch a conversation live: a token, and the socket and topic to use it on (the threadStream channel of api/asyncapi.yaml).'
@@ -30415,6 +30468,48 @@ components:
             - emailed
             - link
           description: How the person hears of it. emailed when OpenBot sent them an email. link when it could not or is not set up to, so the inviter passes the invitation's link on themselves. Either way the person sees the invitation in OpenBot when they sign in.
+    OrganizationPlan:
+      type: object
+      description: Whether this OpenBot needs the organization to be on a plan, and where the organization stands. When required is true, its Bots run only while status is trialing or active.
+      required:
+        - required
+        - status
+        - trialEndsAt
+        - renewsAt
+        - addCardUrl
+      properties:
+        required:
+          type: boolean
+          description: True when this OpenBot runs an organization's Bots only while it is on a plan or its free trial.
+        status:
+          type: string
+          x-extensible-enum:
+            - not_required
+            - trialing
+            - active
+            - past_due
+            - none
+            - unknown
+          description: not_required when this OpenBot needs no plan. trialing during the free trial, which a card on file starts. active on the plan. past_due when a payment failed and the card needs updating. none when the organization has no plan or trial yet, or its plan ended. unknown when the plan couldn't be read just now; Bots keep running meanwhile.
+        trialEndsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the free trial ends, while status is trialing. Null otherwise.
+        renewsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the plan's current month ends, while status is active. Null otherwise.
+        addCardUrl:
+          type:
+            - string
+            - 'null'
+          format: uri-reference
+          maxLength: 2048
+          description: Where an owner or an admin goes in the browser to add a card, start the free trial or update the card. A page to open, not an API call. Null for a member, and when the organization needs no card.
     Invitation:
       type: object
       description: An invitation as the person it was sent to sees it. status is the server's verdict.
@@ -37921,7 +38016,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     IdentityProviderConflict:
-      description: A provider with that id is registered already, or the Idempotency-Key was used for a different request.
+      description: A provider with that id is registered already, the Idempotency-Key was used for a different request, or people sign in here with their OpenBot by CopilotKit account, so no organization registers a provider of its own (HOSTED_SIGN_IN_ONLY).
       content:
         application/problem+json:
           schema:
@@ -37934,6 +38029,17 @@ components:
                 status: 409
                 detail: An identity provider with that name is registered already. Choose another name.
                 code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
                 category: conflict
                 retryable: false
                 requestId: req_example
@@ -37957,7 +38063,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     SettingsConflict:
-      description: Single sign-on can't be required before an identity provider is registered, ssoRequired was sent in an organization other than the one this OpenBot keeps, or the Idempotency-Key was used for a different request.
+      description: Single sign-on can't be required before an identity provider is registered, ssoRequired was sent in an organization other than the one this OpenBot keeps, people sign in here with their OpenBot by CopilotKit account so no organization requires it (HOSTED_SIGN_IN_ONLY), or the Idempotency-Key was used for a different request.
       content:
         application/problem+json:
           schema:
@@ -37981,6 +38087,17 @@ components:
                 status: 409
                 detail: Register an identity provider before requiring SSO, or nobody but the break-glass administrators can sign in.
                 code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
                 category: conflict
                 retryable: false
                 requestId: req_example
@@ -38156,6 +38273,25 @@ components:
                 client: desktop
                 minimumVersion: 1.2.0
                 security: true
+    PlanRequired:
+      description: This OpenBot runs an organization's Bots only while it is on a plan or its free trial, and this organization is on neither, or its last payment failed (PLAN_REQUIRED). An owner or an admin adds a card at addCardUrl.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noPlan:
+              value:
+                type: https://open.bot/errors/plan-required
+                title: This organization needs a plan.
+                status: 402
+                detail: Bots in this organization can't run until a card is added. Add a card to start your 30-day free trial.
+                code: PLAN_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
     ConversationNotFound:
       description: The conversation does not exist, was removed, or the caller is not in it, or the organization does not exist.
       content:
@@ -38423,6 +38559,35 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    IdentityProviderRemovalConflict:
+      description: The Idempotency-Key was used for a different request, or people sign in here with their OpenBot by CopilotKit account, so no organization changes a provider of its own (HOSTED_SIGN_IN_ONLY).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     InvalidCompanySignInTicket:
       description: No providerId was sent, or the body or the Idempotency-Key is malformed.
       content:
@@ -38500,7 +38665,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     CompanySignInTicketConflict:
-      description: 'The Idempotency-Key was used already. A ticket is a credential shown once, so its answer is never given again: ask with a new key.'
+      description: 'The Idempotency-Key was used already. A ticket is a credential shown once, so its answer is never given again: ask with a new key. Or people sign in here with their OpenBot by CopilotKit account, so there is no company account to link (HOSTED_SIGN_IN_ONLY).'
       content:
         application/problem+json:
           schema:
@@ -38513,6 +38678,17 @@ components:
                 status: 409
                 detail: That Idempotency-Key was used already. Ask again with a new one.
                 code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
                 category: conflict
                 retryable: false
                 requestId: req_example
@@ -40292,6 +40468,24 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    OrganizationNotAllowed:
+      description: The caller already owns as many organizations as this OpenBot allows one person. Or the request was refused for the caller, as any request can be (SSO_REQUIRED).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            limitReached:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: You already own 3 organizations, the most anyone can here. Delete one you created to create another.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     OrganizationConflict:
       description: Another organization has that slug. Or the Idempotency-Key was used for a different request.
       content:
@@ -40317,6 +40511,17 @@ components:
                 status: 409
                 detail: That Idempotency-Key was used for a different request.
                 code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            creationUnderWay:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: You're already creating an organization. Wait for it to finish, then try again.
+                code: CONFLICT
                 category: conflict
                 retryable: false
                 requestId: req_example
@@ -45394,7 +45599,7 @@ components:
         organizations:
           - id: Wm4pZ7tKc1Xb9RnQ2sYd6hLe
             slug: dana
-            name: Dana's organization
+            name: Dana’s organization
             role: owner
             active: true
             personal: true
@@ -45500,6 +45705,30 @@ components:
           createdAt: '2026-11-15T09:20:05.000Z'
           expiresAt: '2026-11-22T09:20:05.000Z'
         delivery: link
+    OrganizationPlanTrialing:
+      summary: An organization on its free trial, read by an admin.
+      value:
+        required: true
+        status: trialing
+        trialEndsAt: '2026-12-20T09:30:00Z'
+        renewsAt: null
+        addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
+    OrganizationPlanNone:
+      summary: An organization with no plan yet, read by an admin.
+      value:
+        required: true
+        status: none
+        trialEndsAt: null
+        renewsAt: null
+        addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
+    OrganizationPlanNotRequired:
+      summary: An OpenBot that needs no plan.
+      value:
+        required: false
+        status: not_required
+        trialEndsAt: null
+        renewsAt: null
+        addCardUrl: null
     InvitationPageLast:
       summary: One invitation waiting for the caller.
       value:

@@ -19,6 +19,18 @@ export const OPENBOT_CLOUD_URL = "https://api.open.bot";
 export const OPENBOT_CLOUD_WEB_URL = "https://my.open.bot";
 
 /**
+ * Whether this build offers OpenBot Cloud on the first screen. Off unless the build sets
+ * `VITE_OPENBOT_CLOUD_ENABLED=true`: until Cloud is open to everybody, a build shows the first
+ * screen without it (OpenBot (Self-Contained), OpenBot for Business, and connecting to an address).
+ * Read when the screen draws, so a test can set it.
+ */
+export function cloudEnabled(): boolean {
+  return (
+    import.meta.env.VITE_OPENBOT_CLOUD_ENABLED?.trim().toLowerCase() === "true"
+  );
+}
+
+/**
  * Where this build signs in to OpenBot Cloud. `VITE_OPENBOT_CLOUD_URL` points a build at another
  * OpenBot, such as a test stack; unset, it is {@link OPENBOT_CLOUD_URL}.
  */

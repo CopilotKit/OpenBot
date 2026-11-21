@@ -1,6 +1,6 @@
 import { IconBuildingBank, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { SignInSection } from "@/components/admin/controls/sign-in-section";
 import { TeamPage } from "@/components/edition/for-a-team";
@@ -37,6 +37,7 @@ import {
   type IdentityProviderInput,
   registerIdentityProviderMutationOptions,
 } from "@/lib/identity-providers/mutations";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { identityProviderListQueryOptions } from "@/lib/identity-providers/queries";
 import { identityProviderWords } from "@/lib/identity-providers/words";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
@@ -44,6 +45,19 @@ import { ONLY_ORGANIZATION } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/identity-providers")({
+  /*
+   * On OpenBot by CopilotKit (`hostedSignIn`) people sign in with their CopilotKit account, so an
+   * organization has no identity provider of its own to set up: an old link or bookmark lands on the
+   * Admin overview, as Admin lists no such page there. Admin's route has already read the answer, so
+   * this waits on nothing and the page never draws first.
+   */
+  beforeLoad: async ({ context }) => {
+    const deployment = await context.queryClient
+      .ensureQueryData(deploymentCapabilitiesQueryOptions())
+      .catch(() => undefined);
+    if (deployment?.hostedSignIn)
+      throw redirect({ to: "/admin", replace: true });
+  },
   component: IdentityProvidersPageInEveryEdition,
 });
 
@@ -63,7 +77,10 @@ function IdentityProvidersPage() {
   // Outside `default`, an organization's providers are its own: they apply to its members.
   const organizationOnly =
     organization !== undefined && organization !== ONLY_ORGANIZATION;
-  const words = identityProviderWords(organizationOnly);
+  // A hosted OpenBot: people also sign in with their OpenBot by CopilotKit account, set in no environment of theirs.
+  const hosted =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
+  const words = identityProviderWords(organizationOnly, hosted);
   const providers = useQuery(identityProviderListQueryOptions());
   const register = useMutation(
     registerIdentityProviderMutationOptions(queryClient),
@@ -143,10 +160,7 @@ function IdentityProvidersPage() {
       description={words.description}
       title="Identity providers"
     >
-      <PageSection
-        description="Google, Microsoft and Okta are set in the environment. They don't show here."
-        title="Registered"
-      >
+      <PageSection description={words.registeredDescription} title="Registered">
         {failure ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             {failure.message}
@@ -208,10 +222,18 @@ function IdentityProvidersPage() {
       {deploymentWide.length > 0 ? (
         <PageSection
           description={
-            // Only while the organization has none of its own: once it has, only those count for its Require SSO.
+            /*
+             * Only while the organization has none of its own: once it has, only those count for its Require SSO.
+             * On a hosted OpenBot whoever runs it is OpenBot by CopilotKit, whom an organization admin has no way
+             * to ask, so the sentence stops at what is true.
+             */
             registered.length > 0
-              ? "Set up for everyone who signs in to OpenBot. This organization has its own, so only those count for its Require SSO. Ask whoever runs OpenBot to change one of these."
-              : "Set up for everyone who signs in to OpenBot. They count for this organization too. Ask whoever runs OpenBot to change one."
+              ? hosted
+                ? "Set up for everyone who signs in to OpenBot. This organization has its own, so only those count for its Require SSO."
+                : "Set up for everyone who signs in to OpenBot. This organization has its own, so only those count for its Require SSO. Ask whoever runs OpenBot to change one of these."
+              : hosted
+                ? "Set up for everyone who signs in to OpenBot. They count for this organization too."
+                : "Set up for everyone who signs in to OpenBot. They count for this organization too. Ask whoever runs OpenBot to change one."
           }
           title="For all of OpenBot"
         >

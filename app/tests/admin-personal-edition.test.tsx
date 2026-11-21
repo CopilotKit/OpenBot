@@ -44,10 +44,10 @@ import { vendoredMarkFor } from "./vendored-marks";
 mock.module("@/lib/marks", () => ({ markFor: vendoredMarkFor }));
 
 const { Route: PeopleRoute } = await import("@/routes/_authed/admin/people");
-// Admin lists Teams, whose pages are outside it, where everybody in an organization opens them.
-const { Route: TeamsRoute } = await import("@/routes/_authed/_app/teams");
+// Admin's Teams: the pages everybody opens at /teams, drawn inside Admin.
+const { Route: TeamsRoute } = await import("@/routes/_authed/admin/teams");
 const { Route: NewTeamRoute } = await import(
-  "@/routes/_authed/_app/teams_.new"
+  "@/routes/_authed/admin/teams_.new"
 );
 const { Route: IdentityProvidersRoute } = await import(
   "@/routes/_authed/admin/identity-providers"

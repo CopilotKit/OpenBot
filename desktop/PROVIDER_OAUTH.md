@@ -88,6 +88,10 @@ partner, and [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628).
 `VITE_OPENBOT_SUPPORT_URL` replaces the support link a startup failure offers. Unset, it points at
 this repository's issues. A whitelabel build points it at its own support channel.
 
+`VITE_OPENBOT_CLOUD_ENABLED=true` puts "OpenBot Cloud" on the first screen. Unset (the default),
+the first screen offers OpenBot (Self-Contained) and OpenBot for Business (Cloud or Self-Hosted,
+either of which books a call), and connecting to an OpenBot at an address.
+
 `VITE_OPENBOT_CLOUD_URL` is the OpenBot that "Sign in to OpenBot Cloud" on the first screen signs in
 to: the address this app checks, posts its sign-in code to and calls the API on. Unset, it is
 `https://api.open.bot`, OpenBot Cloud's address for programs, which is never challenged by bot
