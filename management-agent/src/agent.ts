@@ -837,17 +837,24 @@ export class ManagementAgent {
       this.config.commandPublicKey,
       this.clock(),
     );
+    // Ids already handled, plus the ones taken in this reply: `state` is read once, so a repeated
+    // id would otherwise look fresh again.
+    const seen = new Set(state.handledCommands);
     const fresh = (id: string | null): id is string =>
-      id !== null && !state.handledCommands.includes(id);
+      id !== null && !seen.has(id);
     for (const entry of ignored) {
       this.log("command ignored", { ...entry });
-      if (!fresh(entry.id) || entry.reason === "signature does not verify")
-        continue;
+      // Only a command that was signed and has terminally expired is recorded: any other reason
+      // (malformed, unknown, not yet issued) could otherwise use up an id a later, correctly
+      // signed command still needs.
+      if (!fresh(entry.id) || entry.reason !== "expired") continue;
+      seen.add(entry.id);
       await this.markHandled(entry.id);
       await this.report(entry.id, false, `ignored: ${entry.reason}`);
     }
     for (const command of accepted) {
       if (!fresh(command.id)) continue;
+      seen.add(command.id);
       await this.markHandled(command.id);
       this.log("command", { id: command.id, kind: command.kind });
       try {
