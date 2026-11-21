@@ -33,8 +33,8 @@ export const SELF_CONTAINED_BRIEF =
 /** What the second choice is: OpenBot as we run it, signed in to from here and on the web. */
 export const CLOUD_SUMMARY = "Use OpenBot here. Your Bots run in our cloud.";
 
-/** OpenBot for Business: on a company's own cloud or on-prem, which books a call. */
-export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a call.";
+/** OpenBot for Business: on a company's own cloud or on-prem, which books a demo. */
+export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a demo.";
 
 /**
  * Where OpenBot Cloud is off in this build (`cloudEnabled`), OpenBot for Business is one card with
@@ -200,7 +200,7 @@ export function Welcome({
         ? "cloud"
         : null,
   );
-  // With Cloud off, which of OpenBot for Business's two ways is picked: both book a call.
+  // With Cloud off, which of OpenBot for Business's two ways is picked: both book a demo.
   const [businessWay, setBusinessWay] = useState<BusinessChoice | null>(null);
   // Picked by the person, not opened on: Cloud's button takes the focus.
   const [pickedNow, setPickedNow] = useState(false);
@@ -361,7 +361,7 @@ export function Welcome({
             </label>
           </>
         ) : (
-          /* OpenBot for Business, its two ways in one card: both book a call. */
+          /* OpenBot for Business, its two ways in one card: both book a demo. */
           <fieldset
             className={rowClass(shown === "business", "tile-group")}
             aria-labelledby="business-name"
@@ -373,7 +373,7 @@ export function Welcome({
               OpenBot for Business
             </span>
             <span className="tile-summary">
-              For your whole team. Book a call to see it.
+              For your whole team. Book a demo to see it.
             </span>
             <div className="tile-options">
               {BUSINESS_CHOICES.map((choice) => (

@@ -262,8 +262,8 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
       ) : (
         <>
           <p id={`${id}-next`} className="footnote">
-            You'll sign in to it in your browser. Nothing is installed on this
-            computer.
+            This app connects to that OpenBot. You'll sign in to it in your
+            browser, then come straight back here.
           </p>
           {trouble && !underField && trouble.offer !== "update" && (
             <Trouble trouble={trouble} />

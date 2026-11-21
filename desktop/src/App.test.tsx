@@ -676,7 +676,7 @@ test("the first screen offers OpenBot (Self-Contained), then OpenBot for Busines
   // Cloud and Self-Hosted are OpenBot for Business's, in one group that says it books a call.
   const business = view.getByRole("group", { name: "OpenBot for Business" });
   expect(business.textContent).toContain(
-    "For your whole team. Book a call to see it.",
+    "For your whole team. Book a demo to see it.",
   );
   expect(
     [...business.querySelectorAll('input[type="radio"]')].map(
@@ -1040,7 +1040,7 @@ test("Connect to it asks for an address in place of Install, and going back brin
   expect(field.value).toBe("");
   expect(
     view.getByText(
-      "You'll sign in to it in your browser. Nothing is installed on this computer.",
+      "This app connects to that OpenBot. You'll sign in to it in your browser, then come straight back here.",
     ),
   ).toBeTruthy();
   // What Self-Contained asks of this computer, and its Install, are not this choice's.
@@ -1407,7 +1407,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     const radios = view.getAllByRole("radio") as HTMLInputElement[];
     expect(radios.map((radio) => radio.closest("label")?.textContent)).toEqual([
       "OpenBot CloudUse OpenBot here. Your Bots run in our cloud.",
-      "OpenBot for BusinessYour own cloud or on-prem. Book a call.",
+      "OpenBot for BusinessYour own cloud or on-prem. Book a demo.",
       "OpenBot (Self-Contained)Everything runs on this computer.Needs a Mac or a 64-bit Windows PC with at least 4 CPU cores, 16 GB of memory and 40 GB of free disk space. Setup takes 1 to 10 minutes.",
     ]);
     expect(radios.map((radio) => [radio.value, radio.checked])).toEqual([

@@ -1082,7 +1082,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
          * the window. The card scrolls, never the page, and scrolled to its end the calendar is
          * whole inside the card, nothing cut at either edge.
          */
-        await page.getByText("Your own cloud or on-prem. Book a call.").click();
+        await page.getByText("Your own cloud or on-prem. Book a demo.").click();
         await page
           .locator(
             '.booking-calendar[data-ready] iframe[title="Booking calendar"]',
