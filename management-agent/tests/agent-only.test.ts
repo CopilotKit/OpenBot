@@ -9,12 +9,21 @@
  * kubectl is scripted here (the commands are recorded and answered as the API server would); the
  * agent-only install on a real cluster is enroll-kind.test.ts and the chart's kind check.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  expect,
+  type Mock,
+  spyOn,
+  test,
+} from "bun:test";
 import { rmSync } from "node:fs";
 import { ManagementAgent, UPGRADES_NOT_SET_UP } from "../src/agent";
 import { ManagementClient } from "../src/client";
 import { AgentConfig, type ReadyAgent } from "../src/config";
 import { CommandFailed, Kube } from "../src/kube";
+import { internalReleaseUrl } from "../src/status";
 import {
   FakeManagementService,
   makePki,
@@ -25,13 +34,30 @@ const installId = "4e2a7c91-5b3d-4f08-a6e1-2c9d8b7f6a50";
 let pki: TestPki;
 let fleet: FakeManagementService;
 let url = "";
+let internalStatus: Mock<typeof fetch>;
 
 beforeAll(async () => {
   pki = makePki(installId, ["127.0.0.1"]);
   fleet = new FakeManagementService(pki, installId);
   url = `https://127.0.0.1:${await fleet.start()}`;
+  // Each heartbeat asks the server's internal status Service, a cluster name. Off a cluster that
+  // name is looked up in the runner's DNS, which can take seconds the first time and push a test
+  // past its timeout; there is no such Service here, so it is refused straight away, as a cluster
+  // without one refuses it. Every other request (the management service) goes out as before.
+  const realFetch = globalThis.fetch;
+  const statusUrl = internalReleaseUrl(agent(false).config);
+  internalStatus = spyOn(globalThis, "fetch").mockImplementation(((
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    const target = input instanceof Request ? input.url : String(input);
+    if (target === statusUrl)
+      return Promise.reject(new TypeError("fetch failed: connection refused"));
+    return realFetch(input, init);
+  }) as typeof fetch);
 });
 afterAll(() => {
+  internalStatus.mockRestore();
   fleet.stop();
   rmSync(pki.directory, { recursive: true, force: true });
 });
