@@ -65,6 +65,7 @@ import {
   AllowlistPreview,
   AllowlistReading,
   DescribeAllowlist,
+  DRAFTED_ALLOWLIST,
   type WrittenAllowlist,
 } from "./network-describe";
 
@@ -163,7 +164,7 @@ type NetworkScope = { scopeKind: NetworkScopeKind; scopeId: string };
 export function NetworkSection() {
   return (
     <ControlsSection
-      description="Control where Bot computers can connect. Changes apply within seconds without a restart. Team policies override the organization’s policy unless it is locked."
+      description="Control where Bot computers can connect. Each connection is checked against the policy exactly as written, the same way every time. No model decides. Changes apply within seconds without a restart. Team policies override the organization’s policy unless it is locked."
       title="Network"
     >
       {({ data }) => <NetworkPolicies data={data} />}
@@ -494,6 +495,7 @@ function NetworkDialog({
               <Field>
                 <FieldLabel htmlFor="network-rules">Allowlist</FieldLabel>
                 <FieldDescription>
+                  {written ? `${DRAFTED_ALLOWLIST} ` : null}
                   One per line. A domain covers its subdomains. *.name covers
                   only subdomains. Either can list ports. Defaults are{" "}
                   {data.defaultDestinations.slice(0, 4).join(", ")} and{" "}

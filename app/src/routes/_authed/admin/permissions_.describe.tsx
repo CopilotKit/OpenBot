@@ -40,9 +40,9 @@ const same = (a: readonly CapabilityChange[], b: readonly CapabilityChange[]) =>
 /**
  * Who can do what, described in words, as team approval rules are on Describe team rules.
  *
- * The model's switch changes land as rows the admin can remove, beside an independent reading of them
- * and whether they check. Who they would change is worked out on the server for every member, with
- * the recent use of what anybody would lose. Only Save writes them, together, with the sentence they
+ * The model's switch changes land as rows the admin can remove, labelled as what OpenBot checks, with
+ * an independent reading of them and whether they check under them. Who they would change is worked
+ * out on the server for every member, with the recent use of what anybody would lose. Only Save writes them, together, with the sentence they
  * were written from.
  */
 function DescribePermissionsPage() {
@@ -88,7 +88,7 @@ function DescribePermissionsPage() {
   return (
     <PageShell
       backButton={BACK}
-      description="Say who may use what, and your model writes the permission changes. Nothing changes until you save them."
+      description="Say who may use what, and your model drafts the permission changes. Nothing changes until you save them. Saved permissions are checked exactly as set, the same way every time. No model decides."
       title="Describe who can do what"
     >
       <form
@@ -116,7 +116,7 @@ function DescribePermissionsPage() {
           <FieldGroup>
             <DescribeField
               action="Write changes"
-              description="Say in a sentence who may or may not do something, and your model writes the changes from this OpenBot's roles and teams. A second reading that never sees your words says what the changes do."
+              description="Say in a sentence who may or may not do something, and your model drafts the changes from this OpenBot's roles and teams. A second reading that never sees your words says what the changes do."
               id="permissions-english"
               label="Describe the change"
               placeholder="Contractors can't use their own computer"
@@ -128,6 +128,24 @@ function DescribePermissionsPage() {
                 return null;
               }}
             />
+            {teams.error ? (
+              <p className="text-destructive text-sm" role="alert">
+                Couldn't load teams. Try again in a moment.
+              </p>
+            ) : null}
+            {changes.length > 0 && teams.data ? (
+              <ChangeRows
+                changes={changes}
+                onRemove={(index) =>
+                  setChanges(changes.filter((_, at) => at !== index))
+                }
+                problems={
+                  current && !current.check.ok ? current.check.problems : []
+                }
+                teams={teams.data.teams}
+                titles={titles}
+              />
+            ) : null}
             {written ? (
               <ReadingStatus
                 check={written.check}
@@ -146,24 +164,6 @@ function DescribePermissionsPage() {
                 heading="What these changes do"
                 passed="Checks. Every change names a permission, role or team this OpenBot has."
                 warning={written.warning}
-              />
-            ) : null}
-            {teams.error ? (
-              <p className="text-destructive text-sm" role="alert">
-                Couldn't load teams. Try again in a moment.
-              </p>
-            ) : null}
-            {changes.length > 0 && teams.data ? (
-              <ChangeRows
-                changes={changes}
-                onRemove={(index) =>
-                  setChanges(changes.filter((_, at) => at !== index))
-                }
-                problems={
-                  current && !current.check.ok ? current.check.problems : []
-                }
-                teams={teams.data.teams}
-                titles={titles}
               />
             ) : null}
             {current &&
@@ -190,7 +190,7 @@ function DescribePermissionsPage() {
 function DescribePermissionsPageInEveryEdition() {
   return (
     <TeamPage
-      description="Say who may use what, and your model writes the permission changes. Nothing changes until you save them."
+      description="Say who may use what, and your model drafts the permission changes. Nothing changes until you save them. Saved permissions are checked exactly as set, the same way every time. No model decides."
       backButton={BACK}
       title="Describe who can do what"
     >
