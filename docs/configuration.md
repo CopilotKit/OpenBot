@@ -882,6 +882,32 @@ is still the record.
 | `OTEL_SERVICE_NAME`                | The `service.name` on every record. Defaults to `openbot`.                                             |
 | `OPENBOT_OTEL_EXPORT`              | `off` turns export off while an endpoint is still set.                                                 |
 
+## CopilotKit management (Kubernetes)
+
+A team install from the `openbot` or `openbot-bundle` chart connects to CopilotKit's management
+service by default, with its licence, through a management agent the chart installs into
+`openbot-system`. [managed-upgrades.md](managed-upgrades.md) says what it sends and how to set up
+managed upgrades. It never applies to the personal edition, to OpenBot Cloud, or to a server the
+chart didn't set up.
+
+The chart values:
+
+| Value (`openbot.` prefix on the bundle) | Default | Meaning |
+| --- | --- | --- |
+| `management.enabled` | `true` | Installs the management agent, and the server connects the install by itself with its licence. `false` opts out: no agent, no network policy peer for it, and the server never connects on its own. |
+| `management.agent.enabled` | unset (follows `management.enabled`) | `false` keeps management on with the agent left out of this release, for the `openbot-agent` release, which runs upgrades, to take over. |
+| `server.managementEnrollment.enabled` | `true` | Shows Admin → Managed updates to admins of `default` and turns on the server's internal port, where the agent collects its one-time token. `management.enabled` needs it. `false` (with `management.enabled=false`) hides the screen. |
+| `server.managementEnrollment.tokenReview` | `false` | Checks the agent's service account token with the TokenReview API, for a cluster that removed the default service account issuer discovery binding. Grants the server's service account `system:auth-delegator`. |
+
+The chart sets the server's environment from them. You don't set these by hand:
+
+| Variable | Meaning |
+| --- | --- |
+| `OPENBOT_MANAGEMENT_ENABLED` | `true` when the chart installs the agent beside this server (`management.enabled`), so the server connects by itself, by its licence, on start and every hour until connected, unless an admin disconnected it. `false` or unset: nothing connects until an admin presses Connect and installs the agent with the Helm command shown. Any other value refuses to start. |
+| `OPENBOT_MANAGEMENT_AGENT_SERVER_URL` | The server's internal port as the agent dials it, `http://<release>-server-internal.<namespace>.svc:9464`. Unset, management doesn't apply and Admin doesn't show Managed updates. Needs `RELEASE_STATUS_PORT`, or the server refuses to start. |
+| `OPENBOT_MANAGEMENT_ENROLL_URL` | CopilotKit's enrollment service. Defaults to `https://enroll.bot.copilotkit.ai`. |
+| `COPILOTKIT_LICENSE_TOKEN` | The licence the server connects with. Without one, nothing connects. |
+
 ## Computer and supervisor
 
 | Variable                             | Meaning                                                                                   |
