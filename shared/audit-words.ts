@@ -50,6 +50,9 @@ const ACTIONS: Readonly<Record<string, string>> = {
  */
 export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "ai_connection.replaced": "Change the AI provider",
+  "personal_ai_connection.replaced": "Connect a personal AI",
+  "personal_ai_connection.removed": "Remove a personal AI",
+  "personal_ai_connection.signed_in": "Sign in to an AI provider",
   "configuration.changed": "Change a setting",
   "credential.created": "Save a credential",
   "credential.rotated": "Replace a credential",
