@@ -61,6 +61,10 @@ export type LocalReason =
   // Not the CLI's: OpenBot's own finding that the backend it set up here is gone, cluster and all
   // (`local_eval::Reason::StackLost`). Start fresh sets it up again.
   | "stack-lost"
+  // OpenBot's own finding too: the backend's cluster is gone from the engine, as after
+  // `docker container prune` removed its stopped node, and OpenBot's own database is still there
+  // (`local_eval::Reason::BackendGone`). Set up again makes the backend again.
+  | "backend-gone"
   | "unrecognized";
 
 /** `local_eval::Readiness`: the CLI's own end-to-end check. Running pods are not this. */

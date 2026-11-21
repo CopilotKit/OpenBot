@@ -818,12 +818,25 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     ]);
     setPreparation({ key: installationKey, status: "preparing" });
     try {
-      await invoke("prepare_installation", {
-        root: root.trim(),
-        harness: nextHarness,
-      });
+      // The Bot it installed, which is the one asked for unless the folder's release does not
+      // include that one (`harness::the_release_includes`): Start then asks for what is there.
+      const installed = await invoke<HarnessChoice | null | undefined>(
+        "prepare_installation",
+        {
+          root: root.trim(),
+          harness: nextHarness,
+        },
+      );
       setSteps((current) => settleProgress(current));
-      setPreparation({ key: installationKey, status: "complete" });
+      if (installed?.id && installed.id !== nextHarness?.id) {
+        setHarness(installed);
+        setPreparation({
+          key: installationKeyFor(root, installed),
+          status: "complete",
+        });
+      } else {
+        setPreparation({ key: installationKey, status: "complete" });
+      }
       return true;
     } catch (error) {
       const problem = asProblem(error);
