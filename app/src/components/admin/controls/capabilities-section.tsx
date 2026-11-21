@@ -36,6 +36,8 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { ISOLATION_UNAVAILABLE } from "@/lib/agents/isolation";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { setCapabilityMutationOptions } from "@/lib/enterprise/mutations";
 import type {
   CapabilitySetting,
@@ -52,6 +54,13 @@ import { ControlsSection } from "./controls-section";
  */
 export function CapabilitiesSection() {
   const [overridesOpen, setOverridesOpen] = useState(false);
+  /*
+   * Whether this OpenBot gives a Bot a computer of its own at all. Where it doesn't (one shared computer, or an
+   * operator who turned isolated Bots off for every organization), "Isolated Bots" can't do anything: the row says
+   * why and its switch is off limits, so an admin isn't shown a setting that has no effect.
+   */
+  const { data: deployment } = useQuery(deploymentCapabilitiesQueryOptions());
+  const noIsolation = deployment?.isolatedBots === false;
   return (
     <ControlsSection>
       {({ data, setCapability, saving }) => {
@@ -68,6 +77,8 @@ export function CapabilitiesSection() {
             <PageRows>
               {data.capabilities.map((capability) => {
                 const effective = capability.organization ?? capability.default;
+                const unavailable =
+                  noIsolation && capability.capability === "isolatedComputers";
                 return (
                   <div key={capability.capability}>
                     <Item size="sm">
@@ -77,16 +88,18 @@ export function CapabilitiesSection() {
                       <ItemContent>
                         <ItemTitle>{capability.title}</ItemTitle>
                         <ItemDescription>
-                          {effective
-                            ? capability.description
-                            : "Off for everybody, unless a role or team turns it on."}
+                          {unavailable
+                            ? ISOLATION_UNAVAILABLE
+                            : effective
+                              ? capability.description
+                              : "Off for everybody, unless a role or team turns it on."}
                         </ItemDescription>
                       </ItemContent>
                       <ItemActions>
                         <Switch
                           aria-label={capability.title}
-                          checked={effective}
-                          disabled={saving}
+                          checked={effective && !unavailable}
+                          disabled={saving || unavailable}
                           onCheckedChange={(checked) =>
                             setCapability(capability.capability, checked)
                           }

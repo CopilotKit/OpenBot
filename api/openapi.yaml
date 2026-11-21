@@ -3409,6 +3409,8 @@ paths:
           $ref: '#/components/responses/InvalidRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '402':
+          $ref: '#/components/responses/PlanRequired'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -10538,7 +10540,7 @@ paths:
         - Organizations
       operationId: createOrganization
       summary: Create an organization
-      description: Create an organization with the caller as its owner. It starts with what a fresh install starts with, its starter Bots included, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
+      description: 'Create an organization with the caller as its owner. It starts with what a fresh install starts with, its starter Bots included, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. An OpenBot may limit how many organizations one person owns, their own included: at the limit the request is refused with 403 and a detail saying so, and nothing is made. Deleting one they created makes room. While another of the caller''s requests is creating one, the request is refused with 409; send it again once that one has answered. Without a slug, one is made from the name. The caller''s session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.'
       security:
         - webSession: []
         - appOAuth:
@@ -10575,7 +10577,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/OrganizationNotAllowed'
         '409':
           $ref: '#/components/responses/OrganizationConflict'
         '500':
@@ -10937,6 +10939,50 @@ paths:
           $ref: '#/components/responses/AdminOnly'
         '404':
           $ref: '#/components/responses/OrganizationOrInvitationNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/plan:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags:
+        - Organizations
+      operationId: getOrganizationPlan
+      x-openbot-singleton: true
+      summary: Read an organization's plan
+      description: 'Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands: on its free trial, on the plan, behind on a payment, or on no plan yet. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - organizations:read
+        - apiKey: []
+      responses:
+        '200':
+          description: The organization's plan.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationPlan'
+              examples:
+                trialing:
+                  $ref: '#/components/examples/OrganizationPlanTrialing'
+                noPlan:
+                  $ref: '#/components/examples/OrganizationPlanNone'
+                notRequired:
+                  $ref: '#/components/examples/OrganizationPlanNotRequired'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -24071,6 +24117,13 @@ components:
         security:
           type: boolean
           description: On CLIENT_UPDATE_REQUIRED, true when the minimum the app is below was raised because of a security problem in older releases.
+        addCardUrl:
+          type:
+            - string
+            - 'null'
+          format: uri-reference
+          maxLength: 2048
+          description: On PLAN_REQUIRED, where an owner or an admin goes in the browser to add a card and start the organization's free trial, or to update the card. Null for a member, who asks an admin.
     ConversationJoinToken:
       type: object
       description: 'What a client needs to watch a conversation live: a token, and the socket and topic to use it on (the threadStream channel of api/asyncapi.yaml).'
@@ -30415,6 +30468,48 @@ components:
             - emailed
             - link
           description: How the person hears of it. emailed when OpenBot sent them an email. link when it could not or is not set up to, so the inviter passes the invitation's link on themselves. Either way the person sees the invitation in OpenBot when they sign in.
+    OrganizationPlan:
+      type: object
+      description: Whether this OpenBot needs the organization to be on a plan, and where the organization stands. When required is true, its Bots run only while status is trialing or active.
+      required:
+        - required
+        - status
+        - trialEndsAt
+        - renewsAt
+        - addCardUrl
+      properties:
+        required:
+          type: boolean
+          description: True when this OpenBot runs an organization's Bots only while it is on a plan or its free trial.
+        status:
+          type: string
+          x-extensible-enum:
+            - not_required
+            - trialing
+            - active
+            - past_due
+            - none
+            - unknown
+          description: not_required when this OpenBot needs no plan. trialing during the free trial, which a card on file starts. active on the plan. past_due when a payment failed and the card needs updating. none when the organization has no plan or trial yet, or its plan ended. unknown when the plan couldn't be read just now; Bots keep running meanwhile.
+        trialEndsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the free trial ends, while status is trialing. Null otherwise.
+        renewsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the plan's current month ends, while status is active. Null otherwise.
+        addCardUrl:
+          type:
+            - string
+            - 'null'
+          format: uri-reference
+          maxLength: 2048
+          description: Where an owner or an admin goes in the browser to add a card, start the free trial or update the card. A page to open, not an API call. Null for a member, and when the organization needs no card.
     Invitation:
       type: object
       description: An invitation as the person it was sent to sees it. status is the server's verdict.
@@ -38178,6 +38273,25 @@ components:
                 client: desktop
                 minimumVersion: 1.2.0
                 security: true
+    PlanRequired:
+      description: This OpenBot runs an organization's Bots only while it is on a plan or its free trial, and this organization is on neither, or its last payment failed (PLAN_REQUIRED). An owner or an admin adds a card at addCardUrl.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noPlan:
+              value:
+                type: https://open.bot/errors/plan-required
+                title: This organization needs a plan.
+                status: 402
+                detail: Bots in this organization can't run until a card is added. Add a card to start your 30-day free trial.
+                code: PLAN_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
     ConversationNotFound:
       description: The conversation does not exist, was removed, or the caller is not in it, or the organization does not exist.
       content:
@@ -40354,6 +40468,24 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    OrganizationNotAllowed:
+      description: The caller already owns as many organizations as this OpenBot allows one person. Or the request was refused for the caller, as any request can be (SSO_REQUIRED).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            limitReached:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: You already own 3 organizations, the most anyone can here. Delete one you created to create another.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     OrganizationConflict:
       description: Another organization has that slug. Or the Idempotency-Key was used for a different request.
       content:
@@ -40379,6 +40511,17 @@ components:
                 status: 409
                 detail: That Idempotency-Key was used for a different request.
                 code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            creationUnderWay:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: You're already creating an organization. Wait for it to finish, then try again.
+                code: CONFLICT
                 category: conflict
                 retryable: false
                 requestId: req_example
@@ -45456,7 +45599,7 @@ components:
         organizations:
           - id: Wm4pZ7tKc1Xb9RnQ2sYd6hLe
             slug: dana
-            name: Dana's organization
+            name: Dana’s organization
             role: owner
             active: true
             personal: true
@@ -45562,6 +45705,30 @@ components:
           createdAt: '2026-11-15T09:20:05.000Z'
           expiresAt: '2026-11-22T09:20:05.000Z'
         delivery: link
+    OrganizationPlanTrialing:
+      summary: An organization on its free trial, read by an admin.
+      value:
+        required: true
+        status: trialing
+        trialEndsAt: '2026-12-20T09:30:00Z'
+        renewsAt: null
+        addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
+    OrganizationPlanNone:
+      summary: An organization with no plan yet, read by an admin.
+      value:
+        required: true
+        status: none
+        trialEndsAt: null
+        renewsAt: null
+        addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
+    OrganizationPlanNotRequired:
+      summary: An OpenBot that needs no plan.
+      value:
+        required: false
+        status: not_required
+        trialEndsAt: null
+        renewsAt: null
+        addCardUrl: null
     InvitationPageLast:
       summary: One invitation waiting for the caller.
       value:
