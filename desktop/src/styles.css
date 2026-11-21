@@ -882,6 +882,33 @@ fieldset.picker.hosting .tile.chosen {
   color: var(--text-secondary);
 }
 
+/*
+ * OpenBot (Self-Contained) with OpenBot Cloud on: the foot of the card, below everything else, set
+ * off by a rule. A line in the footnote's size and colour with its link, as "Already have OpenBot
+ * at work?" is; opened, its name leads the line and what this computer needs follows it.
+ */
+.this-computer-foot {
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.this-computer-aside {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.this-computer-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.this-computer-foot .needs {
+  margin-top: 10px;
+}
+
 /* The clouds it runs on: each mark on the marks' white ground, as the provider tiles draw theirs. */
 .cloud-marks {
   grid-area: marks;
@@ -1017,6 +1044,18 @@ button.text-link.inline-link {
 
 .book-a-demo h2 {
   margin: 0;
+  scroll-margin-top: 20px;
+}
+
+/* Focused by Book a demo above, not by a person's Tab: no ring around a heading. */
+.book-a-demo h2:focus {
+  outline: none;
+}
+
+/* Book a demo, under where it runs: one button that takes the card down to the calendar. */
+.business-book {
+  display: flex;
+  margin-top: -4px;
 }
 
 .book-a-demo-line {
@@ -1123,6 +1162,11 @@ fieldset.picker.hosting .tile.held:active {
 
 .connect-to-openbot .footnote {
   margin-top: 8px;
+}
+
+/* Who has the address, right under the field. */
+.connect-to-openbot .field .address-help {
+  margin-top: 6px;
 }
 
 /*
