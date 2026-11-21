@@ -216,6 +216,9 @@ paths:
   /api/v2/organizations/{organizationId}/model-catalogue: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-catalogue' }
   /api/v2/organizations/{organizationId}/people/{personId}/model-choices/{conversationId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1model-choices~1{conversationId}' }
   /api/v2/organizations/{organizationId}/ai-connection: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connection' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connection: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection~1sign-ins' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins/{signInId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection~1sign-ins~1{signInId}' }
   /api/v2/organizations/{organizationId}/apps: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps' }
   /api/v2/organizations/{organizationId}/apps/{appId}: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}' }
   /api/v2/organizations/{organizationId}/apps/{appId}/refresh: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1refresh' }
@@ -605,6 +608,8 @@ components:
             model-choices:write: Choose the model the signed-in person's conversations answer on.
             ai-connection:read: Read how OpenBot reaches its AI provider, never a key, when the signed-in person is an administrator.
             ai-connection:write: Change how OpenBot reaches its AI provider, when the signed-in person is an administrator.
+            personal-ai-connection:read: Read the signed-in person's own AI connection and which AI their runs use, never a key.
+            personal-ai-connection:write: Set, sign in to or remove the signed-in person's own AI connection.
             apps:read: Read the apps the organization has added, the directory of apps it can add, and how apps are set up here.
             apps:write: Add, change, refresh and remove apps, when the signed-in person may.
             connections:read: Read the signed-in person's connections to apps, and each app's shared account.

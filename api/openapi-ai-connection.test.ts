@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { parse } from "yaml";
 import {
   GetAiConnectionResponse,
+  GetPersonalAiConnectionResponse,
+  GetPersonalAiSignInResponse,
   ReplaceAiConnectionBody,
+  ReplacePersonalAiConnectionBody,
+  StartPersonalAiSignInResponse,
 } from "../app/src/lib/api/generated/models/models.zod";
 
 /**
@@ -188,4 +192,79 @@ test("an endpoint address is http or https with nothing in it that signs in", ()
       }
     ).additionalProperties,
   ).toBe(false);
+});
+
+const PERSONAL =
+  "/api/v2/organizations/{organizationId}/people/{personId}/ai-connection";
+const personal = spec.paths[PERSONAL] ?? {};
+const signIns = spec.paths[`${PERSONAL}/sign-ins`] ?? {};
+const signIn = spec.paths[`${PERSONAL}/sign-ins/{signInId}`] ?? {};
+
+test("a person's own AI connection is theirs alone: only they read, set, sign in to or remove it", () => {
+  const operations = [
+    personal.get,
+    personal.put,
+    personal.delete,
+    signIns.post,
+    signIn.get,
+  ];
+  expect(operations.map((operation) => operation?.operationId)).toEqual([
+    "getPersonalAiConnection",
+    "replacePersonalAiConnection",
+    "deletePersonalAiConnection",
+    "startPersonalAiSignIn",
+    "getPersonalAiSignIn",
+  ]);
+  for (const operation of operations) {
+    expect(operation?.responses["403"]?.$ref).toContain("OwnOnly");
+    const scopes = operation?.security?.flatMap(
+      (scheme) => scheme.appOAuth ?? [],
+    );
+    expect(
+      scopes?.every((scope) => scope.startsWith("personal-ai-connection:")),
+    ).toBe(true);
+  }
+  for (const write of [personal.put, personal.delete, signIns.post]) {
+    expect(write?.parameters?.map((p) => p.$ref)).toContainEqual(
+      expect.stringContaining("IdempotencyKey"),
+    );
+  }
+});
+
+test("no answer about a person's own AI has a place for a key, and every example parses", () => {
+  for (const operation of [
+    personal.get,
+    personal.put,
+    personal.delete,
+    signIns.post,
+    signIn.get,
+  ]) {
+    const success = operation?.responses["200"] ?? operation?.responses["201"];
+    const names = propertyNames(success?.content?.["application/json"]?.schema);
+    for (const secret of ["apiKey", "secret", "token", "key", "deviceCode"]) {
+      expect(names).not.toContain(secret);
+    }
+  }
+  const parses = (
+    operation: Operation | undefined,
+    status: string,
+    schema: { safeParse: (value: unknown) => { success: boolean } },
+  ) => {
+    const examples = Object.values(
+      operation?.responses[status]?.content?.["application/json"]?.examples ??
+        {},
+    );
+    expect(examples.length).toBeGreaterThan(0);
+    for (const example of examples)
+      expect(schema.safeParse(exampleValue(example)).success).toBe(true);
+  };
+  parses(personal.get, "200", GetPersonalAiConnectionResponse);
+  parses(signIns.post, "201", StartPersonalAiSignInResponse);
+  parses(signIn.get, "200", GetPersonalAiSignInResponse);
+  for (const example of Object.values(
+    personal.put?.requestBody?.content["application/json"]?.examples ?? {},
+  ))
+    expect(
+      ReplacePersonalAiConnectionBody.safeParse(exampleValue(example)).success,
+    ).toBe(true);
 });
