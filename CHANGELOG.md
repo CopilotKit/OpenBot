@@ -62,6 +62,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **Search an organization's members.** `listOrganizationMembers` takes `search`, which narrows the
   list to the members whose name or address starts with it or holds it, ignoring case, best
   matches first. Only that organization's current members are ever listed.
+- **TrustedRouter as an AI connection, and the AI provider in answers can gain values.**
+  `PUT /api/v2/organizations/{organizationId}/ai-connection` (`replaceAiConnection`) takes
+  `provider: trustedrouter` with `login: endpoint`, an address and a key, like `unbiased`. In
+  answers, `provider` is now declared open (`x-extensible-enum`, `AiConnectionProviderAnswer`), so
+  a script that reads it should show a provider it doesn't know by its id rather than fail. A
+  request still names one of the closed `AiConnectionProvider` list.
 - New optional fields: `organizationId` on a conversation event and on a Recorder connection, and
   `hostedSignIn` on `deployment`, true where people sign in through OpenBot by CopilotKit's own
   sign-in, starting at `/api/auth/hosted/sign-in`.
