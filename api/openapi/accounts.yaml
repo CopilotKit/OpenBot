@@ -110,6 +110,8 @@ paths:
         not their own away from administrator, and not the role of somebody
         the deployment's configuration names as an administrator. Asking for
         the role a person already has changes nothing and records nothing.
+        role is deprecated: change a member's role with
+        updateOrganizationMember instead.
       security:
         - webSession: []
         - appOAuth: [people:write]
@@ -609,8 +611,9 @@ paths:
       operationId: createApiKey
       summary: Make an API key
       description: >-
-        Make an API key that acts as the person, in every organization they
-        are a member of, on the API. The key itself is in this answer and never again:
+        Make an API key that acts as the person on the API, in this
+        organization only: the one it was made in. In any other organization
+        it is refused as if the organization did not exist. The key itself is in this answer and never again:
         OpenBot keeps only a hash of it. Only the person themselves may make
         one, signed in to OpenBot: a key can never make another key, and
         neither can an app's sign-in. A key ends when it expires, when it is
@@ -992,8 +995,13 @@ paths:
         by email domain: a company's own SAML or OIDC provider, which signs in
         everybody at its domain. Every administrator sees every provider,
         whoever registered it. Never a client secret or a signing
-        certificate. Only an administrator may list them. A missing cursor
-        starts at the first page and nextCursor null ends the list.
+        certificate. Where this OpenBot may keep more than one organization,
+        the list in any organization but `default` also holds the providers
+        registered for the whole OpenBot, marked deployment: they count for
+        this organization's Require SSO only while it has no provider of its
+        own, and can't be removed here. Only an
+        administrator may list them. A missing cursor starts at the first
+        page and nextCursor null ends the list.
       security:
         - webSession: []
         - appOAuth: [identity-providers:read]
@@ -1037,6 +1045,9 @@ paths:
         and a client. Only an administrator may register one, signed in to
         OpenBot rather than with a key or an app's sign-in. The audit trail
         records who registered it.
+        Where people sign in with their OpenBot by CopilotKit account
+        (hostedSignIn in getDeployment), no organization registers a provider
+        of its own: this answers 409 with the code HOSTED_SIGN_IN_ONLY.
       security:
         - webSession: []
       parameters:
@@ -1100,7 +1111,12 @@ paths:
       description: >-
         Remove an identity provider, whoever registered it, so nobody signs in
         through it again. Only an administrator may remove one. A provider
-        already removed is not found.
+        registered for the whole OpenBot (deployment) is removed only where it
+        was registered: in any other organization it is refused with 403. A
+        provider already removed is not found.
+        Where people sign in with their OpenBot by CopilotKit account
+        (hostedSignIn in getDeployment), this answers 409 with the code
+        HOSTED_SIGN_IN_ONLY and removes nothing.
       security:
         - webSession: []
         - appOAuth: [identity-providers:write]
@@ -1115,13 +1131,142 @@ paths:
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
         '403':
-          $ref: './common.yaml#/components/responses/AdminOnly'
+          $ref: '#/components/responses/IdentityProviderNotRemovable'
         '404':
           $ref: '#/components/responses/IdentityProviderNotFound'
         '409':
-          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/IdentityProviderRemovalConflict'
         '500':
           $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/company-sign-in:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [People]
+      operationId: getCompanySignIn
+      summary: Read whether a person must use their company sign-in here
+      description: >-
+        Return whether this organization requires its members to sign in
+        through their company's identity provider, whether the person has,
+        and the providers they can use for it. Any member may read their own,
+        as me or by their own id. It answers even while the organization
+        holds them out for not having signed in that way, when every other
+        request they make in it is refused with SSO_REQUIRED. To use a
+        provider, they sign in through it by its id (POST
+        /api/auth/sign-in/sso with providerId) in a browser where they are
+        signed in, or from an app through createCompanySignInTicket.
+        Where people sign in with their OpenBot by CopilotKit account
+        (hostedSignIn in getDeployment), no organization requires it:
+        required is false and no providers are listed.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [people:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: Whether the person must use their company sign-in here.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanySignIn'
+              examples:
+                required:
+                  $ref: '#/components/examples/CompanySignInExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/OrganizationNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/company-sign-in/tickets:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [People]
+      operationId: createCompanySignInTicket
+      summary: Get a ticket to link a company account from an app
+      description: >-
+        Return an address for a browser to link the person's company account
+        at one of the organization's identity providers, for an app that has
+        no browser session to carry, such as the phone. The app opens it in
+        the system browser, and the person signs in through the provider
+        there. Sent with returnTo app, the browser goes back to the phone app
+        once the account is linked. The address carries a ticket, never the app's own sign-in. The
+        ticket is the person's, for this organization and this provider,
+        lasts two minutes, and opens once. Signing in through the provider
+        then links the company account as a signed-in browser's sign-in does:
+        the provider must give the person's own email address. Only the
+        person themselves may ask, as me or by their own id, signed in to
+        OpenBot or its app, never with an API key. It answers while the
+        organization holds them out for not having signed in that way.
+        providerId is one of the providers getCompanySignIn lists. Because
+        the answer is a credential shown once, it is not kept: a retry with
+        the same Idempotency-Key is refused as a conflict, so ask again with
+        a new key.
+        Where people sign in with their OpenBot by CopilotKit account
+        (hostedSignIn in getDeployment), there is no company account to link:
+        this answers 409 with the code HOSTED_SIGN_IN_ONLY.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCompanySignInTicketRequest'
+            examples:
+              okta:
+                value:
+                  providerId: acme-okta
+              fromThePhone:
+                value:
+                  providerId: acme-okta
+                  returnTo: app
+      responses:
+        '201':
+          description: The address to open in the system browser, shown this once.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanySignInTicket'
+              examples:
+                ticket:
+                  $ref: '#/components/examples/CompanySignInTicketExample'
+        '400':
+          $ref: '#/components/responses/InvalidCompanySignInTicket'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CompanySignInTicketForbidden'
+        '404':
+          $ref: '#/components/responses/CompanySignInProviderNotFound'
+        '409':
+          $ref: '#/components/responses/CompanySignInTicketConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/SignInUnavailable'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
 components:
@@ -1306,6 +1451,13 @@ components:
             Only the person themselves may change it.
         role:
           $ref: '#/components/schemas/AssignableRole'
+          deprecated: true
+          x-deprecation-date: 2026-11-19
+          x-sunset: 2028-05-19
+          description: >-
+            Deprecated. Change a member's role with updateOrganizationMember
+            (PATCH /api/v2/organizations/{organizationId}/members/{personId})
+            instead.
     AdvanceOnboardingRequest:
       type: object
       additionalProperties: false
@@ -1456,6 +1608,12 @@ components:
           type: [string, 'null']
           format: date-time
           description: When it last signed a request. Null if never.
+        organizationId:
+          type: [string, 'null']
+          description: >-
+            The organization this key acts in: the one it was made in. Null
+            for a key made before keys were bound to an organization, which
+            acts in `default`. Absent from an older server.
     ApiKeyPage:
       type: object
       required: [apiKeys, nextCursor]
@@ -1689,6 +1847,83 @@ components:
           description: >-
             The id of the person who registered it, while they still have an
             account here. Null once they are gone; the provider stays.
+        deployment:
+          type: boolean
+          description: >-
+            True for a provider registered for the whole OpenBot, listed in
+            another organization: it counts for that organization's Require
+            SSO only while the organization has no provider of its own, and
+            can't be removed from it. False or absent for the organization's
+            own.
+    CreateCompanySignInTicketRequest:
+      type: object
+      additionalProperties: false
+      required: [providerId]
+      properties:
+        providerId:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: The identity provider to sign in through, one getCompanySignIn lists.
+        returnTo:
+          type: string
+          enum: [app]
+          description: >-
+            app when the phone app asks: once the company account is linked,
+            the browser is sent back to the app at
+            openbotmobile://company-sign-in/linked, which ends its sign-in
+            session. Without it the browser stays on a page saying the
+            account is linked. Nothing else is a place to go back to.
+    CompanySignInTicket:
+      type: object
+      required: [url, expiresAt]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: >-
+            The address to open in the system browser. It carries the ticket,
+            a credential shown this once.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the ticket stops opening.
+    CompanySignIn:
+      type: object
+      description: >-
+        Whether a person must sign in through their company's identity
+        provider to work in this organization, and how they can.
+      required: [required, met, providers]
+      properties:
+        required:
+          type: boolean
+          description: >-
+            Whether this organization requires its members to sign in through
+            an identity provider.
+        met:
+          type: boolean
+          description: >-
+            Whether the person has: they signed in through one of providers,
+            or with the same identity at the same issuer another way, or they
+            are the admin who runs this OpenBot. While required is true and
+            met is false, the organization holds them out.
+        providers:
+          type: array
+          description: >-
+            The identity providers that count for this organization: its own,
+            or, where it has none and this OpenBot may keep more than one
+            organization, those registered for the whole OpenBot. Empty when
+            there are none.
+          items:
+            type: object
+            required: [id, domain]
+            properties:
+              id:
+                type: string
+                description: The provider's id, which signing in through it takes.
+              domain:
+                type: string
+                description: The email domain it signs in.
     IdentityProviderPage:
       type: object
       required: [identityProviders, nextCursor]
@@ -1988,6 +2223,38 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    IdentityProviderNotRemovable:
+      description: >-
+        The caller is not an administrator of the organization, or holds no
+        role in it. Or the provider was registered for the whole OpenBot, so
+        it can't be removed from this organization.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notAdmin:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only an admin can do this.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            deployment:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: This identity provider is set up for all of OpenBot, so it can't be removed here. Ask the admin who runs OpenBot.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     IdentityProviderNotFound:
       description: No identity provider has that id, it was removed, or the organization does not exist.
       content:
@@ -2006,10 +2273,44 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    IdentityProviderRemovalConflict:
+      description: >-
+        The Idempotency-Key was used for a different request, or people sign
+        in here with their OpenBot by CopilotKit account, so no organization
+        changes a provider of its own (HOSTED_SIGN_IN_ONLY).
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     IdentityProviderConflict:
       description: >-
-        A provider with that id is registered already, or the Idempotency-Key
-        was used for a different request.
+        A provider with that id is registered already, the Idempotency-Key
+        was used for a different request, or people sign in here with
+        their OpenBot by CopilotKit account, so no organization registers
+        a provider of its own (HOSTED_SIGN_IN_ONLY).
       content:
         application/problem+json:
           schema:
@@ -2022,6 +2323,17 @@ components:
                 status: 409
                 detail: An identity provider with that name is registered already. Choose another name.
                 code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
                 category: conflict
                 retryable: false
                 requestId: req_example
@@ -2044,6 +2356,119 @@ components:
                 detail: This OpenBot signs nobody in, so it has no API keys.
                 code: SIGN_IN_UNAVAILABLE
                 category: dependency
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    InvalidCompanySignInTicket:
+      description: No providerId was sent, or the body or the Idempotency-Key is malformed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            noProvider:
+              value:
+                type: https://open.bot/errors/validation-error
+                title: Request validation failed.
+                status: 400
+                detail: Name the identity provider to sign in through, as providerId.
+                code: VALIDATION_ERROR
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CompanySignInTicketForbidden:
+      description: >-
+        The ticket is for somebody else, or the request is signed in with an
+        API key, which never links a company account.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            someoneElse:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Only they can link their company account.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            apiKey:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: Link your company account from OpenBot or its app, not with an API key.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CompanySignInProviderNotFound:
+      description: >-
+        The organization does not exist or the caller is not in it, or no
+        identity provider by that id counts for it.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            organization:
+              value:
+                type: https://open.bot/errors/organization-not-found
+                title: Organization not found.
+                status: 404
+                detail: Couldn't find that organization.
+                code: ORGANIZATION_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            provider:
+              value:
+                type: https://open.bot/errors/identity-provider-not-found
+                title: Identity provider not found.
+                status: 404
+                detail: This organization has no such identity provider for signing in.
+                code: IDENTITY_PROVIDER_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    CompanySignInTicketConflict:
+      description: >-
+        The Idempotency-Key was used already. A ticket is a credential shown
+        once, so its answer is never given again: ask with a new key. Or
+        people sign in here with their OpenBot by CopilotKit account, so
+        there is no company account to link (HOSTED_SIGN_IN_ONLY).
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used already. Ask again with a new one.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
+                category: conflict
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
@@ -2155,6 +2580,7 @@ components:
             createdAt: '2026-11-14T09:00:00.000Z'
             expiresAt: '2027-02-12T09:00:00.000Z'
             lastUsedAt: '2026-11-14T09:05:12.000Z'
+            organizationId: Jq3xT9mLw2Vb8RnC5sYd0fKe
         nextCursor: null
     CreatedApiKeyExample:
       summary: A key, made.
@@ -2166,6 +2592,7 @@ components:
           createdAt: '2026-11-14T09:00:00.000Z'
           expiresAt: '2027-02-12T09:00:00.000Z'
           lastUsedAt: null
+          organizationId: Jq3xT9mLw2Vb8RnC5sYd0fKe
         key: obk_XyR2f8Lq0mVt5WcN1pZa7KdJ3hUe9sBg
     SessionPageLast:
       summary: Signed in on a laptop and a phone.
@@ -2225,7 +2652,7 @@ components:
         provider: github
         authorizationUrl: https://github.com/login/oauth/authorize?client_id=Iv23liExample&redirect_uri=https%3A%2F%2Fopenbot.acme.com%2Fapi%2Fidentity%2Fgithub%2Fcallback&state=sealed
     IdentityProviderPageLast:
-      summary: One provider, on one page.
+      summary: The organization's own provider, and one registered for the whole OpenBot.
       value:
         identityProviders:
           - id: acme-okta
@@ -2233,7 +2660,29 @@ components:
             domain: acme.com
             protocol: saml
             registeredBy: 8kq2m4x7p1rvz3a9c5d0
+            deployment: false
+          - id: example-entra
+            issuer: https://login.microsoftonline.com/0d1c2b3a-4f5e-6d7c-8b9a-0f1e2d3c4b5a/v2.0
+            domain: example.com
+            protocol: oidc
+            registeredBy: null
+            deployment: true
         nextCursor: null
+    CompanySignInTicketExample:
+      summary: An address the phone opens in the system browser.
+      value:
+        url: https://openbot.acme.com/api/auth/company-sign-in/link?ticket=cst_EXAMPLEEXAMPLEEXAMPLEEXAMPLE
+        expiresAt: '2026-11-20T06:02:00.000Z'
+    CompanySignInExample:
+      summary: An organization that requires its company sign-in, which the caller hasn't used yet.
+      value:
+        required: true
+        met: false
+        providers:
+          - id: acme-okta
+            domain: acme.com
+          - id: example-entra
+            domain: example.com
     IdentityProviderExample:
       summary: A SAML provider, registered.
       value:

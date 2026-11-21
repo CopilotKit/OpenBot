@@ -15,6 +15,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useId, useState } from "react";
 import type { ZodType } from "zod";
 import { CallbackTokenPanel } from "@/components/agents/callback-token-panel";
+import { DefaultModelSection } from "@/components/bot-profile/default-model";
 import { BusinessComputerLink } from "@/components/edition/team-features-dialog";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -212,6 +213,18 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
         agent={agent}
         onEditEndpoint={() => setEditing("endpoint")}
       />
+      {agent.defaultModel !== undefined ? (
+        <DefaultModelSection
+          agent={agent}
+          onSave={(defaultModel) =>
+            update.mutateAsync({
+              agentId: agent.id,
+              input: { ...profileUpdateInput(agent, {}), defaultModel },
+            })
+          }
+          saving={update.isPending}
+        />
+      ) : null}
       {open ? (
         <EditTextDialog
           label={open.label}

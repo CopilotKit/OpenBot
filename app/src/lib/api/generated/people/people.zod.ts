@@ -258,7 +258,7 @@ export const GetPersonResponse = zod.object({
 });
 
 /**
- * Change what is sent and leave the rest. A person changes their own name, and nobody else's. An administrator changes anybody's role, but not their own away from administrator, and not the role of somebody the deployment's configuration names as an administrator. Asking for the role a person already has changes nothing and records nothing.
+ * Change what is sent and leave the rest. A person changes their own name, and nobody else's. An administrator changes anybody's role, but not their own away from administrator, and not the role of somebody the deployment's configuration names as an administrator. Asking for the role a person already has changes nothing and records nothing. role is deprecated: change a member's role with updateOrganizationMember instead.
  * @summary Change a person
  */
 
@@ -313,7 +313,9 @@ export const UpdatePersonBody = zod
     role: zod
       .enum(["admin", "member"])
       .optional()
-      .describe("A role an admin can give a person."),
+      .describe(
+        "Deprecated. Change a member's role with updateOrganizationMember (PATCH /api/v2/organizations/{organizationId}/members/{personId}) instead.",
+      ),
   })
   .describe("The changes to make. At least one.");
 
@@ -1149,3 +1151,125 @@ export const UpdatePreferencesResponse = zod
   .describe(
     "How a person set OpenBot up for themselves, on every device they sign in from.",
   );
+
+/**
+ * Return whether this organization requires its members to sign in through their company's identity provider, whether the person has, and the providers they can use for it. Any member may read their own, as me or by their own id. It answers even while the organization holds them out for not having signed in that way, when every other request they make in it is refused with SSO_REQUIRED. To use a provider, they sign in through it by its id (POST /api/auth/sign-in/sso with providerId) in a browser where they are signed in, or from an app through createCompanySignInTicket. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), no organization requires it: required is false and no providers are listed.
+ * @summary Read whether a person must use their company sign-in here
+ */
+
+export const getCompanySignInPathPersonIdMax = 200;
+
+export const getCompanySignInPathPersonIdRegExp = new RegExp("\\S");
+
+export const GetCompanySignInParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  personId: zod
+    .string()
+    .min(1)
+    .max(getCompanySignInPathPersonIdMax)
+    .regex(getCompanySignInPathPersonIdRegExp)
+    .describe(
+      "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
+    ),
+});
+
+export const GetCompanySignInResponse = zod
+  .object({
+    required: zod
+      .boolean()
+      .describe(
+        "Whether this organization requires its members to sign in through an identity provider.",
+      ),
+    met: zod
+      .boolean()
+      .describe(
+        "Whether the person has: they signed in through one of providers, or with the same identity at the same issuer another way, or they are the admin who runs this OpenBot. While required is true and met is false, the organization holds them out.",
+      ),
+    providers: zod
+      .array(
+        zod.object({
+          id: zod
+            .string()
+            .describe("The provider's id, which signing in through it takes."),
+          domain: zod.string().describe("The email domain it signs in."),
+        }),
+      )
+      .describe(
+        "The identity providers that count for this organization: its own, or, where it has none and this OpenBot may keep more than one organization, those registered for the whole OpenBot. Empty when there are none.",
+      ),
+  })
+  .describe(
+    "Whether a person must sign in through their company's identity provider to work in this organization, and how they can.",
+  );
+
+/**
+ * Return an address for a browser to link the person's company account at one of the organization's identity providers, for an app that has no browser session to carry, such as the phone. The app opens it in the system browser, and the person signs in through the provider there. Sent with returnTo app, the browser goes back to the phone app once the account is linked. The address carries a ticket, never the app's own sign-in. The ticket is the person's, for this organization and this provider, lasts two minutes, and opens once. Signing in through the provider then links the company account as a signed-in browser's sign-in does: the provider must give the person's own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), there is no company account to link: this answers 409 with the code HOSTED_SIGN_IN_ONLY.
+ * @summary Get a ticket to link a company account from an app
+ */
+
+export const createCompanySignInTicketPathPersonIdMax = 200;
+
+export const createCompanySignInTicketPathPersonIdRegExp = new RegExp("\\S");
+
+export const CreateCompanySignInTicketParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  personId: zod
+    .string()
+    .min(1)
+    .max(createCompanySignInTicketPathPersonIdMax)
+    .regex(createCompanySignInTicketPathPersonIdRegExp)
+    .describe(
+      "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
+    ),
+});
+
+export const createCompanySignInTicketHeaderIdempotencyKeyMax = 128;
+
+export const CreateCompanySignInTicketHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(createCompanySignInTicketHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const createCompanySignInTicketBodyProviderIdMax = 256;
+
+export const CreateCompanySignInTicketBody = zod.object({
+  providerId: zod
+    .string()
+    .min(1)
+    .max(createCompanySignInTicketBodyProviderIdMax)
+    .describe(
+      "The identity provider to sign in through, one getCompanySignIn lists.",
+    ),
+  returnTo: zod
+    .enum(["app"])
+    .optional()
+    .describe(
+      "app when the phone app asks: once the company account is linked, the browser is sent back to the app at openbotmobile://company-sign-in/linked, which ends its sign-in session. Without it the browser stays on a page saying the account is linked. Nothing else is a place to go back to.",
+    ),
+});
+
+export const CreateCompanySignInTicketResponse = zod.object({
+  url: zod
+    .url()
+    .describe(
+      "The address to open in the system browser. It carries the ticket, a credential shown this once.",
+    ),
+  expiresAt: zod.iso
+    .datetime({ offset: true })
+    .describe("When the ticket stops opening."),
+});

@@ -60,9 +60,9 @@ type Window = { width: number; height: number };
 
 /**
  * Who is looking: an admin of the organization, a maintainer of Sales who is not an admin, one of
- * its members who is neither, or an admin with no teams yet.
+ * its members who is neither, an admin with no teams yet, or the one person of a personal OpenBot.
  */
-type Persona = "admin" | "maintainer" | "member" | "no-teams";
+type Persona = "admin" | "maintainer" | "member" | "no-teams" | "personal";
 
 const person = (id: string, name: string, email: string) => ({
   id,
@@ -106,7 +106,7 @@ const signedIn = (persona: Persona) =>
 
 /** The organization's teams, each with the server's verdicts on what this person may do to it. */
 function teamsFor(persona: Persona): Team[] {
-  if (persona === "no-teams") return [];
+  if (persona === "no-teams" || persona === "personal") return [];
   const admin = persona === "admin";
   // An admin manages, moves and deletes every team; anybody else only manages one they maintain.
   const verdicts = { canManage: admin, canMove: admin, canDelete: admin };
@@ -186,7 +186,11 @@ const PUBLISHED: TeamBot = teamBotOf("expenses", "Expenses", {
 });
 
 /** What the API answers for one read, or undefined for an address these screens never ask. */
-function answer(path: string, persona: Persona): unknown {
+function answer(
+  path: string,
+  persona: Persona,
+  query = new URLSearchParams(),
+): unknown {
   const me = signedIn(persona);
   const admin = me === DANA;
   const teams = teamsFor(persona);
@@ -195,7 +199,7 @@ function answer(path: string, persona: Persona): unknown {
       generativeUi: true,
       selfHostBanner: false,
       localEvaluation: false,
-      edition: "team",
+      edition: persona === "personal" ? "personal" : "team",
       authProviders: [],
       ssoConfigured: false,
       ssoRequired: false,
@@ -212,9 +216,28 @@ function answer(path: string, persona: Persona): unknown {
       ),
       nextCursor: null,
     };
-  if (path === `${ORGANIZATION}/members`)
+  if (path === `${ORGANIZATION}/members`) {
+    // The server's search: a name, a word of it or an address starting with it first, then any
+    // that hold it, ignoring case.
+    const typed = query.get("search")?.trim().toLowerCase() ?? "";
+    const rank = (one: (typeof PEOPLE)[number]) => {
+      const name = one.name.toLowerCase();
+      const email = one.email.toLowerCase();
+      if (
+        name.startsWith(typed) ||
+        name.includes(` ${typed}`) ||
+        email.startsWith(typed)
+      )
+        return 0;
+      return name.includes(typed) || email.includes(typed) ? 1 : 2;
+    };
+    const found = typed
+      ? PEOPLE.filter((one) => rank(one) < 2).sort(
+          (a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name),
+        )
+      : PEOPLE;
     return {
-      members: PEOPLE.map(
+      members: found.map(
         (one): OrganizationMember => ({
           id: one.id,
           email: one.email,
@@ -228,6 +251,7 @@ function answer(path: string, persona: Persona): unknown {
       ),
       nextCursor: null,
     };
+  }
   if (path === `${ORGANIZATION}/teams`)
     return { teams, canCreate: admin, nextCursor: null };
   const one = /\/teams\/([^/]+)(\/members)?$/.exec(path);
@@ -474,12 +498,107 @@ const SCREENS: Screen[] = [
     path: "/teams/team_finance",
     ready: (page) => page.getByText("Tom Becker").waitFor(),
   },
+  // Adding people: the box as it opens, what typing finds (with the long name, and people in the
+  // team already), the best match completed in the box, nobody found, and somebody just added.
   {
     name: "add-person-dialog",
     path: "/teams/team_sales",
     ready: async (page) => {
       await page.getByRole("button", { name: "Add person" }).click();
-      await page.getByRole("button", { name: "Add Tom Becker" }).waitFor();
+      await page.getByRole("combobox", { name: "Name or email" }).waitFor();
+    },
+  },
+  {
+    name: "add-person-dialog-results",
+    path: "/teams/team_sales",
+    ready: async (page) => {
+      await page.getByRole("button", { name: "Add person" }).click();
+      await page.getByRole("combobox", { name: "Name or email" }).fill("a");
+      await page.getByRole("option", { name: /Tom Becker/ }).waitFor();
+    },
+  },
+  {
+    name: "add-person-dialog-completion",
+    path: "/teams/team_sales",
+    ready: async (page) => {
+      await page.getByRole("button", { name: "Add person" }).click();
+      await page
+        .getByRole("combobox", { name: "Name or email" })
+        .pressSequentially("to");
+      await page.getByRole("option", { name: /Tom Becker/ }).waitFor();
+      await page
+        .getByRole("combobox", { name: "Name or email" })
+        .and(page.locator("[value='Tom Becker']"))
+        .waitFor();
+    },
+  },
+  // Tab takes the completion in the browser's own key handling: the caret goes to the end, and a
+  // letter typed then is added after the name, not put in place of what was completed.
+  {
+    name: "add-person-dialog-tab-taken",
+    path: "/teams/team_sales",
+    ready: async (page) => {
+      await page.getByRole("button", { name: "Add person" }).click();
+      const box = page.getByRole("combobox", { name: "Name or email" });
+      await box.pressSequentially("to");
+      await box.and(page.locator("[value='Tom Becker']")).waitFor();
+      await box.press("Tab");
+      // By its label: the team page behind the dialog has role menus that are comboboxes too.
+      await page.waitForFunction(() => {
+        const input = document.querySelector<HTMLInputElement>(
+          "input[aria-label='Name or email']",
+        );
+        return (
+          input?.value === "Tom Becker" &&
+          input.selectionStart === 10 &&
+          input.selectionEnd === 10 &&
+          document.activeElement === input
+        );
+      });
+      await box.press("x");
+      await page.waitForFunction(
+        () =>
+          document.querySelector<HTMLInputElement>(
+            "input[aria-label='Name or email']",
+          )?.value === "Tom Beckerx",
+      );
+    },
+  },
+  {
+    name: "add-person-dialog-no-match",
+    path: "/teams/team_sales",
+    ready: async (page) => {
+      await page.getByRole("button", { name: "Add person" }).click();
+      await page.getByRole("combobox", { name: "Name or email" }).fill("zzz");
+      await page.getByText(/^Nobody in this organization matches/).waitFor();
+    },
+  },
+  // Escape closes the list and leaves the dialog open, in a real browser's own key handling.
+  {
+    name: "add-person-dialog-escape",
+    path: "/teams/team_sales",
+    ready: async (page) => {
+      await page.getByRole("button", { name: "Add person" }).click();
+      const box = page.getByRole("combobox", { name: "Name or email" });
+      await box.pressSequentially("to");
+      await page.getByRole("option", { name: /Tom Becker/ }).waitFor();
+      await box.press("Escape");
+      await page
+        .locator("[role=combobox][aria-expanded=false][value=to]")
+        .waitFor();
+      await page.getByRole("dialog", { name: "Add people to Sales" }).waitFor();
+    },
+  },
+  {
+    name: "add-person-dialog-added",
+    path: "/teams/team_sales",
+    ready: async (page) => {
+      await page.getByRole("button", { name: "Add person" }).click();
+      const box = page.getByRole("combobox", { name: "Name or email" });
+      await box.pressSequentially("to");
+      await page.getByRole("option", { name: /Tom Becker/ }).waitFor();
+      await box.press("Enter");
+      await page.getByRole("region", { name: "Added to Sales" }).waitFor();
     },
   },
   {
@@ -497,6 +616,32 @@ const SCREENS: Screen[] = [
         .click();
       await page.getByRole("combobox", { name: "Assign to" }).waitFor();
     },
+  },
+  // The same team screens as Admin draws them, in its frame, for an admin who opened them there.
+  {
+    name: "admin-teams-list",
+    path: "/admin/teams",
+    everywhere: true,
+    ready: (page) => page.getByRole("link", { name: /^Sales EMEA/ }).waitFor(),
+  },
+  {
+    name: "admin-team-page",
+    path: "/admin/teams/team_sales",
+    everywhere: true,
+    ready: (page) => page.getByText("Sam Ortiz").waitFor(),
+  },
+  {
+    name: "admin-new-team",
+    path: "/admin/teams/new",
+    everywhere: true,
+    ready: (page) => page.getByLabel("Parent team").waitFor(),
+  },
+  // The personal edition keeps Teams in Admin's sidebar, saying it is for a team, as People does.
+  {
+    name: "admin-teams-personal",
+    path: "/admin/teams",
+    persona: "personal",
+    ready: (page) => page.getByText("For a team", { exact: true }).waitFor(),
   },
   // Two Admin pages that were there before, to look at beside the new ones.
   {
@@ -558,7 +703,29 @@ async function open(
     if (path.startsWith("/files/") && existsSync(font))
       return route.fulfill({ path: font });
     if (path.startsWith("/api/")) {
-      const body = answer(path, persona);
+      // Adding somebody to a team: the person, in the team as a member.
+      const added = /\/teams\/[^/]+\/members\/([^/]+)$/.exec(path);
+      if (route.request().method() === "PUT" && added) {
+        const who = PEOPLE.find((one) => one.id === added[1]);
+        return who
+          ? route.fulfill({
+              json: {
+                member: {
+                  ...who,
+                  image: null,
+                  role: "member",
+                  isCaller: false,
+                  joinedAt: "2026-11-19T09:00:00.000Z",
+                },
+              },
+            })
+          : route.fulfill({ status: 404, json: { detail: "Not found." } });
+      }
+      const body = answer(
+        path,
+        persona,
+        new URL(route.request().url()).searchParams,
+      );
       return body === undefined
         ? route.fulfill({ status: 404, json: { detail: "Not found." } })
         : route.fulfill({ json: body });
@@ -768,4 +935,130 @@ describe.skipIf(!asked)("the team screens", () => {
       }, 60_000);
     }
   }
+});
+
+/** Styles what the page draws now: a click drew a page the first stylesheet was not built for. */
+async function restyle(page: Page) {
+  const classes = await page.evaluate(() =>
+    [...document.querySelectorAll("[class]")].flatMap((element) => [
+      ...element.classList,
+    ]),
+  );
+  await page.addStyleTag({ content: await stylesheet([...new Set(classes)]) });
+  await page.waitForTimeout(400);
+}
+
+/** Saves what the page shows now, when screenshots are asked for. */
+async function shoot(page: Page, name: string) {
+  if (!shots) return;
+  mkdirSync(shots, { recursive: true });
+  await page.screenshot({ path: join(shots, `${name}.png`) });
+}
+
+/** Admin's frame is drawn: its way back to the app is there. */
+const backTo = (page: Page) =>
+  page.getByRole("link", { name: "Back to app" }).waitFor();
+
+/** Admin's sidebar entry for Teams: the link inside the sidebar, not a back button on the page. */
+const sidebarTeams = (page: Page) =>
+  page.locator('[data-slot="sidebar"]').getByRole("link", { name: "Teams" });
+
+/*
+ * Teams opened from Admin stays in Admin: from People, the sidebar's Teams opens the list in
+ * Admin's frame with Teams the current entry, a team opens under it, and its back button returns
+ * there. The app's own Teams, from the menu under the person's name, is still the app's page. In
+ * a wide window, where the sidebar is beside the page rather than a sheet over it.
+ */
+describe.skipIf(!asked)("Teams opened from Admin", () => {
+  const people = SCREENS.find((screen) => screen.name === "admin-people");
+  const skills = SCREENS.find((screen) => screen.name === "skills-page-member");
+  if (!people || !skills) throw new Error("no People or Skills screen");
+  for (const engine of engines)
+    for (const theme of THEMES) {
+      test(`stays in Admin, and the app's Teams stays in the app, in ${engine}, ${theme}`, async () => {
+        const page = await open(people, engine, theme, WIDE);
+        const tag = `${engine}-${theme}`;
+        const backToApp = page.getByRole("link", { name: "Back to app" });
+        const inAdmin = async (path: string) => {
+          expect(new URL(page.url()).pathname).toBe(path);
+          expect(await backToApp.isVisible()).toBe(true);
+          expect(await sidebarTeams(page).getAttribute("data-status")).toBe(
+            "active",
+          );
+        };
+        try {
+          await sidebarTeams(page).click();
+          await page.getByRole("link", { name: /^Sales EMEA/ }).waitFor();
+          await restyle(page);
+          await inAdmin("/admin/teams");
+          await shoot(page, `flow-admin-teams-${tag}`);
+
+          await page.getByRole("link", { name: /^Sales\b(?! EMEA)/ }).click();
+          await page.getByText("Sam Ortiz").waitFor();
+          await restyle(page);
+          await inAdmin("/admin/teams/team_sales");
+          await shoot(page, `flow-admin-team-${tag}`);
+
+          await page.getByRole("button", { name: "Teams" }).click();
+          await page.getByRole("button", { name: "New team" }).first().click();
+          await page.getByLabel("Parent team").waitFor();
+          await restyle(page);
+          await inAdmin("/admin/teams/new");
+          await shoot(page, `flow-admin-new-team-${tag}`);
+        } finally {
+          await page.close();
+        }
+
+        // The app's Teams, from the menu under the person's name: the app's frame, not Admin's.
+        const app = await open(
+          { ...skills, persona: "admin" },
+          engine,
+          theme,
+          WIDE,
+        );
+        try {
+          await app.getByRole("button", { name: /Dana Whitfield/ }).click();
+          const entry = app.getByRole("menuitem", { name: "Teams" });
+          await entry.waitFor();
+          // The menu is drawn with classes of its own, styled before it is pressed.
+          await restyle(app);
+          expect(await entry.getAttribute("href")).toBe("/teams");
+          await shoot(app, `flow-app-menu-${tag}`);
+          await entry.click();
+          await app.getByRole("link", { name: /^Sales EMEA/ }).waitFor();
+          await restyle(app);
+          expect(new URL(app.url()).pathname).toBe("/teams");
+          expect(
+            await app.getByRole("link", { name: "Back to app" }).count(),
+          ).toBe(0);
+          await shoot(app, `flow-app-teams-${tag}`);
+        } finally {
+          await app.close();
+        }
+      }, 60_000);
+
+      test(`in the personal edition, says it is for a team, inside Admin, in ${engine}, ${theme}`, async () => {
+        const page = await open(
+          { ...people, persona: "personal", ready: (one) => backTo(one) },
+          engine,
+          theme,
+          WIDE,
+        );
+        try {
+          await sidebarTeams(page).click();
+          await page.getByText("For a team", { exact: true }).waitFor();
+          await restyle(page);
+          expect(new URL(page.url()).pathname).toBe("/admin/teams");
+          expect(
+            await page.getByRole("link", { name: "Back to app" }).isVisible(),
+          ).toBe(true);
+          expect(await sidebarTeams(page).getAttribute("data-status")).toBe(
+            "active",
+          );
+          await shoot(page, `flow-admin-teams-personal-${engine}-${theme}`);
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
+    }
 });

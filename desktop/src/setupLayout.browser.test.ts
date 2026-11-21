@@ -301,14 +301,19 @@ export async function listen(name, listener) {
 
 type Window = { script: string; style: string };
 
-/** The window as the app builds it, with the native side scripted and the marks left out. */
-async function buildWindow(): Promise<Window> {
+/**
+ * The window as the app builds it, with the native side scripted and the marks left out. `env` is
+ * Vite's build-time values; none set is a build without a whitelabel support page or OpenBot Cloud.
+ */
+async function buildWindow(env: Record<string, string> = {}): Promise<Window> {
   const built = await Bun.build({
     entrypoints: [new URL("./main.tsx", import.meta.url).pathname],
     target: "browser",
     format: "esm",
-    // Vite's build-time values, none of them set, as a build without a whitelabel support page.
-    define: { "process.env.NODE_ENV": '"production"', "import.meta.env": "{}" },
+    define: {
+      "process.env.NODE_ENV": '"production"',
+      "import.meta.env": JSON.stringify(env),
+    },
     plugins: [
       {
         name: "scripted-native-side",
@@ -351,16 +356,16 @@ async function buildWindow(): Promise<Window> {
 }
 
 /** Served as the shell serves the window: its page, its script and its stylesheet. */
-async function open(page: Page, hash = "") {
+async function open(page: Page, hash = "", served: Window = built) {
   await page.route("https://openbot.test/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/main.js")
       return route.fulfill({
         contentType: "text/javascript",
-        body: built.script,
+        body: served.script,
       });
     if (path === "/main.css")
-      return route.fulfill({ contentType: "text/css", body: built.style });
+      return route.fulfill({ contentType: "text/css", body: served.style });
     if (path === "/")
       return route.fulfill({
         contentType: "text/html",
@@ -374,11 +379,14 @@ async function open(page: Page, hash = "") {
 
 let browser: Browser;
 let built: Window;
+/** The same window from a build that turns OpenBot Cloud on. */
+let cloudBuilt: Window;
 let chromium: Chromium;
 
 beforeAll(async () => {
   if (!asked) return;
   built = await buildWindow();
+  cloudBuilt = await buildWindow({ VITE_OPENBOT_CLOUD_ENABLED: "true" });
   const playwright = (await import(PLAYWRIGHT)) as {
     chromium: Chromium;
     webkit: { launch(): Promise<Browser> };
@@ -856,10 +864,15 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         viewport: { width: 1000, height: 760 },
         colorScheme: theme,
       });
+      const shots = process.env.OPENBOT_APP_SHOTS;
       try {
         await open(page);
         await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
         await page.waitForTimeout(400);
+        // A build without OpenBot Cloud (VITE_OPENBOT_CLOUD_ENABLED unset) offers no Cloud row.
+        expect(await page.getByText("OpenBot Cloud").count()).toBe(0);
+        if (shots)
+          await page.screenshot({ path: `${shots}/welcome-off-${theme}.png` });
         const shape = await page.evaluate(() => {
           const card = document.querySelector("main > .sheet") as HTMLElement;
           const group = document.querySelector(".tile-group") as HTMLElement;
@@ -913,6 +926,87 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         expect(
           await page.getByRole("button", { name: "Connect" }).count(),
         ).toBe(1);
+      } finally {
+        await page.close();
+      }
+    });
+
+    // A build with OpenBot Cloud on: three rows, and Cloud's sign-in fits as Install does.
+    test(`at 1000x760 (${theme}), a build with OpenBot Cloud on shows three rows without the card scrolling, and so does Cloud's sign-in`, async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 760 },
+        colorScheme: theme,
+      });
+      const shots = process.env.OPENBOT_APP_SHOTS;
+      try {
+        await open(page, "", cloudBuilt);
+        await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+        await page.waitForTimeout(400);
+        const shape = await page.evaluate(() => {
+          const card = document.querySelector("main > .sheet") as HTMLElement;
+          const rows = [
+            ...document.querySelectorAll("fieldset.picker.hosting > .tile"),
+          ].map((row) => row.getBoundingClientRect());
+          const business = document.querySelector(
+            ".tile.with-marks",
+          ) as HTMLElement;
+          const box = business.getBoundingClientRect();
+          const words = business
+            .querySelector(".tile-summary")
+            ?.getBoundingClientRect();
+          const marks = [...business.querySelectorAll(".cloud-mark")].map(
+            (mark) => mark.getBoundingClientRect(),
+          );
+          return {
+            overflow: card.scrollHeight - card.clientHeight,
+            // Three rows, one above the other, the same width.
+            rows:
+              rows.length === 3 &&
+              rows.every(
+                (row, at) =>
+                  row.width === rows[0]?.width &&
+                  (at === 0 || row.top >= (rows[at - 1]?.bottom ?? 0)),
+              ),
+            // The four clouds' marks inside OpenBot for Business's row, on one line, past its words.
+            marks:
+              marks.length === 4 &&
+              !!words &&
+              marks.every(
+                (mark) =>
+                  mark.top >= box.top &&
+                  mark.bottom <= box.bottom &&
+                  mark.right <= box.right &&
+                  mark.left >= words.right &&
+                  mark.top === marks[0]?.top,
+              ),
+            // Each row's name and line on one line.
+            oneLine: [
+              ...document.querySelectorAll(
+                "fieldset.picker.hosting .tile-name, fieldset.picker.hosting .tile-summary",
+              ),
+            ].every((text) => text.getBoundingClientRect().height <= 22),
+          };
+        });
+        const { overflow, ...laid } = shape;
+        expect(overflow).toBeLessThanOrEqual(0);
+        expect(laid).toEqual({ rows: true, marks: true, oneLine: true });
+        if (shots)
+          await page.screenshot({ path: `${shots}/welcome-on-${theme}.png` });
+        await page.getByText("We run it for you.").click();
+        await page
+          .getByRole("button", { name: "Sign in to OpenBot Cloud" })
+          .waitFor();
+        await page.waitForTimeout(200);
+        expect(
+          await page.evaluate(() => {
+            const card = document.querySelector("main > .sheet") as HTMLElement;
+            return card.scrollHeight - card.clientHeight;
+          }),
+        ).toBeLessThanOrEqual(0);
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/welcome-on-cloud-${theme}.png`,
+          });
       } finally {
         await page.close();
       }

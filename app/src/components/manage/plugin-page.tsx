@@ -255,8 +255,10 @@ function ConnectionStateUnreadable() {
       <ItemContent>
         <ItemTitle>Your account</ItemTitle>
         <ItemDescription role="alert">
-          Couldn't load whether you've connected an account here. Try again in a
-          moment, or check {paths.deploymentName}'s logs if it keeps happening.
+          {/* A hosted OpenBot's logs are OpenBot by CopilotKit's: its admin can't read them. */}
+          {paths.hosted
+            ? "Couldn't load whether you've connected an account here. Try again in a moment."
+            : `Couldn't load whether you've connected an account here. Try again in a moment, or check ${paths.deploymentName}'s logs if it keeps happening.`}
         </ItemDescription>
       </ItemContent>
     </Item>
@@ -791,10 +793,10 @@ export function PluginPage({
                   <ItemDescription>
                     {server.accountMode === "shared"
                       ? server.sharedOnly
-                        ? "One shared account for everyone in this organization. It signs in with this deployment's own client, so it can't be made personal."
+                        ? `One shared account for everyone in this organization. It signs in with ${paths.deploymentName}'s own client, so it can't be made personal.`
                         : "One shared account for everyone in this organization."
                       : server.sharedOnly
-                        ? "It signs in with this deployment's own client, so only a shared account can connect it."
+                        ? `It signs in with ${paths.deploymentName}'s own client, so only a shared account can connect it.`
                         : "Each person connects their own."}
                   </ItemDescription>
                 </ItemContent>
@@ -902,7 +904,7 @@ export function PluginPage({
             auth === "user-oauth"
               ? personal
                 ? `Connect your ${title} account through OpenBot. OpenBot registers an OAuth client, and your Bots see only what you can see.`
-                : "This vendor answers as whoever is asking. The deployment registers an OAuth client, and each person connects their own account. A Bot only sees what that person can see."
+                : `This vendor answers as whoever is asking. ${paths.hosted ? "OpenBot" : "The deployment"} registers an OAuth client, and each person connects their own account. A Bot only sees what that person can see.`
               : auth === "builtin"
                 ? `Built into ${paths.deploymentName}. There is no vendor to reach and no credential to keep. ${personal ? "A call runs as you." : "A call runs as whoever asked."}`
                 : auth === "brokered"
@@ -978,6 +980,7 @@ export function PluginPage({
                         provider,
                         brokeredApp,
                         brokeredAccount.kind === "fields",
+                        paths.hosted,
                       ).description
                     }
                   </ItemDescription>
@@ -1319,8 +1322,9 @@ export function PluginPage({
             <div className="mt-3 p-3">
               {server?.dynamicClient ? (
                 <p className="text-muted-foreground text-sm">
-                  {personal ? "OpenBot" : "The deployment"} registers its
-                  redirect URI itself. There is nothing to add at the vendor.
+                  {personal || paths.hosted ? "OpenBot" : "The deployment"}{" "}
+                  registers its redirect URI itself. There is nothing to add at
+                  the vendor.
                 </p>
               ) : (
                 <p className="text-muted-foreground text-sm">
@@ -1331,9 +1335,10 @@ export function PluginPage({
               )}
               {!setup.data?.redirectUri ? (
                 <p className="mt-3 text-destructive text-sm" role="alert">
-                  {atStart(paths.deploymentName)} has no public URL, so{" "}
-                  {personal ? "you can't" : "nobody can"} finish connecting. Set
-                  OPENBOT_PUBLIC_URL.
+                  {/* A hosted OpenBot's address is OpenBot by CopilotKit's to set, not its admin's. */}
+                  {paths.hosted
+                    ? "OpenBot has no public address right now, so nobody can finish connecting. Try again later."
+                    : `${atStart(paths.deploymentName)} has no public URL, so ${personal ? "you can't" : "nobody can"} finish connecting. Set OPENBOT_PUBLIC_URL.`}
                 </p>
               ) : server?.dynamicClient ? null : (
                 /* Selectable and monospaced: it is copied by hand into somebody else's console. */

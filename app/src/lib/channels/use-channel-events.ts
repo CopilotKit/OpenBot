@@ -5,14 +5,15 @@ import {
 } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { HELD_OUT_NOW, holdOut, SSO_REQUIRED_CLOSE } from "@/lib/auth/held-out";
 import { nudgeMoment } from "@/lib/notices";
 import {
   isBotReply,
   noticeChannelEvent,
 } from "@/lib/notifications/reply-notice";
+import { currentOrganizationId } from "@/lib/organizations/current";
 import { apiSocketPath, socketUrl as buildSocketUrl } from "@/lib/socket-url";
 import { type BotTask, taskKeys } from "@/lib/tasks/queries";
-import { type BotLine, botSaidOffTheList } from "./said-off-the-list";
 import {
   type AgentChannel,
   type ChannelPage,
@@ -20,6 +21,7 @@ import {
   type ChannelWork,
   channelKeys,
 } from "./queries";
+import { type BotLine, botSaidOffTheList } from "./said-off-the-list";
 
 /**
  * Keep the roster live.
@@ -62,14 +64,35 @@ export function isChannelSocketMessage(
 }
 
 /**
+ * Whether an activity event is about the organization the person is working in.
+ *
+ * A person can be in several organizations, and the socket is theirs, not one organization's. An event that names
+ * another organization (`organizationId`) is about a conversation this screen does not hold, and patching it in would
+ * put that organization's preview in this one's sidebar, or refetch for a row that will never be here. An event that
+ * names none, from a server older than this, is taken as it always was.
+ */
+function inOrganization(
+  activity: { organizationId?: unknown },
+  organization: string | undefined,
+): boolean {
+  return (
+    typeof activity.organizationId !== "string" ||
+    organization === undefined ||
+    activity.organizationId === organization
+  );
+}
+
+/**
  * Parse one socket frame into something the roster can act on, or `null` to drop it.
  *
  * Pure and exported so the drop rules are provable without a socket: unparseable
- * text, non-object JSON (`null`, numbers, strings, arrays) and activity events with
- * no string channel id are all ignored rather than crashing or refetching the roster.
+ * text, non-object JSON (`null`, numbers, strings, arrays), activity events with
+ * no string channel id, and activity events about another organization than
+ * `organization` are all ignored rather than crashing or refetching the roster.
  */
 export function parseChannelSocketMessage(
   data: unknown,
+  organization: string | undefined = currentOrganizationId(),
 ): ChannelSocketMessage | null {
   if (typeof data !== "string") return null;
   let parsed: unknown;
@@ -81,11 +104,17 @@ export function parseChannelSocketMessage(
   if (!isChannelSocketMessage(parsed)) return null;
   if (isResync(parsed)) return parsed;
   if (typeof parsed.channelId !== "string") return null;
+  if (!inOrganization(parsed, organization)) return null;
   return parsed;
 }
 
 export type ChannelActivityEvent = {
   channelId: string;
+  /**
+   * The organization the conversation is in. Absent from a server older than this, and then the event is taken
+   * whatever organization the person is working in (`inOrganization`).
+   */
+  organizationId?: string;
   lastMessage: string | null;
   lastMessageAt: string | null;
   lastMessageAgentId: string | null;
@@ -467,6 +496,112 @@ export function applyToRoster(
   if (line) botSaidOffTheList(activity.channelId, line);
 }
 
+/**
+ * Whether an event is something said in a conversation: the one kind that moves a conversation in a
+ * list ordered by recency, so the one kind that can bring it onto a Bot's first page. A name, an
+ * opening, a pin, busy and work patch a row where it is, and a deletion takes it out.
+ */
+function saidSomething(activity: ChannelActivityEvent): boolean {
+  return (
+    activity.deleted === undefined &&
+    activity.summary === undefined &&
+    activity.opening === undefined &&
+    activity.pinned === undefined &&
+    activity.busy === undefined &&
+    activity.work === undefined
+  );
+}
+
+/** Read a query again: now, or once a read already under way lands. Never cancels that read. */
+function readAgain(queryClient: QueryClient, query: Query): void {
+  if (query.state.fetchStatus === "fetching") {
+    readAgainWhenLanded(queryClient, query);
+    return;
+  }
+  void queryClient.invalidateQueries(
+    { queryKey: query.queryKey, exact: true },
+    { cancelRefetch: false },
+  );
+}
+
+/** The Bots in a conversation, as the roster holds it; undefined when the roster does not. */
+function botsInConversation(
+  queryClient: QueryClient,
+  channelId: string,
+): string[] | undefined {
+  return queryClient
+    .getQueryData<ChannelCache>(channelKeys.list())
+    ?.pages.flatMap((page) => page.channels)
+    .find((channel) => channel.id === channelId)?.agentIds;
+}
+
+/**
+ * Apply one event to every Bot's list the Bots panel has open (`channelKeys.byBot`), as
+ * {@link applyToRoster} does to the roster. A list that holds the conversation is patched in place. A
+ * list that does not is read again only for something said in the conversation, and only when its
+ * Bot is in it. Which Bots are in it is the roster's word (the event was just applied to it). When
+ * the roster does not know the conversation either, it is being read again for it, and once that
+ * read lands it says; a conversation it still does not hold, a task's thread, is on no Bot's list.
+ *
+ * Found in review: every busy, work or naming event on a conversation past a Bot's loaded rows read
+ * that Bot's list again, and a task thread's events read every open Bot's list, each read cancelling
+ * the one before (Show more's among them) and none of them ever bringing the row in.
+ */
+export function applyToBotLists(
+  queryClient: QueryClient,
+  activity: ChannelActivityEvent,
+): void {
+  const moves = saidSomething(activity);
+  const missing: { botId: string; query: Query }[] = [];
+  for (const query of queryClient
+    .getQueryCache()
+    .findAll({ queryKey: channelKeys.byBots() })) {
+    const botId = query.queryKey[2];
+    const data = query.state.data as ChannelCache | undefined;
+    if (typeof botId !== "string" || !data) continue;
+    const patched = applyChannelEvent(data, activity);
+    if (patched !== "unknown") {
+      /*
+       * A patch reorders only the page that holds the row. Past a Bot's first page (after Show
+       * more), a conversation with news could not reach the top that way, so the list is read again.
+       */
+      const holding = patched.pages.findIndex((page) =>
+        page.channels.some((channel) => channel.id === activity.channelId),
+      );
+      if (holding > 0 && moves) readAgain(queryClient, query);
+      else if (patched !== data)
+        queryClient.setQueryData(query.queryKey, patched);
+      continue;
+    }
+    if (moves) missing.push({ botId, query });
+  }
+  if (missing.length === 0) return;
+
+  const readFor = (botIds: readonly string[]) => {
+    for (const { botId, query } of missing)
+      if (botIds.includes(botId)) readAgain(queryClient, query);
+  };
+  const known = botsInConversation(queryClient, activity.channelId);
+  if (known) {
+    readFor(known);
+    return;
+  }
+  const roster = queryClient
+    .getQueryCache()
+    .find({ queryKey: channelKeys.list(), exact: true });
+  if (roster?.state.fetchStatus === "fetching") {
+    const stop = queryClient.getQueryCache().subscribe((event) => {
+      if (event.query !== roster || roster.state.fetchStatus === "fetching")
+        return;
+      stop();
+      readFor(botsInConversation(queryClient, activity.channelId) ?? []);
+    });
+    return;
+  }
+  // No roster read to wait on (nothing shows it): the Bot that spoke is in the conversation.
+  if (activity.lastMessageAgentId) readFor([activity.lastMessageAgentId]);
+}
+
 const FIRST_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
 
@@ -493,6 +628,7 @@ export function useChannelEvents() {
         // Recover events missed while the socket was disconnected.
         void queryClient.invalidateQueries({ queryKey: channelKeys.list() });
         void queryClient.invalidateQueries({ queryKey: channelKeys.details() });
+        void queryClient.invalidateQueries({ queryKey: channelKeys.byBots() });
       };
 
       socket.onmessage = (message) => {
@@ -506,6 +642,9 @@ export function useChannelEvents() {
           void queryClient.invalidateQueries({
             queryKey: channelKeys.details(),
           });
+          void queryClient.invalidateQueries({
+            queryKey: channelKeys.byBots(),
+          });
           return;
         }
 
@@ -516,6 +655,7 @@ export function useChannelEvents() {
         });
 
         applyToRoster(queryClient, activity);
+        applyToBotLists(queryClient, activity);
 
         // A Bot's reply, while OpenBot is out of sight: the notice, when the person allowed them.
         noticeChannelEvent(activity, queryClient, (channelId) => {
@@ -584,8 +724,16 @@ export function useChannelEvents() {
       };
 
       // WebSocket needs explicit reconnect handling.
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         if (stopped) return;
+        /*
+         * The organization began to hold the person out until they sign in through their company: the server ends the
+         * socket so, and would refuse it again. Not reconnected; the app gives way to the held page at once.
+         */
+        if (event.code === SSO_REQUIRED_CLOSE) {
+          holdOut(HELD_OUT_NOW);
+          return;
+        }
         retryTimer = window.setTimeout(connect, retryDelay);
         retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
       };

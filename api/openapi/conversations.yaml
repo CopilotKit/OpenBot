@@ -126,9 +126,10 @@ paths:
         first, then the most recently used. Each says what was last said in it,
         whether the caller has read it, and what a Bot is still working on
         there. With q the page holds only the conversations whose name or words
-        match, for a search of the whole list; a search page holds at most 50. A
-        missing cursor starts at the first page and nextCursor null ends the
-        list."
+        match, for a search of the whole list; a search page holds at most 50.
+        With botId it holds only the conversations that Bot takes part in, in
+        the same order. A missing cursor starts at the first page and
+        nextCursor null ends the list."
       security:
         - webSession: []
         - appOAuth:
@@ -142,6 +143,15 @@ paths:
           schema:
             type: string
             minLength: 2
+            maxLength: 200
+        - name: botId
+          in: query
+          description: Only the conversations this Bot takes part in, one-Bot
+            and group alike. A Bot the caller has no conversations with answers
+            an empty page. Cannot be combined with q.
+          schema:
+            type: string
+            minLength: 1
             maxLength: 200
         - $ref: '#/components/parameters/ConversationLimit'
         - $ref: './common.yaml#/components/parameters/Cursor'
@@ -766,6 +776,8 @@ paths:
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
+        '402':
+          $ref: './common.yaml#/components/responses/PlanRequired'
         '403':
           $ref: './common.yaml#/components/responses/Forbidden'
         '404':

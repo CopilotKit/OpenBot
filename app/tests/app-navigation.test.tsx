@@ -15,7 +15,7 @@ import {
   isRedirect,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import { cleanup, render, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { TeamFeaturesDialog } from "@/components/edition/team-features-dialog";
@@ -193,23 +193,17 @@ test.each(["user", "admin"] as const)(
   "the sidebar draws exactly the shared list for a %s",
   async (role) => {
     const { view, user } = renderSidebar(role);
-    const footer = await waitFor(() => {
-      const element = view.container.querySelector<HTMLElement>(
-        '[data-sidebar="footer"]',
-      );
-      if (!element) throw new Error("No sidebar footer");
-      return element;
-    });
-    expect(
-      links(footer).map(({ label, to }) => ({
-        label: label.replace(/\d+$/, ""),
-        to,
-      })),
-    ).toEqual(expected(role, "primary"));
-    // What a person makes and comes back to, beside Bots, in the order of the eight.
+    const footer = await view.findByRole("navigation", { name: "Sections" });
+    // Every destination in the shared list's order, after Conversations: a section with a panel
+    // (Bots) as a button that switches the panel, any other as a link to its page.
+    const names = [
+      ...footer.querySelectorAll<HTMLElement>("a[href], button"),
+    ].map((item) => item.querySelector(".sr-only")?.textContent);
+    expect(names).toEqual([
+      "Conversations",
+      ...expected(role, "primary").map((item) => item.label),
+    ]);
     expect(links(footer).map(({ to }) => to)).toEqual([
-      "/bots",
-      "/agents",
       "/routines",
       "/memory",
       "/skills",
@@ -219,7 +213,7 @@ test.each(["user", "admin"] as const)(
     const badge = within(footer).getByRole("img", {
       name: "1 thing needs you",
     });
-    expect(badge.closest("a")?.getAttribute("href")).toBe("/bots");
+    expect(badge.closest("button")?.textContent).toContain("Bots");
 
     await user.click(view.getByRole("button", { name: /Maya Chen/ }));
     const menu = await view.findByRole("menu");
@@ -234,11 +228,11 @@ test.each(["user", "admin"] as const)(
   },
 );
 
-test("the running OpenBot version sits to the right of the person's name, in one row, from /api/me", async () => {
-  const { view } = renderSidebar("user", "team", { version: "v0.3.1" });
-  const version = await view.findByText("v0.3.1");
-  const account = view.getByRole("button", { name: /Maya Chen/ });
-  expect(account.contains(version)).toBe(true);
+test("the running OpenBot version sits to the right of the person's name, in one row, from /api/me, at the top of the account menu", async () => {
+  const { view, user } = renderSidebar("user", "team", { version: "v0.3.1" });
+  await user.click(await view.findByRole("button", { name: /Maya Chen/ }));
+  const account = await view.findByRole("menu");
+  const version = await within(account).findByText("v0.3.1");
   // The name, then the version, side by side in one row: the version as wide as its words, the
   // name in the rest (account-version-layout.test.tsx measures it in a browser).
   const name = within(account).getByText("Maya Chen");
@@ -264,12 +258,13 @@ test.each([
 test("Admin is in the list for admins only", () => {
   const ids = (role: string | undefined) =>
     navigationFor(role).map((item) => item.id);
-  expect(ids("admin")).toEqual(NAVIGATION.map((item) => item.id));
+  expect(ids("admin")).toEqual(
+    NAVIGATION.filter((item) => item.id !== "agents").map((item) => item.id),
+  );
   expect(ids("user")).not.toContain("admin");
   expect(ids(undefined)).not.toContain("admin");
   expect(ids("user")).toEqual([
     "bots",
-    "agents",
     "routines",
     "memory",
     "skills",
@@ -277,6 +272,19 @@ test("Admin is in the list for admins only", () => {
     "teams",
     "settings",
   ]);
+});
+
+/*
+ * Agents are what a Bot hands work to, which most people never turn on, and the word reads as
+ * another name for a Bot. Hidden for now: not in the menu for anybody, and its page sends people
+ * home (agents-page.test.tsx). A Bot's own Agents page, where handing work out is switched on, stays.
+ */
+test("Agents is hidden from the menu in every edition, for every role", () => {
+  for (const edition of ["team", "personal"] as const)
+    for (const role of ["user", "admin", undefined])
+      expect(navigationFor(role, edition).map((item) => item.id)).not.toContain(
+        "agents",
+      );
 });
 
 test("Teams is in the menu under the person's name for everybody in a team edition, admin or not, and never in the personal edition", async () => {
@@ -365,7 +373,6 @@ test("the personal edition has Admin, and the feature list beside it", () => {
   // Routines and Skills are in the main menu, as in the team edition. Memory isn't offered.
   expect(personal.map((item) => item.id)).toEqual([
     "bots",
-    "agents",
     "routines",
     "skills",
     "connections",
@@ -376,7 +383,6 @@ test("the personal edition has Admin, and the feature list beside it", () => {
   // Admin is still for an admin only, in this edition as in the other.
   expect(navigationFor("user", "personal").map((item) => item.id)).toEqual([
     "bots",
-    "agents",
     "routines",
     "skills",
     "connections",

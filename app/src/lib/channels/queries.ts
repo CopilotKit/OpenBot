@@ -132,6 +132,10 @@ export const channelKeys = {
   /** Every channel read by id, to refetch them together. */
   details: () => ["channels", "detail"] as const,
   detail: (channelId: string) => ["channels", "detail", channelId] as const,
+  /** Every Bot's list of its conversations (the Bots panel), to patch or refetch them together. */
+  byBots: () => ["channels", "bot"] as const,
+  /** One Bot's conversations, as the Bots panel lists them under it. */
+  byBot: (botId: string) => ["channels", "bot", botId] as const,
 };
 
 /** One page of channels, and where the next one starts. */
@@ -160,6 +164,36 @@ export function channelListQueryOptions() {
           organizationId(),
           pageParam ? { cursor: pageParam as string } : undefined,
           { fallback: "Couldn't load your conversations." },
+        ),
+      ),
+    getNextPageParam: (page: ChannelPage) => page.nextCursor ?? undefined,
+    select: (data): ChannelSummary[] =>
+      data.pages.flatMap((page) => page.channels),
+  });
+}
+
+/**
+ * One Bot's conversations, newest first, `limit` at a time: the Bots panel's list under a Bot, read
+ * from the server (`botId` on listConversations) so a Bot's older conversations are there too, not
+ * only the ones the roster happens to have loaded. Group conversations are listed under each Bot.
+ */
+export function botConversationsInfiniteQueryOptions(
+  botId: string,
+  limit: number,
+) {
+  return infiniteQueryOptions({
+    queryKey: channelKeys.byBot(botId),
+    initialPageParam: "",
+    queryFn: async ({ pageParam }): Promise<ChannelPage> =>
+      channelPageOf(
+        await listConversations(
+          organizationId(),
+          {
+            botId,
+            limit,
+            ...(pageParam ? { cursor: pageParam as string } : {}),
+          },
+          { fallback: "Couldn't load this Bot's conversations." },
         ),
       ),
     getNextPageParam: (page: ChannelPage) => page.nextCursor ?? undefined,

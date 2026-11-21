@@ -406,6 +406,22 @@ function answer(method: string, url: URL): Response | undefined {
     return undefined;
   }
   if (method !== "GET") return undefined;
+  // Managed updates don't apply to this OpenBot, so Admin doesn't list them.
+  if (path === "/api/v2/organizations/default/management")
+    return Response.json(
+      {
+        type: "https://open.bot/errors/management-unavailable",
+        title: "Managed updates aren't available here.",
+        status: 404,
+        detail: "Managed updates aren't available for this OpenBot.",
+        code: "MANAGEMENT_UNAVAILABLE",
+        category: "not_found",
+        retryable: false,
+        requestId: "req_test",
+        traceId: "trace_test",
+      },
+      { status: 404 },
+    );
   if (path === DEPLOYMENT_PATH)
     return deploymentResponse({
       edition: "team",

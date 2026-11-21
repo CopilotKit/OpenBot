@@ -4,7 +4,7 @@ import {
   recorderPaths,
   type TrajectoryGrant,
 } from "@openbot/shared/recorder-api";
-import { openbotRaw } from "../shared/openbot-client";
+import { openbotRaw, SSO_REQUIRED } from "../shared/openbot-client";
 
 /** The table's verdicts for the pass stage (rows 1-23a). Every one keeps every queued event; signed-out keeps them for the
  * person who recorded them until they connect this browser again (Decision 19). */
@@ -58,6 +58,8 @@ export const PASS_HINTS: Record<string, string> = {
   UNAUTHORIZED: "Learning capture is paused: OpenBot refused the capture pass.",
   GATEWAY_NOT_ALLOWED:
     "Learning capture is off: the capture pass pointed at a backend address your organization does not allow.",
+  SSO_REQUIRED:
+    "Learning capture is paused: your organization requires signing in through your company. Use Sign in with your company below, and capture goes on once you have.",
   PROXY_AUTHENTICATION:
     "Learning capture is paused: this browser's network proxy has not let the capture pass through yet (407).",
   UNKNOWN_ANSWER:
@@ -115,6 +117,13 @@ export function classifyGrantError(
   }
   // Row 3.
   if (status === 403 && code === "FORBIDDEN") return stop("park", "FORBIDDEN");
+  /*
+   * Row 3a: the person's organization holds them out until they sign in through their company (Require SSO). Not an
+   * answer the Recorder doesn't know: held, events kept, and tried again every 5 minutes, so capture goes on once they
+   * have linked their company account. The popup's own Sign in with your company is the way in.
+   */
+  if (status === 403 && code === SSO_REQUIRED)
+    return stop("hold", "SSO_REQUIRED");
   // Row 4.
   if (status === 404 && code === "NOT_FOUND") return stop("park", "NOT_FOUND");
   // Row 4a.

@@ -91,6 +91,8 @@ export function sourceSettings(config: AgentConfig) {
     },
     insecure: source.insecure ? true : null,
     secretRef: source.pullSecret ? { name: source.pullSecret } : null,
+    // The cloud's registry, signed in to with source-controller's workload identity.
+    provider: source.provider ?? null,
     // Flux checks the chart's signature before Helm reads it.
     verify: source.verify
       ? {
@@ -272,14 +274,24 @@ export class Flux {
    * Returns the request's token, which helm-controller reports back as `lastHandledReconcileAt`
    * once it has acted on it.
    *
-   * The HelmRelease is also asked to reset its failure counts (`resetAt`, with the same token as
-   * `requestedAt`, as `flux reconcile helmrelease --reset` does). Remediation retries are 0, so
-   * after a failed install or upgrade Flux tries the same chart and values again only on a reset:
-   * without it, putting back a digest that already failed (a failed first install, once a person
-   * has fixed its cause) would leave the release failed.
-   * https://fluxcd.io/flux/components/helm/helmreleases/#resetting-remediation-retries
+   * When Flux last attempted this same digest and failed, the HelmRelease is also asked to reset
+   * its failure counts (`resetAt`, with the same token as `requestedAt`, as `flux reconcile
+   * helmrelease --reset` does). Remediation retries are 0, so after a failed install or upgrade
+   * Flux tries the same chart and values again only on a reset: without it, putting back a digest
+   * that already failed (a failed first install, once a person has fixed its cause) would leave
+   * the release failed. https://fluxcd.io/flux/components/helm/helmreleases/#resetting-remediation-retries
+   *
+   * Only then. A new digest resets the counts by itself (the chart changed), and a reset sent with
+   * it made helm-controller 1.7 run a failed upgrade a second time: right after the first attempt
+   * failed, its next pass still saw the reset as unhandled, cleared the failure and upgraded again
+   * (seen on EKS: two failed Helm revisions of the same chart, ten more minutes with the server
+   * stopped and the release's hooks run again, and the agent waiting out its own timeout).
    */
   async pin(digest: string) {
+    const before = await this.helmRelease();
+    const failedOnThisDigest =
+      before?.status?.lastAttemptedRevisionDigest === digest &&
+      ready(before)?.status === "False";
     await this.kube.patch(
       this.namespace,
       OCI_REPOSITORY,
@@ -300,7 +312,7 @@ export class Flux {
       HELM_RELEASE,
       this.config.product.helmRelease,
       `reconcile.fluxcd.io/requestedAt=${token}`,
-      `reconcile.fluxcd.io/resetAt=${token}`,
+      ...(failedOnThisDigest ? [`reconcile.fluxcd.io/resetAt=${token}`] : []),
     );
     return token;
   }

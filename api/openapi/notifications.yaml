@@ -15,7 +15,8 @@ paths:
       summary: List a person's devices
       description: >-
         Return one page of the phones a person registered for push
-        notifications, the first registered first. Never a device's push
+        notifications in this organization, the first registered first.
+        Never a device's push
         token. Only the person themselves may list them; there is no
         administrator view. A missing cursor starts at the first page and
         nextCursor null ends the list.
@@ -62,7 +63,11 @@ paths:
       summary: Register a device for push notifications
       description: >-
         Register one of the person's phones for push notifications under the
-        id the app made for it, or replace what that id holds. The app sends
+        id the app made for it, or replace what that id holds. A device is
+        registered in one organization, the one the address names, and gets
+        push notifications only from the person's Bots there. A person in
+        several organizations registers the phone in each one they want
+        notifications from, under the same id. The app sends
         its current push token every time it starts, so a token that changed
         replaces the old one and the device is never registered twice.
         Answers 200 whether the id was new or held a registration already.
@@ -120,8 +125,10 @@ paths:
       operationId: deleteDevice
       summary: Stop push notifications to a device
       description: >-
-        Stop sending push notifications to one of the person's phones. The
-        app does this when the person signs out on it, so another account
+        Stop sending push notifications to one of the person's phones from
+        this organization. Its registrations in the person's other
+        organizations stay. The app does this in each organization when the
+        person signs out on it, so another account
         can register the phone after them. Only the person themselves may
         remove their devices. A device already removed is not found, which a
         client can read as done.
@@ -736,7 +743,8 @@ components:
       type: object
       description: >-
         A phone that gets push notifications for the person, from every one
-        of their Bots. Never its push token.
+        of their Bots in the organization it is registered in. Never its
+        push token.
       required: [id, platform, createdAt]
       properties:
         id:

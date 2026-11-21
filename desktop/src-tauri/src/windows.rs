@@ -675,6 +675,16 @@ fn blocker_with(
         }
     };
 
+    // Whether the current WSL (the one with WslService) is installed, once a probe has said.
+    let mut modern_wsl = None;
+    let modern_wsl_service = "the WSL service (powershell)";
+    let wsl_service_args = [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        modern_wsl_probe_command(),
+    ];
+
     let wsl_feature = "the WSL feature state (powershell)";
     let enabled = ask(
         wsl_feature,
@@ -692,19 +702,10 @@ fn blocker_with(
         // Modern WSL2 uses WslService and does not require the legacy WSL1 optional component.
         // https://learn.microsoft.com/en-us/windows/wsl/faq#was-lxssmanager-replaced-by-wslservice
         // Service presence only establishes installation; VMP and kernel health are checked below.
-        let modern_wsl = "the WSL service (powershell)";
-        let installed = ask(
-            modern_wsl,
-            "powershell",
-            &[
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                modern_wsl_probe_command(),
-            ],
-        )?
-        .map(|said| probe_bool(modern_wsl, &said))
-        .transpose()?;
+        let installed = ask(modern_wsl_service, "powershell", &wsl_service_args)?
+            .map(|said| probe_bool(modern_wsl_service, &said))
+            .transpose()?;
+        modern_wsl = installed;
         if installed == Some(false) {
             return Ok(Some(for_this_account(Blocker::WslAbsent)));
         }
@@ -747,17 +748,41 @@ fn blocker_with(
     }
 
     // Inbox WSL predates --version. A positively inspected kernel file is enough, so do not run
-    // an unsupported command in that case. An executed probe failing is never "no kernel".
+    // an unsupported command in that case. An executed probe failing is never "no kernel" on its
+    // own; only with WslService absent too (below).
     if kernel_file_exists()? {
         return Ok(None);
     }
-    let Some(version_output) = ask(
+    let version_output = match ask(
         "the WSL version (wsl.exe --version)",
         "wsl.exe",
         &["--version"],
-    )?
-    else {
-        return Ok(None);
+    ) {
+        Ok(Some(said)) => said,
+        Ok(None) => return Ok(None),
+        /*
+         * The inbox `wsl.exe` that ships with Windows does not know `--version` (Microsoft:
+         * "wsl --version" fails on the in-Windows WSL) and exits with an error. That failure,
+         * on a machine with no kernel file and without the current WSL's WslService (which
+         * replaced the inbox LxssManager), is the inbox WSL with no kernel: `wsl --update`
+         * installs the current WSL and its kernel. Seen on Windows with only the inbox WSL,
+         * where OpenBot 1.1.0 stopped on "could not check the WSL version" instead.
+         * With WslService present, or unknown, the failure stays the detection error it was.
+         */
+        Err(problem) => {
+            let modern = match modern_wsl {
+                Some(known) => Some(known),
+                None => ask(modern_wsl_service, "powershell", &wsl_service_args)
+                    .ok()
+                    .flatten()
+                    .and_then(|said| probe_bool(modern_wsl_service, &said).ok()),
+            };
+            return if modern == Some(false) {
+                Ok(Some(Blocker::WslNoKernel))
+            } else {
+                Err(problem)
+            };
+        }
     };
     if !wsl_kernel_present(&version_output, false) {
         return Ok(Some(Blocker::WslNoKernel));
@@ -2142,6 +2167,11 @@ mod tests {
         let mut probe = 0;
         let result = blocker_with(
             |program, args| {
+                // The current WSL is installed, so a failed `wsl --version` stays an error.
+                if program == "powershell" && args[3] == modern_wsl_probe_command() {
+                    assert_eq!(probe, 6, "asked for the WSL service before `wsl --version`");
+                    return Ok(probe_output(0, "True", ""));
+                }
                 assert_probe_call(probe, program, args);
                 let current = probe;
                 probe += 1;
@@ -2402,6 +2432,95 @@ mod tests {
         assert_eq!(probe, 5);
     }
 
+    /// The inbox `wsl.exe` refuses `--version`, in UTF-16 with exit -1, as OpenBot 1.1.0 met it on
+    /// a Windows machine with only the inbox WSL. With no kernel file and no WslService, that is
+    /// the inbox WSL without a kernel: the screen whose fix runs `wsl --update`, not "could not
+    /// check the WSL version". With WslService present, the same failure stays a detection error.
+    #[test]
+    fn the_inbox_wsl_refusing_version_offers_the_update_instead_of_a_failed_check() {
+        let inbox_refusal = || {
+            let mut output = probe_output(-1, "", "");
+            output.stdout = "Invalid command line option: --version\r\n\
+                Copyright (c) Microsoft Corporation. All rights reserved.\r\n\r\n\
+                Usage: wsl.exe [Argument] [Options...] [CommandLine]\r\n"
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect();
+            output
+        };
+        for (service, legacy, expected) in [
+            ("False", "1", Ok(Some(Blocker::WslNoKernel))),
+            ("True", "1", Err("the WSL version (wsl.exe --version)")),
+        ] {
+            let mut probe = 0;
+            let mut asked_service = 0;
+            let result = blocker_with(
+                |program, args| {
+                    if program == "powershell" && args[3] == modern_wsl_probe_command() {
+                        asked_service += 1;
+                        return Ok(probe_output(0, service, ""));
+                    }
+                    assert_probe_call(probe, program, args);
+                    let mut outputs = PROBE_OUTPUTS;
+                    outputs[2] = legacy;
+                    let output = if probe == 5 {
+                        inbox_refusal()
+                    } else {
+                        probe_output(0, outputs[probe], "")
+                    };
+                    probe += 1;
+                    Ok(output)
+                },
+                || Ok(false),
+            );
+            assert_eq!(probe, 6, "service {service}");
+            match expected {
+                Ok(blocker) => {
+                    assert_eq!(result, Ok(blocker), "service {service}");
+                    assert!(blocker.unwrap().fix().is_some());
+                    assert!(blocker.unwrap().instruction().contains("wsl --update"));
+                }
+                Err(operation) => {
+                    let error = result.expect_err("a modern WSL failing --version is an error");
+                    assert!(error.said.contains(operation), "{}", error.said);
+                    assert!(error
+                        .detail
+                        .unwrap()
+                        .contains("Invalid command line option: --version"));
+                }
+            }
+            assert_eq!(asked_service, 1, "service {service}");
+        }
+    }
+
+    /// With the WSL feature off, the service was already asked; it is not asked twice.
+    #[test]
+    fn a_known_current_wsl_is_not_asked_about_again_after_a_failed_version() {
+        let mut asked_service = 0;
+        let mut probe = 0;
+        let result = blocker_with(
+            |program, args| {
+                if program == "powershell" && args[3] == modern_wsl_probe_command() {
+                    asked_service += 1;
+                    return Ok(probe_output(0, "True", ""));
+                }
+                assert_probe_call(probe, program, args);
+                let mut outputs = PROBE_OUTPUTS;
+                outputs[2] = "2";
+                let output = if probe == 5 {
+                    probe_output(1, "", "refused")
+                } else {
+                    probe_output(0, outputs[probe], "")
+                };
+                probe += 1;
+                Ok(output)
+            },
+            || Ok(false),
+        );
+        assert!(result.is_err());
+        assert_eq!(asked_service, 1);
+    }
+
     fn child_probe_output(
         code: &str,
         stdout: &str,
@@ -2446,6 +2565,9 @@ mod tests {
             let mut calls = Vec::new();
             let result = blocker_with(
                 |program, args| {
+                    if program == "powershell" && args[3] == modern_wsl_probe_command() {
+                        return child_probe_output("0", "True", "");
+                    }
                     assert_probe_call(probe, program, args);
                     calls.push(serde_json::json!({ "program": program, "args": args }));
                     let stdout = PROBE_OUTPUTS[probe];

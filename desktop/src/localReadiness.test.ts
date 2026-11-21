@@ -35,6 +35,7 @@ const reasons: LocalReason[] = [
   "browser-open-failed",
   "resources-short",
   "stack-lost",
+  "backend-gone",
   "unrecognized",
 ];
 
@@ -87,6 +88,27 @@ test("a lost backend says the saved data is gone and offers Start fresh", () => 
   });
 });
 
+/**
+ * A Mac on Docker Desktop, Desktop 1.1.2: a prune of stopped containers removed the backend's node,
+ * and every status failed as on box I. OpenBot's own database was still there, so the row says that
+ * only the backend's data went, and what stays.
+ */
+test("a backend whose node was removed says what went and what stays, and offers to set it up again", () => {
+  const row = localReadiness({
+    ...base,
+    intelligence: report({
+      outcome: "failed",
+      reason: "backend-gone",
+      stack: null,
+    }),
+  }).intelligence;
+  expect(row).toEqual({
+    state: "blocked",
+    said: "Your conversations and what your Bots remember are gone from this computer. Set up again to carry on. Your Bots, settings, sign-in and AI connection stay.",
+    action: "start-fresh",
+  });
+});
+
 test("every reason gives a plain, non-empty sentence without its own name or Intelligence's", () => {
   for (const reason of reasons) {
     const rows = localReadiness({
@@ -115,7 +137,7 @@ test("every failure gives a plain, non-empty sentence without its own name or In
 });
 
 test("the reason and failure lists in this test match the source", () => {
-  expect(new Set(reasons).size).toBe(20);
+  expect(new Set(reasons).size).toBe(21);
   expect(localFailures.length).toBe(19);
 });
 

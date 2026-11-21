@@ -84,6 +84,7 @@ import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import {
   askRunLiveness,
+  quietRunPeriod,
   RUN_ENDED_UNHEARD,
   RUN_UNREACHABLE,
   watchQuietRun,
@@ -95,10 +96,13 @@ import {
 } from "@/lib/copilot/repair-history";
 import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
 import {
+  asksToCarryOn,
   failedRunReason,
   followLastRun,
+  laterRunFailure,
   requestNotMade,
   stoppedReason,
+  TURN_CUT_OFF,
 } from "@/lib/copilot/stopped-turn";
 import {
   readThreadMessages,
@@ -142,6 +146,17 @@ const JOIN_DEADLINE_MS = 1500;
  * the join is ended. Shorter than a quiet run's ask: the conversation shows nothing while it waits.
  */
 const JOIN_LIVENESS_MS = 5_000;
+
+/** The notices of a turn cut off part way, which Carry on can pick up. */
+const CUT_OFF = new Set([
+  TURN_CUT_OFF,
+  RUN_ENDED_UNHEARD,
+  RUN_UNREACHABLE,
+  STREAM_BROKE,
+]);
+
+/** What Carry on sends, as the person. */
+const CARRY_ON = "Please carry on where you stopped.";
 
 /**
  * Whether the roster says a turn is running in this conversation now: one this tab started from a
@@ -727,7 +742,10 @@ export function ChannelChat({
     setReplaying(true);
 
     void (async () => {
-      let joined: "connected" | "deadline" = "deadline";
+      let joined: "connected" | "deadline" | "gave up" = "deadline";
+      // How a kept join's turn was found to have ended, and how to stop watching it.
+      let keptEnded: "over" | "unreachable" | null = null;
+      let stopKept = () => {};
       try {
         // Bounded, and finished when it returns; `join-thread.ts` has why that matters.
         joined = await joinWithin({
@@ -762,6 +780,35 @@ export function ChannelChat({
               setReplaying(false);
             }
           },
+          /*
+           * A turn kept for is watched as a turn sent from here is: gone quiet, the server is asked
+           * whether the conversation still has a run, and a run that is over, or a server that can't
+           * say, ends the join with a notice. See `keptUntil`.
+           */
+          keptUntil: () => {
+            const quiet = watchQuietRun({
+              ask: () => askRunLiveness(channel.id),
+              quietMs: quietRunPeriod.ms,
+            });
+            const hearing = agent.subscribe({
+              onEvent: ({ event }) => {
+                if (
+                  event.type === EventType.RUN_FINISHED ||
+                  event.type === EventType.RUN_ERROR
+                )
+                  quiet.rest();
+                else quiet.heard();
+              },
+            });
+            stopKept = () => {
+              quiet.stop();
+              hearing.unsubscribe();
+            };
+            return quiet.over.then((outcome) => {
+              keptEnded = outcome;
+              hearing.unsubscribe();
+            });
+          },
         });
       } catch {
         /*
@@ -771,9 +818,15 @@ export function ChannelChat({
          */
         unanswered.current = true;
       } finally {
+        stopKept();
         lastRun.stop();
         if (current) setReplaying(false);
         openJoined.current();
+      }
+      // The turn the join was kept for had ended without a word reaching here: say so.
+      if (keptEnded !== null && current && turnsRef.current === 0) {
+        setRestoring(false);
+        setRunError(keptEnded === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE);
       }
       /*
        * The last run failed, so say so again, as the turn did when it failed. Only from a replay
@@ -1138,6 +1191,8 @@ export function ChannelChat({
   const turnFailure = useRef<string | null>(null);
   /** A run of the turn going here failed because its stream reached this browser out of shape. */
   const streamBroke = useRef(false);
+  /** The person stopped the turn going here (Stop, or Send now): a run it aborted is not a failure. */
+  const stoppedHere = useRef(false);
   const assistantMessagesBeforeRun = useRef<Set<string>>(new Set());
   /** The reply this turn last told the roster about, so a later run of the turn says only what's new. */
   const reportedReply = useRef<string | null>(null);
@@ -1360,6 +1415,7 @@ export function ChannelChat({
 
     setRunError(null);
     turnFailure.current = null;
+    stoppedHere.current = false;
     reportedReply.current = null;
     assistantMessagesBeforeRun.current = new Set(
       target.messages
@@ -1447,8 +1503,16 @@ export function ChannelChat({
          */
         const quiet = watchQuietRun({
           ask: () => askRunLiveness(channel.id),
+          quietMs: quietRunPeriod.ms,
         });
         const hearing = target.subscribe({
+          /*
+           * The browser starting the turn's next run (with a step's result) ends the rest, before a
+           * word of it arrives. Found on WebKit with the server killed right after the next run was
+           * sent: nothing of it ever came, the watch was still resting from the run before, and the
+           * server saying it had no run going read as the step still being taken. "Thinking" for good.
+           */
+          onRunInitialized: () => quiet.heard(),
           onEvent: ({ event }) => {
             // Between the server's runs the turn is this browser's (a step it takes, a card the
             // person answers), and quiet there is not a run gone missing.
@@ -1477,6 +1541,18 @@ export function ChannelChat({
         if (ended !== "ran") {
           // The run is let go of here; whatever it does later is not this turn's any more.
           run.catch(() => undefined);
+          /*
+           * And a step the browser is still taking is stopped with it. Left running, a save whose
+           * request came back after the server did started the turn's next run under a notice that
+           * said the turn was over. What it says now is this turn's last word, so nothing after it
+           * is reported as a failure of its own.
+           */
+          stoppedHere.current = true;
+          try {
+            copilotkit.stopAgent({ agent: target });
+          } catch {
+            // Nothing left to stop.
+          }
           void target.detachActiveRun().catch(() => undefined);
           awaitingReply.current = false;
           // What the thread holds is what was saved: read back when the runtime can be asked.
@@ -1680,6 +1756,18 @@ export function ChannelChat({
           return;
         }
         /*
+         * A LATER RUN OF A TURN STILL GOING HERE, started from this browser with a step's result (a
+         * file it saved). Its failure used to be dropped as if it were Stop, so a turn whose backend
+         * stopped answering part way ended with nothing said. Said now, unless the person stopped it.
+         * See `laterRunFailure`.
+         */
+        if (!awaitingReply.current && turnsRef.current > 0) {
+          if (stoppedHere.current) return;
+          const said = laterRunFailure(error);
+          if (said) fail(said, true);
+          return;
+        }
+        /*
          * The run request itself was not made. That is the back end out of reach, or the Bot taken
          * away from this person (the runtime answers 404 for a Bot that is not theirs), and the
          * runtime client reports both the same way. `failedRunReason` asks the server which.
@@ -1819,6 +1907,7 @@ export function ChannelChat({
   });
   const stopTask = () => {
     awaitingReply.current = false;
+    stoppedHere.current = true;
     stopEpoch.current++;
     copilotkit.stopAgent({ agent });
   };
@@ -1943,6 +2032,7 @@ export function ChannelChat({
             modelPicker={
               <ModelPicker
                 catalogue={picksModel ? models.data : undefined}
+                defaultModel={runModel.defaultModel}
                 disabled={!channel.active}
                 onChange={runModel.choose}
                 saving={runModel.saving}
@@ -2103,6 +2193,19 @@ export function ChannelChat({
              * run before closing it; see server/src/channels/stall-guard.ts.
              */
             stopped={runError ?? undefined}
+            /*
+             * A turn cut off part way (its backend stopped answering, its run ended unheard, its
+             * stream broke, or the server says its reply came back incomplete or its model's
+             * connection dropped and asks for the Bot to carry on) is carried on with one press: a
+             * short message, as the person, so the Bot picks the work up with everything it did in
+             * front of it.
+             */
+            onCarryOn={
+              runError !== null &&
+              (CUT_OFF.has(runError) || asksToCarryOn(runError))
+                ? () => askFromComponent(CARRY_ON)
+                : undefined
+            }
             /*
              * What the server says this conversation waits on: a Bot its Bot asked, a routine.
              * Hidden while this tab's own turn is going, which already shows itself and would

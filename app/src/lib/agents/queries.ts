@@ -37,6 +37,8 @@ export function isSharedWithYou(agent: AgentProfile): boolean {
 
 export const agentKeys = {
   all: ["agents"] as const,
+  /** Every list of Bots, to refetch them together. A prefix of each `list`. */
+  lists: () => ["agents", "list"] as const,
   /** A person's own list keeps the key it always had; Admin's list of every Bot has its own. */
   list: (hidden = false, scope: ListBotsScope = "caller") =>
     scope === "caller"

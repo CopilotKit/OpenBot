@@ -100,7 +100,7 @@ export const ListOrganizationsResponse = zod.object({
 });
 
 /**
- * Create an organization with the caller as its owner. It starts with what a fresh install starts with, its starter Bots included, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Create an organization with the caller as its owner. It starts with what a fresh install starts with, its starter Bots included, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. An OpenBot may limit how many organizations one person owns, their own included: at the limit the request is refused with 403 and a detail saying so, and nothing is made. Deleting one they created makes room. While another of the caller's requests is creating one, the request is refused with 409; send it again once that one has answered. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Create an organization
  */
 export const createOrganizationHeaderIdempotencyKeyMax = 128;
@@ -173,7 +173,7 @@ export const CreateOrganizationResponse = zod.object({
 });
 
 /**
- * Return one page of the organization's members, in the order they joined. Any member can read it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's members, in the order they joined. Any member can read it. search narrows the list to the members whose name or address matches it, ignoring case, best matches first: those whose name, a word of their name (a first or a last name) or their address starts with it, then those whose name or address holds it, each group in alphabetical order of name, then address. A search finds only this organization's current members: never somebody it removed, somebody turned away from this OpenBot, or a member of another organization only. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List an organization's members
  */
 
@@ -186,6 +186,11 @@ export const ListOrganizationMembersParams = zod.object({
     ),
 });
 
+export const listOrganizationMembersQuerySearchMax = 200;
+
+export const listOrganizationMembersQuerySearchRegExp = new RegExp(
+  "^[^\\x00]*$",
+);
 export const listOrganizationMembersQueryLimitDefault = 50;
 export const listOrganizationMembersQueryLimitMax = 100;
 
@@ -196,6 +201,14 @@ export const listOrganizationMembersQueryCursorRegExp = new RegExp(
 );
 
 export const ListOrganizationMembersQueryParams = zod.object({
+  search: zod
+    .string()
+    .max(listOrganizationMembersQuerySearchMax)
+    .regex(listOrganizationMembersQuerySearchRegExp)
+    .optional()
+    .describe(
+      "The start of a name, a first or last name, or an address, or a part of one, matched without regard to case. Leading and trailing spaces are ignored; empty lists everybody.",
+    ),
   limit: zod
     .int()
     .min(1)
@@ -258,6 +271,12 @@ export const ListOrganizationMembersResponse = zod.object({
           joinedAt: zod.iso
             .datetime({ offset: true })
             .describe("When they became a member."),
+          notOpenedYet: zod
+            .boolean()
+            .optional()
+            .describe(
+              "True for somebody who is a member of the organization where it is kept, at OpenBot by CopilotKit on a hosted OpenBot, and hasn't opened OpenBot yet. Until they do, they have no OpenBot account: id is their id there, and email is empty when none is known. An owner or an admin removes them by that id, as any member (removable says whether they can be). They can't be given another role here until they open OpenBot (assignableRoles is empty). Absent for everybody else.",
+            ),
         })
         .describe("One member of an organization."),
     )
@@ -339,6 +358,34 @@ export const UpdateOrganizationResponse = zod.object({
       "One organization, as one of its members sees it. role and active are the server's verdicts about the caller.",
     ),
 });
+
+/**
+ * Delete the organization and what is in it. Nobody can work in it again: its Bots stop, its computers are removed, the API keys made in it stop working, and it leaves every member's list of organizations. Its members keep their accounts and their other organizations. Only an owner of this organization can. A person's own organization and `default` stay, and are refused. A repeated request with the same Idempotency-Key returns the first result.
+ * @summary Delete an organization
+ */
+
+export const DeleteOrganizationParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+});
+
+export const deleteOrganizationHeaderIdempotencyKeyMax = 128;
+
+export const DeleteOrganizationHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(deleteOrganizationHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const DeleteOrganizationResponse = zod.void();
 
 /**
  * Give a member of the organization another role. An owner or an admin changes anybody between admin and member. Only an owner makes somebody an owner, or changes an owner's role, their own included, and the organization always keeps an owner: the last one cannot step down. A person's own organization keeps exactly its one owner. The members list says which roles the caller may give each member, as assignableRoles. A repeated request with the same Idempotency-Key and body returns the first result.
@@ -423,6 +470,12 @@ export const UpdateOrganizationMemberResponse = zod.object({
       joinedAt: zod.iso
         .datetime({ offset: true })
         .describe("When they became a member."),
+      notOpenedYet: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True for somebody who is a member of the organization where it is kept, at OpenBot by CopilotKit on a hosted OpenBot, and hasn't opened OpenBot yet. Until they do, they have no OpenBot account: id is their id there, and email is empty when none is known. An owner or an admin removes them by that id, as any member (removable says whether they can be). They can't be given another role here until they open OpenBot (assignableRoles is empty). Absent for everybody else.",
+        ),
     })
     .describe("One member of an organization."),
 });
@@ -683,6 +736,58 @@ export const CancelOrganizationInvitationHeader = zod.object({
 });
 
 export const CancelOrganizationInvitationResponse = zod.void();
+
+/**
+ * Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands: on its free trial, on the plan, behind on a payment, or on no plan yet. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.
+ * @summary Read an organization's plan
+ */
+
+export const GetOrganizationPlanParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+});
+
+export const getOrganizationPlanResponseAddCardUrlMax = 2048;
+
+export const GetOrganizationPlanResponse = zod
+  .object({
+    required: zod
+      .boolean()
+      .describe(
+        "True when this OpenBot runs an organization's Bots only while it is on a plan or its free trial.",
+      ),
+    status: zod
+      .string()
+      .describe(
+        "not_required when this OpenBot needs no plan. trialing during the free trial, which a card on file starts. active on the plan. past_due when a payment failed and the card needs updating. none when the organization has no plan or trial yet, or its plan ended. unknown when the plan couldn't be read just now; Bots keep running meanwhile.",
+      ),
+    trialEndsAt: zod.iso
+      .datetime({ offset: true })
+      .nullable()
+      .describe(
+        "When the free trial ends, while status is trialing. Null otherwise.",
+      ),
+    renewsAt: zod.iso
+      .datetime({ offset: true })
+      .nullable()
+      .describe(
+        "When the plan's current month ends, while status is active. Null otherwise.",
+      ),
+    addCardUrl: zod
+      .string()
+      .max(getOrganizationPlanResponseAddCardUrlMax)
+      .nullable()
+      .describe(
+        "Where an owner or an admin goes in the browser to add a card, start the free trial or update the card. A page to open, not an API call. Null for a member, and when the organization needs no card.",
+      ),
+  })
+  .describe(
+    "Whether this OpenBot needs the organization to be on a plan, and where the organization stands. When required is true, its Bots run only while status is trialing or active.",
+  );
 
 /**
  * Return one page of the invitations sent to the caller's email address that they have not answered, the newest first, each with the organization and who invited them. One that ran out of time is listed as expired until it is canceled or replaced. A missing cursor starts at the first page and nextCursor null ends the list.

@@ -1,6 +1,6 @@
 /**
  * The OpenBot management agent: installed only when an install's owner chooses management, it
- * sends a heartbeat every minute, moves the product to the version CopilotKit's management service
+ * sends a heartbeat every minute (configurable), moves the product to the version CopilotKit's management service
  * asks for (by pinning Flux to that release's exact chart digest, inside the maintenance window,
  * only along the release policy's upgrade paths, with a verified backup first whenever the
  * database changes), and runs the few signed commands it knows.
@@ -24,7 +24,6 @@ import {
   type Command,
   type CommandResult,
   type DesiredState,
-  HEARTBEAT_INTERVAL_SECONDS,
   type HeartbeatReply,
   type MaintenanceWindow,
   ROLLBACK_REFUSED_REASON,
@@ -37,8 +36,9 @@ import {
   planUpgrade,
   type ReleaseManifest,
 } from "../../shared/release-manifest";
+import { BackupTargetRefused, confirmBackupTarget } from "./backup-target";
 import type { ManagementClient } from "./client";
-import type { Agent } from "./config";
+import { heartbeatIntervalMs, type ReadyAgent, upgradesOn } from "./config";
 import { Flux } from "./flux";
 import { operationId, runJob } from "./jobs";
 import { CommandFailed, type Kube, run } from "./kube";
@@ -68,6 +68,10 @@ const PROMOTION_TIMEOUT_SECONDS = 900;
 export const RETRY_AFTER_FAILURE_MS = 30 * 60_000;
 const WORKLOAD = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/;
 
+/** What a person does to let the agent run upgrades, where the agent was installed without them. */
+export const UPGRADES_NOT_SET_UP =
+  "set them up as https://github.com/CopilotKit/OpenBot/blob/main/docs/managed-upgrades.md says";
+
 export type Log = (message: string, fields?: Record<string, unknown>) => void;
 
 interface StatefulSet {
@@ -88,6 +92,8 @@ interface Pod {
 export class ManagementAgent {
   readonly store: StateStore;
   readonly flux: Flux;
+  /** Called after every failed heartbeat (main.ts: has OpenBot connected a new install?). */
+  onHeartbeatFailure?: (error: unknown) => Promise<void>;
   /** The upgrade, rollback or support bundle running now, if any. */
   private operation: Promise<void> | null = null;
   private operationTarget: string | null = null;
@@ -102,7 +108,7 @@ export class ManagementAgent {
     null;
 
   constructor(
-    private readonly agent: Agent,
+    private readonly agent: ReadyAgent,
     private readonly kube: Kube,
     private readonly client: ManagementClient,
     private readonly log: Log = (message, fields) =>
@@ -155,7 +161,7 @@ export class ManagementAgent {
     const line =
       upgradeState === "recovery-required"
         ? `recovery-required: ${journal?.error ?? "a promotion stopped"}`
-        : this.message;
+        : (this.message ?? live?.warnings?.at(-1) ?? null);
     return {
       state: upgradeState,
       targetVersion:
@@ -168,6 +174,7 @@ export class ManagementAgent {
 
   /** A person suspended the product's HelmRelease (off level 1): the agent leaves it alone. */
   private async suspendedByPerson(state: AgentState) {
+    if (!upgradesOn(this.config)) return false;
     const release = await this.flux.helmRelease().catch(() => null);
     return (
       release?.spec.suspend === true &&
@@ -178,15 +185,17 @@ export class ManagementAgent {
 
   /** The product's Flux objects, then one heartbeat, then commands, then the desired version. */
   async tick() {
-    try {
-      const created = await this.flux.ensure();
-      if (created.length > 0)
-        this.log("created the product's Flux objects", { created });
-    } catch (error) {
-      this.log("could not create or update the product's Flux objects", {
-        error: String(error),
-      });
-    }
+    // Without upgrades set up there is no Flux beside the agent, and nothing of Flux's to create.
+    if (upgradesOn(this.config))
+      try {
+        const created = await this.flux.ensure();
+        if (created.length > 0)
+          this.log("created the product's Flux objects", { created });
+      } catch (error) {
+        this.log("could not create or update the product's Flux objects", {
+          error: String(error),
+        });
+      }
     const { state, journal } = await this.store.read();
     const heartbeat = await collectHeartbeat({
       config: this.config,
@@ -202,16 +211,23 @@ export class ManagementAgent {
     await this.reconcile(reply);
   }
 
-  /** Runs forever: a heartbeat every minute with up to 10% jitter. */
+  /** Runs forever: a heartbeat every interval (a minute unless the config says otherwise) with up
+   * to 10% jitter. */
   async loop(signal?: AbortSignal) {
+    const interval = heartbeatIntervalMs(this.config);
     while (!signal?.aborted) {
       try {
         await this.tick();
       } catch (error) {
         this.log("heartbeat failed", { error: String(error) });
+        await this.onHeartbeatFailure?.(error).catch((failure) =>
+          this.log("after a failed heartbeat, the check failed too", {
+            error: String(failure),
+          }),
+        );
       }
       const jitter = 1 + Math.random() * 0.1;
-      await Bun.sleep(HEARTBEAT_INTERVAL_SECONDS * 1000 * jitter);
+      await Bun.sleep(interval * jitter);
     }
   }
 
@@ -251,6 +267,13 @@ export class ManagementAgent {
   ) {
     this.waitingWindow = false;
     if (this.operation) return;
+    // Upgrades are not set up: a desired version waits for a person to set them up.
+    if (!upgradesOn(this.config)) {
+      this.message = reply.desired
+        ? `upgrades are not set up, so ${reply.desired.version} waits: ${UPGRADES_NOT_SET_UP}`
+        : null;
+      return;
+    }
     const { state, journal } = await this.store.read();
     if (journalBlocks(journal) || state.paused || reply.paused) return;
     if (await this.suspendedByPerson(state)) return;
@@ -277,7 +300,7 @@ export class ManagementAgent {
       digest: candidate.digest,
     };
     if (!state.accepted) {
-      await this.firstRelease(release, candidate.manifest);
+      await this.firstRelease(release, candidate.manifest, state);
       return;
     }
     const current = parseReleaseManifest(JSON.parse(state.accepted.manifest));
@@ -329,7 +352,8 @@ export class ManagementAgent {
    * those zero replicas as the ones to put back.
    *
    * Pods of a StatefulSet that the failed release left stuck are deleted while it goes back on
-   * (`forcedRollback`), as Kubernetes asks.
+   * (`forcedRollback`), as Kubernetes asks. Then every workload of the release is restarted, so
+   * none keeps the address of the database the person restored away from.
    */
   private async converge(accepted: AcceptedRelease, manifest: ReleaseManifest) {
     const pinned = await this.flux.pinnedDigest();
@@ -375,6 +399,12 @@ export class ManagementAgent {
               done.abort();
               await unstuck;
             }
+            // A recovery restores the database to a new server and repoints the release at it.
+            // The upgrade rewrites the connection Secrets, but a workload whose pod template did
+            // not change (Intelligence's, say) keeps the old server's address it read at start and
+            // goes on writing there. Restart every workload of the release so each one reads the
+            // database the release now names.
+            await this.restart(undefined);
           },
           declaredSuspension: async () => new Set(),
         });
@@ -386,8 +416,9 @@ export class ManagementAgent {
    * A StatefulSet stays stuck on a pod the failed release started that never became Ready, even
    * once its template is put back: Kubernetes asks for those pods to be deleted
    * (https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#forced-rollback).
-   * While the accepted release goes back on, the agent deletes exactly those pods: owned by one of
-   * the release's StatefulSets, not Ready, and not at the revision the StatefulSet now rolls out.
+   * While the accepted release goes back on (or a first install goes on again after one failed),
+   * the agent deletes exactly those pods: owned by one of the release's StatefulSets, not Ready, and
+   * not at the revision the StatefulSet now rolls out.
    */
   private async forcedRollback(signal: AbortSignal) {
     const target = productTarget(this.config);
@@ -489,15 +520,37 @@ export class ManagementAgent {
     }
   }
 
-  /** No release accepted yet: install on an empty namespace, or adopt the running release when it
-   * is the desired one. */
+  /**
+   * No release accepted yet: install on an empty namespace, install again after the agent's own
+   * first install failed, or adopt the running release when it is the desired one.
+   *
+   * A failed first install leaves Flux pinned to its chart and the release's workloads in the
+   * namespace, but no server that answers /release, so it can never be adopted. The agent knows it
+   * put that release there (`firstInstall`) and that none was ever accepted, so there is no data to
+   * keep and no backup to take: once a person has cleared the journal, it installs the desired
+   * release (the same one after its cause is fixed, or the new one CopilotKit names) inside the
+   * window, journaled like the first attempt.
+   */
   private async firstRelease(
     release: AcceptedRelease,
     manifest: ReleaseManifest,
+    state: AgentState,
   ) {
     const target = productTarget(this.config);
     const server = await serverDeployment(target, run).catch(() => null);
     if (!server && (await this.flux.pinnedDigest()) === null) {
+      this.start(release.version, () =>
+        this.install(release, manifest, "install"),
+      );
+      return;
+    }
+    if (state.firstInstall !== null) {
+      if (!this.insideWindow()) {
+        this.waitingWindow = true;
+        this.operationTarget = release.version;
+        this.message = `the first install of ${state.firstInstall} did not complete; waiting for the maintenance window to install ${release.version}`;
+        return;
+      }
       this.start(release.version, () =>
         this.install(release, manifest, "install"),
       );
@@ -568,6 +621,21 @@ export class ManagementAgent {
     );
   }
 
+  /** `applyRelease`, deleting the pods a failed release left stuck while it goes on. */
+  private async applyReleaseUnstuck(
+    release: AcceptedRelease,
+    manifest: ReleaseManifest,
+  ) {
+    const done = new AbortController();
+    const unstuck = this.forcedRollback(done.signal);
+    try {
+      await this.applyRelease(release, manifest);
+    } finally {
+      done.abort();
+      await unstuck;
+    }
+  }
+
   private newJournal(
     from: string,
     to: string,
@@ -608,10 +676,18 @@ export class ManagementAgent {
       release.version,
     );
     try {
+      // Before Flux is moved: from here until a release is accepted, what runs in the namespace is
+      // the agent's own install, which a person may clear and the agent may install again.
+      if (mode === "install")
+        await this.updateState((state) => {
+          state.firstInstall = release.version;
+        });
       journal.databaseMayHaveChanged = true;
       journal.phase = "promoting";
       await this.saveJournal(journal);
-      await this.applyRelease(release, manifest);
+      // After a failed first install, its StatefulSet pods are stuck on the failed release.
+      if (mode === "install") await this.applyReleaseUnstuck(release, manifest);
+      else await this.applyRelease(release, manifest);
       journal.phase = "verifying";
       await this.saveJournal(journal);
       await this.verify(manifest);
@@ -619,6 +695,7 @@ export class ManagementAgent {
         state.accepted = release;
         state.previous = null;
         state.rolledBackFrom = null;
+        state.firstInstall = null;
       });
       journal.phase = "accepted";
       await this.saveJournal(journal);
@@ -670,15 +747,17 @@ export class ManagementAgent {
     const maintenance =
       needsMaintenance(candidate) ||
       current.compatibility.database.to !== candidate.compatibility.database.to;
+    const journal = this.newJournal(
+      current.version,
+      candidate.version,
+      maintenance ? `openbot-${operation}` : "none",
+    );
+    if (maintenance) await this.confirmBackupTarget(journal, operation);
     await runPromotion({
       target,
       run,
       candidate,
-      journal: this.newJournal(
-        current.version,
-        candidate.version,
-        maintenance ? `openbot-${operation}` : "none",
-      ),
+      journal,
       save: (journal) => this.saveJournal(journal),
       before,
       maintenance,
@@ -700,6 +779,52 @@ export class ManagementAgent {
         });
       },
     });
+  }
+
+  /**
+   * Before anything is quiesced or backed up: is the database the backup Job would back up the one
+   * the product's server uses? When it is not, or the agent cannot tell, nothing is touched and the
+   * upgrade stops in `recovery-required` with the reason, so a person corrects the backup target
+   * (or the server) and clears the journal before any migrating upgrade runs.
+   */
+  private async confirmBackupTarget(
+    journal: PromotionJournal,
+    operation: string,
+  ) {
+    this.liveJournal = { ...journal };
+    try {
+      const confirmation = await confirmBackupTarget({
+        kube: this.kube,
+        kind: this.config.backup.kind,
+        template: this.agent.jobs.backupTarget,
+        operation,
+        timeoutSeconds: Math.min(this.config.backup.timeoutSeconds, 900),
+        identity: await readIdentity(this.config),
+      });
+      if (confirmation.verified)
+        this.log("backup target confirmed", {
+          to: journal.toVersion,
+          how: confirmation.message,
+        });
+      else {
+        // Journaled with the promotion (runPromotion saves this object), and the heartbeat says
+        // it until the next promotion.
+        journal.warnings = [...(journal.warnings ?? []), confirmation.message];
+        this.liveJournal = { ...journal };
+        this.log("backup target not verified", {
+          to: journal.toVersion,
+          warning: confirmation.message,
+        });
+      }
+    } catch (error) {
+      if (!(error instanceof BackupTargetRefused)) throw error;
+      journal.phase = "recovery-required";
+      journal.backupReference = "none";
+      journal.error = error.message;
+      journal.recovery = `Nothing was changed: the product was not quiesced, backed up or upgraded. ${error.mismatch ? "Point the agent's backup values at the database the product's server uses (helm upgrade openbot-agent with the right backup.<kind> values)" : "Make the backup target confirmable (the reason says what is missing)"}, then remove journal.json from the agent's state ConfigMap.`;
+      await this.saveJournal(journal);
+      throw error;
+    }
   }
 
   // --- commands ------------------------------------------------------------------------------
@@ -761,6 +886,19 @@ export class ManagementAgent {
   }
 
   private async execute(command: Command) {
+    if (
+      !upgradesOn(this.config) &&
+      (command.kind === "pause" ||
+        command.kind === "resume" ||
+        command.kind === "rollback")
+    ) {
+      await this.report(
+        command.id,
+        false,
+        `upgrades are not set up: ${UPGRADES_NOT_SET_UP}`,
+      );
+      return;
+    }
     switch (command.kind) {
       case "pause": {
         const release = await this.flux.helmRelease();

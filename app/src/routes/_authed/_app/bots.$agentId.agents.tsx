@@ -1,9 +1,21 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { BotSubpage } from "@/components/bot-profile/bot-subpage";
 import { BotDelegation } from "@/components/bot-profile/delegation";
 import { TASK_THREADS_OFFERED } from "@/lib/bot-agents/queries";
 
+/*
+ * HIDDEN FOR NOW, with the Agents page (`agents/index.tsx`): the Bot's page has no Agents row, and
+ * this address leads to the Bot's page. To bring it back, drop this `beforeLoad` and put the row back
+ * in `components/bot-profile/settings-rows.tsx`.
+ */
 export const Route = createFileRoute("/_authed/_app/bots/$agentId/agents")({
+  beforeLoad: ({ params }) => {
+    throw redirect({
+      to: "/bots/$agentId",
+      params: { agentId: params.agentId },
+      replace: true,
+    });
+  },
   component: AgentsPage,
 });
 

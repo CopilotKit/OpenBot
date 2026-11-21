@@ -3,14 +3,17 @@ import { IconArrowLeft, IconPlayerRecordFilled } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
+import { ComputerBlocked } from "@/components/computer/computer-blocked";
 import { PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemMedia } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { openBrowserMutationOptions } from "@/lib/browser/mutations";
+import { atComputerLimit, settledRefusal } from "@/lib/computers/refusal";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import { CANT_OPEN_BROWSER } from "./browser-screen";
 import {
   LearningNextRow,
   learningNextWords,
@@ -75,6 +78,13 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
   }, [saved]);
 
   const error = state.problem ?? (show.error ?? recording.error)?.message;
+  /*
+   * Opening the browser refused for good: said calmly, in place of the error. Show browser only opens it. Record opens
+   * it and then starts the Recorder, so only the computer limit's refusal of it is the browser's.
+   */
+  const blocked = state.problem
+    ? null
+    : (settledRefusal(show.error) ?? atComputerLimit(recording.startError));
   const named = !!recording.title.trim();
   // A recording that is running, or one that just ended, is always the third step. Without a name or a result there is
   // nothing for it to show, so it is naming the task again.
@@ -221,7 +231,13 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
         <StepDots step={shown} />
         {body}
       </div>
-      {error ? (
+      {blocked ? (
+        <ComputerBlocked
+          className="mt-4 rounded-lg border border-border"
+          refusal={blocked}
+          title={CANT_OPEN_BROWSER}
+        />
+      ) : error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
           {error}
         </p>

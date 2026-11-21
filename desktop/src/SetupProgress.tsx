@@ -902,6 +902,8 @@ function label(step: string): string {
       return "Stopping OpenBot";
     case "stop-intelligence":
       return "Stopping OpenBot's services";
+    case "stop-engine":
+      return "Stopping the software OpenBot runs on";
     case "start-your-podman":
       return "Starting your Podman again";
     default:

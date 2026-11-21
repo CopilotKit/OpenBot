@@ -15,6 +15,7 @@ import type {
   OrganizationMemberPage,
   OrganizationMemberResponse,
   OrganizationPage,
+  OrganizationPlan,
   OrganizationResponse,
   UpdateOrganizationMemberRequest,
   UpdateOrganizationRequest,
@@ -57,7 +58,7 @@ export const getCreateOrganizationUrl = () => {
 };
 
 /**
- * Create an organization with the caller as its owner. It starts with what a fresh install starts with, its starter Bots included, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Create an organization with the caller as its owner. It starts with what a fresh install starts with, its starter Bots included, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. An OpenBot may limit how many organizations one person owns, their own included: at the limit the request is refused with 403 and a detail saying so, and nothing is made. Deleting one they created makes room. While another of the caller's requests is creating one, the request is refused with 409; send it again once that one has answered. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Create an organization
  */
 export const createOrganization = async (
@@ -116,7 +117,7 @@ export const getListOrganizationMembersUrl = (
 };
 
 /**
- * Return one page of the organization's members, in the order they joined. Any member can read it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's members, in the order they joined. Any member can read it. search narrows the list to the members whose name or address matches it, ignoring case, best matches first: those whose name, a word of their name (a first or a last name) or their address starts with it, then those whose name or address holds it, each group in alphabetical order of name, then address. A search finds only this organization's current members: never somebody it removed, somebody turned away from this OpenBot, or a member of another organization only. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List an organization's members
  */
 export const listOrganizationMembers = async (
@@ -179,6 +180,24 @@ export const updateOrganization = async (
       body: JSON.stringify(updateOrganizationRequest),
     },
   );
+};
+
+export const getDeleteOrganizationUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/profile`;
+};
+
+/**
+ * Delete the organization and what is in it. Nobody can work in it again: its Bots stop, its computers are removed, the API keys made in it stop working, and it leaves every member's list of organizations. Its members keep their accounts and their other organizations. Only an owner of this organization can. A person's own organization and `default` stay, and are refused. A repeated request with the same Idempotency-Key returns the first result.
+ * @summary Delete an organization
+ */
+export const deleteOrganization = async (
+  organizationId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<void> => {
+  return apiRequest<void>(getDeleteOrganizationUrl(organizationId), {
+    ...options,
+    method: "DELETE",
+  });
 };
 
 export const getUpdateOrganizationMemberUrl = (
@@ -364,6 +383,27 @@ export const cancelOrganizationInvitation = async (
     {
       ...options,
       method: "DELETE",
+    },
+  );
+};
+
+export const getGetOrganizationPlanUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/plan`;
+};
+
+/**
+ * Say whether this OpenBot needs an organization to be on a plan before its Bots run, and where this organization stands: on its free trial, on the plan, behind on a payment, or on no plan yet. An OpenBot that needs no plan (every self-hosted install and OpenBot Desktop) answers not_required. Any member can read it. addCardUrl is where an owner or an admin goes, in the browser, to add a card and start or keep the plan; it is null for everyone else.
+ * @summary Read an organization's plan
+ */
+export const getOrganizationPlan = async (
+  organizationId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<OrganizationPlan> => {
+  return apiRequest<OrganizationPlan>(
+    getGetOrganizationPlanUrl(organizationId),
+    {
+      ...options,
+      method: "GET",
     },
   );
 };

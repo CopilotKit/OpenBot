@@ -15,6 +15,7 @@ export * from "./components/components";
 export * from "./computers/computers";
 export * from "./connections/connections";
 export * from "./conversations/conversations";
+export * from "./copilotkit-management/copilotkit-management";
 export * from "./credentials/credentials";
 export * from "./deliveries/deliveries";
 export * from "./destinations/destinations";

@@ -3926,6 +3926,12 @@ test("a refusal from OpenBot reaches the popup in the Recorder's own sentence, n
       { status: 403, body: { error: hostile } },
       "OpenBot does not let you record. Ask whoever runs it.",
     ],
+    // Held out until they sign in through their company: the Recorder's own sentence, which the popup offers the way in
+    // beside, and never the answer's text.
+    [
+      { status: 403, body: { detail: hostile, code: "SSO_REQUIRED" } },
+      "Your organization requires signing in through your company. Sign in with your company in OpenBot, then try again.",
+    ],
     [
       {
         status: 503,

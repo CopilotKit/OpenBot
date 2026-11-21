@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   failedRunReason,
+  laterRunFailure,
   stoppedReason,
+  TURN_CUT_OFF,
 } from "../src/lib/copilot/stopped-turn";
 
 /**
@@ -10,6 +12,46 @@ import {
  * The cases are the three things that actually arrive: the sentence the deployment's stall watchdog
  * wrote into the run, an error thrown in the browser, and nothing at all.
  */
+
+/*
+ * FOUND ON A PERSON'S 1.1.2 DESKTOP. The server stopped and started again in the middle of a long
+ * turn of file saves. The run that would have carried the last save's result was never made, and the
+ * failure was dropped as if the person had pressed Stop: the turn ended with nothing said.
+ */
+describe("a later run of a turn that fails", () => {
+  test("says the turn was cut off when the backend couldn't be reached, and keeps what it did", () => {
+    expect(
+      laterRunFailure(new Error("REST run request failed: Failed to fetch")),
+    ).toBe(TURN_CUT_OFF);
+    expect(laterRunFailure(new TypeError("Failed to fetch"))).toBe(
+      TURN_CUT_OFF,
+    );
+    // Not the first run's sentence: the message was sent and the Bot worked on it.
+    expect(TURN_CUT_OFF).not.toContain("wasn't sent");
+  });
+
+  test("a run its server dropped, read back from the stored history, says the turn was cut off", () => {
+    // The exact words the backend's event store ends such a run with.
+    expect(stoppedReason("Runner connection dropped")).toBe(TURN_CUT_OFF);
+  });
+
+  test("passes on any other failure in its own words", () => {
+    expect(laterRunFailure(new Error("The model refused the request."))).toBe(
+      "The model refused the request.",
+    );
+  });
+
+  test("says nothing about a run stopped here", () => {
+    expect(
+      laterRunFailure(
+        new DOMException("The user aborted a request.", "AbortError"),
+      ),
+    ).toBeNull();
+    expect(
+      laterRunFailure(new Error("signal is aborted without reason")),
+    ).toBeNull();
+  });
+});
 
 describe("the reason a turn ended", () => {
   test("passes on what ended the turn, in its own words", () => {

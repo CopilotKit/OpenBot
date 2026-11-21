@@ -125,11 +125,18 @@ export function ModelPicker({
   catalogue,
   value,
   onChange,
+  allowSingle,
+  defaultModel,
+  showValue = false,
   disabled,
   saving,
   className,
 }: {
   catalogue: ModelCatalogue | undefined;
+  allowSingle?: boolean;
+  defaultModel?: string;
+  /** The settings field displays the value on its trigger. */
+  showValue?: boolean;
   value: ModelPick | undefined;
   onChange: (pick: ModelPick) => void;
   disabled?: boolean;
@@ -137,7 +144,8 @@ export function ModelPicker({
   saving?: boolean;
   className?: string;
 }) {
-  if (!catalogue?.choosable || !value) return null;
+  if (!catalogue || (!catalogue.choosable && !allowSingle) || !value)
+    return null;
   const selected =
     catalogue.models.find((model) => model.id === value.model) ??
     catalogue.models.find((model) => model.id === catalogue.default);
@@ -146,24 +154,30 @@ export function ModelPicker({
     <Picker
       catalogue={catalogue}
       className={className}
+      defaultModel={defaultModel ?? catalogue.default}
       disabled={disabled || saving}
       effort={value.model === selected.id ? value.effort : null}
       onChange={onChange}
       selected={selected}
+      showValue={showValue}
     />
   );
 }
 
 function Picker({
   catalogue,
+  defaultModel,
   selected,
+  showValue,
   effort,
   onChange,
   disabled,
   className,
 }: {
   catalogue: ModelCatalogue;
+  defaultModel: string;
   selected: ModelOption;
+  showValue: boolean;
   effort: string | null;
   onChange: (pick: ModelPick) => void;
   disabled?: boolean;
@@ -215,7 +229,11 @@ function Picker({
   /** On the efforts alone: only the "Thinking" column shows. */
   const effortsOnly = effortStep && thinks(selected);
 
-  const effortText = running ? effortLabel(running) : null;
+  const effortText = running
+    ? effortLabel(running)
+    : showValue && thinks(selected)
+      ? "Model default"
+      : null;
   const shown = effortText
     ? `${selected.label} · ${effortText}`
     : selected.label;
@@ -273,14 +291,27 @@ function Picker({
                   : `Model: ${selected.label}`
               }
               className={cn(
-                "h-8 shrink-0 gap-1 px-2 font-normal text-muted-foreground",
+                showValue
+                  ? "min-w-0 w-full justify-start gap-2 px-3 font-normal"
+                  : "h-8 shrink-0 gap-1 px-2 font-normal text-muted-foreground",
                 className,
               )}
               data-slot="composer-model"
-              render={<Button size="sm" type="button" variant="ghost" />}
+              render={
+                <Button
+                  size={showValue ? "default" : "sm"}
+                  type="button"
+                  variant={showValue ? "outline" : "ghost"}
+                />
+              }
               nativeButton
             >
               <IconCpu aria-hidden className="size-4 shrink-0" />
+              {showValue ? (
+                <span className="min-w-0 flex-1 truncate text-left">
+                  {shown}
+                </span>
+              ) : null}
               <IconChevronDown aria-hidden className="size-3.5 shrink-0" />
             </ComboboxPrimitive.Trigger>
           }
@@ -304,7 +335,7 @@ function Picker({
           picked.current = false;
           return (toMessage && messageBox(trigger.current)) || true;
         }}
-        side="top"
+        side={showValue ? "bottom" : "top"}
         sideOffset={8}
       >
         <ComboboxInput
@@ -346,7 +377,7 @@ function Picker({
                         <span className="min-w-0 truncate">
                           {choice.model.label}
                         </span>
-                        {choice.model.id === catalogue.default ? (
+                        {choice.model.id === defaultModel ? (
                           <DefaultTag />
                         ) : null}
                       </ComboboxItem>

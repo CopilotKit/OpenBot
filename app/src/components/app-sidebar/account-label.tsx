@@ -1,18 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
+import { stripItemClassName } from "@/components/layout/strip";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { SidebarMenuButton } from "@/components/ui/sidebar";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useAnythingCut } from "@/hooks/use-anything-cut";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
+import { cn } from "@/lib/utils";
 import { OpenBotVersion } from "../layout/openbot-version";
 
 function UserAvatar() {
@@ -26,7 +26,10 @@ function UserAvatar() {
       .join("") ?? currentUser?.email.slice(0, 2).toUpperCase();
 
   return (
-    <div className="size-[28px] shrink-0 bg-muted-foreground/10 text-foreground/70 rounded-full flex items-center justify-center text-xs overflow-hidden">
+    <div
+      aria-hidden="true"
+      className="size-[28px] shrink-0 bg-muted-foreground/10 text-foreground/70 rounded-full flex items-center justify-center text-xs overflow-hidden"
+    >
       {initials}
     </div>
   );
@@ -75,6 +78,21 @@ export function AccountLabel() {
 }
 
 /**
+ * The account row at the top of the account menu: avatar, name, the release the server runs, and
+ * the organization being worked in. Not a menu item: it says whose menu this is.
+ */
+export function AccountRow() {
+  return (
+    <div
+      className="flex min-w-0 items-center gap-2 px-2 py-1.5"
+      data-slot="account-row"
+    >
+      <AccountLabel />
+    </div>
+  );
+}
+
+/**
  * The account menu's popup: at least as wide as the account row, and wider where a row's words need
  * it (an organization's long name), up to 24rem and never past the window's edge.
  */
@@ -84,30 +102,31 @@ export const accountMenuClassName =
 export const accountMenuItemClassName = "gap-2 px-2 py-1.5";
 
 /**
- * The account row as the sidebar draws it: a button that opens the account menu (`children`, the
- * menu's content). When the person's name or their organization's is cut short, it reads whole in
- * a tooltip, on hover and on keyboard focus alike, and never while the menu is open.
+ * The account, as the strip draws it: the person's avatar at the strip's foot, a button that opens
+ * the account menu (`children`, the menu's content). Their name, and their organization where
+ * OpenBot lists them, read in a tooltip on hover and keyboard focus, never while the menu is open.
+ * The menu itself starts with the whole account row (`AccountLabel`), version included.
  */
 export function AccountMenu({ children }: { children: ReactNode }) {
   const { person, organization } = useAccountNames();
-  const { ref, cut } = useAnythingCut<HTMLButtonElement>();
   const [menuOpen, setMenuOpen] = useState(false);
   return (
     <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
-      <Tooltip disabled={!cut || menuOpen}>
+      <Tooltip disabled={menuOpen}>
         <TooltipTrigger
           render={
             <DropdownMenuTrigger
-              ref={ref}
-              render={
-                <SidebarMenuButton className="hover:bg-foreground/5 h-10" />
-              }
+              className={cn(stripItemClassName, "rounded-full")}
             />
           }
         >
-          <AccountLabel />
+          <UserAvatar />
+          {/* Read out as the button's name: whose account, and the organization being worked in. */}
+          <span className="sr-only">
+            {organization ? `${person}, ${organization}` : person}
+          </span>
         </TooltipTrigger>
-        <TooltipContent align="start" side="top" sideOffset={8}>
+        <TooltipContent align="center" side="right" sideOffset={8}>
           <span className="grid min-w-0 *:break-words">
             <span>{person}</span>
             {organization ? (

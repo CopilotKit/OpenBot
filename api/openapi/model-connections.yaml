@@ -84,6 +84,14 @@ paths:
                   kind: model
                   provider: openai
                   secret: sk-example
+              serverToServerClient:
+                value:
+                  kind: mcp_oauth_client
+                  provider: shopify
+                  keyId: server-to-server
+                  metadata:
+                    clientId: example-client-id
+                  secret: example-client-secret
       responses:
         '201':
           description: The credential, as kept. Never its secret.
@@ -592,10 +600,16 @@ components:
         kind:
           type: string
           description: >-
-            model, connector or mcp. The other kinds are written by what they
-            belong to: an app's registration when it is added, a person's
+            model, connector, mcp or mcp_oauth_client. mcp_oauth_client is the
+            organization's own OAuth client for an app that connects with a
+            server-to-server grant: provider is the app's slug in the app
+            directory, keyId is server-to-server, metadata.clientId is the
+            client's id and secret is the client's secret. The organization's
+            app then connects with that client, and the app is offered to the
+            organization once it is kept. The other kinds are written by what
+            they belong to: an app's registration when it is added, a person's
             sign-in when they connect it.
-          enum: [model, connector, mcp]
+          enum: [model, connector, mcp, mcp_oauth_client]
         provider:
           type: string
           minLength: 1
@@ -725,6 +739,17 @@ components:
           type: [string, 'null']
         effort:
           type: [string, 'null']
+        defaultModel:
+          type: object
+          description: The Bot default saved when the conversation was created. Absent when it follows the deployment default.
+          required: [model, effort, source]
+          properties:
+            model:
+              type: string
+            effort:
+              type: [string, 'null']
+            source:
+              type: string
         unverified:
           $ref: '#/components/schemas/UnverifiedModel'
     UnverifiedModel:
@@ -761,6 +786,11 @@ components:
           description: >-
             An effort the model takes, or null for its own. Trimmed, and read
             in lower case.
+        pinModel:
+          type: boolean
+          description: >-
+            Keep an explicitly named model as an override even when it is the
+            deployment's default. Omit to use the default as a reset.
     AiConnectionProvider:
       type: string
       description: >-

@@ -22,10 +22,11 @@ import type {
   CreateIdentityProviderHeaders,
   CreateIdentityProviderRequest,
   DeleteIdentityProviderHeaders,
-  IdempotencyConflictResponse,
   IdentityProviderConflictResponse,
   IdentityProviderNotFoundResponse,
+  IdentityProviderNotRemovableResponse,
   IdentityProviderPage,
+  IdentityProviderRemovalConflictResponse,
   IdentityProviderResponse,
   InvalidRequestResponse,
   ListIdentityProvidersParams,
@@ -83,7 +84,7 @@ export const getListIdentityProvidersUrl = (
 };
 
 /**
- * Return one page of the identity providers registered for single sign-on, by email domain: a company's own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the identity providers registered for single sign-on, by email domain: a company's own SAML or OIDC provider, which signs in everybody at its domain. Every administrator sees every provider, whoever registered it. Never a client secret or a signing certificate. Where this OpenBot may keep more than one organization, the list in any organization but `default` also holds the providers registered for the whole OpenBot, marked deployment: they count for this organization's Require SSO only while it has no provider of its own, and can't be removed here. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List identity providers
  */
 export const listIdentityProviders = async (
@@ -313,7 +314,7 @@ export const getCreateIdentityProviderUrl = (organizationId: string) => {
 };
 
 /**
- * Register a company's identity provider, so everybody it vouches for at its email domain can sign in. SAML takes the metadata the company's identity team supplies; OIDC takes the issuer, which describes itself, and a client. Only an administrator may register one, signed in to OpenBot rather than with a key or an app's sign-in. The audit trail records who registered it.
+ * Register a company's identity provider, so everybody it vouches for at its email domain can sign in. SAML takes the metadata the company's identity team supplies; OIDC takes the issuer, which describes itself, and a client. Only an administrator may register one, signed in to OpenBot rather than with a key or an app's sign-in. The audit trail records who registered it. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), no organization registers a provider of its own: this answers 409 with the code HOSTED_SIGN_IN_ONLY.
  * @summary Register an identity provider
  */
 export const createIdentityProvider = async (
@@ -475,7 +476,7 @@ export const getDeleteIdentityProviderUrl = (
 };
 
 /**
- * Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider already removed is not found.
+ * Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider registered for the whole OpenBot (deployment) is removed only where it was registered: in any other organization it is refused with 403. A provider already removed is not found. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), this answers 409 with the code HOSTED_SIGN_IN_ONLY and removes nothing.
  * @summary Remove an identity provider
  */
 export const deleteIdentityProvider = async (
@@ -522,9 +523,9 @@ export const getDeleteIdentityProviderMutationOptions = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
-    | AdminOnlyResponse
+    | IdentityProviderNotRemovableResponse
     | IdentityProviderNotFoundResponse
-    | IdempotencyConflictResponse
+    | IdentityProviderRemovalConflictResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
@@ -575,9 +576,9 @@ export type DeleteIdentityProviderMutationResult = NonNullable<
 export type DeleteIdentityProviderMutationError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
-  | AdminOnlyResponse
+  | IdentityProviderNotRemovableResponse
   | IdentityProviderNotFoundResponse
-  | IdempotencyConflictResponse
+  | IdentityProviderRemovalConflictResponse
   | ServerErrorResponse
   | UnexpectedErrorResponse;
 export type DeleteIdentityProviderMutationVariables = {
@@ -593,9 +594,9 @@ export const useDeleteIdentityProvider = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
-    | AdminOnlyResponse
+    | IdentityProviderNotRemovableResponse
     | IdentityProviderNotFoundResponse
-    | IdempotencyConflictResponse
+    | IdentityProviderRemovalConflictResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
   TContext = unknown,

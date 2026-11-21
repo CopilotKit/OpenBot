@@ -4,7 +4,7 @@ import { RunAgentInputSchema } from "@ag-ui/core/schemas";
 import { CopilotKitProvider, useFrontendTool } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import {
@@ -12,6 +12,8 @@ import {
   type ChannelPage,
   channelKeys,
 } from "@/lib/channels/queries";
+import { quietRunPeriod, RUN_ENDED_UNHEARD } from "@/lib/copilot/quiet-run";
+import { TURN_CUT_OFF } from "@/lib/copilot/stopped-turn";
 import { queryClient } from "@/query-client";
 import { MY_CAPABILITIES_PATH } from "./admin-settings-api";
 import { botGrantsPath, botGrantsResponse } from "./bot-grants-api";
@@ -65,7 +67,9 @@ type RunPlan =
   /** The back end answers the run request with a server error. */
   | { kind: "breaks" }
   /** The run request never reaches a back end at all. */
-  | { kind: "unreachable" };
+  | { kind: "unreachable" }
+  /** The run request is taken and nothing of it ever comes back: its server died under it. */
+  | { kind: "silent" };
 
 let originalFetch: typeof fetch;
 let plans: RunPlan[] = [];
@@ -134,6 +138,10 @@ function run(input: RunAgentInput): Response {
   if (plan.kind === "breaks")
     return NativeResponse.json({ error: "Bad gateway" }, { status: 502 });
   if (plan.kind === "unreachable") throw new TypeError("Failed to fetch");
+  if (plan.kind === "silent")
+    return new NativeResponse(new ReadableStream<Uint8Array>(), {
+      headers: { "content-type": "text/event-stream" },
+    });
   const started = {
     type: "RUN_STARTED",
     threadId: input.threadId,
@@ -357,6 +365,22 @@ beforeAll(() => {
         )
       )
         return NativeResponse.json({ sessions: [], nextCursor: null });
+      // Whether the conversation has a run going, as a quiet run asks: none, here.
+      if (
+        /^\/api\/v2\/organizations\/default\/conversations\/[^/]+\/join-tokens$/.test(
+          url.pathname,
+        )
+      )
+        return NativeResponse.json(
+          {
+            joinToken: "jt",
+            expiresAt: "2026-11-20T00:00:30.000Z",
+            threadId: channel.threadId,
+            runId: null,
+            realtime: { clientUrl: "ws://localhost/client", topic: "thread" },
+          },
+          { status: 201 },
+        );
       const thread = url.pathname.match(/\/threads\/([^/]+)\/messages$/);
       if (thread)
         return NativeResponse.json({
@@ -487,6 +511,44 @@ test.each(["a reload", "coming back from another conversation"])(
   },
 );
 
+/*
+ * Found with the server killed and started again in the middle of a long turn: the backend ends that
+ * run "Runner connection dropped", and the conversation opened again said only that.
+ */
+test("a conversation whose server dropped its run says the turn was cut off after a reload, with Carry on", async () => {
+  plans = [{ kind: "fails", message: "Runner connection dropped" }];
+  const live = open();
+  await send(live, "Write the plan as six files");
+  await live.findByTestId("transcript-stopped");
+  live.unmount();
+  const back = open();
+  await settled(back, "Write the plan as six files");
+  const restored = await back.findByTestId("transcript-stopped");
+  expect(within(restored).getByRole("alert").textContent).toBe(TURN_CUT_OFF);
+  within(restored).getByRole("button", { name: "Carry on" });
+});
+
+/*
+ * A Bot on a Claude plan whose engine went away part way through a reply: the server ends the turn
+ * "The connection to Claude dropped. Ask the Bot to carry on." It asks for the Bot to carry on, so
+ * the turn offers Carry on, live and in a conversation opened again, as a turn cut off here does.
+ */
+test("a turn the server says to carry on offers Carry on, live and after a reload", async () => {
+  const DROPPED = "The connection to Claude dropped. Ask the Bot to carry on.";
+  plans = [{ kind: "fails", message: DROPPED }];
+  const live = open();
+  await send(live, "Write the tide note for the harbour board");
+  const shown = await live.findByTestId("transcript-stopped");
+  expect(within(shown).getByRole("alert").textContent).toBe(DROPPED);
+  within(shown).getByRole("button", { name: "Carry on" });
+  live.unmount();
+  const back = open();
+  await settled(back, "Write the tide note for the harbour board");
+  const restored = await back.findByTestId("transcript-stopped");
+  expect(within(restored).getByRole("alert").textContent).toBe(DROPPED);
+  within(restored).getByRole("button", { name: "Carry on" });
+});
+
 test("a failure that a later run answered is not shown after a reload", async () => {
   plans = [
     { kind: "fails", message: REJECTED },
@@ -614,9 +676,10 @@ test("a turn that failed after it had done some work keeps its message sent, and
   ];
   const live = open();
   await send(live, "Find all HubSpot deals at S1 and later");
-  expect((await live.findByTestId("transcript-stopped")).textContent).toBe(
-    FAILED,
-  );
+  const stopped = await live.findByTestId("transcript-stopped");
+  expect(within(stopped).getByRole("alert").textContent).toBe(FAILED);
+  // It asks for the Bot to carry on, so the turn offers that with one press.
+  within(stopped).getByRole("button", { name: "Carry on" });
   await waitFor(() =>
     expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
   );
@@ -634,6 +697,65 @@ test("a turn that failed before it did anything hands the words back to send aga
   await live.findByTestId("transcript-stopped");
   await waitFor(() => expect(typed(live)).toBe("Summarise my inbox"));
 });
+
+/*
+ * FOUND ON A PERSON'S 1.1.2 DESKTOP. The server stopped and started again in the middle of a long
+ * turn of file saves. The run that would have carried the last save's result back was never made,
+ * and its failure was dropped as if the person had pressed Stop: the turn ended with nothing said.
+ */
+test("a turn whose backend stops answering after a browser step says so, and offers to carry on", async () => {
+  plans = [
+    { kind: "calls", tool: STEP },
+    { kind: "unreachable" },
+    { kind: "answers", text: "Picking up where I stopped." },
+  ];
+  const live = open();
+  await send(live, "Write the plan as six files");
+  const shown = await live.findByTestId("transcript-stopped");
+  expect(within(shown).getByRole("alert").textContent).toBe(TURN_CUT_OFF);
+  expect(stepsRun).toBe(1);
+  await waitFor(() =>
+    expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
+  // The message went and the Bot worked on it, so it is not handed back to send again.
+  expect(typed(live)).toBe("");
+  const user = userEvent.setup({ document: live.container.ownerDocument });
+  await user.click(within(shown).getByRole("button", { name: "Carry on" }));
+  await live.findByText("Picking up where I stopped.");
+  await waitFor(() =>
+    expect(live.queryByTestId("transcript-stopped")).toBeNull(),
+  );
+});
+
+/*
+ * Found on WebKit with the server killed right after the browser sent the run carrying a save's
+ * result: nothing of that run ever came, the watch was still resting from the run before, and the
+ * server's "no run going" read as the step still being taken. "Thinking" for good, with Stop up.
+ */
+test("a run started after a browser step that never answers ends the turn once the server has no run", async () => {
+  const period = quietRunPeriod.ms;
+  quietRunPeriod.ms = 200;
+  try {
+    plans = [{ kind: "calls", tool: STEP }, { kind: "silent" }];
+    const live = open();
+    await send(live, "Write the plan as six files");
+    const shown = await live.findByTestId(
+      "transcript-stopped",
+      {},
+      // The quiet period, and then the stored thread read back (up to five and a half seconds).
+      { timeout: 15_000 },
+    );
+    expect(within(shown).getByRole("alert").textContent).toBe(
+      RUN_ENDED_UNHEARD,
+    );
+    within(shown).getByRole("button", { name: "Carry on" });
+    await waitFor(() =>
+      expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+    );
+  } finally {
+    quietRunPeriod.ms = period;
+  }
+}, 20_000);
 
 test("a turn that fails in a run after its browser steps says so, as one that fails at once does", async () => {
   // The Bot works through browser steps, each answered here and sent back in a run of its own, and
