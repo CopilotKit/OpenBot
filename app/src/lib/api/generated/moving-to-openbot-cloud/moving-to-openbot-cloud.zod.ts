@@ -19,6 +19,8 @@ export const GetExportEstimateParams = zod.object({
 
 export const getExportEstimateResponseCountsItemCountMin = 0;
 
+export const getExportEstimateResponseCountsItemBytesMin = 0;
+
 export const getExportEstimateResponseEstimatedBytesMin = 0;
 
 export const getExportEstimateResponseStoredBytesMin = 0;
@@ -32,6 +34,11 @@ export const GetExportEstimateResponse = zod.object({
           "A kind of thing that moves. bots: Bots with their settings and instructions. skills: skills, a Bot's and the person's (and the organization's, for an administrator). conversations and messages: every conversation and every message in it. memories: what the person's Bots remember about them. routines, goals and check-ins: with their schedules. files: files sent in conversations and kept on a Bot's computer. settings: the person's standing instructions and preferences. model-keys: a model key, only when the person chose to bring it. A later OpenBot may add a kind; count one you don't know like any other.",
         ),
       count: zod.int().min(getExportEstimateResponseCountsItemCountMin),
+      bytes: zod
+        .int()
+        .min(getExportEstimateResponseCountsItemBytesMin)
+        .optional()
+        .describe("For files, how many bytes they hold together."),
     }),
   ),
   estimatedBytes: zod
@@ -149,6 +156,8 @@ export const createExportResponsePartsItemSha256RegExp = new RegExp(
 );
 export const createExportResponseCountsItemCountMin = 0;
 
+export const createExportResponseCountsItemBytesMin = 0;
+
 export const createExportResponseProgressMin = 0;
 export const createExportResponseProgressMax = 1;
 
@@ -192,6 +201,11 @@ export const CreateExportResponse = zod.object({
             "A kind of thing that moves. bots: Bots with their settings and instructions. skills: skills, a Bot's and the person's (and the organization's, for an administrator). conversations and messages: every conversation and every message in it. memories: what the person's Bots remember about them. routines, goals and check-ins: with their schedules. files: files sent in conversations and kept on a Bot's computer. settings: the person's standing instructions and preferences. model-keys: a model key, only when the person chose to bring it. A later OpenBot may add a kind; count one you don't know like any other.",
           ),
         count: zod.int().min(createExportResponseCountsItemCountMin),
+        bytes: zod
+          .int()
+          .min(createExportResponseCountsItemBytesMin)
+          .optional()
+          .describe("For files, how many bytes they hold together."),
       }),
     )
     .optional()
@@ -279,6 +293,8 @@ export const getExportResponsePartsItemSha256RegExp = new RegExp(
 );
 export const getExportResponseCountsItemCountMin = 0;
 
+export const getExportResponseCountsItemBytesMin = 0;
+
 export const getExportResponseProgressMin = 0;
 export const getExportResponseProgressMax = 1;
 
@@ -322,6 +338,11 @@ export const GetExportResponse = zod.object({
             "A kind of thing that moves. bots: Bots with their settings and instructions. skills: skills, a Bot's and the person's (and the organization's, for an administrator). conversations and messages: every conversation and every message in it. memories: what the person's Bots remember about them. routines, goals and check-ins: with their schedules. files: files sent in conversations and kept on a Bot's computer. settings: the person's standing instructions and preferences. model-keys: a model key, only when the person chose to bring it. A later OpenBot may add a kind; count one you don't know like any other.",
           ),
         count: zod.int().min(getExportResponseCountsItemCountMin),
+        bytes: zod
+          .int()
+          .min(getExportResponseCountsItemBytesMin)
+          .optional()
+          .describe("For files, how many bytes they hold together."),
       }),
     )
     .optional()
@@ -518,7 +539,11 @@ export const createImportResponseExpectedPartsItemSha256RegExp = new RegExp(
 
 export const createImportResponseExpectedItemCountMin = 0;
 
+export const createImportResponseExpectedItemBytesMin = 0;
+
 export const createImportResponseImportedItemCountMin = 0;
+
+export const createImportResponseImportedItemBytesMin = 0;
 
 export const CreateImportResponse = zod.object({
   id: zod.string().min(1),
@@ -567,6 +592,11 @@ export const CreateImportResponse = zod.object({
             "A kind of thing that moves. bots: Bots with their settings and instructions. skills: skills, a Bot's and the person's (and the organization's, for an administrator). conversations and messages: every conversation and every message in it. memories: what the person's Bots remember about them. routines, goals and check-ins: with their schedules. files: files sent in conversations and kept on a Bot's computer. settings: the person's standing instructions and preferences. model-keys: a model key, only when the person chose to bring it. A later OpenBot may add a kind; count one you don't know like any other.",
           ),
         count: zod.int().min(createImportResponseExpectedItemCountMin),
+        bytes: zod
+          .int()
+          .min(createImportResponseExpectedItemBytesMin)
+          .optional()
+          .describe("For files, how many bytes they hold together."),
       }),
     )
     .optional()
@@ -582,6 +612,11 @@ export const CreateImportResponse = zod.object({
             "A kind of thing that moves. bots: Bots with their settings and instructions. skills: skills, a Bot's and the person's (and the organization's, for an administrator). conversations and messages: every conversation and every message in it. memories: what the person's Bots remember about them. routines, goals and check-ins: with their schedules. files: files sent in conversations and kept on a Bot's computer. settings: the person's standing instructions and preferences. model-keys: a model key, only when the person chose to bring it. A later OpenBot may add a kind; count one you don't know like any other.",
           ),
         count: zod.int().min(createImportResponseImportedItemCountMin),
+        bytes: zod
+          .int()
+          .min(createImportResponseImportedItemBytesMin)
+          .optional()
+          .describe("For files, how many bytes they hold together."),
       }),
     )
     .optional()
@@ -716,7 +751,11 @@ export const listImportsResponseItemsItemExpectedPartsItemSha256RegExp =
 
 export const listImportsResponseItemsItemExpectedItemCountMin = 0;
 
+export const listImportsResponseItemsItemExpectedItemBytesMin = 0;
+
 export const listImportsResponseItemsItemImportedItemCountMin = 0;
+
+export const listImportsResponseItemsItemImportedItemBytesMin = 0;
 
 export const ListImportsResponse = zod.object({
   items: zod.array(
@@ -780,6 +819,11 @@ export const ListImportsResponse = zod.object({
             count: zod
               .int()
               .min(listImportsResponseItemsItemExpectedItemCountMin),
+            bytes: zod
+              .int()
+              .min(listImportsResponseItemsItemExpectedItemBytesMin)
+              .optional()
+              .describe("For files, how many bytes they hold together."),
           }),
         )
         .optional()
@@ -797,6 +841,11 @@ export const ListImportsResponse = zod.object({
             count: zod
               .int()
               .min(listImportsResponseItemsItemImportedItemCountMin),
+            bytes: zod
+              .int()
+              .min(listImportsResponseItemsItemImportedItemBytesMin)
+              .optional()
+              .describe("For files, how many bytes they hold together."),
           }),
         )
         .optional()
@@ -922,7 +971,11 @@ export const getImportResponseExpectedPartsItemSha256RegExp = new RegExp(
 
 export const getImportResponseExpectedItemCountMin = 0;
 
+export const getImportResponseExpectedItemBytesMin = 0;
+
 export const getImportResponseImportedItemCountMin = 0;
+
+export const getImportResponseImportedItemBytesMin = 0;
 
 export const GetImportResponse = zod.object({
   id: zod.string().min(1),
@@ -971,6 +1024,11 @@ export const GetImportResponse = zod.object({
             "A kind of thing that moves. bots: Bots with their settings and instructions. skills: skills, a Bot's and the person's (and the organization's, for an administrator). conversations and messages: every conversation and every message in it. memories: what the person's Bots remember about them. routines, goals and check-ins: with their schedules. files: files sent in conversations and kept on a Bot's computer. settings: the person's standing instructions and preferences. model-keys: a model key, only when the person chose to bring it. A later OpenBot may add a kind; count one you don't know like any other.",
           ),
         count: zod.int().min(getImportResponseExpectedItemCountMin),
+        bytes: zod
+          .int()
+          .min(getImportResponseExpectedItemBytesMin)
+          .optional()
+          .describe("For files, how many bytes they hold together."),
       }),
     )
     .optional()
@@ -986,6 +1044,11 @@ export const GetImportResponse = zod.object({
             "A kind of thing that moves. bots: Bots with their settings and instructions. skills: skills, a Bot's and the person's (and the organization's, for an administrator). conversations and messages: every conversation and every message in it. memories: what the person's Bots remember about them. routines, goals and check-ins: with their schedules. files: files sent in conversations and kept on a Bot's computer. settings: the person's standing instructions and preferences. model-keys: a model key, only when the person chose to bring it. A later OpenBot may add a kind; count one you don't know like any other.",
           ),
         count: zod.int().min(getImportResponseImportedItemCountMin),
+        bytes: zod
+          .int()
+          .min(getImportResponseImportedItemBytesMin)
+          .optional()
+          .describe("For files, how many bytes they hold together."),
       }),
     )
     .optional()
@@ -1126,7 +1189,11 @@ export const uploadImportPartResponseExpectedPartsItemSha256RegExp = new RegExp(
 
 export const uploadImportPartResponseExpectedItemCountMin = 0;
 
+export const uploadImportPartResponseExpectedItemBytesMin = 0;
+
 export const uploadImportPartResponseImportedItemCountMin = 0;
+
+export const uploadImportPartResponseImportedItemBytesMin = 0;
 
 export const UploadImportPartResponse = zod.object({
   id: zod.string().min(1),
@@ -1175,6 +1242,11 @@ export const UploadImportPartResponse = zod.object({
             "A kind of thing that moves. bots: Bots with their settings and instructions. skills: skills, a Bot's and the person's (and the organization's, for an administrator). conversations and messages: every conversation and every message in it. memories: what the person's Bots remember about them. routines, goals and check-ins: with their schedules. files: files sent in conversations and kept on a Bot's computer. settings: the person's standing instructions and preferences. model-keys: a model key, only when the person chose to bring it. A later OpenBot may add a kind; count one you don't know like any other.",
           ),
         count: zod.int().min(uploadImportPartResponseExpectedItemCountMin),
+        bytes: zod
+          .int()
+          .min(uploadImportPartResponseExpectedItemBytesMin)
+          .optional()
+          .describe("For files, how many bytes they hold together."),
       }),
     )
     .optional()
@@ -1190,6 +1262,11 @@ export const UploadImportPartResponse = zod.object({
             "A kind of thing that moves. bots: Bots with their settings and instructions. skills: skills, a Bot's and the person's (and the organization's, for an administrator). conversations and messages: every conversation and every message in it. memories: what the person's Bots remember about them. routines, goals and check-ins: with their schedules. files: files sent in conversations and kept on a Bot's computer. settings: the person's standing instructions and preferences. model-keys: a model key, only when the person chose to bring it. A later OpenBot may add a kind; count one you don't know like any other.",
           ),
         count: zod.int().min(uploadImportPartResponseImportedItemCountMin),
+        bytes: zod
+          .int()
+          .min(uploadImportPartResponseImportedItemBytesMin)
+          .optional()
+          .describe("For files, how many bytes they hold together."),
       }),
     )
     .optional()
@@ -1275,7 +1352,7 @@ export const UploadImportPartResponse = zod.object({
 });
 
 /**
- * Once every part has arrived, import the bundle into this organization in the background: every id is given a new one here, everything is owned by the caller, and nothing reaches another organization. Read getImport until status is imported or failed. Applying again while it runs, or after it finished, changes nothing and answers where it stands; applying a failed import tries again from where it stopped, and nothing already imported is imported twice. A missing part answers 409 with IMPORT_INCOMPLETE.
+ * Once every part has arrived, import the bundle into this organization in the background: every id is given a new one here, everything is owned by the caller, and nothing reaches another organization. Every file is stored where a file uploaded here is, in this organization's own place in OpenBot's file store, and the uploaded parts are removed once the import is done. Read getImport until status is imported or failed. Applying again while it runs, or after it finished, changes nothing and answers where it stands; applying a failed import tries again from where it stopped, and nothing already imported is imported twice. A missing part answers 409 with IMPORT_INCOMPLETE.
  *
  * What OpenBot Cloud doesn't have comes in differently, and the summary says so in notes: a Bot that ran on its own isolated computer comes in as an ordinary Bot; a feature that needs the Business plan, in an organization that isn't on it, is left out. A model key in the bundle becomes the caller's own AI connection, unless they have one here already, which is kept.
  * @summary Import the uploaded bundle
@@ -1324,7 +1401,11 @@ export const applyImportResponseExpectedPartsItemSha256RegExp = new RegExp(
 
 export const applyImportResponseExpectedItemCountMin = 0;
 
+export const applyImportResponseExpectedItemBytesMin = 0;
+
 export const applyImportResponseImportedItemCountMin = 0;
+
+export const applyImportResponseImportedItemBytesMin = 0;
 
 export const ApplyImportResponse = zod.object({
   id: zod.string().min(1),
@@ -1373,6 +1454,11 @@ export const ApplyImportResponse = zod.object({
             "A kind of thing that moves. bots: Bots with their settings and instructions. skills: skills, a Bot's and the person's (and the organization's, for an administrator). conversations and messages: every conversation and every message in it. memories: what the person's Bots remember about them. routines, goals and check-ins: with their schedules. files: files sent in conversations and kept on a Bot's computer. settings: the person's standing instructions and preferences. model-keys: a model key, only when the person chose to bring it. A later OpenBot may add a kind; count one you don't know like any other.",
           ),
         count: zod.int().min(applyImportResponseExpectedItemCountMin),
+        bytes: zod
+          .int()
+          .min(applyImportResponseExpectedItemBytesMin)
+          .optional()
+          .describe("For files, how many bytes they hold together."),
       }),
     )
     .optional()
@@ -1388,6 +1474,11 @@ export const ApplyImportResponse = zod.object({
             "A kind of thing that moves. bots: Bots with their settings and instructions. skills: skills, a Bot's and the person's (and the organization's, for an administrator). conversations and messages: every conversation and every message in it. memories: what the person's Bots remember about them. routines, goals and check-ins: with their schedules. files: files sent in conversations and kept on a Bot's computer. settings: the person's standing instructions and preferences. model-keys: a model key, only when the person chose to bring it. A later OpenBot may add a kind; count one you don't know like any other.",
           ),
         count: zod.int().min(applyImportResponseImportedItemCountMin),
+        bytes: zod
+          .int()
+          .min(applyImportResponseImportedItemBytesMin)
+          .optional()
+          .describe("For files, how many bytes they hold together."),
       }),
     )
     .optional()
@@ -1504,11 +1595,17 @@ export const getImportVerificationResponseKindsItemFoundMin = 0;
 
 export const getImportVerificationResponseKindsItemLeftOutMin = 0;
 
+export const getImportVerificationResponseKindsItemExpectedBytesMin = 0;
+
+export const getImportVerificationResponseKindsItemFoundBytesMin = 0;
+
 export const GetImportVerificationResponse = zod.object({
   importId: zod.string().min(1),
   matches: zod
     .boolean()
-    .describe("True when, for every kind, found plus leftOut is expected."),
+    .describe(
+      "True when, for every kind, found plus leftOut is expected, and for files foundBytes is expectedBytes.",
+    ),
   kinds: zod.array(
     zod.object({
       kind: zod
@@ -1529,6 +1626,18 @@ export const GetImportVerificationResponse = zod.object({
         .min(getImportVerificationResponseKindsItemLeftOutMin)
         .describe(
           "How many OpenBot Cloud left out on purpose, as the notes say.",
+        ),
+      expectedBytes: zod
+        .int()
+        .min(getImportVerificationResponseKindsItemExpectedBytesMin)
+        .optional()
+        .describe("For files, how many bytes the bundle held."),
+      foundBytes: zod
+        .int()
+        .min(getImportVerificationResponseKindsItemFoundBytesMin)
+        .optional()
+        .describe(
+          "For files, how many bytes are in this organization's file store now, read from the store itself.",
         ),
     }),
   ),

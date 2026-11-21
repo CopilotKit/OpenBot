@@ -8,7 +8,7 @@ import type { ReconnectApp } from "./reconnectApp";
 export interface ImportVerification {
   /** @minLength 1 */
   importId: string;
-  /** True when, for every kind, found plus leftOut is expected. */
+  /** True when, for every kind, found plus leftOut is expected, and for files foundBytes is expectedBytes. */
   matches: boolean;
   kinds: ImportVerificationKind[];
   notes: MoveNote[];
