@@ -44,6 +44,7 @@ import {
   useState,
 } from "react";
 import { InlineApproval } from "@/components/approvals/inline-approval";
+import { AddModelKeyLink } from "@/components/channels/add-model-key-link";
 import {
   ArgumentsArrivingContext,
   TurnInFlightContext,
@@ -373,8 +374,12 @@ function Stopped({
           Carry on
         </Button>
       ) : (
-        // A run refused because the organization needs a card is answered where it was refused.
-        <AddCardButton />
+        <>
+          {/* A run refused because the organization needs a card is answered where it was refused. */}
+          <AddCardButton />
+          {/* And one with no model key, for an admin who can add it. */}
+          <AddModelKeyLink reason={reason} />
+        </>
       )}
     </div>
   );
