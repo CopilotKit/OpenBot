@@ -301,14 +301,19 @@ export async function listen(name, listener) {
 
 type Window = { script: string; style: string };
 
-/** The window as the app builds it, with the native side scripted and the marks left out. */
-async function buildWindow(): Promise<Window> {
+/**
+ * The window as the app builds it, with the native side scripted and the marks left out. `env` is
+ * Vite's build-time values; none set is a build without a whitelabel support page or OpenBot Cloud.
+ */
+async function buildWindow(env: Record<string, string> = {}): Promise<Window> {
   const built = await Bun.build({
     entrypoints: [new URL("./main.tsx", import.meta.url).pathname],
     target: "browser",
     format: "esm",
-    // Vite's build-time values, none of them set, as a build without a whitelabel support page.
-    define: { "process.env.NODE_ENV": '"production"', "import.meta.env": "{}" },
+    define: {
+      "process.env.NODE_ENV": '"production"',
+      "import.meta.env": JSON.stringify(env),
+    },
     plugins: [
       {
         name: "scripted-native-side",
@@ -351,16 +356,16 @@ async function buildWindow(): Promise<Window> {
 }
 
 /** Served as the shell serves the window: its page, its script and its stylesheet. */
-async function open(page: Page, hash = "") {
+async function open(page: Page, hash = "", served: Window = built) {
   await page.route("https://openbot.test/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/main.js")
       return route.fulfill({
         contentType: "text/javascript",
-        body: built.script,
+        body: served.script,
       });
     if (path === "/main.css")
-      return route.fulfill({ contentType: "text/css", body: built.style });
+      return route.fulfill({ contentType: "text/css", body: served.style });
     if (path === "/")
       return route.fulfill({
         contentType: "text/html",
@@ -374,11 +379,14 @@ async function open(page: Page, hash = "") {
 
 let browser: Browser;
 let built: Window;
+/** The same window from a build that turns OpenBot Cloud on. */
+let cloudBuilt: Window;
 let chromium: Chromium;
 
 beforeAll(async () => {
   if (!asked) return;
   built = await buildWindow();
+  cloudBuilt = await buildWindow({ VITE_OPENBOT_CLOUD_ENABLED: "true" });
   const playwright = (await import(PLAYWRIGHT)) as {
     chromium: Chromium;
     webkit: { launch(): Promise<Browser> };
@@ -851,7 +859,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
   // Windows: once the first screen listed where OpenBot runs and what this computer needs, the card
   // showed a scrollbar for a few pixels at that size. Everything on it has to show without one.
   for (const theme of ["light", "dark"] as const) {
-    test(`at 1000x760 (${theme}), everything on it shows without the card scrolling, and so does OpenBot Cloud's sign-in`, async () => {
+    test(`at 1000x760 (${theme}), everything on it shows without the card scrolling, OpenBot for Business's two ways stacked`, async () => {
       const page = await browser.newPage({
         viewport: { width: 1000, height: 760 },
         colorScheme: theme,
@@ -859,6 +867,79 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
       const shots = process.env.OPENBOT_APP_SHOTS;
       try {
         await open(page);
+        await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+        await page.waitForTimeout(400);
+        // A build without OpenBot Cloud (VITE_OPENBOT_CLOUD_ENABLED unset) offers no Cloud row.
+        expect(await page.getByText("OpenBot Cloud").count()).toBe(0);
+        if (shots)
+          await page.screenshot({ path: `${shots}/welcome-off-${theme}.png` });
+        const shape = await page.evaluate(() => {
+          const card = document.querySelector("main > .sheet") as HTMLElement;
+          const group = document.querySelector(".tile-group") as HTMLElement;
+          const [cloud, own] = [
+            ...document.querySelectorAll(".tile-option"),
+          ].map((option) => option.getBoundingClientRect());
+          const marks = [...document.querySelectorAll(".cloud-mark")].map(
+            (mark) => mark.getBoundingClientRect(),
+          );
+          const box = group.getBoundingClientRect();
+          return {
+            overflow: card.scrollHeight - card.clientHeight,
+            // One above the other, the same width, inside the Business card.
+            stacked:
+              !!cloud &&
+              !!own &&
+              own.top >= cloud.bottom &&
+              cloud.width === own.width &&
+              own.right <= box.right &&
+              own.bottom <= box.bottom,
+            // The four clouds' marks on Self-Hosted's own line, inside its row.
+            marks:
+              marks.length === 4 &&
+              !!own &&
+              marks.every(
+                (mark) =>
+                  mark.top >= own.top &&
+                  mark.bottom <= own.bottom &&
+                  mark.right <= own.right &&
+                  mark.top === marks[0]?.top,
+              ),
+            // Each choice's name and line on one line.
+            oneLine: [...document.querySelectorAll(".tile-option-text")].every(
+              (text) => text.getBoundingClientRect().height <= 21,
+            ),
+          };
+        });
+        const { overflow, ...laid } = shape;
+        expect(overflow).toBeLessThanOrEqual(0);
+        expect(laid).toEqual({ stacked: true, marks: true, oneLine: true });
+        // And connecting to a company's own OpenBot, by the link under the rows: the address and Connect.
+        await page.getByRole("button", { name: "Connect to it" }).click();
+        await page.getByLabel("OpenBot address", { exact: true }).waitFor();
+        await page.waitForTimeout(400);
+        expect(
+          await page.evaluate(() => {
+            const card = document.querySelector("main > .sheet") as HTMLElement;
+            return card.scrollHeight - card.clientHeight;
+          }),
+        ).toBeLessThanOrEqual(0);
+        expect(
+          await page.getByRole("button", { name: "Connect" }).count(),
+        ).toBe(1);
+      } finally {
+        await page.close();
+      }
+    });
+
+    // A build with OpenBot Cloud on: three rows, and Cloud's sign-in fits as Install does.
+    test(`at 1000x760 (${theme}), a build with OpenBot Cloud on shows three rows without the card scrolling, and so does Cloud's sign-in`, async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 760 },
+        colorScheme: theme,
+      });
+      const shots = process.env.OPENBOT_APP_SHOTS;
+      try {
+        await open(page, "", cloudBuilt);
         await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
         await page.waitForTimeout(400);
         const shape = await page.evaluate(() => {
@@ -910,8 +991,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         expect(overflow).toBeLessThanOrEqual(0);
         expect(laid).toEqual({ rows: true, marks: true, oneLine: true });
         if (shots)
-          await page.screenshot({ path: `${shots}/welcome-${theme}.png` });
-        // OpenBot Cloud: its sign-in, which fits as Self-Contained's Install does.
+          await page.screenshot({ path: `${shots}/welcome-on-${theme}.png` });
         await page.getByText("We run it for you.").click();
         await page
           .getByRole("button", { name: "Sign in to OpenBot Cloud" })
@@ -925,21 +1005,8 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         ).toBeLessThanOrEqual(0);
         if (shots)
           await page.screenshot({
-            path: `${shots}/welcome-cloud-${theme}.png`,
+            path: `${shots}/welcome-on-cloud-${theme}.png`,
           });
-        // And connecting to a company's own OpenBot, by the link under the rows: the address and Connect.
-        await page.getByRole("button", { name: "Connect to it" }).click();
-        await page.getByLabel("OpenBot address", { exact: true }).waitFor();
-        await page.waitForTimeout(400);
-        expect(
-          await page.evaluate(() => {
-            const card = document.querySelector("main > .sheet") as HTMLElement;
-            return card.scrollHeight - card.clientHeight;
-          }),
-        ).toBeLessThanOrEqual(0);
-        expect(
-          await page.getByRole("button", { name: "Connect" }).count(),
-        ).toBe(1);
       } finally {
         await page.close();
       }
@@ -947,7 +1014,8 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
   }
 
   /*
-   * OpenBot for Business books a call: picked, it shows the app's OpenBot for Business view, what it adds and the booking calendar, where it used to show an
+   * OpenBot for Business books a call: either of its two ways to run, picked, shows the app's
+   * OpenBot for Business view, what it adds and the booking calendar, where it used to show an
    * address field. Taller than the window, it scrolls in the card as any tall step does; the page
    * never does, nothing runs off the card's side, and the calendar takes the height Calendly reports.
    */
@@ -959,7 +1027,9 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
       await routeCalendar(page);
       await open(page);
       await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
-      await page.getByText("Your own cloud or on-prem. Book a call.").click();
+      await page.getByText("Your own cloud or on-prem.").click();
+      await page.locator(".tile-option.chosen").waitFor();
+      await page.getByText("We run it for you.").click();
       await page
         .locator(
           '.booking-calendar[data-ready] iframe[title="Booking calendar"]',
