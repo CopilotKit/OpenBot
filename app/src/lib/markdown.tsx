@@ -3,7 +3,7 @@ import {
   IconFileText,
   IconPresentation,
   IconTable,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useRouter } from "@tanstack/react-router";
 import {
   type ComponentProps,

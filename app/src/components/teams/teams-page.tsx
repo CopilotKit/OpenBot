@@ -3,7 +3,7 @@ import {
   IconChevronRight,
   IconPlus,
   IconUsersGroup,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { TeamPage } from "@/components/edition/for-a-team";

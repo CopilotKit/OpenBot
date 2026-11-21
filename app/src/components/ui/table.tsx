@@ -71,8 +71,12 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   return (
     <th
       data-slot="table-head"
+      /*
+       * The UI Kit's "Table header": the column's name in 12px regular gray, in tokens (theme.css)
+       * that the skins set back to 14px medium (skins/legacy-base.css).
+       */
       className={cn(
-        "h-10 whitespace-nowrap px-3 text-left align-middle font-medium text-muted-foreground",
+        "h-10 whitespace-nowrap px-3 text-left align-middle text-table-head-size font-(--table-head-weight) text-table-head",
         className,
       )}
       {...props}

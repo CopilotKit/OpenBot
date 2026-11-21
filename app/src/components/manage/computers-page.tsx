@@ -4,7 +4,7 @@ import {
   IconBolt,
   IconDeviceDesktop,
   IconDeviceDesktopOff,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";

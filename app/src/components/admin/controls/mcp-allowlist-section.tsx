@@ -3,7 +3,7 @@ import {
   IconKey,
   IconPlug,
   IconWorld,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useState } from "react";
 import { PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";

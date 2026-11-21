@@ -45,5 +45,8 @@
     "typescript": "^5.9.3",
     "vite": "^7.1.12",
     "zod": "^4.4.3"
+  },
+  "dependencies": {
+    "@fontsource-variable/sora": "^5.3.0"
   }
 }

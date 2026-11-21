@@ -8,7 +8,7 @@ import {
   IconPencil,
   IconSearch,
   IconTerminal2,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { structuredPatch } from "diff";
 import { type ReactNode, useState } from "react";
 import { byPosition } from "@/components/gallery/positions";

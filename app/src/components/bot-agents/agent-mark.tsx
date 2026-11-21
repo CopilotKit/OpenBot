@@ -1,5 +1,5 @@
 import { WEB_HARNESSES } from "@openbot/shared/harnesses";
-import { IconSitemap } from "@tabler/icons-react";
+import { IconSitemap } from "@/components/icons";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { ItemMedia } from "@/components/ui/item";

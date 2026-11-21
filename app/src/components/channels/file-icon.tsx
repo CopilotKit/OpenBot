@@ -9,8 +9,8 @@ import {
   IconJson,
   IconMarkdown,
   IconPhoto,
-  type TablerIcon,
-} from "@tabler/icons-react";
+  type Icon,
+} from "@/components/icons";
 import {
   type AcceptedFileType,
   mediaTypeOf,
@@ -37,7 +37,7 @@ export const FILE_TYPE_ICONS = {
   "text/markdown": IconMarkdown,
   "text/csv": IconFileTypeCsv,
   "application/json": IconJson,
-} as const satisfies Record<AcceptedFileType["mimeType"], TablerIcon>;
+} as const satisfies Record<AcceptedFileType["mimeType"], Icon>;
 
 /** A file's icon by the type the server found in it; the plain file icon for a type not known. */
 export function FileTypeIcon({

@@ -1,4 +1,4 @@
-import { IconBolt, IconChevronRight, IconPlus } from "@tabler/icons-react";
+import { IconBolt, IconChevronRight, IconPlus } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
@@ -16,6 +16,7 @@ import {
 } from "@/components/layout/page-shell";
 import { NeedsYouBoard } from "@/components/needs-you/board";
 import { DoneTasks, useNeedsYou } from "@/components/needs-you/needs-you";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -239,11 +240,7 @@ function RosterRow({
         </ItemDescription>
       </ItemContent>
       <ItemActions>
-        {waiting > 0 ? (
-          <span className="rounded-full bg-primary px-1.5 text-[11px] font-medium text-primary-foreground tabular-nums">
-            {waiting}
-          </span>
-        ) : null}
+        {waiting > 0 ? <Badge variant="count">{waiting}</Badge> : null}
         <IconChevronRight className="size-4 text-muted-foreground" />
       </ItemActions>
     </Item>

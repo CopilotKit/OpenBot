@@ -1,4 +1,4 @@
-import { type Icon, IconLogout, IconMessages } from "@tabler/icons-react";
+import { type Icon, IconLogout, IconMessages } from "@/components/icons";
 import { Link } from "@tanstack/react-router";
 import type { CSSProperties, ReactNode } from "react";
 import { BrandName } from "@/components/edition/brand-name";

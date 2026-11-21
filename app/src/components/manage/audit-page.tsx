@@ -1,16 +1,5 @@
 import { isOpenBotActor } from "@openbot/shared/openbot-actor";
 import {
-  IconAlertTriangle,
-  IconBan,
-  IconDeviceDesktop,
-  IconDownload,
-  IconEyeOff,
-  IconList,
-  IconRefresh,
-  IconSearch,
-  IconX,
-} from "@tabler/icons-react";
-import {
   keepPreviousData,
   useInfiniteQuery,
   useQuery,
@@ -25,6 +14,17 @@ import {
   withFilters,
 } from "@/components/audit/audit-filters";
 import { AuditTable } from "@/components/audit/audit-table";
+import {
+  IconAlertTriangle,
+  IconBan,
+  IconDeviceDesktop,
+  IconDownload,
+  IconEyeOff,
+  IconList,
+  IconRefresh,
+  IconSearch,
+  IconX,
+} from "@/components/icons";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

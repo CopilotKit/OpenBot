@@ -14,7 +14,7 @@ import { TeamFeaturesDialog } from "@/components/edition/team-features-dialog";
 import { deploymentKeys } from "@/lib/deployment/queries";
 
 /**
- * The home page's link to OpenBot for Business: personal edition only, and closing it lasts for
+ * The home page's bar offering OpenBot for Business: personal edition only, and closing it lasts for
  * the session, so it is back the next time the app starts.
  */
 
@@ -55,14 +55,12 @@ function draw(edition: "personal" | "team") {
  * It opened the website in a new tab, away from the app and its calendar. It opens the OpenBot for
  * Business dialog, with the booking calendar in it, and leaves nothing to follow out of the app.
  */
-test("the personal edition's Meet OpenBot for Business opens the dialog in the app, not the website", async () => {
+test("the personal edition's Talk to an engineer opens the dialog in the app, not the website", async () => {
   const view = draw("personal");
   expect(view.queryByRole("link", { name: /OpenBot for Business/ })).toBeNull();
   expect(view.queryByRole("dialog")).toBeNull();
 
-  fireEvent.click(
-    view.getByRole("button", { name: "Meet OpenBot for Business" }),
-  );
+  fireEvent.click(view.getByRole("button", { name: "Talk to an engineer" }));
 
   const dialog = await view.findByRole("dialog", {
     name: "OpenBot for Business",
@@ -72,20 +70,28 @@ test("the personal edition's Meet OpenBot for Business opens the dialog in the a
 
 test("the team edition shows nothing", () => {
   const view = draw("team");
-  expect(view.queryByText("Meet OpenBot for Business")).toBeNull();
+  expect(
+    view.queryByText("Self-host OpenBot for your organization."),
+  ).toBeNull();
 });
 
 test("closing it lasts for the session", () => {
   const first = draw("personal");
-  fireEvent.click(first.getByRole("button", { name: "Close" }));
-  expect(first.queryByText("Meet OpenBot for Business")).toBeNull();
+  fireEvent.click(first.getByRole("button", { name: "Dismiss" }));
+  expect(
+    first.queryByText("Self-host OpenBot for your organization."),
+  ).toBeNull();
   first.unmount();
 
   // Back on the home page in the same session: still closed.
-  expect(draw("personal").queryByText("Meet OpenBot for Business")).toBeNull();
+  expect(
+    draw("personal").queryByText("Self-host OpenBot for your organization."),
+  ).toBeNull();
   cleanup();
 
   // A new session: back again.
   sessionStorage.clear();
-  expect(draw("personal").getByText("Meet OpenBot for Business")).toBeTruthy();
+  expect(
+    draw("personal").getByText("Self-host OpenBot for your organization."),
+  ).toBeTruthy();
 });

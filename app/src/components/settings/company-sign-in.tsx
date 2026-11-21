@@ -1,6 +1,6 @@
-import { IconBuildingBank } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { LinkCompanyAccount } from "@/components/auth/link-company-account";
+import { IconBuildingBank } from "@/components/icons";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import {
   Item,

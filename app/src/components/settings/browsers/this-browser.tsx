@@ -1,4 +1,4 @@
-import { IconBrowser } from "@tabler/icons-react";
+import { IconBrowser } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { noteStoreTabOpened } from "@/components/browser/browser-nav-item";

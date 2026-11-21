@@ -1,7 +1,7 @@
-import { IconChevronRight, IconCpu } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
+import { IconChevronRight, IconCpu } from "@/components/icons";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {

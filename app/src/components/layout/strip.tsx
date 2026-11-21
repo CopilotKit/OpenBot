@@ -1,6 +1,6 @@
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
-import type { Icon } from "@tabler/icons-react";
+import type { Icon } from "@/components/icons";
 import type * as React from "react";
 import type { ReactNode } from "react";
 import { Sidebar } from "@/components/ui/sidebar";
@@ -73,6 +73,8 @@ export const stripItemClassName = cn(
   "relative flex size-9 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/75 outline-hidden ring-sidebar-ring transition-colors",
   "hover:bg-foreground/5 hover:text-sidebar-foreground focus-visible:ring-2 [&_svg]:size-5 [&_svg]:shrink-0",
   "data-active:bg-foreground/[0.07] data-active:text-sidebar-foreground",
+  // OpenBot's own look: the sidebar's white fill under the pointer and on the open section.
+  "own:hover:bg-sidebar-item-hover own:data-active:bg-sidebar-item-hover",
   "data-active:before:absolute data-active:before:top-1/2 data-active:before:-left-[6px] data-active:before:h-5 data-active:before:w-[3px] data-active:before:-translate-y-1/2 data-active:before:rounded-full data-active:before:bg-sidebar-foreground",
 );
 

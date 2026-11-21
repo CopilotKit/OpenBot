@@ -2,7 +2,7 @@ import {
   IconChevronRight,
   IconClock,
   IconPlayerPause,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";

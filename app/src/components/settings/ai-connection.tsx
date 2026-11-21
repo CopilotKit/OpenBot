@@ -1,10 +1,10 @@
 import {
   IconChevronRight,
-  IconCircleCheckFilled,
+  IconCircleCheck,
   IconCloud,
   IconExternalLink,
   IconSparkles,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
@@ -830,7 +830,7 @@ function SignInFields({
       </p>
       {signedIn ? (
         <p className="flex items-center gap-2 text-sm">
-          <IconCircleCheckFilled className="size-4 text-emerald-600 dark:text-emerald-400" />
+          <IconCircleCheck className="size-4 text-emerald-600 dark:text-emerald-400" />
           Signed in to {provider.name}.
         </p>
       ) : waiting ? (
@@ -948,7 +948,7 @@ function Connected({
             <ItemDescription>{described?.summary}</ItemDescription>
           </ItemContent>
           <ItemActions>
-            <IconCircleCheckFilled
+            <IconCircleCheck
               aria-label="Connected"
               className="size-5 text-emerald-600 dark:text-emerald-400"
             />

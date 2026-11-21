@@ -1,4 +1,4 @@
-import { IconBuildingBank, IconUsersGroup } from "@tabler/icons-react";
+import { IconBuildingBank, IconUsersGroup } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useId } from "react";
 import { Button } from "@/components/ui/button";

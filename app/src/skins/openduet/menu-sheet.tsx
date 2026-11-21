@@ -8,7 +8,7 @@ import {
   IconSearch,
   IconStack2,
   IconTrash,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { type ReactNode, useId, useRef, useState } from "react";

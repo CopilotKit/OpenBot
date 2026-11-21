@@ -1,4 +1,4 @@
-import { IconArrowDown, IconArrowUp, IconSitemap } from "@tabler/icons-react";
+import { IconArrowDown, IconArrowUp, IconSitemap } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { OPTION_CLASSES } from "@/components/agents/new-bot-sheet";

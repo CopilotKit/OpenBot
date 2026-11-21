@@ -10,7 +10,7 @@ import {
 } from "@openbot/shared/audit-filters";
 import { auditTypeWords } from "@openbot/shared/audit-words";
 import { connectorName, humanise } from "@openbot/shared/tool-name";
-import { IconChevronDown, IconCirclePlus, IconX } from "@tabler/icons-react";
+import { IconChevronDown, IconCirclePlus, IconX } from "@/components/icons";
 import { type ReactElement, type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {

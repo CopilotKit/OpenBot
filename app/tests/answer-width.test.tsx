@@ -10,12 +10,10 @@ import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
 /**
- * A Bot's answers and the composer share one column, 768px (`max-w-3xl`), centred and the whole
- * width of a small screen. 768px is the reading width ChatGPT and Claude.ai give an answer; wider, a
- * line of prose gets long enough to be hard to read. The answers' text sits inset in that column, so
- * the composer reaches a little past it on both sides, and a drawer on the composer lines up with
- * the text. In a pane narrower than the column, both keep 16px off its edges. Skins keep the column
- * they were drawn with, 672px for both.
+ * A Bot's answers and the composer share one column, Figma's 700px (`max-w-page`, which pads 16px a
+ * side), centred and the whole width of a small screen. The two columns are the same width, so a
+ * message and the box it was typed in share their edges. In a pane narrower than the column, both
+ * keep 16px off its edges. Skins keep the column they were drawn with, 672px for both.
  */
 
 class OfflineWebSocket extends EventTarget {
@@ -78,10 +76,10 @@ test("a conversation's answers and its composer share one column", () => {
       />,
     );
     const { answers, composer } = columns(view.container);
-    centredUpTo(answers, "max-w-3xl");
-    // The composer's column pads like the answers' (`px-4`) and is 2rem wider to pay for it, so the
-    // composer itself is 768px from an 800px pane up and keeps 16px off each edge below that.
-    centredUpTo(composer, "max-w-[calc(var(--container-3xl)+2rem)]");
+    centredUpTo(answers, "max-w-page");
+    // The composer's column is the answers' own, padding and all: 700px from a 732px pane up, and
+    // 16px off each edge below that.
+    centredUpTo(composer, "max-w-page");
     expect(answers).toContain("px-4");
     expect(composer).toContain("px-4");
     cleanup();
@@ -104,7 +102,7 @@ test("a group conversation's answers are as wide as a conversation's", async () 
       view.container.querySelector("[data-transcript-column]"),
     ).not.toBeNull(),
   );
-  centredUpTo(columns(view.container).answers, "max-w-3xl");
+  centredUpTo(columns(view.container).answers, "max-w-page");
 });
 
 test("every skin keeps its answers and its composer in its own column", () => {

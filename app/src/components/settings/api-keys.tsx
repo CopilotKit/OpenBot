@@ -1,4 +1,4 @@
-import { IconExternalLink, IconKey, IconPlus } from "@tabler/icons-react";
+import { IconExternalLink, IconKey, IconPlus } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import {

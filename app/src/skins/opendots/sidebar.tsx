@@ -10,7 +10,7 @@ import {
   IconSearch,
   IconTrash,
   IconX,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, type LinkProps, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useRef, useState } from "react";

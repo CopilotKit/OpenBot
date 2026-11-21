@@ -1,4 +1,4 @@
-import { IconMail, IconMailPlus } from "@tabler/icons-react";
+import { IconMail, IconMailPlus } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useEffect, useId, useState } from "react";
 import {

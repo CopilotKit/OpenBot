@@ -159,7 +159,7 @@ export function BookingCalendar({
   return (
     <div className="flex w-full min-w-0 justify-center">
       <div
-        className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card"
+        className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card own:lg:max-w-[50rem] own:lg:rounded-card own:lg:border-transparent own:lg:shadow-composer"
         data-booking-calendar=""
         data-ready={ready ? "" : undefined}
       >

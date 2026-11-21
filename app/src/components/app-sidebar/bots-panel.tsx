@@ -1,4 +1,4 @@
-import { IconChevronDown, IconPlus, IconSearch } from "@tabler/icons-react";
+import { IconChevronDown, IconPlus } from "@/components/icons";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
@@ -6,11 +6,7 @@ import { BotOrb } from "@/components/agents/bot-orb";
 import { attentionSummary } from "@/components/bot-profile/attention";
 import { SectionPanel } from "@/components/layout/section-panel";
 import { Button } from "@/components/ui/button";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group";
+import { SearchField } from "@/components/ui/search-field";
 import { SidebarContent } from "@/components/ui/sidebar";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
@@ -227,17 +223,16 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
       title="Bots"
     >
       <SidebarContent className="scroll-fade-b px-2 pb-2">
-        <InputGroup className="h-9 rounded-lg bg-background text-sm">
-          <InputGroupInput
-            aria-label="Search Bots"
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search Bots…"
-            value={search}
-          />
-          <InputGroupAddon>
-            <IconSearch />
-          </InputGroupAddon>
-        </InputGroup>
+        {/* The UI Kit's small search, with its round clear button. */}
+        <SearchField
+          aria-label="Search Bots"
+          clearLabel="Clear the search"
+          onChange={(event) => setSearch(event.target.value)}
+          onClear={() => setSearch("")}
+          placeholder="Search Bots…"
+          size="sm"
+          value={search}
+        />
         <div className="h-2 shrink-0" />
         {bots.isPending ? (
           <p

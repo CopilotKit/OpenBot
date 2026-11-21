@@ -4,8 +4,16 @@
 /* Composer chips/dropdown. Reads the shadcn tokens declared below, so it themes itself. */
 @import "prompt-area/tailwind.css";
 @import "@fontsource-variable/inter";
+@import "@fontsource-variable/sora";
+@import "@fontsource-variable/figtree";
 @import "./theme.css";
 @import "./skins/skins.css";
+
+/*
+ * OpenBot's own look only, never an alternate skin's: for a screen redrawn from the November 2026
+ * Figma whose old drawing the skins keep (onboarding). The opposite of theme.css's `skin:`.
+ */
+@custom-variant own (&:is(:root:not([data-skin]) *));
 
 /*
  * Streamdown draws a Bot's prose, and Tailwind only ships classes it can see used. Its markup lives
@@ -43,6 +51,361 @@
 }
 
 /*
+ * OpenBot's own frame (Figma "Master screens"): the window sits 12px inside a near-black field of
+ * square-pixel dither, CopilotKit's pixelation. The sidebar and the page are two pieces of one
+ * window with 18px outer corners; where they meet, the field bites a small curved notch out of the
+ * sidebar's top and bottom corners, and a bump of it marks the active row at the window's left edge.
+ *
+ * Drawn here rather than in the sidebar primitive because the primitive also frames Admin and
+ * Settings under every skin, and only OpenBot's own look has this frame. Below 768px the sidebar is
+ * a sheet and the page fills the screen, so there is no frame to draw.
+ *
+ * Its knobs are here rather than in theme.css, which holds only shadcn's tokens: the field's colour
+ * (Figma's ink), the dither tile and how strongly it shows, and the colour of the page's soft shapes
+ * (Figma's #7D8DC5 at 15%).
+ */
+:root {
+  --frame: oklch(0.172 0.007 258.4);
+  --frame-dither: url("./assets/patterns/pixel-dither.png");
+  /* Figma's frames: this same 800px tile at 339.55px and 30%, in Home, Setup and Onboarding alike. */
+  --frame-dither-opacity: 0.3;
+  --backdrop-shape: oklch(0.653 0.086 271.6 / 15%);
+}
+
+@media (min-width: 768px) {
+  :root:not([data-skin]) [data-slot="sidebar-wrapper"] {
+    position: relative;
+    isolation: isolate;
+    padding: --spacing(3);
+    background-color: var(--frame);
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-wrapper"]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: var(--frame-dither);
+    background-size: 340px 340px;
+    opacity: var(--frame-dither-opacity);
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-container"] {
+    top: --spacing(3);
+    bottom: --spacing(3);
+    left: --spacing(3);
+    height: auto;
+    padding: 0;
+    /* Room on the right for the resize rail, which hangs past its edge. */
+    clip-path: inset(0 -48px 0 0 round 18px 0 0 18px);
+    transition-property: left, right, width, clip-path;
+  }
+
+  /*
+   * Hidden, a sidebar that goes away (Settings' and Admin's, `collapsible="offcanvas"`) slides out
+   * past the window's left edge. The rule above pins it 12px in, which also overrode the primitive's
+   * own way out, so the page grew under a sidebar that stayed. The app's sidebar is not one of them:
+   * it collapses to its strip (`collapsible="icon"`), which keeps its place, its notches and the
+   * page's square corners beside it.
+   *
+   * It moves by its width, exactly as far as the page's left edge does, so the two stay joined all
+   * the way. Going further, to hide the notches, opened a strip of the dark field between them that
+   * grew to 50px mid-slide. Instead the clip holds at the window's left edge while the sidebar slides
+   * under it: the inset grows by what the sidebar moves, with the window's 18px corners, and on the
+   * right it closes over the notches and the rail. Both use the primitive's 200ms linear easing.
+   */
+  :root:not([data-skin])
+    [data-slot="sidebar"][data-collapsible="offcanvas"]
+    [data-slot="sidebar-container"] {
+    left: calc(--spacing(3) - var(--sidebar-width));
+    clip-path: inset(0 0 0 var(--sidebar-width) round 18px 0 0 18px);
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-inner"] {
+    position: relative;
+    border-radius: 18px 0 0 18px;
+  }
+
+  /*
+   * The notches, top and bottom, where the sidebar meets the page: Figma's "Window / Decoration".
+   *
+   * Both halves meet half a pixel past the seam, on the middle of the page's 1px left border, which
+   * starts at the seam and so is centred half a pixel to its right. Meeting at the seam itself put
+   * the notch's point beside the line rather than on it.
+   */
+  :root:not([data-skin]) [data-slot="sidebar-inner"]::before,
+  :root:not([data-skin]) [data-slot="sidebar-inner"]::after {
+    content: "";
+    position: absolute;
+    right: -0.5px;
+    width: 30px;
+    height: 16px;
+    pointer-events: none;
+    background-color: var(--frame);
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-inner"]::before {
+    top: 0;
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-inner"]::after {
+    bottom: 0;
+    transform: scaleY(-1);
+  }
+
+  /*
+   * The page's half of each notch, the same curve mirrored, so the field dips between two rounded
+   * corners (Figma's "Window / Bottom Decoration" pair, at the page's left edge).
+   *
+   * Drawn from the sidebar's gap, the spacer whose width puts the page where it is: its right edge
+   * is the seam whether the sidebar is open, narrowed to its strip or sliding away. Above the page
+   * (z-index 1, under the sidebar's 10), so the notch covers the page's 1px left border instead of
+   * letting it show through as a pale line. Not from the sidebar's container, which the app's
+   * sidebar clips (`overflow-hidden`, so its panel is cut off as it narrows), and which is wider
+   * than the gap by 2px while narrowed. The gap is stretched to the window's height for the bottom one.
+   */
+  :root:not([data-skin]) [data-slot="sidebar-wrapper"] > [data-slot="sidebar"] {
+    display: flex;
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-gap"]::before,
+  :root:not([data-skin]) [data-slot="sidebar-gap"]::after {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    left: 100%;
+    width: 30px;
+    height: 16px;
+    pointer-events: none;
+    background-color: var(--frame);
+    transition: scale 200ms linear;
+  }
+
+  /*
+   * They shrink into the page's corner while its own corners round, so one shape turns into the
+   * other. Fading them instead left a grey patch: the dark notch half see-through over the page.
+   */
+  :root:not([data-skin])
+    [data-slot="sidebar"][data-collapsible="offcanvas"]
+    [data-slot="sidebar-gap"]::before,
+  :root:not([data-skin])
+    [data-slot="sidebar"][data-collapsible="offcanvas"]
+    [data-slot="sidebar-gap"]::after {
+    scale: 0;
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-gap"]::before {
+    top: 0;
+    transform-origin: left top;
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath transform='matrix(-1 0 0 1 30 0)' d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-gap"]::after {
+    bottom: 0;
+    transform-origin: left bottom;
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath transform='matrix(-1 0 0 -1 30 16)' d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  :root:not([data-skin]) [data-slot="sidebar-wrapper"] > main {
+    margin: 0;
+    border: 0;
+    border-left: 1px solid var(--sidebar-border);
+    border-radius: 0 18px 18px 0;
+    box-shadow: none;
+    isolation: isolate;
+    transition: border-radius 200ms linear;
+  }
+
+  :root:not([data-skin])
+    [data-slot="sidebar-wrapper"]:has(
+      > [data-slot="sidebar"][data-collapsible="offcanvas"]
+    )
+    > main {
+    border-left: 0;
+    border-radius: 18px;
+  }
+
+  /*
+   * The active row's mark: a bump of the field, 14px deep and 52px tall, into the sidebar's left edge,
+   * with a short pale bar in it. The row sits 8px in from the sidebar's edge, so the bump starts 8px
+   * outside it. Every destination and conversation in the sidebar is a router link, which marks
+   * itself `data-status="active"`; the header's links (the name, New conversation) are left out.
+   */
+  :root:not([data-skin])
+    :is([data-slot="sidebar-content"], [data-slot="sidebar-footer"])
+    :is(
+      [data-slot="sidebar-menu-item"]:has(> [data-status="active"]),
+      [data-sidebar-row]:has([data-status="active"])
+    )::before,
+  :root:not([data-skin])
+    :is([data-slot="sidebar-content"], [data-slot="sidebar-footer"])
+    :is(
+      [data-slot="sidebar-menu-item"]:has(> [data-status="active"]),
+      [data-sidebar-row]:has([data-status="active"])
+    )::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    pointer-events: none;
+  }
+
+  :root:not([data-skin])
+    :is([data-slot="sidebar-content"], [data-slot="sidebar-footer"])
+    :is(
+      [data-slot="sidebar-menu-item"]:has(> [data-status="active"]),
+      [data-sidebar-row]:has([data-status="active"])
+    )::before {
+    left: -8px;
+    width: 14px;
+    height: 52px;
+    translate: 0 -50%;
+    background-color: var(--frame);
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 52'%3E%3Cpath d='M0 0C0 9 10 13 10 26C10 39 0 43 0 52Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  :root:not([data-skin])
+    :is([data-slot="sidebar-content"], [data-slot="sidebar-footer"])
+    :is(
+      [data-slot="sidebar-menu-item"]:has(> [data-status="active"]),
+      [data-sidebar-row]:has([data-status="active"])
+    )::after {
+    left: -6px;
+    width: 3px;
+    height: 13px;
+    translate: 0 -50%;
+    border-radius: 9999px;
+    background-color: var(--sidebar);
+  }
+
+  /*
+   * The page's backdrop: Figma's "Hero / Background shapes" as Figma exports it (three blurred
+   * #7D8DC5 ellipses, the group at 15%), anchored where Figma anchors it, to the page's bottom left.
+   * One picture, painted once: the gradients drawn here before read brighter than Figma's blur.
+   */
+  :root:not([data-skin]) [data-slot="sidebar-wrapper"] > main::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    border-radius: inherit;
+    background:
+      url("./assets/patterns/backdrop-shapes.svg") -342px calc(100% + 388px) /
+      1769.55px 1653.19px no-repeat;
+  }
+}
+
+/*
+ * Onboarding's frame (Figma "Onboarding"): the app's window again, 12px inside the dithered field,
+ * with the step's words on a gray pane at the left and its picture on the page at the right, and the
+ * same notches where the two meet. From `lg`, where a step has two panes; one column below, as on a
+ * phone. The words' pane is drawn by an empty element behind the step's header, words and buttons
+ * (`data-onboarding-pane`), which are three rows of the frame's grid rather than one box.
+ */
+@media (min-width: 1024px) {
+  :root:not([data-skin]) [data-onboarding-frame] {
+    position: relative;
+    isolation: isolate;
+    padding: --spacing(3);
+    background-color: var(--frame);
+  }
+
+  :root:not([data-skin]) [data-onboarding-frame]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: var(--frame-dither);
+    background-size: 340px 340px;
+    opacity: var(--frame-dither-opacity);
+  }
+
+  :root:not([data-skin]) [data-onboarding-pane] {
+    position: relative;
+    border-radius: 18px 0 0 18px;
+    background-color: var(--sidebar);
+  }
+
+  :root:not([data-skin]) [data-onboarding-pane]::before,
+  :root:not([data-skin]) [data-onboarding-pane]::after,
+  :root:not([data-skin]) [data-onboarding-notch] {
+    content: "";
+    position: absolute;
+    z-index: 2;
+    width: 30px;
+    height: 16px;
+    pointer-events: none;
+    background-color: var(--frame);
+  }
+
+  :root:not([data-skin]) [data-onboarding-pane]::before,
+  :root:not([data-skin]) [data-onboarding-pane]::after {
+    right: -0.5px;
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  :root:not([data-skin]) [data-onboarding-pane]::before {
+    top: 0;
+  }
+
+  :root:not([data-skin]) [data-onboarding-pane]::after {
+    bottom: 0;
+    transform: scaleY(-1);
+  }
+
+  :root:not([data-skin]) [data-onboarding-notch] {
+    left: calc(100% + 0.5px);
+  }
+
+  :root:not([data-skin]) [data-onboarding-notch="top"] {
+    top: 0;
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath transform='matrix(-1 0 0 1 30 0)' d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  :root:not([data-skin]) [data-onboarding-notch="bottom"] {
+    bottom: 0;
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath transform='matrix(-1 0 0 -1 30 16)' d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
+      no-repeat center / 100% 100%;
+  }
+
+  /* The picture's pane: the page, with its soft shapes, as the app's page has them. */
+  :root:not([data-skin]) [data-onboarding-demo] {
+    border-left: 1px solid var(--sidebar-border);
+    border-radius: 0 18px 18px 0;
+    background-color: var(--background);
+    background-image:
+      radial-gradient(closest-side, var(--backdrop-shape), transparent),
+      radial-gradient(closest-side, var(--backdrop-shape), transparent),
+      radial-gradient(closest-side, var(--backdrop-shape), transparent);
+    background-position:
+      calc(100% + 120px) 8%,
+      calc(100% + 40px) calc(100% + 220px),
+      22% calc(100% + 260px);
+    background-size:
+      860px 820px,
+      640px 560px,
+      940px 920px;
+    background-repeat: no-repeat;
+  }
+}
+
+/*
  * OpenBot Desktop on macOS has no separate title bar over this page: the window's buttons sit over
  * the top-left corner and the sidebar runs to the top edge, as in Mac apps with a sidebar. The
  * desktop marks the page (`data-desktop-titlebar`) and makes the sidebar's header the drag handle.
@@ -65,6 +428,26 @@
   )
   > main {
   padding-top: 40px;
+}
+
+/*
+ * OpenBot's own look in that window (Figma "Master screens", drawn for the Mac app): the buttons
+ * get a band of their own across the top of the sidebar, and the name and + start on the next row
+ * at the sidebar's usual inset, rather than beside the buttons. The band is centred on the buttons:
+ * the frame is 12px, the buttons' middle is 32.5px down (`TRAFFIC_LIGHTS`), so the band is twice
+ * the 20.5px between them, 41px. Figma's band is 48px; matching it means moving the buttons, which
+ * every skin and the setup screens share, so that is a separate change. The header stays the drag
+ * handle the desktop makes it, band included.
+ */
+:root[data-desktop-titlebar="overlay"]:not([data-skin]) {
+  --desktop-titlebar-band: 41px;
+}
+
+:root[data-desktop-titlebar="overlay"]:not([data-skin])
+  [data-slot="sidebar-header"][data-titlebar-band] {
+  height: calc(var(--spacing) * 12 + var(--desktop-titlebar-band));
+  padding-top: calc(var(--spacing) * 2 + var(--desktop-titlebar-band));
+  padding-left: --spacing(2);
 }
 
 /* While the sidebar's edge is dragged, it follows the pointer rather than easing after it. */
@@ -287,45 +670,37 @@
 }
 
 /*
- * The same pattern as a halo behind a Bot's orb at the top of a conversation, from the same tokens,
- * so swapping or turning off the empty-state pattern does the same here. It fades out from the
- * center instead of a corner, and is gone by the edge of its own box (`closest-side`), so the box's
- * square never shows. The intro leaves it room to reach that edge (`HALO_ROOM` in
- * conversation-intro.tsx).
- *
- * The dark theme's light pattern on a near-black ground stood out about 1.6 times as strongly as the
- * light theme's, and read as a block of pixels around the orb rather than a halo; it is drawn at 0.6
- * of the token's strength there so the two themes match. A skin's 0 is still 0.
+ * A Bot's orb (`BotOrb`): the designers' picture for its palette, filling its circle. A working
+ * Bot's orb breathes, a little smaller and brighter and back every 2.4 seconds; only `scale` and
+ * `filter` move, and nothing under reduced motion.
  */
-.orb-pattern {
-  position: absolute;
-  inset: -40px;
-  z-index: -1;
-  pointer-events: none;
-  background-color: var(--empty-pattern-color);
-  opacity: var(--empty-pattern-opacity);
-  mask-image:
-    var(--empty-pattern),
-    radial-gradient(
-      circle closest-side,
-      #000 42%,
-      rgb(0 0 0 / 0.35) 78%,
-      transparent 100%
-    );
-  mask-repeat: repeat, no-repeat;
-  mask-size:
-    auto,
-    100% 100%;
-  mask-composite: intersect;
+.bot-orb-image {
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
-.dark .orb-pattern {
-  opacity: calc(var(--empty-pattern-opacity) * 0.6);
+
+.bot-orb-image[data-state="working"] {
+  animation: bot-orb-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes bot-orb-breathe {
+  50% {
+    scale: 0.9;
+    filter: brightness(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-orb-image[data-state="working"] {
+    animation: none;
+  }
 }
 
 /*
- * A Bot's sphere, the one drawing of a Bot at every size, so it reads as the same Bot wherever it
- * is: its palette's lightest stop (c4) lit through c2 to c3 at the rim, with one sweep of c1 across
- * it. `BotOrb` draws it still at avatar sizes, with CSS alone, and live when larger or busy, where
+ * The sphere the alternate skins' onboarding demos and the OpenBot for Business orb draw: its
+ * palette's lightest stop (c4) lit through c2 to c3 at the rim, with one sweep of c1 across
+ * it. `BotOrb` drew it still at avatar sizes, with CSS alone, and live when larger or busy, where
  * the sweep turns. Before, the live orb drew AgentOrb's own mesh instead, in which c3, a violet in
  * most palettes, lay across the top: the Personal Assistant was green in the sidebar and blue, teal
  * and pink at the top of its page and its conversation (bot-orb-one-color.test.tsx).

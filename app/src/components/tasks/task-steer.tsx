@@ -1,4 +1,4 @@
-import { IconCornerDownRight } from "@tabler/icons-react";
+import { IconCornerDownRight } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { relativeTimeShort } from "@/lib/relative-time";

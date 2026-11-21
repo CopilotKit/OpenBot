@@ -5,7 +5,7 @@ import {
   IconChevronRight,
   IconCircleCheck,
   IconPlug,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";

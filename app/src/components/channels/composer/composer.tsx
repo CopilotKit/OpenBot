@@ -7,7 +7,7 @@ import {
   IconArrowUp,
   IconPlayerStopFilled,
   IconPlus,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { PromptArea, type PromptAreaHandle } from "prompt-area";
 import {
   isSegmentsEmpty,
@@ -144,10 +144,15 @@ function stagedMimeType(attachment: Attachment): string {
 
 const MAX_HEIGHT_PX = 220;
 /**
- * Two `text-sm` lines: the compact composer's message box sits on its own row above the controls,
- * so it opens two lines tall and grows from there.
+ * The home page's box opens 48px tall, which with its 16px padding, the gap and the 36px buttons
+ * is Figma's 120px. prompt-area's own default is 80px, which made the box 140px before any typing.
  */
-const COMPACT_MIN_HEIGHT_PX = 38;
+const HOME_MIN_HEIGHT_PX = 48;
+/**
+ * One `text-sm` line: the compact composer's message box sits in the controls' row, between attach
+ * and send, so it opens one line tall, level with the buttons, and grows upward from there.
+ */
+const COMPACT_MIN_HEIGHT_PX = 20;
 const COMPACT_MAX_HEIGHT_PX = 160;
 
 export type ComposerProps = {
@@ -1576,9 +1581,14 @@ export function Composer({
   const sendLabel = parking ? "Queue message" : "Send message";
   const callAction =
     draft.isEmpty && draft.attachments.length === 0 ? voiceCall : undefined;
+  /*
+   * Figma's send: a 36px ink circle with an 18px arrow, as dark while the box is empty as when it is
+   * ready. The arrow is the only button in the box drawn in ink, so it reads as the way to send
+   * before anything is typed, and a press on it then does nothing.
+   */
   const actionClassName = cn(
-    "rounded-full p-0",
-    compact ? "size-8 self-end" : "size-7",
+    "size-9 rounded-full p-0 disabled:opacity-100",
+    compact && "self-end",
   );
   const primaryAction = canStop ? (
     <Button
@@ -1590,7 +1600,7 @@ export function Composer({
       size="icon"
       type="button"
     >
-      <IconPlayerStopFilled className="size-3" />
+      <IconPlayerStopFilled className="size-3.5" />
     </Button>
   ) : callAction ? (
     <Button
@@ -1608,7 +1618,7 @@ export function Composer({
       size="icon"
       type="button"
     >
-      <IconWaveform className="size-4" />
+      <IconWaveform />
     </Button>
   ) : (
     <Button
@@ -1619,7 +1629,7 @@ export function Composer({
       size="icon"
       type="submit"
     >
-      <IconArrowUp className="size-3.5" />
+      <IconArrowUp />
     </Button>
   );
 
@@ -1721,6 +1731,7 @@ export function Composer({
         <LiveDictationNotice dictation={dictation} />
         <form
           aria-busy={isBusy}
+          data-disabled={disabled || undefined}
           data-slot="composer"
           className={cn(
             /*
@@ -1728,10 +1739,15 @@ export function Composer({
              * internally at COMPACT_MAX_HEIGHT_PX: padding inside that box would scroll away with
              * the text, so the first visible line would touch the top edge on a long message.
              *
-             * A column: the attachment strip across the top, the message box under it, and the
-             * controls row at the bottom.
+             * A column: the attachment strip across the top, and the one row under it that holds
+             * the controls and the message box between them.
+             *
+             * Figma's "Chat input" in a conversation: white, 20px corners, no outline, the long
+             * soft shadow, 70px tall while it holds a line. Its states are tokens (theme.css: the
+             * placeholder, the band while writing, the gray box when disabled), which the skins set
+             * back (skins/legacy-base.css).
              */
-            "flex flex-col rounded-2xl border border-border bg-card px-3 py-3",
+            "flex flex-col rounded-card bg-card p-4 shadow-composer [--prompt-area-placeholder:var(--color-composer-placeholder)] not-data-disabled:hover:[--prompt-area-placeholder:var(--color-composer-placeholder-hover)] has-[.prompt-area-editor:focus]:ring-(length:--composer-focus-ring) has-[.prompt-area-editor:focus]:ring-field-focus data-disabled:bg-composer-disabled data-disabled:shadow-(--composer-disabled-shadow) data-disabled:[&_button:not([data-slot=composer-send]):disabled]:text-composer-disabled-ink",
             className,
           )}
           onSubmit={handleFormSubmit}
@@ -1744,52 +1760,53 @@ export function Composer({
               onRemove={discardAttachment}
             />
             {/*
-             * TWO ROWS: the message box across the full width, then the controls under it. Attach
-             * and the model on the left, the microphone and send on the right, so the controls
-             * keep their place however long the message grows.
+             * ONE ROW, as Figma draws it: attach on the left, the message box taking what is left,
+             * then the routine, the model, the microphone and send on the right. The controls sit
+             * on the row's bottom edge, so a message that grows to several lines grows upward from
+             * them and they keep their place.
              */}
-            <div className="min-w-0" data-slot="composer-input">
-              <PromptArea
-                aria-label="Message"
-                className={cn(
-                  "w-full border-0 bg-transparent p-0 text-sm shadow-none",
-                  editorClassName,
-                )}
-                disabled={disabled}
-                maxHeight={COMPACT_MAX_HEIGHT_PX}
-                minHeight={COMPACT_MIN_HEIGHT_PX}
-                onChange={handleChange}
-                onImagePaste={canAttach ? stagePastedImage : undefined}
-                onSubmit={submitDraft}
-                placeholder={placeholder}
-                ref={promptAreaRef}
-                triggers={triggers}
-                value={value}
-              />
-            </div>
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-1">
-                {attachmentsEnabled ? (
-                  <Button
-                    aria-label="Attach a file"
-                    data-slot="composer-attach"
-                    // The button stays, and stays labelled: a conversation that cannot take another
-                    // message has not lost the ability to attach, it has lost the message.
-                    disabled={disabled}
-                    onClick={() => fileInputRef.current?.click()}
-                    size="icon"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <IconPlus className="size-5" />
-                  </Button>
-                ) : null}
-                {/* No attachments and nothing else behind a plus, so no plus: a disabled one that
-                    explained nothing read as broken. */}
+            <div className="flex items-end gap-2">
+              {attachmentsEnabled ? (
+                <Button
+                  aria-label="Attach a file"
+                  className="size-9 shrink-0 rounded-full"
+                  data-slot="composer-attach"
+                  // The button stays, and stays labelled: a conversation that cannot take another
+                  // message has not lost the ability to attach, it has lost the message.
+                  disabled={disabled}
+                  onClick={() => fileInputRef.current?.click()}
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <IconPlus />
+                </Button>
+              ) : null}
+              {/* No attachments and nothing else behind a plus, so no plus: a disabled one that
+                  explained nothing read as broken. */}
+              {/* 8px above and below one line, so the words sit level with the 36px buttons. */}
+              <div className="min-w-0 flex-1 py-2" data-slot="composer-input">
+                <PromptArea
+                  aria-label="Message"
+                  className={cn(
+                    "w-full border-0 bg-transparent p-0 text-sm shadow-none",
+                    editorClassName,
+                  )}
+                  disabled={disabled}
+                  maxHeight={COMPACT_MAX_HEIGHT_PX}
+                  minHeight={COMPACT_MIN_HEIGHT_PX}
+                  onChange={handleChange}
+                  onImagePaste={canAttach ? stagePastedImage : undefined}
+                  onSubmit={submitDraft}
+                  placeholder={placeholder}
+                  ref={promptAreaRef}
+                  triggers={triggers}
+                  value={value}
+                />
+              </div>
+              <div className="flex shrink-0 items-end gap-1">
                 {routine ? <RoutineComposerButton {...routine} /> : null}
                 {modelPicker}
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
                 <DictationButton
                   dictation={dictation}
                   disabled={disabled || voiceCall?.active === true}
@@ -1825,18 +1842,26 @@ export function Composer({
       <LiveDictationNotice dictation={dictation} />
       <form
         aria-busy={isBusy}
-        className="overflow-hidden rounded-2xl border border-border bg-card"
+        data-disabled={disabled || undefined}
+        /*
+         * Figma's "Chat input" on the home page: white, 20px corners, no outline, lifted off the
+         * page by a long soft shadow. Its placeholder is the ink at 40%, a step fainter than
+         * secondary text, so "Ask anything" reads as the box's own hint and not as words in it.
+         * The states are the conversation's composer's, above.
+         */
+        className="overflow-hidden rounded-card bg-card shadow-composer [--prompt-area-placeholder:var(--color-composer-placeholder)] not-data-disabled:hover:[--prompt-area-placeholder:var(--color-composer-placeholder-hover)] has-[.prompt-area-editor:focus]:ring-(length:--composer-focus-ring) has-[.prompt-area-editor:focus]:ring-field-focus data-disabled:bg-composer-disabled data-disabled:shadow-(--composer-disabled-shadow) data-disabled:[&_button:not([data-slot=composer-send]):disabled]:text-composer-disabled-ink"
         data-slot="composer"
         onSubmit={handleFormSubmit}
       >
         <DictationSurface
           dictation={dictation}
           canSend={canSendRecording}
-          className="p-3"
+          className="p-4"
         >
           {filePicker}
 
-          <div className="grow pb-2">
+          {/* Two lines of room before the buttons: with them, Figma's 120px box. */}
+          <div className="grow pb-1">
             <AttachmentStrip
               files={files}
               images={images}
@@ -1852,6 +1877,7 @@ export function Composer({
                 )}
                 disabled={disabled}
                 maxHeight={MAX_HEIGHT_PX}
+                minHeight={HOME_MIN_HEIGHT_PX}
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
                 onSubmit={submitDraft}
@@ -1867,14 +1893,14 @@ export function Composer({
             {attachmentsEnabled ? (
               <Button
                 aria-label="Attach a file"
-                className="size-7 rounded-full p-0"
+                className="size-9 rounded-full p-0"
                 data-slot="composer-attach"
                 disabled={disabled}
                 onClick={() => fileInputRef.current?.click()}
                 type="button"
                 variant="ghost"
               >
-                <IconPlus className="size-4" />
+                <IconPlus />
               </Button>
             ) : (
               <div />

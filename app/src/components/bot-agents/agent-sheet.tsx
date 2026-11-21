@@ -3,7 +3,7 @@ import {
   reachedThroughMastra,
   WEB_HARNESSES,
 } from "@openbot/shared/harnesses";
-import { IconLock, IconPlus, IconUsers, IconX } from "@tabler/icons-react";
+import { IconLock, IconPlus, IconUsers, IconX } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { CustomAgentCta } from "@/components/agents/custom-agent-cta";

@@ -711,6 +711,15 @@ or a script has to say.
   behind a NetworkPolicy that admits only those peers. A `RELEASE_STATUS_PORT` that isn't a port
   number, or is the API's own port, stops the server from starting.
 
+### Appearance
+
+- **OpenBot has a new look.** The default look uses the Sora typeface, a new palette, new icons and
+  a dark frame around the app. Buttons, fields, menus, rows, switches, checkboxes, radio buttons,
+  tabs, tables, badges and search fields are redrawn, and Home, Choose a Bot and the message box
+  follow them. The OpenDuet, OpenDots and OpenFuse skins look as they did.
+- **The first-sign-in steps are redrawn**, with a short video beside each step. With reduced motion
+  each step shows a still picture.
+
 ### Smaller changes
 
 - An admin's review list shows a person as soon as their own space is made, and a denied folder

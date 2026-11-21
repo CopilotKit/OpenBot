@@ -3,7 +3,7 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconCreditCard,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Fragment, useEffect, useId, useState } from "react";

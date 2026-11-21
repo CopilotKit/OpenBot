@@ -1,4 +1,4 @@
-import { IconDots, IconPlus, IconSitemap } from "@tabler/icons-react";
+import { IconDots, IconPlus, IconSitemap } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import {

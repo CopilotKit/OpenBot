@@ -7,7 +7,7 @@ import {
   IconKey,
   IconSearch,
   IconShieldLock,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";

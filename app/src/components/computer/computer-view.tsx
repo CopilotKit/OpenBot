@@ -1,6 +1,6 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
-import { IconLock, IconWorld, IconX } from "@tabler/icons-react";
+import { IconLock, IconWorld, IconX } from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useFittedWidth } from "@/components/browser/fitted-window";

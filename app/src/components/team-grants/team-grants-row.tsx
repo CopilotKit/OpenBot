@@ -1,4 +1,4 @@
-import { IconChevronRight, IconUsersGroup } from "@tabler/icons-react";
+import { IconChevronRight, IconUsersGroup } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";

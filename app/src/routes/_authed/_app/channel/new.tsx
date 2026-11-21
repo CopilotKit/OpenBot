@@ -43,6 +43,7 @@ import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useDraftModel } from "@/lib/models/run-model";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
 import { searchTextEntry } from "@/lib/search-text";
+import { cn } from "@/lib/utils";
 import { newId } from "../../../../lib/new-id";
 
 /**
@@ -56,6 +57,10 @@ const AGENT_NOT_FOUND = "Couldn't find that Bot.";
 /** Said when a draft holding files is sent to two or more Bots. */
 const GROUP_TAKES_NO_FILES =
   "A conversation with more than one Bot can't take files yet. Remove them to send.";
+
+/** A row in the Bot list: Figma's "Bot Dropdown item", a 36px pill, the orb 4px in from its end. */
+const BOT_ROW =
+  "flex h-9 w-full items-center gap-2 rounded-full py-1 pr-4 pl-1 text-left text-sm";
 
 export const Route = createFileRoute("/_authed/_app/channel/new")({
   /*
@@ -278,12 +283,16 @@ function NewConversation({ composition }: { composition: string }) {
 
   return (
     <div className="flex h-full flex-col">
+      {/*
+       * Figma's "Choose a Bot input": the conversation bar, 48px, with "To:" where the Bot's name
+       * will be. Its line darkens while the field has the caret, as Figma's pressed state does.
+       */}
       <div
-        className="h-12 border-b border-border sticky top-0 flex flex-row px-2 items-center"
+        className="sticky top-0 flex h-12 flex-row items-center gap-1 border-foreground/12 border-b px-6 focus-within:border-foreground/18"
         data-slot="conversation-header"
       >
-        <SidebarToggle className="mr-1" />
-        <span className="text-sm text-muted-foreground">To:</span>
+        <SidebarToggle className="-ml-3.5" />
+        <span className="text-sm">To:</span>
         <Combobox
           // Do not auto-open when a recipient is already chosen; the field is already answered.
           open={pickerOpen ?? (!chosen && !loadError && !waitingForUrlAgent)}
@@ -312,7 +321,7 @@ function NewConversation({ composition }: { composition: string }) {
         >
           <ComboboxChips
             ref={anchor}
-            className="flex-1 border-none bg-transparent! focus-within:ring-0 dark:bg-transparent!"
+            className="flex-1 border-none bg-transparent! focus-within:ring-0 dark:bg-transparent! [&_input]:placeholder:text-foreground/40"
           >
             {selected.map((profile) => (
               <ComboboxChip
@@ -337,33 +346,47 @@ function NewConversation({ composition }: { composition: string }) {
               }
             />
           </ComboboxChips>
-          {/* Allow max-w to constrain the popup even though its anchor is full-width. */}
+          {/*
+           * Figma's Bot list: a white card as wide as the field, lifted by the message box's shadow,
+           * New Bot on its own above a line and the Bots under it, each a 36px pill with its 28px
+           * orb, its name and, fainter, what it is for.
+           */}
           <ComboboxContent
             anchor={anchor}
-            className="flex min-w-0 max-w-lg flex-col"
-            sideOffset={12}
+            className="flex min-w-0 flex-col rounded-card bg-card shadow-composer ring-0"
+            sideOffset={4}
           >
-            <div className="shrink-0 border-b p-1">
+            <div className="shrink-0 border-sidebar border-b p-2">
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className={cn(
+                  BOT_ROW,
+                  "hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                )}
                 onClick={() => {
                   setPickerOpen(false);
                   setCreatingBot(true);
                 }}
               >
-                <AgentOrb size="24px" state="idle" />
-                <span className="font-medium">New Bot</span>
-                <span className="text-muted-foreground">Create a new Bot</span>
+                <AgentOrb size="28px" state="idle" />
+                <span className="font-semibold leading-tight tracking-heading">
+                  New Bot
+                </span>
+                <span className="text-foreground/40">Create a new Bot</span>
               </button>
             </div>
             <ComboboxEmpty>No Bots found.</ComboboxEmpty>
-            <ComboboxList className="min-h-0">
+            <ComboboxList className="flex min-h-0 flex-col gap-2 p-2">
               {(item: AgentProfile) => (
-                <ComboboxItem key={item.id} value={item} className="h-10">
-                  <ChannelAvatar participantIds={[item.id]} size={24} />
-                  {item.name}
-                  <span className="truncate text-muted-foreground ml-1">
+                <ComboboxItem
+                  key={item.id}
+                  value={item}
+                  className={cn(BOT_ROW, "pr-8 data-highlighted:bg-secondary")}
+                >
+                  <ChannelAvatar participantIds={[item.id]} size={28} />
+                  <span className="truncate">{item.name}</span>
+                  {/* Stays faint on the highlighted row, which darkens everything else in it. */}
+                  <span className="truncate text-foreground/40!">
                     {item.title}
                   </span>
                 </ComboboxItem>

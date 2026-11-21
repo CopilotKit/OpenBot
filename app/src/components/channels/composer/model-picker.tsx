@@ -4,7 +4,7 @@ import {
   IconChevronDown,
   IconCpu,
   IconCube,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMemo, useRef, useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import { Button } from "@/components/ui/button";

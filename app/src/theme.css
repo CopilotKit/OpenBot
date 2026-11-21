@@ -1,31 +1,42 @@
 @custom-variant dark (&:is(.dark *));
+/*
+ * For the alternate skins only, and only inside a primitive where no call site's class can reach,
+ * such as which chevron a select draws. Anything a call site may set itself (a size, a gap, a
+ * colour) goes through a token instead, below, which the skins set in skins/legacy-base.css: a
+ * `skin:` class would outrank the call site's own class under a skin.
+ */
+@custom-variant skin (:root[data-skin] &);
 
 :root {
   color-scheme: light;
   /*
-   * Three surfaces, darkest to lightest, the way Linear draws them: the frame (the sidebar's tint,
-   * which the window edge shares), the panel the page sits in, and the white cards on it. The frame
-   * is CopilotKit's pale lavender, the grays lean towards its lilac, the ring is its periwinkle, and
-   * the selected sidebar row is a lilac tint. Only shadcn's own tokens, so a stock shadcn theme drops in.
+   * OpenBot's own look, the November 2026 redesign (Figma "Master screens"), in shadcn's tokens only
+   * so a stock shadcn theme still drops in. Three surfaces, darkest to lightest: the frame (the
+   * sidebar's cool gray, Figma's `--sidebar/bg`, which also backs a row's icon tile), the pale page
+   * (`--bg-secondary`), and the white cards on it. Text and the primary button are Figma's near-black
+   * ink (`--text-primary`); secondary text and borders are that ink at 60% and 8%, so they read the
+   * same on the page, a card and a tile. The pale fills are the secondary button (`#f1f2f7`) and the
+   * chips (`#eff2f6`); `--input` is the pale blue-gray Figma gives a switch that is off. The ring
+   * stays CopilotKit's periwinkle.
    */
-  --background: oklch(0.983 0.003 286.4);
-  --foreground: oklch(0.108 0.015 220.9);
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.172 0.007 258.4);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.108 0.015 220.9);
+  --card-foreground: oklch(0.172 0.007 258.4);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.108 0.015 220.9);
-  --primary: oklch(0.108 0.015 220.9);
+  --popover-foreground: oklch(0.172 0.007 258.4);
+  --primary: oklch(0.172 0.007 258.4);
   --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.956 0.005 286.3);
-  --secondary-foreground: oklch(0.108 0.015 220.9);
-  --muted: oklch(0.956 0.005 286.3);
-  --muted-foreground: oklch(0.506 0.013 285.9);
-  --accent: oklch(0.956 0.005 286.3);
-  --accent-foreground: oklch(0.108 0.015 220.9);
-  --destructive: oklch(0.504 0.178 22.9);
-  --success: oklch(0.514 0.1 167.2);
-  --border: oklch(0.894 0.014 286.1);
-  --input: oklch(0.894 0.014 286.1);
+  --secondary: oklch(0.962 0.007 277.2);
+  --secondary-foreground: oklch(0.172 0.007 258.4);
+  --muted: oklch(0.96 0.006 255.5);
+  --muted-foreground: oklch(0.172 0.007 258.4 / 60%);
+  --accent: oklch(0.962 0.007 277.2);
+  --accent-foreground: oklch(0.172 0.007 258.4);
+  --destructive: oklch(0.585 0.223 24);
+  --success: oklch(0.741 0.145 169.4);
+  --border: oklch(0.172 0.007 258.4 / 8%);
+  --input: oklch(0.878 0.022 263.2);
   --ring: oklch(0.644 0.167 276.1);
   --chart-1: oklch(0.869 0.022 252.894);
   --chart-2: oklch(0.554 0.046 257.417);
@@ -42,13 +53,13 @@
   --empty-pattern: url("./assets/patterns/dot-matrix.svg");
   --empty-pattern-color: oklch(0.746 0.117 279.9);
   --empty-pattern-opacity: 0.25;
-  --sidebar: oklch(0.948 0.011 286.2);
-  --sidebar-foreground: oklch(0.108 0.015 220.9);
-  --sidebar-primary: oklch(0.108 0.015 220.9);
+  --sidebar: oklch(0.936 0.009 264.5);
+  --sidebar-foreground: oklch(0.172 0.007 258.4);
+  --sidebar-primary: oklch(0.172 0.007 258.4);
   --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.832 0.085 281.4 / 30%);
-  --sidebar-accent-foreground: oklch(0.108 0.015 220.9);
-  --sidebar-border: oklch(0.894 0.014 286.1);
+  --sidebar-accent: oklch(1 0 0 / 60%);
+  --sidebar-accent-foreground: oklch(0.172 0.007 258.4);
+  --sidebar-border: oklch(0.172 0.007 258.4 / 8%);
   --sidebar-ring: oklch(0.644 0.167 276.1);
 }
 
@@ -56,7 +67,10 @@
   color-scheme: dark;
   --empty-pattern-color: oklch(0.832 0.085 281.4);
   --empty-pattern-opacity: 0.15;
-  /* The same three surfaces on a near-black plum ground: the frame darkest, the cards lightest. */
+  /*
+   * The same three surfaces on a near-black plum ground: the frame darkest, the cards lightest. Not yet
+   * redrawn for the redesign, whose dark theme is still to come.
+   */
   --background: oklch(0.182 0.023 296.6);
   --foreground: oklch(0.956 0.005 286.3);
   --card: oklch(0.212 0.028 297.1);
@@ -103,8 +117,8 @@ body {
   min-height: 100vh;
   background: var(--background);
   color: var(--foreground);
-  /* "Inter Variable" is the face @fontsource-variable/inter loads; plain Inter matches only one installed locally. */
-  font-family: "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif;
+  /* The face is a token, so a skin that sets `--font-sans` is set in it. */
+  font-family: var(--font-sans);
 }
 
 /*
@@ -122,25 +136,323 @@ body {
  */
 
 /*
- * Text is sized on a 15px base while everything else is on Tailwind's 16px rem.
+ * Type, on Tailwind's own 16px scale, which is Figma's: Body/3 is `text-xs` (12px), Body/2 and the
+ * sidebar are `text-sm` (14px), Body/1 and H3 are `text-base` (16px), H2 is `text-xl` (20px). H1 is
+ * 32px, so `text-3xl` is 32px rather than Tailwind's 30.
  *
- * The root stays at the browser's 16px so spacing, sizes and radii land on Tailwind's 4px grid
- * (`p-4` is 16px, `h-8` is 32px). Only type keeps the scale it had under the old 15px root: each
- * size below is Tailwind's default multiplied by 15/16, so `text-sm` is still 13.125px. Line
- * heights are Tailwind's own unitless ratios and scale with them. `body` reads `--text-base`, so
- * unclassed text is 15px too.
+ * Not `inline`, so every size and face is read through its variable, and the alternate skins put
+ * back the 15px scale and Inter they were drawn in (`:root[data-skin]` in skins/legacy-base.css).
+ *
+ * Sora runs wide, and Figma tightens it by 4% at 12px and in every heading: `--text-xs` carries
+ * that itself, and a heading takes `tracking-heading`. Body text at 12 and 14px sits at Figma's 1.35.
  */
-@theme inline {
-  --text-xs: 0.703125rem; /* 11.25px */
-  --text-sm: 0.8203125rem; /* 13.125px */
-  --text-base: 0.9375rem; /* 15px */
-  --text-lg: 1.0546875rem; /* 16.875px */
-  --text-xl: 1.171875rem; /* 18.75px */
-  --text-2xl: 1.40625rem; /* 22.5px */
-  --text-3xl: 1.7578125rem; /* 28.125px */
-  --text-4xl: 2.109375rem; /* 33.75px */
+@theme {
+  --font-sans: "Sora Variable", ui-sans-serif, system-ui, sans-serif;
   --font-heading: var(--font-sans);
-  --font-sans: "Inter Variable", sans-serif;
+  --font-brand: "Figtree Variable", var(--font-sans);
+  --text-xs--line-height: 1.35;
+  --text-xs--letter-spacing: -0.04em;
+  --text-sm--line-height: 1.35;
+  --text-3xl: 2rem;
+  --text-3xl--line-height: 1.12;
+  --tracking-heading: -0.04em;
+  /* A row card and the tile behind its icon (Figma: 20px and 12px). */
+  --radius-card: 1.25rem;
+  --radius-tile: 0.75rem;
+  /* The page column: Figma's 700px of content, with the 16px gutter either side. */
+  --container-page: 45.75rem;
+  /* The bubble behind what a person sent (Figma's surface/50, #d8dee9). Not redrawn for dark yet. */
+  --color-message: oklch(0.899 0.016 262.7);
+  /* The message box's long soft shadow, which lifts it off the page (Figma's "Chat input"). */
+  --shadow-composer:
+    0 106px 21px rgb(173 169 169 / 0.01), 0 60px 18px rgb(173 169 169 / 0.05),
+    0 27px 13.5px rgb(173 169 169 / 0.09), 0 7px 7.5px rgb(173 169 169 / 0.1);
+  /*
+   * Its states ("Chat input"): the placeholder the ink at 40%, at 60% under the pointer; a 4px
+   * #d8dee9 band round the box while the message is being written in it; the microphone a #cfd7e6
+   * circle while it listens; and disabled, the box the secondary fill with no shadow and its
+   * controls in gray. Send is the kit's Primary button, so it is ink even while it cannot send.
+   */
+  --color-composer-placeholder: color-mix(
+    in oklab,
+    var(--foreground) 40%,
+    transparent
+  );
+  --color-composer-placeholder-hover: color-mix(
+    in oklab,
+    var(--foreground) 60%,
+    transparent
+  );
+  --composer-focus-ring: 4px;
+  --color-composer-listening: var(--input);
+  --color-composer-disabled: var(--secondary);
+  --color-composer-disabled-ink: var(--color-field-disabled);
+  --composer-disabled-shadow: 0 0 #0000;
+  /*
+   * A button's hover, pressed and disabled colours (UI Kit "Button" and "Icon Button"). Mixed from
+   * the shadcn tokens above rather than written out, so they follow the dark theme and a theme that
+   * replaces these tokens; the mixes land on the kit's own colours in the light theme: the primary
+   * #31363a on hover, black pressed, its label #51595f disabled; the secondary #e7eaf0 on hover and
+   * #cfd7e6 (`--input`) pressed, its label #cfd7e6 disabled. A ghost button takes the secondary's
+   * hover and pressed. The alternate skins put back their own (skins/legacy-base.css).
+   */
+  --color-primary-hover: color-mix(
+    in oklab,
+    var(--primary) 81%,
+    var(--primary-foreground)
+  );
+  --color-primary-active: color-mix(in oklab, var(--primary) 50%, black);
+  --color-primary-disabled: color-mix(
+    in oklab,
+    var(--primary-foreground) 35%,
+    var(--primary)
+  );
+  --color-secondary-hover: color-mix(
+    in oklab,
+    var(--secondary) 70%,
+    var(--input)
+  );
+  --color-secondary-active: var(--input);
+  --color-secondary-disabled: color-mix(
+    in oklab,
+    var(--secondary-foreground) 11%,
+    var(--secondary)
+  );
+  --color-ghost-hover: var(--color-secondary-hover);
+  --color-ghost-active: var(--color-secondary-active);
+  /*
+   * The kit has no outlined button: what the app drew outlined (a row's Edit, a dialog's Cancel) is
+   * the kit's Secondary, a pale pill with no border.
+   */
+  --color-outline: var(--secondary);
+  --color-outline-border: transparent;
+  --color-outline-hover: var(--color-secondary-hover);
+  --color-outline-active: var(--color-secondary-active);
+  /*
+   * A field's edge and words (UI Kit "Dropdown" and "Search"): a hairline of ink at 12%, 18% under
+   * the pointer; focus is a 4px band of `#d8dee9` inside the edge; a placeholder is ink at 40%, and
+   * a disabled field's words are `#9da6ac`. Mixed from the tokens above, like the buttons' states.
+   */
+  --color-field-border: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --color-field-border-hover: color-mix(
+    in oklab,
+    var(--foreground) 18%,
+    transparent
+  );
+  --color-field-focus: color-mix(in oklab, var(--input) 83%, var(--card));
+  --color-field-placeholder: color-mix(
+    in oklab,
+    var(--foreground) 40%,
+    transparent
+  );
+  --color-field-disabled: color-mix(
+    in oklab,
+    var(--foreground) 34%,
+    var(--card)
+  );
+  --color-field-focus-border: var(--color-field-focus);
+  --color-field-disabled-bg: var(--card);
+  --color-field-disabled-bg-dark: color-mix(
+    in oklab,
+    var(--input) 30%,
+    transparent
+  );
+  /*
+   * What else differs between a button's states, OpenBot's look and the skins': the colour a
+   * button takes while its menu is open, a disabled outlined or ghost button's words, and the link.
+   */
+  --color-secondary-expanded: var(--color-secondary-hover);
+  --color-outline-expanded: var(--color-outline-hover);
+  --color-outline-disabled: var(--color-secondary-disabled);
+  --color-ghost-expanded: var(--color-ghost-hover);
+  --color-ghost-disabled: var(--color-secondary-disabled);
+  --color-link-hover: var(--color-primary-hover);
+  --color-link-active: var(--color-primary-active);
+  --color-link-disabled: var(--color-secondary-disabled);
+
+  /*
+   * The primitives' measures from the UI Kit, as tokens rather than numbers in the primitives, for
+   * the same reason as the colours: the skins put back their own (skins/legacy-base.css), and a
+   * call site's own class still replaces the primitive's, as with any other Tailwind class.
+   *
+   * Buttons: an M's icons are 20px and an S's 18px, and the end beside an icon is the same as the
+   * other end. A button is not nudged when pressed, and a disabled one is not faded: its colours
+   * say it.
+   */
+  --spacing-button-icon: 1.25rem;
+  --spacing-button-icon-sm: 1.125rem;
+  --spacing-button-edge: 1rem;
+  --spacing-button-edge-sm: 0.75rem;
+  --button-press-shift: 0px;
+  --button-disabled-opacity: 1;
+  --link-hover-decoration: none;
+  /*
+   * Fields ("Dropdown", "Search"): M is 40px with 12px corners, S a 32px pill, the words 16px in
+   * (12px in an S), 18px icons 12px in with 8px to the words. Focus is the 4px band, drawn as the
+   * border plus a 3px inset ring so nothing moves; an invalid field is only its red edge.
+   */
+  --spacing-field: 2.5rem;
+  --spacing-field-sm: 2rem;
+  --spacing-field-x: 1rem;
+  --spacing-field-x-sm: 0.75rem;
+  --spacing-field-y: 0.625rem;
+  --spacing-field-icon: 1.125rem;
+  --spacing-field-addon: 0.75rem;
+  --spacing-field-addon-gap: 0.5rem;
+  --radius-field: var(--radius-tile);
+  --radius-field-sm: calc(infinity * 1px);
+  --field-focus-band: 3px;
+  --field-focus-ring: 0px;
+  --field-invalid-ring: 0px;
+  --field-disabled-opacity: 1;
+  /*
+   * Menus ("Dropdown menu list"): the card's 20px corners and the composer's shadow, 4px inside;
+   * a row 8px in (12px at the end) and 8px tall, 12px corners, 18px icons 8px from the words, and
+   * the tick 12px from the end.
+   */
+  --spacing-menu-item-x: 0.5rem;
+  --spacing-menu-item-end: 0.75rem;
+  --spacing-menu-item-y: 0.5rem;
+  --spacing-menu-gap: 0.5rem;
+  --spacing-menu-icon: 1.125rem;
+  --spacing-menu-inset: 2.125rem;
+  --spacing-menu-label-y: 0.375rem;
+  --spacing-menu-indicator: 0.75rem;
+  --spacing-menu-check: 1.125rem;
+  --spacing-select-pad: 0.25rem;
+  --radius-menu: var(--radius-card);
+  --radius-menu-item: var(--radius-tile);
+  --menu-shadow:
+    0 106px 21px rgb(173 169 169 / 0.01), 0 60px 18px rgb(173 169 169 / 0.05),
+    0 27px 13.5px rgb(173 169 169 / 0.09), 0 7px 7.5px rgb(173 169 169 / 0.1);
+  --menu-shadow-sub: var(--menu-shadow);
+  /*
+   * Cards and rows ("Action Card", "Bot Card"): a heading's lines at 1.12, a row tinted #f1f2f7
+   * under the pointer whether it is a link or opens a dialog, a Bot card turning the page's
+   * #fafafa, and 12px between the things at a row's end.
+   */
+  --leading-heading: 1.12;
+  --color-row-hover: var(--secondary);
+  /*
+   * A sidebar row under the pointer (Figma's "sidebar/item hover", #fafafa, a pill). The open page's
+   * row takes none: the frame's notch at the window's edge marks it.
+   */
+  --color-sidebar-item-hover: var(--background);
+  --color-bot-card-hover: var(--background);
+  --spacing-row-actions: 0.75rem;
+  --spacing-row: calc(1.25rem - 1px);
+  /*
+   * Checkbox ("Checkbox label"): 16px with 4px corners, white inside; ink when ticked or half
+   * ticked, #31363a under the pointer; focused, a 2px #d8dee9 band round it in place of its edge;
+   * disabled, the frame's gray with a faint edge and a gray tick; invalid, tinted red with a red
+   * edge, and red when ticked. Its edge at rest is the kit's gray-blue taken darker, #798d9b for the
+   * kit's #b8c3ca: an unticked box is nothing but its edge, and that darker one is the lightest of
+   * the hue at WCAG's 3:1 on every surface (checkbox.tsx). The radio shares all of it.
+   */
+  --color-check-bg: var(--card);
+  --color-check-border: oklch(0.632 0.031 238.5);
+  --color-check-border-hover: var(--muted-foreground);
+  --color-check-checked-hover: var(--color-primary-hover);
+  --color-check-focus-border: transparent;
+  --color-check-focus-ring: var(--color-field-focus);
+  --check-focus-ring: 2px;
+  --color-check-invalid-bg: color-mix(
+    in oklab,
+    var(--destructive) 10%,
+    transparent
+  );
+  --check-invalid-ring: 0px;
+  --color-check-checked-invalid: var(--destructive);
+  --color-check-disabled-bg: var(--sidebar);
+  --color-check-disabled-border: color-mix(
+    in oklab,
+    var(--foreground) 12%,
+    transparent
+  );
+  --color-check-checked-disabled: var(--sidebar);
+  --color-check-disabled: var(--color-field-disabled);
+  --check-disabled-opacity: 1;
+  --check-shadow: 0 0 #0000;
+  /*
+   * Radio ("Radio"): chosen, its edge and its 8px dot are the tickbox's ink, and every other state is
+   * the tickbox's too. The kit drew it blue (#114cee); the designer chose the tickbox's colours
+   * instead (November 2026). Disabled, its dot is gray on the frame's gray, as the tickbox's tick is
+   * (radio-group.tsx).
+   */
+  --color-radio: var(--primary);
+  --color-radio-hover: var(--color-primary-hover);
+  --color-radio-disabled: var(--color-field-disabled);
+  /*
+   * Tabs ("Tabs", Clear): a #f1f2f7 pill holding pill tabs, the chosen one white, labelled in 14px
+   * regular and gray until chosen. M (the default) is 40px with the tabs 4px in, 16px to a side and
+   * 8px from icon to label; S is 32px, 2px in, 12px to a side and 4px apart (tabs.tsx).
+   */
+  --color-tabs: var(--secondary);
+  --color-tab-active: var(--card);
+  --spacing-tabs: 2.5rem;
+  --spacing-tabs-pad: 0.25rem;
+  --spacing-tab-x: 1rem;
+  --spacing-tab-gap: 0.5rem;
+  --spacing-tab-edge: 0.75rem;
+  --radius-tabs: calc(infinity * 1px);
+  --radius-tab: calc(infinity * 1px);
+  --tab-weight: 400;
+  --tab-trim: 0px;
+  --tab-active-shadow: 0 0 #0000;
+  /* A table's column names ("Table header"): 12px regular in #51595f. */
+  --color-table-head: color-mix(in oklab, var(--foreground) 65%, var(--card));
+  --text-table-head-size: 0.75rem;
+  --table-head-weight: 400;
+  /*
+   * Search ("Search"): a pill, 32px (S) or 48px (M), white with a 12% edge that darkens under the
+   * pointer, a 4px #d8dee9 band round it while focused, and its glyph gray until something is typed
+   * (search-field.tsx).
+   */
+  --spacing-search-lg: 3rem;
+  --spacing-search-lg-gap: 0.875rem;
+  --color-search-lg: var(--card);
+  --search-lg-shadow: 0 0 #0000;
+  --color-search-icon: var(--color-field-placeholder);
+  --search-focus-ring: 4px;
+  --color-search-focus-ring: var(--color-field-focus);
+  --color-search-focus-border: transparent;
+  /*
+   * The status colours (Figma "OpenBot" variables, group "colors"): success #12c89c, warning
+   * #f26900, error #e21f32 and additional #0f62fe, each with a subtle fill at the kit's strength.
+   * Success and error are shadcn's `--success` and `--destructive` (above), which the skins set to
+   * their own; warning and additional are OpenBot's alone, the same in both themes until the dark
+   * theme is drawn.
+   */
+  --color-warning: oklch(0.68 0.19 46.5);
+  --color-additional: oklch(0.557 0.243 262);
+  --color-success-subtle: color-mix(in oklab, var(--success) 20%, transparent);
+  --color-warning-subtle: color-mix(
+    in oklab,
+    var(--color-warning) 10%,
+    transparent
+  );
+  --color-destructive-subtle: color-mix(
+    in oklab,
+    var(--destructive) 10%,
+    transparent
+  );
+  --color-additional-subtle: color-mix(
+    in oklab,
+    var(--color-additional) 20%,
+    transparent
+  );
+  /*
+   * Badges ("Badges"): Icon+Text is a 32px pill in its status's subtle fill, the icon in the status
+   * colour and the label in ink, 8px in beside the icon and 12px at the end. Numeric is a 24px ink
+   * circle with the count in 12px.
+   */
+  --spacing-badge-count: 1.5rem;
+  --spacing-badge-count-x: 0.25rem;
+  --text-badge-count: 0.75rem;
+  --badge-count-weight: 400;
+}
+
+@theme inline {
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);

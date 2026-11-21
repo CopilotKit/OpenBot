@@ -1,4 +1,4 @@
-import { IconBrain, IconPlus, IconRobot, IconUser } from "@tabler/icons-react";
+import { IconBrain, IconPlus, IconRobot, IconUser } from "@/components/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useId, useState } from "react";
 import {

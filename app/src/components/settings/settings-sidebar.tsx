@@ -2,11 +2,12 @@ import {
   IconArrowLeft,
   IconBell,
   IconBuilding,
+  IconChevronLeft,
   IconKey,
   IconLayoutGrid,
   IconListCheck,
   IconSettings,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link, type LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
@@ -194,10 +195,16 @@ export function SettingsSidebar({
       <SidebarHeader className="h-12 p-2">
         <SidebarMenu>
           <SidebarMenuItem>
+            {/*
+             * Figma's "Navigation / Back" in OpenBot's own look: a chevron, the words in semibold,
+             * and the sidebar's white pill under the pointer. The skins keep their arrow and fill.
+             */}
             <SidebarMenuButton
+              className="own:h-9 own:rounded-full own:px-2 own:font-semibold own:hover:bg-sidebar-item-hover"
               render={(props) => (
                 <Link {...appLinkOptions} {...props}>
-                  <IconArrowLeft className="mr-2 h-4 w-4" />
+                  <IconArrowLeft className="mr-2 h-4 w-4 own:hidden" />
+                  <IconChevronLeft className="hidden own:mr-1 own:block own:size-5" />
                   Back to app
                 </Link>
               )}
@@ -219,15 +226,23 @@ export function SettingsSidebar({
               <SidebarMenu className="gap-px">
                 {entries.map((option) => (
                   <SidebarMenuItem key={option.title}>
+                    {/*
+                     * Figma's "Navigation item" in OpenBot's own look: the 18px glyph in a 28px box
+                     * with a 1px line, a white pill under the pointer, and no fill on the open page,
+                     * which the frame's notch marks. The skins keep their fill and 16px glyphs.
+                     */}
                     <SidebarMenuButton
+                      className="own:h-9 own:rounded-full own:px-2 own:py-1 own:hover:bg-sidebar-item-hover own:data-[status=active]:hover:bg-transparent"
                       render={(props) => (
                         <Link
                           {...option.linkOptions}
                           activeOptions={{ exact: option.exact ?? false }}
-                          activeProps={{ className: "bg-foreground/5" }}
+                          activeProps={{
+                            className: "bg-foreground/5 own:bg-transparent",
+                          }}
                           {...props}
                         >
-                          <option.icon className="mr-2 h-4 w-4" />
+                          <option.icon className="mr-2 h-4 w-4 own:mr-[13px] own:ml-[5px] own:size-[18px] own:**:[stroke-width:1.33]" />
                           {/* Cut short on one line in a narrow sidebar, never wrapped out of the row. */}
                           <span className="min-w-0 truncate">
                             {option.title}

@@ -1,4 +1,4 @@
-import { IconDots } from "@tabler/icons-react";
+import { IconDots } from "@/components/icons";
 import {
   Fragment,
   type ReactNode,

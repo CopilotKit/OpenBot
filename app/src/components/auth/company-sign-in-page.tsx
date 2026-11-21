@@ -1,12 +1,12 @@
-import {
-  IconBuilding,
-  IconChevronDown,
-  IconUserCircle,
-} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useSyncExternalStore } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { useSignOut } from "@/components/app-sidebar/use-sign-out";
+import {
+  IconBuilding,
+  IconChevronDown,
+  IconUserCircle,
+} from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,

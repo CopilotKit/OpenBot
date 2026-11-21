@@ -34,7 +34,7 @@ Bots are coworkers, and you own them. Each Bot has a computer of its own (a real
 - The skin system stays. This redesign replaces the default `openbot` skin. The other skins stay as alternates.
 - Desktop and mobile must both work at native quality.
 - Dense admin screens (audit log, approvals, tables, settings) must stay easy to scan.
-- Stack: React 19, Vite, Tailwind 4, shadcn and Base UI components, Tabler icons, Motion.
+- Stack: React 19, Vite, Tailwind 4, shadcn and Base UI components, Hugeicons (free set, through `components/icons`), Motion.
 
 ## Brand Commitments
 

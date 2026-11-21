@@ -1,14 +1,10 @@
-import { IconMessagePlus, IconSearch } from "@tabler/icons-react";
+import { IconMessagePlus } from "@/components/icons";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SectionPanel } from "@/components/layout/section-panel";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group";
+import { SearchField } from "@/components/ui/search-field";
 import {
   SidebarContent,
   SidebarGroup,
@@ -368,20 +364,19 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
         <SidebarMenu>
           <SidebarGroup className="gap-px pt-0">
             <SidebarMenuItem>
-              <InputGroup className="bg-background text-sm rounded-lg h-9">
-                <InputGroupInput
-                  aria-label="Search conversations"
-                  aria-describedby={
-                    searching ? "conversation-search-scope" : undefined
-                  }
-                  onChange={(event) => changeSearch(event.target.value)}
-                  placeholder="Search…"
-                  value={search}
-                />
-                <InputGroupAddon>
-                  <IconSearch />
-                </InputGroupAddon>
-              </InputGroup>
+              {/* The UI Kit's small search, with its round clear button. */}
+              <SearchField
+                aria-label="Search conversations"
+                aria-describedby={
+                  searching ? "conversation-search-scope" : undefined
+                }
+                clearLabel="Clear the search"
+                onChange={(event) => changeSearch(event.target.value)}
+                onClear={() => changeSearch("")}
+                placeholder="Search…"
+                size="sm"
+                value={search}
+              />
             </SidebarMenuItem>
             {/*
              * What is searched, said while somebody types: names and the recent lines the rows

@@ -6,7 +6,7 @@ import {
   IconHandStop,
   IconPlayerStop,
   IconProgress,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { HeldAnswer } from "@/components/approvals/waiting";

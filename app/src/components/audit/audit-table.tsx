@@ -3,7 +3,7 @@ import {
   IconArrowUp,
   IconCirclePlus,
   IconSearch,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import {
   type ColumnDef,
   type ColumnFiltersState,

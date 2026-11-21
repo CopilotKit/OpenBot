@@ -400,11 +400,22 @@ async function rows(page: Page): Promise<RowLook[]> {
           !control.contains(title),
       );
       const card = row.getBoundingClientRect();
-      const lines = new Set(
-        buttons.map((button) =>
-          Math.round(button.getBoundingClientRect().top / 8),
-        ),
-      );
+      // Buttons on one line overlap from top to bottom. Their tops alone don't say it: a 28px icon
+      // button centred beside a 32px one starts 2px lower, and a band of 8px can fall between them.
+      const lines: { top: number; bottom: number }[] = [];
+      for (const rect of buttons
+        .map((button) => button.getBoundingClientRect())
+        .sort((one, other) => one.top - other.top)) {
+        const line = lines.find(
+          (candidate) =>
+            rect.top < candidate.bottom - 0.5 &&
+            rect.bottom > candidate.top + 0.5,
+        );
+        if (line) {
+          line.top = Math.min(line.top, rect.top);
+          line.bottom = Math.max(line.bottom, rect.bottom);
+        } else lines.push({ top: rect.top, bottom: rect.bottom });
+      }
       const names = buttons.map(
         (button) =>
           button.getAttribute("aria-label") ?? button.textContent?.trim() ?? "",
@@ -446,7 +457,7 @@ async function rows(page: Page): Promise<RowLook[]> {
             rect.right > innerWidth + 0.5
           );
         }),
-        buttonLines: lines.size,
+        buttonLines: lines.length,
         missing: wanted.filter(
           (label) =>
             !names.includes(label) &&

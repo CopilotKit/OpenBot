@@ -3,7 +3,7 @@ import {
   IconPin,
   IconPinnedOff,
   IconTrash,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { memo, useState } from "react";
@@ -106,14 +106,17 @@ export const Channel = memo(function Channel({
             params={{ channelId }}
             data-slot={slot}
             type="button"
+            // In OpenBot's own look a row is Figma's "Recent Conversation item": 4px and 8px in, and
+            // a white pill under the pointer. The open conversation keeps that pill: beside the strip
+            // the panel is off the window's edge, where the frame used to mark it.
             className={cn(
-              "flex flex-row px-2.5 gap-2 items-center w-full hover:bg-foreground/5 rounded-lg [content-visibility:auto]",
+              "flex flex-row px-2.5 gap-2 items-center w-full hover:bg-sidebar-item-hover rounded-[20px] own:rounded-full own:px-2 [content-visibility:auto]",
               view === "compact"
                 ? "py-1.5 [contain-intrinsic-size:auto_2rem]"
-                : "py-2 [contain-intrinsic-size:auto_3.25rem]",
+                : "py-2 own:py-1 [contain-intrinsic-size:auto_3.25rem]",
             )}
             activeProps={{
-              className: "bg-foreground/5",
+              className: "bg-foreground/5 own:bg-sidebar-item-hover",
             }}
           >
             <ChannelItemContent

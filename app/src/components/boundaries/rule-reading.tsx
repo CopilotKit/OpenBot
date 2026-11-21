@@ -1,4 +1,4 @@
-import { IconAlertTriangle, IconCircleCheck } from "@tabler/icons-react";
+import { IconAlertTriangle, IconCircleCheck } from "@/components/icons";
 import type { WrittenRule } from "@/components/boundaries/describe-rule";
 import { cn } from "@/lib/utils";
 

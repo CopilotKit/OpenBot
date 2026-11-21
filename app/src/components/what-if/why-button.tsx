@@ -1,5 +1,5 @@
 import { whatIfExplainable } from "@openbot/shared/what-if";
-import { IconHelpCircle } from "@tabler/icons-react";
+import { IconHelpCircle } from "@/components/icons";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import type { AuditEvent } from "@/components/audit/audit-cells";

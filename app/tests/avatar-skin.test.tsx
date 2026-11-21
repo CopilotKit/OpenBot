@@ -87,10 +87,10 @@ test("a group shows two orbs", () => {
 });
 
 test("a conversation's orb is drawn from the Bot's seed, as its own avatar is", () => {
+  // The orb's picture, which its palette picks.
   const color = (view: ReturnType<typeof render>) =>
-    view.container
-      .querySelector<HTMLElement>("[data-variant]")
-      ?.style.getPropertyValue("--c1");
+    view.container.querySelector<HTMLElement>("[data-variant]")?.style
+      .backgroundImage;
   const own = color(
     renderAs("orb", <AbstractAvatar name="Copy" seed="knowledge" size={32} />),
   );

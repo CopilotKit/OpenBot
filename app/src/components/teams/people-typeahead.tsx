@@ -1,4 +1,3 @@
-import { IconCornerDownLeft, IconSearch } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import {
   type KeyboardEvent,
@@ -9,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { IconCornerDownLeft, IconSearch } from "@/components/icons";
 import { PersonAvatar } from "@/components/organizations/person-avatar";
 import {
   InputGroup,

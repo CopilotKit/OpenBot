@@ -10,7 +10,7 @@ import {
   IconUsers,
   IconUsersGroup,
   IconZoomQuestion,
-} from "@tabler/icons-react";
+} from "@/components/icons";
 import { useQuery } from "@tanstack/react-query";
 import type { LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";

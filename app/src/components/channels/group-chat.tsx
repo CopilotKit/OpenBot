@@ -133,7 +133,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
 
   if (group.isPending)
     return (
-      <div className="mx-auto w-full max-w-3xl px-4 py-6">
+      <div className="mx-auto w-full max-w-page px-4 py-6">
         <RestoringTranscript />
       </div>
     );
@@ -141,7 +141,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
   if (group.data === undefined)
     return (
       <div
-        className="mx-auto flex w-full max-w-3xl flex-col items-start gap-3 px-4 py-8"
+        className="mx-auto flex w-full max-w-page flex-col items-start gap-3 px-4 py-8"
         role="alert"
       >
         <p className="text-sm text-destructive">
@@ -168,7 +168,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
         ref={viewportRef}
       >
         <div
-          className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-6"
+          className="mx-auto flex w-full max-w-page flex-col gap-5 px-4 py-6"
           data-transcript-column
         >
           {messages.length === 0 ? (
@@ -200,7 +200,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
         </div>
       </div>
       {/* The same column and the same compact composer as a conversation with one Bot. */}
-      <div className="mx-auto w-full max-w-2xl shrink-0 pb-4">
+      <div className="mx-auto w-full max-w-page shrink-0 px-4 pb-4">
         {send.error ? (
           <p className="pb-2 text-sm text-destructive" role="alert">
             {send.error.message}
