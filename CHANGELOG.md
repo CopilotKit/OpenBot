@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 1.1.3
+
 **Before upgrading.**
 
 - **Migrations run at start: fourteen, and none removes anything.** The database moves from
