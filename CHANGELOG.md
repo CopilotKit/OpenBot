@@ -175,6 +175,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Kubernetes
 
+- **A team install is connected to CopilotKit's management service by default; upgrades stay
+  yours to set up.** The `openbot` chart (and `openbot-bundle`) installs the management agent into
+  `openbot-system` without Flux: it enrolls by licence, sends its heartbeat and runs restart and
+  support-bundle commands, and reports that upgrades are not set up. It refuses pause, resume and
+  rollback, and a desired version waits, until upgrades are set up with the `openbot-agent`
+  release, which takes over with the same certificate. A cluster's own Flux is not touched. Turn it
+  off with `management.enabled=false` (`openbot.management.enabled=false` on the bundle). See
+  [docs/managed-upgrades.md](docs/managed-upgrades.md).
 - **An admin can turn on managed updates from Admin.** Admin, Managed updates, Connect shows a
   code to approve at CopilotKit's page, signed in with your OpenBot account as an admin of the
   organization your licence names. Once it's approved, it shows one `helm install` of

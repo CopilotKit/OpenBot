@@ -134,6 +134,7 @@ type Props = {
   status?: boolean;
   onStart?: (startable: Startable) => Promise<StartOutcome>;
   onForgotten?: () => void;
+  installAgain?: () => Promise<boolean>;
   pollDelays?: number[];
   roomEveryMs?: number;
 };
@@ -146,6 +147,7 @@ function Holder(props: Props) {
     connected: props.connected ?? false,
     onStart: props.onStart ?? (async () => "started"),
     onForgotten: props.onForgotten,
+    installAgain: props.installAgain,
     pollDelays: props.pollDelays ?? [0, 0, 0],
     roomEveryMs: props.roomEveryMs,
   });
@@ -1349,6 +1351,57 @@ test("a lost backend offers Start fresh, which sets OpenBot up again and opens i
   ]);
 });
 
+/**
+ * A Mac on Docker Desktop, Desktop 1.1.2: `docker container prune` removed the backend's stopped
+ * node, every status failed "local-command-failed, no stack", and Retry failed the same way five
+ * times. The native side now says only the backend is gone (`backend-gone`: its cluster is gone,
+ * OpenBot's own database is not). The card says what went and what stays, offers Set up again in
+ * place of Retry, and Set up again sets the backend up, connects it, waits for it and opens OpenBot.
+ */
+test("a backend whose node was removed offers Set up again, which sets it up and opens OpenBot", async () => {
+  const gone = report({
+    outcome: "failed",
+    stack: null,
+    reason: "backend-gone",
+  });
+  invokeHandler = answers({
+    run_local_eval: [gone, ready],
+    set_up_local_eval: [report()],
+    connect_local_eval: [connection()],
+  });
+  const started: Startable[] = [];
+  let installs = 0;
+  const screen = view({
+    stack: "local-044466e209069a0812bc9764",
+    connected: true,
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+    installAgain: async () => {
+      installs += 1;
+      return true;
+    },
+  });
+  await screen.findByText(
+    "Your conversations and what your Bots remember are gone from this computer. Set up again to carry on. Your Bots, settings, sign-in and AI connection stay.",
+  );
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Start fresh" })).toBeNull();
+
+  await userEvent.click(screen.getByRole("button", { name: "Set up again" }));
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  // OpenBot's own installation is left as it is: Start, not a first install, moves it forward.
+  // A folder still on 1.0.3 under Desktop 1.1.2 failed that first install every time.
+  expect(installs).toBe(0);
+  expect(commands()).toEqual([
+    "run_local_eval:status",
+    "set_up_local_eval",
+    "connect_local_eval",
+    "run_local_eval:status",
+  ]);
+});
+
 /** The same stop on a screen about something else: its card says what is gone and offers Start fresh. */
 test("a lost backend is said on the status card too, with Start fresh", async () => {
   invokeHandler = answers({
@@ -2052,6 +2105,94 @@ test("polling is bounded, and says so when Intelligence never became ready", asy
       args: { why: "OpenBot didn't get ready in time. Retry to check again." },
     },
   ]);
+});
+
+/**
+ * Found in a dogfooding report on a Mac (Desktop 1.1.2): the container engine stalled for a few
+ * minutes, the CLI took 115 seconds to list the backend's services, and the one status call ran out
+ * at its 120-second limit. The window stopped at that first check and said "OpenBot took too long
+ * to set up", the sentence for a setup that ran 30 minutes. Retry, once the engine was back,
+ * answered at once. A status call that runs out of time is asked again on the wait's schedule.
+ */
+test("a status call that runs out of time is asked again, and the backend that answers next starts OpenBot", async () => {
+  const answers = ["timeout", "timeout", ready];
+  invokeHandler = async (command) => {
+    if (command !== "run_local_eval") throw new Error(`unexpected ${command}`);
+    const next = answers.shift() ?? ready;
+    if (next === "timeout") throw "timeout";
+    return next;
+  };
+  const started: Startable[] = [];
+  view({
+    stack: "local-abc123",
+    connected: true,
+    pollDelays: [0, 0, 0],
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(statusCalls()).toHaveLength(3);
+  expect(document.body.textContent).not.toContain(
+    "OpenBot took too long to set up",
+  );
+});
+
+/**
+ * Found on the Windows pass of the fix above: after the backend's CPU was held back for four and a
+ * half minutes, its first answer once it caught up was degraded, its checks still failing, and the
+ * wait ended at once with "OpenBot is running but not working properly". Coming back from a slow
+ * spell, degraded is waited on like a backend still starting.
+ */
+test("a degraded answer after a status call ran out of time is waited on, and the ready one after it starts OpenBot", async () => {
+  const answers: unknown[] = [
+    "timeout",
+    report({ readiness: "degraded", licence: "valid", checksPassed: false }),
+    ready,
+  ];
+  invokeHandler = async (command) => {
+    if (command !== "run_local_eval") throw new Error(`unexpected ${command}`);
+    const next = answers.shift() ?? ready;
+    if (next === "timeout") throw "timeout";
+    return next;
+  };
+  const started: Startable[] = [];
+  view({
+    stack: "local-abc123",
+    connected: true,
+    pollDelays: [0, 0, 0],
+    onStart: async (startable) => {
+      started.push(startable);
+      return "started";
+    },
+  });
+  await waitFor(() => expect(started).toEqual([startableUrls]));
+  expect(statusCalls()).toHaveLength(3);
+  expect(document.body.textContent).not.toContain(
+    "OpenBot is running but not working properly",
+  );
+});
+
+test("a backend that never answers a status call says so, and Retry checks again", async () => {
+  invokeHandler = async (command) => {
+    if (command === "run_local_eval") throw "timeout";
+    if (command === "back_end_wait_ended") return null;
+    throw new Error(`unexpected ${command}`);
+  };
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    pollDelays: [0, 0],
+  });
+  await screen.findByText(
+    "OpenBot's services didn't answer in time. Retry to check again.",
+  );
+  expect(statusCalls()).toHaveLength(3);
+  expect(document.body.textContent).not.toContain(
+    "OpenBot took too long to set up",
+  );
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
 });
 
 /**

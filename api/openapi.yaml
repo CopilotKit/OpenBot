@@ -10540,7 +10540,7 @@ paths:
         - Organizations
       operationId: createOrganization
       summary: Create an organization
-      description: Create an organization with the caller as its owner. It starts with what a fresh install starts with, its starter Bots included, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. Without a slug, one is made from the name. The caller's session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.
+      description: 'Create an organization with the caller as its owner. It starts with what a fresh install starts with, its starter Bots included, and no conversations. Everybody already has an organization of their own, made when they first signed in; this is for making another, which anybody signed in may do where OpenBot keeps more than one. An OpenBot may limit how many organizations one person owns, their own included: at the limit the request is refused with 403 and a detail saying so, and nothing is made. Deleting one they created makes room. While another of the caller''s requests is creating one, the request is refused with 409; send it again once that one has answered. Without a slug, one is made from the name. The caller''s session keeps working where it was. A repeated request with the same Idempotency-Key and body returns the first result.'
       security:
         - webSession: []
         - appOAuth:
@@ -10577,7 +10577,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/OrganizationNotAllowed'
         '409':
           $ref: '#/components/responses/OrganizationConflict'
         '500':
@@ -40406,6 +40406,24 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    OrganizationNotAllowed:
+      description: The caller already owns as many organizations as this OpenBot allows one person. Or the request was refused for the caller, as any request can be (SSO_REQUIRED).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            limitReached:
+              value:
+                type: https://open.bot/errors/permission-denied
+                title: Permission denied.
+                status: 403
+                detail: You already own 3 organizations, the most anyone can here. Delete one you created to create another.
+                code: PERMISSION_DENIED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     OrganizationConflict:
       description: Another organization has that slug. Or the Idempotency-Key was used for a different request.
       content:
@@ -40431,6 +40449,17 @@ components:
                 status: 409
                 detail: That Idempotency-Key was used for a different request.
                 code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            creationUnderWay:
+              value:
+                type: https://open.bot/errors/conflict
+                title: The request conflicts with the current state.
+                status: 409
+                detail: You're already creating an organization. Wait for it to finish, then try again.
+                code: CONFLICT
                 category: conflict
                 retryable: false
                 requestId: req_example

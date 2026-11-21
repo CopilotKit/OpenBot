@@ -10,7 +10,7 @@ import {
   serverDeployment,
 } from "../../shared/kubernetes-promotion";
 import type { Heartbeat, UpgradeState } from "../../shared/management-contract";
-import type { AgentConfig, ReadyAgent } from "./config";
+import { type AgentConfig, type ReadyAgent, upgradesOn } from "./config";
 import { type Flux, ready } from "./flux";
 import { type Kube, run } from "./kube";
 
@@ -91,7 +91,7 @@ export async function collectHeartbeat(options: {
       kube.list<Workload>(namespace, "deployments").catch(() => []),
       kube.list<Workload>(namespace, "statefulsets").catch(() => []),
       kube.list<Pod>(namespace, "pods").catch(() => []),
-      flux.helmRelease().catch(() => null),
+      upgradesOn(config) ? flux.helmRelease().catch(() => null) : null,
       readIdentity(config),
     ]);
   const imageDigests: Record<string, string> = {};
@@ -154,6 +154,9 @@ export async function collectHeartbeat(options: {
       desired: workload.spec?.replicas ?? 0,
     })),
     upgrade: options.upgrade,
+    // Whether this agent runs upgrades, so CopilotKit's service and OpenBot's screen can tell a
+    // connected install with upgrades set up from one without.
+    upgrades: upgradesOn(config) ? "on" : "not-set-up",
     sentAt: new Date().toISOString(),
   };
 }

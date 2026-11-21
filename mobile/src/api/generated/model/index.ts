@@ -415,6 +415,7 @@ export * from "./organizationInvitationResponseDelivery";
 export * from "./organizationMember";
 export * from "./organizationMemberPage";
 export * from "./organizationMemberResponse";
+export * from "./organizationNotAllowedResponse";
 export * from "./organizationNotCreatedResponse";
 export * from "./organizationNotDeletedResponse";
 export * from "./organizationNotFoundResponse";

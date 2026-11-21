@@ -14,9 +14,13 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import type { LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { managePaths } from "@/lib/manage-paths";
 import { MANAGEMENT_SENTENCE } from "@/lib/management/format";
-import { managementQueryOptions } from "@/lib/management/queries";
+import {
+  asksForManagement,
+  managementQueryOptions,
+} from "@/lib/management/queries";
 import { primitive, VAULT } from "@/lib/primitives";
 
 export type AdminEntry = {
@@ -224,6 +228,8 @@ export function adminSections(management: boolean): readonly AdminSection[] {
  * or failed, and wherever the server answers that it doesn't apply.
  */
 export function useAdminSections(): readonly AdminSection[] {
-  const management = useQuery(managementQueryOptions());
-  return adminSections(management.data?.applies === true);
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  const asks = asksForManagement(capabilities);
+  const management = useQuery({ ...managementQueryOptions(), enabled: asks });
+  return adminSections(asks && management.data?.applies === true);
 }

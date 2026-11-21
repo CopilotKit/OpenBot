@@ -587,6 +587,7 @@ describe("the rules name the jobs the workflows run", () => {
     ).toEqual([
       "ai_connection::tests::real_engine",
       "host_access::live",
+      "local_eval::stack_lost_live::engine",
       "local_images::live",
       "netavark_rules::live",
       "update_ready::live",
