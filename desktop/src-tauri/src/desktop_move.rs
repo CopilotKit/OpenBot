@@ -36,6 +36,9 @@ pub struct State {
     from_settings: AtomicBool,
     /// A move is running: a second one is refused.
     running: AtomicBool,
+    /// The OpenBot Cloud sign-in this run made for the move, for Try again.
+    signed_in:
+        std::sync::Mutex<Option<std::sync::Arc<openbot_desktop_lib::connected::sign_in::Session>>>,
 }
 
 fn state<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> &State {
@@ -249,12 +252,26 @@ fn move_now<R: tauri::Runtime>(
     }
     let mut told = Told { app: app.clone() };
     moving::Progress::running(&mut told, Stage::SignIn, None);
-    let session = crate::desktop_connected::sign_in_for_move(app, address, opened).map_err(
-        |mut problem| {
-            problem.kind = Some("sign-in");
-            problem
-        },
-    )?;
+    // A sign-in this run made for the move is used again by Try again. One kept from an earlier
+    // run is not: it may predate the scopes the move needs, so the move signs in afresh.
+    let kept = state(app)
+        .signed_in
+        .lock()
+        .unwrap()
+        .clone()
+        .filter(|session| session.address() == address.trim_end_matches('/'));
+    let session = match kept {
+        Some(session) => session,
+        None => {
+            let session = crate::desktop_connected::sign_in_for_move(app, address, opened)
+                .map_err(|mut problem| {
+                    problem.kind = Some("sign-in");
+                    problem
+                })?;
+            *state(app).signed_in.lock().unwrap() = Some(session.clone());
+            session
+        }
+    };
     moving::Progress::done(&mut told, Stage::SignIn);
 
     let not_moved = |detail: String| {

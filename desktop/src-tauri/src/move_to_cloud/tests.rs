@@ -744,13 +744,13 @@ fn local_openbot(parts: Vec<(Part, Vec<u8>)>, counts: Vec<Count>) -> String {
     })
 }
 
+/// The parts an OpenBot Cloud in a test received, by number.
+type Received = Arc<Mutex<BTreeMap<u32, Vec<u8>>>>;
+
 /// OpenBot Cloud, as the API says it answers: the person's own organization, an import that
 /// checks each part against the manifest, imports on apply, and is checked by `verify`.
-fn cloud_openbot(
-    expected: Vec<Part>,
-    verify: serde_json::Value,
-) -> (String, Arc<Mutex<BTreeMap<u32, Vec<u8>>>>) {
-    let received: Arc<Mutex<BTreeMap<u32, Vec<u8>>>> = Arc::default();
+fn cloud_openbot(expected: Vec<Part>, verify: serde_json::Value) -> (String, Received) {
+    let received: Received = Arc::default();
     let parts = received.clone();
     let address = serve(move |request| {
         if request.headers.get("authorization").map(String::as_str)

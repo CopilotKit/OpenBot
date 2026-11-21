@@ -321,9 +321,10 @@ pub fn cancel_sign_in<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 }
 
 /**
-The move to OpenBot Cloud's sign-in at `typed`: the sign-in kept for that address when it still
-works, else the browser's, exactly as Connect signs in (and kept in the credential store as
-Connect keeps it). Nothing is shown and nothing on this computer is stopped: the move still needs
+The move to OpenBot Cloud's sign-in at `typed`, in the browser, exactly as Connect signs in (and
+kept in the credential store as Connect keeps it). Always the browser's: a sign-in kept from before
+may not carry the scopes the move asks for, which OpenBot Cloud lists in its metadata and this
+sign-in asks for. Nothing is shown and nothing on this computer is stopped: the move still needs
 the OpenBot here, and shows OpenBot Cloud only once it is done (`keep_moved_choice`,
 `show_connected_at`). `opened` says whether the browser was opened.
 */
@@ -333,13 +334,6 @@ pub fn sign_in_for_move<R: tauri::Runtime>(
     opened: &std::sync::atomic::AtomicBool,
 ) -> Result<Arc<sign_in::Session>, Problem> {
     let (address, metadata) = address::check(typed)?;
-    match sign_in::resume(&address, &metadata, store(app)) {
-        Ok(session) => return Ok(Arc::new(session)),
-        Err(problem) => log::info!(
-            "[move] no sign-in kept for that address works ({}); signing in in the browser",
-            problem.detail.unwrap_or(problem.said)
-        ),
-    }
     let attempt = Arc::new(sign_in::Attempt::default());
     if let Some(earlier) = state(app)
         .connected
