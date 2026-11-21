@@ -28,12 +28,15 @@ import {
 import {
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   useSyncExternalStore,
 } from "react";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
+import { useDeclaredBotId } from "@/lib/copilot/active-bot";
 import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
+import { reportComputerActivity } from "@/lib/copilot/computer-activity";
 import {
   type FolderNames,
   FolderNamesContext,
@@ -898,6 +901,28 @@ export function StepOutput({
       ) : null}
     </div>
   );
+}
+
+/**
+ * A Windows computer's step (desktop_*) runs on the server, so nothing in this browser reports it the way a
+ * browser computer's call does (`callComputer`). Said here, while it runs in the newest turn, so the
+ * conversation opens the computer panel on it as it does for the browser.
+ */
+export function useReportsDesktopActivity(
+  steps: readonly ToolItem[],
+  active: boolean,
+): void {
+  const botId = useDeclaredBotId();
+  const runningDesktopCall = active
+    ? steps.find(
+        (step) =>
+          step.result === undefined &&
+          step.toolCall.function.name.startsWith("desktop_"),
+      )?.toolCall.id
+    : undefined;
+  useEffect(() => {
+    if (runningDesktopCall && botId) reportComputerActivity(botId);
+  }, [runningDesktopCall, botId]);
 }
 
 export function ToolActivity({
