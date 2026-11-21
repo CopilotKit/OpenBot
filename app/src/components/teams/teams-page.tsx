@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { teamListQueryOptions } from "@/lib/teams/queries";
+import { type TeamPaths, type TeamsShell, teamPaths } from "./team-paths";
 import { TEAMS_DESCRIPTION, teamFacts } from "./team-words";
 
 /**
@@ -26,14 +27,14 @@ import { TEAMS_DESCRIPTION, teamFacts } from "./team-words";
  * comes from the company's directory, and the reader's own role in it. A team opens to its page;
  * New team is its own screen, offered only to whoever the server lets create one.
  */
-function Teams() {
+function Teams({ paths }: { paths: TeamPaths }) {
   const list = useQuery(teamListQueryOptions());
   const teams = list.data?.teams ?? [];
   const canCreate = list.data?.canCreate === true;
 
   const newTeam = (variant: "ghost" | "outline") => (
     <Button
-      render={(props) => <Link {...props} to="/teams/new" />}
+      render={(props) => <Link {...props} {...paths.newTeam()} />}
       size="sm"
       variant={variant}
     >
@@ -71,13 +72,7 @@ function Teams() {
           {teams.map((team, index) => (
             <StaggerItem index={index} key={team.id}>
               <Item
-                render={(props) => (
-                  <Link
-                    {...props}
-                    params={{ teamId: team.id }}
-                    to="/teams/$teamId"
-                  />
-                )}
+                render={(props) => <Link {...props} {...paths.team(team.id)} />}
                 size="sm"
               >
                 <ItemMedia variant="icon">
@@ -107,15 +102,18 @@ function Teams() {
   );
 }
 
-/** The personal edition shows this page's title, and that it applies to a team. */
-export function TeamsPage() {
+/**
+ * The personal edition shows this page's title, and that it applies to a team. `shell` is the frame
+ * it is drawn in: the app's for everybody, Admin's for an admin who opened it there.
+ */
+export function TeamsPage({ shell = "app" }: { shell?: TeamsShell } = {}) {
   return (
     <TeamPage
       description={TEAMS_DESCRIPTION}
       more="Here, you're the only person."
       title="Teams"
     >
-      <Teams />
+      <Teams paths={teamPaths(shell)} />
     </TeamPage>
   );
 }
