@@ -72,7 +72,7 @@ The easiest way to get started is with the fully self-contained app that runs on
 - **Govern work across your team.** Company sign-in, roles, tool permissions, approvals, and audit apply across the workspace. Your agents use OpenBot's tools and computers under the same policies.
 - **Get help deploying it.** CopilotKit's engineers can work with your team to deploy OpenBot, connect your systems, and automate parts of specific jobs.
 
-[Connect your agent](#bring-your-own-agent) · [Configure models and tools](docs/configuration.md) · [Explore OpenBot for Business](https://open.bot/business)
+[Connect your agent](#bring-your-own-agent) · [Configure models and tools](docs/configuration.md) · [OpenDesign Go setup](docs/configuration.md#opendesign-go) · [Explore OpenBot for Business](https://open.bot/business)
 
 ## Built on CopilotKit and AG-UI
 
