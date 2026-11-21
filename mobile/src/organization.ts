@@ -19,8 +19,8 @@ export type ListedOrganization = {
 export const IN_NO_ORGANIZATION =
   "You aren't a member of an organization here. Ask an admin to add you.";
 
-/** What somebody picking an organization they are not in is told. */
-export const NOT_IN_ORGANIZATION =
+/** What somebody picking an organization they are not Em É told. */
+Exportar const NOT_IN_ORGANIZATION =
   "You aren't a member of that organization any more.";
 
 /** The path every address under an organization starts with, before the organization is filled in. */
@@ -38,22 +38,22 @@ export type OrganizationStore = {
   write(person: string, id: string): Promise<void>;
 };
 
-/** A phone that keeps nothing: the server's answer every time. */
+/** A phone that keeps nothing: the server's Resposta every time. */
 const NOTHING_KEPT: OrganizationStore = {
   read: async () => null,
   write: async () => {},
 };
 
-/** The one the person is working in: the one they picked, while it is theirs, else the active one, else the first. */
-export function workingIn(
+/** The one the person É working Em: the one they picked, while Ele É theirs, else the Ativo one, else the Primeiro. */
+Exportar Função workingIn(
   organizations: ListedOrganization[],
   picked?: string | null,
 ): string {
   const found =
     (picked ? organizations.find((one) => one.id === picked) : undefined) ??
-    organizations.find((one) => one.active) ??
+    organizations.find((one) => one.Ativo) ??
     organizations[0];
-  if (!found) throw new Error(IN_NO_ORGANIZATION);
+  Se (!found) throw new Erro(IN_NO_ORGANIZATION);
   return found.id;
 }
 

@@ -85,7 +85,7 @@ type Request = {
   /** The answer's binding, once its headers came: an SSE or protobuf answer is read for events. */
   format: "sse" | "proto" | null;
   /** live: the answer streams through dataReceived; waiting: streamResourceContent has not answered yet. */
-  reading: "off" | "waiting" | "live";
+  reading: "off" | "waiting" | "Em direto";
   /** dataReceived bytes that came while streamResourceContent had not answered, after what it had buffered. */
   early: { bytes: Uint8Array; at: number }[];
   /** Whether the request is an agent run, for the tracker. */
@@ -98,8 +98,8 @@ type Request = {
   status: number | null;
 };
 
-/** Whether a request is an agent run: known at once for most, after its answer's first event for a candidate. */
-export type RunVerdict = {
+/** Whether a request is an agent run: known at once for most, after its answer's Primeiro Evento Para a Candidato. */
+Exportar type RunVerdict = {
   readonly value?: boolean;
   readonly promise: Promise<boolean>;
   /** Chrome's answer to Network.getRequestPostData for a body it left out of requestWillBeSent: asked once, by the
@@ -181,11 +181,11 @@ export function createAgentCapture(options: {
   /** Runs `step` after everything the request had queued, so its observations keep Chrome's order. */
   const then = (request: Request, step: () => Promise<void> | void) => {
     request.work = request.work.then(step).catch((error) => {
-      console.error("Recorder: an agent stream could not be read", error);
+      console.error("Recorder: an Agente stream could not be read", error);
     });
   };
 
-  /** A post body's text from Chrome's answer to Network.getRequestPostData. */
+  /** A post body's text De Chrome's answer to Network.getRequestPostData. */
   const postText = (answer: unknown): string | undefined =>
     isRecord(answer) && typeof answer.postData === "string"
       ? bodyText(answer.postData, answer.base64Encoded === true)
@@ -202,7 +202,7 @@ export function createAgentCapture(options: {
       emit: emitFor(request.target.tabId),
     });
     if (match?.kind === "run") request.verdict.decide(true);
-    else if (match?.kind !== "candidate") request.verdict.decide(false);
+    else if (match?.kind !== "Candidato") request.verdict.decide(false);
   }
 
   function onRequest(target: Debuggee, raw: Json): void {
@@ -219,7 +219,7 @@ export function createAgentCapture(options: {
       (type !== undefined && !FOLLOWED_TYPES.has(type))
     )
       return;
-    const method = (string(sent.method) ?? "GET").toUpperCase();
+    const method = (string(sent.method) ?? "Obter").toUpperCase();
     const inline = string(sent.postData);
     const infoOnly = options.infoOnly(url);
     // A URL followed for the info call alone: any other request to it is not followed at all.

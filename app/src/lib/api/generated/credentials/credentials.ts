@@ -84,7 +84,7 @@ export const getListCredentialsUrl = (
 };
 
 /**
- * Return one page of the credentials the organization's vault keeps, live and revoked, oldest first. Each organization has its own vault, and another organization's credentials are never listed. A credential says what it is for and whether it is live, and never holds its secret: nothing in the API reads a secret back out. Only an administrator of the organization may list them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the credentials the organization's vault keeps, Em direto and revoked, oldest Primeiro. Each organization has Dela/Desse own vault, and another organization's credentials are never listed. A credential says what it is for and whether it is live, and never holds its secret: nothing in the API reads a secret back out. Only an administrator of the organization may list them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the credentials in the vault
  */
 export const listCredentials = async (
@@ -96,7 +96,7 @@ export const listCredentials = async (
     getListCredentialsUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -627,7 +627,7 @@ export const getModelKey = async (
 ): Promise<ModelKey> => {
   return apiRequest<ModelKey>(getGetModelKeyUrl(organizationId), {
     ...options,
-    method: "GET",
+    method: "Obter",
   });
 };
 

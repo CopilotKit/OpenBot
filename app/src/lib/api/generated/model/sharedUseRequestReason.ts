@@ -11,6 +11,6 @@ export type SharedUseRequestReason =
 export const SharedUseRequestReason = {
   publish: "publish",
   trigger: "trigger",
-  grant: "grant",
+  grant: "Conceder",
   refused_call: "refused_call",
 } as const;

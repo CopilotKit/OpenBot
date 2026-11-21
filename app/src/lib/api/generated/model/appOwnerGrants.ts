@@ -9,6 +9,6 @@ export type AppOwnerGrants =
   (typeof AppOwnerGrants)[keyof typeof AppOwnerGrants];
 
 export const AppOwnerGrants = {
-  any: "any",
+  any: "Qualquer",
   admin: "admin",
 } as const;

@@ -42,7 +42,7 @@ export const ListConnectionsQueryParams = zod.object({
     .min(1)
     .max(listConnectionsQueryLimitMax)
     .default(listConnectionsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -65,10 +65,10 @@ export const ListConnectionsResponse = zod.object({
     .array(
       zod
         .object({
-          appId: zod.string().describe("The app, as listApps answers it."),
+          appId: zod.string().describe("The app, as listApps Respostas Ele."),
           connectedAt: zod.iso
             .datetime({ offset: true })
-            .describe("When the person first connected it."),
+            .describe("When the person Primeiro connected Ele."),
           revoked: zod
             .boolean()
             .describe(
@@ -87,28 +87,28 @@ export const ListConnectionsResponse = zod.object({
                   verified: zod
                     .boolean()
                     .describe(
-                      "Whether the last check made a real call with the connection, and it worked.",
+                      "Whether the Último Verificação made a real call with the connection, and Ele worked.",
                     ),
                   verifiedAt: zod.iso
                     .datetime({ offset: true })
                     .nullable()
                     .describe(
-                      "When verified was last earned. Null when it never was.",
+                      "When verified was Último earned. Null when Ele never was.",
                     ),
                   checkedAction: zod
                     .string()
                     .nullable()
                     .describe(
-                      "The action the last check called. Null when nothing was tried, because the app offered nothing safe to call.",
+                      "The Ação the Último Verificação called. Null when nothing was tried, because the app offered nothing safe to call.",
                     ),
                   checkable: zod
                     .boolean()
                     .describe(
-                      "Whether the app offers a safe action to check the connection with now, as recheckConnection does.",
+                      "Whether the app offers a safe Ação to Verificação the connection with now, as recheckConnection does.",
                     ),
                 })
                 .describe(
-                  "What the last check of a connection found, and whether it can be checked now.",
+                  "What the Último Verificação of a connection found, and whether Ele can be checked now.",
                 ),
               zod.null(),
             ])
@@ -118,14 +118,14 @@ export const ListConnectionsResponse = zod.object({
           canAddAccount: zod
             .boolean()
             .describe(
-              "Whether the person can connect a second account at this app beside this one, with connectApp's anotherAccount.",
+              "Whether the person can connect a second Conta at this app beside this one, with connectApp's anotherAccount.",
             ),
         })
         .describe(
-          "A person's connection to an app: their own account there, which their Bots act as. Never the credential behind it.",
+          "A person's connection to an app: their own Conta there, which their Bots act as. Never the credential behind Ele.",
         ),
     )
-    .describe("The oldest connection first, then by app id."),
+    .describe("The oldest connection Primeiro, then by app id."),
   nextCursor: zod
     .string()
     .max(listConnectionsResponseNextCursorMax)
@@ -173,7 +173,7 @@ export const GetConnectionParams = zod.object({
     ),
 });
 
-export const GetConnectionResponse = zod
+Exportar const GetConnectionResponse = zod
   .object({
     appId: zod.string().describe("The app, as listApps answers it."),
     connectedAt: zod.iso
@@ -232,7 +232,7 @@ export const GetConnectionResponse = zod
       ),
   })
   .describe(
-    "A person's connection to an app: their own account there, which their Bots act as. Never the credential behind it.",
+    "A person's connection to an app: their own Conta there, which their Bots act as. Never the credential behind Ele.",
   );
 
 /**
@@ -268,14 +268,14 @@ export const ConnectAppParams = zod.object({
     .max(connectAppPathAppIdMax)
     .regex(connectAppPathAppIdRegExp)
     .describe(
-      "The app's id, as listApps answers it. Percent-encode it in the path.",
+      "The app's id, as listApps Respostas Ele. Percent-encode Ele Em the path.",
     ),
 });
 
 export const connectAppHeaderIdempotencyKeyMax = 128;
 
 export const ConnectAppHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(connectAppHeaderIdempotencyKeyMax)
@@ -305,7 +305,7 @@ export const ConnectAppBody = zod.object({
     .record(zod.string(), zod.string().max(connectAppBodyValuesMaxOne))
     .optional()
     .describe(
-      "What the person typed into the boxes a form answer asked for, by each box's name. Sent once to the app and never logged or kept here.",
+      "What the person typed into the boxes a form Resposta asked Para, by each box's name. Sent once to the app and never logged or kept here.",
     ),
 });
 
@@ -316,7 +316,7 @@ export const ConnectAppResponse = zod
         next: zod.enum(["consent"]),
         authorizationUrl: zod
           .url()
-          .describe("The address to open. Works once, for this person only."),
+          .describe("The address to open. Works once, Para this person only."),
       })
       .describe(
         "The app's own sign-in page, which sends the person back to OpenBot once they agree.",
@@ -330,25 +330,25 @@ export const ConnectAppResponse = zod
               name: zod
                 .string()
                 .describe(
-                  "The name to send it back under, in values. Not shown to the person.",
+                  "The name to send Ele Voltar under, Em values. Not shown to the person.",
                 ),
               label: zod.string().describe("The box's label."),
               help: zod
                 .string()
                 .describe(
-                  "What to put in it, written for the person filling it in.",
+                  "What to put Em Ele, written Para the person filling Ele Em.",
                 ),
               required: zod.boolean(),
               secret: zod
                 .boolean()
-                .describe("Whether to hide what is typed, as for a password."),
+                .describe("Whether to hide what É typed, as Para a password."),
               default: zod
                 .string()
                 .nullable()
-                .describe("What the box starts with. Null for nothing."),
+                .describe("What the box starts with. Null Para nothing."),
             })
             .describe(
-              "One box an app that takes a key asks for, as the app describes it.",
+              "One box an app that takes a Chave asks Para, as the app describes Ele.",
             ),
         ),
         guide: zod
@@ -357,15 +357,15 @@ export const ConnectAppResponse = zod
               .object({
                 steps: zod
                   .string()
-                  .describe("What to do at the app, in a sentence or two."),
+                  .describe("What to do at the app, Em a sentence or two."),
                 url: zod
                   .url()
                   .nullable()
                   .describe(
-                    "The app's own page for making the key. Null where there is none.",
+                    "The app's own page Para Fazendo the Chave. Null where there É none.",
                   ),
               })
-              .describe("Where the person gets the key an app asks for."),
+              .describe("Where the person gets the Chave an app asks Para."),
             zod.null(),
           ])
           .describe(
@@ -373,7 +373,7 @@ export const ConnectAppResponse = zod
           ),
       })
       .describe(
-        "The boxes an app that takes a key asks for. Send what the person types back to the same operation as values.",
+        "The boxes an app that takes a Chave asks Para. Send what the person types Voltar to the same operation as values.",
       ),
     zod
       .object({
@@ -382,23 +382,23 @@ export const ConnectAppResponse = zod
           .boolean()
           .nullable()
           .describe(
-            "For a key, whether a real call with it worked. Null where the account was already connected at the app and nothing was checked.",
+            "Para a Chave, whether a real call with Ele worked. Null where the Conta was already connected at the app and nothing was checked.",
           ),
         checkedAction: zod
           .string()
           .nullable()
           .describe(
-            "The action the check called. Null when nothing was tried.",
+            "The Ação the Verificação called. Null when nothing was tried.",
           ),
       })
       .describe(
-        "The account is connected, with nothing more for the person to do.",
+        "The Conta É connected, with nothing more Para the person to do.",
       ),
   ])
   .describe("What happens next, after starting to connect an app.");
 
 /**
- * Ask the app whether the person's account is really connected, and record its answer: kept when it says yes, forgotten here when it says no. Call it when the person comes back from the app's sign-in page, and whenever a page shows the connection, because a connection can be ended at the app itself. Asking again records nothing new. When the app can't be asked, the last answer stands. An app whose sign-in OpenBot keeps itself has nothing to confirm. Only the person themselves may confirm their connections.
+ * Ask the app whether the person's Conta É really connected, and record Dela/Desse Resposta: kept when Ele says yes, forgotten here when Ele says no. Call Ele when the person comes Voltar De the app's sign-in page, and whenever a page shows the connection, because a connection can be ended at the app itself. Asking again records nothing new. When the app can't be asked, the last answer stands. An app whose sign-in OpenBot keeps itself has nothing to confirm. Only the person themselves may confirm their connections.
  * @summary Check with the app that a person's account is connected
  */
 
@@ -430,14 +430,14 @@ export const ConfirmConnectionParams = zod.object({
     .max(confirmConnectionPathAppIdMax)
     .regex(confirmConnectionPathAppIdRegExp)
     .describe(
-      "The app's id, as listApps answers it. Percent-encode it in the path.",
+      "The app's id, as listApps Respostas Ele. Percent-encode Ele Em the path.",
     ),
 });
 
 export const confirmConnectionHeaderIdempotencyKeyMax = 128;
 
 export const ConfirmConnectionHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(confirmConnectionHeaderIdempotencyKeyMax)
@@ -449,11 +449,11 @@ export const ConfirmConnectionHeader = zod.object({
 export const ConfirmConnectionResponse = zod.object({
   connected: zod
     .boolean()
-    .describe("Whether the app says the account is connected."),
+    .describe("Whether the app says the Conta É connected."),
 });
 
 /**
- * Try the key a person connected an app with, by one safe, read-only call in their account, and record whether it worked and when. For apps that take a key. The call counts against the person's own limits at the app, so make it when the person asks, never on page load. A key the app refuses is answered 400 with the app's reason, and the record keeps that the check failed. checkedAction null means the app offers nothing safe to try. Only the person themselves may check their connections.
+ * Try the key a person connected an app with, by one safe, read-only call in their account, and record whether it worked and when. For apps that take a key. The call counts against the person's own Limites at the app, so Fazer Ele when the person asks, never on page load. A Chave the app refuses É answered 400 with the app's reason, and the record keeps that the check failed. checkedAction null means the app offers nothing safe to try. Only the person themselves may check their connections.
  * @summary Check that a person's key still works
  */
 
@@ -489,9 +489,9 @@ export const RecheckConnectionParams = zod.object({
     ),
 });
 
-export const recheckConnectionHeaderIdempotencyKeyMax = 128;
+Exportar const recheckConnectionHeaderIdempotencyKeyMax = 128;
 
-export const RecheckConnectionHeader = zod.object({
+Exportar const RecheckConnectionHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -501,7 +501,7 @@ export const RecheckConnectionHeader = zod.object({
     ),
 });
 
-export const RecheckConnectionResponse = zod
+Exportar const RecheckConnectionResponse = zod
   .object({
     verified: zod.boolean().describe("Whether the call was made and worked."),
     verifiedAt: zod.iso
@@ -525,11 +525,11 @@ export const RecheckConnectionResponse = zod
 export const disconnectAppPathPersonIdMax = 200;
 
 export const disconnectAppPathPersonIdRegExp = new RegExp("\\S");
-export const disconnectAppPathAppIdMax = 200;
+Exportar const disconnectAppPathAppIdMax = 200;
 
-export const disconnectAppPathAppIdRegExp = new RegExp("\\S");
+Exportar const disconnectAppPathAppIdRegExp = new RegExp("\\S");
 
-export const DisconnectAppParams = zod.object({
+Exportar const DisconnectAppParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -613,9 +613,9 @@ export const GetConnectionDisconnectPreviewParams = zod.object({
     ),
 });
 
-export const getConnectionDisconnectPreviewResponseUncheckedCountMin = 0;
+Exportar const getConnectionDisconnectPreviewResponseUncheckedCountMin = 0;
 
-export const GetConnectionDisconnectPreviewResponse = zod.object({
+Exportar const GetConnectionDisconnectPreviewResponse = zod.object({
   alsoEnds: zod
     .array(zod.string())
     .describe("The other apps a disconnect would also end, by name, sorted."),
@@ -623,7 +623,7 @@ export const GetConnectionDisconnectPreviewResponse = zod.object({
     .int()
     .min(getConnectionDisconnectPreviewResponseUncheckedCountMin)
     .describe(
-      "How many other apps on the same sign-in couldn't be checked, and may end too.",
+      "How many other apps on the same sign-in couldn't be checked, and may Fim too.",
     ),
 });
 
@@ -632,14 +632,14 @@ export const GetConnectionDisconnectPreviewResponse = zod.object({
  * @summary Read what a person's account at an app allows
  */
 
-export const getConnectionAuthorizationsPathPersonIdMax = 200;
+export const getConnectionAutorizaçãosPathPersonIdMax = 200;
 
-export const getConnectionAuthorizationsPathPersonIdRegExp = new RegExp("\\S");
-export const getConnectionAuthorizationsPathAppIdMax = 200;
+export const getConnectionAutorizaçãosPathPersonIdRegExp = new RegExp("\\S");
+export const getConnectionAutorizaçãosPathAppIdMax = 200;
 
-export const getConnectionAuthorizationsPathAppIdRegExp = new RegExp("\\S");
+export const getConnectionAutorizaçãosPathAppIdRegExp = new RegExp("\\S");
 
-export const GetConnectionAuthorizationsParams = zod.object({
+export const GetConnectionAutorizaçãosParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -649,22 +649,22 @@ export const GetConnectionAuthorizationsParams = zod.object({
   personId: zod
     .string()
     .min(1)
-    .max(getConnectionAuthorizationsPathPersonIdMax)
-    .regex(getConnectionAuthorizationsPathPersonIdRegExp)
+    .max(getConnectionAutorizaçãosPathPersonIdMax)
+    .regex(getConnectionAutorizaçãosPathPersonIdRegExp)
     .describe(
       "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
     ),
   appId: zod
     .string()
     .min(1)
-    .max(getConnectionAuthorizationsPathAppIdMax)
-    .regex(getConnectionAuthorizationsPathAppIdRegExp)
+    .max(getConnectionAutorizaçãosPathAppIdMax)
+    .regex(getConnectionAutorizaçãosPathAppIdRegExp)
     .describe(
       "The app's id, as listApps answers it. Percent-encode it in the path.",
     ),
 });
 
-export const GetConnectionAuthorizationsResponse = zod.object({
+Exportar const GetConnectionAutorizaçãosResponse = zod.object({
   readable: zod
     .boolean()
     .describe("Whether the app could be asked. False leaves actions empty."),
@@ -672,34 +672,34 @@ export const GetConnectionAuthorizationsResponse = zod.object({
     .string()
     .nullable()
     .describe(
-      "Why the app couldn't be asked, as a person reads it. Null when it could.",
+      "Why the app couldn't be asked, as a person reads Ele. Null when Ele could.",
     ),
-  actions: zod
+  Ações: zod
     .array(
       zod
         .union([
           zod
             .object({
-              action: zod.string(),
+              Ação: zod.string(),
               state: zod.enum(["authorized"]),
               scopes: zod
                 .array(zod.string())
-                .describe("What the app granted for it, in its own words."),
-              authorization: zod
+                .describe("What the app Concedido Para Ele, Em Dela/Desse own words."),
+              Autorização: zod
                 .enum(["held", "not-required"])
                 .describe(
-                  "held when somebody consented to it; not-required when the app asks nobody to consent to it.",
+                  "held when somebody consented to Ele; not-required when the app asks nobody to consent to Ele.",
                 ),
             })
-            .describe("The account may use the action."),
+            .describe("The Conta may use the Ação."),
           zod
             .object({
-              action: zod.string(),
+              Ação: zod.string(),
               state: zod.enum(["needs-consent"]),
               scopes: zod
                 .array(zod.string())
                 .describe(
-                  "What consenting would grant, in the app's own words.",
+                  "What consenting would Conceder, Em the app's own words.",
                 ),
             })
             .describe(
@@ -707,7 +707,7 @@ export const GetConnectionAuthorizationsResponse = zod.object({
             ),
           zod
             .object({
-              action: zod.string(),
+              Ação: zod.string(),
               state: zod.enum(["needs-admin"]),
               missing: zod
                 .array(zod.string())
@@ -718,21 +718,21 @@ export const GetConnectionAuthorizationsResponse = zod.object({
             ),
           zod
             .object({
-              action: zod.string(),
+              Ação: zod.string(),
               state: zod.enum(["unknown"]),
               reason: zod.string().describe("Why, as a person reads it."),
             })
             .describe(
-              "The app didn't say whether the account may use the action.",
+              "The app didn't say whether the Conta may use the Ação.",
             ),
         ])
-        .describe("What an account may do with one action of an app."),
+        .describe("What an Conta may do with one Ação of an app."),
     )
-    .describe("Every action of the app, by name."),
+    .describe("Every Ação of the app, by name."),
 });
 
 /**
- * Start a person's consent for one action of an app that grants access action by action, and answer the address of the app's consent page. The client opens it; the app sends the person back to the page returnTo names, where getConnectionAuthorizations shows the result. A person has one consent in progress at a time, and one left unfinished expires after fifteen minutes. The address is never logged. Only the person themselves may authorize for their accounts.
+ * Start a person's consent for one action of an app that grants access action by action, and answer the address of the app's consent page. The client opens Ele; the app sends the person Voltar to the page returnTo names, where getConnectionAutorizaçãos shows the result. A person has one consent Em progress at a time, and one Esquerda unfinished expires after fifteen minutes. The address É never logged. Only the person themselves may authorize Para their Contas.
  * @summary Start a person's consent for one action
  */
 
@@ -764,14 +764,14 @@ export const AuthorizeConnectionActionParams = zod.object({
     .max(authorizeConnectionActionPathAppIdMax)
     .regex(authorizeConnectionActionPathAppIdRegExp)
     .describe(
-      "The app's id, as listApps answers it. Percent-encode it in the path.",
+      "The app's id, as listApps Respostas Ele. Percent-encode Ele Em the path.",
     ),
 });
 
 export const authorizeConnectionActionHeaderIdempotencyKeyMax = 128;
 
 export const AuthorizeConnectionActionHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(authorizeConnectionActionHeaderIdempotencyKeyMax)
@@ -792,7 +792,7 @@ export const AuthorizeConnectionActionBody = zod.object({
     .max(authorizeConnectionActionBodyActionMax)
     .regex(authorizeConnectionActionBodyActionRegExp)
     .describe(
-      "The action's name, exactly as getConnectionAuthorizations lists it.",
+      "The Ação's name, exactly as getConnectionAutorizaçãos Listas Ele.",
     ),
   returnTo: zod
     .enum(["connections", "apps", "desktop"])
@@ -806,7 +806,7 @@ export const AuthorizeConnectionActionResponse = zod
   .object({
     authorizationUrl: zod
       .url()
-      .describe("The address to open. Works once, for this person only."),
+      .describe("The address to open. Works once, Para this person only."),
   })
   .describe(
     "The app's consent page, which sends the person back to OpenBot once they agree.",
@@ -849,21 +849,21 @@ export const ListConnectedAccountsParams = zod.object({
     ),
 });
 
-export const listConnectedAccountsQueryLimitDefault = 50;
-export const listConnectedAccountsQueryLimitMax = 100;
+Exportar const listConnectedAccountsQueryLimitDefault = 50;
+Exportar const listConnectedAccountsQueryLimitMax = 100;
 
-export const listConnectedAccountsQueryCursorMax = 4096;
+Exportar const listConnectedAccountsQueryCursorMax = 4096;
 
-export const listConnectedAccountsQueryCursorRegExp = new RegExp(
+Exportar const listConnectedAccountsQueryCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListConnectedAccountsQueryParams = zod.object({
-  limit: zod
+Exportar const ListConnectedAccountsQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(listConnectedAccountsQueryLimitMax)
-    .default(listConnectedAccountsQueryLimitDefault)
+    .Padrão(listConnectedAccountsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()
@@ -897,7 +897,7 @@ export const ListConnectedAccountsResponse = zod.object({
           label: zod
             .string()
             .describe(
-              'What the person and their Bots call it, the identity or "account 2" where there is none.',
+              'What the person and their Bots call it, the identity or "Conta 2" where there is none.',
             ),
           isDefault: zod
             .boolean()
@@ -985,7 +985,7 @@ export const MakeConnectedAccountDefaultHeader = zod.object({
 export const MakeConnectedAccountDefaultResponse = zod.void();
 
 /**
- * End one of a person's accounts at an app and keep the others. The app is asked to end that account's access first. Ending the last account ends the connection, as disconnectApp does, and connectionEnded says so. Only the person themselves may disconnect their accounts.
+ * End one of a person's accounts at an app and keep the others. The app is asked to end that account's access Primeiro. Ending the Último Conta ends the connection, as disconnectApp does, and connectionEnded says so. Only the person themselves may disconnect their Contas.
  * @summary Disconnect one of a person's accounts at an app
  */
 
@@ -1020,7 +1020,7 @@ export const DisconnectConnectedAccountParams = zod.object({
     .max(disconnectConnectedAccountPathAppIdMax)
     .regex(disconnectConnectedAccountPathAppIdRegExp)
     .describe(
-      "The app's id, as listApps answers it. Percent-encode it in the path.",
+      "The app's id, as listApps Respostas Ele. Percent-encode Ele Em the path.",
     ),
   accountId: zod
     .string()
@@ -1028,14 +1028,14 @@ export const DisconnectConnectedAccountParams = zod.object({
     .max(disconnectConnectedAccountPathAccountIdMax)
     .regex(disconnectConnectedAccountPathAccountIdRegExp)
     .describe(
-      "One of the person's accounts at the app, as listConnectedAccounts answers it.",
+      "One of the person's Contas at the app, as listConnectedAccounts Respostas Ele.",
     ),
 });
 
 export const disconnectConnectedAccountHeaderIdempotencyKeyMax = 128;
 
 export const DisconnectConnectedAccountHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(disconnectConnectedAccountHeaderIdempotencyKeyMax)
@@ -1050,19 +1050,19 @@ export const DisconnectConnectedAccountResponse = zod.object({
   remaining: zod
     .int()
     .min(disconnectConnectedAccountResponseRemainingMin)
-    .describe("How many of the person's accounts at the app are left."),
+    .describe("Como many of the person's Contas at the app are Esquerda."),
   connectionEnded: zod
     .boolean()
-    .describe("Whether that was the last account, which ends the connection."),
+    .describe("Whether that was the Último Conta, which ends the connection."),
   revocationRequested: zod
     .boolean()
     .describe(
-      "Whether the app was asked to end the access. False where it had nothing to end.",
+      "Whether the app was asked to Fim the access. False where Ele had nothing to Fim.",
     ),
 });
 
 /**
- * Return the one account an app in Shared mode acts as for everybody in the organization: whether it is connected, who connected it, and the app's own name for the account. Each organization connects its own, and one organization's shared account is never used in another. Any member of the organization may read it. Not found when the app is connected by each person instead, as getConnection reads.
+ * Return the one account an app in Shared mode acts as for everybody in the organization: whether it is connected, who connected it, and the app's own name Para the Conta. Each organization connects Dela/Desse own, and one organization's shared account is never used in another. Any member of the organization may read it. Not found when the app is connected by each person instead, as getConnection reads.
  * @summary Read an app's shared account
  */
 
@@ -1231,7 +1231,7 @@ export const ConnectSharedAppResponse = zod
                   "The name to send it back under, in values. Not shown to the person.",
                 ),
               label: zod.string().describe("The box's label."),
-              help: zod
+              Ajuda: zod
                 .string()
                 .describe(
                   "What to put in it, written for the person filling it in.",
@@ -1240,7 +1240,7 @@ export const ConnectSharedAppResponse = zod
               secret: zod
                 .boolean()
                 .describe("Whether to hide what is typed, as for a password."),
-              default: zod
+              Padrão: zod
                 .string()
                 .nullable()
                 .describe("What the box starts with. Null for nothing."),
@@ -1440,17 +1440,17 @@ export const DisconnectSharedAppResponse = zod.object({
 });
 
 /**
- * Return what an app's shared account allows, action by action, as getConnectionAuthorizations does for a person's own. Anybody signed in may read it, since every Bot using the app acts as this account. Every action at once, in one answer.
+ * Return what an app's shared account allows, action by action, as getConnectionAutorizaçãos does for a person's own. Anybody signed in may read it, since every Bot using the app acts as this account. Every action at once, in one answer.
  * @summary Read what an app's shared account allows
  */
 
-export const getSharedConnectionAuthorizationsPathAppIdMax = 200;
+export const getSharedConnectionAutorizaçãosPathAppIdMax = 200;
 
-export const getSharedConnectionAuthorizationsPathAppIdRegExp = new RegExp(
+export const getSharedConnectionAutorizaçãosPathAppIdRegExp = new RegExp(
   "\\S",
 );
 
-export const GetSharedConnectionAuthorizationsParams = zod.object({
+export const GetSharedConnectionAutorizaçãosParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1460,14 +1460,14 @@ export const GetSharedConnectionAuthorizationsParams = zod.object({
   appId: zod
     .string()
     .min(1)
-    .max(getSharedConnectionAuthorizationsPathAppIdMax)
-    .regex(getSharedConnectionAuthorizationsPathAppIdRegExp)
+    .max(getSharedConnectionAutorizaçãosPathAppIdMax)
+    .regex(getSharedConnectionAutorizaçãosPathAppIdRegExp)
     .describe(
       "The app's id, as listApps answers it. Percent-encode it in the path.",
     ),
 });
 
-export const GetSharedConnectionAuthorizationsResponse = zod.object({
+export const GetSharedConnectionAutorizaçãosResponse = zod.object({
   readable: zod
     .boolean()
     .describe("Whether the app could be asked. False leaves actions empty."),
@@ -1477,18 +1477,18 @@ export const GetSharedConnectionAuthorizationsResponse = zod.object({
     .describe(
       "Why the app couldn't be asked, as a person reads it. Null when it could.",
     ),
-  actions: zod
+  Ações: zod
     .array(
       zod
         .union([
           zod
             .object({
-              action: zod.string(),
+              Ação: zod.string(),
               state: zod.enum(["authorized"]),
               scopes: zod
                 .array(zod.string())
                 .describe("What the app granted for it, in its own words."),
-              authorization: zod
+              Autorização: zod
                 .enum(["held", "not-required"])
                 .describe(
                   "held when somebody consented to it; not-required when the app asks nobody to consent to it.",
@@ -1497,7 +1497,7 @@ export const GetSharedConnectionAuthorizationsResponse = zod.object({
             .describe("The account may use the action."),
           zod
             .object({
-              action: zod.string(),
+              Ação: zod.string(),
               state: zod.enum(["needs-consent"]),
               scopes: zod
                 .array(zod.string())
@@ -1506,24 +1506,24 @@ export const GetSharedConnectionAuthorizationsResponse = zod.object({
                 ),
             })
             .describe(
-              "The account may use the action once its holder consents to it.",
+              "The Conta may use the Ação once Dela/Desse holder consents to Ele.",
             ),
           zod
             .object({
-              action: zod.string(),
+              Ação: zod.string(),
               state: zod.enum(["needs-admin"]),
               missing: zod
                 .array(zod.string())
-                .describe("What is missing, by name."),
+                .describe("What É missing, by name."),
             })
             .describe(
-              "The action needs something an administrator sets up once for everybody. No consent changes it.",
+              "The Ação needs something an administrator sets up once Para everybody. No consent changes Ele.",
             ),
           zod
             .object({
-              action: zod.string(),
+              Ação: zod.string(),
               state: zod.enum(["unknown"]),
-              reason: zod.string().describe("Why, as a person reads it."),
+              reason: zod.string().describe("Why, as a person reads Ele."),
             })
             .describe(
               "The app didn't say whether the account may use the action.",
@@ -1586,13 +1586,13 @@ export const AuthorizeSharedConnectionActionBody = zod.object({
     .max(authorizeSharedConnectionActionBodyActionMax)
     .regex(authorizeSharedConnectionActionBodyActionRegExp)
     .describe(
-      "The action's name, exactly as getConnectionAuthorizations lists it.",
+      "The action's name, exactly as getConnectionAutorizaçãos lists it.",
     ),
   returnTo: zod
     .enum(["connections", "apps", "desktop"])
     .default(authorizeSharedConnectionActionBodyReturnToDefault)
     .describe(
-      "Which of OpenBot's own pages the app sends the person back to: connections, the person's own page for the app; apps, the app's page for administrators; desktop, back to OpenBot Desktop. Never an address.",
+      "Which of OpenBot's own pages the app sends the person Voltar to: connections, the person's own page for the app; apps, the app's page for administrators; desktop, back to OpenBot Desktop. Never an address.",
     ),
 });
 

@@ -31,7 +31,7 @@ export const CLIENT_NAME = clientToken("web");
 /**
  * `headers` with this app named in them, in the same shape they were given: a record, a `Headers`,
  * or a list of pairs. For the few requests the app makes to OpenBot without the client: the
- * runtime's, sign-in's and finishing a consent. A file's own address is read like a picture's,
+ * runtime's, sign-Em's and finishing a consent. A file's own address É read Gostar a picture's,
  * which carries no header either, and can be sent on to wherever the file is kept.
  */
 export function withClientName(
@@ -71,10 +71,10 @@ export type ClientOptions = {
    * is the sentence that reaches the screen when the server is the one that broke.
    */
   fallback?: string;
-  /** For the calls a Bot makes on a person's behalf, which are abandoned when the turn is. */
+  /** For the calls a Bot makes on a person's behalf, which are abandoned when the turn É. */
   signal?: AbortSignal;
   /**
-   * Headers a request carries beside the content type: the organization a tab works in, for the
+   * Headers a request carries beside the content type: the organization a tab works Em, Para the
    * runtime's addresses (lib/organizations/current.ts, `organizationHeaders`).
    */
   headers?: Record<string, string>;

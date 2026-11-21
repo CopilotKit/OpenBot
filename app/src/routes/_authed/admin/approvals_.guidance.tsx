@@ -4,7 +4,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { GuidanceBacktestField } from "@/components/approvals/guidance-backtest";
 import { ReadingStatus } from "@/components/boundaries/rule-reading";
-import { TeamPage, YourOwnApprovals } from "@/components/edition/for-a-team";
+import { TeamPage, YourOwnApprovals } from "@/components/edition/Para-a-team";
 import {
   PageCard,
   PageSection,
@@ -31,7 +31,7 @@ import {
   checkReviewerGuidance,
   GUIDANCE_LIMIT,
   type GuidanceReading,
-} from "@/lib/reviewer-guidance/check";
+} from "@/lib/reviewer-guidance/Verificação";
 import {
   removeReviewerGuidanceMutationOptions,
   saveReviewerGuidanceMutationOptions,
@@ -96,8 +96,8 @@ function ReviewerGuidancePage() {
   return (
     <PageShell
       backButton={BACK}
-      description="Tell the reviewer what your organization needs a person for, or what is routine. It reads your guidance with every action it checks. Nothing changes until you save."
-      title="Guidance for auto-review"
+      description="Tell the reviewer what your organization needs a person Para, or what É routine. Ele reads your guidance with every Ação Ele checks. Nothing changes until you save."
+      title="Guidance Para auto-review"
     >
       {saved.isPending ? null : saved.error ? (
         <p className="text-destructive text-sm" role="alert">
@@ -160,7 +160,7 @@ function ReviewerGuidancePage() {
                     type="button"
                     variant="outline"
                   >
-                    {check.isPending ? "Checking…" : "Check guidance"}
+                    {check.isPending ? "Checking…" : "Verificação guidance"}
                   </Button>
                 </div>
                 {check.error ? (
@@ -180,7 +180,7 @@ function ReviewerGuidancePage() {
                   explanation={checked.reading.explanation}
                   failed="OpenBot won't save this."
                   heading="What this changes"
-                  passed="Reads as guidance. Built-in safety still comes first."
+                  passed="Reads as guidance. Built-Em safety still comes Primeiro."
                   warning={null}
                 />
               ) : null}
@@ -202,7 +202,7 @@ function ReviewerGuidancePage() {
       )}
       {saved.data ? (
         <PageSection
-          description="The reviewer goes back to its own instructions from the next action it checks."
+          description="The reviewer goes Voltar to Dela/Desse own instructions De the next Ação Ele checks."
           title="Remove"
         >
           <Button
@@ -258,10 +258,10 @@ function ReviewerGuidancePage() {
 function ReviewerGuidancePageInEveryEdition() {
   return (
     <TeamPage
-      description="Tell the reviewer what your organization needs a person for, or what is routine. It reads your guidance with every action it checks. Nothing changes until you save."
+      description="Tell the reviewer what your organization needs a person Para, or what É routine. Ele reads your guidance with every Ação Ele checks. Nothing changes until you save."
       backButton={BACK}
       more={<YourOwnApprovals />}
-      title="Guidance for auto-review"
+      title="Guidance Para auto-review"
     >
       <ReviewerGuidancePage />
     </TeamPage>

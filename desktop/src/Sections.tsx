@@ -1,12 +1,12 @@
 /** One part of setup, named for what it is about rather than counted. */
-export type Section = "Account" | "Install" | "AI" | "Start";
+export type Section = "Conta" | "Instalar" | "AI" | "Start";
 
 /*
  * Setup signs in, installs, connects an AI, and starts. A section can hold several
  * screens (Account is the sign-in and then the agreement), which is why these are names and not
  * "Step 1 of 4": a step that holds two steps reads as a miscount.
  */
-const SECTIONS: Section[] = ["Account", "Install", "AI", "Start"];
+const SECTIONS: Section[] = ["Conta", "Instalar", "AI", "Start"];
 
 /**
  * OpenBot's mark and name, with "by CopilotKit" beside it where the company is named: it reads

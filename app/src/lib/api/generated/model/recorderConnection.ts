@@ -10,7 +10,7 @@ export interface RecorderConnection {
   id: string;
   /** The browser's name, as its Recorder gave it. */
   label: string;
-  /** How it was connected: from OpenBot in a browser, by OpenBot Desktop, by OpenBot for the person's own OpenBot browser, or by OpenBot for one recording in a Bot's browser. */
+  /** How it was connected: from OpenBot in a browser, by OpenBot Desktop, by OpenBot for the person's own OpenBot browser, or by OpenBot for one recording in a Bot's Navegador. */
   via: RecorderConnectionVia;
   /** The Recorder extension's id. */
   extensionId: string;

@@ -9,7 +9,7 @@ export type ApprovalRuleDraftBehaviour =
   (typeof ApprovalRuleDraftBehaviour)[keyof typeof ApprovalRuleDraftBehaviour];
 
 export const ApprovalRuleDraftBehaviour = {
-  allow: "allow",
+  allow: "Permitir",
   pre_approved: "pre_approved",
   ask: "ask",
   hand_off: "hand_off",

@@ -4,8 +4,8 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the phones a person registered for push notifications in this organization, the first registered first. Never a device's push token. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.
- * @summary List a person's devices
+ * Return one page of the phones a person registered for push notifications in this organization, the first registered first. Never a device's push token. Only the person themselves may Lista them; there É no administrator view. A missing cursor starts at the Primeiro page and nextCursor null ends the Lista.
+ * @summary Lista a person's devices
  */
 
 export const listDevicesPathPersonIdMax = 200;
@@ -42,7 +42,7 @@ export const ListDevicesQueryParams = zod.object({
     .min(1)
     .max(listDevicesQueryLimitMax)
     .default(listDevicesQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -74,10 +74,10 @@ export const ListDevicesResponse = zod.object({
             .describe("When OpenBot first registered the phone."),
         })
         .describe(
-          "A phone that gets push notifications for the person, from every one of their Bots in the organization it is registered in. Never its push token.",
+          "A phone that gets push notifications Para the person, De every one of their Bots Em the organization Ele É registered Em. Never Dela/Desse push token.",
         ),
     )
-    .describe("The first registered first, then by id."),
+    .describe("The Primeiro registered Primeiro, then by id."),
   nextCursor: zod
     .string()
     .max(listDevicesResponseNextCursorMax)
@@ -89,7 +89,7 @@ export const ListDevicesResponse = zod.object({
 });
 
 /**
- * Register one of the person's phones for push notifications under the id the app made for it, or replace what that id holds. A device is registered in one organization, the one the address names, and gets push notifications only from the person's Bots there. A person in several organizations registers the phone in each one they want notifications from, under the same id. The app sends its current push token every time it starts, so a token that changed replaces the old one and the device is never registered twice. Answers 200 whether the id was new or held a registration already. A token another account holds moves only once that account signed out on the phone. Only the person themselves may register their devices, and only where this deployment sends push notifications (listNotificationTransports).
+ * Register one of the person's phones Para push notifications under the id the app made Para Ele, or replace what that id holds. A device É registered Em one organization, the one the address names, and gets push notifications only De the person's Bots there. A person in several organizations registers the phone in each one they want notifications from, under the same id. The app sends its current push token every time it starts, so a token that changed replaces the old one and the device is never registered twice. Answers 200 whether the id was new or held a registration already. A token another account holds moves only once that account signed out on the phone. Only the person themselves may register their devices, and only where this deployment sends push notifications (listNotificationTransports).
  * @summary Register a device for push notifications
  */
 
@@ -122,7 +122,7 @@ export const RegisterDeviceParams = zod.object({
 export const registerDeviceHeaderIdempotencyKeyMax = 128;
 
 export const RegisterDeviceHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(registerDeviceHeaderIdempotencyKeyMax)
@@ -167,12 +167,12 @@ export const RegisterDeviceResponse = zod.object({
         .describe("When OpenBot first registered the phone."),
     })
     .describe(
-      "A phone that gets push notifications for the person, from every one of their Bots in the organization it is registered in. Never its push token.",
+      "A phone that gets push notifications Para the person, De every one of their Bots Em the organization Ele É registered Em. Never Dela/Desse push token.",
     ),
 });
 
 /**
- * Stop sending push notifications to one of the person's phones from this organization. Its registrations in the person's other organizations stay. The app does this in each organization when the person signs out on it, so another account can register the phone after them. Only the person themselves may remove their devices. A device already removed is not found, which a client can read as done.
+ * Stop sending push notifications to one of the person's phones De this organization. Dela/Desse registrations Em the person's other organizations stay. The app does this in each organization when the person signs out on it, so another account can register the phone after them. Only the person themselves may remove their devices. A device already removed is not found, which a client can read as done.
  * @summary Stop push notifications to a device
  */
 
@@ -205,7 +205,7 @@ export const DeleteDeviceParams = zod.object({
 export const deleteDeviceHeaderIdempotencyKeyMax = 128;
 
 export const DeleteDeviceHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(deleteDeviceHeaderIdempotencyKeyMax)

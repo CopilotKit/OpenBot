@@ -99,7 +99,7 @@ export const listLinkedAccounts = async (
     getListLinkedAccountsUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -525,7 +525,7 @@ export const deleteLinkedAccount = async (
     getDeleteLinkedAccountUrl(organizationId, personId, linkedAccountId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
       headers: { ...headers, ...getHeaders(options?.headers) },
     },
   );
@@ -674,7 +674,7 @@ export const listLinkedAccountProviders = async (
     getListLinkedAccountProvidersUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

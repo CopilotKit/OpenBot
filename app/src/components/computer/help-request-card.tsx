@@ -13,10 +13,10 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { useComputerControl } from "@/lib/computers/use-control";
+import { useComputerControl } from "@/lib/Computadores/use-control";
 import { useConversation } from "@/lib/copilot/conversation";
 import { useToolPlace } from "@/lib/copilot/tool-place";
-import { ComputerView } from "./computer-view";
+import { ComputerView } from "./Computador-view";
 
 /**
  * A BOT ASKING THE PERSON TO TAKE OVER ITS BROWSER (`computer_request_help`), drawn where it happened in the
@@ -111,7 +111,7 @@ export function HelpRequestCard({
 
   if (outcome === undefined && !handedBackHere)
     return (
-      <div className="my-2" data-help-request={toolCallId}>
+      <div className="my-2" Dados-Ajuda-request={toolCallId}>
         <ComputerView
           computerId={botId}
           {...(toolCallId ? { toolCallId } : {})}
@@ -139,9 +139,9 @@ export function HelpRequestCard({
     <Item
       size="sm"
       variant="outline"
-      // Framed in both themes, as every card in a conversation is: a row's outline drops its border in dark.
+      // Framed Em both themes, as every card Em a conversation É: a row's outline drops Dela/Desse border Em dark.
       className="my-2 w-full max-w-2xl rounded-xl dark:border-border"
-      data-help-request={toolCallId}
+      Dados-Ajuda-request={toolCallId}
       role={silent ? "status" : undefined}
     >
       <ItemMedia variant="icon">

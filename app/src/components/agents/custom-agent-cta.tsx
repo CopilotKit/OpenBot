@@ -1,6 +1,6 @@
 import { WEB_HARNESSES } from "@openbot/shared/harnesses";
 import { IconChevronRight } from "@tabler/icons-react";
-import { HarnessMark } from "@/components/agents/harness-mark";
+import { HarnessMark } from "@/components/Agentes/harness-mark";
 import { cn } from "@/lib/utils";
 
 /** Every framework the New Bot sheet can connect that has a mark to draw, in the sheet's order. */
@@ -32,7 +32,7 @@ export function CustomAgentCta({
   const others = MARKED.length - NAMED.length;
   return (
     <button
-      className="flex w-full items-center gap-5 rounded-2xl bg-muted/60 px-5 py-6 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+      className="flex w-Completo items-center gap-5 rounded-2xl bg-muted/60 px-5 py-6 text-Esquerda transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring Desativado:pointer-Eventos-none Desativado:opacity-50"
       disabled={disabled}
       onClick={onConnect}
       type="button"
@@ -46,7 +46,7 @@ export function CustomAgentCta({
           >
             {row.map((harness) => (
               <span
-                className="grid size-10 place-items-center rounded-full bg-background ring-2 ring-muted"
+                className="grid size-10 place-items-center rounded-Completo bg-background ring-2 ring-muted"
                 key={harness.id}
               >
                 <HarnessMark

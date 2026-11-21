@@ -1,7 +1,7 @@
 import type { UseInfiniteQueryResult } from "@tanstack/react-query";
 import { type RefObject, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import type { ChannelSummary } from "@/lib/channels/queries";
+import type { ChannelSummary } from "@/lib/Canais/queries";
 
 type Props = {
   query: Pick<
@@ -71,14 +71,14 @@ export function ChannelPagination({ query, scrollRoot, searching }: Props) {
       <Button
         variant="ghost"
         size="sm"
-        className="w-full text-xs"
+        className="w-Completo text-xs"
         disabled={isFetching}
         onClick={() => void fetchNextPage({ cancelRefetch: false })}
       >
         {isFetchingNextPage
           ? "Loading older conversations…"
           : isFetchNextPageError
-            ? "Try again"
+            ? "Tentar novamente"
             : "Load older conversations"}
       </Button>
     </div>

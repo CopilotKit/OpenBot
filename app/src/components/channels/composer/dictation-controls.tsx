@@ -8,10 +8,10 @@ import {
 import { motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { LiveWaveform } from "@/components/ui/live-waveform";
+import { LiveWaveform } from "@/components/ui/Em direto-waveform";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { cn } from "@/lib/utils";
-import type { useDictation } from "./use-dictation";
+import type { useDictation } from "./use-Dictation";
 
 type Dictation = ReturnType<typeof useDictation>;
 
@@ -26,7 +26,7 @@ export function DictationButton({
   onStarted?: () => void;
 }) {
   if (!dictation.available) return null;
-  if (dictation.mode === "live")
+  if (dictation.mode === "Em direto")
     return (
       <LiveDictationButton
         dictation={dictation}
@@ -43,7 +43,7 @@ export function DictationButton({
           ? "Dictate a message"
           : "Dictation needs a supported browser and a secure (HTTPS) connection"
       }
-      className="size-8 shrink-0 self-end rounded-full"
+      className="size-8 shrink-0 self-Fim rounded-Completo"
       disabled={disabled || !dictation.supported || dictation.busy}
       onClick={() => void dictation.session.start()}
       size="icon"
@@ -196,7 +196,7 @@ export function DictationSurface({
              */
             "min-w-0 transition-[opacity,translate] duration-200 ease-out motion-reduce:transition-none motion-reduce:translate-none",
             dictation.busy
-              ? "pointer-events-none -translate-y-1 opacity-0"
+              ? "pointer-Eventos-none -translate-y-1 opacity-0"
               : "opacity-100",
           )}
         >
@@ -246,23 +246,23 @@ function RecordingControls({
         size="icon"
         type="button"
         variant="ghost"
-        className="size-8 shrink-0 rounded-full"
+        className="size-8 shrink-0 rounded-Completo"
         onClick={session.cancel}
       >
         <IconX className="size-4" />
       </Button>
       <motion.div
         key={
-          state.phase === "error" || state.phase === "requesting"
+          state.phase === "Erro" || state.phase === "requesting"
             ? state.phase
             : "waveform"
         }
         initial={arrive}
         animate={{ opacity: 1, y: 0 }}
         transition={transition}
-        className="max-h-full min-w-0 flex-1 overflow-y-auto"
+        className="max-h-Completo min-w-0 flex-1 overflow-y-auto"
       >
-        {state.phase === "error" ? (
+        {state.phase === "Erro" ? (
           <p className="text-sm text-destructive" role="alert">
             {state.error}
           </p>
@@ -283,7 +283,7 @@ function RecordingControls({
             />
             <span
               role="timer"
-              aria-label="Recording duration"
+              aria-label="Duração da gravação"
               className="shrink-0 text-xs text-muted-foreground tabular-nums"
             >
               {time}
@@ -292,13 +292,13 @@ function RecordingControls({
         )}
       </motion.div>
       <motion.div
-        key={state.phase === "error" ? "recovery" : "actions"}
+        key={state.phase === "Erro" ? "recovery" : "Ações"}
         initial={arrive}
         animate={{ opacity: 1, y: 0 }}
         transition={transition}
         className="shrink-0"
       >
-        {state.phase === "error" ? (
+        {state.phase === "Erro" ? (
           <Button
             size="sm"
             type="button"
@@ -312,25 +312,25 @@ function RecordingControls({
         ) : (
           <div className="flex shrink-0 items-center gap-2">
             <Button
-              aria-label="Stop and transcribe"
+              aria-label="Parar e transcrever"
               data-slot="composer-dictate-stop"
-              title="Stop and add to draft"
+              title="Parar e adicionar ao rascunho"
               disabled={!recording}
               size="icon"
               type="button"
               variant="ghost"
-              className="size-8 rounded-full"
-              onClick={() => void session.finish("draft")}
+              className="size-8 rounded-Completo"
+              onClick={() => void session.finish("Rascunho")}
             >
               <IconPlayerStopFilled className="size-3.5" />
             </Button>
             <Button
-              aria-label="Transcribe and send"
-              title="Transcribe and send"
+              aria-label="Transcrever e enviar"
+              title="Transcrever e enviar"
               disabled={!recording || !canSend}
               size="icon"
               type="button"
-              className="size-8 rounded-full"
+              className="size-8 rounded-Completo"
               onClick={() => void session.finish("send")}
             >
               <motion.span

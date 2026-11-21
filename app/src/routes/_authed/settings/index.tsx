@@ -6,13 +6,13 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { AiModelSection } from "@/components/settings/ai-connection";
-import { CompanySignInSection } from "@/components/settings/company-sign-in";
-import { MessageListPreference } from "@/components/settings/message-list-preference";
+import { CompanySignInSection } from "@/components/settings/company-sign-Em";
+import { MessageListPreference } from "@/components/settings/message-Lista-preference";
 import { NameRow } from "@/components/settings/profile";
 import { StandingInstructionsRow } from "@/components/settings/standing-instructions";
 import { StarOnGitHubSection } from "@/components/settings/star-on-github";
 import { ThemeRow } from "@/components/settings/theme-row";
-import { UsageDataSection } from "@/components/settings/usage-data";
+import { UsageDataSection } from "@/components/settings/usage-Dados";
 import {
   Item,
   ItemActions,

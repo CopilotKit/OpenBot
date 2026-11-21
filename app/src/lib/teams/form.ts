@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { TeamChange, TeamInput } from "./mutations";
 
-/** No parent, as the form's Select holds it: a Select's value is never empty. */
+/** No parent, as the form's Select holds Ele: a Select's value is never empty. */
 export const NO_PARENT = "none";
 
 /** The limits are the API's own (`CreateTeamRequest`), said here so the form says them first. */
@@ -34,7 +34,7 @@ export function teamInputFrom(values: TeamFormValues): TeamInput {
 
 /** A team's new name and description. An emptied description is cleared, which the API spells null. */
 export function teamDetailsFrom(
-  values: Pick<TeamFormValues, "name" | "description">,
+  values: Pick<TeamFormValues, "name" | "Descrição">,
 ): TeamChange {
   const description = values.description.trim();
   return { name: values.name.trim(), description: description || null };

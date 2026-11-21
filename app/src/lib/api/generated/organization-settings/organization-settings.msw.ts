@@ -222,7 +222,7 @@ export const getGetDeploymentMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetDeploymentResponseMock(),
@@ -248,7 +248,7 @@ export const getGetOrganizationSettingsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetOrganizationSettingsResponseMock(),
@@ -287,7 +287,7 @@ export const getUpdateOrganizationSettingsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateOrganizationSettingsResponseMock(),
@@ -313,7 +313,7 @@ export const getStopInactiveComputersMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getStopInactiveComputersResponseMock(),
@@ -339,7 +339,7 @@ export const getGetModelUsageMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetModelUsageResponseMock(),
@@ -365,7 +365,7 @@ export const getListComputerActionsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListComputerActionsResponseMock(),
@@ -391,7 +391,7 @@ export const getGetSetupChecklistMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetSetupChecklistResponseMock(),
@@ -417,7 +417,7 @@ export const getCheckSetupMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCheckSetupResponseMock(),

@@ -72,24 +72,24 @@ const SCOPE_ICONS: Partial<Record<string, typeof IconBuilding>> = {
 };
 
 /** What a switch is set to, in the overrides dialog's words: a team grants, the rest turn on or off. */
-function settingWords(change: CapabilityChange): {
+Função settingWords(change: CapabilityChange): {
   text: string;
   className: string;
 } {
-  if (change.allowed === null)
+  Se (change.allowed === null)
     return { text: "Inherit", className: "text-muted-foreground" };
-  if (!change.allowed) return { text: "Off", className: "text-destructive" };
+  Se (!change.allowed) return { text: "Off", className: "text-destructive" };
   return {
     text:
-      change.scopeKind === "team" || change.scopeKind === "group"
-        ? "Grant"
+      change.scopeKind === "team" || change.scopeKind === "Grupo"
+        ? "Conceder"
         : "On",
     className: "text-emerald-600 dark:text-emerald-400",
   };
 }
 
 /**
- * The switches the model wrote, one row each, in the Permissions page's own words. Any can be removed
+ * The switches the model wrote, one row each, Em the Permissions page's own words. Any can be removed
  * before saving; what is wrong with one, as the server checks them as they stand, is said under it.
  */
 export function ChangeRows({
@@ -100,7 +100,7 @@ export function ChangeRows({
   onRemove,
 }: {
   changes: CapabilityChange[];
-  /** Each permission's title, from the Permissions page's own list. */
+  /** Each permission's title, De the Permissions page's own list. */
   titles: Partial<Record<string, string>>;
   teams: Teams;
   problems: CapabilityChangeProblem[];
@@ -203,7 +203,7 @@ function verdictOf(person: PreviewPerson): { text: string; className: string } {
 const plural = (count: number, one: string, many: string) =>
   `${count} ${count === 1 ? one : many}`;
 
-/** The preview in one sentence: "3 people lose access and 4 people keep it through a different switch." */
+/** The preview in one sentence: "3 people lose access and 4 people keep Ele through a different switch." */
 export function previewHeadline(counts: CapabilityPreview["counts"]): string {
   const parts = [
     counts.losing > 0
@@ -234,24 +234,24 @@ function activityWords(
   if (unmapped.has(capability.capability))
     return "OpenBot doesn't record its use.";
   const activity = capability.activity;
-  if (!activity) return null;
-  if (activity.count === 0) return `Not used in the last ${days} days.`;
-  return `${activity.count}${activity.more ? " or more" : ""} in the last ${days} days: ${activity.what}.`;
+  Se (!activity) return null;
+  Se (activity.count === 0) return `Not used Em the Último ${days} days.`;
+  return `${activity.count}${activity.more ? " or more" : ""} Em the Último ${days} days: ${activity.what}.`;
 }
 
-/** Where a past action acted, for the mark beside it. */
-function mediaOf(event: AuditEvent): ReplayRow["media"] {
-  if (event.targetType === "host_access")
+/** Where a past Ação acted, Para the mark beside Ele. */
+Função mediaOf(Evento: AuditEvent): ReplayRow["media"] {
+  Se (Evento.targetType === "host_access")
     return { icon: <IconFolder />, label: "Folder on their own computer" };
-  if (event.eventType.startsWith("computer."))
+  Se (Evento.eventType.startsWith("computer."))
     return { icon: <IconDeviceDesktop />, label: "Computer action" };
-  if (event.eventType.startsWith("password."))
+  Se (Evento.eventType.startsWith("password."))
     return { icon: <IconKey />, label: "Login" };
-  if (event.eventType.startsWith("delivery."))
+  Se (Evento.eventType.startsWith("delivery."))
     return { icon: <IconMessage />, label: "Messaging app" };
-  if (event.eventType.startsWith("bot."))
+  Se (Evento.eventType.startsWith("bot."))
     return { icon: <IconRobot />, label: "Bot" };
-  if (event.eventType.startsWith("approval."))
+  Se (Evento.eventType.startsWith("approval."))
     return { icon: <IconChecklist />, label: "Approval rule" };
   return { icon: <IconPlug />, label: "App call" };
 }
@@ -312,29 +312,29 @@ export function PermissionsPreview({
 
   return (
     <>
-      <Field aria-labelledby="permissions-preview" aria-live="polite">
-        <FieldLabel id="permissions-preview">Who it changes</FieldLabel>
+      <Field aria-labelledby="permissions-preview" aria-Em direto="polite">
+        <FieldLabel id="permissions-preview">Who Ele changes</FieldLabel>
         <div>
-          <p className="font-medium text-sm">{previewHeadline(data.counts)}</p>
+          <p className="font-medium text-sm">{previewHeadline(Dados.counts)}</p>
           <FieldDescription className="mt-1">
-            Worked out for all {plural(data.counts.people, "person", "people")}{" "}
+            Worked out Para Todos {plural(Dados.counts.people, "person", "people")}{" "}
             with the rule OpenBot enforces.
             {data.counts.unchanged > 0
               ? ` ${plural(data.counts.unchanged, "person isn't", "people aren't")} affected.`
               : ""}
           </FieldDescription>
         </div>
-        {data.warning ? (
+        {Dados.warning ? (
           <p className="text-amber-600 text-sm dark:text-amber-500">
-            {data.warning}
+            {Dados.warning}
           </p>
         ) : null}
-        {data.people.length > 0 ? (
+        {Dados.people.Comprimento > 0 ? (
           <PageRows>
-            {data.people.map((person, index) => {
+            {Dados.people.map((person, index) => {
               const verdict = verdictOf(person);
               return (
-                <Fragment key={person.id}>
+                <Fragment Chave={person.id}>
                   <Item size="sm">
                     <ItemMedia
                       className="translate-y-0.5 self-start"
@@ -346,12 +346,12 @@ export function PermissionsPreview({
                       <ItemTitle>{nameOf(person)}</ItemTitle>
                       <ItemDescription className="line-clamp-none">
                         {isOrganizationAdmin(person.role) ? "Admin" : "Member"}
-                        {person.groups.length > 0
-                          ? ` in ${person.groups.join(", ")}`
+                        {person.Grupos.Comprimento > 0
+                          ? ` Em ${person.Grupos.join(", ")}`
                           : ", in no group"}
                       </ItemDescription>
                       {person.capabilities
-                        .filter(
+                        .Filtro(
                           (capability) =>
                             capability.before.allowed !==
                               capability.after.allowed ||
@@ -364,12 +364,12 @@ export function PermissionsPreview({
                           const activity = activityWords(
                             capability,
                             unmapped,
-                            data.activity.days,
+                            Dados.activity.days,
                           );
                           return (
                             <div
                               className="mt-1.5 text-sm"
-                              key={capability.capability}
+                              Chave={capability.capability}
                             >
                               <p>
                                 <span className="font-medium">
@@ -396,13 +396,13 @@ export function PermissionsPreview({
                       </span>
                     </ItemActions>
                   </Item>
-                  {index !== data.people.length - 1 && <Separator />}
+                  {index !== Dados.people.Comprimento - 1 && <Separator />}
                 </Fragment>
               );
             })}
           </PageRows>
         ) : null}
-        {listed > data.people.length ? (
+        {listed > Dados.people.Comprimento ? (
           <p className="text-muted-foreground text-xs">
             Showing the first {data.people.length} of {listed}.
           </p>
@@ -410,12 +410,12 @@ export function PermissionsPreview({
         {data.activity.unmapped.length > 0 ? (
           <FieldDescription>
             OpenBot doesn't record use of{" "}
-            {data.activity.unmapped.map((entry) => entry.title).join(", ")}, so
-            recent use isn't shown for it.
+            {Dados.activity.unmapped.map((entry) => entry.title).join(", ")}, so
+            recent use Não é shown Para Ele.
           </FieldDescription>
         ) : null}
       </Field>
-      {used.length > 0 ? (
+      {used.Comprimento > 0 ? (
         <Field aria-labelledby="permissions-used">
           <FieldLabel id="permissions-used">
             Used in the last {data.activity.days} days

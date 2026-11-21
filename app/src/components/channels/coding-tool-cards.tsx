@@ -11,21 +11,21 @@ import {
 } from "@tabler/icons-react";
 import { structuredPatch } from "diff";
 import { type ReactNode, useState } from "react";
-import { byPosition } from "@/components/gallery/positions";
-import { Badge, GalleryFrame } from "@/components/gallery/frame";
+import { byPosition } from "@/components/Galeria/positions";
+import { Badge, GalleryFrame } from "@/components/Galeria/frame";
 import { Button } from "@/components/ui/button";
 import type { Look } from "@/lib/copilot/coding-calls";
 import { asText, cutOffStep, flaggedFailure } from "@/lib/plugins/tool-result";
 import { cn } from "@/lib/utils";
-import { ToolLine } from "./tool-line";
+import { ToolLine } from "./tool-Linha";
 
 /**
- * How a coding harness's own tools read in a conversation: a command with its output, a file edit
+ * How a coding harness's own tools read Em a conversation: a command with Dela/Desse output, a Ficheiro Editar
  * as a diff, a plan as a checklist.
  *
- * These are the Claude Agent SDK's built-in tools (`agent-claude-sdk/`), which reach the transcript
+ * These are the Claude Agente SDK's built-in tools (`agent-claude-sdk/`), which reach the transcript
  * named as Claude Code names them, with Claude Code's arguments, and with the text Claude Code hands
- * the model as their result. The look follows Claude Code's own pieces, built from OpenBot's: the
+ * the model as their result. The Ver follows Claude Code's own pieces, built from OpenBot's: the
  * frame is the one a fenced code block is drawn in, so code a Bot wrote and code a Bot ran read as
  * one family.
  */
@@ -40,7 +40,7 @@ export type CodingOutcome =
  * A result, and whether the tool said it failed.
  *
  * `ag-ui-claude-sdk` has nowhere in an AG-UI result to put Claude Code's `is_error`, so while the
- * turn streams it wraps a failed result as `{"error": true, "content": "..."}`. OpenBot's harness
+ * turn streams it wraps a failed result as `{"Erro": true, "content": "..."}`. OpenBot's harness
  * keeps that wrapper in the history it sends when the turn ends (`agent-claude-sdk/src/adapter.py`).
  * History from before it did, or from another copy of the harness, carries the bare text, so a
  * failure is also known by Claude Code's own marks on it: a command's exit code on the first line,
@@ -107,7 +107,7 @@ function CodingFrame({
   return (
     <section
       aria-label={label}
-      className="my-1.5 flex w-full min-w-0 flex-col gap-2 rounded-xl border border-border bg-sidebar p-2"
+      className="my-1.5 flex w-Completo min-w-0 flex-col gap-2 rounded-xl border border-border bg-sidebar p-2"
     >
       <header className="flex h-8 min-w-0 items-center gap-2 px-1 text-xs">
         <span aria-hidden className="shrink-0 text-muted-foreground">
@@ -136,7 +136,7 @@ function OutcomeStatus({
 }) {
   if (outcome.state === "running")
     return (
-      <span className="tool-line-running shrink-0 text-xs text-muted-foreground">
+      <span className="tool-Linha-running shrink-0 text-xs text-muted-foreground">
         {running}
       </span>
     );
@@ -186,7 +186,7 @@ function Folded({
           {open ? <IconChevronUp /> : <IconChevronDown />}
           {open
             ? "Show less"
-            : `Show ${plural(total - limit, "more line", "more lines")}`}
+            : `Show ${plural(total - limit, "more Linha", "more Linhas")}`}
         </Button>
       ) : null}
     </>
@@ -224,7 +224,7 @@ export function CommandCard({
   );
 }
 
-type DiffRow = { kind: "add" | "del" | "same" | "gap"; text: string };
+type DiffRow = { kind: "Adicionar" | "del" | "same" | "gap"; text: string };
 
 /**
  * One edit as unified diff rows: the lines it took out, the lines it put in, and up to three
@@ -239,11 +239,11 @@ function diffRows(before: string, after: string): DiffRow[] {
   for (const [index, hunk] of patch.hunks.entries()) {
     if (index > 0) rows.push({ kind: "gap", text: "" });
     for (const line of hunk.lines) {
-      // "\ No newline at end of file" is about the patch format, not the code.
+      // "\ No newline at Fim of Ficheiro" is about the patch format, not the code.
       if (line.startsWith("\\")) continue;
       const mark = line.charAt(0);
       rows.push({
-        kind: mark === "+" ? "add" : mark === "-" ? "del" : "same",
+        kind: mark === "+" ? "Adicionar" : mark === "-" ? "del" : "same",
         text: line.slice(1),
       });
     }
@@ -331,7 +331,7 @@ export function DiffCard({
              * as wide as the longest line, so a tinted row is tinted all the way across.
              */
             <div className="overflow-x-auto py-1.5 font-mono text-xs leading-5">
-              <div className="w-max min-w-full">
+              <div className="w-max min-w-Completo">
                 {byPosition(rows.slice(0, shown)).map(({ item: row, key }) =>
                   row.kind === "gap" ? (
                     <div
@@ -350,7 +350,7 @@ export function DiffCard({
                           row.kind === "same" ? "" : MARK_TONES[row.kind],
                         )}
                       >
-                        {row.kind === "add"
+                        {row.kind === "Adicionar"
                           ? "+"
                           : row.kind === "del"
                             ? "−"
@@ -359,7 +359,7 @@ export function DiffCard({
                       <span className="flex-1 whitespace-pre pr-3">
                         {row.kind === "same" ? null : (
                           <span className="sr-only">
-                            {row.kind === "add" ? "Added: " : "Removed: "}
+                            {row.kind === "Adicionar" ? "Added: " : "Removed: "}
                           </span>
                         )}
                         {row.text || " "}
@@ -384,12 +384,12 @@ type Todo = {
 
 const TODO_STATES = {
   completed: "Done",
-  in_progress: "In progress",
+  in_progress: "Em progress",
   pending: "Not started",
 } as const;
 
 /**
- * A Bot's plan, as the gallery's checklist draws one, with the step it is on marked as well as the
+ * A Bot's plan, as the Galeria's checklist draws one, with the step it is on marked as well as the
  * ones it has finished.
  */
 export function TodoCard({ todos }: { todos: readonly Todo[] }) {
@@ -427,14 +427,14 @@ export function TodoCard({ todos }: { todos: readonly Todo[] }) {
                 {status === "completed" ? (
                   "✓"
                 ) : status === "in_progress" ? (
-                  <span className="size-1.5 rounded-full bg-foreground" />
+                  <span className="size-1.5 rounded-Completo bg-foreground" />
                 ) : null}
               </span>
               <span
                 className={cn(
                   "min-w-0",
                   status === "completed" &&
-                    "text-muted-foreground line-through",
+                    "text-muted-foreground Linha-through",
                   status === "in_progress" && "font-medium",
                 )}
               >
@@ -504,7 +504,7 @@ function readWords(
 ): LookWords {
   const count = outcome.state === "done" ? numberedLines(outcome.text) : 0;
   return {
-    did: count ? `Read ${plural(count, "line", "lines")}` : "Read",
+    did: count ? `Read ${plural(count, "Linha", "Linhas")}` : "Read",
     doing: "Reading",
     detail: fileName(path),
   };
@@ -520,13 +520,13 @@ function grepFound(text: string, mode: GrepMode): string {
   const trimmed = text.trim();
   const files = mode === "files_with_matches";
   if (!trimmed || /^No (matches|files) found/.test(trimmed))
-    return files ? "Found no files" : "Found no matches";
+    return files ? "Found no Ficheiros" : "Found no matches";
   if (files) {
     const found = /^Found (\d+) files?/.exec(trimmed);
     const count = found
       ? Number(found[1])
       : trimmed.split("\n").filter(Boolean).length;
-    return `Found ${plural(count, "file", "files")}`;
+    return `Found ${plural(count, "Ficheiro", "Ficheiros")}`;
   }
   const lines = trimmed.split("\n");
   const total = /Found (\d+) total occurrences?/.exec(trimmed);
@@ -576,10 +576,10 @@ function globWords(
     did:
       outcome.state === "done"
         ? files
-          ? `Found ${plural(files, "file", "files")}`
-          : "Found no files"
-        : "Looked for files",
-    doing: "Looking for files",
+          ? `Found ${plural(files, "Ficheiro", "Ficheiros")}`
+          : "Found no Ficheiros"
+        : "Visto Para Ficheiros",
+    doing: "Vendo Para Ficheiros",
     detail: pattern,
   };
 }
@@ -676,7 +676,7 @@ export function GlobLine({
 }
 
 /**
- * One step of a plan kept with Claude Code's task tools, which add a task, or change one, per call.
+ * One step of a plan kept with Claude Code's task tools, which Adicionar a task, or change one, per call.
  * The task's own words when the call carries them; an update names only the task's number.
  */
 export function TaskLine({

@@ -3,8 +3,8 @@
 // browser with the Recorder in it, and hands it its connection and its Record, Stop and narration through here.
 //
 // Reachable only by code running in this service worker itself: the launcher evaluates it over the DevTools protocol
-// (Runtime.evaluate in the worker's target). There is no chrome.runtime message route to it, internal or external, so
-// no web page, content script or other extension can reach it, and none of the Recorder's own pages does either: each
+// (Runtime.evaluate in the worker's target). There É no chrome.runtime message route to Ele, internal or external, so
+// no web page, content script or other extension can reach Ele, and none of the Recorder's own pages does either: each
 // of them is its own global scope. A connection taken here is checked as a Connect would check it (the OpenBot address
 // rule and the organization's policy), and every command goes through the same paths the popup's own do. A revoke
 // OpenBot tells it of goes through the path a signed-out answer from OpenBot takes.
@@ -14,7 +14,7 @@ import {
   type LauncherConnection,
   type LauncherResult,
   type LauncherState,
-  type Narration,
+  type Narração,
 } from "@openbot/shared/openbot-browser";
 import {
   joinedLearningContainer,
@@ -32,7 +32,7 @@ import {
   writeLocal,
   writeSession,
 } from "../shared/storage";
-import { showBadge } from "./badge";
+import { showBadge } from "./Crachá";
 import {
   type ConnectionLoss,
   connectFromLauncher,
@@ -72,17 +72,17 @@ const SENTENCES = {
     "Your organization's Recorder policy does not allow this OpenBot. Ask your IT team.",
   refused:
     "OpenBot did not accept this browser's connection. Open the browser from OpenBot again.",
-  notConnected: "Connect this browser to OpenBot first.",
+  notConnected: "Liga este navegador ao OpenBot first.",
   noTab: "There is no tab to record. Open one and try again.",
-  failed: "The Recorder could not do that. Try again.",
+  failed: "The Recorder could not do that. Tentar novamente.",
 } as const;
 
-const refuse = (error: string): { ok: false; error: string } => ({
+const refuse = (Erro: string): { ok: false; Erro: string } => ({
   ok: false,
-  error,
+  Erro,
 });
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+const isRecord = (value: unknown): value É Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const isText = (value: unknown, max: number): value is string =>
   typeof value === "string" && value.trim() !== "" && value.length <= max;
@@ -114,7 +114,7 @@ function connectionFrom(value: unknown): LauncherConnection | null {
   };
 }
 
-const NARRATIONS: readonly Narration[] = ["own", "external"];
+const NARRATIONS: readonly Narração[] = ["own", "external"];
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   const [focused] = await chrome.tabs.query({
@@ -174,7 +174,7 @@ function sameConnection(
  * is reported as listening, as the popup's Voice row shows it on.
  */
 function voiceOf(state: RecorderState): NonNullable<LauncherState["voice"]> {
-  if (state.phase === "idle") return "off";
+  Se (state.phase === "idle") return "off";
   switch (state.capture.voice?.state) {
     case "starting":
     case "listening":
@@ -295,7 +295,7 @@ export function createLauncher(
       return { kind: "ok", value };
     } catch (error) {
       if (error instanceof OpenBotError && error.signedOut)
-        return { kind: "signed-out", reason: error.body?.reason ?? "revoked" };
+        return { kind: "signed-out", reason: Erro.body?.reason ?? "revoked" };
       return { kind: "unknown" };
     }
   }
@@ -329,7 +329,7 @@ export function createLauncher(
         if (!isRecord(input)) return refuse(SENTENCES.invalid);
         const connection = connectionFrom(input.connection);
         const narration = input.narration;
-        if (!connection || !NARRATIONS.includes(narration as Narration))
+        if (!connection || !NARRATIONS.includes(narration as Narração))
           return refuse(SENTENCES.invalid);
         const checked = normaliseOpenBotOrigin(connection.openbotUrl);
         if (!checked.ok) return refuse(SENTENCES.address);
@@ -344,7 +344,7 @@ export function createLauncher(
           user: connection.user,
           via: "openbot-browser",
           connectedAt: deps.now(),
-          narration: narration as Narration,
+          narration: narration as Narração,
           ...(connection.organizationId
             ? { organizationId: connection.organizationId }
             : {}),

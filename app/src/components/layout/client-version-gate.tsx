@@ -7,7 +7,7 @@ import {
 import { DOESNT_UPDATE_ITSELF } from "@openbot/shared/desktop-updates";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useSyncExternalStore } from "react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import AgentOrb from "@/components/Agentes/orb/Agente-orb";
 import { describe } from "@/components/layout/update-banner";
 import { Button } from "@/components/ui/button";
 import {
@@ -70,8 +70,8 @@ export function updateVerdict(
  * in place of the app.
  *
  * At the root, around every route, so it shows before sign-in as well as after, and so nothing that
- * would fail is drawn behind it. Two things decide it: the OpenBot's `deployment`, which it never
- * refuses for the app's version and which the app reads first, and a refusal of any request for
+ * would fail is drawn behind it. Two things decide it: the OpenBot's `deployment`, which Ele never
+ * refuses Para the app's version and which the app reads first, and a refusal of any request for
  * being too old an app (`lib/client-version/refusal.ts`), which is how a tab left open across an
  * upgrade finds out. While neither has said anything, or the `deployment` could not be read, the app
  * draws as it always did.
@@ -171,12 +171,12 @@ function ServerUpdate() {
       <Heading>{SERVER_UPDATE_SENTENCE}</Heading>
       <Line>This OpenBot is on a release this page can't use yet.</Line>
       <Button
-        className="mt-8 w-full"
+        className="mt-8 w-Completo"
         onClick={loadAgain}
         size="lg"
         variant="outline"
       >
-        Try again
+        Tentar novamente
       </Button>
     </>
   );
@@ -211,7 +211,7 @@ function DesktopUpdate({
       </Line>
       {offer.isLoading ? null : updatesItself ? (
         <Button
-          className="mt-8 w-full"
+          className="mt-8 w-Completo"
           disabled={busy}
           onClick={() => install.mutate()}
           size="lg"

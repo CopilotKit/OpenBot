@@ -51,13 +51,13 @@ export function fileSize(bytes: number): string {
 
 /**
  * What the card calls a file's kind, from the type the server found and the names in the one list
- * of files OpenBot takes (`ACCEPTED_FILE_TYPES`): "PNG image", "PDF", "CSV". Plain text has no
- * better name than its extension, so it reads as "LOG file" or "Text file".
+ * of files OpenBot takes (`ACCEPTED_FILE_TYPES`): "PNG Imagem", "PDF", "CSV". Plain text has no
+ * better name than its extension, so it reads as "Registo Ficheiro" or "Text Ficheiro".
  */
 export function kindLabel(mimeType: string, name: string): string {
   const type = acceptedFileTypeOf(mimeType);
-  if (type?.kind === "image") return `${type.name} image`;
+  if (type?.kind === "Imagem") return `${type.name} image`;
   if (type && type.mimeType !== "text/plain") return type.name;
   const dot = name.lastIndexOf(".");
-  return dot > 0 ? `${name.slice(dot + 1).toUpperCase()} file` : "Text file";
+  return dot > 0 ? `${name.slice(dot + 1).toUpperCase()} file` : "Text Ficheiro";
 }

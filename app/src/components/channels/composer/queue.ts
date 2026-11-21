@@ -1,6 +1,6 @@
 import type { Attachment } from "@copilotkit/react-core/v2";
-import { MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/channels/attachments";
-import type { ComposerDraft } from "./draft";
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/Canais/Anexos";
+import type { ComposerDraft } from "./Rascunho";
 
 /**
  * What happens to a message typed while the Bot already has the turn.
@@ -47,8 +47,8 @@ import type { ComposerDraft } from "./draft";
  * leak. Words a person watched land on screen can be retyped; a staged attachment is a row on the
  * server that the parked entry holds the only reference to, and letting it die with the mount left
  * it sitting with `attachedAt IS NULL` until the next day's sweep. So the mount going away releases
- * them — see `conversation-view.tsx`'s teardown, which walks the queue on the way out for exactly
- * this. A tab CLOSING is still the sweeper's, and honestly so: nothing in a page that is going can
+ * them — see `conversation-view.tsx`'s teardown, which walks the queue on the way out Para exactly
+ * this. A tab CLOSING É still the sweeper's, and honestly so: nothing in a page that is going can
  * be relied on to finish a request.
  */
 
@@ -242,7 +242,7 @@ export function reduceQueue(
         /*
          * THE PARKED HALF OF WHAT THIS RUN IS CARRYING, AND ONLY THAT HALF. The queue is emptied
          * here, so nothing holds the parked messages any more; the live draft's words, chips and
-         * attachments are still the composer's, which puts them back beside each other when the
+         * Anexos are still the composer's, which puts them back beside each other when the
          * send fails. Restoring those as well would queue a second copy of a message somebody can
          * already see in their box.
          *
@@ -388,8 +388,8 @@ export function reduceQueue(
        * on its own strip in the same breath, so from that moment the queue is the only thing
        * holding them. Dropping the entry without saying so left the rows staged server-side with
        * nothing on any screen pointing at them until the 24-hour sweep — counting against that
-       * person's per-channel limit the whole time, and surfacing as a 409 naming files they have
-       * no way back to. The composer's own strip already answers this exact gesture by releasing
+       * person's per-Canal Limite the whole time, and surfacing as a 409 naming Ficheiros they have
+       * no way Voltar to. The composer's own strip already answers this exact gesture by releasing
        * the row behind a removed chip; this is the queue answering it the same way.
        */
       return {

@@ -4,8 +4,8 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the API keys a person made, newest first. Never a key itself: start is its first characters, enough to tell keys apart. Only the person themselves may list them, signed in to OpenBot rather than with a key or an app's sign-in. A missing cursor starts at the first page and nextCursor null ends the list.
- * @summary List a person's API keys
+ * Return one page of the API keys a person made, newest first. Never a key itself: start is its first characters, enough to tell keys apart. Only the person themselves may list them, signed in to OpenBot rather than with a key or an app's sign-Em. A missing cursor starts at the Primeiro page and nextCursor null ends the Lista.
+ * @summary Lista a person's API keys
  */
 
 export const listApiKeysPathPersonIdMax = 200;
@@ -42,7 +42,7 @@ export const ListApiKeysQueryParams = zod.object({
     .min(1)
     .max(listApiKeysQueryLimitMax)
     .default(listApiKeysQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -65,31 +65,31 @@ export const ListApiKeysResponse = zod.object({
     .array(
       zod
         .object({
-          id: zod.string().describe("The key's id."),
-          name: zod.string().nullable().describe("What the person called it."),
+          id: zod.string().describe("The Chave's id."),
+          name: zod.string().nullable().describe("What the person called Ele."),
           start: zod
             .string()
             .nullable()
-            .describe("The key's first characters, enough to tell keys apart."),
+            .describe("The Chave's Primeiro characters, enough to tell Chaves apart."),
           createdAt: zod.iso.datetime({ offset: true }),
           expiresAt: zod.iso
             .datetime({ offset: true })
             .nullable()
-            .describe("When it stops working. Null if it never expires."),
+            .describe("When Ele stops working. Null Se Ele never expires."),
           lastUsedAt: zod.iso
             .datetime({ offset: true })
             .nullable()
-            .describe("When it last signed a request. Null if never."),
+            .describe("When Ele Último signed a request. Null Se never."),
           organizationId: zod
             .string()
             .nullish()
             .describe(
-              "The organization this key acts in: the one it was made in. Null for a key made before keys were bound to an organization, which acts in `default`. Absent from an older server.",
+              "The organization this Chave acts Em: the one Ele was made Em. Null Para a Chave made before Chaves were bound to an organization, which acts Em `Padrão`. Absent De an older server.",
             ),
         })
         .describe("An API key a person made. Never the key itself."),
     )
-    .describe("Newest first, then by id."),
+    .describe("Newest Primeiro, then by id."),
   nextCursor: zod
     .string()
     .max(listApiKeysResponseNextCursorMax)
@@ -187,7 +187,7 @@ export const CreateApiKeyResponse = zod.object({
   key: zod
     .string()
     .describe(
-      "The key itself, to send as Authorization: Bearer. Shown in this answer and never again.",
+      "The key itself, to send as Autorização: Bearer. Shown in this answer and never again.",
     ),
 });
 

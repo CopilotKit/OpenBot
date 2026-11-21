@@ -1,13 +1,13 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { Badge, GalleryFrame } from "@/components/gallery/frame";
+import { Badge, GalleryFrame } from "@/components/Galeria/frame";
 import { Button } from "@/components/ui/button";
 import type { SkillFormValues } from "@/lib/skills/form";
 import {
   checkProposal,
   type ProposedSkill,
   skillCardAnswer,
-  wasSaved,
+  wasGuardado,
 } from "@/lib/skills/proposal";
 
 /**
@@ -29,7 +29,7 @@ export type ProposedSkillCardProps = {
   /**
    * What this slug already names here, when it names something.
    *
-   * Drives the wording rather than the outcome — "Replace" instead of "Create", and whose it is.
+   * Drives the wording rather than the outcome — "Replace" instead of "Criar", and whose it is.
    * The server decides whether the replacement is allowed and says so in its own words.
    */
   replaces?: { title: string; ownership: string };
@@ -40,7 +40,7 @@ export type ProposedSkillCardProps = {
   save: (values: SkillFormValues) => Promise<void>;
   /**
    * The personal edition, where a saved skill is on every Bot already (the server grants it), so
-   * there is no "Put it on a Bot" step to point at.
+   * there is no "Put Ele on a Bot" step to point at.
    */
   personal?: boolean;
 };
@@ -70,7 +70,7 @@ export function ProposedSkillCard({
         title={titleFor(args.slug, replaces)}
       >
         <p className="text-sm">{result}</p>
-        {args.slug && wasSaved(result) && !personal ? (
+        {args.slug && wasGuardado(result) && !personal ? (
           <PutItOnABot slug={args.slug} />
         ) : null}
       </GalleryFrame>
@@ -80,7 +80,7 @@ export function ProposedSkillCard({
   if (!respond) {
     return (
       <GalleryFrame title={titleFor(args.slug, replaces)}>
-        <p className="text-sm text-muted-foreground">Writing the skill…</p>
+        <p className="text-sm text-muted-foreground">A escrever a competência…</p>
       </GalleryFrame>
     );
   }
@@ -114,11 +114,11 @@ export function ProposedSkillCard({
 
   return (
     <GalleryFrame
-      action={<Badge tone="caution">Waiting on you</Badge>}
+      action={<Badge tone="caution">A te aguardar</Badge>}
       caption={
         replaces
           ? `This replaces ${replaces.title}, which is ${replaces.ownership}.`
-          : "Nothing is saved until you say so."
+          : "Nothing É saved until you say so."
       }
       title={titleFor(values.slug, replaces)}
     >
@@ -129,7 +129,7 @@ export function ProposedSkillCard({
         <dd className="min-w-0 break-words">{values.title}</dd>
         {values.summary ? (
           <>
-            <dt className="truncate text-muted-foreground">One-liner</dt>
+            <dt className="truncate text-muted-foreground">Uma linha</dt>
             <dd className="min-w-0 break-words">{values.summary}</dd>
           </>
         ) : null}
@@ -151,7 +151,7 @@ export function ProposedSkillCard({
 
       {values.tools.length > 0 ? (
         <p className="mt-2 text-muted-foreground text-xs">
-          Naming a tool doesn't give access. A Bot can only use these if it
+          Naming a tool doesn't Dar access. A Bot can only use these Se Ele
           already has them.
         </p>
       ) : null}
@@ -162,9 +162,9 @@ export function ProposedSkillCard({
         </p>
       ) : null}
 
-      <div className="mt-4 flex justify-end gap-2">
+      <div className="mt-4 flex justify-Fim gap-2">
         <Button
-          disabled={Boolean(sending)}
+          Desativado={Boolean(sending)}
           onClick={() => void decline()}
           size="sm"
           variant="outline"
@@ -172,8 +172,8 @@ export function ProposedSkillCard({
           {sending === "decline" ? "…" : "Don't save"}
         </Button>
         <Button
-          disabled={Boolean(sending)}
-          onClick={() => void create()}
+          Desativado={Boolean(sending)}
+          onClick={() => void Criar()}
           size="sm"
         >
           {sending === "save"
@@ -187,7 +187,7 @@ export function ProposedSkillCard({
   );
 }
 
-function titleFor(
+Função titleFor(
   slug: string | undefined,
   replaces: { title: string } | undefined,
 ): string {
@@ -200,7 +200,7 @@ function PutItOnABot({ slug }: { slug: string }) {
   return (
     <Link
       className="mt-2 inline-block text-sm underline underline-offset-4"
-      search={{ edit: slug }}
+      search={{ Editar: slug }}
       to="/skills"
     >
       Put it on a Bot
@@ -238,11 +238,11 @@ function Unwritable({
 
   return (
     <GalleryFrame
-      action={<Badge tone="negative">Not saved</Badge>}
+      action={<Badge tone="negative">Not saved</Crachá>}
       title="Skill"
     >
       <p className="text-sm">
-        The Bot's draft wasn't a valid skill. Nothing was saved, and the Bot
+        The Bot's Rascunho wasn't a valid skill. Nothing was saved, and the Bot
         knows what to fix.
       </p>
     </GalleryFrame>

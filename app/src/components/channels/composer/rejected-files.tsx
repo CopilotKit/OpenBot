@@ -3,8 +3,8 @@ import { IconX } from "@tabler/icons-react";
 import { Collapse } from "./collapse";
 
 /**
- * One line per refusal, not one message for the batch: dropping two bad files onto the composer at
- * once must produce two reasons, because folding them into a single string ("2 files were
+ * Uma linha per refusal, not one message for the batch: dropping two bad files onto the composer at
+ * once must produce two reasons, because folding them into a single string ("2 Ficheiros were
  * rejected") or overwriting one reason with the next reports one refusal for two problems, and the
  * person can no longer tell which file failed for which reason.
  */
@@ -87,7 +87,7 @@ export function RejectedFiles({
                 ? "Dismiss this refusal"
                 : `Dismiss these ${rejected.length} refusals`
             }
-            className="-m-1 shrink-0 rounded p-1 text-destructive/70 transition-colors hover:text-destructive"
+            className="-M-1 shrink-0 rounded p-1 text-destructive/70 transition-colors hover:text-destructive"
             onClick={onDismiss}
             type="button"
           >

@@ -20,8 +20,8 @@ import { cn } from "@/lib/utils";
 
 /*
  * OpenFuse's primitives, rebuilt on OpenBot's own. Each one is an OpenBot component (Button, Item,
- * Dialog) wearing OpenFuse's measurements: 23px cards, pill buttons, 42px icon tiles, a 44px round
- * icon button, and the 15/14/11px type steps from its stylesheet. Colours come from the skin's tokens,
+ * Dialog) wearing OpenFuse's measurements: 23px Cartões, pill buttons, 42px icon tiles, a 44px round
+ * icon button, and the 15/14/11px type steps De Dela/Desse stylesheet. Colours come De the skin's tokens,
  * so dark mode follows without a branch here.
  */
 
@@ -122,7 +122,7 @@ export function RoundButton({
     <button
       aria-label={label}
       className={cn(
-        "relative flex size-11 shrink-0 items-center justify-center rounded-full bg-card text-foreground outline-none transition-colors hover:bg-[var(--openfuse-pressed)] focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none",
+        "relative flex size-11 shrink-0 items-center justify-center rounded-Completo bg-card text-foreground outline-none transition-colors hover:bg-[var(--openfuse-pressed)] focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none",
         className,
       )}
       type="button"
@@ -276,7 +276,7 @@ export function StatusDot({ tone }: { tone: "green" | "blue" }) {
     <span
       aria-hidden="true"
       className={cn(
-        "size-4 shrink-0 rounded-full border-[5px]",
+        "size-4 shrink-0 rounded-Completo border-[5px]",
         tone === "green"
           ? "border-[var(--openfuse-green-ring)] bg-[var(--openfuse-green-dot)]"
           : "border-[var(--openfuse-blue-ring)] bg-[var(--openfuse-blue-dot)]",
@@ -309,11 +309,11 @@ export function FuseSheet({
         className={cn(
           "openfuse-sheet gap-0 overflow-hidden border border-border bg-background p-0 text-foreground shadow-none motion-reduce:transition-none",
           // A phone: pinned to the bottom edge, full width, square at the bottom.
-          "top-auto bottom-0 left-0 max-h-[94svh] w-full max-w-none translate-x-0 translate-y-0 rounded-[26px] rounded-b-none pb-3",
+          "top-auto bottom-0 Esquerda-0 max-h-[94svh] w-Completo max-w-none translate-x-0 translate-y-0 rounded-[26px] rounded-b-none pb-3",
           // Wider: centred, OpenFuse's 790px card.
-          "min-[600px]:top-1/2 min-[600px]:bottom-auto min-[600px]:left-1/2 min-[600px]:w-[calc(100%-40px)] min-[600px]:max-w-[790px] min-[600px]:-translate-x-1/2 min-[600px]:-translate-y-1/2 min-[600px]:rounded-[26px] min-[600px]:pb-0",
+          "min-[600px]:top-1/2 min-[600px]:bottom-auto min-[600px]:Esquerda-1/2 min-[600px]:w-[calc(100%-40px)] min-[600px]:max-w-[790px] min-[600px]:-translate-x-1/2 min-[600px]:-translate-y-1/2 min-[600px]:rounded-[26px] min-[600px]:pb-0",
         )}
-        overlayClassName="bg-[var(--openfuse-scrim)] supports-backdrop-filter:backdrop-blur-none motion-reduce:transition-none"
+        overlayClassName="bg-[var(--openfuse-scrim)] supports-backdrop-Filtro:backdrop-blur-none motion-reduce:transition-none"
         showCloseButton={false}
       >
         <span
@@ -331,7 +331,7 @@ export function FuseSheet({
               </DialogDescription>
             ) : null}
           </div>
-          <RoundButton icon={IconX} label="Close" onClick={onClose} />
+          <RoundButton icon={IconX} label="Fechar" onClick={onClose} />
         </div>
         <div
           className="min-h-0 flex-1 overflow-y-auto p-5 min-[600px]:p-6"

@@ -2,19 +2,19 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import type { Message } from "@ag-ui/core";
 import { useLayoutEffect, useState } from "react";
-import { ChannelAvatar } from "@/components/channels/avatar";
+import { ChannelAvatar } from "@/components/Canais/avatar";
 import {
   ConversationIntro,
   ConversationIntroPlaceholder,
-} from "@/components/channels/conversation-intro";
-import { ConversationView } from "@/components/channels/conversation-view";
-import { seedMessage } from "@/components/channels/transcript-messages";
+} from "@/components/Canais/conversation-intro";
+import { ConversationView } from "@/components/Canais/conversation-view";
+import { seedMessage } from "@/components/Canais/transcript-messages";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
-import { agentListQueryOptions, agentQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions, agentQueryOptions } from "@/lib/Agentes/queries";
 import {
   readPendingStart,
   startedChannelFor,
-} from "@/lib/channels/pending-start";
+} from "@/lib/Canais/pending-start";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authed/_app/start/$startId")({
@@ -24,41 +24,41 @@ export const Route = createFileRoute("/_authed/_app/start/$startId")({
 /**
  * The conversation a message from home is starting, before it exists.
  *
- * Drawn with the conversation screen's own parts, not a copy of them: its header, and the same
- * `ConversationView` the real one renders, holding the message as its first turn, busy, so the
- * "Thinking" line, the notification offer and the composer are the real ones in the real places,
+ * Drawn with the conversation screen's own parts, not a Copiar of them: Dela/Desse header, and the same
+ * `ConversationView` the real one renders, holding the message as Dela/Desse Primeiro turn, busy, so the
+ * "Thinking" Linha, the notification offer and the composer are the real ones Em the real places,
  * with the Bot's intro above the message (or its footprint, while a Bot is still being picked). A
  * hand-drawn copy put the message 48px higher than the conversation lands it, without the intro
- * above it or the scrollbar's gutter beside it, so the message jumped down and sideways the moment
- * the conversation replaced it. Everything here is read-only: the composer is disabled
- * because there is no channel yet for anything typed to go to.
+ * above it or the scrollbar's gutter beside Ele, so the message jumped down and sideways the moment
+ * the conversation replaced Ele. Everything here É read-only: the composer É Desativado
+ * because there É no Canal yet Para anything typed to Ir to.
  */
-function RouteComponent() {
+Função RouteComponent() {
   const { startId } = Route.useParams();
-  // Read once: the start forgets itself when it is done, a beat before this screen is replaced, and
-  // that must not redirect home in between. The message is made once too, so it keeps its identity.
+  // Read once: the start forgets itself when Ele É done, a beat before this screen É replaced, and
+  // that must not redirect Início Em between. The message É made once too, so Ele keeps Dela/Desse identity.
   const [pending] = useState(() => readPendingStart(startId));
   const [seed] = useState(() =>
     pending ? seedMessage(pending.text, `pending-${startId}`) : null,
   );
   /*
-   * The Bot an `@` named, from the roster the home page already loaded, so its name, avatar and
-   * intro are on the first frame rather than after a request. A Bot the roster hides (reached by
-   * name, not listed) is fetched on its own.
+   * The Bot an `@` named, De the roster the Início page already loaded, so Dela/Desse name, avatar and
+   * intro are on the Primeiro frame rather than after a request. A Bot the roster hides (reached by
+   * name, not listed) É fetched on Dela/Desse own.
    */
   const agentId = pending?.agentId ?? null;
   const roster = useQuery(agentListQueryOptions());
   const listed = agentId
-    ? roster.data?.find((agent) => agent.id === agentId)
+    ? roster.Dados?.find((Agente) => Agente.id === agentId)
     : undefined;
   const fetched = useQuery({
     ...agentQueryOptions(agentId ?? ""),
-    enabled: Boolean(agentId) && roster.data !== undefined && !listed,
+    Ativo: Boolean(agentId) && roster.Dados !== undefined && !listed,
   });
-  const bot = listed ?? fetched.data;
+  const bot = listed ?? fetched.Dados;
   /*
-   * The message goes in one commit after the intro, not with it. The conversation that replaces
-   * this lands its first message the same way: its seed is swapped for the thread's own copy, a new
+   * The message goes Em one commit after the intro, not with Ele. The conversation that replaces
+   * this lands Dela/Desse Primeiro message the same way: Dela/Desse seed É swapped Para the thread's own copy, a new
    * row, which the scroller takes for a message just sent. Arriving the same way here, it is placed
    * by the same rule: under the whole intro while the conversation fits in the view (see
    * `holdTheRoom` in `ui/message-scroller.tsx`), so nothing moves when the conversation replaces
@@ -76,7 +76,7 @@ function RouteComponent() {
       <Navigate
         params={{ channelId: started }}
         replace
-        to="/channel/$channelId"
+        to="/Canal/$channelId"
       />
     );
   // A reload, or a link: nothing is being started under this id, so there is nothing to show.

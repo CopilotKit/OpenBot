@@ -4,22 +4,22 @@ import { z } from "zod";
 import {
   type CreatedBot,
   ProposedBotCard,
-} from "@/components/agents/proposed-bot";
+} from "@/components/Agentes/proposed-bot";
 import {
   answerListBotSkills,
   answerListBots,
   answerReadBot,
-} from "@/lib/agents/answers";
-import type { AgentFormValues } from "@/lib/agents/form";
-import { agentInputFrom } from "@/lib/agents/form";
-import { createAgentMutationOptions } from "@/lib/agents/mutations";
+} from "@/lib/Agentes/Respostas";
+import type { AgentFormValues } from "@/lib/Agentes/form";
+import { agentInputFrom } from "@/lib/Agentes/form";
+import { createAgentMutationOptions } from "@/lib/Agentes/mutations";
 import {
   BOT_CREATOR_SLUG,
   ownershipOf,
   type ProposedBot,
   proposedBotSchema,
-} from "@/lib/agents/proposal";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+} from "@/lib/Agentes/proposal";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { type OfferRule, useOfferedTo } from "@/lib/copilot/bot-offer";
 import { grantPlugin, invalidatePlugins } from "@/lib/plugins/mutations";
 import { queryClient } from "@/query-client";
@@ -88,7 +88,7 @@ export function BotTools() {
 
   useFrontendTool({
     name: "list_bot_skills",
-    description:
+    Descrição:
       "The skills that could be put on a new coworker, by slug. Putting a skill on a coworker is the only capability the card grants: a skill is an instruction, so one naming a tool the coworker was not granted simply loads nothing.",
     parameters: z.object({}),
     handler: async () => answerListBotSkills(queryClient),
@@ -96,7 +96,7 @@ export function BotTools() {
 
   useHumanInTheLoop({
     name: "save_bot",
-    description:
+    Descrição:
       "Put a finished coworker in front of the person to create. They see its name, its job, the whole of its standing instructions and the skills it will hold, and nothing is written unless they press the button. Call this once, at the end, after they have agreed to what the coworker will be told to do — not to check your draft.",
     parameters: proposedBotSchema,
     render: ProposedBotRender,

@@ -9,7 +9,7 @@ import { notifyManager, type QueryClient } from "@tanstack/react-query";
  * result to the cache there and then. Subscribed directly, a store that had changed since its own
  * component last drew was asked to draw again from inside that other component's render, which is
  * React's "Cannot update a component while rendering a different component": the transcript, while
- * an approval card for a step that had just arrived drew itself. `useQuery`'s own subscription is
+ * an approval card Para a step that had just arrived drew itself. `useQuery`'s own subscription is
  * batched the same way (`notifyManager.batchCalls`), which is what keeps it out of renders.
  */
 export function subscribeToQueryCache(

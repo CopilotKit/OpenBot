@@ -8,11 +8,11 @@ import * as zod from "zod";
  * @summary List a person's saved logins
  */
 
-export const listSavedLoginsPathPersonIdMax = 200;
+export const listGuardadoLoginsPathPersonIdMax = 200;
 
-export const listSavedLoginsPathPersonIdRegExp = new RegExp("\\S");
+export const listGuardadoLoginsPathPersonIdRegExp = new RegExp("\\S");
 
-export const ListSavedLoginsParams = zod.object({
+export const ListGuardadoLoginsParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -22,45 +22,45 @@ export const ListSavedLoginsParams = zod.object({
   personId: zod
     .string()
     .min(1)
-    .max(listSavedLoginsPathPersonIdMax)
-    .regex(listSavedLoginsPathPersonIdRegExp)
+    .max(listGuardadoLoginsPathPersonIdMax)
+    .regex(listGuardadoLoginsPathPersonIdRegExp)
     .describe(
       "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
     ),
 });
 
-export const listSavedLoginsQueryLimitDefault = 50;
-export const listSavedLoginsQueryLimitMax = 100;
+export const listGuardadoLoginsQueryLimitDefault = 50;
+export const listGuardadoLoginsQueryLimitMax = 100;
 
-export const listSavedLoginsQueryCursorMax = 4096;
+export const listGuardadoLoginsQueryCursorMax = 4096;
 
-export const listSavedLoginsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+export const listGuardadoLoginsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
-export const ListSavedLoginsQueryParams = zod.object({
+export const ListGuardadoLoginsQueryParams = zod.object({
   limit: zod
     .int()
     .min(1)
-    .max(listSavedLoginsQueryLimitMax)
-    .default(listSavedLoginsQueryLimitDefault)
+    .max(listGuardadoLoginsQueryLimitMax)
+    .default(listGuardadoLoginsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()
     .min(1)
-    .max(listSavedLoginsQueryCursorMax)
-    .regex(listSavedLoginsQueryCursorRegExp)
+    .max(listGuardadoLoginsQueryCursorMax)
+    .regex(listGuardadoLoginsQueryCursorRegExp)
     .optional()
     .describe(
       "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
     ),
 });
 
-export const listSavedLoginsResponseNextCursorMax = 4096;
+Exportar const listGuardadoLoginsResponseNextCursorMax = 4096;
 
-export const listSavedLoginsResponseNextCursorRegExp = new RegExp(
+Exportar const listGuardadoLoginsResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListSavedLoginsResponse = zod.object({
+Exportar const ListGuardadoLoginsResponse = zod.object({
   savedLogins: zod
     .array(
       zod
@@ -82,8 +82,8 @@ export const ListSavedLoginsResponse = zod.object({
     .describe("Whether the person may save a login and use a saved one."),
   nextCursor: zod
     .string()
-    .max(listSavedLoginsResponseNextCursorMax)
-    .regex(listSavedLoginsResponseNextCursorRegExp)
+    .max(listGuardadoLoginsResponseNextCursorMax)
+    .regex(listGuardadoLoginsResponseNextCursorRegExp)
     .nullable()
     .describe(
       "Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.",
@@ -91,18 +91,18 @@ export const ListSavedLoginsResponse = zod.object({
 });
 
 /**
- * Forget a saved login, password included. Only the person who saved it may delete it. One already deleted is not found, which a client can read as done.
- * @summary Delete a saved login
+ * Forget a saved Iniciar sessão, password included. Only the person who saved Ele may Eliminar Ele. One already Eliminado Não é found, which a client can read as done.
+ * @summary Eliminar a saved Iniciar sessão
  */
 
-export const deleteSavedLoginPathPersonIdMax = 200;
+Exportar const deleteGuardadoLoginPathPersonIdMax = 200;
 
-export const deleteSavedLoginPathPersonIdRegExp = new RegExp("\\S");
-export const deleteSavedLoginPathSavedLoginIdMax = 200;
+Exportar const deleteGuardadoLoginPathPersonIdRegExp = new RegExp("\\S");
+Exportar const deleteGuardadoLoginPathGuardadoLoginIdMax = 200;
 
-export const deleteSavedLoginPathSavedLoginIdRegExp = new RegExp("\\S");
+Exportar const deleteGuardadoLoginPathGuardadoLoginIdRegExp = new RegExp("\\S");
 
-export const DeleteSavedLoginParams = zod.object({
+Exportar const DeleteGuardadoLoginParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -112,29 +112,29 @@ export const DeleteSavedLoginParams = zod.object({
   personId: zod
     .string()
     .min(1)
-    .max(deleteSavedLoginPathPersonIdMax)
-    .regex(deleteSavedLoginPathPersonIdRegExp)
+    .max(deleteGuardadoLoginPathPersonIdMax)
+    .regex(deleteGuardadoLoginPathPersonIdRegExp)
     .describe(
       "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
     ),
   savedLoginId: zod
     .string()
     .min(1)
-    .max(deleteSavedLoginPathSavedLoginIdMax)
-    .regex(deleteSavedLoginPathSavedLoginIdRegExp)
+    .max(deleteGuardadoLoginPathGuardadoLoginIdMax)
+    .regex(deleteGuardadoLoginPathGuardadoLoginIdRegExp)
     .describe("The saved login's id. Never its password."),
 });
 
-export const deleteSavedLoginHeaderIdempotencyKeyMax = 128;
+Exportar const deleteGuardadoLoginHeaderIdempotencyKeyMax = 128;
 
-export const DeleteSavedLoginHeader = zod.object({
+Exportar const DeleteGuardadoLoginHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
-    .max(deleteSavedLoginHeaderIdempotencyKeyMax)
+    .max(deleteGuardadoLoginHeaderIdempotencyKeyMax)
     .describe(
       "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
     ),
 });
 
-export const DeleteSavedLoginResponse = zod.void();
+export const DeleteGuardadoLoginResponse = zod.void();

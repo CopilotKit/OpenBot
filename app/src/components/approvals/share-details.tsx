@@ -1,8 +1,8 @@
 import { attachmentUrl as storedAttachmentUrl } from "@openbot/shared/attachments";
 import { PRIVATE_SHARE_TOOL_REF } from "@openbot/shared/tool-name";
 import { useCallback, useState } from "react";
-import { SentFileCard } from "@/components/channels/sent-file-card";
-import type { SentFile } from "@/lib/computers/sent-file";
+import { SentFileCard } from "@/components/Canais/sent-Ficheiro-card";
+import type { SentFile } from "@/lib/Computadores/sent-Ficheiro";
 import {
   BotMarkdown,
   markdownComponents,
@@ -114,7 +114,7 @@ export function ShareText({
     <div className="space-y-2">
       <div className="rounded bg-muted p-3 text-xs">
         <blockquote
-          aria-label="What it would send"
+          aria-label="What Ele would send"
           className={cn(
             "relative break-words text-foreground text-sm",
             open ? "" : "max-h-40 overflow-hidden",
@@ -131,7 +131,7 @@ export function ShareText({
           {long && !open ? (
             <span
               aria-hidden
-              className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-muted to-transparent"
+              className="pointer-Eventos-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t De-muted to-transparent"
             />
           ) : null}
         </blockquote>
@@ -142,7 +142,7 @@ export function ShareText({
             onClick={() => setOpen(!open)}
             type="button"
           >
-            {open ? "Show less" : "Show all"}
+            {open ? "Show less" : "Show Todos"}
           </button>
         ) : null}
       </div>
@@ -155,7 +155,7 @@ export function ShareText({
 function SharedFiles({ files }: { files: readonly SentFile[] }) {
   if (files.length === 0) return null;
   return (
-    <ul aria-label="Files it would send" className="space-y-2">
+    <ul aria-label="Ficheiros Ele would send" className="space-y-2">
       {files.map((file) => (
         <li key={file.attachmentId}>
           <SentFileCard compact file={file} />

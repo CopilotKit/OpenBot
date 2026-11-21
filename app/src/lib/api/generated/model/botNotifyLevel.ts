@@ -9,7 +9,7 @@ export type BotNotifyLevel =
   (typeof BotNotifyLevel)[keyof typeof BotNotifyLevel];
 
 export const BotNotifyLevel = {
-  all: "all",
+  all: "Todos",
   needs_input: "needs_input",
   none: "none",
 } as const;

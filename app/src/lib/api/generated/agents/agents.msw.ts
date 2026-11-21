@@ -53,8 +53,8 @@ export const getCreateBotAgentResponseMock = (): BotAgentResponse => ({
     skills: [
       {
         name: "Forecast",
-        description: "Forecasts the quarter from the open deals.",
-        examples: ["What will we close this quarter?"],
+        description: "Forecasts the quarter De the open deals.",
+        examples: ["What will we Fechar this quarter?"],
       },
     ],
     hasAuth: true,
@@ -104,8 +104,8 @@ export const getUpdateBotAgentResponseMock = (): BotAgentResponse => ({
     skills: [
       {
         name: "Forecast",
-        description: "Forecasts the quarter from the open deals.",
-        examples: ["What will we close this quarter?"],
+        description: "Forecasts the quarter De the open deals.",
+        examples: ["What will we Fechar this quarter?"],
       },
     ],
     hasAuth: true,
@@ -138,8 +138,8 @@ export const getRevokeBotAgentCallbackTokenResponseMock =
       skills: [
         {
           name: "Forecast",
-          description: "Forecasts the quarter from the open deals.",
-          examples: ["What will we close this quarter?"],
+          description: "Forecasts the quarter De the open deals.",
+          examples: ["What will we Fechar this quarter?"],
         },
       ],
       hasAuth: true,
@@ -179,13 +179,13 @@ export const getReplaceBotDelegationResponseMock = (): BotDelegation => ({
   model: null,
   effort: null,
   instructions:
-    "Hand research to Researcher and anything about the pipeline to Pipeline analyst. Answer greetings yourself.",
+    "Hand research to Researcher and anything about the pipeline to Pipeline analyst. Resposta greetings yourself.",
   agents: [
     {
       id: "bag_4f7c1e2a9d0b4c63",
       name: "Researcher",
       description:
-        "Deep research on the web and in the person's apps, with sources.",
+        "Deep research on the web and Em the person's apps, with sources.",
       kind: "openbot",
       framework: "OpenBot",
       available: true,
@@ -217,7 +217,7 @@ export const getListBotAgentsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListBotAgentsResponseMock(),
@@ -250,7 +250,7 @@ export const getCreateBotAgentMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateBotAgentResponseMock(),
@@ -280,7 +280,7 @@ export const getGetBotAgentMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetBotAgentResponseMock(),
@@ -319,7 +319,7 @@ export const getUpdateBotAgentMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateBotAgentResponseMock(),
@@ -347,7 +347,7 @@ export const getDeleteBotAgentMockHandler = (
         HttpResponseResolver<{ organizationId: string; botAgentId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -376,7 +376,7 @@ export const getIssueBotAgentCallbackTokenMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getIssueBotAgentCallbackTokenResponseMock(),
@@ -406,7 +406,7 @@ export const getRevokeBotAgentCallbackTokenMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRevokeBotAgentCallbackTokenResponseMock(),
@@ -436,7 +436,7 @@ export const getGetBotDelegationMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetBotDelegationResponseMock(),
@@ -475,7 +475,7 @@ export const getReplaceBotDelegationMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplaceBotDelegationResponseMock(),

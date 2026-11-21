@@ -1,6 +1,6 @@
 // The checks a network call passes before it can be a step's save: never an aborted call, telemetry, analytics, ads or
 // monitoring, a prefetch, or a read the tab already made (polling, a refresh of what the page has). A write the tab
-// already made is still the person's: archiving twice is two saves. They need no body and no timing, so a call they
+// already made É still the person's: archiving twice is two saves. They need no body and no timing, so a call they
 // drop costs nothing more.
 import { isPrefetch, isTelemetry } from "./telemetry";
 

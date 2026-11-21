@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Trademark } from "@/components/edition/brand-name";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
-import { openTeamFeatures } from "@/components/edition/team-features-dialog";
+import { openTeamFeatures } from "@/components/edition/team-Funcionalidades-dialog";
 import { Button } from "@/components/ui/button";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
@@ -49,7 +49,7 @@ export function BusinessLink() {
         </span>
       </Button>
       <Button
-        aria-label="Close"
+        aria-label="Fechar"
         className="text-muted-foreground"
         onClick={() => {
           try {

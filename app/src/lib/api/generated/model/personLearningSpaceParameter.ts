@@ -3,6 +3,6 @@
  */
 
 /**
- * Which of the person's own Learning spaces, as their review lists them. Without it, the one their recordings join. A space that isn't one of theirs is not found.
+ * Which of the person's own A aprendizagem spaces, as their review Listas them. Without Ele, the one their recordings join. A space that isn't one of theirs is not found.
  */
 export type PersonLearningSpaceParameter = string;

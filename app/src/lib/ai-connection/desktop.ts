@@ -43,7 +43,7 @@ export function beginPlanSignIn(plan: Plan): Promise<{ url: string }> {
   return desktop(
     "begin_plan_sign_in",
     { plan },
-    "Couldn't start signing in. Try again.",
+    "Couldn't start signing Em. Tentar novamente.",
   );
 }
 
@@ -52,12 +52,12 @@ export function finishPlanSignIn(plan: Plan, code?: string): Promise<void> {
   return desktop(
     "finish_plan_sign_in",
     code === undefined ? { plan } : { plan, code },
-    "Couldn't finish signing in. Try again.",
+    "Couldn't Terminar signing Em. Tentar novamente.",
   );
 }
 
 export function cancelPlanSignIn(plan: Plan): Promise<void> {
-  return desktop("cancel_plan_sign_in", { plan }, "Couldn't stop signing in.");
+  return desktop("cancel_plan_sign_in", { plan }, "Couldn't stop signing Em.");
 }
 
 export type ProviderSignIn = {
@@ -73,7 +73,7 @@ export function beginProviderSignIn(
   return desktop(
     "begin_provider_sign_in",
     { provider },
-    "Couldn't start signing in. Try again.",
+    "Couldn't start signing Em. Tentar novamente.",
   );
 }
 
@@ -87,7 +87,7 @@ export function finishProviderSignIn(
   return desktop(
     "finish_provider_sign_in",
     { attemptId },
-    "Couldn't finish signing in. Try again.",
+    "Couldn't Terminar signing Em. Tentar novamente.",
   );
 }
 
@@ -95,7 +95,7 @@ export function cancelProviderSignIn(attemptId: string): Promise<void> {
   return desktop(
     "cancel_provider_sign_in",
     { attemptId },
-    "Couldn't stop signing in.",
+    "Couldn't stop signing Em.",
   );
 }
 
@@ -107,7 +107,7 @@ export function prepareAiConnection(
   return desktop(
     "prepare_ai_connection",
     { provider, login },
-    "OpenBot couldn't start what this plan needs. Try again.",
+    "OpenBot couldn't start what this plan needs. Tentar novamente.",
   );
 }
 

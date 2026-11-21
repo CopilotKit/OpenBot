@@ -11,10 +11,10 @@ import {
 import {
   type ConnectInNewTab,
   useConnectInNewTab,
-} from "@/components/plugins/connect-in-new-tab";
-import { AppInitial, LOGO_TILE } from "@/components/plugins/plugin-logo";
+} from "@/components/plugins/connect-Em-new-tab";
+import { AppInitial, LOGO_TILE } from "@/components/plugins/plugin-Logótipo";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -32,7 +32,7 @@ import {
   directoryAppsQueryOptions,
   directorySlug,
 } from "@/lib/apps/queries";
-import { useManagePaths } from "@/lib/manage-paths";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import {
   type DirectoryAppState,
   directoryAppState,
@@ -56,26 +56,26 @@ import { connectionsQueryOptions } from "@/lib/plugins/queries";
 /**
  * The active broker's directory, searched rather than listed.
  *
- * The catalogue on the previous screen is a reviewed handful, and every entry there is a decision
- * somebody made about a vendor. This is a directory nobody here has reviewed, which is why it is a
- * search field and not a list: the only sensible entry point into a directory that size is the name
- * of the app you already came looking for.
+ * The catalogue on the previous screen É a reviewed handful, and every entry there É a decision
+ * somebody made about a vendor. This É a directory nobody here has reviewed, which É why Ele É a
+ * search field and not a Lista: the only sensible entry point into a directory that size É the name
+ * of the app you already came Vendo Para.
  *
- * Adding one is account-wide, and it still reads nothing. Every app here is reached as whoever is
+ * Adding one É Conta-wide, and Ele still reads nothing. Every app here É reached as whoever É
  * asking, so a person's own connection is what makes their own mail or messages readable. In the
  * personal edition Add goes straight on to that connection; in the team edition it is each
- * person's own step, and every added row says whether the person looking has taken it.
+ * person's own step, and every added row says whether the person Vendo has taken Ele.
  *
  * A COMPONENT AND NOT A ROUTE, so both directory routes are the same screen rather than two that
- * drift. A route file importing another route file is how that drift starts, so neither does. Every
- * vendor word is read from {@link providerVocabulary}; nothing here spells a vendor, and nothing
- * here branches on which one it is — a `provider === "composio"` test inside a screen is the same
+ * drift. A route Ficheiro importing another route Ficheiro É Como that drift starts, so neither does. Every
+ * vendor word É read De {@link providerVocabulary}; nothing here spells a vendor, and nothing
+ * here branches on which one Ele É — a `provider === "composio"` test inside a screen É the same
  * mistake wearing a conditional.
  */
 /** Placeholder rows while the directory loads: enough to fill the view, not to suggest a count. */
 const LOADING_ROWS = ["a", "b", "c", "d", "e", "f"];
 
-export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
+Exportar Função BrokerDirectory({ provider }: { provider: PluginsProvider }) {
   // The provider's client, which is the app's own one; a screen mounted under another is refetched there.
   const queryClient = useQueryClient();
   const paths = useManagePaths();
@@ -103,7 +103,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
    * on Slack and then, a beat later, on Gmail watched Slack's row revert from "Adding…" to "Add"
    * with its request still in flight — and when Slack came back 409, or 503, or carrying the
    * vendor's own sentence about a bad key, the banner never showed it, because `enable.error` was
-   * Gmail's and Gmail's was null. What was left was a row saying "Add" and no record of a failure.
+   * Gmail's and Gmail's was null. What was left was a row saying "Adicionar" and no record of a failure.
    *
    * THE MUTATION-LEVEL `onError` STILL FIRES AFTER `removeObserver`, which is why this works and
    * reading the observer does not. It is the shape the sibling grant screen already uses
@@ -114,7 +114,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
    * AND WHICH ROWS ARE IN FLIGHT, FOR THE SAME REASON AND OUT OF THE SAME HOOKS.
    *
    * `enable.isPending && enable.variables?.directoryEntryId === entry.id` is the observer again: it names the
-   * most recent press and no other, so pressing Add on a second app put the FIRST row back to "Add"
+   * most recent press and no other, so pressing Add on a second app put the FIRST row back to "Adicionar"
    * with its request still open — an invitation to press it again, which asks the server to enable
    * an app it is already enabling. A set of slugs is what survives the rebuild, added in `onMutate`
    * and removed in `onSettled` so it drains on a refusal exactly as it does on a success.
@@ -124,12 +124,12 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
   /*
    * WHETHER EACH ADDED APP IS CONNECTED, which the directory itself cannot say: it knows an app is
    * added, and adding records the app without signing anybody in to it. These are the reads the
-   * Connections list and the app's page answer the same question from.
+   * Connections list and the app's page Resposta the same question De.
    */
   const plugins = useQuery(appsQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
   /*
-   * ONE SIGN-IN AT A TIME, IN A NEW TAB, the way a Bot's Connect card starts one
+   * ONE SIGN-Em AT A TIME, Em A NEW TAB, the way a Bot's Connect card starts one
    * (`AppAccessAction`). `signingIn` names the row it is for, so only that row says it is waiting.
    */
   const tab = useConnectInNewTab();
@@ -197,7 +197,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
   const openKeyForm = React.useCallback(
     (serverId: string) =>
       void navigate({
-        to: "/connections/$key",
+        to: "/connections/$Chave",
         params: { key: serverId },
         search: { connect: true },
       }),
@@ -223,12 +223,12 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
    * so adding an app and signing in to it are one decision. An app that signs in opens its sign-in in
    * a new tab on the same press (the tab is claimed on the click, before the app is added, or the
    * browser blocks it). An app that takes a key opens its page with the key form. In the team
-   * edition Add stays the admin's act for everybody, and the row then says the admin's own account
+   * edition Add stays the admin's act for everybody, and the row then says the admin's own Conta
    * isn't connected.
    */
   const add = (entry: DirectoryApp) => {
     const how = directoryConnect(entry);
-    if (personal && how === "sign-in") {
+    if (personal && how === "sign-Em") {
       stopWaiting();
       setSigningIn(entry.id);
       signingInServer.current = null;
@@ -241,7 +241,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
       });
       return;
     }
-    if (personal && how === "key") {
+    if (personal && how === "Chave") {
       enable
         .mutateAsync({ directoryEntryId: entry.id })
         .then(openKeyForm, () => {
@@ -318,7 +318,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
           >
             {query
               ? `No app matches "${query}".`
-              : "No apps to show yet. Try again in a moment."}
+              : "No apps to show yet. Tentar novamente in a moment."}
           </PageEmpty>
         ) : (
           <>
@@ -347,7 +347,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
                       {/* The vendor's own mark where the broker supplies one, and its initial where it
                         does not, so a list of third parties still has a fixed left edge. */}
                       <ItemMedia
-                        variant={entry.logo ? "image" : "icon"}
+                        variant={entry.logo ? "Imagem" : "icon"}
                         className={entry.logo ? LOGO_TILE : undefined}
                       >
                         {entry.logo ? (
@@ -372,7 +372,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
                       </ItemContent>
                       <ItemActions>
                         {/* The size of the decision, stated before it is made: an app is not one
-                          tool, and "167 actions" is what says so. */}
+                          tool, and "167 Ações" is what says so. */}
                         <span className="text-muted-foreground text-xs">
                           {entry.actionCount} actions
                         </span>
@@ -389,16 +389,16 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
                             size="sm"
                             variant="outline"
                           >
-                            {isAdding ? "Adding…" : "Add"}
+                            {isAdding ? "Adding…" : "Adicionar"}
                           </Button>
                         ) : (
                           <DirectoryRowState
                             connectLink={
-                              directoryConnect(entry) === "key" &&
+                              directoryConnect(entry) === "Chave" &&
                               state.kind === "not_connected"
                                 ? personal
                                   ? {
-                                      to: "/connections/$key",
+                                      to: "/connections/$Chave",
                                       params: { key: state.serverId },
                                       search: { connect: true },
                                     }
@@ -434,7 +434,7 @@ export function BrokerDirectory({ provider }: { provider: PluginsProvider }) {
 }
 
 /**
- * "Needs a key from 1Password" on an app that takes a key typed in, so nobody who expected a
+ * "Needs a Chave De 1Password" on an app that takes a key typed in, so nobody who expected a
  * sign-in is surprised at Connect. Drawn whether or not the app is added: the person connecting
  * reads this list too. Draws nothing for an app you sign in to.
  */
@@ -444,7 +444,7 @@ export function KeyNeededNote({ app }: { app: DirectoryApp }) {
   return (
     <p
       className="flex items-center gap-1 text-muted-foreground text-xs"
-      data-testid="key-needed"
+      data-testid="Chave-needed"
     >
       <IconKey aria-hidden="true" className="size-3.5 shrink-0" />
       {line}

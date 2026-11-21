@@ -89,7 +89,7 @@ export const getListNetworkPoliciesUrl = (
 };
 
 /**
- * Return one page of the network policies: where Bot computers may connect, for the organization and for a directory group. A group's policy applies to its members unless the organization's is locked. The organization's first, then each group's by name. Only an administrator may read them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the network policies: where Bot computers may connect, for the organization and for a directory group. A group's policy applies to its members unless the organization's is locked. The organization's Primeiro, then each Grupo's by name. Only an administrator may read them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List where Bot computers may connect
  */
 export const listNetworkPolicies = async (
@@ -101,7 +101,7 @@ export const listNetworkPolicies = async (
     getListNetworkPoliciesUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -319,7 +319,7 @@ export const getReplaceNetworkPolicyUrl = (
 };
 
 /**
- * Set the organization's network policy, or a directory group's, making it if there is none. The list is checked as the computers read it, and the policy reaches every running computer it covers. The audit trail records the policy, and the sentence it was written from when it was described in English. Only an administrator may set one.
+ * Set the organization's network policy, or a directory Grupo's, making it if there is none. The list is checked as the computers read it, and the policy reaches every running computer it covers. The audit trail records the policy, and the sentence it was written from when it was described in English. Only an administrator may set one.
  * @summary Set where Bot computers may connect
  */
 export const replaceNetworkPolicy = async (
@@ -481,7 +481,7 @@ export const getDeleteNetworkPolicyUrl = (
 };
 
 /**
- * Remove the organization's network policy, or a group's, so the level beneath decides: the group falls back to the organization's, and the organization to the default list. Recorded on the audit trail. Only an administrator may remove one. One that was never set is not found.
+ * Remove the organization's network policy, or a Grupo's, so the level beneath decides: the group falls back to the organization's, and the organization to the default list. Recorded on the audit trail. Only an administrator may remove one. One that was never set is not found.
  * @summary Remove a network policy
  */
 export const deleteNetworkPolicy = async (

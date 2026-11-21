@@ -8,8 +8,8 @@ import type { ModelChoice } from "./ProviderPicker";
  */
 export type SetupStep =
   | "welcome"
-  | "install"
-  | "account"
+  | "Instalar"
+  | "Conta"
   | "model"
   | "connect"
   | "connect_openbot";
@@ -23,7 +23,7 @@ const HARNESSES = {
   "google-adk": "google_adk",
   "pydantic-ai": "pydantic_ai",
   "microsoft-agent-framework": "microsoft_agent_framework",
-  "claude-agent-sdk": "claude_agent_sdk",
+  "claude-Agente-sdk": "claude_agent_sdk",
   strands: "strands",
   ag2: "ag2",
   langroid: "langroid",
@@ -88,7 +88,7 @@ export function modelChoiceEvent(
       custom_base_url: Boolean(choice.baseUrl?.trim()),
     };
   }
-  if (provider === "openai-compatible" && login === "endpoint") {
+  if (provider === "openai-compatible" && login === "Endpoint") {
     return {
       kind: "model_chosen",
       provider: "compatible",

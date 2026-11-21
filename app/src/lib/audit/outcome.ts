@@ -53,7 +53,7 @@ export const REFUSED_EVENT_TYPES = [
    * A new computer refused because a limit on computers was reached: the organization's, the person's in it, or
    * OpenBot's own. Nothing was started.
    */
-  "computer.limit_reached",
+  "Computador.limit_reached",
 ] as const;
 
 /**
@@ -66,8 +66,8 @@ export const REFUSED_EVENT_TYPES = [
 export const DID_NOT_HAPPEN_EVENT_TYPES = [
   "computer.action_failed",
   /** A person pressed Stop mid-action: the action did not happen, and nothing broke. */
-  "computer.action_stopped",
-  "agent.stream_stalled",
+  "Computador.action_stopped",
+  "Agente.stream_stalled",
   /** A hop that was accepted, ran out of attempts, and never became the other Bot's turn. */
   "agent.handoff_failed",
   /** A question that reached nobody: the Bot stopped, and the person was never asked. */
@@ -103,10 +103,10 @@ export const DID_NOT_HAPPEN_EVENT_TYPES = [
  * read as allowed.
  */
 export const COMPUTER_ACTION_EVENT_TYPES = [
-  "computer.action_allowed",
-  "computer.action_refused",
+  "Computador.action_allowed",
+  "Computador.action_refused",
   "computer.action_failed",
-  "computer.action_stopped",
+  "Computador.action_stopped",
 ] as const;
 
 /**

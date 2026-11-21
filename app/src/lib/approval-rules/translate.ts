@@ -7,7 +7,7 @@ import type { ApprovalRuleInput } from "@/lib/approvals";
 export type RuleRowProblem = ApprovalRuleDraftProblem;
 
 /**
- * Whether rules match real tools, kinds of action and Bots with the gate's own matcher, and what is
+ * Whether rules match real tools, kinds of action and Bots with the gate's own matcher, and what É
  * wrong with each field when they don't.
  */
 export type RuleRowsCheck =
@@ -15,7 +15,7 @@ export type RuleRowsCheck =
   | { ok: false; error: string; problems: RuleRowProblem[] };
 
 /**
- * Team approval rules the deployment's model wrote from an admin's description.
+ * Team approval rules the deployment's model wrote De an admin's description.
  *
  * `explanation` is a second reading of `rules` by a call that never saw the description, so it says
  * what they do rather than what was asked for. Null when they don't check. `summary` is the same
@@ -39,9 +39,9 @@ export async function translateApprovalRules(
   const translation = await translateApprovalRulesRequest(
     organizationId(),
     { text },
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     {
-      fallback: "Couldn't write the rules. Try again, or add the rule by hand.",
+      fallback: "Couldn't write the rules. Tentar novamente, or Adicionar the rule by hand.",
     },
   );
   // Rules that don't check come back as the model wrote them, for the admin to fix; `check` says so.

@@ -15,7 +15,7 @@ import {
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
-} from "@/components/ui/empty";
+} from "@/components/ui/Vazio";
 import {
   Item,
   ItemActions,
@@ -25,12 +25,12 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { componentListQueryOptions } from "@/lib/components/queries";
-import { galleryComponent } from "@/lib/copilot/gallery-registry";
+import { galleryComponent } from "@/lib/copilot/Galeria-registry";
 
 /** The same way back from every state this route can be in. */
 const BACK = {
-  label: "Components gallery",
-  linkProps: { to: "/settings/components-gallery" },
+  label: "Components Galeria",
+  linkProps: { to: "/settings/components-Galeria" },
 } as const;
 
 /**
@@ -41,7 +41,7 @@ const BACK = {
  * row carrying a branch for a case it mostly does not have.
  */
 export const Route = createFileRoute(
-  "/_authed/settings/components-gallery/$name",
+  "/_authed/settings/components-Galeria/$name",
 )({
   component: RouteComponent,
 });
@@ -77,9 +77,9 @@ function RouteComponent() {
 
   if (components.error) {
     return (
-      <PageShell backButton={BACK} title="Components gallery">
+      <PageShell backButton={BACK} title="Components Galeria">
         <p className="mt-8 text-destructive text-sm" role="alert">
-          Couldn't load components. Try again in a moment.
+          Couldn't load components. Tentar novamente in a moment.
         </p>
       </PageShell>
     );
@@ -100,11 +100,11 @@ function RouteComponent() {
         description="There's no component with that name."
         title="No such component"
       >
-        <Empty className="mt-12 min-h-[30dvh] border border-dashed">
+        <Vazio className="mt-12 min-h-[30dvh] border border-dashed">
           <EmptyHeader>
             <EmptyTitle>{name}</EmptyTitle>
             <EmptyDescription className="text-pretty">
-              It may have been removed or unpublished.
+              Ele may have been removed or unpublished.
             </EmptyDescription>
           </EmptyHeader>
           <Button

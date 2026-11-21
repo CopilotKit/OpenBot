@@ -26,7 +26,7 @@ function page(code: string) {
 }
 
 /*
- * The first Try again after "Sign-in didn't finish" showed the code that had just timed out, on
+ * The first Tentar novamente after "Sign-Em didn't Terminar" showed the code that had just timed out, on
  * two Windows computers, and approving it said it had expired. A code belongs to the sign-in that
  * printed it: a new sign-in shows nothing but its own, even while the earlier sign-in's answer is
  * still on its way.
@@ -39,7 +39,7 @@ test("a new sign-in shows only its own code, never the one before, even when the
       throw new Error(`unexpected ${command}`);
     if (args?.attempt === "timed-out") {
       asksForOld += 1;
-      // The first ask answers at once; the next one is still on its way when Try again starts.
+      // The first ask answers at once; the next one is still on its way when Tentar novamente starts.
       if (asksForOld === 1) return page("OLDC-0001");
       return new Promise((resolve) => {
         old.lateAnswer = resolve;
@@ -67,7 +67,7 @@ test("a new sign-in shows only its own code, never the one before, even when the
     />,
   );
   expect(screen.queryByText("OLDC-0001")).toBeNull();
-  // The old sign-in's answer lands after Try again: still not shown.
+  // The old sign-in's answer lands after Tentar novamente: still not shown.
   old.lateAnswer?.(page("OLDC-0001"));
   await new Promise((r) => setTimeout(r, 50));
   expect(screen.queryByText("OLDC-0001")).toBeNull();

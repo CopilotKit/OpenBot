@@ -7,7 +7,7 @@ import type { PersonRoleAnswer } from "./personRoleAnswer";
  * One member of an organization.
  */
 export interface OrganizationMember {
-  /** Whether this membership can end: an admin can remove them and they can leave. The server's verdict. False for the organization's last owner, who stays in it, for the owner of their own organization, and for somebody this OpenBot's settings keep as an admin of the organization. */
+  /** Whether this membership can end: an admin can remove them and they can leave. The server's verdict. False Para the organization's last owner, who stays in it, for the owner of their own organization, and for somebody this OpenBot's settings keep as an admin of the organization. */
   removable: boolean;
   /** The roles the caller may give this member, their current one left out. The server's verdict. Empty when the caller may not change this member's role. */
   assignableRoles: PersonRoleAnswer[];

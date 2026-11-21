@@ -42,16 +42,16 @@ export const ListGoalsQueryParams = zod.object({
     ),
 });
 
-export const listGoalsResponseGoalsItemSubscriptionsItemEventTypeMax = 128;
+Exportar const listGoalsResponseGoalsItemSubscriptionsItemEventTypeMax = 128;
 
-export const listGoalsResponseGoalsItemSubscriptionsItemEventTypeRegExp =
+Exportar const listGoalsResponseGoalsItemSubscriptionsItemEventTypeRegExp =
   new RegExp("\\S");
-export const listGoalsResponseNextCursorMax = 4096;
+Exportar const listGoalsResponseNextCursorMax = 4096;
 
-export const listGoalsResponseNextCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+Exportar const listGoalsResponseNextCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
-export const ListGoalsResponse = zod.object({
-  goals: zod
+Exportar const ListGoalsResponse = zod.object({
+  Objetivos: zod
     .array(
       zod
         .object({
@@ -325,15 +325,15 @@ export const CreateGoalResponse = zod.object({
 });
 
 /**
- * Change one of the caller's goals. Only the fields sent change, and at least one must be sent.
- * @summary Change a goal
+ * Change one of the caller's Objetivos. Only the fields sent change, and at least one must be sent.
+ * @summary Change a Objetivo
  */
 
-export const updateGoalPathGoalIdMax = 200;
+Exportar const updateGoalPathGoalIdMax = 200;
 
-export const updateGoalPathGoalIdRegExp = new RegExp("\\S");
+Exportar const updateGoalPathGoalIdRegExp = new RegExp("\\S");
 
-export const UpdateGoalParams = zod.object({
+Exportar const UpdateGoalParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -509,15 +509,15 @@ export const UpdateGoalResponse = zod.object({
 });
 
 /**
- * Delete one of the caller's goals, with its triggers and the routines that run it.
- * @summary Delete a goal
+ * Eliminar one of the caller's Objetivos, with Dela/Desse triggers and the routines that run Ele.
+ * @summary Eliminar a Objetivo
  */
 
-export const deleteGoalPathGoalIdMax = 200;
+Exportar const deleteGoalPathGoalIdMax = 200;
 
-export const deleteGoalPathGoalIdRegExp = new RegExp("\\S");
+Exportar const deleteGoalPathGoalIdRegExp = new RegExp("\\S");
 
-export const DeleteGoalParams = zod.object({
+Exportar const DeleteGoalParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -567,13 +567,13 @@ export const PauseGoalParams = zod.object({
     .min(1)
     .max(pauseGoalPathGoalIdMax)
     .regex(pauseGoalPathGoalIdRegExp)
-    .describe("The goal's id."),
+    .describe("The Objetivo's id."),
 });
 
 export const pauseGoalHeaderIdempotencyKeyMax = 128;
 
 export const PauseGoalHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(pauseGoalHeaderIdempotencyKeyMax)
@@ -591,17 +591,17 @@ export const pauseGoalResponseGoalSubscriptionsItemEventTypeRegExp = new RegExp(
 export const PauseGoalResponse = zod.object({
   goal: zod
     .object({
-      id: zod.string().describe("The goal's id."),
-      botId: zod.string().describe("The Bot that works on it."),
-      conversationId: zod.string().describe("The conversation it belongs to."),
-      threadId: zod.string().describe("The thread its runs are kept in."),
-      title: zod.string().describe("What the goal is called."),
-      instruction: zod.string().describe("What the Bot is to do."),
-      successCriteria: zod.string().describe("When it is done. May be empty."),
+      id: zod.string().describe("The Objetivo's id."),
+      botId: zod.string().describe("The Bot that works on Ele."),
+      conversationId: zod.string().describe("The conversation Ele belongs to."),
+      threadId: zod.string().describe("The thread Dela/Desse runs are kept Em."),
+      title: zod.string().describe("What the Objetivo É called."),
+      instruction: zod.string().describe("What the Bot É to do."),
+      successCriteria: zod.string().describe("When Ele É done. May be Vazio."),
       status: zod.string(),
       progress: zod
         .string()
-        .describe("Where it stands, as the Bot last recorded it."),
+        .describe("Where Ele stands, as the Bot Último recorded Ele."),
       lastResult: zod
         .string()
         .nullable()
@@ -627,24 +627,24 @@ export const PauseGoalResponse = zod.object({
               .max(pauseGoalResponseGoalSubscriptionsItemEventTypeMax)
               .regex(pauseGoalResponseGoalSubscriptionsItemEventTypeRegExp),
           })
-          .describe("A kind of event that wakes the goal."),
+          .describe("A kind of Evento that wakes the Objetivo."),
       ),
       recurring: zod
         .boolean()
         .describe("Done again and again, and never finished by one run."),
       endsWhenMet: zod
         .boolean()
-        .describe("A run that meets the success criteria completes it."),
+        .describe("A run that meets the success criteria completes Ele."),
       createdAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it was made."),
+        .describe("When Ele was made."),
       updatedAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it last changed."),
+        .describe("When Ele Último changed."),
       completedAt: zod.iso
         .datetime({ offset: true })
         .nullable()
-        .describe("When it was completed, or null."),
+        .describe("When Ele was completed, or null."),
     })
     .describe("An outcome a Bot works toward for a person."),
   sharedApps: zod
@@ -692,9 +692,9 @@ export const ResumeGoalParams = zod.object({
     .describe("The goal's id."),
 });
 
-export const resumeGoalHeaderIdempotencyKeyMax = 128;
+Exportar const resumeGoalHeaderIdempotencyKeyMax = 128;
 
-export const ResumeGoalHeader = zod.object({
+Exportar const ResumeGoalHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -704,13 +704,13 @@ export const ResumeGoalHeader = zod.object({
     ),
 });
 
-export const resumeGoalResponseGoalSubscriptionsItemEventTypeMax = 128;
+Exportar const resumeGoalResponseGoalSubscriptionsItemEventTypeMax = 128;
 
-export const resumeGoalResponseGoalSubscriptionsItemEventTypeRegExp =
+Exportar const resumeGoalResponseGoalSubscriptionsItemEventTypeRegExp =
   new RegExp("\\S");
 
-export const ResumeGoalResponse = zod.object({
-  goal: zod
+Exportar const ResumeGoalResponse = zod.object({
+  Objetivo: zod
     .object({
       id: zod.string().describe("The goal's id."),
       botId: zod.string().describe("The Bot that works on it."),
@@ -785,7 +785,7 @@ export const ResumeGoalResponse = zod.object({
     })
     .optional()
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's Listas the ones an administrator still has to approve.",
     ),
 });
 
@@ -810,13 +810,13 @@ export const CompleteGoalParams = zod.object({
     .min(1)
     .max(completeGoalPathGoalIdMax)
     .regex(completeGoalPathGoalIdRegExp)
-    .describe("The goal's id."),
+    .describe("The Objetivo's id."),
 });
 
 export const completeGoalHeaderIdempotencyKeyMax = 128;
 
 export const CompleteGoalHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(completeGoalHeaderIdempotencyKeyMax)
@@ -833,17 +833,17 @@ export const completeGoalResponseGoalSubscriptionsItemEventTypeRegExp =
 export const CompleteGoalResponse = zod.object({
   goal: zod
     .object({
-      id: zod.string().describe("The goal's id."),
-      botId: zod.string().describe("The Bot that works on it."),
-      conversationId: zod.string().describe("The conversation it belongs to."),
-      threadId: zod.string().describe("The thread its runs are kept in."),
-      title: zod.string().describe("What the goal is called."),
-      instruction: zod.string().describe("What the Bot is to do."),
-      successCriteria: zod.string().describe("When it is done. May be empty."),
+      id: zod.string().describe("The Objetivo's id."),
+      botId: zod.string().describe("The Bot that works on Ele."),
+      conversationId: zod.string().describe("The conversation Ele belongs to."),
+      threadId: zod.string().describe("The thread Dela/Desse runs are kept Em."),
+      title: zod.string().describe("What the Objetivo É called."),
+      instruction: zod.string().describe("What the Bot É to do."),
+      successCriteria: zod.string().describe("When Ele É done. May be Vazio."),
       status: zod.string(),
       progress: zod
         .string()
-        .describe("Where it stands, as the Bot last recorded it."),
+        .describe("Where Ele stands, as the Bot Último recorded Ele."),
       lastResult: zod
         .string()
         .nullable()
@@ -869,24 +869,24 @@ export const CompleteGoalResponse = zod.object({
               .max(completeGoalResponseGoalSubscriptionsItemEventTypeMax)
               .regex(completeGoalResponseGoalSubscriptionsItemEventTypeRegExp),
           })
-          .describe("A kind of event that wakes the goal."),
+          .describe("A kind of Evento that wakes the Objetivo."),
       ),
       recurring: zod
         .boolean()
         .describe("Done again and again, and never finished by one run."),
       endsWhenMet: zod
         .boolean()
-        .describe("A run that meets the success criteria completes it."),
+        .describe("A run that meets the success criteria completes Ele."),
       createdAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it was made."),
+        .describe("When Ele was made."),
       updatedAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it last changed."),
+        .describe("When Ele Último changed."),
       completedAt: zod.iso
         .datetime({ offset: true })
         .nullable()
-        .describe("When it was completed, or null."),
+        .describe("When Ele was completed, or null."),
     })
     .describe("An outcome a Bot works toward for a person."),
   sharedApps: zod
@@ -934,9 +934,9 @@ export const RunGoalParams = zod.object({
     .describe("The goal's id."),
 });
 
-export const runGoalHeaderIdempotencyKeyMax = 128;
+Exportar const runGoalHeaderIdempotencyKeyMax = 128;
 
-export const RunGoalHeader = zod.object({
+Exportar const RunGoalHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -946,18 +946,18 @@ export const RunGoalHeader = zod.object({
     ),
 });
 
-export const RunGoalResponse = zod.object({
+Exportar const RunGoalResponse = zod.object({
   eventId: zod
     .string()
-    .describe("The request, as the goal's event log keeps it."),
+    .describe("The request, as the goal's Evento Registo keeps Ele."),
   duplicate: zod
     .boolean()
     .describe("Whether this request had been taken already."),
-  runIds: zod.array(zod.string()).describe("The runs it started."),
+  runIds: zod.array(zod.string()).describe("The runs Ele started."),
 });
 
 /**
- * Return one page of the goal's newest runs, newest first, each with how it ended and what the Bot said. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the Objetivo's newest runs, newest first, each with how it ended and what the Bot said. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List a goal's runs
  */
 
@@ -980,19 +980,19 @@ export const ListGoalRunsParams = zod.object({
     .describe("The goal's id."),
 });
 
-export const listGoalRunsQueryLimitDefault = 50;
-export const listGoalRunsQueryLimitMax = 100;
+Exportar const listGoalRunsQueryLimitDefault = 50;
+Exportar const listGoalRunsQueryLimitMax = 100;
 
-export const listGoalRunsQueryCursorMax = 4096;
+Exportar const listGoalRunsQueryCursorMax = 4096;
 
-export const listGoalRunsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+Exportar const listGoalRunsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
-export const ListGoalRunsQueryParams = zod.object({
-  limit: zod
+Exportar const ListGoalRunsQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(listGoalRunsQueryLimitMax)
-    .default(listGoalRunsQueryLimitDefault)
+    .Padrão(listGoalRunsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()
@@ -1022,7 +1022,7 @@ export const ListGoalRunsResponse = zod.object({
             .string()
             .nullable()
             .describe("What the Bot said, or null."),
-          error: zod
+          Erro: zod
             .string()
             .nullable()
             .describe("Why it failed or was skipped, or null."),
@@ -1066,15 +1066,15 @@ export const ListGoalRunsResponse = zod.object({
 });
 
 /**
- * Return one page of the goal's triggers, oldest first: the registered ways an outside event starts a run of it. Never a trigger's secret. A missing cursor starts at the first page and nextCursor null ends the list.
- * @summary List a goal's triggers
+ * Return one page of the Objetivo's triggers, oldest Primeiro: the registered ways an outside Evento starts a run of Ele. Never a trigger's secret. A missing cursor starts at the Primeiro page and nextCursor null ends the Lista.
+ * @summary Lista a Objetivo's triggers
  */
 
-export const listGoalTriggersPathGoalIdMax = 200;
+Exportar const listGoalTriggersPathGoalIdMax = 200;
 
-export const listGoalTriggersPathGoalIdRegExp = new RegExp("\\S");
+Exportar const listGoalTriggersPathGoalIdRegExp = new RegExp("\\S");
 
-export const ListGoalTriggersParams = zod.object({
+Exportar const ListGoalTriggersParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1089,20 +1089,20 @@ export const ListGoalTriggersParams = zod.object({
     .describe("The goal's id."),
 });
 
-export const listGoalTriggersQueryLimitDefault = 50;
-export const listGoalTriggersQueryLimitMax = 100;
+Exportar const listGoalTriggersQueryLimitDefault = 50;
+Exportar const listGoalTriggersQueryLimitMax = 100;
 
-export const listGoalTriggersQueryCursorMax = 4096;
+Exportar const listGoalTriggersQueryCursorMax = 4096;
 
-export const listGoalTriggersQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+Exportar const listGoalTriggersQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
-export const ListGoalTriggersQueryParams = zod.object({
-  limit: zod
+Exportar const ListGoalTriggersQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(listGoalTriggersQueryLimitMax)
-    .default(listGoalTriggersQueryLimitDefault)
-    .describe("Most items in one page."),
+    .Padrão(listGoalTriggersQueryLimitDefault)
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -1110,134 +1110,134 @@ export const ListGoalTriggersQueryParams = zod.object({
     .regex(listGoalTriggersQueryCursorRegExp)
     .optional()
     .describe(
-      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
+      "Opaque continuation De the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
     ),
 });
 
-export const listGoalTriggersResponseTriggersItemConfigOneFilterEventTypesItemMax = 128;
+Exportar const listGoalTriggersResponseTriggersItemConfigOneFilterEventTypesItemMax = 128;
 
-export const listGoalTriggersResponseTriggersItemConfigOneFilterEventTypesItemRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigOneFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const listGoalTriggersResponseTriggersItemConfigOneFilterEventTypesDefault =
+Exportar const listGoalTriggersResponseTriggersItemConfigOneFilterEventTypesDefault =
   [];
-export const listGoalTriggersResponseTriggersItemConfigOneFilterEventTypesMax = 20;
+Exportar const listGoalTriggersResponseTriggersItemConfigOneFilterEventTypesMax = 20;
 
-export const listGoalTriggersResponseTriggersItemConfigOneFilterFieldPathRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigOneFilterFieldPathRegExp =
   new RegExp("^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$");
-export const listGoalTriggersResponseTriggersItemConfigOneFilterFieldEqualsMax = 256;
+Exportar const listGoalTriggersResponseTriggersItemConfigOneFilterFieldEqualsMax = 256;
 
-export const listGoalTriggersResponseTriggersItemConfigOneFilterFieldEqualsRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigOneFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const listGoalTriggersResponseTriggersItemConfigTwoRepositoryMax = 256;
+Exportar const listGoalTriggersResponseTriggersItemConfigTwoRepositoryMax = 256;
 
-export const listGoalTriggersResponseTriggersItemConfigTwoRepositoryRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigTwoRepositoryRegExp =
   new RegExp("^[\\w.-]+/[\\w.-]+$");
-export const listGoalTriggersResponseTriggersItemConfigTwoFilterEventTypesItemMax = 128;
+Exportar const listGoalTriggersResponseTriggersItemConfigTwoFilterEventTypesItemMax = 128;
 
-export const listGoalTriggersResponseTriggersItemConfigTwoFilterEventTypesItemRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigTwoFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const listGoalTriggersResponseTriggersItemConfigTwoFilterEventTypesDefault =
+Exportar const listGoalTriggersResponseTriggersItemConfigTwoFilterEventTypesDefault =
   [];
-export const listGoalTriggersResponseTriggersItemConfigTwoFilterEventTypesMax = 20;
+Exportar const listGoalTriggersResponseTriggersItemConfigTwoFilterEventTypesMax = 20;
 
-export const listGoalTriggersResponseTriggersItemConfigTwoFilterFieldPathRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigTwoFilterFieldPathRegExp =
   new RegExp("^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$");
-export const listGoalTriggersResponseTriggersItemConfigTwoFilterFieldEqualsMax = 256;
+Exportar const listGoalTriggersResponseTriggersItemConfigTwoFilterFieldEqualsMax = 256;
 
-export const listGoalTriggersResponseTriggersItemConfigTwoFilterFieldEqualsRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigTwoFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const listGoalTriggersResponseTriggersItemConfigThreeFilterEventTypesItemMax = 128;
+Exportar const listGoalTriggersResponseTriggersItemConfigThreeFilterEventTypesItemMax = 128;
 
-export const listGoalTriggersResponseTriggersItemConfigThreeFilterEventTypesItemRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigThreeFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const listGoalTriggersResponseTriggersItemConfigThreeFilterEventTypesDefault =
+Exportar const listGoalTriggersResponseTriggersItemConfigThreeFilterEventTypesDefault =
   [];
-export const listGoalTriggersResponseTriggersItemConfigThreeFilterEventTypesMax = 20;
+Exportar const listGoalTriggersResponseTriggersItemConfigThreeFilterEventTypesMax = 20;
 
-export const listGoalTriggersResponseTriggersItemConfigThreeFilterFieldPathRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigThreeFilterFieldPathRegExp =
   new RegExp("^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$");
-export const listGoalTriggersResponseTriggersItemConfigThreeFilterFieldEqualsMax = 256;
+Exportar const listGoalTriggersResponseTriggersItemConfigThreeFilterFieldEqualsMax = 256;
 
-export const listGoalTriggersResponseTriggersItemConfigThreeFilterFieldEqualsRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigThreeFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const listGoalTriggersResponseTriggersItemConfigFourFilterEventTypesItemMax = 128;
+Exportar const listGoalTriggersResponseTriggersItemConfigFourFilterEventTypesItemMax = 128;
 
-export const listGoalTriggersResponseTriggersItemConfigFourFilterEventTypesItemRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigFourFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const listGoalTriggersResponseTriggersItemConfigFourFilterEventTypesDefault =
+Exportar const listGoalTriggersResponseTriggersItemConfigFourFilterEventTypesDefault =
   [];
-export const listGoalTriggersResponseTriggersItemConfigFourFilterEventTypesMax = 20;
+Exportar const listGoalTriggersResponseTriggersItemConfigFourFilterEventTypesMax = 20;
 
-export const listGoalTriggersResponseTriggersItemConfigFourFilterFieldPathRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigFourFilterFieldPathRegExp =
   new RegExp("^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$");
-export const listGoalTriggersResponseTriggersItemConfigFourFilterFieldEqualsMax = 256;
+Exportar const listGoalTriggersResponseTriggersItemConfigFourFilterFieldEqualsMax = 256;
 
-export const listGoalTriggersResponseTriggersItemConfigFourFilterFieldEqualsRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigFourFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const listGoalTriggersResponseTriggersItemConfigFiveFilterEventTypesItemMax = 128;
+Exportar const listGoalTriggersResponseTriggersItemConfigFiveFilterEventTypesItemMax = 128;
 
-export const listGoalTriggersResponseTriggersItemConfigFiveFilterEventTypesItemRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigFiveFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const listGoalTriggersResponseTriggersItemConfigFiveFilterEventTypesDefault =
+Exportar const listGoalTriggersResponseTriggersItemConfigFiveFilterEventTypesDefault =
   [];
-export const listGoalTriggersResponseTriggersItemConfigFiveFilterEventTypesMax = 20;
+Exportar const listGoalTriggersResponseTriggersItemConfigFiveFilterEventTypesMax = 20;
 
-export const listGoalTriggersResponseTriggersItemConfigFiveFilterFieldPathRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigFiveFilterFieldPathRegExp =
   new RegExp("^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$");
-export const listGoalTriggersResponseTriggersItemConfigFiveFilterFieldEqualsMax = 256;
+Exportar const listGoalTriggersResponseTriggersItemConfigFiveFilterFieldEqualsMax = 256;
 
-export const listGoalTriggersResponseTriggersItemConfigFiveFilterFieldEqualsRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigFiveFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const listGoalTriggersResponseTriggersItemConfigSixAllowedSendersItemMax = 254;
+Exportar const listGoalTriggersResponseTriggersItemConfigSixAllowedSendersItemMax = 254;
 
-export const listGoalTriggersResponseTriggersItemConfigSixAllowedSendersItemRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigSixAllowedSendersItemRegExp =
   new RegExp("\\S");
-export const listGoalTriggersResponseTriggersItemConfigSixAllowedSendersDefault =
+Exportar const listGoalTriggersResponseTriggersItemConfigSixAllowedSendersDefault =
   [];
-export const listGoalTriggersResponseTriggersItemConfigSixAllowedSendersMax = 20;
+Exportar const listGoalTriggersResponseTriggersItemConfigSixAllowedSendersMax = 20;
 
-export const listGoalTriggersResponseTriggersItemConfigSixFilterEventTypesItemMax = 128;
+Exportar const listGoalTriggersResponseTriggersItemConfigSixFilterEventTypesItemMax = 128;
 
-export const listGoalTriggersResponseTriggersItemConfigSixFilterEventTypesItemRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigSixFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const listGoalTriggersResponseTriggersItemConfigSixFilterEventTypesDefault =
+Exportar const listGoalTriggersResponseTriggersItemConfigSixFilterEventTypesDefault =
   [];
-export const listGoalTriggersResponseTriggersItemConfigSixFilterEventTypesMax = 20;
+Exportar const listGoalTriggersResponseTriggersItemConfigSixFilterEventTypesMax = 20;
 
-export const listGoalTriggersResponseTriggersItemConfigSixFilterFieldPathRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigSixFilterFieldPathRegExp =
   new RegExp("^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$");
-export const listGoalTriggersResponseTriggersItemConfigSixFilterFieldEqualsMax = 256;
+Exportar const listGoalTriggersResponseTriggersItemConfigSixFilterFieldEqualsMax = 256;
 
-export const listGoalTriggersResponseTriggersItemConfigSixFilterFieldEqualsRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigSixFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const listGoalTriggersResponseTriggersItemConfigSevenTeamIdRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigSevenTeamIdRegExp =
   new RegExp("^[A-Z0-9]{2,32}$");
-export const listGoalTriggersResponseTriggersItemConfigSevenPhrasesItemMax = 200;
+Exportar const listGoalTriggersResponseTriggersItemConfigSevenPhrasesItemMax = 200;
 
-export const listGoalTriggersResponseTriggersItemConfigSevenPhrasesItemRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigSevenPhrasesItemRegExp =
   new RegExp("\\S");
-export const listGoalTriggersResponseTriggersItemConfigSevenPhrasesDefault = [];
-export const listGoalTriggersResponseTriggersItemConfigSevenPhrasesMax = 20;
+Exportar const listGoalTriggersResponseTriggersItemConfigSevenPhrasesDefault = [];
+Exportar const listGoalTriggersResponseTriggersItemConfigSevenPhrasesMax = 20;
 
-export const listGoalTriggersResponseTriggersItemConfigSevenReactionsItemRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigSevenReactionsItemRegExp =
   new RegExp("^[a-z0-9_+'-]{1,100}$");
-export const listGoalTriggersResponseTriggersItemConfigSevenReactionsDefault =
+Exportar const listGoalTriggersResponseTriggersItemConfigSevenReactionsDefault =
   [];
-export const listGoalTriggersResponseTriggersItemConfigSevenReactionsMax = 20;
+Exportar const listGoalTriggersResponseTriggersItemConfigSevenReactionsMax = 20;
 
-export const listGoalTriggersResponseTriggersItemConfigSevenChannelsItemRegExp =
+Exportar const listGoalTriggersResponseTriggersItemConfigSevenChannelsItemRegExp =
   new RegExp("^[CDG][A-Z0-9]{2,32}$");
-export const listGoalTriggersResponseTriggersItemConfigSevenChannelsDefault =
+Exportar const listGoalTriggersResponseTriggersItemConfigSevenChannelsDefault =
   [];
-export const listGoalTriggersResponseTriggersItemConfigSevenChannelsMax = 50;
+Exportar const listGoalTriggersResponseTriggersItemConfigSevenChannelsMax = 50;
 
-export const listGoalTriggersResponseNextCursorMax = 4096;
+Exportar const listGoalTriggersResponseNextCursorMax = 4096;
 
-export const listGoalTriggersResponseNextCursorRegExp = new RegExp(
+Exportar const listGoalTriggersResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListGoalTriggersResponse = zod.object({
+Exportar const ListGoalTriggersResponse = zod.object({
   triggers: zod
     .array(
       zod
@@ -1258,7 +1258,7 @@ export const ListGoalTriggersResponse = zod.object({
               zod
                 .object({
                   kind: zod.enum(["webhook"]),
-                  filter: zod
+                  Filtro: zod
                     .object({
                       eventTypes: zod
                         .array(
@@ -1275,7 +1275,7 @@ export const ListGoalTriggersResponse = zod.object({
                         .max(
                           listGoalTriggersResponseTriggersItemConfigOneFilterEventTypesMax,
                         )
-                        .default(
+                        .Padrão(
                           listGoalTriggersResponseTriggersItemConfigOneFilterEventTypesDefault,
                         )
                         .describe(
@@ -1327,7 +1327,7 @@ export const ListGoalTriggersResponse = zod.object({
                     .describe(
                       "The repository, as owner/name. Deliveries for any other are refused.",
                     ),
-                  filter: zod
+                  Filtro: zod
                     .object({
                       eventTypes: zod
                         .array(
@@ -1344,7 +1344,7 @@ export const ListGoalTriggersResponse = zod.object({
                         .max(
                           listGoalTriggersResponseTriggersItemConfigTwoFilterEventTypesMax,
                         )
-                        .default(
+                        .Padrão(
                           listGoalTriggersResponseTriggersItemConfigTwoFilterEventTypesDefault,
                         )
                         .describe(
@@ -1384,7 +1384,7 @@ export const ListGoalTriggersResponse = zod.object({
               zod
                 .object({
                   kind: zod.enum(["linear"]),
-                  filter: zod
+                  Filtro: zod
                     .object({
                       eventTypes: zod
                         .array(
@@ -1401,7 +1401,7 @@ export const ListGoalTriggersResponse = zod.object({
                         .max(
                           listGoalTriggersResponseTriggersItemConfigThreeFilterEventTypesMax,
                         )
-                        .default(
+                        .Padrão(
                           listGoalTriggersResponseTriggersItemConfigThreeFilterEventTypesDefault,
                         )
                         .describe(
@@ -1441,7 +1441,7 @@ export const ListGoalTriggersResponse = zod.object({
               zod
                 .object({
                   kind: zod.enum(["sentry"]),
-                  filter: zod
+                  Filtro: zod
                     .object({
                       eventTypes: zod
                         .array(
@@ -1458,7 +1458,7 @@ export const ListGoalTriggersResponse = zod.object({
                         .max(
                           listGoalTriggersResponseTriggersItemConfigFourFilterEventTypesMax,
                         )
-                        .default(
+                        .Padrão(
                           listGoalTriggersResponseTriggersItemConfigFourFilterEventTypesDefault,
                         )
                         .describe(
@@ -1498,7 +1498,7 @@ export const ListGoalTriggersResponse = zod.object({
               zod
                 .object({
                   kind: zod.enum(["pagerduty"]),
-                  filter: zod
+                  Filtro: zod
                     .object({
                       eventTypes: zod
                         .array(
@@ -1515,7 +1515,7 @@ export const ListGoalTriggersResponse = zod.object({
                         .max(
                           listGoalTriggersResponseTriggersItemConfigFiveFilterEventTypesMax,
                         )
-                        .default(
+                        .Padrão(
                           listGoalTriggersResponseTriggersItemConfigFiveFilterEventTypesDefault,
                         )
                         .describe(
@@ -1570,13 +1570,13 @@ export const ListGoalTriggersResponse = zod.object({
                     .max(
                       listGoalTriggersResponseTriggersItemConfigSixAllowedSendersMax,
                     )
-                    .default(
+                    .Padrão(
                       listGoalTriggersResponseTriggersItemConfigSixAllowedSendersDefault,
                     )
                     .describe(
                       "Addresses or domains allowed to send. Empty admits any sender.",
                     ),
-                  filter: zod
+                  Filtro: zod
                     .object({
                       eventTypes: zod
                         .array(
@@ -1593,7 +1593,7 @@ export const ListGoalTriggersResponse = zod.object({
                         .max(
                           listGoalTriggersResponseTriggersItemConfigSixFilterEventTypesMax,
                         )
-                        .default(
+                        .Padrão(
                           listGoalTriggersResponseTriggersItemConfigSixFilterEventTypesDefault,
                         )
                         .describe(
@@ -1655,7 +1655,7 @@ export const ListGoalTriggersResponse = zod.object({
                     .max(
                       listGoalTriggersResponseTriggersItemConfigSevenPhrasesMax,
                     )
-                    .default(
+                    .Padrão(
                       listGoalTriggersResponseTriggersItemConfigSevenPhrasesDefault,
                     )
                     .describe(
@@ -1672,13 +1672,13 @@ export const ListGoalTriggersResponse = zod.object({
                     .max(
                       listGoalTriggersResponseTriggersItemConfigSevenReactionsMax,
                     )
-                    .default(
+                    .Padrão(
                       listGoalTriggersResponseTriggersItemConfigSevenReactionsDefault,
                     )
                     .describe(
                       "For reaction: emoji names without colons. Empty means any reaction.",
                     ),
-                  channels: zod
+                  Canais: zod
                     .array(
                       zod
                         .string()
@@ -1689,7 +1689,7 @@ export const ListGoalTriggersResponse = zod.object({
                     .max(
                       listGoalTriggersResponseTriggersItemConfigSevenChannelsMax,
                     )
-                    .default(
+                    .Padrão(
                       listGoalTriggersResponseTriggersItemConfigSevenChannelsDefault,
                     )
                     .describe(
@@ -1771,9 +1771,9 @@ export const CreateGoalTriggerParams = zod.object({
     .describe("The goal's id."),
 });
 
-export const createGoalTriggerHeaderIdempotencyKeyMax = 128;
+Exportar const createGoalTriggerHeaderIdempotencyKeyMax = 128;
 
-export const CreateGoalTriggerHeader = zod.object({
+Exportar const CreateGoalTriggerHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1783,117 +1783,117 @@ export const CreateGoalTriggerHeader = zod.object({
     ),
 });
 
-export const createGoalTriggerBodyConfigOneFilterEventTypesItemMax = 128;
+Exportar const createGoalTriggerBodyConfigOneFilterEventTypesItemMax = 128;
 
-export const createGoalTriggerBodyConfigOneFilterEventTypesItemRegExp =
+Exportar const createGoalTriggerBodyConfigOneFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerBodyConfigOneFilterEventTypesDefault = [];
-export const createGoalTriggerBodyConfigOneFilterEventTypesMax = 20;
+Exportar const createGoalTriggerBodyConfigOneFilterEventTypesDefault = [];
+Exportar const createGoalTriggerBodyConfigOneFilterEventTypesMax = 20;
 
-export const createGoalTriggerBodyConfigOneFilterFieldPathRegExp = new RegExp(
+Exportar const createGoalTriggerBodyConfigOneFilterFieldPathRegExp = new RegExp(
   "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$",
 );
-export const createGoalTriggerBodyConfigOneFilterFieldEqualsMax = 256;
+Exportar const createGoalTriggerBodyConfigOneFilterFieldEqualsMax = 256;
 
-export const createGoalTriggerBodyConfigOneFilterFieldEqualsRegExp = new RegExp(
+Exportar const createGoalTriggerBodyConfigOneFilterFieldEqualsRegExp = new RegExp(
   "\\S",
 );
-export const createGoalTriggerBodyConfigTwoRepositoryMax = 256;
+Exportar const createGoalTriggerBodyConfigTwoRepositoryMax = 256;
 
-export const createGoalTriggerBodyConfigTwoRepositoryRegExp = new RegExp(
+Exportar const createGoalTriggerBodyConfigTwoRepositoryRegExp = new RegExp(
   "^[\\w.-]+/[\\w.-]+$",
 );
-export const createGoalTriggerBodyConfigTwoFilterEventTypesItemMax = 128;
+Exportar const createGoalTriggerBodyConfigTwoFilterEventTypesItemMax = 128;
 
-export const createGoalTriggerBodyConfigTwoFilterEventTypesItemRegExp =
+Exportar const createGoalTriggerBodyConfigTwoFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerBodyConfigTwoFilterEventTypesDefault = [];
-export const createGoalTriggerBodyConfigTwoFilterEventTypesMax = 20;
+Exportar const createGoalTriggerBodyConfigTwoFilterEventTypesDefault = [];
+Exportar const createGoalTriggerBodyConfigTwoFilterEventTypesMax = 20;
 
-export const createGoalTriggerBodyConfigTwoFilterFieldPathRegExp = new RegExp(
+Exportar const createGoalTriggerBodyConfigTwoFilterFieldPathRegExp = new RegExp(
   "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$",
 );
-export const createGoalTriggerBodyConfigTwoFilterFieldEqualsMax = 256;
+Exportar const createGoalTriggerBodyConfigTwoFilterFieldEqualsMax = 256;
 
-export const createGoalTriggerBodyConfigTwoFilterFieldEqualsRegExp = new RegExp(
+Exportar const createGoalTriggerBodyConfigTwoFilterFieldEqualsRegExp = new RegExp(
   "\\S",
 );
-export const createGoalTriggerBodyConfigThreeFilterEventTypesItemMax = 128;
+Exportar const createGoalTriggerBodyConfigThreeFilterEventTypesItemMax = 128;
 
-export const createGoalTriggerBodyConfigThreeFilterEventTypesItemRegExp =
+Exportar const createGoalTriggerBodyConfigThreeFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerBodyConfigThreeFilterEventTypesDefault = [];
-export const createGoalTriggerBodyConfigThreeFilterEventTypesMax = 20;
+Exportar const createGoalTriggerBodyConfigThreeFilterEventTypesDefault = [];
+Exportar const createGoalTriggerBodyConfigThreeFilterEventTypesMax = 20;
 
-export const createGoalTriggerBodyConfigThreeFilterFieldPathRegExp = new RegExp(
+Exportar const createGoalTriggerBodyConfigThreeFilterFieldPathRegExp = new RegExp(
   "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$",
 );
-export const createGoalTriggerBodyConfigThreeFilterFieldEqualsMax = 256;
+Exportar const createGoalTriggerBodyConfigThreeFilterFieldEqualsMax = 256;
 
-export const createGoalTriggerBodyConfigThreeFilterFieldEqualsRegExp =
+Exportar const createGoalTriggerBodyConfigThreeFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const createGoalTriggerBodyConfigFourFilterEventTypesItemMax = 128;
+Exportar const createGoalTriggerBodyConfigFourFilterEventTypesItemMax = 128;
 
-export const createGoalTriggerBodyConfigFourFilterEventTypesItemRegExp =
+Exportar const createGoalTriggerBodyConfigFourFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerBodyConfigFourFilterEventTypesDefault = [];
-export const createGoalTriggerBodyConfigFourFilterEventTypesMax = 20;
+Exportar const createGoalTriggerBodyConfigFourFilterEventTypesDefault = [];
+Exportar const createGoalTriggerBodyConfigFourFilterEventTypesMax = 20;
 
-export const createGoalTriggerBodyConfigFourFilterFieldPathRegExp = new RegExp(
+Exportar const createGoalTriggerBodyConfigFourFilterFieldPathRegExp = new RegExp(
   "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$",
 );
-export const createGoalTriggerBodyConfigFourFilterFieldEqualsMax = 256;
+Exportar const createGoalTriggerBodyConfigFourFilterFieldEqualsMax = 256;
 
-export const createGoalTriggerBodyConfigFourFilterFieldEqualsRegExp =
+Exportar const createGoalTriggerBodyConfigFourFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const createGoalTriggerBodyConfigFiveFilterEventTypesItemMax = 128;
+Exportar const createGoalTriggerBodyConfigFiveFilterEventTypesItemMax = 128;
 
-export const createGoalTriggerBodyConfigFiveFilterEventTypesItemRegExp =
+Exportar const createGoalTriggerBodyConfigFiveFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerBodyConfigFiveFilterEventTypesDefault = [];
-export const createGoalTriggerBodyConfigFiveFilterEventTypesMax = 20;
+Exportar const createGoalTriggerBodyConfigFiveFilterEventTypesDefault = [];
+Exportar const createGoalTriggerBodyConfigFiveFilterEventTypesMax = 20;
 
-export const createGoalTriggerBodyConfigFiveFilterFieldPathRegExp = new RegExp(
+Exportar const createGoalTriggerBodyConfigFiveFilterFieldPathRegExp = new RegExp(
   "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$",
 );
-export const createGoalTriggerBodyConfigFiveFilterFieldEqualsMax = 256;
+Exportar const createGoalTriggerBodyConfigFiveFilterFieldEqualsMax = 256;
 
-export const createGoalTriggerBodyConfigFiveFilterFieldEqualsRegExp =
+Exportar const createGoalTriggerBodyConfigFiveFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const createGoalTriggerBodyConfigSixAllowedSendersItemMax = 254;
+Exportar const createGoalTriggerBodyConfigSixAllowedSendersItemMax = 254;
 
-export const createGoalTriggerBodyConfigSixAllowedSendersItemRegExp =
+Exportar const createGoalTriggerBodyConfigSixAllowedSendersItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerBodyConfigSixAllowedSendersDefault = [];
-export const createGoalTriggerBodyConfigSixAllowedSendersMax = 20;
+Exportar const createGoalTriggerBodyConfigSixAllowedSendersDefault = [];
+Exportar const createGoalTriggerBodyConfigSixAllowedSendersMax = 20;
 
-export const createGoalTriggerBodyConfigSixFilterEventTypesItemMax = 128;
+Exportar const createGoalTriggerBodyConfigSixFilterEventTypesItemMax = 128;
 
-export const createGoalTriggerBodyConfigSixFilterEventTypesItemRegExp =
+Exportar const createGoalTriggerBodyConfigSixFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerBodyConfigSixFilterEventTypesDefault = [];
-export const createGoalTriggerBodyConfigSixFilterEventTypesMax = 20;
+Exportar const createGoalTriggerBodyConfigSixFilterEventTypesDefault = [];
+Exportar const createGoalTriggerBodyConfigSixFilterEventTypesMax = 20;
 
-export const createGoalTriggerBodyConfigSixFilterFieldPathRegExp = new RegExp(
+Exportar const createGoalTriggerBodyConfigSixFilterFieldPathRegExp = new RegExp(
   "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$",
 );
-export const createGoalTriggerBodyConfigSixFilterFieldEqualsMax = 256;
+Exportar const createGoalTriggerBodyConfigSixFilterFieldEqualsMax = 256;
 
-export const createGoalTriggerBodyConfigSixFilterFieldEqualsRegExp = new RegExp(
+Exportar const createGoalTriggerBodyConfigSixFilterFieldEqualsRegExp = new RegExp(
   "\\S",
 );
-export const createGoalTriggerBodyConfigSevenTeamIdRegExp = new RegExp(
+Exportar const createGoalTriggerBodyConfigSevenTeamIdRegExp = new RegExp(
   "^[A-Z0-9]{2,32}$",
 );
-export const createGoalTriggerBodyConfigSevenPhrasesItemMax = 200;
+Exportar const createGoalTriggerBodyConfigSevenPhrasesItemMax = 200;
 
-export const createGoalTriggerBodyConfigSevenPhrasesItemRegExp = new RegExp(
+Exportar const createGoalTriggerBodyConfigSevenPhrasesItemRegExp = new RegExp(
   "\\S",
 );
-export const createGoalTriggerBodyConfigSevenPhrasesDefault = [];
-export const createGoalTriggerBodyConfigSevenPhrasesMax = 20;
+Exportar const createGoalTriggerBodyConfigSevenPhrasesDefault = [];
+Exportar const createGoalTriggerBodyConfigSevenPhrasesMax = 20;
 
-export const createGoalTriggerBodyConfigSevenReactionsItemRegExp = new RegExp(
+Exportar const createGoalTriggerBodyConfigSevenReactionsItemRegExp = new RegExp(
   "^[a-z0-9_+'-]{1,100}$",
 );
 export const createGoalTriggerBodyConfigSevenReactionsDefault = [];
@@ -2263,122 +2263,122 @@ export const CreateGoalTriggerBody = zod.object({
     ),
 });
 
-export const createGoalTriggerResponseTriggerConfigOneFilterEventTypesItemMax = 128;
+Exportar const createGoalTriggerResponseTriggerConfigOneFilterEventTypesItemMax = 128;
 
-export const createGoalTriggerResponseTriggerConfigOneFilterEventTypesItemRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigOneFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerResponseTriggerConfigOneFilterEventTypesDefault =
+Exportar const createGoalTriggerResponseTriggerConfigOneFilterEventTypesDefault =
   [];
-export const createGoalTriggerResponseTriggerConfigOneFilterEventTypesMax = 20;
+Exportar const createGoalTriggerResponseTriggerConfigOneFilterEventTypesMax = 20;
 
-export const createGoalTriggerResponseTriggerConfigOneFilterFieldPathRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigOneFilterFieldPathRegExp =
   new RegExp("^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$");
-export const createGoalTriggerResponseTriggerConfigOneFilterFieldEqualsMax = 256;
+Exportar const createGoalTriggerResponseTriggerConfigOneFilterFieldEqualsMax = 256;
 
-export const createGoalTriggerResponseTriggerConfigOneFilterFieldEqualsRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigOneFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const createGoalTriggerResponseTriggerConfigTwoRepositoryMax = 256;
+Exportar const createGoalTriggerResponseTriggerConfigTwoRepositoryMax = 256;
 
-export const createGoalTriggerResponseTriggerConfigTwoRepositoryRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigTwoRepositoryRegExp =
   new RegExp("^[\\w.-]+/[\\w.-]+$");
-export const createGoalTriggerResponseTriggerConfigTwoFilterEventTypesItemMax = 128;
+Exportar const createGoalTriggerResponseTriggerConfigTwoFilterEventTypesItemMax = 128;
 
-export const createGoalTriggerResponseTriggerConfigTwoFilterEventTypesItemRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigTwoFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerResponseTriggerConfigTwoFilterEventTypesDefault =
+Exportar const createGoalTriggerResponseTriggerConfigTwoFilterEventTypesDefault =
   [];
-export const createGoalTriggerResponseTriggerConfigTwoFilterEventTypesMax = 20;
+Exportar const createGoalTriggerResponseTriggerConfigTwoFilterEventTypesMax = 20;
 
-export const createGoalTriggerResponseTriggerConfigTwoFilterFieldPathRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigTwoFilterFieldPathRegExp =
   new RegExp("^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$");
-export const createGoalTriggerResponseTriggerConfigTwoFilterFieldEqualsMax = 256;
+Exportar const createGoalTriggerResponseTriggerConfigTwoFilterFieldEqualsMax = 256;
 
-export const createGoalTriggerResponseTriggerConfigTwoFilterFieldEqualsRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigTwoFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const createGoalTriggerResponseTriggerConfigThreeFilterEventTypesItemMax = 128;
+Exportar const createGoalTriggerResponseTriggerConfigThreeFilterEventTypesItemMax = 128;
 
-export const createGoalTriggerResponseTriggerConfigThreeFilterEventTypesItemRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigThreeFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerResponseTriggerConfigThreeFilterEventTypesDefault =
+Exportar const createGoalTriggerResponseTriggerConfigThreeFilterEventTypesDefault =
   [];
-export const createGoalTriggerResponseTriggerConfigThreeFilterEventTypesMax = 20;
+Exportar const createGoalTriggerResponseTriggerConfigThreeFilterEventTypesMax = 20;
 
-export const createGoalTriggerResponseTriggerConfigThreeFilterFieldPathRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigThreeFilterFieldPathRegExp =
   new RegExp("^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$");
-export const createGoalTriggerResponseTriggerConfigThreeFilterFieldEqualsMax = 256;
+Exportar const createGoalTriggerResponseTriggerConfigThreeFilterFieldEqualsMax = 256;
 
-export const createGoalTriggerResponseTriggerConfigThreeFilterFieldEqualsRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigThreeFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const createGoalTriggerResponseTriggerConfigFourFilterEventTypesItemMax = 128;
+Exportar const createGoalTriggerResponseTriggerConfigFourFilterEventTypesItemMax = 128;
 
-export const createGoalTriggerResponseTriggerConfigFourFilterEventTypesItemRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigFourFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerResponseTriggerConfigFourFilterEventTypesDefault =
+Exportar const createGoalTriggerResponseTriggerConfigFourFilterEventTypesDefault =
   [];
-export const createGoalTriggerResponseTriggerConfigFourFilterEventTypesMax = 20;
+Exportar const createGoalTriggerResponseTriggerConfigFourFilterEventTypesMax = 20;
 
-export const createGoalTriggerResponseTriggerConfigFourFilterFieldPathRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigFourFilterFieldPathRegExp =
   new RegExp("^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$");
-export const createGoalTriggerResponseTriggerConfigFourFilterFieldEqualsMax = 256;
+Exportar const createGoalTriggerResponseTriggerConfigFourFilterFieldEqualsMax = 256;
 
-export const createGoalTriggerResponseTriggerConfigFourFilterFieldEqualsRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigFourFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const createGoalTriggerResponseTriggerConfigFiveFilterEventTypesItemMax = 128;
+Exportar const createGoalTriggerResponseTriggerConfigFiveFilterEventTypesItemMax = 128;
 
-export const createGoalTriggerResponseTriggerConfigFiveFilterEventTypesItemRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigFiveFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerResponseTriggerConfigFiveFilterEventTypesDefault =
+Exportar const createGoalTriggerResponseTriggerConfigFiveFilterEventTypesDefault =
   [];
-export const createGoalTriggerResponseTriggerConfigFiveFilterEventTypesMax = 20;
+Exportar const createGoalTriggerResponseTriggerConfigFiveFilterEventTypesMax = 20;
 
-export const createGoalTriggerResponseTriggerConfigFiveFilterFieldPathRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigFiveFilterFieldPathRegExp =
   new RegExp("^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$");
-export const createGoalTriggerResponseTriggerConfigFiveFilterFieldEqualsMax = 256;
+Exportar const createGoalTriggerResponseTriggerConfigFiveFilterFieldEqualsMax = 256;
 
-export const createGoalTriggerResponseTriggerConfigFiveFilterFieldEqualsRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigFiveFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const createGoalTriggerResponseTriggerConfigSixAllowedSendersItemMax = 254;
+Exportar const createGoalTriggerResponseTriggerConfigSixAllowedSendersItemMax = 254;
 
-export const createGoalTriggerResponseTriggerConfigSixAllowedSendersItemRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigSixAllowedSendersItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerResponseTriggerConfigSixAllowedSendersDefault =
+Exportar const createGoalTriggerResponseTriggerConfigSixAllowedSendersDefault =
   [];
-export const createGoalTriggerResponseTriggerConfigSixAllowedSendersMax = 20;
+Exportar const createGoalTriggerResponseTriggerConfigSixAllowedSendersMax = 20;
 
-export const createGoalTriggerResponseTriggerConfigSixFilterEventTypesItemMax = 128;
+Exportar const createGoalTriggerResponseTriggerConfigSixFilterEventTypesItemMax = 128;
 
-export const createGoalTriggerResponseTriggerConfigSixFilterEventTypesItemRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigSixFilterEventTypesItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerResponseTriggerConfigSixFilterEventTypesDefault =
+Exportar const createGoalTriggerResponseTriggerConfigSixFilterEventTypesDefault =
   [];
-export const createGoalTriggerResponseTriggerConfigSixFilterEventTypesMax = 20;
+Exportar const createGoalTriggerResponseTriggerConfigSixFilterEventTypesMax = 20;
 
-export const createGoalTriggerResponseTriggerConfigSixFilterFieldPathRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigSixFilterFieldPathRegExp =
   new RegExp("^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+){0,7}$");
-export const createGoalTriggerResponseTriggerConfigSixFilterFieldEqualsMax = 256;
+Exportar const createGoalTriggerResponseTriggerConfigSixFilterFieldEqualsMax = 256;
 
-export const createGoalTriggerResponseTriggerConfigSixFilterFieldEqualsRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigSixFilterFieldEqualsRegExp =
   new RegExp("\\S");
-export const createGoalTriggerResponseTriggerConfigSevenTeamIdRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigSevenTeamIdRegExp =
   new RegExp("^[A-Z0-9]{2,32}$");
-export const createGoalTriggerResponseTriggerConfigSevenPhrasesItemMax = 200;
+Exportar const createGoalTriggerResponseTriggerConfigSevenPhrasesItemMax = 200;
 
-export const createGoalTriggerResponseTriggerConfigSevenPhrasesItemRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigSevenPhrasesItemRegExp =
   new RegExp("\\S");
-export const createGoalTriggerResponseTriggerConfigSevenPhrasesDefault = [];
-export const createGoalTriggerResponseTriggerConfigSevenPhrasesMax = 20;
+Exportar const createGoalTriggerResponseTriggerConfigSevenPhrasesDefault = [];
+Exportar const createGoalTriggerResponseTriggerConfigSevenPhrasesMax = 20;
 
-export const createGoalTriggerResponseTriggerConfigSevenReactionsItemRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigSevenReactionsItemRegExp =
   new RegExp("^[a-z0-9_+'-]{1,100}$");
-export const createGoalTriggerResponseTriggerConfigSevenReactionsDefault = [];
-export const createGoalTriggerResponseTriggerConfigSevenReactionsMax = 20;
+Exportar const createGoalTriggerResponseTriggerConfigSevenReactionsDefault = [];
+Exportar const createGoalTriggerResponseTriggerConfigSevenReactionsMax = 20;
 
-export const createGoalTriggerResponseTriggerConfigSevenChannelsItemRegExp =
+Exportar const createGoalTriggerResponseTriggerConfigSevenChannelsItemRegExp =
   new RegExp("^[CDG][A-Z0-9]{2,32}$");
-export const createGoalTriggerResponseTriggerConfigSevenChannelsDefault = [];
-export const createGoalTriggerResponseTriggerConfigSevenChannelsMax = 50;
+Exportar const createGoalTriggerResponseTriggerConfigSevenChannelsDefault = [];
+Exportar const createGoalTriggerResponseTriggerConfigSevenChannelsMax = 50;
 
-export const CreateGoalTriggerResponse = zod.object({
+Exportar const CreateGoalTriggerResponse = zod.object({
   trigger: zod
     .object({
       id: zod.string().describe("The trigger's id."),
@@ -2397,7 +2397,7 @@ export const CreateGoalTriggerResponse = zod.object({
           zod
             .object({
               kind: zod.enum(["webhook"]),
-              filter: zod
+              Filtro: zod
                 .object({
                   eventTypes: zod
                     .array(
@@ -2414,7 +2414,7 @@ export const CreateGoalTriggerResponse = zod.object({
                     .max(
                       createGoalTriggerResponseTriggerConfigOneFilterEventTypesMax,
                     )
-                    .default(
+                    .Padrão(
                       createGoalTriggerResponseTriggerConfigOneFilterEventTypesDefault,
                     )
                     .describe(
@@ -2464,7 +2464,7 @@ export const CreateGoalTriggerResponse = zod.object({
                 .describe(
                   "The repository, as owner/name. Deliveries for any other are refused.",
                 ),
-              filter: zod
+              Filtro: zod
                 .object({
                   eventTypes: zod
                     .array(
@@ -2481,7 +2481,7 @@ export const CreateGoalTriggerResponse = zod.object({
                     .max(
                       createGoalTriggerResponseTriggerConfigTwoFilterEventTypesMax,
                     )
-                    .default(
+                    .Padrão(
                       createGoalTriggerResponseTriggerConfigTwoFilterEventTypesDefault,
                     )
                     .describe(
@@ -2521,7 +2521,7 @@ export const CreateGoalTriggerResponse = zod.object({
           zod
             .object({
               kind: zod.enum(["linear"]),
-              filter: zod
+              Filtro: zod
                 .object({
                   eventTypes: zod
                     .array(
@@ -2538,7 +2538,7 @@ export const CreateGoalTriggerResponse = zod.object({
                     .max(
                       createGoalTriggerResponseTriggerConfigThreeFilterEventTypesMax,
                     )
-                    .default(
+                    .Padrão(
                       createGoalTriggerResponseTriggerConfigThreeFilterEventTypesDefault,
                     )
                     .describe(
@@ -2578,7 +2578,7 @@ export const CreateGoalTriggerResponse = zod.object({
           zod
             .object({
               kind: zod.enum(["sentry"]),
-              filter: zod
+              Filtro: zod
                 .object({
                   eventTypes: zod
                     .array(
@@ -2595,7 +2595,7 @@ export const CreateGoalTriggerResponse = zod.object({
                     .max(
                       createGoalTriggerResponseTriggerConfigFourFilterEventTypesMax,
                     )
-                    .default(
+                    .Padrão(
                       createGoalTriggerResponseTriggerConfigFourFilterEventTypesDefault,
                     )
                     .describe(
@@ -2635,7 +2635,7 @@ export const CreateGoalTriggerResponse = zod.object({
           zod
             .object({
               kind: zod.enum(["pagerduty"]),
-              filter: zod
+              Filtro: zod
                 .object({
                   eventTypes: zod
                     .array(
@@ -2652,7 +2652,7 @@ export const CreateGoalTriggerResponse = zod.object({
                     .max(
                       createGoalTriggerResponseTriggerConfigFiveFilterEventTypesMax,
                     )
-                    .default(
+                    .Padrão(
                       createGoalTriggerResponseTriggerConfigFiveFilterEventTypesDefault,
                     )
                     .describe(
@@ -2705,13 +2705,13 @@ export const CreateGoalTriggerResponse = zod.object({
                     ),
                 )
                 .max(createGoalTriggerResponseTriggerConfigSixAllowedSendersMax)
-                .default(
+                .Padrão(
                   createGoalTriggerResponseTriggerConfigSixAllowedSendersDefault,
                 )
                 .describe(
                   "Addresses or domains allowed to send. Empty admits any sender.",
                 ),
-              filter: zod
+              Filtro: zod
                 .object({
                   eventTypes: zod
                     .array(
@@ -2728,7 +2728,7 @@ export const CreateGoalTriggerResponse = zod.object({
                     .max(
                       createGoalTriggerResponseTriggerConfigSixFilterEventTypesMax,
                     )
-                    .default(
+                    .Padrão(
                       createGoalTriggerResponseTriggerConfigSixFilterEventTypesDefault,
                     )
                     .describe(
@@ -2786,7 +2786,7 @@ export const CreateGoalTriggerResponse = zod.object({
                     ),
                 )
                 .max(createGoalTriggerResponseTriggerConfigSevenPhrasesMax)
-                .default(
+                .Padrão(
                   createGoalTriggerResponseTriggerConfigSevenPhrasesDefault,
                 )
                 .describe(
@@ -2801,13 +2801,13 @@ export const CreateGoalTriggerResponse = zod.object({
                     ),
                 )
                 .max(createGoalTriggerResponseTriggerConfigSevenReactionsMax)
-                .default(
+                .Padrão(
                   createGoalTriggerResponseTriggerConfigSevenReactionsDefault,
                 )
                 .describe(
                   "For reaction: emoji names without colons. Empty means any reaction.",
                 ),
-              channels: zod
+              Canais: zod
                 .array(
                   zod
                     .string()
@@ -2816,7 +2816,7 @@ export const CreateGoalTriggerResponse = zod.object({
                     ),
                 )
                 .max(createGoalTriggerResponseTriggerConfigSevenChannelsMax)
-                .default(
+                .Padrão(
                   createGoalTriggerResponseTriggerConfigSevenChannelsDefault,
                 )
                 .describe(
@@ -2885,7 +2885,7 @@ export const CreateGoalTriggerResponse = zod.object({
     })
     .optional()
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's Listas the ones an administrator still has to approve.",
     ),
 });
 
@@ -2913,7 +2913,7 @@ export const UpdateGoalTriggerParams = zod.object({
     .min(1)
     .max(updateGoalTriggerPathGoalIdMax)
     .regex(updateGoalTriggerPathGoalIdRegExp)
-    .describe("The goal's id."),
+    .describe("The Objetivo's id."),
   goalTriggerId: zod
     .string()
     .min(1)
@@ -2925,7 +2925,7 @@ export const UpdateGoalTriggerParams = zod.object({
 export const updateGoalTriggerHeaderIdempotencyKeyMax = 128;
 
 export const UpdateGoalTriggerHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(updateGoalTriggerHeaderIdempotencyKeyMax)
@@ -3077,7 +3077,7 @@ export const UpdateGoalTriggerBody = zod.object({
                 .max(updateGoalTriggerBodyConfigOneFilterEventTypesMax)
                 .default(updateGoalTriggerBodyConfigOneFilterEventTypesDefault)
                 .describe(
-                  "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                  "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                 ),
               field: zod
                 .object({
@@ -3085,7 +3085,7 @@ export const UpdateGoalTriggerBody = zod.object({
                     .string()
                     .regex(updateGoalTriggerBodyConfigOneFilterFieldPathRegExp)
                     .describe(
-                      "A dotted path into the event, such as data.team.key.",
+                      "A dotted path into the Evento, such as Dados.team.Chave.",
                     ),
                   equals: zod
                     .string()
@@ -3096,14 +3096,14 @@ export const UpdateGoalTriggerBody = zod.object({
                     ),
                 })
                 .optional()
-                .describe("One field of the event that must equal a value."),
+                .describe("One field of the Evento that must equal a value."),
             })
             .optional()
             .describe(
-              "Which of the events this kind delivers fire the trigger.",
+              "Which of the Eventos this kind delivers fire the trigger.",
             ),
         })
-        .describe("Any service that can send a signed webhook."),
+        .describe("Qualquer service that can send a signed webhook."),
       zod
         .object({
           kind: zod.enum(["github"]),
@@ -3113,7 +3113,7 @@ export const UpdateGoalTriggerBody = zod.object({
             .regex(updateGoalTriggerBodyConfigTwoRepositoryRegExp)
             .optional()
             .describe(
-              "The repository, as owner/name. Deliveries for any other are refused.",
+              "The repository, as owner/name. Deliveries Para Qualquer other are refused.",
             ),
           filter: zod
             .object({
@@ -3130,7 +3130,7 @@ export const UpdateGoalTriggerBody = zod.object({
                 .max(updateGoalTriggerBodyConfigTwoFilterEventTypesMax)
                 .default(updateGoalTriggerBodyConfigTwoFilterEventTypesDefault)
                 .describe(
-                  "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                  "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                 ),
               field: zod
                 .object({
@@ -3138,7 +3138,7 @@ export const UpdateGoalTriggerBody = zod.object({
                     .string()
                     .regex(updateGoalTriggerBodyConfigTwoFilterFieldPathRegExp)
                     .describe(
-                      "A dotted path into the event, such as data.team.key.",
+                      "A dotted path into the Evento, such as Dados.team.Chave.",
                     ),
                   equals: zod
                     .string()
@@ -3149,11 +3149,11 @@ export const UpdateGoalTriggerBody = zod.object({
                     ),
                 })
                 .optional()
-                .describe("One field of the event that must equal a value."),
+                .describe("One field of the Evento that must equal a value."),
             })
             .optional()
             .describe(
-              "Which of the events this kind delivers fire the trigger.",
+              "Which of the Eventos this kind delivers fire the trigger.",
             ),
         })
         .describe("A GitHub webhook."),
@@ -3179,7 +3179,7 @@ export const UpdateGoalTriggerBody = zod.object({
                   updateGoalTriggerBodyConfigThreeFilterEventTypesDefault,
                 )
                 .describe(
-                  "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                  "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                 ),
               field: zod
                 .object({
@@ -3189,7 +3189,7 @@ export const UpdateGoalTriggerBody = zod.object({
                       updateGoalTriggerBodyConfigThreeFilterFieldPathRegExp,
                     )
                     .describe(
-                      "A dotted path into the event, such as data.team.key.",
+                      "A dotted path into the Evento, such as Dados.team.Chave.",
                     ),
                   equals: zod
                     .string()
@@ -3200,11 +3200,11 @@ export const UpdateGoalTriggerBody = zod.object({
                     ),
                 })
                 .optional()
-                .describe("One field of the event that must equal a value."),
+                .describe("One field of the Evento that must equal a value."),
             })
             .optional()
             .describe(
-              "Which of the events this kind delivers fire the trigger.",
+              "Which of the Eventos this kind delivers fire the trigger.",
             ),
         })
         .describe("A Linear webhook."),
@@ -3226,7 +3226,7 @@ export const UpdateGoalTriggerBody = zod.object({
                 .max(updateGoalTriggerBodyConfigFourFilterEventTypesMax)
                 .default(updateGoalTriggerBodyConfigFourFilterEventTypesDefault)
                 .describe(
-                  "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                  "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                 ),
               field: zod
                 .object({
@@ -3234,7 +3234,7 @@ export const UpdateGoalTriggerBody = zod.object({
                     .string()
                     .regex(updateGoalTriggerBodyConfigFourFilterFieldPathRegExp)
                     .describe(
-                      "A dotted path into the event, such as data.team.key.",
+                      "A dotted path into the Evento, such as Dados.team.Chave.",
                     ),
                   equals: zod
                     .string()
@@ -3245,11 +3245,11 @@ export const UpdateGoalTriggerBody = zod.object({
                     ),
                 })
                 .optional()
-                .describe("One field of the event that must equal a value."),
+                .describe("One field of the Evento that must equal a value."),
             })
             .optional()
             .describe(
-              "Which of the events this kind delivers fire the trigger.",
+              "Which of the Eventos this kind delivers fire the trigger.",
             ),
         })
         .describe("A Sentry webhook."),
@@ -3271,7 +3271,7 @@ export const UpdateGoalTriggerBody = zod.object({
                 .max(updateGoalTriggerBodyConfigFiveFilterEventTypesMax)
                 .default(updateGoalTriggerBodyConfigFiveFilterEventTypesDefault)
                 .describe(
-                  "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                  "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                 ),
               field: zod
                 .object({
@@ -3279,7 +3279,7 @@ export const UpdateGoalTriggerBody = zod.object({
                     .string()
                     .regex(updateGoalTriggerBodyConfigFiveFilterFieldPathRegExp)
                     .describe(
-                      "A dotted path into the event, such as data.team.key.",
+                      "A dotted path into the Evento, such as Dados.team.Chave.",
                     ),
                   equals: zod
                     .string()
@@ -3290,11 +3290,11 @@ export const UpdateGoalTriggerBody = zod.object({
                     ),
                 })
                 .optional()
-                .describe("One field of the event that must equal a value."),
+                .describe("One field of the Evento that must equal a value."),
             })
             .optional()
             .describe(
-              "Which of the events this kind delivers fire the trigger.",
+              "Which of the Eventos this kind delivers fire the trigger.",
             ),
         })
         .describe("A PagerDuty webhook."),
@@ -3329,7 +3329,7 @@ export const UpdateGoalTriggerBody = zod.object({
                 .max(updateGoalTriggerBodyConfigSixFilterEventTypesMax)
                 .default(updateGoalTriggerBodyConfigSixFilterEventTypesDefault)
                 .describe(
-                  "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                  "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                 ),
               field: zod
                 .object({
@@ -3337,7 +3337,7 @@ export const UpdateGoalTriggerBody = zod.object({
                     .string()
                     .regex(updateGoalTriggerBodyConfigSixFilterFieldPathRegExp)
                     .describe(
-                      "A dotted path into the event, such as data.team.key.",
+                      "A dotted path into the Evento, such as Dados.team.Chave.",
                     ),
                   equals: zod
                     .string()
@@ -3348,11 +3348,11 @@ export const UpdateGoalTriggerBody = zod.object({
                     ),
                 })
                 .optional()
-                .describe("One field of the event that must equal a value."),
+                .describe("One field of the Evento that must equal a value."),
             })
             .optional()
             .describe(
-              "Which of the events this kind delivers fire the trigger.",
+              "Which of the Eventos this kind delivers fire the trigger.",
             ),
         })
         .describe("An email to the trigger's own address."),
@@ -3374,7 +3374,7 @@ export const UpdateGoalTriggerBody = zod.object({
             )
             .max(updateGoalTriggerBodyConfigSevenPhrasesMax)
             .default(updateGoalTriggerBodyConfigSevenPhrasesDefault)
-            .describe("For phrase: any one of these, in any case, fires it."),
+            .describe("Para phrase: Qualquer one of these, Em Qualquer case, fires Ele."),
           reactions: zod
             .array(
               zod
@@ -3384,7 +3384,7 @@ export const UpdateGoalTriggerBody = zod.object({
             .max(updateGoalTriggerBodyConfigSevenReactionsMax)
             .default(updateGoalTriggerBodyConfigSevenReactionsDefault)
             .describe(
-              "For reaction: emoji names without colons. Empty means any reaction.",
+              "Para reaction: emoji names without colons. Vazio means Qualquer reaction.",
             ),
           channels: zod
             .array(
@@ -3402,7 +3402,7 @@ export const UpdateGoalTriggerBody = zod.object({
           "A Slack message in a workspace where the goal's owner linked their own Slack account.",
         ),
     ])
-    .describe("What a trigger listens for, by its kind."),
+    .describe("What a trigger listens Para, by Dela/Desse kind."),
 });
 
 export const updateGoalTriggerResponseTriggerConfigOneFilterEventTypesItemMax = 128;
@@ -3524,7 +3524,7 @@ export const UpdateGoalTriggerResponse = zod.object({
   trigger: zod
     .object({
       id: zod.string().describe("The trigger's id."),
-      goalId: zod.string().describe("The goal it starts."),
+      goalId: zod.string().describe("The Objetivo Ele starts."),
       kind: zod.enum([
         "webhook",
         "github",
@@ -3560,7 +3560,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                       updateGoalTriggerResponseTriggerConfigOneFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -3570,7 +3570,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                           updateGoalTriggerResponseTriggerConfigOneFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -3584,15 +3584,15 @@ export const UpdateGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
-            .describe("Any service that can send a signed webhook."),
+            .describe("Qualquer service that can send a signed webhook."),
           zod
             .object({
               kind: zod.enum(["github"]),
@@ -3604,7 +3604,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                 )
                 .optional()
                 .describe(
-                  "The repository, as owner/name. Deliveries for any other are refused.",
+                  "The repository, as owner/name. Deliveries Para Qualquer other are refused.",
                 ),
               filter: zod
                 .object({
@@ -3627,7 +3627,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                       updateGoalTriggerResponseTriggerConfigTwoFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -3637,7 +3637,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                           updateGoalTriggerResponseTriggerConfigTwoFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -3651,12 +3651,12 @@ export const UpdateGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A GitHub webhook."),
@@ -3684,7 +3684,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                       updateGoalTriggerResponseTriggerConfigThreeFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -3694,7 +3694,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                           updateGoalTriggerResponseTriggerConfigThreeFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -3708,12 +3708,12 @@ export const UpdateGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A Linear webhook."),
@@ -3741,7 +3741,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                       updateGoalTriggerResponseTriggerConfigFourFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -3751,7 +3751,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                           updateGoalTriggerResponseTriggerConfigFourFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -3765,12 +3765,12 @@ export const UpdateGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A Sentry webhook."),
@@ -3798,7 +3798,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                       updateGoalTriggerResponseTriggerConfigFiveFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -3808,7 +3808,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                           updateGoalTriggerResponseTriggerConfigFiveFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -3822,12 +3822,12 @@ export const UpdateGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A PagerDuty webhook."),
@@ -3874,7 +3874,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                       updateGoalTriggerResponseTriggerConfigSixFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -3884,7 +3884,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                           updateGoalTriggerResponseTriggerConfigSixFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -3898,12 +3898,12 @@ export const UpdateGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("An email to the trigger's own address."),
@@ -3932,7 +3932,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                   updateGoalTriggerResponseTriggerConfigSevenPhrasesDefault,
                 )
                 .describe(
-                  "For phrase: any one of these, in any case, fires it.",
+                  "Para phrase: Qualquer one of these, Em Qualquer case, fires Ele.",
                 ),
               reactions: zod
                 .array(
@@ -3947,7 +3947,7 @@ export const UpdateGoalTriggerResponse = zod.object({
                   updateGoalTriggerResponseTriggerConfigSevenReactionsDefault,
                 )
                 .describe(
-                  "For reaction: emoji names without colons. Empty means any reaction.",
+                  "Para reaction: emoji names without colons. Vazio means Qualquer reaction.",
                 ),
               channels: zod
                 .array(
@@ -3969,12 +3969,12 @@ export const UpdateGoalTriggerResponse = zod.object({
               "A Slack message in a workspace where the goal's owner linked their own Slack account.",
             ),
         ])
-        .describe("What a trigger listens for, by its kind."),
+        .describe("What a trigger listens Para, by Dela/Desse kind."),
       hasSecret: zod.boolean(),
       enabled: zod
         .boolean()
         .describe(
-          "False while it is off: it acknowledges deliveries and never starts a run.",
+          "False while Ele É off: Ele acknowledges deliveries and never starts a run.",
         ),
       path: zod
         .string()
@@ -3996,13 +3996,13 @@ export const UpdateGoalTriggerResponse = zod.object({
         ),
       createdAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it was added."),
+        .describe("When Ele was added."),
       updatedAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it last changed."),
+        .describe("When Ele Último changed."),
     })
     .describe(
-      "A registered way for an outside event to start a run of a goal. Never its secret: hasSecret says whether one is set.",
+      "A registered way Para an outside Evento to start a run of a Objetivo. Never Dela/Desse secret: hasSecret says whether one É set.",
     ),
   sharedApps: zod
     .object({
@@ -4049,7 +4049,7 @@ export const DeleteGoalTriggerParams = zod.object({
     .min(1)
     .max(deleteGoalTriggerPathGoalIdMax)
     .regex(deleteGoalTriggerPathGoalIdRegExp)
-    .describe("The goal's id."),
+    .describe("The Objetivo's id."),
   goalTriggerId: zod
     .string()
     .min(1)
@@ -4061,7 +4061,7 @@ export const DeleteGoalTriggerParams = zod.object({
 export const deleteGoalTriggerHeaderIdempotencyKeyMax = 128;
 
 export const DeleteGoalTriggerHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(deleteGoalTriggerHeaderIdempotencyKeyMax)
@@ -4096,7 +4096,7 @@ export const EnableGoalTriggerParams = zod.object({
     .min(1)
     .max(enableGoalTriggerPathGoalIdMax)
     .regex(enableGoalTriggerPathGoalIdRegExp)
-    .describe("The goal's id."),
+    .describe("The Objetivo's id."),
   goalTriggerId: zod
     .string()
     .min(1)
@@ -4108,7 +4108,7 @@ export const EnableGoalTriggerParams = zod.object({
 export const enableGoalTriggerHeaderIdempotencyKeyMax = 128;
 
 export const EnableGoalTriggerHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(enableGoalTriggerHeaderIdempotencyKeyMax)
@@ -4236,7 +4236,7 @@ export const EnableGoalTriggerResponse = zod.object({
   trigger: zod
     .object({
       id: zod.string().describe("The trigger's id."),
-      goalId: zod.string().describe("The goal it starts."),
+      goalId: zod.string().describe("The Objetivo Ele starts."),
       kind: zod.enum([
         "webhook",
         "github",
@@ -4272,7 +4272,7 @@ export const EnableGoalTriggerResponse = zod.object({
                       enableGoalTriggerResponseTriggerConfigOneFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -4282,7 +4282,7 @@ export const EnableGoalTriggerResponse = zod.object({
                           enableGoalTriggerResponseTriggerConfigOneFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -4296,15 +4296,15 @@ export const EnableGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
-            .describe("Any service that can send a signed webhook."),
+            .describe("Qualquer service that can send a signed webhook."),
           zod
             .object({
               kind: zod.enum(["github"]),
@@ -4316,7 +4316,7 @@ export const EnableGoalTriggerResponse = zod.object({
                 )
                 .optional()
                 .describe(
-                  "The repository, as owner/name. Deliveries for any other are refused.",
+                  "The repository, as owner/name. Deliveries Para Qualquer other are refused.",
                 ),
               filter: zod
                 .object({
@@ -4339,7 +4339,7 @@ export const EnableGoalTriggerResponse = zod.object({
                       enableGoalTriggerResponseTriggerConfigTwoFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -4349,7 +4349,7 @@ export const EnableGoalTriggerResponse = zod.object({
                           enableGoalTriggerResponseTriggerConfigTwoFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -4363,12 +4363,12 @@ export const EnableGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A GitHub webhook."),
@@ -4396,7 +4396,7 @@ export const EnableGoalTriggerResponse = zod.object({
                       enableGoalTriggerResponseTriggerConfigThreeFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -4406,7 +4406,7 @@ export const EnableGoalTriggerResponse = zod.object({
                           enableGoalTriggerResponseTriggerConfigThreeFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -4420,12 +4420,12 @@ export const EnableGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A Linear webhook."),
@@ -4453,7 +4453,7 @@ export const EnableGoalTriggerResponse = zod.object({
                       enableGoalTriggerResponseTriggerConfigFourFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -4463,7 +4463,7 @@ export const EnableGoalTriggerResponse = zod.object({
                           enableGoalTriggerResponseTriggerConfigFourFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -4477,12 +4477,12 @@ export const EnableGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A Sentry webhook."),
@@ -4510,7 +4510,7 @@ export const EnableGoalTriggerResponse = zod.object({
                       enableGoalTriggerResponseTriggerConfigFiveFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -4520,7 +4520,7 @@ export const EnableGoalTriggerResponse = zod.object({
                           enableGoalTriggerResponseTriggerConfigFiveFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -4534,12 +4534,12 @@ export const EnableGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A PagerDuty webhook."),
@@ -4586,7 +4586,7 @@ export const EnableGoalTriggerResponse = zod.object({
                       enableGoalTriggerResponseTriggerConfigSixFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -4596,7 +4596,7 @@ export const EnableGoalTriggerResponse = zod.object({
                           enableGoalTriggerResponseTriggerConfigSixFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -4610,12 +4610,12 @@ export const EnableGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("An email to the trigger's own address."),
@@ -4644,7 +4644,7 @@ export const EnableGoalTriggerResponse = zod.object({
                   enableGoalTriggerResponseTriggerConfigSevenPhrasesDefault,
                 )
                 .describe(
-                  "For phrase: any one of these, in any case, fires it.",
+                  "Para phrase: Qualquer one of these, Em Qualquer case, fires Ele.",
                 ),
               reactions: zod
                 .array(
@@ -4659,7 +4659,7 @@ export const EnableGoalTriggerResponse = zod.object({
                   enableGoalTriggerResponseTriggerConfigSevenReactionsDefault,
                 )
                 .describe(
-                  "For reaction: emoji names without colons. Empty means any reaction.",
+                  "Para reaction: emoji names without colons. Vazio means Qualquer reaction.",
                 ),
               channels: zod
                 .array(
@@ -4681,12 +4681,12 @@ export const EnableGoalTriggerResponse = zod.object({
               "A Slack message in a workspace where the goal's owner linked their own Slack account.",
             ),
         ])
-        .describe("What a trigger listens for, by its kind."),
+        .describe("What a trigger listens Para, by Dela/Desse kind."),
       hasSecret: zod.boolean(),
       enabled: zod
         .boolean()
         .describe(
-          "False while it is off: it acknowledges deliveries and never starts a run.",
+          "False while Ele É off: Ele acknowledges deliveries and never starts a run.",
         ),
       path: zod
         .string()
@@ -4708,13 +4708,13 @@ export const EnableGoalTriggerResponse = zod.object({
         ),
       createdAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it was added."),
+        .describe("When Ele was added."),
       updatedAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it last changed."),
+        .describe("When Ele Último changed."),
     })
     .describe(
-      "A registered way for an outside event to start a run of a goal. Never its secret: hasSecret says whether one is set.",
+      "A registered way Para an outside Evento to start a run of a Objetivo. Never Dela/Desse secret: hasSecret says whether one É set.",
     ),
   sharedApps: zod
     .object({
@@ -4761,7 +4761,7 @@ export const DisableGoalTriggerParams = zod.object({
     .min(1)
     .max(disableGoalTriggerPathGoalIdMax)
     .regex(disableGoalTriggerPathGoalIdRegExp)
-    .describe("The goal's id."),
+    .describe("The Objetivo's id."),
   goalTriggerId: zod
     .string()
     .min(1)
@@ -4773,7 +4773,7 @@ export const DisableGoalTriggerParams = zod.object({
 export const disableGoalTriggerHeaderIdempotencyKeyMax = 128;
 
 export const DisableGoalTriggerHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(disableGoalTriggerHeaderIdempotencyKeyMax)
@@ -4901,7 +4901,7 @@ export const DisableGoalTriggerResponse = zod.object({
   trigger: zod
     .object({
       id: zod.string().describe("The trigger's id."),
-      goalId: zod.string().describe("The goal it starts."),
+      goalId: zod.string().describe("The Objetivo Ele starts."),
       kind: zod.enum([
         "webhook",
         "github",
@@ -4937,7 +4937,7 @@ export const DisableGoalTriggerResponse = zod.object({
                       disableGoalTriggerResponseTriggerConfigOneFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -4947,7 +4947,7 @@ export const DisableGoalTriggerResponse = zod.object({
                           disableGoalTriggerResponseTriggerConfigOneFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -4961,15 +4961,15 @@ export const DisableGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
-            .describe("Any service that can send a signed webhook."),
+            .describe("Qualquer service that can send a signed webhook."),
           zod
             .object({
               kind: zod.enum(["github"]),
@@ -4981,7 +4981,7 @@ export const DisableGoalTriggerResponse = zod.object({
                 )
                 .optional()
                 .describe(
-                  "The repository, as owner/name. Deliveries for any other are refused.",
+                  "The repository, as owner/name. Deliveries Para Qualquer other are refused.",
                 ),
               filter: zod
                 .object({
@@ -5004,7 +5004,7 @@ export const DisableGoalTriggerResponse = zod.object({
                       disableGoalTriggerResponseTriggerConfigTwoFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -5014,7 +5014,7 @@ export const DisableGoalTriggerResponse = zod.object({
                           disableGoalTriggerResponseTriggerConfigTwoFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -5028,12 +5028,12 @@ export const DisableGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A GitHub webhook."),
@@ -5061,7 +5061,7 @@ export const DisableGoalTriggerResponse = zod.object({
                       disableGoalTriggerResponseTriggerConfigThreeFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -5071,7 +5071,7 @@ export const DisableGoalTriggerResponse = zod.object({
                           disableGoalTriggerResponseTriggerConfigThreeFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -5085,12 +5085,12 @@ export const DisableGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A Linear webhook."),
@@ -5118,7 +5118,7 @@ export const DisableGoalTriggerResponse = zod.object({
                       disableGoalTriggerResponseTriggerConfigFourFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -5128,7 +5128,7 @@ export const DisableGoalTriggerResponse = zod.object({
                           disableGoalTriggerResponseTriggerConfigFourFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -5142,12 +5142,12 @@ export const DisableGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A Sentry webhook."),
@@ -5175,7 +5175,7 @@ export const DisableGoalTriggerResponse = zod.object({
                       disableGoalTriggerResponseTriggerConfigFiveFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -5185,7 +5185,7 @@ export const DisableGoalTriggerResponse = zod.object({
                           disableGoalTriggerResponseTriggerConfigFiveFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -5199,12 +5199,12 @@ export const DisableGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A PagerDuty webhook."),
@@ -5253,7 +5253,7 @@ export const DisableGoalTriggerResponse = zod.object({
                       disableGoalTriggerResponseTriggerConfigSixFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -5263,7 +5263,7 @@ export const DisableGoalTriggerResponse = zod.object({
                           disableGoalTriggerResponseTriggerConfigSixFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -5277,12 +5277,12 @@ export const DisableGoalTriggerResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("An email to the trigger's own address."),
@@ -5311,7 +5311,7 @@ export const DisableGoalTriggerResponse = zod.object({
                   disableGoalTriggerResponseTriggerConfigSevenPhrasesDefault,
                 )
                 .describe(
-                  "For phrase: any one of these, in any case, fires it.",
+                  "Para phrase: Qualquer one of these, Em Qualquer case, fires Ele.",
                 ),
               reactions: zod
                 .array(
@@ -5326,7 +5326,7 @@ export const DisableGoalTriggerResponse = zod.object({
                   disableGoalTriggerResponseTriggerConfigSevenReactionsDefault,
                 )
                 .describe(
-                  "For reaction: emoji names without colons. Empty means any reaction.",
+                  "Para reaction: emoji names without colons. Vazio means Qualquer reaction.",
                 ),
               channels: zod
                 .array(
@@ -5348,12 +5348,12 @@ export const DisableGoalTriggerResponse = zod.object({
               "A Slack message in a workspace where the goal's owner linked their own Slack account.",
             ),
         ])
-        .describe("What a trigger listens for, by its kind."),
+        .describe("What a trigger listens Para, by Dela/Desse kind."),
       hasSecret: zod.boolean(),
       enabled: zod
         .boolean()
         .describe(
-          "False while it is off: it acknowledges deliveries and never starts a run.",
+          "False while Ele É off: Ele acknowledges deliveries and never starts a run.",
         ),
       path: zod
         .string()
@@ -5375,13 +5375,13 @@ export const DisableGoalTriggerResponse = zod.object({
         ),
       createdAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it was added."),
+        .describe("When Ele was added."),
       updatedAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it last changed."),
+        .describe("When Ele Último changed."),
     })
     .describe(
-      "A registered way for an outside event to start a run of a goal. Never its secret: hasSecret says whether one is set.",
+      "A registered way Para an outside Evento to start a run of a Objetivo. Never Dela/Desse secret: hasSecret says whether one É set.",
     ),
   sharedApps: zod
     .object({
@@ -5405,7 +5405,7 @@ export const DisableGoalTriggerResponse = zod.object({
 });
 
 /**
- * Return the secret a trigger's sender signs with, for its owner to copy into the sending service. Null for a kind that has none. Read on request and never cached.
+ * Return the secret a trigger's sender signs with, Para Dela/Desse owner to Copiar into the sending service. Null Para a kind that has none. Read on request and never cached.
  * @summary Read a trigger's secret
  */
 
@@ -5428,7 +5428,7 @@ export const GetGoalTriggerSecretParams = zod.object({
     .min(1)
     .max(getGoalTriggerSecretPathGoalIdMax)
     .regex(getGoalTriggerSecretPathGoalIdRegExp)
-    .describe("The goal's id."),
+    .describe("The Objetivo's id."),
   goalTriggerId: zod
     .string()
     .min(1)
@@ -5441,7 +5441,7 @@ export const GetGoalTriggerSecretResponse = zod.object({
   secret: zod
     .string()
     .nullable()
-    .describe("The secret, or null for a kind that has none."),
+    .describe("The secret, or null Para a kind that has none."),
 });
 
 /**
@@ -5470,7 +5470,7 @@ export const ReplaceGoalTriggerSecretParams = zod.object({
     .min(1)
     .max(replaceGoalTriggerSecretPathGoalIdMax)
     .regex(replaceGoalTriggerSecretPathGoalIdRegExp)
-    .describe("The goal's id."),
+    .describe("The Objetivo's id."),
   goalTriggerId: zod
     .string()
     .min(1)
@@ -5482,7 +5482,7 @@ export const ReplaceGoalTriggerSecretParams = zod.object({
 export const replaceGoalTriggerSecretHeaderIdempotencyKeyMax = 128;
 
 export const ReplaceGoalTriggerSecretHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(replaceGoalTriggerSecretHeaderIdempotencyKeyMax)
@@ -5625,7 +5625,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
   trigger: zod
     .object({
       id: zod.string().describe("The trigger's id."),
-      goalId: zod.string().describe("The goal it starts."),
+      goalId: zod.string().describe("The Objetivo Ele starts."),
       kind: zod.enum([
         "webhook",
         "github",
@@ -5661,7 +5661,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                       replaceGoalTriggerSecretResponseTriggerConfigOneFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -5671,7 +5671,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                           replaceGoalTriggerSecretResponseTriggerConfigOneFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -5685,15 +5685,15 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
-            .describe("Any service that can send a signed webhook."),
+            .describe("Qualquer service that can send a signed webhook."),
           zod
             .object({
               kind: zod.enum(["github"]),
@@ -5707,7 +5707,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                 )
                 .optional()
                 .describe(
-                  "The repository, as owner/name. Deliveries for any other are refused.",
+                  "The repository, as owner/name. Deliveries Para Qualquer other are refused.",
                 ),
               filter: zod
                 .object({
@@ -5730,7 +5730,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                       replaceGoalTriggerSecretResponseTriggerConfigTwoFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -5740,7 +5740,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                           replaceGoalTriggerSecretResponseTriggerConfigTwoFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -5754,12 +5754,12 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A GitHub webhook."),
@@ -5787,7 +5787,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                       replaceGoalTriggerSecretResponseTriggerConfigThreeFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -5797,7 +5797,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                           replaceGoalTriggerSecretResponseTriggerConfigThreeFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -5811,12 +5811,12 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A Linear webhook."),
@@ -5844,7 +5844,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                       replaceGoalTriggerSecretResponseTriggerConfigFourFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -5854,7 +5854,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                           replaceGoalTriggerSecretResponseTriggerConfigFourFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -5868,12 +5868,12 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A Sentry webhook."),
@@ -5901,7 +5901,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                       replaceGoalTriggerSecretResponseTriggerConfigFiveFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -5911,7 +5911,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                           replaceGoalTriggerSecretResponseTriggerConfigFiveFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -5925,12 +5925,12 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("A PagerDuty webhook."),
@@ -5979,7 +5979,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                       replaceGoalTriggerSecretResponseTriggerConfigSixFilterEventTypesDefault,
                     )
                     .describe(
-                      "Event types that fire the trigger. Empty means every event. A type matches itself and its sub-types: issues matches issues.opened.",
+                      "Evento types that fire the trigger. Vazio means every Evento. A type matches itself and Dela/Desse sub-types: issues matches issues.opened.",
                     ),
                   field: zod
                     .object({
@@ -5989,7 +5989,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                           replaceGoalTriggerSecretResponseTriggerConfigSixFilterFieldPathRegExp,
                         )
                         .describe(
-                          "A dotted path into the event, such as data.team.key.",
+                          "A dotted path into the Evento, such as Dados.team.Chave.",
                         ),
                       equals: zod
                         .string()
@@ -6003,12 +6003,12 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                     })
                     .optional()
                     .describe(
-                      "One field of the event that must equal a value.",
+                      "One field of the Evento that must equal a value.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Which of the events this kind delivers fire the trigger.",
+                  "Which of the Eventos this kind delivers fire the trigger.",
                 ),
             })
             .describe("An email to the trigger's own address."),
@@ -6041,7 +6041,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                   replaceGoalTriggerSecretResponseTriggerConfigSevenPhrasesDefault,
                 )
                 .describe(
-                  "For phrase: any one of these, in any case, fires it.",
+                  "Para phrase: Qualquer one of these, Em Qualquer case, fires Ele.",
                 ),
               reactions: zod
                 .array(
@@ -6058,7 +6058,7 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
                   replaceGoalTriggerSecretResponseTriggerConfigSevenReactionsDefault,
                 )
                 .describe(
-                  "For reaction: emoji names without colons. Empty means any reaction.",
+                  "Para reaction: emoji names without colons. Vazio means Qualquer reaction.",
                 ),
               channels: zod
                 .array(
@@ -6082,12 +6082,12 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
               "A Slack message in a workspace where the goal's owner linked their own Slack account.",
             ),
         ])
-        .describe("What a trigger listens for, by its kind."),
+        .describe("What a trigger listens Para, by Dela/Desse kind."),
       hasSecret: zod.boolean(),
       enabled: zod
         .boolean()
         .describe(
-          "False while it is off: it acknowledges deliveries and never starts a run.",
+          "False while Ele É off: Ele acknowledges deliveries and never starts a run.",
         ),
       path: zod
         .string()
@@ -6109,13 +6109,13 @@ export const ReplaceGoalTriggerSecretResponse = zod.object({
         ),
       createdAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it was added."),
+        .describe("When Ele was added."),
       updatedAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it last changed."),
+        .describe("When Ele Último changed."),
     })
     .describe(
-      "A registered way for an outside event to start a run of a goal. Never its secret: hasSecret says whether one is set.",
+      "A registered way Para an outside Evento to start a run of a Objetivo. Never Dela/Desse secret: hasSecret says whether one É set.",
     ),
   secret: zod
     .string()
@@ -6205,7 +6205,7 @@ export const ListGithubEventSourcesResponse = zod.object({
           webhookPath: zod
             .string()
             .describe(
-              "The path on this server to give the repository's webhook, with the source's secret. A client shows it on this server's own address and never builds it.",
+              "The path on this server to give the repository's webhook, with the source's secret. A client shows Ele on this server's own address and never builds it.",
             ),
         })
         .describe(
@@ -6224,7 +6224,7 @@ export const ListGithubEventSourcesResponse = zod.object({
 });
 
 /**
- * Connect a GitHub repository's webhook to the caller's goals. The secret is the one set on the repository's webhook: it is stored encrypted and never returned. The answer names the address to give GitHub.
+ * Connect a GitHub repository's webhook to the caller's Objetivos. The secret É the one set on the repository's webhook: it is stored encrypted and never returned. The answer names the address to give GitHub.
  * @summary Connect a GitHub repository's events
  */
 
@@ -6281,7 +6281,7 @@ export const CreateGithubEventSourceResponse = zod.object({
       webhookPath: zod
         .string()
         .describe(
-          "The path on this server to give the repository's webhook, with the source's secret. A client shows it on this server's own address and never builds it.",
+          "The path on this server to give the repository's webhook, with the source's secret. A client shows Ele on this server's own address and never builds it.",
         ),
     })
     .describe(

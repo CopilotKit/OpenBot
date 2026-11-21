@@ -12,7 +12,7 @@ import type {
   BotGrant,
   BotGrantCandidate,
   BotGrantChanges,
-  BotGrantChangesSaved,
+  BotGrantChangesGuardado,
   BotGrantDescription,
   BotGrantInput,
   BotGrantPage,
@@ -60,7 +60,7 @@ export const listBotGrants = async (
     getListBotGrantsUrl(organizationId, botId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -73,7 +73,7 @@ export const getBatchUpdateBotGrantsUrl = (
 };
 
 /**
- * Turn several of one app's actions on and off for a Bot as one change, or none of them: one that can't be made refuses them all, and problems says which. Each action is checked as replaceBotGrant and deleteBotGrant check it, and an action turned on must be one the app offers now. The audit trail records the change once, with the sentence it was chosen from when it was described in English (translateBotGrants). An administrator may turn actions on and off. A Bot's owner may only turn on actions of their own app.
+ * Turn several of one app's Ações on and off Para a Bot as one change, or none of them: one that can't be made refuses them all, and problems says which. Each action is checked as replaceBotGrant and deleteBotGrant check it, and an action turned on must be one the app offers now. The audit trail records the change once, with the sentence it was chosen from when it was described in English (translateBotGrants). An administrator may turn actions on and off. A Bot's owner may only turn on Ações of their own app.
  * @summary Change a Bot's actions in one app at once
  */
 export const batchUpdateBotGrants = async (
@@ -81,7 +81,7 @@ export const batchUpdateBotGrants = async (
   botId: string,
   botGrantChanges: BotGrantChanges,
   options?: Parameters<typeof apiRequest>[1],
-): Promise<BotGrantChangesSaved> => {
+): Promise<BotGrantChangesGuardado> => {
   const getHeaders = (
     h?: NonNullable<RequestInit["headers"]>,
   ): Record<string, string | readonly string[]> => {
@@ -103,7 +103,7 @@ export const batchUpdateBotGrants = async (
     }
     return headers;
   };
-  return apiRequest<BotGrantChangesSaved>(
+  return apiRequest<BotGrantChangesGuardado>(
     getBatchUpdateBotGrantsUrl(organizationId, botId),
     {
       ...options,
@@ -126,7 +126,7 @@ export const getTranslateBotGrantsUrl = (
 
 /**
  * Turn a description in English of what a Bot may do in one app into an exact set of that app's actions. OpenBot's model chooses them, they are checked against what the app offers now, and a second call that never sees the description says what the set lets the Bot do. Nothing is saved: batchUpdateBotGrants saves the set. The audit trail records the description and what it became. Only an administrator may ask.
- * @summary Choose a Bot's actions in one app from a description
+ * @summary Escolhe um Bot's actions in one app from a description
  */
 export const translateBotGrants = async (
   organizationId: string,
@@ -336,7 +336,7 @@ export const listBotApps = async (
     getListBotAppsUrl(organizationId, botId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -557,7 +557,7 @@ export const listGiveableApps = async (
     getListGiveableAppsUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

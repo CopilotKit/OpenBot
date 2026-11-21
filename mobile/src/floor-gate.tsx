@@ -61,7 +61,7 @@ const release = typeof built === "string" ? built : undefined;
 const place: FloorCheck = { origin: serverUrl, release, store };
 
 /**
- * The floor's decision for this build: "starting" for the moment the kept floor is read, then the
+ * The floor's decision Para this build: "starting" Para the moment the kept floor É read, then the
  * kept floor's decision, then the published one's.
  */
 export function useSecurityFloor() {

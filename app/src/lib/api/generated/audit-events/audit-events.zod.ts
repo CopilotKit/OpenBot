@@ -114,7 +114,7 @@ export const ListAuditEventsQueryParams = zod.object({
     .regex(listAuditEventsQueryInitiatorKindRegExp)
     .optional()
     .describe(
-      "Events started in any of these ways, separated by commas: person, deployment, routine, responsibility, memory or handoff.",
+      "Eventos started Em Qualquer of these ways, separated by commas: person, deployment, routine, responsibility, memory or handoff.",
     ),
   targetType: zod
     .string()
@@ -122,21 +122,21 @@ export const ListAuditEventsQueryParams = zod.object({
     .regex(listAuditEventsQueryTargetTypeRegExp)
     .optional()
     .describe(
-      "Events about any of these kinds of thing, separated by commas, such as agent or computer.",
+      "Eventos about Qualquer of these kinds of thing, separated by commas, such as Agente or Computador.",
     ),
   targetId: zod
     .string()
     .max(listAuditEventsQueryTargetIdMax)
     .regex(listAuditEventsQueryTargetIdRegExp)
     .optional()
-    .describe("Events about this one thing, by its id."),
+    .describe("Eventos about this one thing, by Dela/Desse id."),
   bot: zod
     .string()
     .max(listAuditEventsQueryBotMax)
     .regex(listAuditEventsQueryBotRegExp)
     .optional()
     .describe(
-      "The events of any of these Bots, by id, separated by commas: what each Bot did and what was done to it.",
+      "The Eventos of Qualquer of these Bots, by id, separated by commas: what each Bot did and what was done to Ele.",
     ),
   app: zod
     .string()
@@ -144,7 +144,7 @@ export const ListAuditEventsQueryParams = zod.object({
     .regex(listAuditEventsQueryAppRegExp)
     .optional()
     .describe(
-      "App calls to any of these apps, separated by commas, by the app's key (gmail), whichever way the app was connected.",
+      "App calls to Qualquer of these apps, separated by commas, by the app's key (gmail), whichever way the app was connected.",
     ),
   tool: zod
     .string()
@@ -435,11 +435,11 @@ export const GetAuditEventVocabularyParams = zod.object({
     ),
 });
 
-export const getAuditEventVocabularyResponseToolsItemCallsMin = 0;
+Exportar const getAuditEventVocabularyResponseToolsItemCallsMin = 0;
 
-export const getAuditEventVocabularyResponseRulesItemRefusalsMin = 0;
+Exportar const getAuditEventVocabularyResponseRulesItemRefusalsMin = 0;
 
-export const GetAuditEventVocabularyResponse = zod
+Exportar const GetAuditEventVocabularyResponse = zod
   .object({
     bots: zod.array(
       zod.object({
@@ -516,9 +516,9 @@ export const AskAuditEventsParams = zod.object({
     ),
 });
 
-export const askAuditEventsHeaderIdempotencyKeyMax = 128;
+Exportar const askAuditEventsHeaderIdempotencyKeyMax = 128;
 
-export const AskAuditEventsHeader = zod.object({
+Exportar const AskAuditEventsHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -528,12 +528,12 @@ export const AskAuditEventsHeader = zod.object({
     ),
 });
 
-export const askAuditEventsBodyQuestionMax = 500;
+Exportar const askAuditEventsBodyQuestionMax = 500;
 
-export const askAuditEventsBodyQuestionRegExp = new RegExp("^[^\\x00]*$");
-export const askAuditEventsBodyTimeZoneMax = 100;
+Exportar const askAuditEventsBodyQuestionRegExp = new RegExp("^[^\\x00]*$");
+Exportar const askAuditEventsBodyTimeZoneMax = 100;
 
-export const AskAuditEventsBody = zod.object({
+Exportar const AskAuditEventsBody = zod.object({
   question: zod
     .string()
     .min(1)
@@ -549,7 +549,7 @@ export const AskAuditEventsBody = zod.object({
     ),
 });
 
-export const AskAuditEventsResponse = zod
+Exportar const AskAuditEventsResponse = zod
   .object({
     answerable: zod
       .enum(["yes", "partly", "no"])
@@ -637,26 +637,26 @@ export const ListDeploymentAuditEventsParams = zod.object({
     ),
 });
 
-export const listDeploymentAuditEventsQueryLimitDefault = 50;
-export const listDeploymentAuditEventsQueryLimitMax = 100;
+Exportar const listDeploymentAuditEventsQueryLimitDefault = 50;
+Exportar const listDeploymentAuditEventsQueryLimitMax = 100;
 
-export const listDeploymentAuditEventsQueryCursorMax = 4096;
+Exportar const listDeploymentAuditEventsQueryCursorMax = 4096;
 
-export const listDeploymentAuditEventsQueryCursorRegExp = new RegExp(
+Exportar const listDeploymentAuditEventsQueryCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
-export const listDeploymentAuditEventsQueryEventTypeMax = 4096;
+Exportar const listDeploymentAuditEventsQueryEventTypeMax = 4096;
 
-export const listDeploymentAuditEventsQueryEventTypeRegExp = new RegExp(
+Exportar const listDeploymentAuditEventsQueryEventTypeRegExp = new RegExp(
   "^[^\\x00]*$",
 );
 
-export const ListDeploymentAuditEventsQueryParams = zod.object({
-  limit: zod
+Exportar const ListDeploymentAuditEventsQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(listDeploymentAuditEventsQueryLimitMax)
-    .default(listDeploymentAuditEventsQueryLimitDefault)
+    .Padrão(listDeploymentAuditEventsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()

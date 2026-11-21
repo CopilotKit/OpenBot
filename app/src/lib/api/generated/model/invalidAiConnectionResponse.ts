@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The body is malformed, the provider doesn't take that login, the address isn't http or https or has something in it that signs in, or a key, an address or a model the login needs is missing.
+ * The body is malformed, the provider doesn't take that Iniciar sessão, the address isn't http or https or has something in it that signs in, or a key, an address or a model the login needs is missing.
  */
 export type InvalidAiConnectionResponse = Problem;

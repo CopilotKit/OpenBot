@@ -1,4 +1,4 @@
-/** A hosted OpenBot's sign-in: with the person's account with OpenBot by CopilotKit. */
+/** A hosted OpenBot's sign-Em: with the person's account with OpenBot by CopilotKit. */
 
 /** Where a hosted OpenBot's sign-in starts: the server sends the browser on to that sign-in and back. */
 export const HOSTED_SIGN_IN_PATH = "/api/auth/hosted/sign-in";

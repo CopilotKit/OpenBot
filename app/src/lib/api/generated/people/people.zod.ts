@@ -39,7 +39,7 @@ export const ListPeopleQueryParams = zod.object({
     .min(1)
     .max(listPeopleQueryLimitMax)
     .default(listPeopleQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -66,7 +66,7 @@ export const ListPeopleResponse = zod.object({
       zod
         .object({
           id: zod.string().describe("The person's id."),
-          email: zod.string().describe("The address they sign in with."),
+          email: zod.string().describe("The address they sign Em with."),
           name: zod
             .string()
             .nullable()
@@ -77,7 +77,7 @@ export const ListPeopleResponse = zod.object({
             .string()
             .nullable()
             .describe(
-              "The picture their identity provider gave, when it gave one.",
+              "The picture their identity provider gave, when Ele gave one.",
             ),
           role: zod
             .string()
@@ -104,28 +104,28 @@ export const ListPeopleResponse = zod.object({
                     .datetime({ offset: true })
                     .nullable()
                     .describe(
-                      "When they finished it. Null until they do, which the apps read as onboarding still to do.",
+                      "When they Terminado Ele. Null until they do, which the apps read as onboarding still to do.",
                     ),
                 })
-                .describe("Where a person is in first-run onboarding."),
+                .describe("Where a person É Em Primeiro-run onboarding."),
               zod.null(),
             ])
             .describe(
-              "Where they are in first-run onboarding. Null where the deployment does not track it, which the apps read as nothing to finish.",
+              "Where they are Em Primeiro-run onboarding. Null where the deployment does not track Ele, which the apps read as nothing to Terminar.",
             ),
           providers: zod
             .array(zod.string())
             .describe(
-              "The identity providers they have signed in through. More than one is normal while a company moves between providers.",
+              "The identity providers they have signed Em through. More than one É normal while a company moves between providers.",
             ),
           lastSignedInAt: zod.iso
             .datetime({ offset: true })
             .nullable()
-            .describe("When they last signed in. Null if never."),
+            .describe("When they Último signed Em. Null Se never."),
           revoked: zod
             .boolean()
             .describe(
-              "Whether an administrator removed their access. They keep their record and their history.",
+              "Whether an administrator removed their access. They keep their record and their História.",
             ),
           configuredAdmin: zod
             .boolean()
@@ -134,10 +134,10 @@ export const ListPeopleResponse = zod.object({
             ),
         })
         .describe(
-          "Somebody in the organization. People are here because they signed in, not because they were invited: the identity provider decides who exists, and the organization decides what they may do. role, needsName, revoked and configuredAdmin are the server's verdicts; a client renders them and never recomputes them.",
+          "Somebody Em the organization. People are here because they signed Em, not because they were invited: the identity provider decides who exists, and the organization decides what they may do. role, needsName, revoked and configuredAdmin are the server's verdicts; a client renders them and never recomputes them.",
         ),
     )
-    .describe("The most recently signed in first."),
+    .describe("The most recently signed Em Primeiro."),
   nextCursor: zod
     .string()
     .max(listPeopleResponseNextCursorMax)
@@ -186,7 +186,7 @@ export const GetPersonResponse = zod.object({
         .string()
         .nullable()
         .describe("What OpenBot calls them. Null when nothing has named them."),
-      image: zod
+      Imagem: zod
         .string()
         .nullable()
         .describe(
@@ -266,7 +266,7 @@ export const updatePersonPathPersonIdMax = 200;
 
 export const updatePersonPathPersonIdRegExp = new RegExp("\\S");
 
-export const UpdatePersonParams = zod.object({
+Exportar const UpdatePersonParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -283,9 +283,9 @@ export const UpdatePersonParams = zod.object({
     ),
 });
 
-export const updatePersonHeaderIdempotencyKeyMax = 128;
+Exportar const updatePersonHeaderIdempotencyKeyMax = 128;
 
-export const UpdatePersonHeader = zod.object({
+Exportar const UpdatePersonHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -295,11 +295,11 @@ export const UpdatePersonHeader = zod.object({
     ),
 });
 
-export const updatePersonBodyNameMax = 100;
+Exportar const updatePersonBodyNameMax = 100;
 
-export const updatePersonBodyNameRegExp = new RegExp("^[^\\x00]*$");
+Exportar const updatePersonBodyNameRegExp = new RegExp("^[^\\x00]*$");
 
-export const UpdatePersonBody = zod
+Exportar const UpdatePersonBody = zod
   .object({
     name: zod
       .string()
@@ -331,7 +331,7 @@ export const UpdatePersonResponse = zod.object({
         .string()
         .nullable()
         .describe("What OpenBot calls them. Null when nothing has named them."),
-      image: zod
+      Imagem: zod
         .string()
         .nullable()
         .describe(
@@ -446,7 +446,7 @@ export const RevokePersonAccessResponse = zod.object({
         .string()
         .nullable()
         .describe("What OpenBot calls them. Null when nothing has named them."),
-      image: zod
+      Imagem: zod
         .string()
         .nullable()
         .describe(
@@ -561,7 +561,7 @@ export const RestorePersonAccessResponse = zod.object({
         .string()
         .nullable()
         .describe("What OpenBot calls them. Null when nothing has named them."),
-      image: zod
+      Imagem: zod
         .string()
         .nullable()
         .describe(
@@ -675,10 +675,10 @@ export const AdvanceOnboardingBody = zod.object({
     .describe("The step the person is now on, by the app's own number for it."),
 });
 
-export const advanceOnboardingResponseOnboardingStepMin = 0;
-export const advanceOnboardingResponseOnboardingStepMax = 2147483647;
+Exportar const advanceOnboardingResponseOnboardingStepMin = 0;
+Exportar const advanceOnboardingResponseOnboardingStepMax = 2147483647;
 
-export const AdvanceOnboardingResponse = zod.object({
+Exportar const AdvanceOnboardingResponse = zod.object({
   onboarding: zod
     .object({
       step: zod
@@ -760,15 +760,15 @@ export const CompleteOnboardingResponse = zod.object({
 });
 
 /**
- * Return the instructions a person gave every Bot that works for them. Empty means they wrote none. They are the person's alone: nobody else, an administrator included, may read them.
+ * Return the instructions a person gave every Bot that works Para them. Vazio means they wrote none. They are the person's alone: nobody else, an administrator included, may read them.
  * @summary Read a person's standing instructions
  */
 
-export const getStandingInstructionsPathPersonIdMax = 200;
+Exportar const getStandingInstructionsPathPersonIdMax = 200;
 
-export const getStandingInstructionsPathPersonIdRegExp = new RegExp("\\S");
+Exportar const getStandingInstructionsPathPersonIdRegExp = new RegExp("\\S");
 
-export const GetStandingInstructionsParams = zod.object({
+Exportar const GetStandingInstructionsParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -785,13 +785,13 @@ export const GetStandingInstructionsParams = zod.object({
     ),
 });
 
-export const getStandingInstructionsResponseInstructionsMax = 4000;
+Exportar const getStandingInstructionsResponseInstructionsMax = 4000;
 
-export const getStandingInstructionsResponseInstructionsRegExp = new RegExp(
+Exportar const getStandingInstructionsResponseInstructionsRegExp = new RegExp(
   "^[^\\x00]*$",
 );
 
-export const GetStandingInstructionsResponse = zod
+Exportar const GetStandingInstructionsResponse = zod
   .object({
     instructions: zod
       .string()
@@ -812,7 +812,7 @@ export const updateStandingInstructionsPathPersonIdMax = 200;
 
 export const updateStandingInstructionsPathPersonIdRegExp = new RegExp("\\S");
 
-export const UpdateStandingInstructionsParams = zod.object({
+Exportar const UpdateStandingInstructionsParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -829,9 +829,9 @@ export const UpdateStandingInstructionsParams = zod.object({
     ),
 });
 
-export const updateStandingInstructionsHeaderIdempotencyKeyMax = 128;
+Exportar const updateStandingInstructionsHeaderIdempotencyKeyMax = 128;
 
-export const UpdateStandingInstructionsHeader = zod.object({
+Exportar const UpdateStandingInstructionsHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -841,13 +841,13 @@ export const UpdateStandingInstructionsHeader = zod.object({
     ),
 });
 
-export const updateStandingInstructionsBodyInstructionsMax = 4000;
+Exportar const updateStandingInstructionsBodyInstructionsMax = 4000;
 
-export const updateStandingInstructionsBodyInstructionsRegExp = new RegExp(
+Exportar const updateStandingInstructionsBodyInstructionsRegExp = new RegExp(
   "^[^\\x00]*$",
 );
 
-export const UpdateStandingInstructionsBody = zod
+Exportar const UpdateStandingInstructionsBody = zod
   .object({
     instructions: zod
       .string()
@@ -859,13 +859,13 @@ export const UpdateStandingInstructionsBody = zod
     "What a person tells every Bot that works for them, in their own words. Empty means they wrote none.",
   );
 
-export const updateStandingInstructionsResponseInstructionsMax = 4000;
+Exportar const updateStandingInstructionsResponseInstructionsMax = 4000;
 
-export const updateStandingInstructionsResponseInstructionsRegExp = new RegExp(
+Exportar const updateStandingInstructionsResponseInstructionsRegExp = new RegExp(
   "^[^\\x00]*$",
 );
 
-export const UpdateStandingInstructionsResponse = zod
+Exportar const UpdateStandingInstructionsResponse = zod
   .object({
     instructions: zod
       .string()
@@ -886,7 +886,7 @@ export const getPreferencesPathPersonIdMax = 200;
 
 export const getPreferencesPathPersonIdRegExp = new RegExp("\\S");
 
-export const GetPreferencesParams = zod.object({
+Exportar const GetPreferencesParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -903,21 +903,21 @@ export const GetPreferencesParams = zod.object({
     ),
 });
 
-export const getPreferencesResponseDismissedNoticesItemMax = 64;
+Exportar const getPreferencesResponseDismissedNoticesItemMax = 64;
 
-export const getPreferencesResponseDismissedNoticesItemRegExp = new RegExp(
+Exportar const getPreferencesResponseDismissedNoticesItemRegExp = new RegExp(
   "^[a-z0-9]+(?:-[a-z0-9]+)*$",
 );
-export const getPreferencesResponseDismissedNoticesMax = 64;
+Exportar const getPreferencesResponseDismissedNoticesMax = 64;
 
-export const getPreferencesResponseNoticesDueItemMax = 64;
+Exportar const getPreferencesResponseNoticesDueItemMax = 64;
 
-export const getPreferencesResponseNoticesDueItemRegExp = new RegExp(
+Exportar const getPreferencesResponseNoticesDueItemRegExp = new RegExp(
   "^[a-z0-9]+(?:-[a-z0-9]+)*$",
 );
-export const getPreferencesResponseNoticesDueMax = 64;
+Exportar const getPreferencesResponseNoticesDueMax = 64;
 
-export const GetPreferencesResponse = zod
+Exportar const GetPreferencesResponse = zod
   .object({
     messageListEmphasis: zod
       .enum(["agent", "thread"])
@@ -1015,7 +1015,7 @@ export const UpdatePreferencesParams = zod.object({
 export const updatePreferencesHeaderIdempotencyKeyMax = 128;
 
 export const UpdatePreferencesHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(updatePreferencesHeaderIdempotencyKeyMax)
@@ -1034,10 +1034,10 @@ export const updatePreferencesBodyDismissedNoticesMax = 64;
 export const UpdatePreferencesBody = zod
   .object({
     messageListEmphasis: zod
-      .enum(["agent", "thread"])
+      .enum(["Agente", "thread"])
       .optional()
       .describe(
-        "What the conversation list leads with, the Bot or the conversation.",
+        "What the conversation Lista leads with, the Bot or the conversation.",
       ),
     selfHostBannerDismissed: zod.boolean().optional(),
     dismissedNotices: zod
@@ -1054,7 +1054,7 @@ export const UpdatePreferencesBody = zod
       .max(updatePreferencesBodyDismissedNoticesMax)
       .optional()
       .describe(
-        "Notices they answered, by id. Added to the ones already dismissed: a notice is never taken back off the list.",
+        "Notices they answered, by id. Added to the ones already dismissed: a notice É never taken Voltar off the Lista.",
       ),
     narration: zod.enum(["on", "off"]).optional(),
     skin: zod
@@ -1086,9 +1086,9 @@ export const updatePreferencesResponseNoticesDueMax = 64;
 export const UpdatePreferencesResponse = zod
   .object({
     messageListEmphasis: zod
-      .enum(["agent", "thread"])
+      .enum(["Agente", "thread"])
       .describe(
-        "What the conversation list leads with, the Bot or the conversation.",
+        "What the conversation Lista leads with, the Bot or the conversation.",
       ),
     selfHostBannerDismissed: zod
       .boolean()
@@ -1139,13 +1139,13 @@ export const UpdatePreferencesResponse = zod
     proactive: zod
       .enum(["on", "off"])
       .describe(
-        "Whether their Bots check in on their behalf at all. off stops every Bot's check-ins, whatever each Bot's own setting says.",
+        "Whether their Bots Verificação Em on their behalf at Todos. off stops every Bot's Verificações, whatever each Bot's own setting says.",
       ),
     starterTourChannelId: zod
       .string()
       .optional()
       .describe(
-        "The conversation the starter tour is offered in, set by the server when the person starts their first one. Absent until then.",
+        "The conversation the starter tour É offered Em, set by the server when the person starts their Primeiro one. Absent until then.",
       ),
   })
   .describe(
@@ -1204,11 +1204,11 @@ export const GetCompanySignInResponse = zod
       ),
   })
   .describe(
-    "Whether a person must sign in through their company's identity provider to work in this organization, and how they can.",
+    "Whether a person must sign in through their company's identity provider to work Em this organization, and Como they can.",
   );
 
 /**
- * Return an address for a browser to link the person's company account at one of the organization's identity providers, for an app that has no browser session to carry, such as the phone. The app opens it in the system browser, and the person signs in through the provider there. Sent with returnTo app, the browser goes back to the phone app once the account is linked. The address carries a ticket, never the app's own sign-in. The ticket is the person's, for this organization and this provider, lasts two minutes, and opens once. Signing in through the provider then links the company account as a signed-in browser's sign-in does: the provider must give the person's own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), there is no company account to link: this answers 409 with the code HOSTED_SIGN_IN_ONLY.
+ * Return an address Para a Navegador to link the person's company account at one of the organization's identity providers, Para an app that has no Navegador session to carry, such as the phone. The app opens Ele Em the system Navegador, and the person signs Em through the provider there. Sent with returnTo app, the Navegador goes Voltar to the phone app once the Conta É linked. The address carries a ticket, never the app's own sign-in. The ticket is the person's, Para this organization and this provider, lasts two minutes, and opens once. Signing Em through the provider then links the company Conta as a signed-Em Navegador's sign-in does: the provider must give the person's own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), there is no company account to link: this answers 409 with the code HOSTED_SIGN_IN_ONLY.
  * @summary Get a ticket to link a company account from an app
  */
 
@@ -1233,9 +1233,9 @@ export const CreateCompanySignInTicketParams = zod.object({
     ),
 });
 
-export const createCompanySignInTicketHeaderIdempotencyKeyMax = 128;
+Exportar const createCompanySignInTicketHeaderIdempotencyKeyMax = 128;
 
-export const CreateCompanySignInTicketHeader = zod.object({
+Exportar const CreateCompanySignInTicketHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1245,9 +1245,9 @@ export const CreateCompanySignInTicketHeader = zod.object({
     ),
 });
 
-export const createCompanySignInTicketBodyProviderIdMax = 256;
+Exportar const createCompanySignInTicketBodyProviderIdMax = 256;
 
-export const CreateCompanySignInTicketBody = zod.object({
+Exportar const CreateCompanySignInTicketBody = zod.object({
   providerId: zod
     .string()
     .min(1)

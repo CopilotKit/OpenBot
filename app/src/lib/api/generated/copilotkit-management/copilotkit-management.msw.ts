@@ -34,7 +34,7 @@ export const getGetManagementEnrollmentMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetManagementEnrollmentResponseMock(),
@@ -60,7 +60,7 @@ export const getStartManagementEnrollmentMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getStartManagementEnrollmentResponseMock(),
@@ -84,7 +84,7 @@ export const getCancelManagementEnrollmentMockHandler = (
     async (
       info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 

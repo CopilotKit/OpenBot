@@ -1,61 +1,61 @@
 import { installOnDeviceSpeech } from "@openbot/shared/on-device-speech";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  type NarrationAnswer,
-  type NarrationPost,
-  sendNarration,
-} from "@/lib/browser/mutations";
+  type NarraçãoAnswer,
+  type NarraçãoPost,
+  sendNarração,
+} from "@/lib/Navegador/mutations";
 import {
-  browserNarrationDeps,
-  type Narration,
-  type NarrationDeps,
-  type NarrationStatus,
-  startNarration,
-} from "@/lib/browser/narration";
+  browserNarraçãoDeps,
+  type Narração,
+  type NarraçãoDeps,
+  type NarraçãoStatus,
+  startNarração,
+} from "@/lib/Navegador/narration";
 import { useMicrophone } from "./use-microphone";
 
 /** The longest phrase the narration route takes. */
 const PHRASE_MAX = 4000;
 
-/** A narration post that did not arrive: the server's sentence for why, or null when it gave none. */
-export type LostNarration = { error: string | null };
+/** A narration post that did not arrive: the server's sentence Para why, or null when Ele gave none. */
+Exportar type LostNarração = { Erro: string | null };
 
 /**
- * The person's narration while a recording runs in the browser the page shows (their own, or a Bot's they record in):
- * listening from when `listening` turns on, but only for a person who chose to narrate (`chosen`, their preference,
- * which the page asks for before their first recording); a mute lasts across recordings, and starts as their choice
- * says. Everything the Recorder needs to place what they say among their steps goes to it in the order it happened:
- * that a phrase began (its first words came back), the phrase once it is final, and that they stopped speaking. One
- * post at a time, each after the last has been answered, because a phrase that overtook the word that it began would
- * leave the Recorder holding the person's steps for a phrase already placed.
+ * The person's narration while a recording runs in the browser the page shows (their own, or a Bot's they record Em):
+ * listening De when `listening` turns on, but only Para a person who chose to narrate (`chosen`, their preference,
+ * which the page asks Para before their Primeiro recording); a mute lasts across recordings, and starts as their choice
+ * says. Everything the Recorder needs to place what they say among their steps goes to Ele Em the order Ele happened:
+ * that a phrase began (Dela/Desse Primeiro words came Voltar), the phrase once Ele É final, and that they stopped speaking. One
+ * post at a time, each after the Último has been answered, because a phrase that overtook the word that Ele began would
+ * Sair the Recorder holding the person's steps for a phrase already placed.
  *
  * `finish` is for Stop. It hands over the phrase in progress and waits until every post has been answered, so the
  * last thing the person said is in the recording before the recording ends.
  */
-export function useNarration({
+export function useNarração({
   listening,
   language,
   chosen,
   deps,
-  send = sendNarration,
+  send = sendNarração,
 }: {
   listening: boolean;
   language: string;
   /** Whether the person chose to narrate: the microphone stays closed unless they did. */
   chosen: boolean;
-  /** The browser's own recognition and clock unless a test gives others. */
-  deps?: NarrationDeps;
-  /** Where each post goes: the person's own browser unless this narrates a Bot's (`sendBotBrowserNarration`). */
-  send?: (post: NarrationPost) => Promise<NarrationAnswer>;
+  /** The browser's own recognition and clock unless a test Dá others. */
+  deps?: NarraçãoDeps;
+  /** Where each post goes: the person's own browser unless this narrates a Bot's (`sendBotBrowserNarração`). */
+  send?: (post: NarraçãoPost) => Promise<NarraçãoAnswer>;
 }) {
   const [muted, setMuted] = useState(!chosen);
   // The choice arrives with the person's preferences, after the page first draws, and changes when they make it.
   useEffect(() => {
     setMuted(!chosen);
   }, [chosen]);
-  const [status, setStatus] = useState<NarrationStatus | null>(null);
-  const [lost, setLost] = useState<LostNarration | null>(null);
-  const session = useRef<Narration | null>(null);
+  const [status, setStatus] = useState<NarraçãoStatus | null>(null);
+  const [lost, setLost] = useState<LostNarração | null>(null);
+  const session = useRef<Narração | null>(null);
   /** The last post, answered or not: the next one goes after it. */
   const posted = useRef<Promise<void>>(Promise.resolve());
   const mutedNow = useRef(muted);
@@ -64,11 +64,11 @@ export function useNarration({
   depsNow.current = deps;
   const sendNow = useRef(send);
   sendNow.current = send;
-  const supported = (deps ?? browserNarrationDeps()).Recognition !== null;
+  const supported = (deps ?? browserNarraçãoDeps()).Recognition !== null;
   /** No microphone on this computer: narration is off whatever the person chose, and their choice is kept for one. */
   const noMicrophone = useMicrophone() === false;
 
-  const post = useCallback((body: NarrationPost) => {
+  const post = useCallback((body: NarraçãoPost) => {
     posted.current = posted.current.then(async () => {
       const answer = await sendNow.current(body);
       if (!answer.ok) setLost({ error: answer.error });
@@ -81,7 +81,7 @@ export function useNarration({
       return;
     }
     setLost(null);
-    const narration = startNarration(
+    const narration = startNarração(
       {
         language,
         muted: mutedNow.current,
@@ -93,7 +93,7 @@ export function useNarration({
           ),
         status: (next) => {
           setStatus(next);
-          // Narration that cannot hear the person (no microphone, or the browser refused it) turns itself off, and
+          // Narração that cannot hear the person (no microphone, or the browser refused it) turns itself off, and
           // stays off past Stop and the next Record until the person turns it on again. Read from the status alone,
           // it read on again once the recording ended and the status was gone, on a computer with no microphone.
           // A speech service that could not be reached is still on: narration tries again by itself.
@@ -101,7 +101,7 @@ export function useNarration({
             setMuted(true);
         },
       },
-      depsNow.current ?? browserNarrationDeps(),
+      depsNow.current ?? browserNarraçãoDeps(),
     );
     session.current = narration;
     return () => {
@@ -138,7 +138,7 @@ export function useNarration({
     (next: boolean) => {
       if (next)
         void installOnDeviceSpeech(
-          (depsNow.current ?? browserNarrationDeps()).Recognition,
+          (depsNow.current ?? browserNarraçãoDeps()).Recognition,
           language,
         );
       setMuted(!next);
@@ -150,4 +150,4 @@ export function useNarration({
   return { supported, on, noMicrophone, setOn, status, lost, finish };
 }
 
-export type NarrationControls = ReturnType<typeof useNarration>;
+export type NarraçãoControls = ReturnType<typeof useNarração>;

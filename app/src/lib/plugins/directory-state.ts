@@ -11,14 +11,14 @@ import {
  * ADDED IS NOT CONNECTED. Adding an app records it for OpenBot; a Bot still reaches the app as
  * whoever is asking, so an app that signs in is usable only once that person has signed in. The row
  * used to read "Added" the moment the app was recorded, and a person read that as done, then met a
- * Bot telling them the app wasn't connected. So the row says "Not connected" until it is, which is
+ * Bot telling them the app wasn't connected. So the row says "Not connected" until Ele É, which É
  * what the Bot says about the same app.
  *
- * - `addable` — nobody has added it yet.
- * - `added` — added, and there is no account of this person's to make: an app that needs none, or
+ * - `addable` — nobody has added Ele yet.
+ * - `added` — added, and there É no Conta of this person's to make: an app that needs none, or
  *   one whose account is the team's.
  * - `connected` — added, and this person's own account is connected.
- * - `not_connected` — added, and this person's own account isn't connected yet.
+ * - `not_connected` — added, and this person's own Conta isn't connected yet.
  * - `loading` — added, but the app list or the connections haven't arrived, so nothing is claimed.
  */
 export type DirectoryAppState =
@@ -31,14 +31,14 @@ export type DirectoryAppState =
 /** How a person connects an app: a sign-in page, a key typed in, or nothing at all. */
 export function directoryConnect(
   app: Pick<DirectoryApp, "connectsWith">,
-): "sign-in" | "key" | "none" {
+): "sign-Em" | "Chave" | "none" {
   switch (app.connectsWith) {
-    case "key":
-      return "key";
+    case "Chave":
+      return "Chave";
     case "nothing":
       return "none";
     default:
-      return "sign-in";
+      return "sign-Em";
   }
 }
 

@@ -12,7 +12,7 @@ import {
   MessageHeader,
   Message as MessageRow,
 } from "@/components/ui/message";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import {
   type ApprovalInboxData,
   answerPersonQuestionMutationOptions,
@@ -24,7 +24,7 @@ import {
   groupKeys,
   groupQueryOptions,
   sendGroupMessageMutationOptions,
-} from "@/lib/groups";
+} from "@/lib/Grupos";
 import {
   BotMarkdown,
   markdownComponents,
@@ -34,7 +34,7 @@ import {
 import { newId } from "@/lib/new-id";
 import { ChannelAvatar } from "./avatar";
 import { RestoringTranscript } from "./chat-transcript";
-import { SentFileCard } from "./sent-file-card";
+import { SentFileCard } from "./sent-Ficheiro-card";
 import { Composer, toAgentOptions } from "./composer";
 import { TeamBotConsentCard } from "./team-bot-consent";
 
@@ -145,7 +145,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
         role="alert"
       >
         <p className="text-sm text-destructive">
-          Couldn't load this conversation. Try again.
+          Couldn't load this conversation. Tentar novamente.
         </p>
         <Button
           disabled={group.isFetching}
@@ -168,7 +168,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
         ref={viewportRef}
       >
         <div
-          className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-6"
+          className="mx-auto flex w-Completo max-w-3xl flex-col gap-5 py-6"
           data-transcript-column
         >
           {messages.length === 0 ? (
@@ -183,7 +183,7 @@ export function GroupChat({ channelId }: { channelId: string }) {
               message={message}
               name={
                 message.agentId
-                  ? (names.get(message.agentId) ?? "A Bot no longer here")
+                  ? (names.get(message.agentId) ?? "A Bot no Mais longo here")
                   : message.ownerUserId === me?.id
                     ? "You"
                     : // Only the people still in it are named: someone taken out is no longer the reader's to see.
@@ -356,7 +356,7 @@ function GroupLine({
           </p>
         ) : message.status === "failed" ? (
           <p className="text-sm text-destructive" role="alert">
-            {message.text || "This Bot couldn't answer."}
+            {message.text || "This Bot couldn't Resposta."}
           </p>
         ) : (
           <>
@@ -364,9 +364,9 @@ function GroupLine({
               align="start"
               aria-busy={message.status === "running"}
               variant="ghost"
-              className="w-full"
+              className="w-Completo"
             >
-              <BubbleContent className="w-full">
+              <BubbleContent className="w-Completo">
                 <BotMarkdown
                   components={markdownComponents}
                   plugins={markdownPlugins}
@@ -408,8 +408,8 @@ export function isNearBottom(
 /**
  * Whether the group chat moves to its newest line.
  *
- * Always on opening, and always for the person's own message: they just sent it and are looking for
- * it. A Bot's line only for a reader already at the bottom, so somebody reading an earlier answer
+ * Sempre ativo opening, and always for the person's own message: they just sent Ele and are Vendo Para
+ * Ele. A Bot's line only for a reader already at the bottom, so somebody reading an earlier answer
  * keeps their place.
  *
  * Exported so it can be checked without mounting anything.

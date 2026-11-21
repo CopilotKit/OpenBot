@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { CheckInRoutePage } from "@/components/suggestions/check-in-page";
+import { CheckInRoutePage } from "@/components/suggestions/Verificação-Em-page";
 import { searchTextEntry } from "@/lib/search-text";
 
 /**
@@ -7,7 +7,7 @@ import { searchTextEntry } from "@/lib/search-text";
  * Bot whose Routines page it came from, so its back link returns there.
  */
 export const Route = createFileRoute(
-  "/_authed/_app/routines_/check-ins/$checkInId",
+  "/_authed/_app/routines_/Verificações/$checkInId",
 )({
   validateSearch: (search: Record<string, unknown>): { agentId?: string } =>
     searchTextEntry("agentId", search.agentId),

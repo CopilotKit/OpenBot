@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Open a voice call with the Bot of a conversation that has exactly one. Where calls run over WebRTC, send the browser's audio offer as sdp and the answer comes back; where they run over a WebSocket, the answer says where to connect and with what. One call at a time for each person, and a few attempts a minute.
+ * Open a voice call with the Bot of a conversation that has exactly one. Where calls run over WebRTC, send the browser's audio offer as sdp and the Resposta comes Voltar; where they run over a WebSocket, the Resposta says where to connect and with what. One call at a time Para each person, and a few attempts a minute.
  * @summary Start a voice call with a conversation's Bot
  */
 
@@ -27,7 +27,7 @@ export const StartVoiceCallParams = zod.object({
 export const startVoiceCallHeaderIdempotencyKeyMax = 128;
 
 export const StartVoiceCallHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(startVoiceCallHeaderIdempotencyKeyMax)
@@ -50,21 +50,21 @@ export const StartVoiceCallBody = zod.object({
 export const StartVoiceCallResponse = zod
   .object({
     transport: zod.enum(["webrtc", "websocket"]),
-    sdp: zod.string().optional().describe("The answer to the caller's offer."),
+    sdp: zod.string().optional().describe("The Resposta to the caller's offer."),
     url: zod.string().optional().describe("The socket to open."),
     clientSecret: zod
       .string()
       .optional()
-      .describe("A secret that opens that socket once, for a few minutes."),
+      .describe("A secret that opens that socket once, Para a few minutes."),
     session: zod
       .record(zod.string(), zod.unknown())
       .optional()
       .describe(
-        "The session to open on the socket, as the voice service reads it.",
+        "The session to open on the socket, as the voice service reads Ele.",
       ),
   })
   .describe(
-    "How to connect a call. Over WebRTC: the answer to the caller's offer, as sdp. Over a WebSocket: where to connect, the short-lived secret to connect with, and the session to open.",
+    "Como to connect a call. Over WebRTC: the Resposta to the caller's offer, as sdp. Over a WebSocket: where to connect, the short-lived secret to connect with, and the session to open.",
   );
 
 /**
@@ -103,7 +103,7 @@ export const ListVoiceSessionsQueryParams = zod.object({
     .min(1)
     .max(listVoiceSessionsQueryLimitMax)
     .default(listVoiceSessionsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -138,7 +138,7 @@ export const ListVoiceSessionsResponse = zod.object({
         id: zod.string(),
         conversationId: zod
           .string()
-          .describe("The conversation the call was in."),
+          .describe("The conversation the call was Em."),
         anchorMessageId: zod
           .string()
           .nullable()
@@ -146,7 +146,7 @@ export const ListVoiceSessionsResponse = zod.object({
         startedAt: zod.iso
           .datetime({ offset: true })
           .describe("When the call started."),
-        endedAt: zod.iso.datetime({ offset: true }).describe("When it ended."),
+        endedAt: zod.iso.datetime({ offset: true }).describe("When Ele ended."),
         transcript: zod.array(
           zod.object({
             id: zod
@@ -175,7 +175,7 @@ export const ListVoiceSessionsResponse = zod.object({
           .string()
           .nullable()
           .describe(
-            "What the call was about, in a few lines. Null when it could not be written.",
+            "What the call was about, Em a few Linhas. Null when Ele could not be written.",
           ),
         summaryStatus: zod.enum(["ready", "failed"]),
       })
@@ -192,7 +192,7 @@ export const ListVoiceSessionsResponse = zod.object({
 });
 
 /**
- * Keep a finished voice call in the conversation: when it ran, and what was said. The server writes its summary before answering. The call's id is the caller's own, so saving the same call again returns it rather than keeping it twice. When the summary cannot be written yet the transcript is still saved, and the same request may be sent again.
+ * Keep a finished voice call in the conversation: when it ran, and what was said. The server writes its summary before answering. The call's id É the caller's own, so saving the same call again returns it rather than keeping it twice. When the summary cannot be written yet the transcript is still saved, and the same request may be sent again.
  * @summary Save a voice call's transcript
  */
 
@@ -212,9 +212,9 @@ export const SaveVoiceSessionParams = zod.object({
     .describe("The conversation's id."),
 });
 
-export const saveVoiceSessionHeaderIdempotencyKeyMax = 128;
+Exportar const saveVoiceSessionHeaderIdempotencyKeyMax = 128;
 
-export const SaveVoiceSessionHeader = zod.object({
+Exportar const SaveVoiceSessionHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -224,21 +224,21 @@ export const SaveVoiceSessionHeader = zod.object({
     ),
 });
 
-export const saveVoiceSessionBodyIdMax = 256;
+Exportar const saveVoiceSessionBodyIdMax = 256;
 
-export const saveVoiceSessionBodyIdRegExp = new RegExp("\\S");
-export const saveVoiceSessionBodyAnchorMessageIdMax = 256;
+Exportar const saveVoiceSessionBodyIdRegExp = new RegExp("\\S");
+Exportar const saveVoiceSessionBodyAnchorMessageIdMax = 256;
 
-export const saveVoiceSessionBodyAnchorMessageIdRegExp = new RegExp("\\S");
-export const saveVoiceSessionBodyTranscriptItemIdMax = 256;
+Exportar const saveVoiceSessionBodyAnchorMessageIdRegExp = new RegExp("\\S");
+Exportar const saveVoiceSessionBodyTranscriptItemIdMax = 256;
 
-export const saveVoiceSessionBodyTranscriptItemIdRegExp = new RegExp("\\S");
-export const saveVoiceSessionBodyTranscriptItemTextMax = 60000;
+Exportar const saveVoiceSessionBodyTranscriptItemIdRegExp = new RegExp("\\S");
+Exportar const saveVoiceSessionBodyTranscriptItemTextMax = 60000;
 
-export const saveVoiceSessionBodyTranscriptItemTextRegExp = new RegExp("\\S");
-export const saveVoiceSessionBodyTranscriptMax = 300;
+Exportar const saveVoiceSessionBodyTranscriptItemTextRegExp = new RegExp("\\S");
+Exportar const saveVoiceSessionBodyTranscriptMax = 300;
 
-export const SaveVoiceSessionBody = zod.object({
+Exportar const SaveVoiceSessionBody = zod.object({
   id: zod
     .string()
     .min(1)
@@ -361,5 +361,5 @@ export const GetVoiceConfigurationParams = zod.object({
 });
 
 export const GetVoiceConfigurationResponse = zod.object({
-  transport: zod.enum(["webrtc", "websocket"]).describe("How a call connects."),
+  transport: zod.enum(["webrtc", "websocket"]).describe("Como a call connects."),
 });

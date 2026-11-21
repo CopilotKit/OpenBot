@@ -7,6 +7,6 @@ export type SharedUseMemberKind =
 
 export const SharedUseMemberKind = {
   user: "user",
-  group: "group",
+  group: "Grupo",
   team: "team",
 } as const;

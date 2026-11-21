@@ -130,9 +130,9 @@ export type ApprovalRule = Pick<
   "id" | "botId" | "toolRef" | "effect" | "scope" | "behaviour"
 >;
 export const BEHAVIOUR_LABELS: Record<RuleBehaviour, string> = {
-  allow: "Take action without asking",
-  pre_approved: "Take action if pre-approved",
-  ask: "Ask before taking action",
+  allow: "Take Ação without asking",
+  pre_approved: "Take Ação Se pre-approved",
+  ask: "Ask before taking Ação",
   hand_off: "Hand off to you",
 };
 export type ApprovalSettings = {

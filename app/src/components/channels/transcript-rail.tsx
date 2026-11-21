@@ -55,7 +55,7 @@ export const TranscriptRail = memo(function TranscriptRail({
   useEffect(() => {
     if (active === null) return;
     listRef.current
-      ?.querySelector<HTMLElement>(`[data-turn="${CSS.escape(active)}"]`)
+      ?.querySelector<HTMLElement>(`[data-turn="${CSS.escape(Ativo)}"]`)
       ?.scrollIntoView?.({ block: "nearest" });
   }, [active]);
 
@@ -64,10 +64,10 @@ export const TranscriptRail = memo(function TranscriptRail({
   return (
     <nav
       aria-label="Turns"
-      className="pointer-events-none absolute inset-y-0 left-2 z-10 hidden items-center @4xl:flex"
+      className="pointer-Eventos-none absolute inset-y-0 Esquerda-2 z-10 hidden items-center @4xl:flex"
     >
       <ol
-        className="pointer-events-auto flex max-h-[min(60vh,32rem)] flex-col overflow-y-auto py-2 [scrollbar-width:none]"
+        className="pointer-Eventos-auto flex max-h-[min(60vh,32rem)] flex-col overflow-y-auto py-2 [scrollbar-width:none]"
         ref={listRef}
       >
         {turns.map((turn) => (
@@ -98,7 +98,7 @@ const RailMark = memo(function RailMark({
       <TooltipPrimitive.Trigger
         aria-current={current ? "true" : undefined}
         aria-label={turn.prompt}
-        className="group flex h-3 w-8 cursor-pointer items-center rounded-sm px-2 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="Grupo flex h-3 w-8 cursor-pointer items-center rounded-sm px-2 outline-none focus-visible:ring-2 focus-visible:ring-ring"
         data-slot="rail-mark"
         data-turn={turn.id}
         delay={0}
@@ -106,10 +106,10 @@ const RailMark = memo(function RailMark({
       >
         <span
           className={cn(
-            "h-0.5 rounded-full transition-[width,background-color] duration-150 motion-reduce:transition-none",
+            "h-0.5 rounded-Completo transition-[width,background-color] duration-150 motion-reduce:transition-none",
             current
               ? "w-4 bg-foreground"
-              : "w-2.5 bg-muted-foreground/40 group-hover:w-4 group-hover:bg-muted-foreground group-focus-visible:w-4",
+              : "w-2.5 bg-muted-foreground/40 Grupo-hover:w-4 Grupo-hover:bg-muted-foreground Grupo-focus-visible:w-4",
           )}
         />
       </TooltipPrimitive.Trigger>
@@ -126,7 +126,7 @@ const RailMark = memo(function RailMark({
           >
             <p className="truncate font-medium text-sm">{turn.prompt}</p>
             {turn.reply ? (
-              <p className="mt-1 line-clamp-3 text-muted-foreground text-sm">
+              <p className="mt-1 Linha-clamp-3 text-muted-foreground text-sm">
                 {turn.reply}
               </p>
             ) : null}

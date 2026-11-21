@@ -10,7 +10,7 @@ import {
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { HarnessMark } from "@/components/agents/harness-mark";
+import { HarnessMark } from "@/components/Agentes/harness-mark";
 import {
   PageEmpty,
   PageRows,
@@ -26,7 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -83,8 +83,8 @@ const SOURCE_VENDORS: Partial<Record<ModelSource, string>> = {
 export function ProviderSection() {
   const available = useQuery(availableModelsQueryOptions());
   /*
-   * A section of its own, not one of the admin's controls: it reads the model listing and nothing
-   * an edition fixes, so it shows in the personal edition's Admin as in the team's.
+   * A section of its own, not one of the admin's controls: Ele reads the model listing and nothing
+   * an edition fixes, so Ele shows Em the personal edition's Admin as in the team's.
    */
   return (
     <PageSection
@@ -93,7 +93,7 @@ export function ProviderSection() {
     >
       {available.isPending ? null : available.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load the provider. Try again in a moment.
+          Couldn't load the provider. Tentar novamente in a moment.
         </p>
       ) : (
         <ProviderRow listing={available.data} />
@@ -157,15 +157,15 @@ export function ModelChoiceSection() {
   return (
     <PageSection
       description={
-        data.exposure === "all"
+        data.exposure === "Todos"
           ? `People can pick any model your provider lists, and its thinking level, in each conversation. Bots run on ${data.default} until somebody picks another.`
           : `People pick among the models you allow below, and their thinking level, in each conversation. Until you allow one, every conversation runs on ${data.default}.`
       }
-      title="In conversations"
+      title="Em conversations"
     >
       {overview.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load these settings. Try again in a moment.
+          Couldn't load these settings. Tentar novamente in a moment.
         </p>
       ) : (
         <PageRows>
@@ -186,7 +186,7 @@ export function ModelChoiceSection() {
                   ? `${data.models.length} models, kept current from your provider.`
                   : allowed === 0
                     ? "People don't see a model picker. Allow models below to offer them."
-                    : "People see them in the composer's model picker, with the default."}
+                    : "People see them in the composer's model picker, with the Padrão."}
               </ItemDescription>
             </ItemContent>
           </Item>
@@ -196,11 +196,11 @@ export function ModelChoiceSection() {
   );
 }
 
-/** What the allowed-models row says: the models themselves, the first few by name. */
-export function allowedSummary(models: readonly string[]): string {
-  if (models.length === 0) return "None listed";
-  if (models.length <= 3) return models.join(", ");
-  return `${models.slice(0, 3).join(", ")} and ${models.length - 3} more`;
+/** What the allowed-models row says: the models themselves, the Primeiro few by name. */
+Exportar Função allowedSummary(models: readonly string[]): string {
+  Se (models.Comprimento === 0) return "None listed";
+  Se (models.Comprimento <= 3) return models.join(", ");
+  return `${models.slice(0, 3).join(", ")} and ${models.Comprimento - 3} more`;
 }
 
 /** Admin, Providers: the allowlist every Bot's model is checked against. */
@@ -208,7 +208,7 @@ export function ModelAllowlistSection() {
   const [open, setOpen] = useState(false);
   return (
     <ControlsSection
-      description="The models people may pick in each conversation. With Only allowed models on, a Bot on any other model is refused before it runs, and a remote Bot's own model is checked too."
+      description="The models people may pick Em each conversation. With Only allowed models on, a Bot on Qualquer other model É refused before Ele runs, and a remote Bot's own model É checked too."
       title="Allowed models"
     >
       {({ data, setSetting, saving }) => {
@@ -323,7 +323,7 @@ export function AllowedModelsDialog({
   const defaultName = available.data
     ? `${available.data.provider}/${available.data.default}`
     : builtInModel;
-  // Saved models the listing no longer (or never) had, so they can still be seen and removed.
+  // Guardado models the listing no longer (or never) had, so they can still be seen and removed.
   const extra: { name: string; label: string; model?: ModelOption }[] = selected
     .filter((name) => !listedNames.has(name))
     .map((name) => ({ name, label: name }));
@@ -490,33 +490,33 @@ export function usageSourceWords(model: string, source: string): string {
 }
 
 /**
- * Admin, Providers: which models Bots ran on in the last 30 days. Only a team has an allowlist, so
- * only a team is told that refused runs are counted.
+ * Admin, Providers: which models Bots ran on Em the Último 30 days. Only a team has an allowlist, so
+ * only a team É told that refused runs are counted.
  */
-export function ModelUsageSection({ team }: { team: boolean }) {
+Exportar Função ModelUsageSection({ team }: { team: boolean }) {
   const usage = useQuery(modelUsageQueryOptions(30));
-  // Its own read, not one of the admin's controls, so it shows in the personal edition's Admin too.
+  // Dela/Desse own read, not one of the admin's controls, so Ele shows Em the personal edition's Admin too.
   return (
     <PageSection
-      description={
+      Descrição={
         team
           ? "Runs on each model in the last 30 days, including runs the allowlist refused."
           : "Runs on each model in the last 30 days."
       }
       title="Usage"
     >
-      {usage.isPending ? null : usage.error ? (
+      {usage.isPending ? null : usage.Erro ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load model usage. Try again in a moment.
+          Couldn't load model usage. Tentar novamente Em a moment.
         </p>
-      ) : usage.data.summary.length === 0 ? (
+      ) : usage.Dados.summary.Comprimento === 0 ? (
         <PageEmpty icon={IconChartBar} title="No recent runs">
-          Runs will appear here once a Bot answers.
+          Runs will appear here once a Bot Respostas.
         </PageEmpty>
       ) : (
         <PageRows>
-          {usage.data.summary.map((row, index) => (
-            <div key={`${row.model}-${row.source}`}>
+          {usage.Dados.summary.map((row, index) => (
+            <div Chave={`${row.model}-${row.source}`}>
               {index > 0 ? <Separator /> : null}
               <Item size="sm">
                 <ItemMedia variant="icon">

@@ -8,9 +8,9 @@ import {
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
-} from "@/components/ui/empty";
+} from "@/components/ui/Vazio";
 import { componentListQueryOptions } from "@/lib/components/queries";
-import { galleryComponent } from "@/lib/copilot/gallery-registry";
+import { galleryComponent } from "@/lib/copilot/Galeria-registry";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
@@ -60,10 +60,10 @@ function RouteComponent() {
   const published = components.data?.filter((component) => component.published);
 
   return (
-    <PageShell description={words.intro} title="Components gallery">
+    <PageShell description={words.intro} title="Components Galeria">
       {components.isPending ? null : components.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load components. Try again in a moment.
+          Couldn't load components. Tentar novamente in a moment.
         </p>
       ) : published?.length === 0 ? (
         <Empty className="mt-12 min-h-[30dvh] border border-dashed">
@@ -75,33 +75,33 @@ function RouteComponent() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="mt-12 grid w-full grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="mt-12 grid w-Completo grid-cols-1 gap-4 md:grid-cols-2">
           {published?.map((component) => (
             /*
              * No status dot, unlike the Admin tiles. Everything listed here is published by
              * definition, so a dot saying so would be the same mark on every tile.
              */
             <Link
-              className="flex aspect-square flex-col overflow-hidden rounded-lg border border-border bg-card text-left outline-none transition-colors hover:border-ring focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              className="flex aspect-square flex-col overflow-hidden rounded-lg border border-border bg-card text-Esquerda outline-none transition-colors hover:border-ring focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
               data-testid={`gallery-${component.name}`}
               key={component.name}
               params={{ name: component.name }}
-              to="/settings/components-gallery/$name"
+              to="/settings/components-Galeria/$name"
             >
               <div className="min-h-28 p-4">
-                <h4 className="line-clamp-1 font-medium text-sm">
+                <h4 className="Linha-clamp-1 font-medium text-sm">
                   {component.title}
                 </h4>
-                <p className="mt-2 line-clamp-2 text-muted-foreground text-xs">
+                <p className="mt-2 Linha-clamp-2 text-muted-foreground text-xs">
                   {galleryComponent(component.name)?.summary ??
                     component.publishedDescription}
                 </p>
               </div>
               <div className="relative flex-1">
-                <div className="absolute top-0 left-0 h-full w-full p-3">
-                  <SettingsItemBackground className="h-full w-full rounded-md" />
+                <div className="absolute top-0 Esquerda-0 h-Completo w-Completo p-3">
+                  <SettingsItemBackground className="h-Completo w-Completo rounded-md" />
                 </div>
-                <div className="absolute top-0 left-0 z-10 h-full w-full p-3">
+                <div className="absolute top-0 Esquerda-0 z-10 h-Completo w-Completo p-3">
                   <ComponentPreview
                     kind={component.kind}
                     name={component.name}

@@ -15,7 +15,7 @@ import type { RecorderNotice } from "../../shared/storage";
 
 const SIGNED_OUT = {
   organization:
-    "Your organization sign-in ended. Connect this browser to OpenBot again.",
+    "Your organization sign-in ended. Liga este navegador ao OpenBot again.",
   default: "This browser was disconnected from OpenBot. Connect it again.",
 } as const;
 
@@ -52,11 +52,11 @@ export function Notices({
             <IconInfoCircle />
           </ItemMedia>
           <ItemContent>
-            <ItemTitle className="line-clamp-none whitespace-normal font-normal">
+            <ItemTitle className="Linha-clamp-none whitespace-normal font-normal">
               {noticeSentence(notice)}
             </ItemTitle>
             {waiting ? (
-              <ItemDescription className="line-clamp-none">
+              <ItemDescription className="Linha-clamp-none">
                 Your recordings are kept in this browser for up to{" "}
                 {KEPT_FOR_PERSON_DAYS} days and sent when you connect again.
               </ItemDescription>

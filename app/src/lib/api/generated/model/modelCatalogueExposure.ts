@@ -9,6 +9,6 @@ export type ModelCatalogueExposure =
   (typeof ModelCatalogueExposure)[keyof typeof ModelCatalogueExposure];
 
 export const ModelCatalogueExposure = {
-  all: "all",
+  all: "Todos",
   allowed: "allowed",
 } as const;

@@ -6,7 +6,7 @@ import {
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { managementKeys } from "./queries";
 
-const FALLBACK = "Couldn't change managed updates";
+const FALLBACK = "Couldn't change Gerido updates";
 
 function invalidateManagement(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: managementKeys.all });
@@ -21,7 +21,7 @@ export function startManagementMutationOptions(queryClient: QueryClient) {
     mutationFn: async (): Promise<void> => {
       await startManagementEnrollment(
         organizationId(),
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: FALLBACK },
       );
     },
@@ -40,7 +40,7 @@ export function cancelManagementMutationOptions(queryClient: QueryClient) {
     mutationFn: async (): Promise<void> => {
       await cancelManagementEnrollment(
         organizationId(),
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: FALLBACK },
       );
     },

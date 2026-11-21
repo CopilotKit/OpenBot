@@ -23,8 +23,8 @@ import type {
   BrowserConflictResponse,
   BrowserForbiddenResponse,
   BrowserInvalidRequestResponse,
-  BrowserNarrationRequest,
-  BrowserNarrationTaken,
+  BrowserNarraçãoRequest,
+  BrowserNarraçãoTaken,
   BrowserNavigateRequest,
   BrowserNotAnsweringResponse,
   BrowserRecordingRequest,
@@ -84,7 +84,7 @@ export const getGetBotBrowserUrl = (organizationId: string, botId: string) => {
 };
 
 /**
- * Return the browser on a Bot's computer as the caller sees it: whether it is open, its tabs, what the Recorder in it is doing, whether the caller holds control of it, and whether a recording running there is theirs. Of somebody else's recording it says only that one is running. Reading it never starts the computer or opens the browser.
+ * Return the browser on a Bot's Computador as the caller sees Ele: whether Ele É open, Dela/Desse tabs, what the Recorder Em Ele É doing, whether the caller holds control of Ele, and whether a recording running there É theirs. Of somebody else's recording it says only that one is running. Reading it never starts the computer or opens the browser.
  * @summary Read a Bot's browser
  */
 export const getBotBrowser = async (
@@ -298,7 +298,7 @@ export const getChangeBotBrowserTabsUrl = (
 };
 
 /**
- * Open a new tab, switch to a tab or close one in a Bot's browser. Only the person holding control of the Bot's computer may; anybody else is refused with a conflict. Only web addresses open.
+ * Open a new tab, switch to a tab or close one in a Bot's Navegador. Only the person holding control of the Bot's computer may; anybody else is refused with a conflict. Only web addresses open.
  * @summary Open, switch to or close a tab in a Bot's browser
  */
 export const changeBotBrowserTabs = async (
@@ -475,7 +475,7 @@ export const getNavigateBotBrowserUrl = (
 };
 
 /**
- * Open an address in the tab the person is on in a Bot's browser, or go back, forward or reload. Only the person holding control of the Bot's computer may; anybody else is refused with a conflict. Only web addresses open.
+ * Open an address in the tab the person is on in a Bot's Navegador, or Ir Voltar, forward or reload. Only the person holding control of the Bot's computer may; anybody else is refused with a conflict. Only web addresses open.
  * @summary Go to an address in a Bot's browser
  */
 export const navigateBotBrowser = async (
@@ -652,8 +652,8 @@ export const getRecordInBotBrowserUrl = (
 };
 
 /**
- * Start recording what the caller does in a Bot's browser, or stop their recording. Only the person is recorded, never the Bot: a start is for the person holding control, while nothing else records there, and the recording ends when control goes back to the Bot. Only the person who started a recording can stop it. Where Bots share one computer nothing can be recorded in a Bot's browser, and a start is refused. Whether the person narrates is not read here: a Bot's browser is narrated from the page.
- * @summary Start or stop recording in a Bot's browser
+ * Start recording what the caller does in a Bot's browser, or stop their recording. Only the person is recorded, never the Bot: a start is for the person holding control, while nothing else records there, and the recording ends when control goes back to the Bot. Only the person who started a recording can stop it. Where Bots share one computer nothing can be recorded in a Bot's browser, and a start is refused. Whether the person narrates is not read here: a Bot's Navegador É narrated De the page.
+ * @summary Start or stop recording Em a Bot's browser
  */
 export const recordInBotBrowser = async (
   organizationId: string,
@@ -832,16 +832,16 @@ export const getNarrateInBotBrowserUrl = (
 };
 
 /**
- * Send one thing the caller said while recording in a Bot's browser: a finished phrase with when it started and ended, or that they began or stopped speaking. Times are the sender's clock; the server moves them onto its own from when the request arrived and sentAt. Only the person whose recording is running may.
- * @summary Add narration to a recording in a Bot's browser
+ * Send one thing the caller said while recording in a Bot's browser: a finished phrase with when it started and ended, or that they began or stopped speaking. Times are the sender's clock; the server moves them onto Dela/Desse own De when the request arrived and sentAt. Only the person whose recording É running may.
+ * @summary Adicionar narration to a recording Em a Bot's browser
  */
 export const narrateInBotBrowser = async (
   organizationId: string,
   botId: string,
-  browserNarrationRequest: BrowserNarrationRequest,
+  browserNarraçãoRequest: BrowserNarraçãoRequest,
   headers: NarrateInBotBrowserHeaders,
   options?: Parameters<typeof apiRequest>[1],
-): Promise<BrowserNarrationTaken> => {
+): Promise<BrowserNarraçãoTaken> => {
   const getHeaders = (
     h?: NonNullable<RequestInit["headers"]>,
   ): Record<string, string | readonly string[]> => {
@@ -863,7 +863,7 @@ export const narrateInBotBrowser = async (
     }
     return headers;
   };
-  return apiRequest<BrowserNarrationTaken>(
+  return apiRequest<BrowserNarraçãoTaken>(
     getNarrateInBotBrowserUrl(organizationId, botId),
     {
       ...options,
@@ -873,7 +873,7 @@ export const narrateInBotBrowser = async (
         ...headers,
         ...getHeaders(options?.headers),
       },
-      body: JSON.stringify(browserNarrationRequest),
+      body: JSON.stringify(browserNarraçãoRequest),
     },
   );
 };
@@ -940,7 +940,7 @@ export const getNarrateInBotBrowserMutationOptions = <
 export type NarrateInBotBrowserMutationResult = NonNullable<
   Awaited<ReturnType<typeof narrateInBotBrowser>>
 >;
-export type NarrateInBotBrowserMutationBody = BrowserNarrationRequest;
+export type NarrateInBotBrowserMutationBody = BrowserNarraçãoRequest;
 export type NarrateInBotBrowserMutationError =
   | BrowserInvalidRequestResponse
   | UnauthenticatedResponse
@@ -957,7 +957,7 @@ export type NarrateInBotBrowserMutationError =
 export type NarrateInBotBrowserMutationVariables = {
   organizationId: string;
   botId: string;
-  data: BrowserNarrationRequest;
+  data: BrowserNarraçãoRequest;
   headers: NarrateInBotBrowserHeaders;
 };
 
@@ -1160,7 +1160,7 @@ export const getGetPersonBrowserUrl = (
 };
 
 /**
- * Return the browser OpenBot runs for a person: whether this OpenBot can run one at all, where it shows, whether it is open, its tabs, what the Recorder in it is doing, and what any of the person's Recorders is recording. It is the person's alone: nobody else, an administrator included, may read it. Reading it never starts a computer or opens the browser.
+ * Return the browser OpenBot runs for a person: whether this OpenBot can run one at all, where it shows, whether it is open, its tabs, what the Recorder in it is doing, and what any of the person's Recorders É recording. Ele É the person's alone: nobody else, an administrator included, may read it. Reading it never starts a computer or opens the browser.
  * @summary Read a person's own browser
  */
 export const getPersonBrowser = async (
@@ -1393,7 +1393,7 @@ export const getOpenPersonBrowserUrl = (
 };
 
 /**
- * Open the caller's browser, or bring it forward when it is already open, with the Recorder in it connected as them. On OpenBot Desktop it may instead bring the person's everyday Chrome or Edge forward, or open the Recorder's store page in it; the answer says which. Only the person themselves may.
+ * Open the caller's browser, or bring it forward when it is already open, with the Recorder in it connected as them. On OpenBot Desktop it may instead bring the person's everyday Chrome or Edge forward, or open the Recorder's store page Em Ele; the Resposta says which. Only the person themselves may.
  * @summary Open a person's own browser
  */
 export const openPersonBrowser = async (
@@ -2085,16 +2085,16 @@ export const getNarrateInPersonBrowserUrl = (
 };
 
 /**
- * Send one thing the caller said while recording in their browser: a finished phrase with when it started and ended, or that they began or stopped speaking. Times are the sender's clock; the server moves them onto its own from when the request arrived and sentAt. Only the person themselves may.
- * @summary Add narration to a recording in a person's own browser
+ * Send one thing the caller said while recording in their browser: a finished phrase with when it started and ended, or that they began or stopped speaking. Times are the sender's clock; the server moves them onto Dela/Desse own De when the request arrived and sentAt. Only the person themselves may.
+ * @summary Adicionar narration to a recording Em a person's own browser
  */
 export const narrateInPersonBrowser = async (
   organizationId: string,
   personId: string,
-  browserNarrationRequest: BrowserNarrationRequest,
+  browserNarraçãoRequest: BrowserNarraçãoRequest,
   headers: NarrateInPersonBrowserHeaders,
   options?: Parameters<typeof apiRequest>[1],
-): Promise<BrowserNarrationTaken> => {
+): Promise<BrowserNarraçãoTaken> => {
   const getHeaders = (
     h?: NonNullable<RequestInit["headers"]>,
   ): Record<string, string | readonly string[]> => {
@@ -2116,7 +2116,7 @@ export const narrateInPersonBrowser = async (
     }
     return headers;
   };
-  return apiRequest<BrowserNarrationTaken>(
+  return apiRequest<BrowserNarraçãoTaken>(
     getNarrateInPersonBrowserUrl(organizationId, personId),
     {
       ...options,
@@ -2126,7 +2126,7 @@ export const narrateInPersonBrowser = async (
         ...headers,
         ...getHeaders(options?.headers),
       },
-      body: JSON.stringify(browserNarrationRequest),
+      body: JSON.stringify(browserNarraçãoRequest),
     },
   );
 };
@@ -2193,7 +2193,7 @@ export const getNarrateInPersonBrowserMutationOptions = <
 export type NarrateInPersonBrowserMutationResult = NonNullable<
   Awaited<ReturnType<typeof narrateInPersonBrowser>>
 >;
-export type NarrateInPersonBrowserMutationBody = BrowserNarrationRequest;
+export type NarrateInPersonBrowserMutationBody = BrowserNarraçãoRequest;
 export type NarrateInPersonBrowserMutationError =
   | BrowserInvalidRequestResponse
   | UnauthenticatedResponse
@@ -2210,7 +2210,7 @@ export type NarrateInPersonBrowserMutationError =
 export type NarrateInPersonBrowserMutationVariables = {
   organizationId: string;
   personId: string;
-  data: BrowserNarrationRequest;
+  data: BrowserNarraçãoRequest;
   headers: NarrateInPersonBrowserHeaders;
 };
 

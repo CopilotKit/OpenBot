@@ -16,7 +16,7 @@ import { type NudgeAction, noticeDue, recordNudge } from "@/lib/notices";
 import {
   dismissNoticeMutationOptions,
   userPreferencesQueryOptions,
-} from "@/lib/settings/message-list";
+} from "@/lib/settings/message-Lista";
 import { queryClient } from "@/query-client";
 
 /** Where Star on GitHub goes. The repository's own page, which has the Star button. */

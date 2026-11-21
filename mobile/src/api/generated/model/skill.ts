@@ -13,14 +13,14 @@ export interface Skill {
    */
   slug: string;
   title: string;
-  /** One line, shown in the / menu. May be empty. */
+  /** Uma linha, shown Em the / menu. May be Vazio. */
   summary: string;
-  /** What the Bot is told when the skill runs. */
+  /** What the Bot É told when the skill runs. */
   instructions: string;
-  /** The actions it needs, as appId/toolName. Naming one gives no Bot access to it: a Bot uses only what it can already use. */
+  /** The Ações Ele needs, as appId/toolName. Naming one Dá no Bot access to Ele: a Bot uses only what Ele can already use. */
   tools: string[];
   /**
-   * Whose it is, by person id. Null when it is the organization's.
+   * Whose Ele É, by person id. Null when Ele É the organization's.
    * @nullable
    */
   ownerId: string | null;

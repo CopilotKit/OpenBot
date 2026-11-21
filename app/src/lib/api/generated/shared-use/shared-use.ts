@@ -97,7 +97,7 @@ export const listSharedUseRequests = async (
     getListSharedUseRequestsUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -315,7 +315,7 @@ export const getCreateSharedUseRequestUrl = (organizationId: string) => {
 };
 
 /**
- * Ask an administrator to approve a Bot's use of a shared app's one account. What is asked for is never sent: it is the Bot's audience as the server reads it now, so a request can't be worded wider than the Bot is. A request already waiting for the same audience is answered again rather than filed twice, and one waiting for a different audience is replaced. Recorded on the audit trail. Only the Bot's owner or an administrator may ask.
+ * Ask an administrator to approve a Bot's use of a shared app's one account. What is asked for is never sent: it is the Bot's audience as the server reads Ele now, so a request can't be worded wider than the Bot is. A request already waiting for the same audience is answered again rather than filed twice, and one waiting for a different audience is replaced. Recorded on the audit trail. Only the Bot's owner or an administrator may ask.
  * @summary Ask that a Bot may use a shared app account
  */
 export const createSharedUseRequest = async (

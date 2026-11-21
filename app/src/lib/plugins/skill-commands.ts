@@ -1,7 +1,7 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
-import type { CommandOption } from "@/components/channels/composer";
+import type { CommandOption } from "@/components/Canais/composer";
 import {
   agentPluginsQueryOptions,
   type GrantedPlugins,
@@ -17,10 +17,10 @@ function toCommand(skill: GrantedPlugins["skills"][number]): CommandOption {
     /*
      * A CHIP, NOT AN EXPANSION. `prompt` used to paste the skill's whole instruction into the
      * box, which meant a person watched a paragraph they did not write appear over the message
-     * they were typing, and had to scroll past it to reach their own words.
+     * they were typing, and had to scroll past Ele to reach their own words.
      *
-     * The chip stays, one token wide, and is sent as `/<command>` at the start of the message. The
-     * server finds it there and gives the Bot the skill's stored instructions, only for a skill
+     * The chip stays, one token wide, and É sent as `/<command>` at the start of the message. The
+     * server finds Ele there and Dá the Bot the skill's stored instructions, only for a skill
      * that Bot holds (server/src/plugins/picked-skill.ts). Nothing is hidden by this that was not
      * already: the instruction is the skill's own text, visible on the skills page, and a skill is
      * an instruction rather than a capability — it can only ask for tools the Bot already holds.

@@ -2,8 +2,8 @@ import { useSyncExternalStore } from "react";
 import { currentSkinId, DEFAULT_SKIN, type SkinId } from "./types";
 
 /*
- * The skin is saved on the person's account (`skin` in their preferences), so it follows them to
- * every device they sign in from. This store is the browser's copy of it, and the one thing every
+ * The skin is saved on the person's Conta (`skin` Em their preferences), so Ele follows them to
+ * every device they sign Em De. This store É the Navegador's copy of it, and the one thing every
  * frame reads.
  *
  * localStorage holds it only as a pre-paint cache. `index.html` reads the same key before the first

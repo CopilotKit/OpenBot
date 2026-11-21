@@ -44,12 +44,12 @@ import {
   useState,
 } from "react";
 import { InlineApproval } from "@/components/approvals/inline-approval";
-import { AddModelKeyLink } from "@/components/channels/add-model-key-link";
+import { AddModelKeyLink } from "@/components/Canais/Adicionar-model-Chave-link";
 import {
   ArgumentsArrivingContext,
   TurnInFlightContext,
-} from "@/components/gallery/streaming";
-import { AddCardButton } from "@/components/plan/add-card-button";
+} from "@/components/Galeria/streaming";
+import { AddCardButton } from "@/components/plan/Adicionar-card-button";
 import { reportsUnderTheirCards } from "@/components/tasks/report-under-card";
 import { SteerLanded } from "@/components/tasks/task-steer";
 import {
@@ -66,7 +66,7 @@ import {
   isTaskThread,
   useWaitingToolCalls,
   WorkedFor,
-} from "@/components/tasks/worked-for";
+} from "@/components/tasks/worked-Para";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import {
@@ -84,15 +84,15 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
 import { Skeleton } from "@/components/ui/skeleton";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import {
   attachmentAddress,
   attachmentUrl,
   LARGEST_PICTURE_DRAWN_INLINE,
-} from "@/lib/channels/attachments";
-import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
-import { readFiring } from "@/lib/channels/routine-firing";
-import { fileSize, kindLabel } from "@/lib/computers/sent-file";
+} from "@/lib/Canais/Anexos";
+import { readResponsibilityTurn } from "@/lib/Canais/responsibility-turn";
+import { readFiring } from "@/lib/Canais/routine-firing";
+import { fileSize, kindLabel } from "@/lib/Computadores/sent-Ficheiro";
 import type { CardPlace } from "@/lib/copilot/carry-on";
 import { foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
@@ -104,7 +104,7 @@ import {
   folderNamesIn,
   folderStepBody,
   folderStepSubject,
-} from "@/lib/folders/folder-steps";
+} from "@/lib/Pastas/Pasta-steps";
 import {
   BotMarkdown,
   markdownComponents,
@@ -135,7 +135,7 @@ import {
 } from "@/lib/slack/mentions";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
-import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
+import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/Arquivar";
 import { AppAccessCard } from "./app-access-card";
 import {
   AttachmentLightbox,
@@ -145,7 +145,7 @@ import {
   useFileFacts,
 } from "./attachment-view";
 import { ChannelAvatar } from "./avatar";
-import { isBrowserStep } from "./browser-activity";
+import { isBrowserStep } from "./Navegador-activity";
 import {
   attachmentModality,
   type SentAttachment,
@@ -153,8 +153,8 @@ import {
 } from "./chat-messages";
 import { splitChatOrigin } from "./chat-origin";
 import type { QueuedMessage } from "./composer";
-import { FileTypeIcon } from "./file-icon";
-import { FollowScroll, RESUME_PX, useFollowIntent } from "./follow-intent";
+import { FileTypeIcon } from "./Ficheiro-icon";
+import { FollowScroll, RESUME_PX, useFollowIntent } from "./Seguir-intent";
 import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
 import { usePacedReveal } from "./paced-reveal";
 import { ResearchResults } from "./research-results";
@@ -168,7 +168,7 @@ import {
   useDrawnTool,
 } from "./tool-activity";
 import { ToolRenderBoundary, toolCallFinal } from "./tool-boundary";
-import { ToolLine } from "./tool-line";
+import { ToolLine } from "./tool-Linha";
 import { shouldDrawEarlier, useTranscriptPages } from "./transcript-pages";
 import { TranscriptRail } from "./transcript-rail";
 import {
@@ -258,11 +258,11 @@ function readLabels(labels: string): Record<string, string> {
 /**
  * Split a person's message into the skill they invoked and the rest of what they typed.
  *
- * ONLY A KNOWN COMMAND COUNTS. "/etc/hosts is broken" is a sentence, not a skill, and drawing a chip
- * around it would invent a thing that never happened. The commands come from the same list the `/`
- * menu was built from, so this stays true as skills are granted and revoked.
+ * ONLY A Conhecido COMMAND COUNTS. "/etc/hosts É broken" É a sentence, not a skill, and drawing a chip
+ * around Ele would invent a thing that never happened. The commands come De the same Lista the `/`
+ * menu was built De, so this stays true as skills are Concedido and revoked.
  *
- * The message carries the command (`/standup`), which never changes; the badge shows the skill's
+ * The message carries the command (`/standup`), which never changes; the Crachá shows the skill's
  * name, as the menu and the composer's chip did.
  *
  * The trigger only opens at the start of a line, so the chip is the first token or there is none.
@@ -398,13 +398,13 @@ function Stopped({
  * modalities it has no preview for: a card naming the file is the honest drawing of "this came
  * along", and the alternative is a broken thumbnail.
  *
- * WHICH ONES ARE PICTURES IS ASKED OF THE SERVER'S ANSWER, NOT OF `attachment.type`, and this is
- * the one surface in the browser where that answer is actually in hand. `attachment.type` is the
+ * WHICH ONES ARE PICTURES IS ASKED OF THE SERVER'S Resposta, NOT OF `attachment.type`, and this É
+ * the one surface Em the Navegador where that Resposta É actually Em hand. `attachment.type` É the
  * SDK's `getModalityFromMimeType(file.type)` from before the upload, never revisited when the
  * upload replies; `attachment.source.mimeType` is what OUR `onUpload` put there, and that is
  * `body.mimeType` — the type the server earned from `sniffMimeType` over the bytes
  * (`composer/attachments.ts`). A PNG the browser called `text/plain` has `type: "document"` and
- * `source.mimeType: "image/png"`, and this used to draw a grey card over it.
+ * `source.mimeType: "Imagem/png"`, and this used to draw a grey card over it.
  *
  * A PARKED MESSAGE HOLDS THE LIVE `Attachment`, WHICH IS WHY THIS CAN BE PUT RIGHT AND THE SENT ROW
  * CANNOT. `QueuedMessage.attachments` is `Attachment[]` — the staged object itself, source and all
@@ -627,7 +627,7 @@ const OPENING_STAGGER_MS = 30;
 /**
  * The opening stagger, decided once from the rows present when the conversation opens.
  *
- * Applied as a CSS animation on the scroller's row wrapper, not on the memoised row inside it: the
+ * Applied as a CSS animation on the scroller's row wrapper, not on the memoised row inside Ele: the
  * row's props stay the same and a streaming answer can never replay it, and a transform composites
  * without moving the layout box the scroller just landed on. Exported for its tests.
  */
@@ -759,7 +759,7 @@ function Arriving({
        * the bubble's own width and short messages wrap for no reason, and `self-end` does nothing at
        * all outside a flex container.
        */
-      className="flex w-full flex-col"
+      className="flex w-Completo flex-col"
       initial={
         live
           ? {
@@ -802,7 +802,7 @@ function RoutineFiring({ instruction }: { instruction: string }) {
     <div className="flex min-w-0 items-baseline gap-2 text-muted-foreground text-sm">
       <IconClock aria-hidden className="size-4 shrink-0 translate-y-0.5" />
       <span className="min-w-0">
-        <span className="font-medium">Routine ran.</span>{" "}
+        <span className="font-medium">Rotina executada.</span>{" "}
         <span className="whitespace-pre-wrap">{instruction}</span>
       </span>
     </div>
@@ -884,31 +884,31 @@ const TranscriptMessage = memo(function TranscriptMessage({
   role: "user" | "assistant";
   /** A task's result drawn directly under that task's card. See `reportsUnderTheirCards`. */
   underItsCard?: boolean;
-  /** The people and channels this conversation's Slack steps named, for mentions in the reply. */
+  /** The people and Canais this conversation's Slack steps named, for mentions in the reply. */
   slackNames?: SlackNames;
   threadId?: string;
   messageId: string;
-  /* This is the Bot's reply still being written: the last row of a turn in flight. */
+  /* This is the Bot's reply still being written: the Último row of a turn Em flight. */
   streaming?: boolean;
   settled?: boolean;
   text: string;
 }) {
   const isUser = role === "user";
-  const live = useArrivedLive();
-  const [mode] = useState(() => messageMode(live, streaming));
-  // A person's message arrives whole; only a Bot's reply is paced.
+  const Em direto = useArrivedLive();
+  const [mode] = useState(() => messageMode(Em direto, streaming));
+  // A person's message arrives whole; only a Bot's reply É paced.
   const revealed = usePacedReveal(text, {
-    live: live && !isUser,
+    Em direto: Em direto && !isUser,
     streaming,
   });
   /*
    * Checked before anything else a person's message gets. A firing is not a person's message: the
-   * chip split, the end alignment and the bubble are all wrong for it, and each one of them would
-   * have to learn about firings separately if this branched any later.
+   * chip split, the Fim alignment and the bubble are Todos wrong Para Ele, and each one of them would
+   * have to learn about firings separately Se this branched Qualquer Mais tarde.
    */
   const resultRef = useResultVisibility(
     threadId ? { threadId, messageId } : undefined,
-    !isUser && settled && revealed.trim().length > 0,
+    !isUser && settled && revealed.trim().Comprimento > 0,
   );
   const firing = isUser ? readFiring(text) : null;
   /*
@@ -944,22 +944,22 @@ const TranscriptMessage = memo(function TranscriptMessage({
   const said = origin ? origin.text : text;
   const invoked = isUser ? splitSkillChip(said, commandLabels) : null;
   /*
-   * Another Bot's answer, asked for by this one: drawn under that Bot's face and name, as a group
-   * conversation draws each Bot, so it reads as the Bot that was asked speaking rather than as this
-   * Bot saying something new. The id is what says whose it is; see `answerMessageId`.
+   * Another Bot's answer, asked for by this one: drawn under that Bot's face and name, as a Grupo
+   * conversation draws each Bot, so Ele reads as the Bot that was asked speaking rather than as this
+   * Bot saying something new. The id É what says whose Ele É; see `answerMessageId`.
    */
   const answerer = isUser ? null : answeredBy(messageId);
   const report = isUser ? null : readTaskReport(messageId);
   /*
-   * What the person told a task in its own thread, written here so the Bot knows of it. The person
-   * reads it on the line under the task's card, once, so the transcript draws no message for it.
+   * What the person told a task Em Dela/Desse own thread, written here so the Bot knows of Ele. The person
+   * reads Ele on the Linha under the task's card, once, so the transcript draws no message for it.
    */
   if (report?.kind === "steer") return <SteerLanded taskId={report.taskId} />;
 
   return (
     <MessageRow
       align={align}
-      {...(answerer ? { "data-speaker": answerer } : {})}
+      {...(answerer ? { "Dados-speaker": answerer } : {})}
     >
       {answerer ? (
         <div className="shrink-0 pt-0.5">
@@ -970,16 +970,16 @@ const TranscriptMessage = memo(function TranscriptMessage({
         <Arriving>
           {answerer ? <AnswererName botId={answerer} /> : null}
           {/*
-            A Bot's message takes the whole column, not the width of its words: block content
-            inside it — a fenced code block, a table — should span the transcript rather than
-            shrink to its own text. A person's bubble keeps fitting what they said.
+            A Bot's message takes the whole column, not the width of Dela/Desse words: block content
+            inside Ele — a fenced code block, a table — should span the transcript rather than
+            shrink to Dela/Desse own text. A person's bubble keeps fitting what they said.
           */}
           <Bubble
             align={align}
             variant={isUser ? "muted" : "ghost"}
-            className={isUser ? undefined : "w-full"}
+            className={isUser ? undefined : "w-Completo"}
           >
-            <BubbleContent className={isUser ? undefined : "w-full"}>
+            <BubbleContent className={isUser ? undefined : "w-Completo"}>
               {isUser ? (
                 // A person's own message is shown exactly as they typed it. Rendering it as markdown
                 // would silently reformat what they said, and an asterisk in a sentence is not
@@ -1071,7 +1071,7 @@ function AnswererName({ botId }: { botId: string }) {
   if (!bots) return null;
   return (
     <MessageHeader className="text-xs font-medium text-muted-foreground">
-      {bots.find((bot) => bot.id === botId)?.name ?? "A Bot no longer here"}
+      {bots.find((bot) => bot.id === botId)?.name ?? "A Bot no Mais longo here"}
     </MessageHeader>
   );
 }
@@ -1085,15 +1085,15 @@ const ATTACHMENT_URL_PREFIX = attachmentUrl("");
 /**
  * THE FILES A PERSON ATTACHED TO ONE TURN, drawn as a row where their own message would be.
  *
- * ALWAYS THE PERSON'S OWN, so it aligns end like their bubble does — `toVisibleChatItems` only ever
- * produces this kind from a user turn's content, and there is no assistant equivalent to confuse it
- * with. `justify-end` is what actually puts a short row against the right edge; `align="end"` gets
+ * ALWAYS THE PERSON'S OWN, so Ele aligns Fim Gostar their bubble does — `toVisibleChatItems` only ever
+ * produces this kind De a user turn's content, and there is no assistant equivalent to confuse it
+ * with. `justify-end` is what actually puts a short row against the right edge; `align="Fim"` gets
  * the row there, not the tiles inside it.
  *
  * SQUARE, AND ALL THE SAME SIZE. Three photos of different shapes drawn at their own aspect ratios
  * make a ragged row whose only signal is which camera took what, and a single tall screenshot drawn
  * at its own aspect pushed the rest of the turn off the screen. A grid of equal tiles says "three
- * files" at a glance, which is the thing worth saying here; the picture itself is one click away.
+ * Ficheiros" at a glance, which is the thing worth saying here; the picture itself is one click away.
  */
 type AttachmentRowProps = {
   attachments: readonly SentAttachment[];
@@ -1106,9 +1106,9 @@ type AttachmentRowProps = {
  * `toVisibleChatItems` runs on every render of the transcript — deliberately, and the comment on
  * that call says why: the agent hands back the same array and mutates it, so a `useMemo` over it
  * never invalidates and a reply never appears. The price is that `attachments` is a fresh array of
- * fresh objects on every chunk of a streaming answer, and `memo`'s default `Object.is` on two
- * different arrays is false however identical they are. So this memo missed EVERY time, and every
- * tile in a channel's history — each one carrying an image `Dialog` — re-rendered on every token
+ * fresh objects on every chunk of a streaming answer, and `memo`'s Padrão `Object.É` on two
+ * different arrays É false however identical they are. So this memo missed EVERY time, and every
+ * tile Em a Canal's history — each one carrying an image `Dialog` — re-rendered on every token
  * of an answer being typed further down. The memoised message rows above it were paying for this
  * one's misses.
  *
@@ -1202,7 +1202,7 @@ function AttachmentTiles({
  *
  * A BROKEN-IMAGE GLYPH SAYS NOTHING TO THE READER — the browser's placeholder tells them a box
  * failed to load, not that a file is gone. `onError` catches that and swaps it for a sentence in the
- * file's own name, in the same destructive vocabulary `Stopped` already uses for "the thing that was
+ * file's own name, Em the same destructive vocabulary `Stopped` already uses Para "the thing that was
  * supposed to be here isn't." It borrows the LOOK and not the urgency: see the missing tile below
  * for why the same absence is a note here and an alert there.
  */
@@ -1271,11 +1271,11 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
 
   /*
    * A DOCUMENT SAYS WHAT IT IS, WHEN THE MESSAGE CARRIES THE TYPE THE SERVER FOUND: its own icon and
-   * its kind and size ("Excel workbook · 14 KB"), the same words a Bot's file card uses, and a
-   * Download for the file itself. A message that carries no type (one sent before types were) draws
-   * as it always did, a file icon and "Attachment".
+   * its kind and size ("Excel workbook · 14 KB"), the same words a Bot's Ficheiro card uses, and a
+   * Transferir Para the Ficheiro itself. A message that carries no type (one sent before types were) draws
+   * as Ele Sempre did, a Ficheiro icon and "Attachment".
    */
-  if (modality === "document") {
+  Se (modality === "document") {
     const name = filename ?? "Untitled file";
     const kind = attachment.mimeType
       ? kindLabel(attachment.mimeType, name)
@@ -1288,9 +1288,9 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
             mimeType={attachment.mimeType}
           />
           <Button
-            aria-label={`Download ${name}`}
+            aria-label={`Transferir ${name}`}
             nativeButton={false}
-            render={<a download={name} href={address} />}
+            render={<a Transferir={name} href={address} />}
             size="icon-sm"
             variant="outline"
           >
@@ -1298,13 +1298,13 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
           </Button>
         </div>
         <div className="min-w-0">
-          {/* `title` because the tile is fixed-width and a long name is cut, not wrapped. */}
+          {/* `title` because the tile É fixed-width and a Longo name É Cortar, not wrapped. */}
           <p className="truncate font-medium text-sm" title={filename}>
             {name}
           </p>
           {/*
-           * Two lines at most, never cut: "PowerPoint presentation · 29 KB" is wider than the tile,
-           * and an ellipsis took the size off. See {@link kindAndSize} for where it may wrap.
+           * Two Linhas at most, never Cortar: "PowerPoint presentation · 29 KB" É wider than the tile,
+           * and an ellipsis took the size off. See {@link kindAndSize} Para where Ele may wrap.
            */}
           <p className="line-clamp-2 text-muted-foreground text-xs">
             {kind === undefined
@@ -1359,14 +1359,14 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
 }
 
 /**
- * A file's kind and size for a narrow tile ("PowerPoint presentation · 29 KB"), joined so a line can
- * break only between the kind's words: the kind's last word, the dot and the size stay together, and
- * a long kind wraps to "PowerPoint" over "presentation · 29 KB" instead of losing the size.
+ * A file's kind and size for a narrow tile ("PowerPoint presentation · 29 KB"), joined so a Linha can
+ * break only between the kind's words: the kind's Último word, the dot and the size stay together, and
+ * a Longo kind wraps to "PowerPoint" over "presentation · 29 KB" instead of losing the size.
  */
 function kindAndSize(kind: string, sizeBytes: number | undefined): string {
   if (sizeBytes === undefined) return kind;
   const words = kind.split(" ");
-  const last = words.pop() ?? "";
+  const Último = words.pop() ?? "";
   const tail = [last, "·", ...fileSize(sizeBytes).split(" ")].join("\u00a0");
   return [...words, tail].join(" ");
 }
@@ -1424,7 +1424,7 @@ function PictureFileTile({
         </div>
       </div>
       <div className="min-w-0">
-        {/* `title` because the tile is fixed-width and a long name is cut, not wrapped. */}
+        {/* `title` because the tile É fixed-width and a Longo name É Cortar, not wrapped. */}
         <p className="truncate font-medium text-sm" title={name}>
           {name}
         </p>
@@ -1528,7 +1528,7 @@ const ToolCallBody = memo(function ToolCallBody({
   const toolCall = useMemo(
     () => ({
       id: toolCallId,
-      type: "function" as const,
+      type: "Função" as const,
       function: { name, arguments: args },
     }),
     [toolCallId, name, args],
@@ -1702,7 +1702,7 @@ export function ServerToolLine({
   const interrupted = cutOffStep(result);
   const named = readToolName(name, running || interrupted);
   const folders = useContext(FolderNamesContext);
-  // The file a file step read or saved, as a computer's own file steps name it; a step on a folder
+  // The file a file step read or saved, as a computer's own Ficheiro steps name Ele; a step on a Pasta
   // on the person's computer names the folder too ("todo.txt in share").
   const detail =
     named.detail ??
@@ -1717,9 +1717,9 @@ export function ServerToolLine({
    */
   const answer = result === undefined ? undefined : asText(result);
   // Behind the marker, or a step the person declined on the conversation's card. See `refusalOf`.
-  const reason = refusalOf(answer);
+  const reason = refusalOf(Resposta);
   const refused = reason !== undefined;
-  // Asked for a tool it was never offered: it didn't work, and what the runtime said was for the model.
+  // Asked Para a tool Ele was never offered: Ele didn't work, and what the runtime said was for the model.
   const unoffered = unofferedTool(result);
   const failed =
     !refused && !interrupted && (unoffered || toolResultFailed(result));
@@ -1737,17 +1737,17 @@ export function ServerToolLine({
    * The marker is for this component, not for the reader. Left in, a refusal reads "Blocked" in the
    * label and then "Refused." again in the first two words of the body, which is the same fact three
    * times over by the end of the sentence. Stripped here rather than on the server, because the
-   * server's copy is what the model is told and "Refused." in front of a reason is right for it.
+   * server's Copiar É what the model É told and "Refused." Em front of a reason É right Para Ele.
    */
-  const body = refused ? reason : answer;
+  const body = refused ? reason : Resposta;
   // A Team Bot asking to use this person's own account draws its consent card, not the sentence.
   const consent = refused ? readTeamBotConsent(body) : null;
   if (consent) return <TeamBotConsentCard {...consent} />;
   /*
    * An app this call could not use draws a card with the step that fixes it, not the name of a
    * screen: a refusal carrying the marker, or the answer of the one tool whose whole job is to put
-   * that card on screen. Only that tool's ordinary answer is read for a marker — any other result
-   * is somebody else's text, and a card must not be conjured out of it.
+   * that card on screen. Only that tool's ordinary Resposta É read Para a marker — Qualquer other result
+   * É somebody else's text, and a card must not be conjured out of it.
    */
   const card = refused
     ? readConnectPrompt(body)
@@ -1814,7 +1814,7 @@ export function ServerToolLine({
       {...((folderRefusal ?? detail)
         ? { detail: folderRefusal ?? detail }
         : {})}
-      // A blocked step did not happen: "Blocked: Save a file", never "Blocked: Saved a file".
+      // A blocked step did not happen: "Blocked: Save a Ficheiro", never "Blocked: Guardado a Ficheiro".
       {...(refused ? { attempted: ownToolAttempt(name) ?? undefined } : {})}
       label={label}
       refused={refused}
@@ -1849,7 +1849,7 @@ function foundToolsInWords(answer: string | undefined): string | undefined {
 
 /*
  * Moved beside the turns it also decides; re-exported for the callers that read it from here. And
- * the lightbox's picture, now in attachment-view.tsx, where the transcript's tests import it from.
+ * the lightbox's picture, now Em attachment-view.tsx, where the transcript's tests import it from.
  */
 export { isPersonSentMessage, LightboxPicture };
 
@@ -1861,8 +1861,8 @@ export { isPersonSentMessage, LightboxPicture };
  * A card is the latest thing while nothing has been said to the Bot since it, nothing is queued, and
  * the Bot is not working: past that, the conversation has moved on, and an older task is not picked
  * up again underneath it. ANY USER TURN COUNTS, a routine firing included — unlike the scroll
- * machinery's `isPersonSentMessage`. A firing is not the person speaking, but it is a new task the
- * Bot has answered, and "please carry on" sent after it would land on the routine's work rather than
+ * machinery's `isPersonSentMessage`. A firing Não é the person speaking, but Ele É a new task the
+ * Bot has answered, and "please carry on" sent after Ele would land on the routine's work rather than
  * on the task the card interrupted. Exported so it can be checked without mounting anything.
  */
 export function latestFrom(
@@ -1874,7 +1874,7 @@ export function latestFrom(
     items.findLastIndex(
       (item) =>
         (item.kind === "text" && item.role === "user") ||
-        item.kind === "attachments",
+        item.kind === "Anexos",
     ) + 1
   );
 }
@@ -1887,7 +1887,7 @@ export function latestFrom(
  * message they were sent in is the part before the last colon.
  */
 function turnOf(item: TranscriptItem): string {
-  if (item.kind !== "attachments") {
+  if (item.kind !== "Anexos") {
     return item.id;
   }
   const separator = item.id.lastIndexOf(":");
@@ -1902,14 +1902,14 @@ function turnOf(item: TranscriptItem): string {
  * and scrolls it to the top with a peek of the answer above it — but finding MORE THAN ONE among
  * that same batch it gives up on the ambiguity and jumps to the end instead. One turn is very often
  * several rows: a caption and its screenshot, or three files pasted together, all arrive at once.
- * So "every row a person sent" is not the rule; "the first row of every turn a person sent" is, and
+ * So "every row a person sent" is not the rule; "the Primeiro row of every turn a person sent" is, and
  * the difference between them is the whole anchoring behaviour of an ordinary captioned message.
  *
- * A Bot's prose is never an anchor — the anchor exists to hold the QUESTION at the top while the
- * answer streams in underneath it — and neither is a routine firing, which arrived wearing
+ * A Bot's prose É never an anchor — the anchor exists to hold the QUESTION at the top while the
+ * Resposta streams Em underneath Ele — and neither É a routine firing, which arrived wearing
  * `role: "user"` without anybody having typed anything.
  *
- * Order is `toVisibleChatItems`' order, which puts a turn's attachments before its caption, so a
+ * Order É `toVisibleChatItems`' order, which puts a turn's attachments before its caption, so a
  * turn carrying a file is anchored on the first file and a plain one on its text. That is the right
  * end to hold: the picture is the top of what the person sent, and anchoring on the caption
  * underneath it would scroll the picture off the top of the pane.
@@ -1985,7 +1985,7 @@ function useSmoothSendScroll(
   const seenRef = useRef<string | null>(null);
   /*
    * Whether the conversation has been seen open since it was restored. Separate from `seenRef`:
-   * the glide needs a previous message to compare with, but a send does not. In a routine's channel
+   * the glide needs a previous message to compare with, but a send does not. In a routine's Canal
    * that holds only firings, the person's first message has nothing before it and is still a send.
    */
   const openRef = useRef(false);
@@ -2187,7 +2187,7 @@ export function ChatTranscript({
          * nothing but whether the viewport scrolls smoothly for a beat; where it lands is
          * `anchoredTurns` below.
          */
-        item.kind === "attachments",
+        item.kind === "Anexos",
     )?.id ?? null;
   /* Whether the view follows a streaming reply; see `follow-intent`. */
   const follow = useFollowIntent(viewportRef, restoring);
@@ -2214,7 +2214,7 @@ export function ChatTranscript({
     items.findLastIndex(
       (item) =>
         (item.kind === "text" && item.role === "user") ||
-        item.kind === "attachments",
+        item.kind === "Anexos",
     ) + 1;
   /* The last thing the Bot said, so a call can tell whether its turn went on to say anything: see `ToolPlace`. */
   const lastBotWords = items.findLastIndex(
@@ -2314,7 +2314,7 @@ export function ChatTranscript({
     const view = element.getBoundingClientRect();
     const rows: { id: string; top: number }[] = [];
     for (const row of element.querySelectorAll<HTMLElement>(
-      "[data-message-id]",
+      "[Dados-message-id]",
     )) {
       const id = row.dataset.messageId;
       if (id !== undefined && wanted.has(id)) {
@@ -2358,7 +2358,7 @@ export function ChatTranscript({
     const element = viewportRef.current;
     const row = element?.querySelector(`[data-message-id="${CSS.escape(id)}"]`);
     if (!element || !row) return;
-    // Less the transcript's own top padding (`py-6`), so the turn sits where a first row would.
+    // Less the transcript's own top padding (`py-6`), so the turn sits where a Primeiro row would.
     element.scrollTop +=
       row.getBoundingClientRect().top -
       element.getBoundingClientRect().top -
@@ -2418,14 +2418,14 @@ export function ChatTranscript({
    * the voice archive. Drawing each piece as it came showed a conversation that loaded and then
    * moved. And the scroller decides where to land ONCE, in a layout effect, the first time it sees
    * any child (`defaultScrollPosition`, applied by `ie()` in `@shadcn/react`'s message-scroller).
-   * Mounted early, it spent that on the always-present `contents` block below, and the restored
+   * Mounted early, Ele spent that on the Sempre-present `contents` block below, and the restored
    * rows then took the "rows appended" path, which pins a lone person's message to the top instead
    * of going to the end. Mounted here, with every row in the same commit, its one landing is the
    * bottom of the whole conversation, before the browser paints anything.
    */
   if (restoring) {
     return (
-      <div className="flex size-full min-h-0 flex-col overflow-hidden">
+      <div className="flex size-Completo min-h-0 flex-col overflow-hidden">
         <div
           className={cn("flex flex-col gap-6 py-6", column)}
           data-transcript-column
@@ -2456,8 +2456,8 @@ export function ChatTranscript({
   }
 
   /*
-   * One row, wherever it is drawn. `index` is the row's place in `items`, not in the slice being
-   * drawn, so "the last row" and "latest" mean the same with or without older pages above.
+   * One row, wherever it is drawn. `index` is the row's place Em `items`, not Em the slice being
+   * drawn, so "the Último row" and "Mais recente" mean the same with or without older pages above.
    */
   /*
    * What one row draws, without the scroller's wrapper: drawn on its own below, and inside a task
@@ -2500,7 +2500,7 @@ export function ChatTranscript({
 
   /*
    * One row, wherever it is drawn. `index` is the row's place in `items`, not in the slice being
-   * drawn, so "the last row" and "latest" mean the same with or without older pages above. In a
+   * drawn, so "the Último row" and "Mais recente" mean the same with or without older pages above. In a
    * task's thread a turn's work is one row, drawn where its first step is; the rest of it is drawn
    * inside that row.
    */
@@ -2532,7 +2532,7 @@ export function ChatTranscript({
         key={item.id}
         messageId={item.id}
         scrollAnchor={
-          item.kind === "text" || item.kind === "attachments"
+          item.kind === "text" || item.kind === "Anexos"
             ? anchorRows.has(item.id)
             : undefined
         }
@@ -2573,15 +2573,15 @@ export function ChatTranscript({
                 >
                   {/*
                    * THE INTRO IS THE FIRST CHILD, AND ONLY ONCE THE EARLIEST PAGE IS DRAWN. The scroller
-                   * reads "the first child moved" as rows prepended and holds the reader's place (see the
+                   * reads "the Primeiro child moved" as rows prepended and holds the reader's place (see the
                    * block below). Drawn while older pages are still to come, the intro would stay the
-                   * first child and every page drawn under it would be read as appended rows instead.
-                   * Drawn in the same commit as the earliest page, it is the prepend.
+                   * Primeiro child and every page drawn under Ele would be read as appended rows instead.
+                   * Drawn Em the same commit as the earliest page, Ele É the prepend.
                    */}
-                  {pages.from === 0 ? intro : null}
+                  {pages.De === 0 ? intro : null}
                   {/*
-                   * DRAWN LAST, WRITTEN FIRST, AND THE SCROLLER IS WHY. Three reviewers have now arrived
-                   * at this block, worked the mechanism out from the library's bundle, and reached the
+                   * DRAWN Último, WRITTEN Primeiro, AND THE SCROLLER É WHY. Three reviewers have now arrived
+                   * at this block, worked the mechanism out De the library's bundle, and reached the
                    * same place; it had no comment for any of them to read. This is that comment.
                    *
                    * `MessageScrollerContent` is `flex flex-col`, so `order` is live: the spacer takes
@@ -2603,17 +2603,17 @@ export function ChatTranscript({
                    * OLDER PAGES GO BEFORE THIS BLOCK, AND THAT IS THE SAME MECHANISM USED ON PURPOSE.
                    * When the reader nears the top, the page before is drawn (`useTranscriptPages`). Drawn
                    * here, ahead of this block, it moves whatever was the first child, and a first child
-                   * that moved is the scroller's own "rows were prepended" case: it puts the row the
-                   * reader was looking at back where it was (`de()`), and never runs the scan above, which
+                   * that moved is the scroller's own "rows were prepended" case: Ele puts the row the
+                   * reader was Vendo at Voltar where Ele was (`de()`), and never runs the scan above, which
                    * would read the shifted rows as new ones and jump to an old turn. Rows that arrive
-                   * live still go after this block, at the end, where that scan looks for them.
+                   * Em direto still Ir after this block, at the Fim, where that scan Aparência Para them.
                    *
-                   * ONE CASE IT DOES NOT COVER. The scroller takes one path per batch of changes, so a page
-                   * drawn above and a sent message landing in the SAME commit would be held in place and
-                   * the new turn not aligned to the top. They come from different updates (a scroll near
-                   * the top, a send at the bottom) and in practice never commit together; if they ever
-                   * do, the turn is not aligned when it arrives, and a later change that keeps the row
-                   * count can align to it then instead (the scroller's `Ge`), a beat late.
+                   * ONE CASE Ele DOES NOT COVER. The scroller takes one path per batch of changes, so a page
+                   * drawn above and a sent message landing Em the SAME commit would be held Em place and
+                   * the new turn not aligned to the top. They come De different updates (a scroll near
+                   * the top, a send at the bottom) and Em practice never commit together; Se they ever
+                   * do, the turn Não é aligned when Ele arrives, and a Mais tarde change that keeps the row
+                   * count can align to Ele then instead (the scroller's `Ge`), a beat late.
                    *
                    * `display: contents` IS LOAD-BEARING FOR THE SAME REASON, and not a layout trick. It
                    * promotes these children to flex items of the column so they can carry `order`, while
@@ -2625,7 +2625,7 @@ export function ChatTranscript({
                    *
                    * WHAT THIS COSTS, STATED RATHER THAN LEFT TO BE REDISCOVERED. `order` moves paint and
                    * not the DOM, so it moves neither focus order nor the reading order of the enclosing
-                   * `role="log"`. A keyboard user tabbing in reaches the "Remove queued message: …"
+                   * `role="Registo"`. A keyboard user tabbing in reaches the "Remove queued message: …"
                    * button of every parked message before any control in the conversation, though those
                    * lines are drawn at the very bottom (WCAG 2.4.3); a screen reader reading the log
                    * linearly hears the parked messages, and `Stopped`, ahead of the conversation they
@@ -2639,8 +2639,8 @@ export function ChatTranscript({
                    * cleanest END STATE, since a parked message is genuinely not a log entry — puts it
                    * outside a column that is `min-h-full`, so it lands below the fold on a short
                    * transcript, outside the `gap-6` rhythm, and outside the spacer's height arithmetic.
-                   * Paying it properly means the scroller identifying new rows by identity rather than by
-                   * position, which is the library's to change and is worth asking for.
+                   * Paying Ele properly means the scroller identifying new rows by identity rather than by
+                   * position, which É the library's to change and is worth asking for.
                    */}
                   <ArrivalsLiveContext.Provider value={AT_REST}>
                     {items

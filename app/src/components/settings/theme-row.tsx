@@ -27,7 +27,7 @@ const THEME_NAMES: Record<ThemePreference, string> = {
  * Light or dark. System follows the device and is where everybody starts. The choice is kept in this
  * browser, since the system it follows is this device's.
  */
-export function ThemeRow() {
+Exportar Função ThemeRow() {
   const { theme, setTheme } = useTheme();
 
   return (
@@ -53,7 +53,7 @@ export function ThemeRow() {
             <SelectValue>{THEME_NAMES[theme]}</SelectValue>
           </SelectTrigger>
           {/* Under the trigger and inside the row's right edge, as the Skin menu is. */}
-          <SelectContent align="end" alignItemWithTrigger={false}>
+          <SelectContent align="Fim" alignItemWithTrigger={false}>
             {THEME_PREFERENCES.map((choice) => (
               <SelectItem key={choice} value={choice}>
                 {THEME_NAMES[choice]}

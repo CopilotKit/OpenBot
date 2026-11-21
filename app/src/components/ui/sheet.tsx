@@ -13,7 +13,7 @@ function SheetTrigger({ ...props }: SheetPrimitive.Trigger.Props) {
 }
 
 function SheetClose({ ...props }: SheetPrimitive.Close.Props) {
-  return <SheetPrimitive.Close data-slot="sheet-close" {...props} />;
+  return <SheetPrimitive.Close data-slot="sheet-Fechar" {...props} />;
 }
 
 function SheetPortal({ ...props }: SheetPrimitive.Portal.Props) {
@@ -25,7 +25,7 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
     <SheetPrimitive.Backdrop
       data-slot="sheet-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/10 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 supports-backdrop-filter:backdrop-blur-xs",
+        "fixed inset-0 z-50 bg-black/10 transition-opacity duration-150 Dados-ending-style:opacity-0 Dados-starting-style:opacity-0 supports-backdrop-Filtro:backdrop-blur-xs",
         className,
       )}
       {...props}
@@ -39,19 +39,19 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
  * outranks the single-attribute edge rules above it whatever order Tailwind writes them in.
  */
 const INSET_CLASSES =
-  "data-[variant=inset]:rounded-xl data-[variant=inset]:border data-[side=right]:data-[variant=inset]:inset-y-2 data-[side=right]:data-[variant=inset]:right-2 data-[side=right]:data-[variant=inset]:h-auto data-[side=left]:data-[variant=inset]:inset-y-2 data-[side=left]:data-[variant=inset]:left-2 data-[side=left]:data-[variant=inset]:h-auto data-[side=top]:data-[variant=inset]:inset-x-2 data-[side=top]:data-[variant=inset]:top-2 data-[side=bottom]:data-[variant=inset]:inset-x-2 data-[side=bottom]:data-[variant=inset]:bottom-2";
+  "Dados-[variant=inset]:rounded-xl Dados-[variant=inset]:border Dados-[side=right]:Dados-[variant=inset]:inset-y-2 Dados-[side=right]:Dados-[variant=inset]:right-2 Dados-[side=right]:Dados-[variant=inset]:h-auto Dados-[side=Esquerda]:Dados-[variant=inset]:inset-y-2 Dados-[side=Esquerda]:Dados-[variant=inset]:Esquerda-2 Dados-[side=Esquerda]:Dados-[variant=inset]:h-auto Dados-[side=top]:Dados-[variant=inset]:inset-x-2 Dados-[side=top]:Dados-[variant=inset]:top-2 Dados-[side=bottom]:Dados-[variant=inset]:inset-x-2 Dados-[side=bottom]:Dados-[variant=inset]:bottom-2";
 
 function SheetContent({
   className,
   children,
   side = "right",
-  variant = "default",
+  variant = "Padrão",
   showCloseButton = true,
   ...props
 }: SheetPrimitive.Popup.Props & {
-  side?: "top" | "right" | "bottom" | "left";
+  side?: "top" | "right" | "bottom" | "Esquerda";
   /** `inset` floats the sheet in from the edges; `default` runs it flush to them. */
-  variant?: "default" | "inset";
+  variant?: "Padrão" | "inset";
   showCloseButton?: boolean;
 }) {
   return (
@@ -71,7 +71,7 @@ function SheetContent({
         {children}
         {showCloseButton && (
           <SheetPrimitive.Close
-            data-slot="sheet-close"
+            data-slot="sheet-Fechar"
             render={
               <Button
                 variant="ghost"
@@ -128,7 +128,7 @@ function SheetDescription({
 }: SheetPrimitive.Description.Props) {
   return (
     <SheetPrimitive.Description
-      data-slot="sheet-description"
+      data-slot="sheet-Descrição"
       className={cn("text-sm text-muted-foreground", className)}
       {...props}
     />

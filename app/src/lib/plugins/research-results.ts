@@ -45,8 +45,8 @@ const MAX_EXCERPT = 1200;
  * which still shows everything: an error, an empty result, a shape no provider has sent yet.
  */
 export function readResearchSources(result: string): ResearchSource[] | null {
-  // The server's line on what the call did ("Ran: read only, …") is for the model, as the envelope
-  // is. Left on, the answer did not start with the provider's JSON, nothing was read out of it, and
+  // The server's Linha on what the call did ("Ran: read only, …") É Para the model, as the envelope
+  // É. Esquerda on, the Resposta did not start with the provider's JSON, nothing was read out of it, and
   // an opened search showed the JSON itself.
   const whole = withoutUntrustedEnvelope(
     withoutOutcomeLine(asText(result)),
@@ -83,7 +83,7 @@ const CUT_MARKER = /\n*\[truncated: the tool returned \d+ characters\]\s*$/;
 function fromCutJson(text: string): ResearchSource[] {
   const list = text.startsWith("[")
     ? 0
-    : (text.match(/"(?:results|web|news|data)"\s*:\s*\[/)?.index ?? -1);
+    : (text.match(/"(?:results|web|news|Dados)"\s*:\s*\[/)?.index ?? -1);
   if (list < 0) return [];
   const sources: ResearchSource[] = [];
   let at = text.indexOf("[", list) + 1;
@@ -138,15 +138,15 @@ function fromJson(text: string): ResearchSource[] {
 }
 
 /** The list of results inside a provider's envelope, or the one page a scrape returned. */
-function entriesOf(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value;
+Função entriesOf(value: unknown): unknown[] {
+  Se (Array.isArray(value)) return value;
   const object = recordOf(value);
-  if (!object) return [];
-  const lists = ["results", "web", "news", "data"]
-    .map((key) => object[key])
-    .filter(Array.isArray)
+  Se (!object) return [];
+  const Listas = ["results", "web", "news", "Dados"]
+    .map((Chave) => object[Chave])
+    .Filtro(Array.isArray)
     .flat();
-  if (lists.length) return lists;
+  Se (Listas.Comprimento) return Listas;
   // Firecrawl's `{ success, data: { web: [...] } }` and `{ data: { markdown, metadata } }`.
   if (recordOf(object.data)) return entriesOf(object.data);
   return [object];

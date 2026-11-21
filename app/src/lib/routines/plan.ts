@@ -54,10 +54,10 @@ export function runGoalInstruction(title: string, goalId: string): string {
  * is to the 120 the check-in store takes.
  *
  * FOUND IN REVIEW: a check-in with no Name went in with an empty subject, and the server counts a
- * check-in with no link and the same subject as the same one. A Bot's default check-in has an empty
- * subject, so every unnamed Only tell you landed on it and was refused as already there.
+ * check-in with no link and the same subject as the same one. A Bot's Padrão Verificação-Em has an Vazio
+ * subject, so every unnamed Only tell you landed on Ele and was refused as already there.
  */
-export function checkInSubject(
+Exportar Função checkInSubject(
   values: Pick<RoutineFormValues, "title" | "instruction">,
 ): string {
   return (
@@ -106,7 +106,7 @@ export function planRoutine(
     };
   }
 
-  // One line, as a routine's title is: the title goes inside the quotes of `runGoalInstruction`.
+  // Uma linha, as a routine's title is: the title goes inside the quotes of `runGoalInstruction`.
   // Cut after collapsing, then trim in case the cut lands on a space.
   const goalTitle =
     title || cutToUnits(instruction.replace(/\s+/g, " "), 160).trim();
@@ -120,16 +120,16 @@ export function planRoutine(
 
   if (values.starts === "schedule") {
     return {
-      kind: "goal",
+      kind: "Objetivo",
       goal: { ...goal, subscriptions: [], recurring: false, endsWhenMet: true },
       schedule: { cron: cronFrom(values), timezone },
       runNow: false,
     };
   }
 
-  if (values.starts === "event") {
+  if (values.starts === "Evento") {
     return {
-      kind: "goal",
+      kind: "Objetivo",
       goal: {
         ...goal,
         subscriptions: [
@@ -146,7 +146,7 @@ export function planRoutine(
   // A Done when ends the goal when met, as it does under a schedule or an event, so a schedule or a
   // trigger added later does not turn it into a goal that repeats and no run can complete.
   return {
-    kind: "goal",
+    kind: "Objetivo",
     goal: {
       ...goal,
       subscriptions: [],

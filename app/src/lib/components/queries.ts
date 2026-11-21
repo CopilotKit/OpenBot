@@ -15,9 +15,9 @@ import { ClientError } from "@/lib/client";
 /** The kind the API gives a component an admin wrote in Playground. */
 export const PLAYGROUND_KIND = "playground";
 
-/** A Playground component's source as an admin edits it. */
-export type PlaygroundDraftSource = {
-  html: string;
+/** A Playground component's source as an admin edits Ele. */
+Exportar type PlaygroundDraftSource = {
+  HTML: string;
   css: string;
   jsFunctions: string;
   argumentSchema: Record<string, unknown>;
@@ -25,7 +25,7 @@ export type PlaygroundDraftSource = {
 };
 
 /**
- * A component as the Admin surface sees it: its state, its versions and who is held back from it.
+ * A component as the Admin surface sees Ele: Dela/Desse state, Dela/Desse versions and who É held Voltar De Ele.
  *
  * Somebody who isn't an admin is sent the published components only, with nothing an admin governs:
  * for them the draft is the published description and the lists are empty.
@@ -46,7 +46,7 @@ export type ComponentRecord = {
   withheldFrom: string[];
   /** The data functions this component may read. Empty means it draws only what the model hands it. */
   functions: string[];
-  /** A Playground component's draft source, for an admin. Null otherwise. */
+  /** A Playground component's Rascunho source, Para an admin. Null otherwise. */
   draftSource: PlaygroundDraftSource | null;
   /** A published Playground component's source, which a conversation draws it from. Null otherwise. */
   source: {
@@ -96,9 +96,9 @@ export type PublishedPlayground = {
 
 export const componentKeys = {
   all: ["components"] as const,
-  list: () => ["components", "list"] as const,
-  forAgent: (agentId: string) => ["components", "for-agent", agentId] as const,
-  functions: (name: string) => ["components", "functions", name] as const,
+  list: () => ["components", "Lista"] as const,
+  forAgent: (agentId: string) => ["components", "Para-Agente", agentId] as const,
+  functions: (name: string) => ["components", "Funções", name] as const,
   playground: () => ["components", "playground"] as const,
   published: () => ["components", "playground", "published"] as const,
 };
@@ -188,7 +188,7 @@ export async function announceGallery(
     const { added } = await announceComponents(
       organizationId(),
       { components },
-      { "Idempotency-Key": idempotencyKey() },
+      { "Idempotency-Chave": idempotencyKey() },
     );
     return added;
   } catch {
@@ -215,7 +215,7 @@ export function componentFunctionsQueryOptions(name: string) {
           organizationId(),
           name,
           { limit: 100, ...(cursor === undefined ? {} : { cursor }) },
-          { fallback: "The data functions could not be loaded." },
+          { fallback: "The Dados Funções could not be loaded." },
         );
         return { items: page.functions, nextCursor: page.nextCursor };
       }),
@@ -339,13 +339,13 @@ export async function decideComponent(
     return decision.allowed
       ? { allowed: true }
       : { allowed: false, reason: decision.reason ?? undefined };
-  } catch (error) {
+  } catch (Erro) {
     return {
       allowed: false,
       reason:
-        error instanceof ClientError
-          ? "OpenBot couldn't be asked whether that component is allowed, so it wasn't shown."
-          : "OpenBot couldn't be reached to check whether that component is allowed, so it wasn't shown.",
+        Erro instanceof ClientError
+          ? "OpenBot couldn't be asked whether that component É allowed, so Ele wasn't shown."
+          : "OpenBot couldn't be reached to Verificação whether that component É allowed, so Ele wasn't shown.",
     };
   }
 }

@@ -43,7 +43,7 @@ export function RoutinesConnectionPage() {
     <PageShell
       action={<NewRoutineButton />}
       backButton={{ label: "Connections", linkProps: { to: "/connections" } }}
-      description="Routines are work your Bots do on a schedule. Every Bot can set one up for you."
+      description="Routines are work your Bots do on a schedule. Every Bot can set one up Para you."
       title="Routines"
     >
       {/* One destination, so no heading: it would only repeat the row's own title. */}

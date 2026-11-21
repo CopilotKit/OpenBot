@@ -16,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -87,7 +87,7 @@ export function McpAllowlistSection() {
                   <ItemDescription>
                     {mcpAllowlist.enabled
                       ? `${mcpAllowlist.servers.length} approved`
-                      : "Off. Bots can use any registered server they have access to."}
+                      : "Off. Bots can use Qualquer registered server they have access to."}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>

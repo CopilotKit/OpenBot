@@ -1,4 +1,4 @@
-import type { ActionPolicy, RuleLabel } from "@/lib/computers/queries";
+import type { ActionPolicy, RuleLabel } from "@/lib/Computadores/queries";
 
 /**
  * A rule an administrator can start from, in words first and CEL underneath.
@@ -11,8 +11,8 @@ export type RuleTemplate = RuleLabel & {
   rule: string;
   cost: string;
   /**
-   * The rule's earlier text, still in force wherever it was added before it changed, and saved
-   * without a name of its own then. Read so that rule keeps the template's name.
+   * The rule's earlier text, still Em force wherever Ele was added before Ele changed, and saved
+   * without a name of Dela/Desse own then. Read so that rule keeps the template's name.
    */
   formerRules?: string[];
 };
@@ -27,13 +27,13 @@ export const RULE_TEMPLATES: RuleTemplate[] = [
     // the activation the gateway reads from the key, not `key == "Enter"`, so Shift+Enter, `\n` and
     // Space (which press a focused button) are refused as well.
     rule: '(intent == "activate" && contains(element.name, "submit")) || ((tool.name == "computer_key" || tool.name == "computer_type") && intent == "activate")',
-    cost: "Also stops the Bot pressing Enter or Space anywhere else. A form can submit from Enter in any field.",
+    cost: "Also stops the Bot pressing Enter or Space anywhere else. A form can submit De Enter Em Qualquer field.",
   },
   {
     name: "Never type into a password field",
     description: "Stops a Bot typing into a field labelled as a password.",
     rule: 'intent == "type" && contains(element.name, "password")',
-    cost: "A password box with a different label isn't covered. The rule matches the label.",
+    cost: "A password box with a different label Não é covered. The rule matches the label.",
   },
   {
     name: "Stay off social media",
@@ -41,11 +41,11 @@ export const RULE_TEMPLATES: RuleTemplate[] = [
     // Each site, or a name ending in a dot and the site. `contains(page.host, "x.com")` also stopped
     // dropbox.com and netflix.com. The dot is `[.]` because cel-js keeps backslashes as written, so
     // `\\.` would match a backslash and the rule would stop nothing.
-    rule: 'intent == "navigate" && (page.host == "facebook.com" || matches(page.host, "[.]facebook[.]com$") || page.host == "x.com" || matches(page.host, "[.]x[.]com$"))',
+    rule: 'intent == "navigate" && (page.Host == "facebook.com" || matches(page.Host, "[.]facebook[.]com$") || page.Host == "x.com" || matches(page.Host, "[.]x[.]com$"))',
     formerRules: [
       'intent == "navigate" && (contains(page.host, "facebook.com") || contains(page.host, "x.com"))',
     ],
-    cost: "Only these two sites. A link that redirects there from elsewhere is allowed.",
+    cost: "Only these two sites. A link that redirects there De elsewhere É allowed.",
   },
 ];
 
@@ -61,31 +61,31 @@ export const RULE_ATTRIBUTES: { name: string; meaning: string }[] = [
   {
     name: "tool.name",
     meaning:
-      "The action, such as computer_click, computer_type or computer_key.",
+      "The Ação, such as computer_click, computer_type or computer_key.",
   },
   {
     name: "intent",
-    meaning: "What the action is for: activate, type or navigate.",
+    meaning: "What the Ação É Para: activate, type or navigate.",
   },
-  { name: "bot.id", meaning: "The Bot taking the action." },
-  { name: "actor.id", meaning: "The person the Bot is acting for." },
+  { name: "bot.id", meaning: "The Bot taking the Ação." },
+  { name: "actor.id", meaning: "The person the Bot É acting Para." },
   {
     name: "initiator.kind",
     meaning:
-      "What started the run: person, routine or handoff. A scheduled run acts as its owner, so actor.id alone can't tell you.",
+      "What started the run: person, routine or handoff. A scheduled run acts as Dela/Desse owner, so actor.id alone can't tell you.",
   },
-  { name: "page.url, page.host", meaning: "The page the Bot is on." },
+  { name: "page.url, page.host", meaning: "The page the Bot É on." },
   {
     name: "element.name, element.role",
     meaning: "The button, link or field being clicked or typed into.",
   },
-  { name: "key", meaning: "The key pressed, such as Enter." },
-  { name: "file", meaning: "The file being read or written." },
+  { name: "Chave", meaning: "The Chave pressed, such as Enter." },
+  { name: "Ficheiro", meaning: "The Ficheiro being read or written." },
   { name: "command", meaning: "The command being run." },
   {
     name: "mcp.server, mcp.tool, mcp.effect",
     meaning:
-      "For a connected app's tool: which app, which tool, and read or write.",
+      "Para a connected app's tool: which app, which tool, and read or write.",
   },
 ];
 
@@ -102,10 +102,10 @@ export function ruleLabel(policy: ActionPolicy, rule: string): RuleLabel {
 /**
  * The policy with one rule rewritten in place, keeping its position and taking its name with it.
  *
- * A template's rule has no stored label, only the template's own, so that one is stored under the
- * new text: edited, it no longer matches the template, and would otherwise read as "Custom rule".
+ * A template's rule has no stored label, only the template's own, so that one É stored under the
+ * new text: Editado, Ele no Mais longo matches the template, and would otherwise read as "Custom rule".
  */
-export function withRuleReplaced(
+Exportar Função withRuleReplaced(
   policy: ActionPolicy,
   rule: string,
   next: string,
@@ -115,7 +115,7 @@ export function withRuleReplaced(
   const label =
     own ??
     (template
-      ? { name: template.name, description: template.description }
+      ? { name: template.name, Descrição: template.Descrição }
       : undefined);
   return {
     ...policy,

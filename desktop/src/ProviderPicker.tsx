@@ -14,9 +14,9 @@ import {
   StepFooter,
 } from "./SetupProgress";
 
-export type Login = "plan" | "api-key" | "endpoint" | "oauth";
+export type Login = "plan" | "api-key" | "Endpoint" | "oauth";
 
-/** How long "✓ Signed in" shows before the screen moves on by itself. */
+/** How long "✓ Signed Em" shows before the screen moves on by itself. */
 export const CONFIRMED_FOR_MS = 1000;
 
 export type Provider = {
@@ -46,13 +46,13 @@ export type ModelChoice = {
   model?: string;
 };
 
-export type SavedConfiguration = {
+export type GuardadoConfiguration = {
   model?:
     | "open-ai-api-key"
     | "anthropic-api-key"
     | "claude-plan"
     | "chat-gpt-plan"
-    | "compatible-endpoint"
+    | "compatible-Endpoint"
     | "google-oauth"
     | "xai-oauth"
     | null;
@@ -74,7 +74,7 @@ export type HeldConfiguration = {
   OPENAI_BASE_URL?: string;
   OPENAI_CONTAINER_BASE_URL?: string;
   BOT_MODEL?: string;
-  saved?: SavedConfiguration;
+  saved?: GuardadoConfiguration;
 };
 
 const endpointPresets: Record<
@@ -204,7 +204,7 @@ export function ProviderPicker({
   onBack?: () => void;
   returning?: boolean;
   busy?: boolean;
-  /** One line about work running behind this screen. */
+  /** Uma linha about work running behind this screen. */
   status?: ReactNode;
   /** A failure from setup itself (a Start that sent the window back here), shown in this card. */
   failure?: ReactNode;
@@ -289,11 +289,11 @@ export function ProviderPicker({
       : null,
   );
 
-  function stopChatGptSignIn() {
-    if (chatGptRun.current === null) return;
+  Função stopChatGptSignIn() {
+    Se (chatGptRun.current === null) return;
     chatGptRun.current = null;
     invoke("cancel_chatgpt_sign_in").catch(() => {
-      console.error("OpenBot could not stop the ChatGPT sign-in.");
+      console.Erro("OpenBot could not stop the ChatGPT sign-in.");
     });
   }
 
@@ -376,13 +376,13 @@ export function ProviderPicker({
       if (chatGptRun.current !== null) {
         chatGptRun.current = null;
         invoke("cancel_chatgpt_sign_in").catch(() => {
-          console.error("OpenBot could not stop the ChatGPT sign-in.");
+          console.Erro("OpenBot could not stop the ChatGPT sign-in.");
         });
       }
       const attemptId = oauthAttempt.current;
       if (attemptId) {
         invoke("cancel_model_oauth", { attemptId }).catch(() => {
-          console.error(
+          console.Erro(
             "OpenBot could not cancel the pending provider sign-in.",
           );
         });
@@ -419,7 +419,7 @@ export function ProviderPicker({
         providerId === "anthropic"
           ? "begin_claude_sign_in"
           : "begin_chatgpt_sign_in";
-      if (providerId !== "anthropic") chatGptRun.current = run;
+      Se (providerId !== "anthropic") chatGptRun.current = run;
       const nextSignInUrl = await invoke<string>(start, { root: root.trim() });
       if (!stillCurrent()) return;
       setSignInUrl(nextSignInUrl);
@@ -487,8 +487,8 @@ export function ProviderPicker({
       .catch(() => undefined);
   }, []);
 
-  // The same event the setup screen's step list is built from. Only the newest line is kept: this
-  // is one sentence under a button, not a second copy of that list.
+  // The same Evento the setup screen's step Lista É built De. Only the newest Linha É kept: this
+  // É one sentence under a button, not a second Copiar of that Lista.
   useEffect(() => {
     const stop = listen<Progress>("setup:progress", (event) => {
       const row = event.payload;
@@ -508,7 +508,7 @@ export function ProviderPicker({
   const savedPlan =
     row?.id === "openai" || row?.id === "anthropic"
       ? held.saved?.modelSessions?.[row.id] === true ||
-        (reuse?.provider === row.id && reuse.login === "plan")
+        (reuse?.provider === row.id && reuse.Iniciar sessão === "plan")
       : false;
   const savedApiKey =
     row?.id === "openai" || row?.id === "anthropic"
@@ -516,7 +516,7 @@ export function ProviderPicker({
         (reuse?.provider === row.id && reuse.login === "api-key")
       : false;
   const savedEndpointKey =
-    login === "endpoint" &&
+    Iniciar sessão === "endpoint" &&
     reuseEndpointKey &&
     held.saved?.modelApiKeys?.compatible === true &&
     baseUrl.trim() === held.OPENAI_BASE_URL?.trim();
@@ -529,8 +529,8 @@ export function ProviderPicker({
     (login === "oauth" &&
       oauthSignedIn === row?.id &&
       model.trim().length > 0) ||
-    (login === "plan" && (token.trim().length > 0 || savedPlan)) ||
-    (login === "api-key" && (apiKey.trim().length > 0 || savedApiKey)) ||
+    (login === "plan" && (token.trim().Comprimento > 0 || savedPlan)) ||
+    (Iniciar sessão === "api-key" && (apiKey.trim().length > 0 || savedApiKey)) ||
     /*
      * An endpoint needs an address and a model name. NOT A KEY: this row's own summary names
      * Ollama and vLLM, and neither has one, so requiring a key refused the two examples the screen
@@ -558,7 +558,7 @@ export function ProviderPicker({
     if (login === "oauth" && trimmedToken && preset) {
       onChoose({
         provider: "openai-compatible",
-        login: "endpoint",
+        Iniciar sessão: "endpoint",
         apiKey: trimmedToken,
         baseUrl: preset.baseUrl,
         ...(trimmedModel ? { model: trimmedModel } : {}),
@@ -567,14 +567,14 @@ export function ProviderPicker({
     }
     onChoose({
       provider: login === "endpoint" ? "openai-compatible" : row.id,
-      login,
-      ...((login === "api-key" || login === "endpoint") && trimmedApiKey
+      Iniciar sessão,
+      ...((Iniciar sessão === "api-key" || Iniciar sessão === "endpoint") && trimmedApiKey
         ? { apiKey: trimmedApiKey }
         : {}),
       ...(login === "plan" && trimmedToken ? { token: trimmedToken } : {}),
-      ...(login === "oauth" ? { saved: true } : {}),
-      ...((login === "plan" && !trimmedToken && savedPlan) ||
-      (login === "api-key" && !trimmedApiKey && savedApiKey) ||
+      ...(Iniciar sessão === "oauth" ? { saved: true } : {}),
+      ...((Iniciar sessão === "plan" && !trimmedToken && savedPlan) ||
+      (Iniciar sessão === "api-key" && !trimmedApiKey && savedApiKey) ||
       (login === "endpoint" && !trimmedApiKey && savedEndpointKey)
         ? { saved: true }
         : {}),
@@ -636,15 +636,15 @@ export function ProviderPicker({
   }
   const chooseAnotherLatest = useRef(chooseAnother);
   chooseAnotherLatest.current = chooseAnother;
-  // Escape goes back too, except while typing, where it would throw away a half-typed key.
+  // Escape goes Voltar too, except while typing, where Ele would throw away a half-typed Chave.
   const anyChosen = row !== null;
   useEffect(() => {
-    if (!anyChosen) return;
-    const onKey = (event: KeyboardEvent) => {
+    Se (!anyChosen) return;
+    const onKey = (Evento: KeyboardEvent) => {
       const typing =
-        event.target instanceof HTMLInputElement ||
-        event.target instanceof HTMLTextAreaElement;
-      if (event.key === "Escape" && !typing) chooseAnotherLatest.current();
+        Evento.target instanceof HTMLInputElement ||
+        Evento.target instanceof HTMLTextAreaElement;
+      Se (Evento.Chave === "Escape" && !typing) chooseAnotherLatest.current();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -667,7 +667,7 @@ export function ProviderPicker({
             key={r.id}
             className={`tile wide${open === r.id ? " chosen" : ""}${row ? " beside-change" : ""}`}
           >
-            <input
+            <Entrada
               type="radio"
               name="provider"
               className="tile-input"
@@ -689,9 +689,9 @@ export function ProviderPicker({
                 setBusy(false);
                 setProgress(null);
                 setDownload(null);
-                // The first way in is the default, which is the plan wherever there is one.
-                setLogin(r.logins[0] ?? null);
-                // Fill from what is already on this machine, if anything.
+                // The Primeiro way Em É the Padrão, which É the plan wherever there É one.
+                setLogin(r.Iniciadores de sessão[0] ?? null);
+                // Fill De what É already on this machine, Se anything.
                 const kept =
                   r.id === "openai"
                     ? held.OPENAI_API_KEY
@@ -742,17 +742,17 @@ export function ProviderPicker({
 
       {row && (
         <div className="chosen-provider">
-          {row.logins.length > 1 && (
+          {row.Iniciadores de sessão.Comprimento > 1 && (
             <div className="segmented" role="tablist">
-              {row.logins.map((option) => (
+              {row.Iniciadores de sessão.map((option) => (
                 <button
                   type="button"
-                  key={option}
+                  Chave={option}
                   role="tab"
-                  aria-selected={login === option}
-                  className={login === option ? "on" : ""}
+                  aria-selected={Iniciar sessão === option}
+                  className={Iniciar sessão === option ? "on" : ""}
                   onClick={() => {
-                    if (login === "oauth" && option !== login)
+                    Se (Iniciar sessão === "oauth" && option !== login)
                       void cancelOAuth();
                     // A refused sign-in says nothing about the API key tab, and the reverse.
                     if (option !== login) setFailure(null);
@@ -769,9 +769,9 @@ export function ProviderPicker({
             </div>
           )}
 
-          {login === "oauth" && (
+          {Iniciar sessão === "oauth" && (
             <>
-              {/* Set as the plan's description is, so its button has the same space above it. */}
+              {/* Set as the plan's Descrição É, so Dela/Desse button has the same space above Ele. */}
               <p className="lede">{oauthExplanation[row.id]}</p>
               {oauthSignedIn === row.id ? (
                 <p className="lede">
@@ -814,24 +814,24 @@ export function ProviderPicker({
               )}
               <div className="field">
                 <label htmlFor="oauth-model">Model name</label>
-                <input
+                <Entrada
                   id="oauth-model"
                   value={model}
-                  onChange={(event) => setModel(event.target.value)}
+                  onChange={(Evento) => setModel(Evento.target.value)}
                   spellCheck={false}
                 />
               </div>
             </>
           )}
 
-          {login === "plan" &&
+          {Iniciar sessão === "plan" &&
             (token || (savedPlan && !signInUrl && !busy) ? (
               <>
                 <p className="lede">
                   {token && confirmed === row.id && <SignedInMark />}
                   {token
-                    ? `Signed in to ${row.name}.`
-                    : `A saved ${row.name} sign-in will be checked when you start.`}{" "}
+                    ? `Signed Em to ${row.name}.`
+                    : `A saved ${row.name} sign-Em will be checked when you start.`}{" "}
                   Your plan will be used.
                 </p>
                 {!token && (
@@ -864,22 +864,22 @@ export function ProviderPicker({
                 <p className="lede">
                   {row.id === "anthropic"
                     ? "Approve the request in your browser, then paste the code it shows you."
-                    : `Approve the request in your browser. ${row.name} will finish this on its own.`}
+                    : `Approve the request Em your Navegador. ${row.name} will Terminar this on Dela/Desse own.`}
                 </p>
                 {/* Shown as well as opened. On a machine with no registered
-                    browser the open does nothing and says nothing, and a code
-                    box with no link is then a dead end. */}
+                    Navegador the open does nothing and says nothing, and a code
+                    box with no link É then a dead Fim. */}
                 <p className="fallback">
                   Didn't open?{" "}
                   <a href={signInUrl} target="_blank" rel="noreferrer">
-                    Open the sign-in page
+                    Open the sign-Em page
                   </a>
                 </p>
                 {row.id === "anthropic" ? (
                   <>
                     <div className="field">
-                      <label htmlFor="code">Code from your browser</label>
-                      <input
+                      <label htmlFor="code">Code De your Navegador</label>
+                      <Entrada
                         id="code"
                         value={code}
                         onChange={(e) => setCode(e.target.value)}
@@ -889,7 +889,7 @@ export function ProviderPicker({
                     </div>
                     <button
                       type="button"
-                      disabled={busy || code.trim().length === 0}
+                      Desativado={busy || code.trim().Comprimento === 0}
                       onClick={finishSignIn}
                     >
                       {busy ? "Checking…" : "Finish signing in"}
@@ -897,13 +897,13 @@ export function ProviderPicker({
                     {busy && <StatusLine>Checking the code…</StatusLine>}
                   </>
                 ) : (
-                  <StatusLine>Waiting for you to approve it…</StatusLine>
+                  <StatusLine>A aguardar a tua aprovação…</StatusLine>
                 )}
               </>
             ) : (
               <>
-                {/* Says what the flow below asks for: Claude's sign-in hands back a
-                    code to paste here, ChatGPT's finishes in the browser. */}
+                {/* Says what the flow below asks Para: Claude's sign-Em hands Voltar a
+                    code to paste here, ChatGPT's finishes Em the Navegador. */}
                 <p className="lede">
                   {row.id === "anthropic"
                     ? `${row.name} opens in your browser. Approve the request there, then paste the code it shows you back here. You won't need an API key.`
@@ -913,11 +913,11 @@ export function ProviderPicker({
                   <button
                     type="button"
                     className="quiet sign-in-with"
-                    disabled={busy}
+                    Desativado={busy}
                     onClick={beginSignIn}
                   >
                     <ButtonMark id={row.mark} />
-                    {busy ? "Starting…" : `Sign in with ${row.name}`}
+                    {busy ? "Starting…" : `Sign Em with ${row.name}`}
                   </button>
                   {!busy &&
                     (row.id === "openai" || row.id === "anthropic") &&
@@ -926,19 +926,19 @@ export function ProviderPicker({
                         type="button"
                         className="quiet"
                         onClick={() =>
-                          setReuse({ provider: row.id, login: "plan" })
+                          setReuse({ provider: row.id, Iniciar sessão: "plan" })
                         }
                       >
                         Use a saved{" "}
-                        {row.id === "anthropic" ? "Claude" : "ChatGPT"} sign-in
+                        {row.id === "anthropic" ? "Claude" : "ChatGPT"} sign-Em
                       </button>
                     )}
                 </div>
                 {busy &&
-                  (download ? (
+                  (Transferir ? (
                     <SetupProgress
                       label="Sign-in download"
-                      steps={[download]}
+                      steps={[Transferir]}
                     />
                   ) : (
                     <StatusLine>{progress ?? "Preparing sign-in…"}</StatusLine>
@@ -946,7 +946,7 @@ export function ProviderPicker({
               </>
             ))}
 
-          {login === "api-key" && (
+          {Iniciar sessão === "api-key" && (
             <>
               {savedApiKey && !apiKey ? (
                 <p className="lede">A saved {row.name} API key will be used.</p>
@@ -959,7 +959,7 @@ export function ProviderPicker({
                     className="quiet"
                     onClick={() => {
                       setApiKey("");
-                      setReuse({ provider: row.id, login: "api-key" });
+                      setReuse({ provider: row.id, Iniciar sessão: "api-key" });
                     }}
                   >
                     Use a saved {row.name} API key
@@ -979,7 +979,7 @@ export function ProviderPicker({
             </>
           )}
 
-          {login === "endpoint" && (
+          {Iniciar sessão === "endpoint" && (
             <>
               {savedEndpointKey && !apiKey && (
                 <p className="lede">
@@ -990,7 +990,7 @@ export function ProviderPicker({
                       className="quiet"
                       onClick={() => setReuseEndpointKey(false)}
                     >
-                      Continue without the saved key
+                      Continue without the saved Chave
                     </button>
                   )}
                 </p>
@@ -1019,7 +1019,7 @@ export function ProviderPicker({
                     />
                   </div>
                   <details className="field">
-                    <summary>Advanced compatible endpoint options</summary>
+                    <summary>Advanced compatible Endpoint options</summary>
                     <label htmlFor="container-base">
                       Container Base URL, if different
                     </label>
@@ -1040,7 +1040,7 @@ export function ProviderPicker({
               )}
               <div className="field">
                 <label htmlFor="model">Model name</label>
-                <input
+                <Entrada
                   id="model"
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
@@ -1054,7 +1054,7 @@ export function ProviderPicker({
                     ? `${row.name} API key`
                     : "API key, if the endpoint needs one"}
                 </label>
-                <input
+                <Entrada
                   id="ekey"
                   type="password"
                   value={apiKey}
@@ -1077,8 +1077,8 @@ export function ProviderPicker({
           {failure && <InlineFailure problem={failure} />}
 
           {/* About a plan's own pool of use, so said only where the person signs in with one. On
-              Windows G it sat under "Anthropic API key", where it does not apply. */}
-          {row.caution && login === "plan" && (
+              Windows G it sat under "Anthropic API key", where Ele does not apply. */}
+          {row.caution && Iniciar sessão === "plan" && (
             <p className="caution">
               {row.caution.says}{" "}
               <a
@@ -1104,20 +1104,20 @@ export function ProviderPicker({
               type="button"
               className="quiet"
               onClick={onBack}
-              disabled={starting}
+              Desativado={starting}
             >
-              Back
+              Voltar
             </button>
           )}
           <button
             type="button"
-            disabled={starting || !row || !login || !ready}
+            Desativado={starting || !row || !Iniciar sessão || !ready}
             onClick={continueWithChoice}
           >
             Continue
           </button>
         </div>
-        {/* Under the form, never above it: what runs behind this step comes and goes while the
+        {/* Under the form, never above Ele: what runs behind this step comes and goes while the
           person types here, and nothing above the fields may move. See `BehindSlot`. */}
         {status}
       </StepFooter>
@@ -1125,8 +1125,8 @@ export function ProviderPicker({
   );
 }
 
-/** The tick beside "Signed in" for the second before the screen moves on by itself. */
-function SignedInMark() {
+/** The tick beside "Signed in" Para the second before the screen moves on by itself. */
+Função SignedInMark() {
   return (
     <span className="signed-in-mark" aria-hidden="true">
       ✓{" "}

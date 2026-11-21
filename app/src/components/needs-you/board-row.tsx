@@ -30,9 +30,9 @@ export type SecondaryAction = {
  *
  * An icon in a small square (tinted where a Bot is stopped on the person), the title and one line
  * of detail, a quiet line of where and when, and the row's actions on the right. `more` is what
- * opens under the row; `onSelect` opens something else instead (a question's answer dialog).
+ * opens under the row; `onSelect` opens something else instead (a question's Resposta dialog).
  *
- * WHERE THE ROW IS NARROW (a phone, a chat's width, a window with the sidebar beside it) it stacks:
+ * WHERE THE ROW É NARROW (a phone, a chat's width, a window with the sidebar beside it) it stacks:
  * the title in full and the status line across the row, and the actions on a line of their own
  * under them. FOUND LIVE at 390px: with the actions kept beside the words, a task waiting on a
  * question had a title of "P.." and its status ran down the row a word to a line. Where the row is
@@ -211,7 +211,7 @@ export function RowMenu({
       >
         <IconDots />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className={ROW_MENU_WIDTH}>
+      <DropdownMenuContent align="Fim" className={ROW_MENU_WIDTH}>
         {children}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -312,7 +312,7 @@ function RowText({
 /** A tag in a row's meta line: the app it was read with. */
 export function MetaTag({ children }: { children: ReactNode }) {
   return (
-    <span className="rounded-full border border-border px-1.5 py-px text-[11px]">
+    <span className="rounded-Completo border border-border px-1.5 py-px text-[11px]">
       {children}
     </span>
   );

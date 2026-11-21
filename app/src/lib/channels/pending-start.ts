@@ -38,7 +38,7 @@ export function pendingStartPath(id: string): string {
 /**
  * The conversation each finished start became, by the placeholder's id.
  *
- * Somebody who leaves the placeholder while it is being made, and comes back to it (the browser's
+ * Somebody who leaves the placeholder while Ele É being made, and comes Voltar to Ele (the Navegador's
  * Back button, mostly), is coming back to that conversation. The start has forgotten itself by
  * then, and a placeholder that knows nothing sends them home, to an empty composer, while the
  * conversation they asked for sits in the sidebar with their first message still waiting to go.

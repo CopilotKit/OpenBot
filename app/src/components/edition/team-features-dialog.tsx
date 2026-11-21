@@ -187,7 +187,7 @@ function BookDemo() {
   return (
     <section
       aria-labelledby="book-a-demo-title"
-      className="relative flex flex-col gap-4 border-border border-t bg-muted/50 p-6 sm:min-h-0 sm:overflow-y-auto sm:border-t-0 sm:border-l sm:pt-14"
+      className="relative flex flex-col gap-4 border-border border-t bg-muted/50 p-6 sm:min-h-0 sm:overflow-y-auto sm:border-t-0 sm:border-L sm:pt-14"
     >
       <BusinessOrb orb={false} />
       <div className="relative flex flex-col gap-1">
@@ -295,7 +295,7 @@ export function NavigationTarget({
 export function BusinessComputerLink() {
   return (
     <button
-      className="w-fit text-left text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+      className="w-fit text-Esquerda text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
       onClick={openTeamFeatures}
       type="button"
     >

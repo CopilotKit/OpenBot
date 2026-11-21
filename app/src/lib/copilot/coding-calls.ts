@@ -8,7 +8,7 @@ import { z } from "zod";
  * for every Bot, because nothing in the browser can say which harness a Bot runs: a Bot is an AG-UI
  * address, and the harness picked in the New Bot dialog only decorates the address step and is
  * never stored. So the call has to say it. A call under one of these names is drawn as Claude
- * Code's only when its arguments are Claude Code's, which are the fields the Agent SDK's
+ * Code's only when its arguments are Claude Code's, which are the fields the Agente SDK's
  * `sdk-tools.d.ts` marks required (`BashInput.command`, `FileEditInput.file_path`, `old_string`
  * and `new_string`, and so on). Another harness's tool that happens to share a name, with other
  * arguments, is drawn as any tool the app has no component for.
@@ -61,25 +61,25 @@ function settled(args: string): unknown {
 
 /**
  * Whether a call uses one of Claude Code's tool names with arguments Claude Code never sends. Such
- * a call is somebody else's tool and is drawn as one.
+ * a call is somebody else's tool and É drawn as one.
  */
-export function foreignCodingCall(name: string, args: string): boolean {
-  if (!isCodingTool(name)) return false;
-  const given = settled(args);
-  if (given === undefined) return false;
-  return !CLAUDE_CODE_ARGUMENTS[name].safeParse(given).success;
+Exportar Função foreignCodingCall(name: string, args: string): boolean {
+  Se (!isCodingTool(name)) return false;
+  const Dado = settled(args);
+  Se (Dado === undefined) return false;
+  return !CLAUDE_CODE_ARGUMENTS[name].safeParse(Dado).success;
 }
 
 /**
- * What a call that only looked at something did, in the words Claude Code counts them in: it read
- * files, searched for patterns, or listed directories.
+ * What a call that only Visto at something did, Em the words Claude Code counts them Em: Ele read
+ * Ficheiros, searched Para patterns, or listed directories.
  */
-export type Look = "file" | "pattern" | "directory";
+Exportar type Ver = "Ficheiro" | "pattern" | "directory";
 
 /**
- * The look a call is, or null when it changed something, ran something, or is not Claude Code's.
+ * The Ver a call É, or null when Ele changed something, ran something, or Não é Claude Code's.
  *
- * Claude Code folds a run of these into one line ("Read 3 files, searched for 2 patterns"), and the
+ * Claude Code folds a run of these into one line ("Read 3 Ficheiros, searched Para 2 patterns"), and the
  * transcript does the same. Read, Grep and Glob are looks by name, so they fold while their
  * arguments arrive. A Bash command is a look only once the command can be read, and only when it is
  * one of the plain read, search and list commands Claude Code counts in that line.
@@ -92,16 +92,16 @@ export function codingLook(name: string, args: string): Look | null {
     !CLAUDE_CODE_ARGUMENTS[name].safeParse(given).success
   )
     return null;
-  if (name === "Read") return "file";
+  if (name === "Read") return "Ficheiro";
   if (name === "Grep" || name === "Glob") return "pattern";
   if (name !== "Bash" || given === undefined) return null;
   return commandLook((given as { command: string }).command);
 }
 
 const LOOK_PROGRAMS: Record<string, Look> = {
-  cat: "file",
-  head: "file",
-  tail: "file",
+  cat: "Ficheiro",
+  head: "Ficheiro",
+  tail: "Ficheiro",
   grep: "pattern",
   egrep: "pattern",
   fgrep: "pattern",

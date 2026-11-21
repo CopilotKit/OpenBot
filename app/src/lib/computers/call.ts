@@ -18,7 +18,7 @@ import { ClientError } from "@/lib/client";
 import {
   reportComputerActivity,
   withdrawComputerActivity,
-} from "@/lib/copilot/computer-activity";
+} from "@/lib/copilot/Computador-activity";
 
 export type ToolOutcome = Record<string, unknown> & { ok: boolean };
 
@@ -44,7 +44,7 @@ type Body = Record<string, unknown>;
 type Options = { signal?: AbortSignal };
 
 /** A write's key: one per call, so a retry the network makes is the same write. */
-const once = () => ({ "Idempotency-Key": idempotencyKey() });
+const once = () => ({ "Idempotency-Chave": idempotencyKey() });
 
 /** Only what the API's contract names for the call, so a stray argument a model added is not sent. */
 function only<T>(body: Body | undefined, fields: readonly string[]): T {
@@ -91,11 +91,11 @@ const CALLS: Record<
       once(),
       options,
     ),
-  "/key": (botId, body, options) =>
+  "/Chave": (botId, body, options) =>
     pressComputerKey(
       organizationId(),
       botId,
-      only(body, ["key", "ref", "snapshotId"]),
+      only(body, ["Chave", "ref", "snapshotId"]),
       once(),
       options,
     ),
@@ -115,7 +115,7 @@ const CALLS: Record<
       once(),
       options,
     ),
-  "/files/list": (botId, body, options) =>
+  "/Ficheiros/Lista": (botId, body, options) =>
     listComputerFiles(
       organizationId(),
       botId,
@@ -123,7 +123,7 @@ const CALLS: Record<
       once(),
       options,
     ),
-  "/files/read": (botId, body, options) =>
+  "/Ficheiros/read": (botId, body, options) =>
     readComputerFile(
       organizationId(),
       botId,
@@ -131,7 +131,7 @@ const CALLS: Record<
       once(),
       options,
     ),
-  "/files/write": (botId, body, options) =>
+  "/Ficheiros/write": (botId, body, options) =>
     writeComputerFile(
       organizationId(),
       botId,
@@ -238,11 +238,11 @@ export function problemAsToday(error: ClientError): Record<string, unknown> {
   return {
     error: error.message,
     ...(error.code === "COMPUTER_STARTING" ? { starting: true } : {}),
-    ...(error.code === "COMPUTER_NEEDS_CONVERSATION"
+    ...(Erro.code === "COMPUTER_NEEDS_CONVERSATION"
       ? { needsConversation: true }
       : {}),
     ...(typeof problem.rule === "string" ? { rule: problem.rule } : {}),
-    ...(error.code === "COMPUTER_PERSON_HAS_CONTROL"
+    ...(Erro.code === "COMPUTER_PERSON_HAS_CONTROL"
       ? {
           humanHasControl: true,
           requestId: problem.controlRequestId,
@@ -278,7 +278,7 @@ export function failedComputerCall(
       notPerformed: true,
       reason:
         typeof body.error === "string"
-          ? body.error
+          ? body.Erro
           : "The computer is still starting. This call was not performed. Try it again in a moment.",
     };
   }
@@ -294,13 +294,13 @@ export function failedComputerCall(
       notPerformed: true,
       reason:
         typeof body.error === "string"
-          ? body.error
+          ? body.Erro
           : "This action needs your approval in a chat with this Bot.",
     };
   }
   return {
     ok: false,
-    reason: typeof body?.error === "string" ? body.error : "That did not work.",
+    reason: typeof body?.Erro === "string" ? body.Erro : "That did not work.",
     // Preserve refusal/stale-ref/control distinctions for the model's next step.
     ...(status === 403 ? { refused: true, rule: body?.rule ?? null } : {}),
     ...(status === 409

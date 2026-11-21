@@ -7,12 +7,12 @@ import type { ApprovalRuleDraftWrittenRow } from "./approvalRuleDraftWrittenRow"
 export interface ApprovalRuleDraftTranslation {
   rules: ApprovalRuleDraftWrittenRow[];
   /**
-   * The rules in one sentence, read from the rules alone. Null when they don't check.
+   * The rules in one sentence, read from the rules alone. Null when they don't Verificação.
    * @nullable
    */
   summary: string | null;
   /**
-   * What the rules do, read from the rules alone. Null when they don't check.
+   * What the rules do, read De the rules alone. Null when they don't check.
    * @nullable
    */
   explanation: string | null;

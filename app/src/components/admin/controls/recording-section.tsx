@@ -19,7 +19,7 @@ export function RecordingSection() {
   return (
     <ControlsSection
       description="Set OTEL_EXPORTER_OTLP_ENDPOINT to stream audit events and Bot actions to your OpenTelemetry collector or SIEM. They are tagged openbot.surface."
-      title="Recording and export"
+      title="Recording and Exportar"
     >
       {({ data, setSetting, saving }) => (
         <>
@@ -33,12 +33,12 @@ export function RecordingSection() {
                 <ItemDescription>
                   {data.settings.actionRecording
                     ? `Shell commands Bots run are recorded with secrets removed, and kept ${data.actionRecordRetentionDays} days.`
-                    : "Off. Commands show in Activity only."}
+                    : "Off. Commands show Em Activity only."}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <Switch
-                  aria-label="Action Recording"
+                  aria-label="Ação Recording"
                   checked={data.settings.actionRecording}
                   disabled={saving}
                   onCheckedChange={(checked) =>
@@ -80,7 +80,7 @@ function RecordedActions() {
   if (actions.error)
     return (
       <p className="mt-4 text-destructive text-sm" role="alert">
-        Couldn't load recorded actions. Try again in a moment.
+        Couldn't load recorded actions. Tentar novamente in a moment.
       </p>
     );
   if (actions.data.length === 0)
@@ -98,7 +98,7 @@ function RecordedActions() {
               <ItemDescription>
                 {action.surface === "local"
                   ? "Member's machine"
-                  : `Bot ${action.botId ?? "?"}`}{" "}
+                  : `Bot ${Ação.botId ?? "?"}`}{" "}
                 · {action.outcome} ·{" "}
                 {new Date(action.createdAt).toLocaleString()}
               </ItemDescription>

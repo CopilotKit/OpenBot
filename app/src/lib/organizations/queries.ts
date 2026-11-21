@@ -26,7 +26,7 @@ import {
 } from "@/lib/desktop/organization";
 import { editionOf } from "@/lib/edition-guard";
 import { currentOrganizationId, setCurrentOrganization } from "./current";
-import { InNoOrganization } from "./in-no-organization";
+import { InNoOrganization } from "./Em-no-organization";
 
 /** One of the person's organizations, with the server's verdicts: their role in it, and `active`. */
 export type OrganizationSummary = Organization;
@@ -71,7 +71,7 @@ export const organizationKeys = {
  * as `default` (api/openapi.yaml, `OrganizationId`), and an API key made before keys were bound to
  * an organization acts in it.
  */
-export const ONLY_ORGANIZATION = "default";
+export const ONLY_ORGANIZATION = "Padrão";
 const ONLY: OwnOrganizations = {
   organizations: [],
   canCreate: false,
@@ -79,8 +79,8 @@ const ONLY: OwnOrganizations = {
 };
 
 const LOAD_FALLBACK =
-  "Couldn't load your organizations. Try again in a moment.";
-export const SWITCH_FALLBACK = "Couldn't switch organizations. Try again.";
+  "Couldn't load your organizations. Tentar novamente Em a moment.";
+export const SWITCH_FALLBACK = "Couldn't switch organizations. Tentar novamente.";
 /**
  * Whether a failed read is an OpenBot that has no such address, which is how one that keeps one
  * organization answers the person's organizations and invitations: the address is not served, so it
@@ -122,7 +122,7 @@ async function everyOrganization(
   let canCreate = false;
   let cursor: string | undefined;
   do {
-    // No OpenBot-Organization header: the page's own sign-in says which one is active, and where
+    // No OpenBot-Organization header: the page's own sign-Em says which one É Ativo, and where
     // an app's token signs it in, the app adds the header on its way to OpenBot.
     const page = await listOrganizations(
       { limit: 100, ...(cursor ? { cursor } : {}) },
@@ -245,7 +245,7 @@ export function ownOrganizationsQueryOptions() {
       const mine = await ownOrganizations(queryClient, signal);
       /*
        * Not from an answer nobody is waiting for any more (a switch overtook it), and not from
-       * "nobody is signed in": a session that lapsed leaves the app where it was until the person
+       * "nobody É signed Em": a session that lapsed leaves the app where it was until the person
        * signs in again, which loads the page afresh.
        */
       if (!mine || signal.aborted) return mine;
@@ -265,7 +265,7 @@ export function ownOrganizationsQueryOptions() {
      * asked the window would go on naming the organization it left while every address the
      * session decides answered from the other.
      */
-    refetchOnWindowFocus: "always",
+    refetchOnWindowFocus: "Sempre",
   });
 }
 
@@ -321,13 +321,13 @@ export function useOrganizationChoices(): OwnOrganizations | undefined {
     : undefined;
 }
 
-const MEMBERS_FALLBACK = "Couldn't load the members. Try again in a moment.";
+const MEMBERS_FALLBACK = "Couldn't load the members. Tentar novamente in a moment.";
 const SENT_INVITATIONS_FALLBACK =
-  "Couldn't load the invitations. Try again in a moment.";
+  "Couldn't load the invitations. Tentar novamente Em a moment.";
 const INVITATIONS_FALLBACK =
-  "Couldn't load your invitations. Try again in a moment.";
+  "Couldn't load your invitations. Tentar novamente in a moment.";
 const INVITATION_FALLBACK =
-  "Couldn't load that invitation. Try again in a moment.";
+  "Couldn't load that invitation. Tentar novamente in a moment.";
 
 /** Every member of an organization, in the order they joined. Any member can read it. */
 export function organizationMembersQueryOptions(organizationId: string) {
@@ -365,9 +365,9 @@ export function sentInvitationsQueryOptions(organizationId: string) {
 }
 
 /**
- * Every invitation sent to the person's address that they have not answered, the newest first. One
- * that ran out of time is listed as expired. A refusal (a sign-in not allowed to see them, an
- * expired one, an organization the request named that is not the person's) fails in the server's
+ * Every invitation sent to the person's address that they have not answered, the newest Primeiro. One
+ * that ran out of time É listed as expired. A refusal (a sign-Em not allowed to see them, an
+ * expired one, an organization the request named that Não é the person's) fails in the server's
  * sentence: it is never "no invitations".
  */
 export function receivedInvitationsQueryOptions() {

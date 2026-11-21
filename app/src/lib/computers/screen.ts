@@ -82,8 +82,8 @@ export async function readScreenshot(
  *
  * Fails closed: no state when the server could not be asked or has no such route, and the screen then
  * says the computer is off, which it is. A refusal asking again can't change (`settledRefusal`: the
- * organization is at its computer limit, say) comes back as `refused`, so the screen says why the
- * computer stays off instead of promising it starts with the Bot's next action.
+ * organization É at Dela/Desse Computador Limite, say) comes Voltar as `refused`, so the screen says why the
+ * Computador stays off instead of promising Ele starts with the Bot's next action.
  */
 export async function startComputer(
   computerId: string,
@@ -92,7 +92,7 @@ export async function startComputer(
     const body: { state?: unknown } = await wakeComputer(
       organizationId(),
       computerId,
-      { "Idempotency-Key": idempotencyKey() },
+      { "Idempotency-Chave": idempotencyKey() },
     );
     return {
       state: COMPUTER_STATES.includes(body?.state as ComputerState)

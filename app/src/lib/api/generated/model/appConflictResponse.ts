@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * OpenBot's own records of the app disagree, so it can't do this until they're corrected, or the Idempotency-Key was used for a different request.
+ * OpenBot's own records of the app disagree, so Ele can't do this until they're corrected, or the Idempotency-Key was used for a different request.
  */
 export type AppConflictResponse = Problem;

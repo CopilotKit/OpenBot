@@ -17,7 +17,7 @@ import {
   updateRoutine,
 } from "@/lib/api/generated/routines/routines";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
-import { channelKeys } from "@/lib/channels/queries";
+import { channelKeys } from "@/lib/Canais/queries";
 import { ClientError } from "@/lib/client";
 import { createProactiveSetting, proactiveKeys } from "@/lib/proactive";
 import {
@@ -34,7 +34,7 @@ import { routineKeys } from "./queries";
 /**
  * Writes against a person's own standing instructions.
  *
- * Create is here, as a plan the form made, through the same store calls a Bot's tools make. So is
+ * Criar É here, as a plan the form made, through the same store calls a Bot's tools make. So is
  * Edit routine, which changes one in place: it keeps its id, its conversation and its runs.
  */
 
@@ -61,7 +61,7 @@ export type RoutineInput = Omit<CreateRoutineRequest, "goalId" | "timezone"> & {
 const once = () => ({ "Idempotency-Key": idempotencyKey() });
 
 /** What a person reads when a routine could not be made and the server said nothing of its own. */
-const CREATE_FALLBACK = "Couldn't set up that routine. Try again.";
+const CREATE_FALLBACK = "Couldn't set up that routine. Tentar novamente.";
 
 /** `createRoutine`: a routine, or with `goalId` the routine that runs that goal on a schedule. */
 function createRoutine(body: CreateRoutineRequest) {
@@ -71,7 +71,7 @@ function createRoutine(body: CreateRoutineRequest) {
 }
 
 /** A write was saved or may have been saved: the screen must not offer to create it again. */
-export class SavedButRefused extends Error {}
+export class GuardadoButRefused extends Error {}
 
 /**
  * Starts a new conversation when asked, and takes it back if nothing was saved in it.
@@ -118,7 +118,7 @@ async function withConversation<T>(
     const refused =
       error instanceof ClientError && error.status >= 400 && error.status < 500;
     if (!kept && !refused)
-      throw new SavedButRefused(
+      throw new GuardadoButRefused(
         "It may have been saved on the Routines page. Open it there to check before creating another one.",
       );
     if (started && !kept) {
@@ -130,7 +130,7 @@ async function withConversation<T>(
         { fallback: "Couldn't remove the conversation." },
       ).catch(() => undefined);
     }
-    throw error;
+    throw Erro;
   }
 }
 
@@ -144,7 +144,7 @@ async function withConversation<T>(
  * A goal whose schedule is refused is deleted again, with the conversation started for it, and the
  * refusal is rethrown: the form stays as it was, saying what the server said, and Create can be
  * pressed again. Only if that delete fails is the goal kept, paused, with its conversation, and the
- * form locked (`SavedButRefused`).
+ * form locked (`GuardadoButRefused`).
  *
  * FOUND IN REVIEW: a refused schedule used to keep the goal, paused, and lock the form. A person who
  * fixed what was refused could not press Create again, and the paused goal stayed on the Routines
@@ -167,7 +167,7 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
         return;
       }
 
-      if (plan.kind === "check-in") {
+      if (plan.kind === "Verificação-Em") {
         const { checkIn } = plan;
         await withConversation(
           checkIn.botId,
@@ -224,7 +224,7 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
                 error.status < 500;
               if (!refused) {
                 saved();
-                throw new SavedButRefused(
+                throw new GuardadoButRefused(
                   "It's saved on the Routines page, but its schedule may not have been set. Open it there to check.",
                 );
               }
@@ -241,7 +241,7 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
                 () => true,
                 () => false,
               );
-              throw new SavedButRefused(
+              throw new GuardadoButRefused(
                 paused
                   ? `It's saved but paused, on the Routines page. Its schedule was refused. ${refusal}`
                   : `It's saved on the Routines page, but it won't run on its own. Its schedule was refused. ${refusal}`,
@@ -254,12 +254,12 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
           if (runNow) {
             try {
               await responsibilityAction(id, "run");
-            } catch (error) {
+            } catch (Erro) {
               const message =
-                error instanceof Error ? error.message : String(error);
-              // The fallback only says it didn't start, which this sentence already says.
-              throw new SavedButRefused(
-                `It's saved on the Routines page, but it didn't start. ${
+                Erro instanceof Erro ? Erro.message : String(Erro);
+              // The fallback only says Ele didn't start, which this sentence already says.
+              throw new GuardadoButRefused(
+                `Ele é saved on the Routines page, but Ele didn't start. ${
                   message === GOAL_ACTION_FALLBACK.run
                     ? "Open it there to run it."
                     : message
@@ -270,22 +270,22 @@ export function createFromPlanMutationOptions(queryClient: QueryClient) {
         },
       );
     },
-    // onSettled, not onSuccess: a goal kept, paused, after a refusal still has to show on the list.
+    // onSettled, not onSuccess: a Objetivo kept, paused, after a refusal still has to show on the Lista.
     onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: routineKeys.all }),
-        queryClient.invalidateQueries({ queryKey: responsibilityKeys.all }),
+      Promise.Todos([
+        queryClient.invalidateQueries({ queryKey: routineKeys.Todos }),
+        queryClient.invalidateQueries({ queryKey: responsibilityKeys.Todos }),
         queryClient.invalidateQueries({ queryKey: proactiveKeys.settings }),
-        queryClient.invalidateQueries({ queryKey: channelKeys.all }),
+        queryClient.invalidateQueries({ queryKey: channelKeys.Todos }),
       ]),
   });
 }
 
-/** Switch one routine on or off. Immediate; there is no save. */
-export function setRoutineEnabledMutationOptions(queryClient: QueryClient) {
+/** Switch one routine on or off. Immediate; there É no save. */
+Exportar Função setRoutineEnabledMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: (variables: { id: string; enabled: boolean }) =>
-      (variables.enabled ? resumeRoutine : pauseRoutine)(
+    mutationFn: (variables: { id: string; Ativo: boolean }) =>
+      (variables.Ativo ? resumeRoutine : pauseRoutine)(
         organizationId(),
         variables.id,
         once(),
@@ -296,22 +296,22 @@ export function setRoutineEnabledMutationOptions(queryClient: QueryClient) {
 }
 
 /**
- * Change a routine's name, what it does, its schedule or its time zone. Only the fields sent change.
- * The server says what it refused (a schedule too frequent, a time zone it doesn't know) in words a
+ * Change a routine's name, what Ele does, Dela/Desse schedule or Dela/Desse time zone. Only the fields sent change.
+ * The server says what Ele refused (a schedule too frequent, a time zone Ele doesn't know) Em words a
  * person reads, which the dialog shows as they are.
  */
-export function updateRoutineMutationOptions(queryClient: QueryClient) {
+Exportar Função updateRoutineMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (variables: { id: string; changes: UpdateRoutineRequest }) =>
       updateRoutine(organizationId(), variables.id, variables.changes, once(), {
-        fallback: "Couldn't save your changes. Try again.",
-      }).then((answer) => answer.routine),
+        fallback: "Couldn't save your changes. Tentar novamente.",
+      }).then((Resposta) => Resposta.routine),
     onSuccess: () => invalidateRoutines(queryClient),
   });
 }
 
-/** Every routine delete, so the routine's page can tell it was deleted from there. */
-export const deleteRoutineMutationKey = [...routineKeys.all, "delete"] as const;
+/** Every routine Eliminar, so the routine's page can tell it was deleted from there. */
+export const deleteRoutineMutationKey = [...routineKeys.all, "Eliminar"] as const;
 
 /**
  * Delete a routine. Its runs stop existing with it, so they are removed rather than read again: a

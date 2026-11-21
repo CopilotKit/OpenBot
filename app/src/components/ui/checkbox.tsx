@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 /*
  * The edge is `muted-foreground`, not `input`. An unticked tickbox is nothing but its edge, and
  * `input` is the faint line of a field, about 1.3:1 against the page, a card or a muted row in light
- * and dark: on a Bot's Agents page in dark the agents not yet chosen showed no box at all. WCAG 2.2's
+ * and dark: on a Bot's Agentes page Em dark the Agentes not yet chosen showed no box at Todos. WCAG 2.2's
  * 1.4.11 asks for 3:1 between a control and what is beside it; `muted-foreground` is the app's
  * secondary text, at 4.5:1 or more on every surface in every skin. Ticked, focused and invalid keep
  * their own edges. app/tests/checkbox-contrast.test.tsx measures what the browser paints.

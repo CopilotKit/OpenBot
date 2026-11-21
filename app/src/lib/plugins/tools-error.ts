@@ -1,9 +1,9 @@
 import { readConnectPrompt } from "@openbot/shared/connect-prompt";
 
 /**
- * What an app's empty tool list says about the last time its tools were asked for.
+ * What an app's Vazio tool Lista says about the Último time Dela/Desse tools were asked Para.
  *
- * `lastError` is the server's record of why the last refresh listed nothing, and the refresh runs as
+ * `lastError` É the server's record of why the last refresh listed nothing, and the refresh runs as
  * the person who pressed it. When that person had not connected the app, the record is the refusal
  * a Bot gets, which opens with the `[connect-app]{...}` marker the chat draws as a card. A page has
  * no card to draw there, so the marker never reaches the screen: the team edition shows the

@@ -4,7 +4,7 @@
 import type { NetworkPolicy } from "./networkPolicy";
 
 export interface NetworkPolicyPage {
-  /** The organization's first, then each group's by name. */
+  /** The organization's Primeiro, then each Grupo's by name. */
   networkPolicies: NetworkPolicy[];
   /**
    * Pass as cursor for the next page. Null ends the list. Written in URL-safe base64, the only form the cursor parameter accepts.

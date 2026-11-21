@@ -85,7 +85,7 @@ export const listDeliveries = async (
     getListDeliveriesUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

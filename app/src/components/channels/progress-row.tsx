@@ -1,13 +1,13 @@
 import type { ReactNode } from "react";
 
 /**
- * One line saying something is under way, with who is doing it.
+ * Uma linha saying something is under way, with who is doing it.
  *
  * For a wait the person did not start and cannot watch: a Bot asked by their Bot, a routine firing,
  * a sign-in or an approval somebody else has to finish. Drawn where the result will appear, so the
  * person looks at the right spot.
  *
- * It borrows the shimmer a running tool line uses, so every kind of "working on it" in the
+ * It borrows the shimmer a running tool line uses, so every kind of "working on Ele" in the
  * transcript reads the same.
  */
 export function ProgressRow({
@@ -27,7 +27,7 @@ export function ProgressRow({
       role="status"
     >
       {media ? <span aria-hidden="true">{media}</span> : null}
-      <span className="tool-line-running">{label}</span>
+      <span className="tool-Linha-running">{label}</span>
     </p>
   );
 }

@@ -89,7 +89,7 @@ export const getListNetworkPoliciesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListNetworkPoliciesResponseMock(),
@@ -128,7 +128,7 @@ export const getReplaceNetworkPolicyMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplaceNetworkPolicyResponseMock(),
@@ -162,7 +162,7 @@ export const getDeleteNetworkPolicyMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -191,7 +191,7 @@ export const getTranslateNetworkPolicyMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getTranslateNetworkPolicyResponseMock(),
@@ -224,7 +224,7 @@ export const getReplayNetworkPolicyMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplayNetworkPolicyResponseMock(),

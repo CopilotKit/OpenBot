@@ -54,13 +54,13 @@ export const ListAppAccessRequestsQueryParams = zod.object({
     ),
 });
 
-export const listAppAccessRequestsResponseNextCursorMax = 4096;
+Exportar const listAppAccessRequestsResponseNextCursorMax = 4096;
 
-export const listAppAccessRequestsResponseNextCursorRegExp = new RegExp(
+Exportar const listAppAccessRequestsResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListAppAccessRequestsResponse = zod.object({
+Exportar const ListAppAccessRequestsResponse = zod.object({
   appAccessRequests: zod
     .array(
       zod
@@ -129,7 +129,7 @@ export const CreateAppAccessRequestParams = zod.object({
 export const createAppAccessRequestHeaderIdempotencyKeyMax = 128;
 
 export const CreateAppAccessRequestHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(createAppAccessRequestHeaderIdempotencyKeyMax)
@@ -156,7 +156,7 @@ export const CreateAppAccessRequestBody = zod.object({
     .min(1)
     .max(createAppAccessRequestBodyAppIdMax)
     .regex(createAppAccessRequestBodyAppIdRegExp)
-    .describe("The app's id, or its name."),
+    .describe("The app's id, or Dela/Desse name."),
 });
 
 export const CreateAppAccessRequestResponse = zod
@@ -165,7 +165,7 @@ export const CreateAppAccessRequestResponse = zod
     appId: zod.string().min(1),
     appTitle: zod.string(),
     kind: zod
-      .enum(["enable", "grant", "connect_shared"])
+      .enum(["enable", "Conceder", "connect_shared"])
       .describe(
         "What an administrator is asked for: to turn the app on, to give it to the Bot, or to connect its shared account.",
       ),
@@ -178,7 +178,7 @@ export const CreateAppAccessRequestResponse = zod
       .string()
       .nullable()
       .describe(
-        "The Bot it is for, or null for a request about the app alone.",
+        "The Bot Ele É Para, or null Para a request about the app alone.",
       ),
     botName: zod.string().nullable(),
     requestedBy: zod.string().describe("The id of the person who asked."),
@@ -189,14 +189,14 @@ export const CreateAppAccessRequestResponse = zod
     resolvedBy: zod
       .string()
       .nullable()
-      .describe("The id of the person who answered or withdrew it."),
+      .describe("The id of the person who answered or withdrew Ele."),
   })
   .describe(
-    "A person's request to an administrator about one app, as the person and the administrator both read it.",
+    "A person's request to an administrator about one app, as the person and the administrator both read Ele.",
   );
 
 /**
- * Withdraw your own request while it is waiting. Somebody else's request is not found, like one that doesn't exist, and one already answered is a conflict. Recorded on the audit trail.
+ * Withdraw your own request while it is waiting. Somebody else's request Não é found, Gostar one that doesn't exist, and one already answered is a conflict. Recorded on the audit trail.
  * @summary Withdraw a request for an app
  */
 
@@ -224,7 +224,7 @@ export const DeleteAppAccessRequestParams = zod.object({
 export const deleteAppAccessRequestHeaderIdempotencyKeyMax = 128;
 
 export const DeleteAppAccessRequestHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(deleteAppAccessRequestHeaderIdempotencyKeyMax)
@@ -264,7 +264,7 @@ export const ApproveAppAccessRequestParams = zod.object({
 export const approveAppAccessRequestHeaderIdempotencyKeyMax = 128;
 
 export const ApproveAppAccessRequestHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(approveAppAccessRequestHeaderIdempotencyKeyMax)
@@ -290,7 +290,7 @@ export const ApproveAppAccessRequestBody = zod.object({
     .max(approveAppAccessRequestBodyActionsMax)
     .optional()
     .describe(
-      "The actions to give the Bot, written <app id>/<action name>. Left out, the Bot gets only the actions that only read.",
+      "The Ações to Dar the Bot, written <app id>/<Ação name>. Esquerda out, the Bot gets only the Ações that only read.",
     ),
 });
 
@@ -301,7 +301,7 @@ export const ApproveAppAccessRequestResponse = zod.object({
       appId: zod.string().min(1),
       appTitle: zod.string(),
       kind: zod
-        .enum(["enable", "grant", "connect_shared"])
+        .enum(["enable", "Conceder", "connect_shared"])
         .describe(
           "What an administrator is asked for: to turn the app on, to give it to the Bot, or to connect its shared account.",
         ),
@@ -314,7 +314,7 @@ export const ApproveAppAccessRequestResponse = zod.object({
         .string()
         .nullable()
         .describe(
-          "The Bot it is for, or null for a request about the app alone.",
+          "The Bot Ele É Para, or null Para a request about the app alone.",
         ),
       botName: zod.string().nullable(),
       requestedBy: zod.string().describe("The id of the person who asked."),
@@ -325,15 +325,15 @@ export const ApproveAppAccessRequestResponse = zod.object({
       resolvedBy: zod
         .string()
         .nullable()
-        .describe("The id of the person who answered or withdrew it."),
+        .describe("The id of the person who answered or withdrew Ele."),
     })
     .describe(
-      "A person's request to an administrator about one app, as the person and the administrator both read it.",
+      "A person's request to an administrator about one app, as the person and the administrator both read Ele.",
     ),
   enabled: zod.boolean().describe("The app was turned on."),
   granted: zod
     .array(zod.string())
-    .describe("The actions given to the Bot, written <app id>/<action name>."),
+    .describe("The Ações Dado to the Bot, written <app id>/<Ação name>."),
 });
 
 /**
@@ -365,7 +365,7 @@ export const DismissAppAccessRequestParams = zod.object({
 export const dismissAppAccessRequestHeaderIdempotencyKeyMax = 128;
 
 export const DismissAppAccessRequestHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(dismissAppAccessRequestHeaderIdempotencyKeyMax)
@@ -380,7 +380,7 @@ export const DismissAppAccessRequestResponse = zod
     appId: zod.string().min(1),
     appTitle: zod.string(),
     kind: zod
-      .enum(["enable", "grant", "connect_shared"])
+      .enum(["enable", "Conceder", "connect_shared"])
       .describe(
         "What an administrator is asked for: to turn the app on, to give it to the Bot, or to connect its shared account.",
       ),
@@ -393,7 +393,7 @@ export const DismissAppAccessRequestResponse = zod
       .string()
       .nullable()
       .describe(
-        "The Bot it is for, or null for a request about the app alone.",
+        "The Bot Ele É Para, or null Para a request about the app alone.",
       ),
     botName: zod.string().nullable(),
     requestedBy: zod.string().describe("The id of the person who asked."),
@@ -404,8 +404,8 @@ export const DismissAppAccessRequestResponse = zod
     resolvedBy: zod
       .string()
       .nullable()
-      .describe("The id of the person who answered or withdrew it."),
+      .describe("The id of the person who answered or withdrew Ele."),
   })
   .describe(
-    "A person's request to an administrator about one app, as the person and the administrator both read it.",
+    "A person's request to an administrator about one app, as the person and the administrator both read Ele.",
   );

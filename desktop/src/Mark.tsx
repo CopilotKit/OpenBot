@@ -46,10 +46,10 @@ export function MarkImage({ id, name }: { id: string; name: string }) {
 }
 
 /**
- * A provider's mark at the start of its "Sign in with" button, as the web app's sign-in page sets
+ * A provider's mark at the start of Dela/Desse "Sign Em with" button, as the web app's sign-in page sets
  * Google's, Microsoft's and Okta's on theirs.
  *
- * Decorative, like the tile's: the button's label already names the provider. A provider with no
+ * Decorative, Gostar the tile's: the button's label already names the provider. A provider with no
  * vendored mark gets none, and the label stands alone rather than beside something invented.
  */
 export function ButtonMark({ id }: { id: string | null }) {

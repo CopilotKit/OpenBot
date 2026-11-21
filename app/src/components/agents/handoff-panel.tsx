@@ -1,7 +1,7 @@
 import { IconArrowsExchange, IconBolt, IconLock } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment } from "react";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
 import {
   PageEmpty,
   PageRows,
@@ -17,12 +17,12 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { handoffRoster } from "@/lib/agents/handoff-roster";
-import { setHandoffGrantMutationOptions } from "@/lib/agents/mutations";
+import { handoffRoster } from "@/lib/Agentes/handoff-roster";
+import { setHandoffGrantMutationOptions } from "@/lib/Agentes/mutations";
 import {
   agentHandoffQueryOptions,
   agentListQueryOptions,
-} from "@/lib/agents/queries";
+} from "@/lib/Agentes/queries";
 import { queryClient } from "@/query-client";
 
 /**

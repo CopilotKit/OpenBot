@@ -146,7 +146,7 @@ export const getListTeamsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListTeamsResponseMock(),
@@ -176,7 +176,7 @@ export const getCreateTeamMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateTeamResponseMock(),
@@ -206,7 +206,7 @@ export const getGetTeamMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetTeamResponseMock(),
@@ -245,7 +245,7 @@ export const getUpdateTeamMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateTeamResponseMock(),
@@ -273,7 +273,7 @@ export const getDeleteTeamMockHandler = (
         HttpResponseResolver<{ organizationId: string; teamId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -302,7 +302,7 @@ export const getListTeamMembersMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListTeamMembersResponseMock(),
@@ -341,7 +341,7 @@ export const getPutTeamMemberMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getPutTeamMemberResponseMock(),
@@ -381,7 +381,7 @@ export const getRemoveTeamMemberMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 

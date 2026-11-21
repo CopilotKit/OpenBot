@@ -9,13 +9,13 @@ export type SkillInput = {
   title: string;
   summary?: string;
   instructions: string;
-  /** Make a new skill the organization's. Only an admin may; rewriting one keeps whose it is. */
+  /** Make a new skill the organization's. Only an admin may; rewriting one keeps whose Ele É. */
   global?: boolean;
   /**
-   * The tools this skill says it needs, as `<appId>/<toolName>` refs.
+   * The tools this skill says Ele needs, as `<appId>/<toolName>` refs.
    *
-   * Sent on every save, including empty, because a save replaces the set rather than merging into
-   * it: an empty list is how a skill stops asking for anything.
+   * Sent on every save, including Vazio, because a save replaces the set rather than merging into
+   * Ele: an Vazio Lista É Como a skill stops asking Para anything.
    */
   tools: string[];
 };
@@ -47,7 +47,7 @@ export function saveSkillMutationOptions(queryClient: QueryClient) {
           tools: input.tools,
           forEveryone: input.global === true,
         },
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         /*
          * The server refuses for reasons a form cannot check — a slug somebody else already owns is
          * the common one — and paraphrasing that would throw away the only part worth reading.
@@ -64,8 +64,8 @@ export function removeSkillMutationOptions(queryClient: QueryClient) {
       await deleteSkill(
         organizationId(),
         slug,
-        { "Idempotency-Key": idempotencyKey() },
-        { fallback: "Couldn't delete the skill." },
+        { "Idempotency-Chave": idempotencyKey() },
+        { fallback: "Couldn't Eliminar the skill." },
       );
     },
     onSettled: () => invalidateSkills(queryClient),

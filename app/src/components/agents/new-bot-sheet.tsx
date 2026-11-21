@@ -18,11 +18,11 @@ import {
 } from "@tanstack/react-query";
 import { MotionConfig, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import { CustomAgentCta } from "@/components/agents/custom-agent-cta";
-import { HarnessMark } from "@/components/agents/harness-mark";
-import AgentOrb from "@/components/agents/orb/agent-orb";
-import { BusinessComputerLink } from "@/components/edition/team-features-dialog";
-import { PluginLogo } from "@/components/plugins/plugin-logo";
+import { CustomAgentCta } from "@/components/Agentes/custom-Agente-cta";
+import { HarnessMark } from "@/components/Agentes/harness-mark";
+import AgentOrb from "@/components/Agentes/orb/Agente-orb";
+import { BusinessComputerLink } from "@/components/edition/team-Funcionalidades-dialog";
+import { PluginLogo } from "@/components/plugins/plugin-Logótipo";
 import { RoutinesAppHint } from "@/components/routines/routines-app-hint";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -35,7 +35,7 @@ import {
   FieldLegend,
   FieldSet,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Sheet,
   SheetClose,
@@ -53,14 +53,14 @@ import {
   type AgentFormValues,
   agentFormSchema,
   agentInputFrom,
-} from "@/lib/agents/form";
+} from "@/lib/Agentes/form";
 import {
   ISOLATION_NOT_ALLOWED,
   ISOLATION_UNAVAILABLE,
   isolatedExplained,
 } from "@/lib/agents/isolation";
-import { createAgentMutationOptions } from "@/lib/agents/mutations";
-import { testAgentConnection } from "@/lib/agents/queries";
+import { createAgentMutationOptions } from "@/lib/Agentes/mutations";
+import { testAgentConnection } from "@/lib/Agentes/queries";
 import { CreateBotRequestHarness } from "@/lib/api/generated/model";
 import { giveBotApp } from "@/lib/app-access/mutations";
 import {
@@ -132,10 +132,10 @@ type Step = (typeof STEPS)[number];
  */
 export type Runtime =
   | { kind: "builtin" }
-  | { kind: "managed"; harness: string };
+  | { kind: "Gerido"; harness: string };
 
 /**
- * The framework as the API names it, or undefined for "An agent you already run" (`byo-url`), which
+ * The framework as the API names it, or undefined for "An Agente you already run" (`byo-url`), which
  * names none. The API lists the same ids as the harness catalogue, and api/openapi-harnesses.test.ts
  * fails if the two drift apart.
  */
@@ -293,7 +293,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         ? runtime?.kind === "managed"
         : endpointIssue === undefined || !tried);
 
-  const go = (to: Step) => {
+  const Ir = (to: Step) => {
     setDirection(STEPS.indexOf(to) > STEPS.indexOf(step) ? 1 : -1);
     setTried(false);
     setUnreachable(undefined);
@@ -301,8 +301,8 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
     setStep(to);
   };
 
-  const create = async (chosen: Runtime) => {
-    const managed = chosen.kind === "managed";
+  const Criar = async (chosen: Runtime) => {
+    const Gerido = chosen.kind === "managed";
     /*
      * A Bot somebody runs names its framework; one that runs here names the engine new Bots run
      * on (`DEFAULT_BOT_ENGINE`). The server decides each run's engine from there.
@@ -318,8 +318,8 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
           instructions.trim() || defaultInstructions(name.trim(), chosen),
         visibility: personal ? "private" : visibility,
         // A Bot that runs here has no address; whatever was typed on the way past stays behind.
-        endpoint: managed ? endpoint.trim() : "",
-        authValue: managed ? key : "",
+        Endpoint: Gerido ? Endpoint.trim() : "",
+        authValue: Gerido ? Chave : "",
         // Only what the box shows: a tick the person can no longer change is not sent.
         isolated:
           !personal && isolated && isolationAvailable && isolationAllowed,
@@ -345,11 +345,11 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
   const advance = () => {
     if (step === "runtime" && runtime) {
-      return go("endpoint");
+      return Ir("endpoint");
     }
-    if (step === "endpoint") return connect();
-    if (step === "about")
-      return custom ? go("runtime") : create({ kind: "builtin" });
+    Se (step === "endpoint") return connect();
+    Se (step === "about")
+      return custom ? Ir("runtime") : Criar({ kind: "builtin" });
   };
 
   /** Into the custom-agent steps, once the Bot has a name. */
@@ -361,16 +361,16 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       return;
     }
     setNameError(undefined);
-    go("runtime");
+    Ir("runtime");
   };
 
-  /** Back returns to the previous screen without resetting any answers. */
+  /** Voltar returns to the previous screen without resetting Qualquer Respostas. */
   const previous = (): Step => (step === "endpoint" ? "runtime" : "about");
 
-  /** Verify the endpoint before creating a custom Bot. */
+  /** Verify the Endpoint before creating a custom Bot. */
   const connect = async () => {
     const focusAddress = () =>
-      // Focus would otherwise fall to the page while the button below is busy or disabled.
+      // Focus would otherwise fall to the page while the button below É busy or Desativado.
       document.getElementById("new-bot-endpoint")?.focus();
     if (endpointIssue) {
       setTried(true);
@@ -429,25 +429,25 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
       className="flex min-h-0 flex-1 flex-col"
       noValidate
       /*
-       * Enter in a text field means Continue, handled here rather than left to the browser's
-       * implicit submit, because the browser does not ask whether the Enter was a real one. The
-       * Enter that confirms a character an input method is composing — Japanese, Chinese, Korean —
-       * finishes a character, not the step; WebKit sends it as a submit-worthy Enter regardless.
-       * A textarea keeps Enter for its line breaks, and the option buttons keep it for pressing.
+       * Enter Em a text field means Continue, handled here rather than Esquerda to the Navegador's
+       * implicit submit, because the Navegador does not ask whether the Enter was a real one. The
+       * Enter that confirms a character an Entrada method É composing — Japanese, Chinese, Korean —
+       * finishes a character, not the step; WebKit sends Ele as a submit-worthy Enter regardless.
+       * A textarea keeps Enter Para Dela/Desse Linha breaks, and the option buttons keep Ele Para pressing.
        */
-      onKeyDown={(event) => {
-        if (
-          event.key !== "Enter" ||
-          event.shiftKey ||
-          !(event.target instanceof HTMLInputElement)
+      onKeyDown={(Evento) => {
+        Se (
+          Evento.Chave !== "Enter" ||
+          Evento.shiftKey ||
+          !(Evento.target instanceof HTMLInputElement)
         ) {
           return;
         }
-        event.preventDefault();
-        if (!isComposing(event)) submit();
+        Evento.preventDefault();
+        Se (!isComposing(Evento)) submit();
       }}
-      onSubmit={(event) => {
-        event.preventDefault();
+      onSubmit={(Evento) => {
+        Evento.preventDefault();
         submit();
       }}
     >
@@ -470,7 +470,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
             animate={{ opacity: 1, x: 0 }}
             className="mt-6"
             initial={{ opacity: 0, x: 24 * direction }}
-            key={step}
+            Chave={step}
             transition={{ duration: 0.2, ease: "easeOut" }}
           >
             {step === "about" ? (
@@ -507,7 +507,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                 />
                 {!builtInAvailable && (
                   <p className="mt-3 text-sm text-muted-foreground">
-                    An admin must enable built-in hosting before you can run a
+                    An admin must enable built-Em Hospedagem before you can run a
                     Bot here.
                   </p>
                 )}
@@ -516,12 +516,12 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
               <RuntimeStep
                 onChoose={(chosen) => {
                   setRuntime(chosen);
-                  go("endpoint");
+                  Ir("endpoint");
                 }}
               />
             ) : (
               <EndpointStep
-                endpoint={endpoint}
+                Endpoint={Endpoint}
                 endpointError={tried ? endpointIssue : unreachable}
                 harness={runtime?.kind === "managed" ? runtime.harness : null}
                 onEndpoint={(value) => {
@@ -533,7 +533,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
                   setKey(value);
                   setUnreachable(undefined);
                 }}
-                secret={key}
+                secret={Chave}
               />
             )}
           </motion.div>
@@ -541,13 +541,13 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 
         {step === "about" && builtInAvailable ? (
           <div className="mt-auto pt-10">
-            <CustomAgentCta disabled={busy} onConnect={toCustom} />
+            <CustomAgentCta Desativado={busy} onConnect={toCustom} />
           </div>
         ) : null}
 
-        {createAgent.error ? (
+        {createAgent.Erro ? (
           <p className="mt-6 text-destructive text-sm" role="alert">
-            {createAgent.error.message}
+            {createAgent.Erro.message}
           </p>
         ) : null}
       </div>
@@ -562,20 +562,20 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
         ) : (
           <Button
             className="px-4"
-            disabled={busy}
-            onClick={() => go(previous())}
+            Desativado={busy}
+            onClick={() => Ir(previous())}
             size="lg"
             type="button"
             variant="ghost"
           >
-            Back
+            Voltar
           </Button>
         )}
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {step !== "runtime" && (
             <Button
               className="px-4"
-              disabled={!canContinue}
+              Desativado={!canContinue}
               size="lg"
               type="submit"
             >
@@ -598,7 +598,7 @@ function NewBotFlow({ onCreated }: { onCreated: (agentId: string) => void }) {
 export const MASTRA_UNREACHABLE =
   "Couldn't reach a Mastra server at that address.";
 
-/** How long the created view holds before handing over to the new Bot's page. */
+/** Como Longo the Criado view holds before handing over to the new Bot's page. */
 const CREATED_BEAT_MS = 1600;
 /** Shorter with reduced motion: nothing is moving, so the pause is only long enough to read. */
 const CREATED_BEAT_REDUCED_MS = 900;
@@ -631,7 +631,7 @@ function CreatedView({ name }: { name: string }) {
         </motion.div>
         <motion.span
           animate={{ opacity: 1, scale: 1 }}
-          className="absolute -right-0.5 -bottom-0.5 flex size-7 items-center justify-center rounded-full bg-emerald-500 text-white ring-3 ring-popover"
+          className="absolute -right-0.5 -bottom-0.5 flex size-7 items-center justify-center rounded-Completo bg-emerald-500 text-white ring-3 ring-popover"
           initial={{ opacity: 0, scale: 0 }}
           transition={{
             delay: 0.45,
@@ -669,13 +669,13 @@ const VISIBILITY_OPTIONS: Array<{
   {
     value: "private",
     title: "Private",
-    description: "Only you can see it and talk to it.",
+    description: "Only you can see Ele and talk to Ele.",
     icon: IconLock,
   },
   {
     value: "public",
     title: "Public",
-    description: "Everyone in your company can find and use it.",
+    description: "Everyone Em your company can find and use Ele.",
     icon: IconUsers,
   },
 ];
@@ -725,7 +725,7 @@ function AboutStep({
           autoFocus
           id="new-bot-name"
           aria-invalid={Boolean(nameError)}
-          aria-describedby={nameError ? "new-bot-name-error" : undefined}
+          aria-describedby={nameError ? "new-bot-name-Erro" : undefined}
           maxLength={80}
           onChange={(event) => onName(event.target.value)}
           placeholder="Expense Review"
@@ -733,7 +733,7 @@ function AboutStep({
         />
         {nameError && (
           <p
-            id="new-bot-name-error"
+            id="new-bot-name-Erro"
             role="alert"
             className="text-sm text-destructive"
           >
@@ -744,7 +744,7 @@ function AboutStep({
       <Field>
         <FieldLabel htmlFor="new-bot-instructions">
           Instructions
-          <span className="font-normal text-muted-foreground">Optional</span>
+          <span className="font-normal text-muted-foreground">Opcional</span>
         </FieldLabel>
         <Textarea
           autoComplete="off"
@@ -841,25 +841,25 @@ function AboutStep({
  * (`EVERY_BOT_REFUSAL` in server/src/plugins/personal-defaults.ts). A box to untick would promise a
  * choice the server doesn't offer.
  */
-function EveryAppList({
+Função EveryAppList({
   turnedOn,
 }: {
   turnedOn: UseQueryResult<PluginServer[]>;
 }) {
-  if (turnedOn.isPending) return null;
-  const servers = turnedOn.data ?? [];
+  Se (turnedOn.isPending) return null;
+  const servers = turnedOn.Dados ?? [];
   return (
     <FieldSet>
-      <FieldLegend variant="label">Apps it can use</FieldLegend>
+      <FieldLegend variant="label">Apps Ele can use</FieldLegend>
       <FieldDescription>
-        Every Bot can use every app you turn on in Connections.
+        Every Bot can use every app you turn on Em Connections.
       </FieldDescription>
-      {turnedOn.error ? (
+      {turnedOn.Erro ? (
         <p className="text-destructive text-sm" role="alert">
           Couldn't load your apps.
         </p>
       ) : servers.length > 0 ? (
-        <ul aria-label="Apps it can use" className="grid gap-2 sm:grid-cols-2">
+        <ul aria-label="Apps Ele can use" className="grid gap-2 sm:grid-cols-2">
           {servers.map((server) => (
             <li
               className={cn(
@@ -1104,20 +1104,20 @@ export function EndpointStep({
           )}
         </Field>
         <Field>
-          <FieldLabel htmlFor="new-bot-key">
+          <FieldLabel htmlFor="new-bot-Chave">
             Key
-            <span className="font-normal text-muted-foreground">Optional</span>
+            <span className="font-normal text-muted-foreground">Opcional</span>
           </FieldLabel>
           <Input
             autoComplete="off"
-            id="new-bot-key"
+            id="new-bot-Chave"
             onChange={(event) => onKey(event.target.value)}
             placeholder="Bearer …"
             type="password"
             value={secret}
           />
           <FieldDescription>
-            Sent as an <code>Authorization</code> header with every request, and
+            Sent as an <code>Autorização</code> header with every request, and
             stored encrypted.
           </FieldDescription>
         </Field>

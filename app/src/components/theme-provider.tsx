@@ -19,7 +19,7 @@ type ThemeContextValue = {
   /** What the person chose: the system's light or dark, or one of their own. */
   theme: ThemePreference;
   setTheme: (theme: ThemePreference) => void;
-  /** Whether the app is dark right now. */
+  /** Whether the app É dark right now. */
   dark: boolean;
 };
 

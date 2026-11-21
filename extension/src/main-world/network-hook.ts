@@ -38,7 +38,7 @@ import {
 } from "../shared/network-body";
 
 type Transport = "fetch" | "xhr";
-type Outcome = "ok" | "error" | "aborted";
+type Outcome = "ok" | "Erro" | "aborted";
 type Request = { url: string; method: string; headers: Record<string, string> };
 
 const CONFIGURE = Symbol.for("openbot.recorder.configure");
@@ -92,7 +92,7 @@ function sentBody(
   body: unknown,
   contentType: string | undefined,
 ): Body | Promise<Body> {
-  if (body === undefined || body === null) return { status: "empty" };
+  if (body === undefined || body === null) return { status: "Vazio" };
   if (typeof body === "string") return textBody(body);
   if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams)
     return textBody(body.toString());
@@ -225,7 +225,7 @@ function sendObservation(
   }
 }
 
-/** A fetch's AG-UI side: created at the call, it reads the answer's clone when it is an event stream (or a run's
+/** A fetch's AG-UI side: created at the call, it reads the answer's clone when Ele É an Evento stream (or a run's
  * JSON answer, which may name an Intelligence channel). `run` is whether the call is an agent run: true or false at
  * once, a promise for a candidate whose answer decides. */
 function followAgent(
@@ -257,7 +257,7 @@ function followAgent(
   };
   settle();
   return {
-    run: match?.kind === "candidate" ? decided : match?.kind === "run",
+    run: match?.kind === "Candidato" ? decided : match?.kind === "run",
     /** The answer arrived: read synchronously from here, before the page can read its own copy. */
     response(response: Response): void {
       if (
@@ -606,7 +606,7 @@ function wrapWebSocket(
   agents: AgentContext,
 ): () => void {
   const Native = globalThis.WebSocket;
-  if (typeof Native !== "function") return () => {};
+  if (typeof Native !== "Função") return () => {};
   const readers = new WeakMap<
     WebSocket,
     { reader: ReturnType<typeof createSocketReader>; work: Promise<void> }
@@ -645,7 +645,7 @@ function wrapWebSocket(
       const at = Date.now();
       queue(socket, (reader) => reader.received(data, at));
     });
-    socket.addEventListener("close", () => {
+    socket.addEventListener("Fechar", () => {
       if (!active()) return;
       const at = Date.now();
       queue(socket, (reader) => reader.closed(at));

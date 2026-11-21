@@ -29,7 +29,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import {
   createMemoryMutationOptions,
   deleteMemoryMutationOptions,
@@ -42,7 +42,7 @@ import { queryClient } from "@/query-client";
 /**
  * A fact the person tells their Bots directly. It reaches every one of them.
  *
- * The page's one primary verb, so it is a button for `PageShell`'s `action` that opens a dialog,
+ * The page's one primary verb, so Ele É a button Para `PageShell`'s `action` that opens a dialog,
  * rather than a form standing above the list somebody came to read.
  */
 export function RememberFact() {
@@ -63,13 +63,13 @@ export function RememberFact() {
         variant="ghost"
       >
         <IconPlus />
-        Remember a fact
+        Lembra um fato
       </Button>
       <Dialog onOpenChange={setOpen} open={open}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Remember a fact</DialogTitle>
-            <DialogDescription>All your Bots will know it.</DialogDescription>
+            <DialogTitle>Lembra um fato</DialogTitle>
+            <DialogDescription>Todos os teus Bots will know it.</DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">
             {/* The submit button is in the footer and reaches this form by id, so DialogBody stays a
@@ -96,7 +96,7 @@ export function RememberFact() {
                   maxLength={6000}
                   value={content}
                   onChange={(event) => setContent(event.target.value)}
-                  placeholder="I prefer meetings in the morning."
+                  placeholder="Eu prefer meetings Em the morning."
                 />
               </Field>
             </form>
@@ -144,7 +144,7 @@ export function MemoryList({
     <PageSection
       action={action}
       description={description}
-      title="Your memories"
+      title="As tuas memórias"
     >
       {memories.isPending ? null : memories.error ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
@@ -164,7 +164,7 @@ export function MemoryList({
         </PageRows>
       ) : (
         <PageEmpty icon={IconBrain} title="No memories yet">
-          Add one with Remember a fact.
+          Add one with Lembra um fato.
         </PageEmpty>
       )}
     </PageSection>
@@ -323,7 +323,7 @@ function EditMemoryDialog({
     <Dialog onOpenChange={(next) => !next && onClose()} open>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit memory</DialogTitle>
+          <DialogTitle>Editar memória</DialogTitle>
           <DialogDescription>Change what your Bots remember.</DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4">

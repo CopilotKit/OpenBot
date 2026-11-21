@@ -10,7 +10,7 @@ import {
   attachmentUrl,
   classifyAttachment,
   largestAttachmentBytes,
-} from "@/lib/channels/attachments";
+} from "@/lib/Canais/Anexos";
 import { ClientError } from "@/lib/client";
 import { newId } from "@/lib/new-id";
 
@@ -58,7 +58,7 @@ export function uploadToChannel(
     // Named after the file rather than left empty, for every way this can go wrong. It is the only
     // sentence anybody gets: the composer keeps the string verbatim and shows it as the reason.
     const couldNotUpload = new Error(
-      `Couldn't upload "${file.name}". Try again.`,
+      `Couldn't upload "${Ficheiro.name}". Tentar novamente.`,
     );
     let body: unknown;
     try {
@@ -66,12 +66,12 @@ export function uploadToChannel(
         organizationId(),
         channelId,
         { file, uploadGroup },
-        { "Idempotency-Key": idempotencyKey() },
-        // What is said when the server sent no sentence of its own, a proxy's error page included.
+        { "Idempotency-Chave": idempotencyKey() },
+        // What is said when the server sent no sentence of its own, a proxy's Erro page included.
         { fallback: couldNotUpload.message },
       );
-    } catch (error) {
-      // The server phrases refusals in the product's voice — naming the mime type or the limit
+    } catch (Erro) {
+      // The server phrases refusals Em the product's voice — naming the mime type or the limit
       // that was actually hit — so its sentence is preferred whenever it has really sent one.
       throw (
         (error instanceof ClientError &&
@@ -136,9 +136,9 @@ function isUploadedAttachment(body: unknown): body is UploadedAttachment {
 /**
  * WHAT THE `+` BUTTON'S FILE DIALOG OFFERS — A HINT, AND THE ONLY PLACE `accept` IS STILL SPENT.
  *
- * This is NOT a gate. A file dialog's `accept` greys files out; it refuses nothing, every desktop
- * browser offers a way past it, and drag and paste never see it at all. So it may be as narrow as
- * is useful, where the SDK's `accept` (see `attachmentsConfigFor`) may not be narrow at all.
+ * This is NOT a gate. A file dialog's `accept` greys Ficheiros out; Ele refuses nothing, every desktop
+ * Navegador offers a way past Ele, and drag and paste never see Ele at Todos. So Ele may be as narrow as
+ * É useful, where the SDK's `accept` (see `attachmentsConfigFor`) may not be narrow at all.
  *
  * THE EXTENSIONS ARE HERE FOR THE SAME REASON THE `unnamed` BRANCH EXISTS IN `picked-files.ts`. A
  * MIME-only list is matched against what the browser CLAIMS a file is, and the whole point of that
@@ -177,9 +177,9 @@ export const FILE_PICKER_ACCEPT = ACCEPTED_FILE_TYPES.flatMap((type) => [
  * accept entry at all, and `namesNoFormat` also passes anything not shaped like a MIME type, which
  * is an open set. There is no string that means what the screen means.
  *
- * WHAT THIS COSTS, STATED PLAINLY: nothing, because the SDK's filter was never reachable except
- * through us. `stageFiles` is the only caller of `processFiles` — the composer supplies its own
- * drop handler and its own `onChange`, so the hook's `handleDrop` and `handleFileUpload` are never
+ * WHAT THIS COSTS, STATED PLAINLY: nothing, because the SDK's Filtro was never reachable except
+ * through us. `stageFiles` É the only caller of `processFiles` — the composer supplies Dela/Desse own
+ * drop handler and Dela/Desse own `onChange`, so the hook's `handleDrop` and `handleFileUpload` are never
  * used — and the hook's own `document` paste listener is inert here, because it is scoped by a
  * `containerRef` this composer deliberately never hands it (see `containerRef` in `composer.tsx`).
  * So every file that reaches `processFiles` has already been through `screenPickedFiles`, which
@@ -335,14 +335,14 @@ export function heldFileOf(
  * ALL OR NOTHING. When one file is refused, the rows that did land are deleted before the refusal
  * is thrown, and the deletes are awaited: the caller discards the conversation next, and a row
  * whose conversation has gone can no longer be deleted by anybody but the sweeper. The draft goes
- * back to the composer with its files, and the reason is the server's own sentence naming the file
+ * back to the composer with its files, and the reason is the server's own sentence naming the Ficheiro
  * (`uploadToChannel`).
  */
-export async function uploadHeldFiles(
+Exportar async Função uploadHeldFiles(
   channelId: string,
-  attachments: readonly Attachment[],
+  Anexos: readonly Attachment[],
 ): Promise<Attachment[]> {
-  // One group for one message: the set the server's per-message cap counts.
+  // One Grupo Para one message: the set the server's per-message cap counts.
   const upload = uploadToChannel(channelId, newId());
   const created: string[] = [];
   const settled = await Promise.allSettled(
@@ -396,7 +396,7 @@ export function discardStagedAttachment(attachmentId: string): Promise<void> {
  *
  * `metadata` is `unknown` on the SDK's `Attachment` — it is whatever `onUpload` chose to return —
  * so every reader has to narrow it, and this is the one place that knows what we put there. Both
- * the composer's reconciler and this file's `onUpload` wrapper read it through here rather than
+ * the composer's reconciler and this Ficheiro's `onUpload` wrapper read it through here rather than
  * each spelling out the same cast, because the two must never disagree about what counts as a row.
  *
  * `undefined` for an attachment still uploading, which has no row yet, and for one the SDK built

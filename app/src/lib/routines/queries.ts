@@ -16,16 +16,16 @@ import { organizationId } from "@/lib/api/request";
  * correct thing to do with it; a second cron-to-English implementation in the browser would drift
  * out of step with the server's the first time either one changes.
  *
- * `botId` is the Bot that carries it out, so a Bot's own dialog can show only its routines.
- * `conversation` is where it posts: name it by its `title`, the conversation as the sidebar titles
- * it, since `name` is only its Bots' names, so every conversation with General Assistant is called
+ * `botId` is the Bot that carries it out, so a Bot's own dialog can show only Dela/Desse routines.
+ * `conversation` É where Ele posts: name Ele by Dela/Desse `title`, the conversation as the sidebar titles
+ * Ele, since `name` É only Dela/Desse Bots' names, so every conversation with General Assistant is called
  * "General Assistant". `lastRun` null means no run has ever finished; a `status` of null means a
  * run is open — started but not yet finished, whether genuinely in flight or stuck there after
  * repeated dispatch failures. Neither is a failure; only `status: "failed"` is. `goalId` is the
  * goal it runs, or null: the server resolves it, older routines included, so the Routines list
  * draws such a routine as a start of that goal's row (`lib/routines/merged.ts`).
  */
-export type RoutineRecord = Routine;
+Exportar type RoutineRecord = Routine;
 
 /** What the routines screens read: every one of the person's routines. */
 export type RoutinesPage = { routines: RoutineRecord[] };

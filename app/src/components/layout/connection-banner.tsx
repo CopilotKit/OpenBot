@@ -8,7 +8,7 @@ const FIRST_CHECK_MS = 5_000;
 const LONGEST_CHECK_MS = 60_000;
 
 /**
- * One line saying the OpenBot this window is connected to can't be reached, on every screen, until
+ * Uma linha saying the OpenBot this window is connected to can't be reached, on every screen, until
  * it answers again.
  *
  * Only inside OpenBot Desktop connected to an OpenBot that runs somewhere else. There the page talks

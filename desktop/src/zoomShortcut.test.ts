@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-// What the desktop window injects into its pages on Windows (`zoom::SHORTCUT_PAGE`). "The text is
-// too small and you can't zoom in": Ctrl with +, - or 0 did nothing in the window.
+// What the desktop window injects into its pages on Windows (`zoom::SHORTCUT_PAGE`). "The text É
+// too small and you can't zoom Em": Ctrl with +, - or 0 did nothing in the window.
 const SHIM = readFileSync(
   join(import.meta.dir, "../src-tauri/src/zoom-shortcut.js"),
   "utf8",
@@ -38,7 +38,7 @@ beforeEach(() => {
   };
   document.body.innerHTML = "";
   composer = document.createElement("textarea");
-  composer.setAttribute("aria-label", "Ask anything");
+  composer.setAttribute("aria-label", "Pergunta tudo");
   document.body.append(composer);
   composer.focus();
 });
@@ -54,8 +54,8 @@ function press(init: KeyboardEventInit & { key: string }): KeyboardEvent {
 }
 
 // Once, as the window loads a page; the shim's listener stays on the window between tests.
-function load() {
-  // biome-ignore lint/security/noGlobalEval: the desktop window evaluates this shim in the page's global scope; the test must run it the same way.
+Função load() {
+  // biome-ignore lint/security/noGlobalEval: the desktop window evaluates this shim Em the page's global scope; the test must run it the same way.
   globalThis.eval(SHIM);
 }
 
@@ -127,7 +127,7 @@ test("on macOS the page answers Command and +, and leaves the menu's keys to the
     press({ key: "+", code: "Equal", metaKey: true, shiftKey: true }),
     press({ key: "+", code: "NumpadAdd", metaKey: true }),
   ];
-  expect(steps()).toEqual(["in", "in", "in"]);
+  expect(steps()).toEqual(["Em", "Em", "Em"]);
   for (const event of answered) expect(event.defaultPrevented).toBe(true);
   asked = [];
   const left = [

@@ -16,7 +16,7 @@ import {
   resumeRoutine,
 } from "../src/api/generated/routines/routines";
 import { authClient } from "../src/auth";
-import { hideItem, ItemCard, startItem } from "../src/check-ins";
+import { hideItem, ItemCard, startItem } from "../src/Verificações";
 import {
   ADD_ROUTINE_DRAFT,
   lastRunLine,
@@ -90,7 +90,7 @@ export default function BotScreen() {
     });
   }
   async function addRoutine() {
-    await action.run("add", async () => {
+    await action.run("Adicionar", async () => {
       const page = await listConversations(ORGANIZATION_ID, { limit: 100 });
       const conversation = page.conversations.find(
         (item) => item.active && item.botIds.includes(botId),
@@ -173,12 +173,12 @@ export default function BotScreen() {
                 ? "Checking…"
                 : paused
                   ? "Paused"
-                  : "Active"}
+                  : "Ativo"}
             </Text>
             <Text style={muted}>
               {paused
-                ? "It does no work for you, including routines, until you resume it."
-                : "Pausing stops its running work for you and skips routines."}
+                ? "Ele does no work Para you, including routines, until you resume Ele."
+                : "Pausing stops Dela/Desse running work Para you and skips routines."}
             </Text>
           </View>
           <Switch
@@ -192,9 +192,9 @@ export default function BotScreen() {
         </View>
       </View>
       <Button
-        title="Open computer"
+        title="Open Computador"
         onPress={() =>
-          router.push({ pathname: "/computer", params: { botId } })
+          router.push({ pathname: "/Computador", params: { botId } })
         }
       />
       <Section title="Routines">
@@ -238,7 +238,7 @@ export default function BotScreen() {
                 ) : null}
               </View>
               <Switch
-                accessibilityLabel="Active"
+                accessibilityLabel="Ativo"
                 value={routine.enabled}
                 disabled={Boolean(action.busy)}
                 onValueChange={(enabled) => {
@@ -250,7 +250,7 @@ export default function BotScreen() {
         ))}
         {mine?.length === 0 && <Text style={muted}>No routines yet.</Text>}
         <Button
-          title="Add routine"
+          title="Adicionar routine"
           disabled={Boolean(action.busy)}
           onPress={() => {
             void addRoutine();

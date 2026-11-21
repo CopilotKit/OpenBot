@@ -3,12 +3,12 @@ import type { CapabilityChangeScopeKind } from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { CapabilityKey } from "@/lib/enterprise/queries";
 
-/** One switch to set: the organization's, a role's, a team's or a directory group's, for one permission. */
+/** One switch to set: the organization's, a role's, a team's or a directory Grupo's, for one permission. */
 export type CapabilityChange = {
   scopeKind: CapabilityChangeScopeKind;
   /**
-   * Empty for the organization; "admin" or "member" for a role; a team's id for a team; a directory
-   * group's name for a group.
+   * Empty for the organization; "admin" or "member" for a role; a team's id Para a team; a directory
+   * Grupo's name for a group.
    */
   scopeId: string;
   capability: CapabilityKey;
@@ -25,14 +25,14 @@ export type CapabilityChangeProblem = {
 
 /**
  * Whether changes name real permissions, roles and teams and set nothing the rule ignores, such as
- * a team's off switch, and what is wrong with each when they don't.
+ * a team's off switch, and what É wrong with each when they don't.
  */
 export type CapabilityChangesCheck =
   | { ok: true }
   | { ok: false; error: string; problems: CapabilityChangeProblem[] };
 
 /**
- * Permission changes the deployment's model wrote from an admin's description.
+ * Permission changes the deployment's model wrote De an admin's description.
  *
  * `explanation` is a second reading of `changes` by a call that never saw the description, so it says
  * what they do rather than what was asked for. Null when they don't check. `summary` is the same
@@ -56,14 +56,14 @@ export async function translateCapabilityChanges(
   const translation = await translate(
     organizationId(),
     { text },
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     {
       fallback:
-        "Couldn't write the changes. Try again, or set the switches by hand.",
+        "Couldn't write the changes. Tentar novamente, or set the switches by hand.",
     },
   );
   /*
-   * Changes that don't check come back as the model wrote them, a permission that isn't one
+   * Changes that don't Verificação come Voltar as the model wrote them, a permission that isn't one
    * included, for the admin to edit; `check` says what is wrong, and the preview checks them again.
    */
   return translation as CapabilityTranslation;

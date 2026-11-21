@@ -7,5 +7,5 @@ export type ModelCatalogueViewParameter =
 
 export const ModelCatalogueViewParameter = {
   offered: "offered",
-  all: "all",
+  all: "Todos",
 } as const;

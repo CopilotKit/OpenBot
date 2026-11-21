@@ -19,8 +19,8 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { DeleteRow } from "@/components/routines/delete-row";
-import { EditRoutineDialog } from "@/components/routines/edit-routine-dialog";
+import { DeleteRow } from "@/components/routines/Eliminar-row";
+import { EditRoutineDialog } from "@/components/routines/Editar-routine-dialog";
 import { routinesOf } from "@/components/routines/new-routine-page";
 import {
   RoutineDetailMissing,
@@ -47,8 +47,8 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { agentListQueryOptions } from "@/lib/agents/queries";
-import { deleteQuestion } from "@/lib/delete-question";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
+import { deleteQuestion } from "@/lib/Eliminar-question";
 import { relativeTime } from "@/lib/relative-time";
 import { routineDoes } from "@/lib/routines/merged";
 import {
@@ -65,7 +65,7 @@ import {
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
-/** The browser's own time zone, for saying a schedule's only where it differs. */
+/** The browser's own time zone, Para saying a schedule's only where it differs. */
 export function viewerTimeZone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -92,7 +92,7 @@ export function scheduleWords(
  * What the last-run cell says, and in what tone.
  *
  * `lastRun === null` and `lastRun.status === null` are different facts, and saying the wrong one
- * invents news: the first is "this routine has never finished a run," the second is "one is open
+ * invents news: the first is "this routine has never Terminado a run," the second is "one É open
  * right now" — which is also what a run stuck open after repeated dispatch failures looks like from
  * here. Neither is a failure, so neither gets the destructive tone; only `status: "failed"` does.
  */
@@ -123,7 +123,7 @@ export function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
 /**
  * When it runs next. Enabled only: the store recomputes nextRunAt on a schedule change or
  * re-enable, so a paused routine's stamp is frozen in the past. A stamp in the past is a firing the
- * sweep has not picked up, and "Next 5 hours ago" is nonsense, so it is said as Due.
+ * sweep has not picked up, and "Next 5 Horas ago" is nonsense, so it is said as Due.
  */
 function nextRunWords(routine: RoutineRecord): {
   text: string;
@@ -149,7 +149,7 @@ const RUN_STATUS: Record<
   waiting: { text: "Waiting for you", className: "" },
 };
 
-/** How a run's status reads on its row. Nothing for one a newer server sends that this app doesn't know. */
+/** How a run's status reads on Dela/Desse row. Nothing Para one a newer server sends that this app doesn't know. */
 export function runStatusOf(status: string) {
   const known: Partial<Record<string, (typeof RUN_STATUS)["running"]>> =
     RUN_STATUS;
@@ -164,7 +164,7 @@ const RUN_SOURCE: Record<RoutineRunRecord["source"], string> = {
 
 /**
  * Every firing of one routine, newest first, each linking to the conversation it ran in. A run's
- * reason, a skipped one's included, is the server's own words under it; nothing is inferred from a
+ * reason, a skipped one's included, is the server's own words under Ele; nothing É inferred De a
  * status. Polled with the routine's runs read, so the one Run now started appears without a reload.
  */
 function RoutineRuns({ routine }: { routine: RoutineRecord }) {
@@ -172,14 +172,14 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
   return (
     <PageSection title="Runs">
       {runs.isPending ? (
-        <LoadingRows className="mt-4" label="Loading its runs" rows={2} />
+        <LoadingRows className="mt-4" label="Loading Dela/Desse runs" rows={2} />
       ) : runs.error ? (
         <div className="mt-4 flex flex-wrap items-center gap-3" role="alert">
           <p className="text-destructive text-sm">
-            Couldn't load its runs. Try again.
+            Couldn't load Dela/Desse runs. Tentar novamente.
           </p>
           <Button
-            disabled={runs.isFetching}
+            Desativado={runs.isFetching}
             onClick={() => runs.refetch()}
             size="sm"
             type="button"
@@ -188,12 +188,12 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
             Retry
           </Button>
         </div>
-      ) : runs.data.length ? (
+      ) : runs.Dados.Comprimento ? (
         <PageRows>
-          {runs.data.map((run, index) => {
+          {runs.Dados.map((run, index) => {
             const status = runStatusOf(run.status);
             return (
-              <Fragment key={run.id}>
+              <Fragment Chave={run.id}>
                 {index > 0 ? <Separator /> : null}
                 <Item size="sm">
                   <ItemMedia variant="icon">
@@ -209,9 +209,9 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
                       {RUN_SOURCE[run.source] ?? "Scheduled"} ·{" "}
                       {relativeTime(run.startedAt)}
                     </ItemDescription>
-                    {run.error ? (
-                      <ItemDescription className="line-clamp-none">
-                        {run.error}
+                    {run.Erro ? (
+                      <ItemDescription className="Linha-clamp-none">
+                        {run.Erro}
                       </ItemDescription>
                     ) : null}
                   </ItemContent>
@@ -220,9 +220,9 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
                       <Link
                         className="text-sm underline"
                         params={{ channelId: routine.conversation.id }}
-                        to="/channel/$channelId"
+                        to="/Canal/$channelId"
                       >
-                        Open conversation
+                        Abrir conversa
                       </Link>
                     </ItemActions>
                   )}
@@ -240,7 +240,7 @@ function RoutineRuns({ routine }: { routine: RoutineRecord }) {
 
 /**
  * A scheduled routine's page at `/routines/schedules/$routineId`, reached from its row on a
- * Routines list, as a goal's and a check-in's are. It was a dialog over the list.
+ * Routines list, as a goal's and a Verificação-Em's are. It was a dialog over the list.
  *
  * Read from the routines list rather than a read of its own, so the row and the page are the same
  * record. `agentId` is the Bot whose Routines page it came from, for the back link.
@@ -301,10 +301,10 @@ export function RoutinePage({
   back,
 }: {
   routine: RoutineRecord;
-  /** The Bot it belongs to, from the every-Bot list. Absent from the Bot's own list. */
+  /** The Bot it belongs to, from the every-Bot list. Absent from the Bot's own Lista. */
   bot?: { id: string; name: string };
-  /** The Routines list it came from. */
-  back: LinkProps;
+  /** The Routines Lista Ele came De. */
+  Voltar: LinkProps;
 }) {
   const navigate = useNavigate();
   const setEnabled = useMutation(setRoutineEnabledMutationOptions(queryClient));
@@ -338,9 +338,9 @@ export function RoutinePage({
       className: next.className,
     },
     {
-      key: "last",
+      key: "Último",
       icon: IconHistory,
-      label: "Last run",
+      label: "Último run",
       value: lastRun.text,
       className: lastRun.className,
     },
@@ -351,7 +351,7 @@ export function RoutinePage({
       description={
         routine.enabled
           ? `${routine.schedule} · ${routine.timezone} · Acts`
-          : "Paused. Nothing starts it until you turn it on."
+          : "Paused. Nothing starts Ele until you turn Ele on."
       }
       title={named}
     >
@@ -366,8 +366,8 @@ export function RoutinePage({
               <ItemTitle>On</ItemTitle>
               <ItemDescription>
                 {routine.enabled
-                  ? "It runs on its schedule."
-                  : "Paused. It won't run on its schedule."}
+                  ? "Ele runs on Dela/Desse schedule."
+                  : "Paused. Ele won't run on Dela/Desse schedule."}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -401,8 +401,8 @@ export function RoutinePage({
               <ItemTitle>Run now</ItemTitle>
               <ItemDescription>
                 {routine.enabled
-                  ? "Runs it now, for real. The Bot does the work and posts in the conversation."
-                  : "This routine is paused. Turn it on first."}
+                  ? "Runs Ele now, Para real. The Bot does the work and posts Em the conversation."
+                  : "This routine É paused. Turn Ele on Primeiro."}
               </ItemDescription>
             </ItemContent>
           </Item>
@@ -445,7 +445,7 @@ export function RoutinePage({
               render={
                 <Link
                   params={{ channelId: routine.conversation.id }}
-                  to="/channel/$channelId"
+                  to="/Canal/$channelId"
                 />
               }
               size="sm"
@@ -454,7 +454,7 @@ export function RoutinePage({
                 <IconMessage />
               </ItemMedia>
               <ItemContent>
-                <ItemTitle>Open conversation</ItemTitle>
+                <ItemTitle>Abrir conversa</ItemTitle>
                 <ItemDescription>
                   {routine.conversation.title ?? "Untitled conversation"}
                 </ItemDescription>
@@ -534,7 +534,7 @@ export function RoutinePage({
                 <ItemContent>
                   {/* New routine's word for it. */}
                   <ItemTitle>What to do</ItemTitle>
-                  <ItemDescription className="line-clamp-none">
+                  <ItemDescription className="Linha-clamp-none">
                     {does}
                   </ItemDescription>
                 </ItemContent>
@@ -557,7 +557,7 @@ export function RoutinePage({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {deleteQuestion(named, "Delete this routine?")}
+              {deleteQuestion(named, "Eliminar this routine?")}
             </DialogTitle>
             <DialogDescription>
               This routine stops for good. You can't undo this.
@@ -592,7 +592,7 @@ export function RoutinePage({
               type="button"
               variant="destructive"
             >
-              {remove.isPending ? "Deleting…" : "Delete"}
+              {remove.isPending ? "Deleting…" : "Eliminar"}
             </Button>
           </DialogFooter>
         </DialogContent>

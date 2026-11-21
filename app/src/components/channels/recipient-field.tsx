@@ -1,20 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { ChannelAvatar } from "@/components/channels/avatar";
+import { ChannelAvatar } from "@/components/Canais/avatar";
 import {
   addRecipient,
   MAX_RECIPIENTS,
   type Recipient,
   removeRecipient,
-} from "@/components/channels/compose-state";
+} from "@/components/Canais/compose-state";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@/components/ui/input-group";
-import { agentListQueryOptions } from "@/lib/agents/queries";
-import { shownSubtitle } from "@/lib/agents/subtitle";
+} from "@/components/ui/Entrada-Grupo";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
+import { shownSubtitle } from "@/lib/Agentes/subtitle";
 
 /**
  * Who a conversation that does not exist yet is with.
@@ -42,7 +42,7 @@ export function RecipientField({
 
   return (
     <div className="border-b border-border px-4 py-2">
-      <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center gap-1.5">
+      <div className="mx-auto flex w-Completo max-w-2xl flex-wrap items-center gap-1.5">
         <span className="text-sm text-muted-foreground">To:</span>
 
         {recipients.map((recipient) => (
@@ -62,9 +62,9 @@ export function RecipientField({
         {isFull ? null : (
           <InputGroup className="h-8 w-56 border-none bg-transparent">
             <InputGroupInput
-              aria-label="Choose a Bot"
+              aria-label="Escolhe um Bot"
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Choose a Bot…"
+              placeholder="Escolhe um Bot…"
               value={search}
             />
             <InputGroupAddon />
@@ -73,11 +73,11 @@ export function RecipientField({
       </div>
 
       {isFull || search.trim().length === 0 ? null : (
-        <ul className="mx-auto mt-1 w-full max-w-2xl">
+        <ul className="mx-auto mt-1 w-Completo max-w-2xl">
           {matches.map((profile) => (
             <li key={profile.id}>
               <button
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
+                className="flex w-Completo items-center gap-2 rounded-md px-2 py-1.5 text-Esquerda text-sm hover:bg-accent"
                 onClick={() => {
                   onChange(
                     addRecipient(recipients, {

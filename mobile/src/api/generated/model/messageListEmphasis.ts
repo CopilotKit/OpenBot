@@ -9,6 +9,6 @@ export type MessageListEmphasis =
   (typeof MessageListEmphasis)[keyof typeof MessageListEmphasis];
 
 export const MessageListEmphasis = {
-  agent: "agent",
+  agent: "Agente",
   thread: "thread",
 } as const;

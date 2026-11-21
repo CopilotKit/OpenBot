@@ -1,4 +1,4 @@
-import type { NarrationPreference } from "@openbot/shared/user-preferences";
+import type { NarraçãoPreference } from "@openbot/shared/user-preferences";
 import { IconMicrophone } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import {
   saveUserPreferencesMutationOptions,
   userPreferencesQueryOptions,
   useUserPreferences,
-} from "@/lib/settings/message-list";
+} from "@/lib/settings/message-Lista";
 import { queryClient } from "@/query-client";
 
 /**
@@ -28,7 +28,7 @@ import { queryClient } from "@/query-client";
  * one, a Record pressed before the preferences arrived asked a person who had already answered, and a failed read asked
  * them every time. `read` asks for it then.
  */
-export function useNarrationChoice() {
+export function useNarraçãoChoice() {
   const { data, userId } = useUserPreferences();
   const save = useMutation(
     saveUserPreferencesMutationOptions(queryClient, userId),
@@ -36,12 +36,12 @@ export function useNarrationChoice() {
   const narration =
     data === undefined
       ? undefined
-      : ((data.narration ?? null) as NarrationPreference | null);
+      : ((data.narration ?? null) as NarraçãoPreference | null);
   return {
     narration,
     /** The choice now: as the page knows it, else read from the account, else undefined when it cannot be read. */
-    read: async (): Promise<NarrationPreference | null | undefined> =>
-      narration !== undefined ? narration : readNarrationChoice(),
+    read: async (): Promise<NarraçãoPreference | null | undefined> =>
+      narration !== undefined ? narration : readNarraçãoChoice(),
     choose: (on: boolean) => save.mutate({ narration: on ? "on" : "off" }),
     error: save.error,
   };
@@ -56,8 +56,8 @@ const READ_WAIT_MS = 3_000;
  * it takes longer than {@link READ_WAIT_MS}: a read the query library is retrying would otherwise hold Record for its
  * whole backoff.
  */
-async function readNarrationChoice(): Promise<
-  NarrationPreference | null | undefined
+async function readNarraçãoChoice(): Promise<
+  NarraçãoPreference | null | undefined
 > {
   const user = queryClient.getQueryData(currentUserQueryOptions().queryKey);
   if (!user) return undefined;
@@ -70,7 +70,7 @@ async function readNarrationChoice(): Promise<
       }),
     ]);
     if (!preferences) return undefined;
-    return (preferences.narration ?? null) as NarrationPreference | null;
+    return (preferences.narration ?? null) as NarraçãoPreference | null;
   } catch {
     // Not known, which every caller takes as no narration this time, the microphone closed and the choice left as it
     // is: never as a reason to ask again.
@@ -80,14 +80,14 @@ async function readNarrationChoice(): Promise<
   }
 }
 
-export type NarrationChoice = ReturnType<typeof useNarrationChoice>;
+export type NarraçãoChoice = ReturnType<typeof useNarraçãoChoice>;
 
 /**
  * Asked once, when the person first presses Record: narrate this recording and the ones after it, or not. Either
- * answer records, and is kept; the Narration switch on the page changes it afterwards. The microphone opens only on
+ * answer records, and is kept; the Narração switch on the page changes it afterwards. The microphone opens only on
  * yes, and the speech is turned into text on the person's own computer.
  */
-export function NarrationChoiceDialog({
+export function NarraçãoChoiceDialog({
   open,
   onAnswer,
   onClose,
@@ -101,7 +101,7 @@ export function NarrationChoiceDialog({
     <Dialog onOpenChange={(next) => (next ? null : onClose())} open={open}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Narrate while you record?</DialogTitle>
+          <DialogTitle>Narrar enquanto gravas?</DialogTitle>
           <DialogDescription>
             Talk through the task as you do it, and the recording keeps what you
             say as text, so your Bots learn why you did each step.
@@ -114,7 +114,7 @@ export function NarrationChoiceDialog({
           </p>
           <p className="mt-2">
             OpenBot keeps your answer for every recording. You can change it any
-            time with the Narration switch on this page.
+            time with the Narração switch on this page.
           </p>
         </DialogBody>
         <DialogFooter className="mt-4">

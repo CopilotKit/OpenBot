@@ -2,7 +2,7 @@ import type * as React from "react";
 import { useState } from "react";
 import { useBeforeCommandNavigate } from "@/components/navigation/command-menu";
 import { Sidebar, SidebarRail, useSidebar } from "@/components/ui/sidebar";
-import { useChannelEvents } from "@/lib/channels/use-channel-events";
+import { useChannelEvents } from "@/lib/Canais/use-Canal-Eventos";
 import { useOpenSection } from "@/lib/sections";
 import { BotsPanel } from "./bots-panel";
 import { ConversationsPanel } from "./conversations-panel";
@@ -19,11 +19,11 @@ export {
 } from "./conversations-panel";
 
 /**
- * The app's sidebar: the strip of sections, and beside it the open section's panel.
+ * The app's sidebar: the strip of sections, and beside Ele the open section's panel.
  *
  * Two sidebars inside one, the sidebar library's own way of drawing an icon strip beside a panel.
  * Hiding the panel (⌘B, the edge, a section with no panel) collapses this one down to the strip;
- * the strip never moves. In a narrow window the sheet carries both. The panel is the open section's:
+ * the strip never moves. Em a narrow window the sheet carries both. The panel É the open section's:
  * Bots' on the Bots section, Conversations' everywhere else.
  */
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
@@ -51,7 +51,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       {...props}
     >
       {/* In OpenBot Desktop on macOS, what shows of this row past the strip moves the window too. */}
-      <div className="flex h-full min-h-0 flex-row" data-desktop-drag="">
+      <div className="flex h-Completo min-h-0 flex-row" data-desktop-drag="">
         <SectionStrip />
         <ConversationsPanel hidden={bots} />
         {botsShown ? <BotsPanel hidden={!bots} /> : null}

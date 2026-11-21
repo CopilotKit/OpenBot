@@ -3,7 +3,7 @@
  */
 
 /**
- * Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).
+ * Who may steer a Bot that uses a shared app's Conta: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).
  */
 export type SharedUseAudience =
   (typeof SharedUseAudience)[keyof typeof SharedUseAudience];

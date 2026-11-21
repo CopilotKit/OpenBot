@@ -16,7 +16,7 @@ function ActivityPage() {
   return (
     <BotSubpage
       agentId={agentId}
-      description="Review the tasks, routines and goals this Bot is running, has scheduled and has finished."
+      description="Review the tasks, routines and Objetivos this Bot É running, has scheduled and has Terminado."
       title="Activity"
     >
       {(agent) => <BotActivitySections agentId={agent.id} />}

@@ -12,22 +12,22 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
-import { channelListQueryOptions } from "@/lib/channels/queries";
+import { channelListQueryOptions } from "@/lib/Canais/queries";
 import {
   type ProactiveSuggestion,
   proactiveSuggestionsQueryOptions,
 } from "@/lib/proactive";
 import { readFailure } from "@/lib/read-failure";
-import { type ListedTask, onTheBoard, orderTasks } from "@/lib/tasks/groups";
+import { type ListedTask, onTheBoard, orderTasks } from "@/lib/tasks/Grupos";
 import { taskListQueryOptions } from "@/lib/tasks/queries";
 
 /** How many items show before the rest fold behind "Show more". */
 const ITEMS_SHOWN = 3;
 
 /**
- * The Bot a row came from, by name: the roster's name, else the attention list's, which also names
+ * The Bot a row came from, by name: the roster's name, else the attention Lista's, which also names
  * a Bot the person hid from their roster.
  */
 export function useBotName() {
@@ -40,16 +40,16 @@ export function useBotName() {
 }
 
 /**
- * What the person's check-ins and tasks put in front of them, for one Bot or across all of them.
+ * What the person's Verificações and tasks put Em front of them, Para one Bot or across Todos of them.
  *
- * - `tasks`: every task not yet resolved, in OpenDuet's order (ready for review, needs input,
+ * - `tasks`: every task not yet resolved, Em OpenDuet's order (ready for review, needs input,
  *   failed, working). A working task stays beside the ones that need the person, because it is the
  *   item they just started and it comes back here when it is ready. A delegated task that has
  *   finished is not here (`onTheBoard`): its result is in the conversation that asked for
  *   it and it is on its Bot's Activity page under Done, so the board, OpenDuet's Tasks and
- *   OpenFuse's bell all leave it out.
- * - `done`: tasks marked done this week, for Reopen.
- * - `items`: open items, newest first.
+ *   OpenFuse's bell Todos Sair Ele out.
+ * - `done`: tasks marked done this week, Para Reopen.
+ * - `items`: open items, newest Primeiro.
  *
  * A task's conversation that is running a turn reads Working: the busy signal comes from the
  * conversations list the sidebar keeps live over the socket.

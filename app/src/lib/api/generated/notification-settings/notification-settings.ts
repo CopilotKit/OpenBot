@@ -71,7 +71,7 @@ export const getGetNotificationSettingsUrl = (
 };
 
 /**
- * Return which ways of reaching the person each kind of update may use, for every one of their Bots at once: progress, decisions, questions, and what their Bots' check-ins found. A kind the person never chose for goes every way they can be reached. Only the person themselves may read them.
+ * Return which ways of reaching the person each kind of update may use, for every one of their Bots at once: progress, decisions, questions, and what their Bots' Verificações found. A kind the person never chose Para goes every way they can be reached. Only the person themselves may read them.
  * @summary Read where a person's updates go
  */
 export const getNotificationSettings = async (
@@ -83,7 +83,7 @@ export const getNotificationSettings = async (
     getGetNotificationSettingsUrl(organizationId, personId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -908,7 +908,7 @@ export const listNotificationTransports = async (
     getListNotificationTransportsUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

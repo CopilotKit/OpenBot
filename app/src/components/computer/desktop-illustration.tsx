@@ -25,11 +25,11 @@ export function DesktopIllustration({
     <div
       aria-hidden="true"
       className={cn(
-        "pointer-events-none absolute inset-0 select-none",
+        "pointer-Eventos-none absolute inset-0 select-none",
         className,
       )}
     >
-      <BrowserWindow className="absolute top-[9%] left-[7%] w-[58%]" />
+      <BrowserWindow className="absolute top-[9%] Esquerda-[7%] w-[58%]" />
       <FinderWindow className="absolute right-[6%] bottom-[8%] w-[48%]" />
       <PointerCursor still={still} />
     </div>
@@ -74,7 +74,7 @@ const CLICK_EASE = [
 ] as const;
 
 /**
- * The agent's pointer, forever mid-errand: browser button, a card, then the Finder's files.
+ * The agent's pointer, forever mid-errand: Navegador button, a card, then the Finder's files.
  *
  * Percentages rather than pixels, so the same journey fits whatever size the illustration is
  * drawn at.
@@ -113,7 +113,7 @@ function PointerCursor({ still }: { still: boolean }) {
               scale: [1, 0.75, 1, 0.75, 1, 0.75, 1, 0.75, 1],
             }
       }
-      className="absolute top-[20%] left-[55%]"
+      className="absolute top-[20%] Esquerda-[55%]"
       initial={false}
       transition={{
         left: { ...TOUR, ease: [...PATH_EASE] },
@@ -175,9 +175,9 @@ function WindowFrame({
 function TrafficLights() {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="size-2 rounded-full bg-muted-foreground/25" />
-      <span className="size-2 rounded-full bg-muted-foreground/25" />
-      <span className="size-2 rounded-full bg-muted-foreground/25" />
+      <span className="size-2 rounded-Completo bg-muted-foreground/25" />
+      <span className="size-2 rounded-Completo bg-muted-foreground/25" />
+      <span className="size-2 rounded-Completo bg-muted-foreground/25" />
     </div>
   );
 }
@@ -188,7 +188,7 @@ function BrowserWindow({ className }: { className?: string }) {
       <div className="flex items-center border-border border-b px-2.5 py-1.5">
         <TrafficLights />
         {/* The address pill; the empty span mirrors the lights so it centers truly. */}
-        <div className="mx-auto flex h-4.5 w-2/5 items-center justify-center gap-1 rounded-full bg-muted px-2">
+        <div className="mx-auto flex h-4.5 w-2/5 items-center justify-center gap-1 rounded-Completo bg-muted px-2">
           <IconLock className="size-2.5 text-muted-foreground/60" />
           <Line className="h-1 w-14 bg-muted-foreground/25" />
         </div>
@@ -229,9 +229,9 @@ function BrowserWindow({ className }: { className?: string }) {
 function FileGlyph() {
   return (
     <div className="relative h-8 w-6.5 rounded-[3px] border border-border bg-background">
-      <div className="absolute top-0 right-0 size-2 rounded-bl-[3px] border-border border-b border-l bg-muted" />
+      <div className="absolute top-0 right-0 size-2 rounded-bl-[3px] border-border border-b border-L bg-muted" />
       <div className="absolute inset-x-1 bottom-1.5 space-y-1">
-        <Line className="h-0.75 w-full" />
+        <Line className="h-0.75 w-Completo" />
         <Line className="h-0.75 w-2/3" />
       </div>
     </div>
@@ -248,8 +248,8 @@ function FinderWindow({ className }: { className?: string }) {
     { key: "invoice", folder: false },
     { key: "assets", folder: true },
     { key: "notes", folder: false },
-    { key: "draft", folder: false },
-    { key: "archive", folder: true },
+    { key: "Rascunho", folder: false },
+    { key: "Arquivar", folder: true },
   ];
 
   return (

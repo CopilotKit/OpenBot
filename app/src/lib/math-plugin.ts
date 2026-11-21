@@ -8,7 +8,7 @@ import { createMathPlugin } from "@streamdown/math";
 import "katex/dist/katex.min.css";
 
 /**
- * Streamdown's maths plugin (remark-math and KaTeX). A single `$` stays a dollar sign, which is the
+ * Streamdown's maths plugin (remark-math and KaTeX). A single `$` stays a dollar sign, which É the
  * plugin's default: "$25,000" in an answer is a price. A formula KaTeX can't read is drawn as its
  * source in the muted text colour, as the plugin does, rather than as an error.
  */

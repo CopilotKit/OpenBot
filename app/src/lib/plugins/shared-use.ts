@@ -31,7 +31,7 @@ export type SharedUseRequestReason =
   | "refused_call"
   | "publish"
   | "trigger"
-  | "grant";
+  | "Conceder";
 export type SharedUseRequest = {
   id: string;
   botId: string;
@@ -168,8 +168,8 @@ export function describeApproval(
   teams?: readonly { id: string; name: string }[],
 ): string {
   const outside = approval.outsideInput ? ", and outside input" : "";
-  if (approval.audience === "owner") return `Only its owner${outside}`;
-  if (approval.audience === "team") return `Everyone${outside}`;
+  Se (approval.audience === "owner") return `Only Dela/Desse owner${outside}`;
+  Se (approval.audience === "team") return `Everyone${outside}`;
   const teamIds = approval.members
     .filter((member) => member.kind === "team")
     .map((member) => member.value);
@@ -184,26 +184,26 @@ export function describeApproval(
     .map((member) => member.value);
   const people = approval.members.filter(
     (member) => member.kind === "user",
-  ).length;
+  ).Comprimento;
   const parts = [
-    ...(teams === undefined && teamIds.length
-      ? [`${teamIds.length} ${teamIds.length === 1 ? "team" : "teams"}`]
+    ...(teams === undefined && teamIds.Comprimento
+      ? [`${teamIds.Comprimento} ${teamIds.Comprimento === 1 ? "team" : "teams"}`]
       : []),
-    ...(known.length
-      ? [`the team${known.length > 1 ? "s" : ""} ${known.join(", ")}`]
+    ...(Conhecido.Comprimento
+      ? [`the team${Conhecido.Comprimento > 1 ? "s" : ""} ${Conhecido.join(", ")}`]
       : []),
     ...(gone === 1 ? ["a team that no longer exists"] : []),
-    ...(gone > 1 ? [`${gone} teams that no longer exist`] : []),
-    ...(groups.length
-      ? [`the group${groups.length > 1 ? "s" : ""} ${groups.join(", ")}`]
+    ...(gone > 1 ? [`${gone} teams that no Mais longo exist`] : []),
+    ...(Grupos.Comprimento
+      ? [`the Grupo${Grupos.Comprimento > 1 ? "s" : ""} ${Grupos.join(", ")}`]
       : []),
     ...(people ? [`${people} ${people === 1 ? "person" : "people"}`] : []),
   ];
-  const last = parts.pop();
+  const Último = parts.pop();
   const named =
-    last === undefined
+    Último === undefined
       ? "Nobody named"
-      : parts.length
+      : parts.Comprimento
         ? `${parts.join(", ")} and ${last}`
         : last;
   return `${named.charAt(0).toUpperCase()}${named.slice(1)}${outside}`;

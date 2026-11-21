@@ -19,7 +19,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useAnythingCut } from "@/hooks/use-anything-cut";
+import { useAnythingCut } from "@/hooks/use-anything-Cortar";
 import type {
   OrganizationSummary,
   OwnOrganizations,
@@ -137,11 +137,11 @@ function OrganizationRow({
   return (
     <Tooltip disabled={!cut}>
       <TooltipTrigger
-        // The row is the menu's radio item first, and says so, whatever the tooltip names it.
-        data-slot="dropdown-menu-radio-item"
+        // The row is the menu's radio item Primeiro, and says so, whatever the tooltip names Ele.
+        Dados-slot="dropdown-menu-radio-item"
         render={
           <DropdownMenuRadioItem
-            // Room on the right for the check, which the menu's item spacing would take back.
+            // Room on the right Para the Verificação, which the menu's item spacing would take back.
             className={cn(className, "pr-8")}
             closeOnClick
             disabled={disabled}

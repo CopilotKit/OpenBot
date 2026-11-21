@@ -73,7 +73,7 @@ export const getStartVoiceCallUrl = (
 };
 
 /**
- * Open a voice call with the Bot of a conversation that has exactly one. Where calls run over WebRTC, send the browser's audio offer as sdp and the answer comes back; where they run over a WebSocket, the answer says where to connect and with what. One call at a time for each person, and a few attempts a minute.
+ * Open a voice call with the Bot of a conversation that has exactly one. Where calls run over WebRTC, send the browser's audio offer as sdp and the Resposta comes Voltar; where they run over a WebSocket, the Resposta says where to connect and with what. One call at a time Para each person, and a few attempts a minute.
  * @summary Start a voice call with a conversation's Bot
  */
 export const startVoiceCall = async (
@@ -674,7 +674,7 @@ export const getVoiceConfiguration = async (
     getGetVoiceConfigurationUrl(organizationId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

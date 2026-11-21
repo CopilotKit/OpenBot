@@ -13,8 +13,8 @@ import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { type ComponentRecord, componentKeys } from "./queries";
 
 /**
- * Writes against a component's governance: publication, per-Bot grants, per-function grants, the
- * draft, and a Playground component's source.
+ * Writes against a component's governance: publication, per-Bot grants, per-Função grants, the
+ * Rascunho, and a Playground component's source.
  *
  * Every one of these is a decision the server records and may refuse, so none of them patch the
  * cache — the list is invalidated and the screen re-reads whatever was actually decided.
@@ -28,7 +28,7 @@ function invalidateComponents(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: componentKeys.all });
 }
 
-const key = () => ({ "Idempotency-Key": idempotencyKey() });
+const key = () => ({ "Idempotency-Chave": idempotencyKey() });
 
 /**
  * Whether one Bot may answer with a component.

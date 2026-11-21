@@ -49,7 +49,7 @@ export const getListSessionsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListSessionsResponseMock(),
@@ -89,7 +89,7 @@ export const getDeleteSessionMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 

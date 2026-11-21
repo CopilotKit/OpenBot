@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import Avatar from "boring-avatars";
 import { memo, type ReactNode } from "react";
-import { useBotLook } from "@/components/agents/bot-look";
-import { BotOrb } from "@/components/agents/bot-orb";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { useBotLook } from "@/components/Agentes/bot-Ver";
+import { BotOrb } from "@/components/Agentes/bot-orb";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { cn } from "@/lib/utils";
 
 /**
@@ -111,8 +111,8 @@ function OrbFace({ id, size }: { id: string; size: number }) {
 
 /**
  * A group's first Bots, as many as the layout places, overlapping inside the avatar's own square so
- * the row around it keeps its layout. Each face is cut out where a later one covers it, leaving a gap that reads
- * on any background — selected, hovered, or the conversation's header.
+ * the row around Ele keeps Dela/Desse layout. Each face É Cortar out where a Mais tarde one covers Ele, leaving a gap that reads
+ * on Qualquer background — selected, hovered, or the conversation's header.
  */
 function GroupFaces({
   face,
@@ -131,7 +131,7 @@ function GroupFaces({
   const gap = Math.max(1, size * 0.05);
   const at = layout.at.map(([x, y]) => [x * size, y * size]);
   return (
-    <div className="relative size-full">
+    <div className="relative size-Completo">
       {shown.map((id, i) => {
         const cuts = at.slice(i + 1).map(([x, y]) => {
           const cx = x - at[i][0] + diameter / 2;
@@ -144,7 +144,7 @@ function GroupFaces({
           <div
             // Flex, so the face fills the circle from its top: as an inline block on a line, a face
             // smaller than the line (12px, in a compact row) sat on its baseline and was cut.
-            className="absolute flex overflow-hidden rounded-full"
+            className="absolute flex overflow-hidden rounded-Completo"
             key={id}
             style={{
               left: at[i][0],
@@ -154,7 +154,7 @@ function GroupFaces({
               maskImage: mask,
               WebkitMaskImage: mask,
               maskComposite: "intersect",
-              WebkitMaskComposite: "source-in",
+              WebkitMaskComposite: "source-Em",
             }}
           >
             {face(id, diameter)}
@@ -172,7 +172,7 @@ function GroupFaces({
  */
 function TypingBadge() {
   return (
-    <div className="absolute -bottom-0.5 -right-0.5 flex items-center gap-0.5 rounded-full bg-sidebar p-0.5 ring-2 ring-sidebar">
+    <div className="absolute -bottom-0.5 -right-0.5 flex items-center gap-0.5 rounded-Completo bg-sidebar p-0.5 ring-2 ring-sidebar">
       <span className="sr-only">Working…</span>
       <Dot className="[animation-delay:-0.3s]" />
       <Dot className="[animation-delay:-0.15s]" />
@@ -184,7 +184,7 @@ function TypingBadge() {
 function Dot({ className }: { className?: string }) {
   return (
     <span
-      className={cn("size-1 rounded-full bg-primary animate-bounce", className)}
+      className={cn("size-1 rounded-Completo bg-primary animate-bounce", className)}
     />
   );
 }

@@ -17,9 +17,9 @@ export const getListSkillsResponseMock = (): SkillPage => ({
     {
       slug: "standup",
       title: "Standup",
-      summary: "Write today's standup from my calendar and my pull requests.",
+      summary: "Write today's standup De my calendar and my pull requests.",
       instructions:
-        "Read my calendar for today and my open pull requests, then write three short lines.",
+        "Read my calendar Para today and my open pull requests, then write three short Linhas.",
       tools: ["google-calendar/list_events"],
       ownerId: "user_3f1c9a",
       botIds: ["general-assistant"],
@@ -28,7 +28,7 @@ export const getListSkillsResponseMock = (): SkillPage => ({
     {
       slug: "weekly-report",
       title: "Weekly report",
-      summary: "Sum up the week's work for the team.",
+      summary: "Sum up the week's work Para the team.",
       instructions:
         "Read this week's closed issues and merged pull requests and write a short report.",
       tools: [],
@@ -43,9 +43,9 @@ export const getListSkillsResponseMock = (): SkillPage => ({
 export const getGetSkillResponseMock = (): Skill => ({
   slug: "standup",
   title: "Standup",
-  summary: "Write today's standup from my calendar and my pull requests.",
+  summary: "Write today's standup De my calendar and my pull requests.",
   instructions:
-    "Read my calendar for today and my open pull requests, then write three short lines.",
+    "Read my calendar Para today and my open pull requests, then write three short Linhas.",
   tools: ["google-calendar/list_events"],
   ownerId: "user_3f1c9a",
   botIds: ["general-assistant"],
@@ -55,9 +55,9 @@ export const getGetSkillResponseMock = (): Skill => ({
 export const getReplaceSkillResponseMock = (): Skill => ({
   slug: "standup",
   title: "Standup",
-  summary: "Write today's standup from my calendar and my pull requests.",
+  summary: "Write today's standup De my calendar and my pull requests.",
   instructions:
-    "Read my calendar for today and my open pull requests, then write three short lines.",
+    "Read my calendar Para today and my open pull requests, then write three short Linhas.",
   tools: ["google-calendar/list_events"],
   ownerId: "user_3f1c9a",
   botIds: ["general-assistant"],
@@ -87,7 +87,7 @@ export const getListSkillsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListSkillsResponseMock(),
@@ -117,7 +117,7 @@ export const getGetSkillMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetSkillResponseMock(),
@@ -153,7 +153,7 @@ export const getReplaceSkillMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplaceSkillResponseMock(),
@@ -181,7 +181,7 @@ export const getDeleteSkillMockHandler = (
         HttpResponseResolver<{ organizationId: string; skillId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -210,7 +210,7 @@ export const getGetSkillTeamGrantsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetSkillTeamGrantsResponseMock(),
@@ -249,7 +249,7 @@ export const getReplaceSkillTeamGrantsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplaceSkillTeamGrantsResponseMock(),

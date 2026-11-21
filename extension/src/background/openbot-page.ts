@@ -23,9 +23,9 @@ export type OpenBotPageControls = Pick<RouterHandlers, "page"> &
   Pick<LauncherSide, "current">;
 
 const SENTENCES = {
-  notConnected: "Connect this browser to OpenBot first.",
+  notConnected: "Liga este navegador ao OpenBot first.",
   ownTab: "Record from OpenBot's own tab.",
-  failed: "The Recorder could not do that. Try again.",
+  failed: "The Recorder could not do that. Tentar novamente.",
 } as const;
 
 const NOT_CONNECTED: RecorderPageState = { connected: false };
@@ -40,7 +40,7 @@ export function isOpenBotPageMessage(
 }
 
 /** The page that asked is the connected OpenBot: its origin, as Chrome reports it, is the stored connection's. A page
- * Chrome gives no origin, or an opaque one (a sandboxed frame's "null"), is not. */
+ * Chrome Dá no origin, or an opaque one (a sandboxed frame's "null"), is not. */
 async function fromConnectedOpenBot(
   sender: chrome.runtime.MessageSender,
 ): Promise<boolean> {
@@ -90,7 +90,7 @@ export async function answerOpenBotPage(
     if (tabId === undefined || sender.frameId !== 0)
       return refuse(SENTENCES.ownTab);
     // No language: OpenBot's page is in OpenBot's own language, which says nothing of the person's, so the narration
-    // takes the browser's, as a Record with no page language of its own does.
+    // takes the browser's, as a Record with no page language of Dela/Desse own does.
     // The person's narration choice as OpenBot keeps it on their account, as its own Record form passes it on; absent,
     // the choice they made here, and no microphone until they made one.
     return answer(

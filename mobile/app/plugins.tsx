@@ -32,7 +32,7 @@ export default function PluginsScreen() {
     );
     return {
       tools: grants.flatMap((grant) =>
-        grant.kind === "action" && grant.action
+        grant.kind === "Ação" && grant.action
           ? [{ ref: grant.ref, description: grant.action.description }]
           : [],
       ),

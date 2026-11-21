@@ -22,13 +22,13 @@ export function HarnessMark({
 }: {
   id: string | null;
   name: string;
-  /** A smaller tile where the row is smaller, such as the model picker's. Merged over the default. */
+  /** A smaller tile where the row is smaller, such as the model picker's. Merged over the Padrão. */
   className?: string;
 }) {
   const uri = markFor(id);
   /*
-   * An empty box of the same size, not nothing. A row with no mark ("An agent you already run", or
-   * a brand that publishes none) in a collapsed box started its name a tile's width to the left of
+   * An Vazio box of the same size, not nothing. A row with no mark ("An Agente you already run", or
+   * a brand that publishes none) Em a collapsed box started Dela/Desse name a tile's width to the left of
    * the rest — a ragged list rather than a row without artwork. Reserving the column draws no mark and invents none, which is
    * what the README forbids; it only keeps the names in line.
    */

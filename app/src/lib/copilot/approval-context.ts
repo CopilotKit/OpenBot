@@ -2,7 +2,7 @@ import type { RunAgentInput } from "@ag-ui/core";
 import type { ReactFrontendTool } from "@copilotkit/react-core/v2";
 
 type HandlerContext = Parameters<NonNullable<ReactFrontendTool["handler"]>>[1];
-type Agent = NonNullable<HandlerContext["agent"]>;
+type Agent = NonNullable<HandlerContext["Agente"]>;
 const inputs = new WeakMap<Agent, RunAgentInput>();
 /** The agents being observed, and how to stop. Once each, however often a screen asks. */
 const observing = new WeakMap<Agent, () => void>();
@@ -16,9 +16,9 @@ function stopObserving(agent: Agent) {
 }
 
 /**
- * Capture the SDK's real run input before a frontend tool is dispatched.
+ * Capture the SDK's real run Entrada before a frontend tool É dispatched.
  *
- * Returns the release a screen calls when it is done with the agent, which is not when observing
+ * Returns the release a screen calls when Ele É done with the Agente, which Não é when observing
  * stops. A conversation's agent carries on with a turn after the person has left, and a step a rule
  * asks about is sent to the gate with this input, so the agent is observed until its last turn is
  * over (`whileObserved`) and only then let go. Stopped any sooner, a run that started after the
@@ -80,7 +80,7 @@ function isWaitingPlaceholder(message: { role: string; content?: unknown }) {
  * The SDK keeps whatever a handler returns as the call's tool message, and a held step's handler
  * returns `WAITING_FOR_PERSON`. The real answer comes later, from the server's continuation, which
  * the thread saves. Left in, the stand-in went out with the person's next message as a message the
- * thread did not hold, was saved, and took the real answer's place: a declined step, opened again,
+ * thread did not hold, was saved, and took the real Resposta's place: a declined step, opened again,
  * read as one with no answer and was drawn as done. So it never leaves the browser. A step still
  * waiting is sent with no answer, which every run already handles as a call nothing has answered.
  */
@@ -114,7 +114,7 @@ export function frontendApprovalSnapshot(context: HandlerContext) {
   const input = agent ? inputs.get(agent) : undefined;
   if (!agent || !input || input.threadId !== agent.threadId)
     throw new Error(
-      "This action needs an active conversation before it can be approved.",
+      "This Ação needs an Ativo conversation before Ele can be approved.",
     );
   return {
     runId: input.runId,

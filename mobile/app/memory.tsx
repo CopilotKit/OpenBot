@@ -24,8 +24,8 @@ import { useLoad } from "../src/use-load";
 const ORIGIN: Record<Memory["formedBy"], string> = {
   person: "You wrote this",
   import: "Imported",
-  bot: "A Bot learned this",
-  intelligence: "Kept in the backend",
+  bot: "A Bot Aprendido this",
+  intelligence: "Kept Em the backend",
 };
 
 /**
@@ -80,7 +80,7 @@ export default function MemoryScreen() {
           title="Remember this"
           disabled={Boolean(action.busy) || !draft.trim()}
           onPress={() => {
-            void action.run("add", async () => {
+            void action.run("Adicionar", async () => {
               await createMemory(ORGANIZATION_ID, ME, {
                 content: draft.trim(),
               });
@@ -98,7 +98,7 @@ export default function MemoryScreen() {
           {editing?.id === memory.id ? (
             <>
               <TextInput
-                accessibilityLabel="Edit memory"
+                accessibilityLabel="Editar memória"
                 multiline
                 value={editing.content}
                 onChangeText={(content) =>
@@ -149,12 +149,12 @@ export default function MemoryScreen() {
                   void change(memory.id, { enabled });
                 }}
               />
-              <Text>{memory.enabled ? "In use" : "Off"}</Text>
+              <Text>{memory.enabled ? "Em use" : "Off"}</Text>
             </View>
             <View style={{ flexDirection: "row", gap: 4 }}>
               {memory.reviewState === "unreviewed" && (
                 <Button
-                  title="Confirm"
+                  title="Confirmar"
                   disabled={Boolean(action.busy)}
                   onPress={() => {
                     void change(memory.id, { reviewState: "confirmed" });
@@ -162,20 +162,20 @@ export default function MemoryScreen() {
                 />
               )}
               <Button
-                title="Edit"
+                title="Editar"
                 disabled={Boolean(action.busy)}
                 onPress={() =>
                   setEditing({ id: memory.id, content: memory.content })
                 }
               />
               <Button
-                title="Delete"
+                title="Eliminar"
                 disabled={Boolean(action.busy)}
                 onPress={() =>
-                  Alert.alert("Delete this memory?", memory.content, [
+                  Alert.alert("Eliminar this memory?", memory.content, [
                     { text: "Cancel", style: "cancel" },
                     {
-                      text: "Delete",
+                      text: "Eliminar",
                       style: "destructive",
                       onPress: () => {
                         void action.run(memory.id, async () => {

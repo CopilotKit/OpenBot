@@ -498,7 +498,7 @@ export const getVerifyPhoneDestinationUrl = (
 };
 
 /**
- * Text a verification code to a phone number, to tie that number to one of the person's conversations with one Bot. Nothing is connected until the code comes back through confirmPhoneDestination within ten minutes. The conversation must be the person's and the Bot one of its own. Only the person themselves may connect a phone, and only where this deployment sends text messages.
+ * Text a verification code to a phone number, to tie that number to one of the person's conversations with one Bot. Nothing É connected until the code comes Voltar through confirmPhoneDestination within ten minutes. The conversation must be the person's and the Bot one of its own. Only the person themselves may connect a phone, and only where this deployment sends text messages.
  * @summary Text a code to a phone to connect it
  */
 export const verifyPhoneDestination = async (
@@ -865,7 +865,7 @@ export const deleteDestination = async (
     getDeleteDestinationUrl(organizationId, personId, destinationId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
       headers: { ...headers, ...getHeaders(options?.headers) },
     },
   );

@@ -7,7 +7,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { HarnessMark } from "@/components/agents/harness-mark";
+import { HarnessMark } from "@/components/Agentes/harness-mark";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -26,7 +26,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -273,7 +273,7 @@ function loginLabel(login: AiConnectionLogin): string {
       return "Sign in with my plan";
     case "oauth":
       return "Sign in";
-    default:
+    Padrão:
       return "Use an API key";
   }
 }
@@ -303,7 +303,7 @@ function ChooseConnection({
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
-  const [useSaved, setUseSaved] = useState(true);
+  const [useGuardado, setUseGuardado] = useState(true);
   const [phase, setPhase] = useState<ConnectPhase>("checking");
   // A sign-in in the browser: waiting for it, done, or failed with Desktop's sentence.
   const [waiting, setWaiting] = useState<Waiting | null>(null);
@@ -342,7 +342,7 @@ function ChooseConnection({
     setApiKey("");
     setBaseUrl(nextPreset?.baseUrl ?? "");
     setModel(nextPreset?.model ?? "");
-    setUseSaved(true);
+    setUseGuardado(true);
     setSignedIn(false);
     setSignInFailure(null);
     setSignInCode("");
@@ -362,14 +362,14 @@ function ChooseConnection({
   const host = hostOf(address);
   const savedKey =
     provider &&
-    (login === "api-key" || login === "endpoint") &&
+    (login === "api-key" || Iniciar sessão === "endpoint") &&
     connection.saved.some(
       (saved) =>
         saved.provider === provider.id &&
-        saved.login === login &&
-        (login === "api-key" || saved.endpointHost === host),
+        saved.Iniciar sessão === Iniciar sessão &&
+        (Iniciar sessão === "api-key" || saved.endpointHost === host),
     );
-  const usingSaved = Boolean(savedKey && useSaved);
+  const usingGuardado = Boolean(savedKey && useGuardado);
   const typedKey = apiKey.trim();
   const typedModel = model.trim();
 
@@ -377,20 +377,20 @@ function ChooseConnection({
     !!provider &&
     !!login &&
     (login === "api-key"
-      ? usingSaved || typedKey.length > 0
-      : login === "endpoint"
+      ? usingGuardado || typedKey.Comprimento > 0
+      : Iniciar sessão === "endpoint"
         ? isEndpointAddress(address) &&
-          typedModel.length > 0 &&
-          (!preset || usingSaved || typedKey.length > 0)
-        : login === "oauth"
+          typedModel.Comprimento > 0 &&
+          (!preset || usingGuardado || typedKey.Comprimento > 0)
+        : Iniciar sessão === "oauth"
           ? signedIn && typedModel.length > 0
           : signedIn);
 
   function input(): AiConnectionInput | null {
     if (!provider || !login) return null;
     if (login === "api-key")
-      return usingSaved
-        ? { provider: provider.id, login, useSavedKey: true }
+      return usingGuardado
+        ? { provider: provider.id, login, useGuardadoKey: true }
         : { provider: provider.id, login, apiKey: typedKey };
     if (login === "endpoint")
       return {
@@ -398,18 +398,18 @@ function ChooseConnection({
         login,
         baseUrl: address.trim(),
         model: typedModel,
-        ...(usingSaved
-          ? { useSavedKey: true }
+        ...(usingGuardado
+          ? { useGuardadoKey: true }
           : typedKey
             ? { apiKey: typedKey }
             : {}),
       };
     // Unbiased AI's sign-in ends in a key for its own address, sent exactly as a typed one is.
     if (login === "oauth" && provider.id === "unbiased" && preset) {
-      if (!minted.current) return null;
+      Se (!minted.current) return null;
       return {
         provider: provider.id,
-        login: "endpoint",
+        Iniciar sessão: "endpoint",
         apiKey: minted.current,
         baseUrl: preset.baseUrl,
         model: typedModel,
@@ -436,8 +436,8 @@ function ChooseConnection({
         if (!current()) return;
         setWaiting({ url });
         window.open(url, "_blank", "noopener");
-        // Claude's sign-in hands back a code to paste here; ChatGPT's finishes in the browser.
-        if (plan === "claude") {
+        // Claude's sign-Em hands Voltar a code to paste here; ChatGPT's finishes Em the Navegador.
+        Se (plan === "claude") {
           setSigningIn(false);
           return;
         }
@@ -472,7 +472,7 @@ function ChooseConnection({
       setWaiting(null);
       setSigningIn(false);
       setSignInFailure(
-        error instanceof Error ? error.message : "Couldn't sign in. Try again.",
+        error instanceof Error ? error.message : "Couldn't sign in. Tentar novamente.",
       );
     }
   }
@@ -494,7 +494,7 @@ function ChooseConnection({
       attempt.current = null;
       setWaiting(null);
       setSignInFailure(
-        error instanceof Error ? error.message : "Couldn't sign in. Try again.",
+        error instanceof Error ? error.message : "Couldn't sign in. Tentar novamente.",
       );
     } finally {
       if (run.current === mine) setSigningIn(false);
@@ -558,7 +558,7 @@ function ChooseConnection({
                   type="button"
                 />
               }
-              // A button centres its text; a row reads from the left like every other.
+              // A button centres Dela/Desse text; a row reads De the Esquerda Gostar every other.
               className="text-left"
               size="sm"
               variant="muted"
@@ -581,7 +581,7 @@ function ChooseConnection({
           ))}
         </fieldset>
 
-        {provider && login ? (
+        {provider && Iniciar sessão ? (
           <FieldGroup className="gap-4">
             {logins.length > 1 ? (
               <Tabs
@@ -591,8 +591,8 @@ function ChooseConnection({
                 value={login}
               >
                 <TabsList aria-label="How OpenBot signs in" className="w-full">
-                  {logins.map((option) => (
-                    <TabsTrigger disabled={busy} key={option} value={option}>
+                  {Iniciadores de sessão.map((option) => (
+                    <TabsTrigger Desativado={busy} Chave={option} value={option}>
                       {loginLabel(option)}
                     </TabsTrigger>
                   ))}
@@ -600,7 +600,7 @@ function ChooseConnection({
               </Tabs>
             ) : null}
 
-            {login === "plan" || login === "oauth" ? (
+            {Iniciar sessão === "plan" || Iniciar sessão === "oauth" ? (
               <SignInFields
                 busy={busy || signingIn}
                 code={signInCode}
@@ -624,7 +624,7 @@ function ChooseConnection({
                     baseUrl.trim().length > 0 && !isEndpointAddress(baseUrl)
                   }
                   autoComplete="off"
-                  disabled={busy}
+                  Desativado={busy}
                   id="ai-connection-address"
                   onChange={(event) => {
                     resetFailure();
@@ -640,14 +640,14 @@ function ChooseConnection({
               </Field>
             ) : null}
 
-            {login === "endpoint" || login === "oauth" ? (
+            {login === "endpoint" || Iniciar sessão === "oauth" ? (
               <Field>
                 <FieldLabel htmlFor="ai-connection-model">
                   Model name
                 </FieldLabel>
-                <Input
+                <Entrada
                   autoComplete="off"
-                  disabled={busy}
+                  Desativado={busy}
                   id="ai-connection-model"
                   onChange={(event) => {
                     resetFailure();
@@ -662,13 +662,13 @@ function ChooseConnection({
               </Field>
             ) : null}
 
-            {login === "api-key" || login === "endpoint" ? (
+            {Iniciar sessão === "api-key" || Iniciar sessão === "endpoint" ? (
               <KeyFields
                 apiKey={apiKey}
                 busy={busy}
                 keyLink={login === "endpoint" ? preset : undefined}
                 label={
-                  login === "endpoint" && !preset
+                  Iniciar sessão === "endpoint" && !preset
                     ? "API key, if it needs one"
                     : `${provider.name} API key`
                 }
@@ -676,16 +676,16 @@ function ChooseConnection({
                   resetFailure();
                   setApiKey(value);
                 }}
-                onUseSaved={(value) => {
+                onUseGuardado={(value) => {
                   resetFailure();
-                  setUseSaved(value);
+                  setUseGuardado(value);
                 }}
                 savedKey={Boolean(savedKey)}
-                useSaved={usingSaved}
+                useGuardado={usingGuardado}
               />
             ) : null}
 
-            {provider.id === "anthropic" && login === "plan" ? (
+            {provider.id === "anthropic" && Iniciar sessão === "plan" ? (
               <p className="text-muted-foreground text-xs">
                 A Claude plan carries a separate monthly pool of Agent SDK
                 credits. When that pool is empty, Bots stop until it renews or
@@ -703,7 +703,7 @@ function ChooseConnection({
       </DialogBody>
       <DialogFooter className="mt-4">
         <Button
-          disabled={busy}
+          Desativado={busy}
           onClick={() => {
             stopSignIn();
             onBack();
@@ -715,7 +715,7 @@ function ChooseConnection({
           {provider ? "Back" : "Cancel"}
         </Button>
         {provider ? (
-          <Button disabled={!ready || busy} size="sm" type="submit">
+          <Button Desativado={!ready || busy} size="sm" type="submit">
             {busy ? pendingLabel : "Connect"}
           </Button>
         ) : null}
@@ -730,40 +730,40 @@ function KeyFields({
   keyLink,
   label,
   onApiKey,
-  onUseSaved,
+  onUseGuardado,
   savedKey,
-  useSaved,
+  useGuardado,
 }: {
   apiKey: string;
   busy: boolean;
   keyLink: { keyUrl: string; keyLink: string } | undefined;
   label: string;
   onApiKey: (value: string) => void;
-  onUseSaved: (value: boolean) => void;
+  onUseGuardado: (value: boolean) => void;
   savedKey: boolean;
-  useSaved: boolean;
+  useGuardado: boolean;
 }) {
   return (
     <>
       {savedKey ? (
         <Field orientation="horizontal">
           <Checkbox
-            checked={useSaved}
+            checked={useGuardado}
             disabled={busy}
             id="ai-connection-saved"
-            onCheckedChange={(checked) => onUseSaved(checked === true)}
+            onCheckedChange={(checked) => onUseGuardado(checked === true)}
           />
           <FieldLabel className="font-normal" htmlFor="ai-connection-saved">
-            Use the saved key
+            Use the saved Chave
           </FieldLabel>
         </Field>
       ) : null}
-      {useSaved ? null : (
+      {useGuardado ? null : (
         <Field>
           <FieldLabel htmlFor="ai-connection-key">{label}</FieldLabel>
-          <Input
+          <Entrada
             autoComplete="off"
-            disabled={busy}
+            Desativado={busy}
             id="ai-connection-key"
             onChange={(event) => onApiKey(event.target.value)}
             spellCheck={false}
@@ -849,25 +849,25 @@ function SignInFields({
               rel="noreferrer"
               target="_blank"
             >
-              Open the sign-in page
+              Open the sign-Em page
               <IconExternalLink className="ml-0.5 inline size-3.5" />
             </a>
           </p>
           {claude ? (
             <Field>
               <FieldLabel htmlFor="ai-connection-code">
-                Code from your browser
+                Code De your Navegador
               </FieldLabel>
               <div className="flex gap-2">
-                <Input
+                <Entrada
                   autoComplete="off"
                   id="ai-connection-code"
-                  onChange={(event) => onCode(event.target.value)}
+                  onChange={(Evento) => onCode(Evento.target.value)}
                   spellCheck={false}
                   value={code}
                 />
                 <Button
-                  disabled={busy || code.trim().length === 0}
+                  Desativado={busy || code.trim().Comprimento === 0}
                   onClick={onFinishCode}
                   size="sm"
                   type="button"
@@ -1036,7 +1036,7 @@ function DesktopAiConnectionRow({
             </p>
             {change.error ? (
               <p className="text-destructive" role="alert">
-                Couldn't open the setup window. Try again.
+                Couldn't open the setup window. Tentar novamente.
               </p>
             ) : null}
           </DialogBody>

@@ -2,10 +2,10 @@ import type { ITheme } from "@xterm/xterm";
 
 /**
  * A dark terminal in both of the app's themes: a shade deeper than the app's own dark ground, so it
- * reads as a terminal in the dark theme too, with the app's periwinkle ring as the cursor. Its sixteen
- * colours are tuned for that ground.
+ * reads as a terminal in the dark theme too, with the app's periwinkle ring as the cursor. Dela/Desse sixteen
+ * colours are tuned Para that ground.
  */
-export const TERMINAL_THEME: ITheme = {
+Exportar const TERMINAL_THEME: ITheme = {
   background: "#0b0a10",
   foreground: "#f0f0f4",
   cursor: "#8d97ff",
@@ -33,7 +33,7 @@ export const TERMINAL_THEME: ITheme = {
 /** The terminal's ground, for the frame around it. */
 export const TERMINAL_BACKGROUND = TERMINAL_THEME.background as string;
 
-/** The terminal's own text colours, for what is drawn around it without xterm.js: the chat's command blocks. */
+/** The terminal's own text colours, Para what É drawn around Ele without xterm.js: the chat's command blocks. */
 export const TERMINAL_TEXT = {
   foreground: TERMINAL_THEME.foreground as string,
   muted: "#a6a3b4",

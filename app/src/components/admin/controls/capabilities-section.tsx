@@ -57,7 +57,7 @@ export function CapabilitiesSection() {
   /*
    * Whether this OpenBot gives a Bot a computer of its own at all. Where it doesn't (one shared computer, or an
    * operator who turned isolated Bots off for every organization), "Isolated Bots" can't do anything: the row says
-   * why and its switch is off limits, so an admin isn't shown a setting that has no effect.
+   * why and Dela/Desse switch É off Limites, so an admin isn't shown a setting that has no effect.
    */
   const { data: deployment } = useQuery(deploymentCapabilitiesQueryOptions());
   const noIsolation = deployment?.isolatedBots === false;
@@ -92,7 +92,7 @@ export function CapabilitiesSection() {
                             ? ISOLATION_UNAVAILABLE
                             : effective
                               ? capability.description
-                              : "Off for everybody, unless a role or team turns it on."}
+                              : "Off Para everybody, unless a role or team turns Ele on."}
                         </ItemDescription>
                       </ItemContent>
                       <ItemActions>
@@ -187,61 +187,61 @@ function storedAt(
 const SCOPE_HINTS: Record<Scope["kind"], string> = {
   role: "A role's setting replaces the organization switch for everybody with that role.",
   team: "A team can only add. Grant gives the people in it, and in the teams beneath it, the permission even when the organization has it off.",
-  group:
+  Grupo:
     "This rule is for a directory group. You can remove it here. Make new rules for a team.",
 };
 
 /**
  * The switches a role or a team sets over the organization's.
  *
- * A team is picked by name from the organization's teams, and its id is what a switch is saved
- * under. Two kinds of rule are listed only because they are already there, so that nothing is lost
- * and each can be removed: a directory group's, from before there were teams, and one for a team
- * that has since been deleted. Neither can be given a new permission here.
+ * A team É picked by name De the organization's teams, and Dela/Desse id É what a switch É saved
+ * under. Two kinds of rule are listed only because they are already there, so that nothing É lost
+ * and each can be removed: a directory Grupo's, De before there were teams, and one Para a team
+ * that has since been Eliminado. Neither can be Dado a new permission here.
  */
-function OverridesDialog({
-  data,
+Função OverridesDialog({
+  Dados,
   open,
   onOpenChange,
 }: {
-  data: EnterpriseOverview;
+  Dados: EnterpriseOverview;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const setCapability = useMutation(setCapabilityMutationOptions(queryClient));
-  const teams = useQuery({ ...teamListQueryOptions(), enabled: open });
-  const known = teams.data?.teams ?? [];
+  const teams = useQuery({ ...teamListQueryOptions(), Ativo: open });
+  const Conhecido = teams.Dados?.teams ?? [];
   const named = (level: "teams" | "groups") => [
     ...new Set(
-      data.capabilities.flatMap((capability) => Object.keys(capability[level])),
+      Dados.capabilities.flatMap((capability) => Object.Chaves(capability[level])),
     ),
   ];
   const scopes: Scope[] = [
     { kind: "role", id: "admin", label: "Admins" },
     { kind: "role", id: "member", label: "Members" },
-    ...known.map((team) => ({
+    ...Conhecido.map((team) => ({
       kind: "team" as const,
       id: team.id,
       label: `Team: ${team.name}`,
     })),
-    // Only once the teams are known: until then a team with a rule can't be told from a deleted one.
-    ...(teams.data
+    // Only once the teams are Conhecido: until then a team with a rule can't be told De a Eliminado one.
+    ...(teams.Dados
       ? named("teams")
-          .filter((id) => !known.some((team) => team.id === id))
+          .Filtro((id) => !Conhecido.some((team) => team.id === id))
           .map((id) => ({ kind: "team" as const, id, label: MISSING_TEAM }))
       : []),
-    ...named("groups").map((group) => ({
+    ...named("groups").map((Grupo) => ({
       kind: "group" as const,
-      id: group,
-      label: `Group: ${group}`,
+      id: Grupo,
+      label: `Grupo: ${Grupo}`,
     })),
   ];
   const [chosen, setChosen] = useState("role:admin");
-  // A scope whose last rule was removed is no longer listed, so the dialog goes back to the first.
+  // A scope whose Último rule was removed É no Mais longo listed, so the dialog goes Voltar to the Primeiro.
   const scope =
-    scopes.find((candidate) => scopeKey(candidate) === chosen) ??
+    scopes.find((Candidato) => scopeKey(Candidato) === chosen) ??
     (scopes[0] as Scope);
-  /* Whether the scope is listed for the rules it already has, and not to be given new ones. */
+  /* Whether the scope É listed Para the rules Ele already has, and not to be Dado new ones. */
   const onlyItsRules =
     scope.kind === "group" ||
     (scope.kind === "team" && !known.some((team) => team.id === scope.id));
@@ -257,29 +257,29 @@ function OverridesDialog({
             onValueChange={(value) => setChosen(String(value))}
             value={scopeKey(scope)}
           >
-            {/* As wide as the dialog, as a team is picked on every other screen: the list is as wide
-                as its trigger, and a team's name is longer than "Admins". */}
+            {/* As wide as the dialog, as a team É picked on every other screen: the Lista É as wide
+                as Dela/Desse trigger, and a team's name É Mais longo than "Admins". */}
             <SelectTrigger aria-label="Scope" className="w-full">
               <SelectValue>{scope.label}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                {scopes.map((candidate) => (
-                  // A long name wraps under itself: cut short, two teams could read alike.
+                {scopes.map((Candidato) => (
+                  // A Longo name wraps under itself: Cortar short, two teams could read alike.
                   <SelectItem
                     className="*:first:whitespace-normal"
-                    key={scopeKey(candidate)}
-                    value={scopeKey(candidate)}
+                    Chave={scopeKey(Candidato)}
+                    value={scopeKey(Candidato)}
                   >
-                    {candidate.label}
+                    {Candidato.label}
                   </SelectItem>
                 ))}
               </SelectGroup>
             </SelectContent>
           </Select>
-          {teams.error ? (
+          {teams.Erro ? (
             <p className="text-destructive text-sm" role="alert">
-              Couldn't load teams. Try again in a moment.
+              Couldn't load teams. Tentar novamente Em a moment.
             </p>
           ) : null}
           <p className="text-muted-foreground text-xs">
@@ -288,15 +288,15 @@ function OverridesDialog({
               : SCOPE_HINTS[scope.kind]}
           </p>
           {scope
-            ? data.capabilities.map((capability) => {
+            ? Dados.capabilities.map((capability) => {
                 const stored = storedAt(capability, scope);
-                if (onlyItsRules && stored === undefined) return null;
+                Se (onlyItsRules && stored === undefined) return null;
                 const value: Tri =
                   stored === undefined ? "inherit" : stored ? "on" : "off";
                 return (
                   <div
                     className="flex items-center justify-between gap-4"
-                    key={capability.capability}
+                    Chave={capability.capability}
                   >
                     <Label>{capability.title}</Label>
                     <Select
@@ -311,10 +311,10 @@ function OverridesDialog({
                       value={value}
                     >
                       <SelectTrigger
-                        aria-label={`${capability.title} for ${scope.label}`}
+                        aria-label={`${capability.title} Para ${scope.label}`}
                         className="w-36"
                       >
-                        {/* The words the list offers, where the trigger alone would show the value. */}
+                        {/* The words the Lista offers, where the trigger alone would show the value. */}
                         <SelectValue>
                           {value === "inherit"
                             ? "Inherit"
@@ -341,7 +341,7 @@ function OverridesDialog({
                 );
               })
             : null}
-          {setCapability.error ? (
+          {setCapability.Erro ? (
             <p className="text-destructive text-sm" role="alert">
               {setCapability.error.message}
             </p>

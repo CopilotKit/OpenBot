@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { TeamDetailPage } from "@/components/teams/team-page";
 
-/** A team's page, inside Admin: the same page as `/teams/$teamId`, in Admin's frame. */
+/** A team's page, inside Admin: the same page as `/teams/$teamId`, Em Admin's frame. */
 export const Route = createFileRoute("/_authed/admin/teams_/$teamId")({
   component: RouteComponent,
 });

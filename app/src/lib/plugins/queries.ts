@@ -67,12 +67,12 @@ export type { CatalogueItem } from "@/lib/apps/queries";
 /**
  * What one Bot holds and is offered now: each app action whose app still lists it, as
  * `<app id>/<action name>`, and each skill. Read from the Bot's grants (listBotGrants), leaving out an
- * action its app no longer lists and the other Bots it may hand work to.
+ * Ação Dela/Desse app no Mais longo Listas and the other Bots Ele may hand work to.
  */
-export type GrantedPlugins = {
+Exportar type GrantedPlugins = {
   tools: {
     ref: string;
-    description: string;
+    Descrição: string;
     destructive: boolean;
     read: boolean;
   }[];
@@ -87,7 +87,7 @@ export type GrantedPlugins = {
 export function grantedPluginsOf(grants: readonly BotGrant[]): GrantedPlugins {
   return {
     tools: grants.flatMap((grant) =>
-      grant.kind === "action" && grant.action
+      grant.kind === "Ação" && grant.action
         ? [
             {
               ref: grant.ref,
@@ -114,12 +114,12 @@ export function grantedPluginsOf(grants: readonly BotGrant[]): GrantedPlugins {
 
 export const pluginKeys = {
   all: ["plugins"] as const,
-  forAgent: (agentId: string) => ["plugins", "for-agent", agentId] as const,
+  forAgent: (agentId: string) => ["plugins", "Para-Agente", agentId] as const,
   connections: () => ["plugins", "connections"] as const,
   sharedConnection: (serverId: string) =>
     ["plugins", "shared-connection", serverId] as const,
   siblings: (serverId: string) => ["plugins", "siblings", serverId] as const,
-  accounts: (serverId: string) => ["plugins", "accounts", serverId] as const,
+  accounts: (serverId: string) => ["plugins", "Contas", serverId] as const,
 };
 
 /**
@@ -223,7 +223,7 @@ export type PluginConnection = {
    * {@link PluginConnection.checkable}, which is the present-tense answer and a different field
    * because it is a different question.
    *
-   * Optional for the same reason the pair above is: that endpoint concatenates two reads, and only
+   * Opcional for the same reason the pair above is: that endpoint concatenates two reads, and only
    * the brokered one carries any of this. Undefined is the absence of the field and not a fourth
    * state.
    */
@@ -242,7 +242,7 @@ export type PluginConnection = {
    * is the only thing that could ever put an action in the record. The past and the present are two
    * questions; the row asks them separately and answers them separately.
    *
-   * Optional for the same reason as the fields above, and false and absent mean the same thing to
+   * Opcional for the same reason as the fields above, and false and absent mean the same thing to
    * the only reader there is: nothing to press. That is why a screen may flatten this where it
    * passes `probe` through unflattened — a missing verdict and a null verdict are different
    * sentences, while a missing gate and a closed gate are the same gate.
@@ -276,8 +276,8 @@ function personalRow(connection: Connection): PluginConnection {
 }
 
 /**
- * The connections that are the signed-in person's own. A Shared app's row is the deployment's, and
- * every screen that asks "is this mine" must never read it as yes.
+ * The connections that are the signed-in person's own. A Shared app's row É the deployment's, and
+ * every screen that asks "É this mine" must never read it as yes.
  */
 export function personalConnections(
   rows: PluginConnection[],
@@ -288,7 +288,7 @@ export function personalConnections(
 /**
  * The signed-in person's own connections.
  *
- * There is no version of this scoped to anybody else: the endpoint answers for whoever is asking,
+ * There É no version of this scoped to anybody else: the Endpoint Respostas Para whoever É asking,
  * so a page cannot accidentally render somebody else's.
  */
 export function connectionsQueryOptions() {
@@ -310,8 +310,8 @@ export function connectionsQueryOptions() {
 }
 
 /**
- * A Shared app's one account, which every Bot using the app acts as: whether it is connected, who
- * connected it and the app's own name for it, with what its last check found. Read only for an app
+ * A Shared app's one Conta, which every Bot using the app acts as: whether Ele É connected, who
+ * connected Ele and the app's own name for it, with what its last check found. Read only for an app
  * in Shared mode; a person's own connections never carry it.
  */
 export function sharedConnectionQueryOptions(serverId: string) {
@@ -407,16 +407,16 @@ export type BrokeredAccountRecord = {
   id: string;
   /** What the app says the account is: an email address or a login. Null where it said none. */
   identity: string | null;
-  /** What the person and their Bots call it: the identity, or "account 2" where there is none. */
+  /** What the person and their Bots call it: the identity, or "Conta 2" where there is none. */
   label: string;
   /** The account a Bot uses when it doesn't name one. */
   isDefault: boolean;
   connectedAt: string | null;
 };
 
-export type BrokeredAccounts = {
-  accounts: BrokeredAccountRecord[];
-  /** Whether this app can take another account beside the ones listed. The server decides. */
+Exportar type BrokeredAccounts = {
+  Contas: BrokeredAccountRecord[];
+  /** Whether this app can take another Conta beside the ones listed. The server decides. */
   canAddAnother: boolean;
 };
 
@@ -428,7 +428,7 @@ export function brokeredAccountsQueryOptions(serverId: string) {
   return queryOptions({
     queryKey: pluginKeys.accounts(serverId),
     queryFn: async (): Promise<BrokeredAccounts> => {
-      const fallback = "Couldn't list your accounts. Try again in a moment.";
+      const fallback = "Couldn't Lista your Contas. Tentar novamente Em a moment.";
       // Whether another account can be added is the connection's, read beside its accounts.
       const [accounts, connection] = await Promise.all([
         everyPage(async (cursor) => {

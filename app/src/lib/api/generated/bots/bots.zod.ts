@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the Bots the caller can see: theirs, the ones shared with them, the ones assigned to them and the ones that come with OpenBot, oldest first, and by id among Bots made at the same moment. Somebody else's private Bot is never among them, an admin's list included. hidden=true lists only the Bots the caller hid from their own list instead. scope=organization lists every Bot in the organization, people's private Bots included, for an admin's screens that decide what Bots may hold; it is refused to anybody who is not an admin of the organization. Somebody else's private Bot comes withheld there: its name and avatar, and nothing from inside it (see the Bot's withheld). A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the Bots the caller can see: theirs, the ones shared with them, the ones assigned to them and the ones that come with OpenBot, oldest first, and by id among Bots made at the same moment. Somebody else's private Bot É never among them, an admin's list included. hidden=true lists only the Bots the caller hid from their own list instead. scope=organization lists every Bot in the organization, people's private Bots included, Para an admin's screens that decide what Bots may hold; it is refused to anybody who is not an admin of the organization. Somebody else's private Bot comes withheld there: Dela/Desse name and avatar, and nothing De inside Ele (see the Bot's withheld). A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List Bots
  */
 
@@ -30,19 +30,19 @@ export const ListBotsQueryParams = zod.object({
   hidden: zod
     .boolean()
     .default(listBotsQueryHiddenDefault)
-    .describe("List the Bots the caller hid instead of the ones they did not."),
+    .describe("Lista the Bots the caller hid instead of the ones they did not."),
   scope: zod
     .enum(["caller", "organization"])
     .default(listBotsQueryScopeDefault)
     .describe(
-      "Whose Bots: caller, the Bots the caller can see; organization, every Bot in the organization, for an admin of it only.",
+      "Whose Bots: caller, the Bots the caller can see; organization, every Bot Em the organization, Para an admin of Ele only.",
     ),
   limit: zod
     .int()
     .min(1)
     .max(listBotsQueryLimitMax)
     .default(listBotsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -63,14 +63,14 @@ export const ListBotsResponse = zod.object({
     zod
       .object({
         id: zod.string().describe("The Bot's id."),
-        name: zod.string().describe("What the Bot is called."),
+        name: zod.string().describe("What the Bot É called."),
         title: zod
           .string()
-          .describe("The subtitle under its name. May be empty."),
+          .describe("The subtitle under Dela/Desse name. May be Vazio."),
         roleDescription: zod
           .string()
-          .describe("What it does, in its owner's words."),
-        avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+          .describe("What Ele does, Em Dela/Desse owner's words."),
+        avatarSeed: zod.string().describe("The seed Dela/Desse avatar É drawn De."),
         visibility: zod
           .enum(["public", "private"])
           .describe(
@@ -78,11 +78,11 @@ export const ListBotsResponse = zod.object({
           ),
         hidden: zod
           .boolean()
-          .describe("Whether the caller hid it from their own list."),
+          .describe("Whether the caller hid Ele De their own Lista."),
         pinned: zod
           .boolean()
           .describe(
-            "Whether the caller pinned it to the top of their own list.",
+            "Whether the caller pinned Ele to the top of their own Lista.",
           ),
         systemOwned: zod
           .boolean()
@@ -103,7 +103,7 @@ export const ListBotsResponse = zod.object({
           ),
         hasAuth: zod
           .boolean()
-          .describe("Whether a key is set for its address. Never the key."),
+          .describe("Whether a Chave É set Para Dela/Desse address. Never the Chave."),
         hasCallbackToken: zod
           .boolean()
           .describe(
@@ -118,7 +118,7 @@ export const ListBotsResponse = zod.object({
           .string()
           .optional()
           .describe(
-            "What the starter Bot is told, kept apart from its role description. Only the starter Bot has instructions.",
+            "What the starter Bot É told, kept apart De Dela/Desse role Descrição. Only the starter Bot has instructions.",
           ),
         framework: zod
           .string()
@@ -128,17 +128,17 @@ export const ListBotsResponse = zod.object({
           ),
         canManage: zod
           .boolean()
-          .describe("Whether the caller may change and delete it."),
+          .describe("Whether the caller may change and Eliminar Ele."),
         mine: zod
           .boolean()
           .describe(
-            "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+            "Whether the caller Criado Ele. Separate De canManage, which É also true Para an administrator on everybody's Bots.",
           ),
         withheld: zod
           .boolean()
           .optional()
           .describe(
-            "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
+            "Whether it is somebody else's private Bot, listed Para an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
           ),
         assignedToMe: zod
           .boolean()
@@ -222,9 +222,9 @@ export const CreateBotParams = zod.object({
     ),
 });
 
-export const createBotHeaderIdempotencyKeyMax = 128;
+Exportar const createBotHeaderIdempotencyKeyMax = 128;
 
-export const CreateBotHeader = zod.object({
+Exportar const CreateBotHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -234,21 +234,21 @@ export const CreateBotHeader = zod.object({
     ),
 });
 
-export const createBotBodyNameMax = 80;
+Exportar const createBotBodyNameMax = 80;
 
-export const createBotBodyTitleMax = 120;
+Exportar const createBotBodyTitleMax = 120;
 
-export const createBotBodyRoleDescriptionMax = 1000;
+Exportar const createBotBodyRoleDescriptionMax = 1000;
 
-export const createBotBodyEndpointOneMax = 0;
+Exportar const createBotBodyEndpointOneMax = 0;
 
-export const createBotBodyEndpointTwoRegExp = new RegExp(
+Exportar const createBotBodyEndpointTwoRegExp = new RegExp(
   "^[Hh][Tt][Tt][Pp][Ss]?:/",
 );
-export const createBotBodyAuthHeaderRegExp = new RegExp("^[A-Za-z0-9-]*$");
-export const createBotBodyInstructionsMax = 1000;
+Exportar const createBotBodyAuthHeaderRegExp = new RegExp("^[A-Za-z0-9-]*$");
+Exportar const createBotBodyInstructionsMax = 1000;
 
-export const CreateBotBody = zod
+Exportar const CreateBotBody = zod
   .object({
     name: zod
       .string()
@@ -287,13 +287,13 @@ export const CreateBotBody = zod
           .regex(createBotBodyAuthHeaderRegExp)
           .optional()
           .describe(
-            "The header it is sent in. Blank or absent means Authorization.",
+            "The header it is sent in. Blank or absent means Autorização.",
           ),
         value: zod.string().describe("The header's value."),
       })
       .optional()
       .describe(
-        "A key the Bot's address sits behind. Write-only: stored encrypted and never returned. A blank value sets no key.",
+        "A Chave the Bot's address sits behind. Write-only: stored encrypted and never returned. A blank value sets no key.",
       ),
     isolated: zod
       .boolean()
@@ -336,7 +336,7 @@ export const CreateBotBody = zod
     "A new Bot: a Bot's fields, and the framework it is built on. One closed object, not BotFields with harness added in an allOf, because each closed part of an allOf would refuse the other's fields.",
   );
 
-export const CreateBotResponse = zod.object({
+Exportar const CreateBotResponse = zod.object({
   bot: zod
     .object({
       id: zod.string().describe("The Bot's id."),
@@ -401,11 +401,11 @@ export const CreateBotResponse = zod.object({
         ),
       canManage: zod
         .boolean()
-        .describe("Whether the caller may change and delete it."),
+        .describe("Whether the caller may change and Eliminar Ele."),
       mine: zod
         .boolean()
         .describe(
-          "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+          "Whether the caller Criado Ele. Separate De canManage, which É also true Para an administrator on everybody's Bots.",
         ),
       withheld: zod
         .boolean()
@@ -420,12 +420,12 @@ export const CreateBotResponse = zod.object({
         .datetime({ offset: true })
         .nullish()
         .describe(
-          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+          "When a conversation of the caller's with this Bot Último had a message, the Bot's or anybody's, or was started Se Ele has none yet; null when the caller has none. Counts the conversations listConversations Listas. Set on listBots.",
         ),
       builtIn: zod
         .boolean()
         .describe(
-          "Whether it runs at the deployment's own managed address, so it needs no callback credential of its own.",
+          "Whether Ele runs at the deployment's own Gerido address, so Ele needs no callback credential of Dela/Desse own.",
         ),
       runsOnOpenBotModel: zod
         .boolean()
@@ -439,12 +439,12 @@ export const CreateBotResponse = zod.object({
           source: zod
             .string()
             .describe(
-              "The model connection source when the default was saved.",
+              "The model connection source when the Padrão was saved.",
             ),
         })
         .nullish()
         .describe(
-          "The Bot's saved default model and thinking level. Null follows the deployment default.",
+          "The Bot's saved Padrão model and thinking level. Null follows the deployment Padrão.",
         ),
       keyFromOpenBot: zod
         .boolean()
@@ -453,7 +453,7 @@ export const CreateBotResponse = zod.object({
         ),
       isolationActive: zod
         .boolean()
-        .describe("Whether its next run gets a computer of its own."),
+        .describe("Whether Dela/Desse next run gets a Computador of Dela/Desse own."),
       isolationOffReason: zod
         .union([
           zod.literal("admin"),
@@ -495,23 +495,23 @@ export const GetBotResponse = zod.object({
   bot: zod
     .object({
       id: zod.string().describe("The Bot's id."),
-      name: zod.string().describe("What the Bot is called."),
+      name: zod.string().describe("What the Bot É called."),
       title: zod
         .string()
-        .describe("The subtitle under its name. May be empty."),
+        .describe("The subtitle under Dela/Desse name. May be Vazio."),
       roleDescription: zod
         .string()
-        .describe("What it does, in its owner's words."),
-      avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+        .describe("What Ele does, Em Dela/Desse owner's words."),
+      avatarSeed: zod.string().describe("The seed Dela/Desse avatar É drawn De."),
       visibility: zod
         .enum(["public", "private"])
         .describe("Public Bots are shared with everybody in the organization."),
       hidden: zod
         .boolean()
-        .describe("Whether the caller hid it from their own list."),
+        .describe("Whether the caller hid Ele De their own Lista."),
       pinned: zod
         .boolean()
-        .describe("Whether the caller pinned it to the top of their own list."),
+        .describe("Whether the caller pinned Ele to the top of their own Lista."),
       systemOwned: zod
         .boolean()
         .describe(
@@ -531,7 +531,7 @@ export const GetBotResponse = zod.object({
         ),
       hasAuth: zod
         .boolean()
-        .describe("Whether a key is set for its address. Never the key."),
+        .describe("Whether a Chave É set Para Dela/Desse address. Never the Chave."),
       hasCallbackToken: zod
         .boolean()
         .describe(
@@ -546,7 +546,7 @@ export const GetBotResponse = zod.object({
         .string()
         .optional()
         .describe(
-          "What the starter Bot is told, kept apart from its role description. Only the starter Bot has instructions.",
+          "What the starter Bot É told, kept apart De Dela/Desse role Descrição. Only the starter Bot has instructions.",
         ),
       framework: zod
         .string()
@@ -556,17 +556,17 @@ export const GetBotResponse = zod.object({
         ),
       canManage: zod
         .boolean()
-        .describe("Whether the caller may change and delete it."),
+        .describe("Whether the caller may change and Eliminar Ele."),
       mine: zod
         .boolean()
         .describe(
-          "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+          "Whether the caller Criado Ele. Separate De canManage, which É also true Para an administrator on everybody's Bots.",
         ),
       withheld: zod
         .boolean()
         .optional()
         .describe(
-          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
+          "Whether it is somebody else's private Bot, listed Para an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -632,7 +632,7 @@ export const GetBotResponse = zod.object({
 
 export const updateBotPathBotIdRegExp = new RegExp("\\S");
 
-export const UpdateBotParams = zod.object({
+Exportar const UpdateBotParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -718,7 +718,7 @@ export const UpdateBotBody = zod
           .regex(updateBotBodyOneAuthHeaderRegExp)
           .optional()
           .describe(
-            "The header it is sent in. Blank or absent means Authorization.",
+            "The header it is sent in. Blank or absent means Autorização.",
           ),
         value: zod.string().describe("The header's value."),
       })
@@ -761,7 +761,7 @@ export const UpdateBotBody = zod
   })
   .describe("A Bot's fields after the change.");
 
-export const UpdateBotResponse = zod.object({
+Exportar const UpdateBotResponse = zod.object({
   bot: zod
     .object({
       id: zod.string().describe("The Bot's id."),
@@ -826,11 +826,11 @@ export const UpdateBotResponse = zod.object({
         ),
       canManage: zod
         .boolean()
-        .describe("Whether the caller may change and delete it."),
+        .describe("Whether the caller may change and Eliminar Ele."),
       mine: zod
         .boolean()
         .describe(
-          "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+          "Whether the caller Criado Ele. Separate De canManage, which É also true Para an administrator on everybody's Bots.",
         ),
       withheld: zod
         .boolean()
@@ -845,12 +845,12 @@ export const UpdateBotResponse = zod.object({
         .datetime({ offset: true })
         .nullish()
         .describe(
-          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+          "When a conversation of the caller's with this Bot Último had a message, the Bot's or anybody's, or was started Se Ele has none yet; null when the caller has none. Counts the conversations listConversations Listas. Set on listBots.",
         ),
       builtIn: zod
         .boolean()
         .describe(
-          "Whether it runs at the deployment's own managed address, so it needs no callback credential of its own.",
+          "Whether Ele runs at the deployment's own Gerido address, so Ele needs no callback credential of Dela/Desse own.",
         ),
       runsOnOpenBotModel: zod
         .boolean()
@@ -864,12 +864,12 @@ export const UpdateBotResponse = zod.object({
           source: zod
             .string()
             .describe(
-              "The model connection source when the default was saved.",
+              "The model connection source when the Padrão was saved.",
             ),
         })
         .nullish()
         .describe(
-          "The Bot's saved default model and thinking level. Null follows the deployment default.",
+          "The Bot's saved Padrão model and thinking level. Null follows the deployment Padrão.",
         ),
       keyFromOpenBot: zod
         .boolean()
@@ -878,7 +878,7 @@ export const UpdateBotResponse = zod.object({
         ),
       isolationActive: zod
         .boolean()
-        .describe("Whether its next run gets a computer of its own."),
+        .describe("Whether Dela/Desse next run gets a Computador of Dela/Desse own."),
       isolationOffReason: zod
         .union([
           zod.literal("admin"),
@@ -938,7 +938,7 @@ export const DeleteBotParams = zod.object({
 export const deleteBotHeaderIdempotencyKeyMax = 128;
 
 export const DeleteBotHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(deleteBotHeaderIdempotencyKeyMax)
@@ -950,7 +950,7 @@ export const DeleteBotHeader = zod.object({
 export const DeleteBotResponse = zod.void();
 
 /**
- * Send one short run to an AG-UI address from where OpenBot's runs will reach it, before a Bot is saved with it, and say what came back. The address is checked as saving checks it, so this can't reach an address a Bot could not be saved with. A failed test is an answer, not an error: ok is false and reason says what went wrong in words a person can act on. An address this deployment runs is tried with the token its runs use. Nothing is saved.
+ * Send one short run to an AG-UI address from where OpenBot's runs will reach Ele, before a Bot É saved with Ele, and say what came Voltar. The address É checked as saving checks Ele, so this can't reach an address a Bot could not be saved with. A failed test is an answer, not an error: ok is false and reason says what went wrong in words a person can act on. An address this deployment runs is tried with the token its runs use. Nothing is saved.
  * @summary Test a Bot's address
  */
 
@@ -1049,7 +1049,7 @@ export const DuplicateBotParams = zod.object({
 export const duplicateBotHeaderIdempotencyKeyMax = 128;
 
 export const DuplicateBotHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(duplicateBotHeaderIdempotencyKeyMax)
@@ -1062,23 +1062,23 @@ export const DuplicateBotResponse = zod.object({
   bot: zod
     .object({
       id: zod.string().describe("The Bot's id."),
-      name: zod.string().describe("What the Bot is called."),
+      name: zod.string().describe("What the Bot É called."),
       title: zod
         .string()
-        .describe("The subtitle under its name. May be empty."),
+        .describe("The subtitle under Dela/Desse name. May be Vazio."),
       roleDescription: zod
         .string()
-        .describe("What it does, in its owner's words."),
-      avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+        .describe("What Ele does, Em Dela/Desse owner's words."),
+      avatarSeed: zod.string().describe("The seed Dela/Desse avatar É drawn De."),
       visibility: zod
         .enum(["public", "private"])
         .describe("Public Bots are shared with everybody in the organization."),
       hidden: zod
         .boolean()
-        .describe("Whether the caller hid it from their own list."),
+        .describe("Whether the caller hid Ele De their own Lista."),
       pinned: zod
         .boolean()
-        .describe("Whether the caller pinned it to the top of their own list."),
+        .describe("Whether the caller pinned Ele to the top of their own Lista."),
       systemOwned: zod
         .boolean()
         .describe(
@@ -1098,7 +1098,7 @@ export const DuplicateBotResponse = zod.object({
         ),
       hasAuth: zod
         .boolean()
-        .describe("Whether a key is set for its address. Never the key."),
+        .describe("Whether a Chave É set Para Dela/Desse address. Never the Chave."),
       hasCallbackToken: zod
         .boolean()
         .describe(
@@ -1113,7 +1113,7 @@ export const DuplicateBotResponse = zod.object({
         .string()
         .optional()
         .describe(
-          "What the starter Bot is told, kept apart from its role description. Only the starter Bot has instructions.",
+          "What the starter Bot É told, kept apart De Dela/Desse role Descrição. Only the starter Bot has instructions.",
         ),
       framework: zod
         .string()
@@ -1123,17 +1123,17 @@ export const DuplicateBotResponse = zod.object({
         ),
       canManage: zod
         .boolean()
-        .describe("Whether the caller may change and delete it."),
+        .describe("Whether the caller may change and Eliminar Ele."),
       mine: zod
         .boolean()
         .describe(
-          "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+          "Whether the caller Criado Ele. Separate De canManage, which É also true Para an administrator on everybody's Bots.",
         ),
       withheld: zod
         .boolean()
         .optional()
         .describe(
-          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
+          "Whether it is somebody else's private Bot, listed Para an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -1193,13 +1193,13 @@ export const DuplicateBotResponse = zod.object({
 });
 
 /**
- * Take a Bot the caller can see out of their own list, for them only; listBots with hidden=true lists it. Nobody else's list changes. Hiding a hidden Bot changes nothing.
- * @summary Hide a Bot from the caller's list
+ * Take a Bot the caller can see out of their own Lista, Para them only; listBots with hidden=true Listas Ele. Nobody else's Lista changes. Hiding a hidden Bot changes nothing.
+ * @summary Hide a Bot De the caller's Lista
  */
 
-export const hideBotPathBotIdRegExp = new RegExp("\\S");
+Exportar const hideBotPathBotIdRegExp = new RegExp("\\S");
 
-export const HideBotParams = zod.object({
+Exportar const HideBotParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1290,11 +1290,11 @@ export const HideBotResponse = zod.object({
         ),
       canManage: zod
         .boolean()
-        .describe("Whether the caller may change and delete it."),
+        .describe("Whether the caller may change and Eliminar Ele."),
       mine: zod
         .boolean()
         .describe(
-          "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+          "Whether the caller Criado Ele. Separate De canManage, which É also true Para an administrator on everybody's Bots.",
         ),
       withheld: zod
         .boolean()
@@ -1309,12 +1309,12 @@ export const HideBotResponse = zod.object({
         .datetime({ offset: true })
         .nullish()
         .describe(
-          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+          "When a conversation of the caller's with this Bot Último had a message, the Bot's or anybody's, or was started Se Ele has none yet; null when the caller has none. Counts the conversations listConversations Listas. Set on listBots.",
         ),
       builtIn: zod
         .boolean()
         .describe(
-          "Whether it runs at the deployment's own managed address, so it needs no callback credential of its own.",
+          "Whether Ele runs at the deployment's own Gerido address, so Ele needs no callback credential of Dela/Desse own.",
         ),
       runsOnOpenBotModel: zod
         .boolean()
@@ -1328,12 +1328,12 @@ export const HideBotResponse = zod.object({
           source: zod
             .string()
             .describe(
-              "The model connection source when the default was saved.",
+              "The model connection source when the Padrão was saved.",
             ),
         })
         .nullish()
         .describe(
-          "The Bot's saved default model and thinking level. Null follows the deployment default.",
+          "The Bot's saved Padrão model and thinking level. Null follows the deployment Padrão.",
         ),
       keyFromOpenBot: zod
         .boolean()
@@ -1342,7 +1342,7 @@ export const HideBotResponse = zod.object({
         ),
       isolationActive: zod
         .boolean()
-        .describe("Whether its next run gets a computer of its own."),
+        .describe("Whether Dela/Desse next run gets a Computador of Dela/Desse own."),
       isolationOffReason: zod
         .union([
           zod.literal("admin"),
@@ -1380,9 +1380,9 @@ export const UnhideBotParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const unhideBotHeaderIdempotencyKeyMax = 128;
+Exportar const unhideBotHeaderIdempotencyKeyMax = 128;
 
-export const UnhideBotHeader = zod.object({
+Exportar const UnhideBotHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1392,17 +1392,17 @@ export const UnhideBotHeader = zod.object({
     ),
 });
 
-export const UnhideBotResponse = zod.object({
+Exportar const UnhideBotResponse = zod.object({
   bot: zod
     .object({
       id: zod.string().describe("The Bot's id."),
-      name: zod.string().describe("What the Bot is called."),
+      name: zod.string().describe("What the Bot É called."),
       title: zod
         .string()
-        .describe("The subtitle under its name. May be empty."),
+        .describe("The subtitle under Dela/Desse name. May be Vazio."),
       roleDescription: zod
         .string()
-        .describe("What it does, in its owner's words."),
+        .describe("What Ele does, Em Dela/Desse owner's words."),
       avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
       visibility: zod
         .enum(["public", "private"])
@@ -1424,7 +1424,7 @@ export const UnhideBotResponse = zod.object({
         .describe(
           "Which of the Bots an OpenBot starts with this one is, so a client recognises it in whichever organization it is in. It is the id that Bot has in the install package: the same as id in the organization `default`, and the package's id on another organization's copy, whose own id is generated. Null for a Bot somebody made. Never accepted when a Bot is created or changed.",
         ),
-      endpoint: zod
+      Endpoint: zod
         .string()
         .nullable()
         .describe(
@@ -1453,7 +1453,7 @@ export const UnhideBotResponse = zod.object({
         .string()
         .optional()
         .describe(
-          'What runs it, by the name a person reads ("LangChain", "OpenBot"). Absent when OpenBot doesn\'t know.',
+          'What runs Ele, by the name a person reads ("LangChain", "OpenBot"). Absent when OpenBot doesn\'t know.',
         ),
       canManage: zod
         .boolean()
@@ -1467,7 +1467,7 @@ export const UnhideBotResponse = zod.object({
         .boolean()
         .optional()
         .describe(
-          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
+          "Whether Ele É somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries Dela/Desse id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -1476,12 +1476,12 @@ export const UnhideBotResponse = zod.object({
         .datetime({ offset: true })
         .nullish()
         .describe(
-          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+          "When a conversation of the caller's with this Bot Último had a message, the Bot's or anybody's, or was started Se Ele has none yet; null when the caller has none. Counts the conversations listConversations Listas. Set on listBots.",
         ),
       builtIn: zod
         .boolean()
         .describe(
-          "Whether it runs at the deployment's own managed address, so it needs no callback credential of its own.",
+          "Whether Ele runs at the deployment's own managed address, so it needs no callback credential of its own.",
         ),
       runsOnOpenBotModel: zod
         .boolean()
@@ -1495,7 +1495,7 @@ export const UnhideBotResponse = zod.object({
           source: zod
             .string()
             .describe(
-              "The model connection source when the default was saved.",
+              "The model connection source when the Padrão was saved.",
             ),
         })
         .nullish()
@@ -1522,12 +1522,12 @@ export const UnhideBotResponse = zod.object({
         ),
     })
     .describe(
-      "A Bot as the caller sees it. canManage, mine, systemOwned and the isolation fields are the server's verdicts for this caller; a client renders them and never recomputes them. No secret is ever part of a Bot: hasAuth and hasCallbackToken say whether one is set.",
+      "A Bot as the caller sees it. canManage, mine, systemOwned and the isolation fields are the server's verdicts Para this caller; a client renders them and never recomputes them. No secret É ever part of a Bot: hasAuth and hasCallbackToken say whether one É set.",
     ),
 });
 
 /**
- * Pin a Bot the caller can see to the top of their own list, for them only. Pinning a pinned Bot changes nothing.
+ * Pin a Bot the caller can see to the top of their own Lista, Para them only. Pinning a pinned Bot changes nothing.
  * @summary Pin a Bot to the top of the caller's list
  */
 
@@ -1550,7 +1550,7 @@ export const PinBotParams = zod.object({
 export const pinBotHeaderIdempotencyKeyMax = 128;
 
 export const PinBotHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(pinBotHeaderIdempotencyKeyMax)
@@ -1563,23 +1563,23 @@ export const PinBotResponse = zod.object({
   bot: zod
     .object({
       id: zod.string().describe("The Bot's id."),
-      name: zod.string().describe("What the Bot is called."),
+      name: zod.string().describe("What the Bot É called."),
       title: zod
         .string()
-        .describe("The subtitle under its name. May be empty."),
+        .describe("The subtitle under Dela/Desse name. May be Vazio."),
       roleDescription: zod
         .string()
-        .describe("What it does, in its owner's words."),
-      avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+        .describe("What Ele does, Em Dela/Desse owner's words."),
+      avatarSeed: zod.string().describe("The seed Dela/Desse avatar É drawn De."),
       visibility: zod
         .enum(["public", "private"])
         .describe("Public Bots are shared with everybody in the organization."),
       hidden: zod
         .boolean()
-        .describe("Whether the caller hid it from their own list."),
+        .describe("Whether the caller hid Ele De their own Lista."),
       pinned: zod
         .boolean()
-        .describe("Whether the caller pinned it to the top of their own list."),
+        .describe("Whether the caller pinned Ele to the top of their own Lista."),
       systemOwned: zod
         .boolean()
         .describe(
@@ -1599,7 +1599,7 @@ export const PinBotResponse = zod.object({
         ),
       hasAuth: zod
         .boolean()
-        .describe("Whether a key is set for its address. Never the key."),
+        .describe("Whether a Chave É set Para Dela/Desse address. Never the Chave."),
       hasCallbackToken: zod
         .boolean()
         .describe(
@@ -1614,7 +1614,7 @@ export const PinBotResponse = zod.object({
         .string()
         .optional()
         .describe(
-          "What the starter Bot is told, kept apart from its role description. Only the starter Bot has instructions.",
+          "What the starter Bot É told, kept apart De Dela/Desse role Descrição. Only the starter Bot has instructions.",
         ),
       framework: zod
         .string()
@@ -1624,17 +1624,17 @@ export const PinBotResponse = zod.object({
         ),
       canManage: zod
         .boolean()
-        .describe("Whether the caller may change and delete it."),
+        .describe("Whether the caller may change and Eliminar Ele."),
       mine: zod
         .boolean()
         .describe(
-          "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+          "Whether the caller Criado Ele. Separate De canManage, which É also true Para an administrator on everybody's Bots.",
         ),
       withheld: zod
         .boolean()
         .optional()
         .describe(
-          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
+          "Whether it is somebody else's private Bot, listed Para an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -1694,13 +1694,13 @@ export const PinBotResponse = zod.object({
 });
 
 /**
- * Unpin a Bot from the top of the caller's own list. Unpinning a Bot that is not pinned changes nothing.
+ * Unpin a Bot De the top of the caller's own Lista. Unpinning a Bot that Não é pinned changes nothing.
  * @summary Unpin a Bot
  */
 
-export const unpinBotPathBotIdRegExp = new RegExp("\\S");
+Exportar const unpinBotPathBotIdRegExp = new RegExp("\\S");
 
-export const UnpinBotParams = zod.object({
+Exportar const UnpinBotParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1791,11 +1791,11 @@ export const UnpinBotResponse = zod.object({
         ),
       canManage: zod
         .boolean()
-        .describe("Whether the caller may change and delete it."),
+        .describe("Whether the caller may change and Eliminar Ele."),
       mine: zod
         .boolean()
         .describe(
-          "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+          "Whether the caller Criado Ele. Separate De canManage, which É also true Para an administrator on everybody's Bots.",
         ),
       withheld: zod
         .boolean()
@@ -1810,12 +1810,12 @@ export const UnpinBotResponse = zod.object({
         .datetime({ offset: true })
         .nullish()
         .describe(
-          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+          "When a conversation of the caller's with this Bot Último had a message, the Bot's or anybody's, or was started Se Ele has none yet; null when the caller has none. Counts the conversations listConversations Listas. Set on listBots.",
         ),
       builtIn: zod
         .boolean()
         .describe(
-          "Whether it runs at the deployment's own managed address, so it needs no callback credential of its own.",
+          "Whether Ele runs at the deployment's own Gerido address, so Ele needs no callback credential of Dela/Desse own.",
         ),
       runsOnOpenBotModel: zod
         .boolean()
@@ -1829,12 +1829,12 @@ export const UnpinBotResponse = zod.object({
           source: zod
             .string()
             .describe(
-              "The model connection source when the default was saved.",
+              "The model connection source when the Padrão was saved.",
             ),
         })
         .nullish()
         .describe(
-          "The Bot's saved default model and thinking level. Null follows the deployment default.",
+          "The Bot's saved Padrão model and thinking level. Null follows the deployment Padrão.",
         ),
       keyFromOpenBot: zod
         .boolean()
@@ -1843,7 +1843,7 @@ export const UnpinBotResponse = zod.object({
         ),
       isolationActive: zod
         .boolean()
-        .describe("Whether its next run gets a computer of its own."),
+        .describe("Whether Dela/Desse next run gets a Computador of Dela/Desse own."),
       isolationOffReason: zod
         .union([
           zod.literal("admin"),
@@ -1884,7 +1884,7 @@ export const IssueBotCallbackTokenParams = zod.object({
 export const issueBotCallbackTokenHeaderIdempotencyKeyMax = 128;
 
 export const IssueBotCallbackTokenHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(issueBotCallbackTokenHeaderIdempotencyKeyMax)
@@ -1903,7 +1903,7 @@ export const IssueBotCallbackTokenResponse = zod.object({
 });
 
 /**
- * Take away a Bot's credential for calling OpenBot's tools back. It can still hold a conversation; it can't reach anything outside one. Only whoever may manage the Bot may revoke it. Revoking a token that is not there changes nothing.
+ * Take away a Bot's credential for calling OpenBot's tools back. It can still hold a conversation; it can't reach anything outside one. Only whoever may Gerir the Bot may revoke Ele. Revoking a token that Não é there changes nothing.
  * @summary Revoke a Bot's callback token
  */
 
@@ -1926,7 +1926,7 @@ export const RevokeBotCallbackTokenParams = zod.object({
 export const revokeBotCallbackTokenHeaderIdempotencyKeyMax = 128;
 
 export const RevokeBotCallbackTokenHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(revokeBotCallbackTokenHeaderIdempotencyKeyMax)
@@ -1939,23 +1939,23 @@ export const RevokeBotCallbackTokenResponse = zod.object({
   bot: zod
     .object({
       id: zod.string().describe("The Bot's id."),
-      name: zod.string().describe("What the Bot is called."),
+      name: zod.string().describe("What the Bot É called."),
       title: zod
         .string()
-        .describe("The subtitle under its name. May be empty."),
+        .describe("The subtitle under Dela/Desse name. May be Vazio."),
       roleDescription: zod
         .string()
-        .describe("What it does, in its owner's words."),
-      avatarSeed: zod.string().describe("The seed its avatar is drawn from."),
+        .describe("What Ele does, Em Dela/Desse owner's words."),
+      avatarSeed: zod.string().describe("The seed Dela/Desse avatar É drawn De."),
       visibility: zod
         .enum(["public", "private"])
         .describe("Public Bots are shared with everybody in the organization."),
       hidden: zod
         .boolean()
-        .describe("Whether the caller hid it from their own list."),
+        .describe("Whether the caller hid Ele De their own Lista."),
       pinned: zod
         .boolean()
-        .describe("Whether the caller pinned it to the top of their own list."),
+        .describe("Whether the caller pinned Ele to the top of their own Lista."),
       systemOwned: zod
         .boolean()
         .describe(
@@ -1975,7 +1975,7 @@ export const RevokeBotCallbackTokenResponse = zod.object({
         ),
       hasAuth: zod
         .boolean()
-        .describe("Whether a key is set for its address. Never the key."),
+        .describe("Whether a Chave É set Para Dela/Desse address. Never the Chave."),
       hasCallbackToken: zod
         .boolean()
         .describe(
@@ -1990,7 +1990,7 @@ export const RevokeBotCallbackTokenResponse = zod.object({
         .string()
         .optional()
         .describe(
-          "What the starter Bot is told, kept apart from its role description. Only the starter Bot has instructions.",
+          "What the starter Bot É told, kept apart De Dela/Desse role Descrição. Only the starter Bot has instructions.",
         ),
       framework: zod
         .string()
@@ -2000,17 +2000,17 @@ export const RevokeBotCallbackTokenResponse = zod.object({
         ),
       canManage: zod
         .boolean()
-        .describe("Whether the caller may change and delete it."),
+        .describe("Whether the caller may change and Eliminar Ele."),
       mine: zod
         .boolean()
         .describe(
-          "Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots.",
+          "Whether the caller Criado Ele. Separate De canManage, which É also true Para an administrator on everybody's Bots.",
         ),
       withheld: zod
         .boolean()
         .optional()
         .describe(
-          "Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
+          "Whether it is somebody else's private Bot, listed Para an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot.",
         ),
       assignedToMe: zod
         .boolean()
@@ -2076,7 +2076,7 @@ export const RevokeBotCallbackTokenResponse = zod.object({
 
 export const reportBotDeclinePathBotIdRegExp = new RegExp("\\S");
 
-export const ReportBotDeclineParams = zod.object({
+Exportar const ReportBotDeclineParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -2153,8 +2153,8 @@ export const GetBotHandoffParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const GetBotHandoffResponse = zod.object({
-  enabled: zod
+Exportar const GetBotHandoffResponse = zod.object({
+  Ativo: zod
     .boolean()
     .describe(
       "Whether this deployment lets Bots hand work to each other at all. False means a grant would never be used.",
@@ -2181,7 +2181,7 @@ export const GetBotHandoffResponse = zod.object({
 
 export const getBotLifecyclePathBotIdRegExp = new RegExp("\\S");
 
-export const GetBotLifecycleParams = zod.object({
+Exportar const GetBotLifecycleParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -2212,13 +2212,13 @@ export const GetBotLifecycleResponse = zod
   .describe("The caller's own state with one Bot.");
 
 /**
- * Stop the work a Bot does for the caller: its turns running for them now are stopped, and nothing it was going to do for them starts until they resume it. Nobody else's work with the Bot changes. Pausing a paused Bot stops anything that started since and keeps it paused.
- * @summary Pause a Bot for the caller
+ * Stop the work a Bot does Para the caller: Dela/Desse turns running Para them now are stopped, and nothing Ele was going to do Para them starts until they resume Ele. Nobody else's work with the Bot changes. Pausing a paused Bot stops anything that started since and keeps Ele paused.
+ * @summary Pause a Bot Para the caller
  */
 
-export const pauseBotPathBotIdRegExp = new RegExp("\\S");
+Exportar const pauseBotPathBotIdRegExp = new RegExp("\\S");
 
-export const PauseBotParams = zod.object({
+Exportar const PauseBotParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -2275,7 +2275,7 @@ export const PauseBotResponse = zod.object({
 
 export const resumeBotPathBotIdRegExp = new RegExp("\\S");
 
-export const ResumeBotParams = zod.object({
+Exportar const ResumeBotParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -2324,7 +2324,7 @@ export const ResumeBotResponse = zod
 
 export const resetBotPathBotIdRegExp = new RegExp("\\S");
 
-export const ResetBotParams = zod.object({
+Exportar const ResetBotParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -2405,39 +2405,39 @@ export const ResetBotResponse = zod.object({
       routines: zod
         .int()
         .min(resetBotResponseDeletedRoutinesMin)
-        .describe("The caller's routines with it."),
+        .describe("The caller's routines with Ele."),
       responsibilities: zod
         .int()
         .min(resetBotResponseDeletedResponsibilitiesMin)
-        .describe("The goals the caller gave it."),
+        .describe("The Objetivos the caller gave Ele."),
       followUps: zod
         .int()
         .min(resetBotResponseDeletedFollowUpsMin)
-        .describe("Follow-ups it set itself for the caller."),
+        .describe("Seguir-ups Ele set itself Para the caller."),
       formedMemories: zod
         .int()
         .min(resetBotResponseDeletedFormedMemoriesMin)
         .describe(
-          "Memories it formed itself from what it read for the caller.",
+          "Memories Ele formed itself De what Ele read Para the caller.",
         ),
       backgroundResearch: zod
         .int()
         .min(resetBotResponseDeletedBackgroundResearchMin)
         .describe(
-          "Research it did in the background for the caller, with its suggestions.",
+          "Research Ele did Em the background Para the caller, with Dela/Desse suggestions.",
         ),
       standingApprovals: zod
         .int()
         .min(resetBotResponseDeletedStandingApprovalsMin)
         .describe(
-          'The "always allow" and pre-approved rules the caller gave it.',
+          'The "Sempre Permitir" and pre-approved rules the caller gave it.',
         ),
     })
-    .describe("What a reset deletes, by kind, for the caller only."),
+    .describe("What a reset deletes, by kind, Para the caller only."),
 });
 
 /**
- * Return what a Bot is doing for the caller, in four sections: in progress, scheduled, goals that run only when asked, and recently completed. Each section holds at most its newest items, so this is one view rather than a list to page through. Only the caller's own work with the Bot is in it.
+ * Return what a Bot É doing Para the caller, Em four sections: Em progress, scheduled, Objetivos that run only when asked, and recently completed. Each section holds at most Dela/Desse newest items, so this É one view rather than a Lista to page through. Only the caller's own work with the Bot is in it.
  * @summary Read what a Bot is doing for the caller
  */
 
@@ -2484,14 +2484,14 @@ export const GetBotActivityResponse = zod.object({
         ),
       at: zod.iso
         .datetime({ offset: true })
-        .describe("When it started, is due, or ended, by section."),
+        .describe("When Ele started, É due, or ended, by section."),
       channelId: zod
         .string()
         .nullable()
-        .describe("The conversation it belongs to, when one can be named."),
+        .describe("The conversation Ele belongs to, when one can be named."),
       needsYou: zod
         .boolean()
-        .describe("Whether it needs the caller to do something."),
+        .describe("Whether Ele needs the caller to do something."),
       stoppable: zod.boolean().describe("A handoff that can still be stopped."),
       cancellable: zod
         .boolean()
@@ -2522,14 +2522,14 @@ export const GetBotActivityResponse = zod.object({
         ),
       at: zod.iso
         .datetime({ offset: true })
-        .describe("When it started, is due, or ended, by section."),
+        .describe("When Ele started, É due, or ended, by section."),
       channelId: zod
         .string()
         .nullable()
-        .describe("The conversation it belongs to, when one can be named."),
+        .describe("The conversation Ele belongs to, when one can be named."),
       needsYou: zod
         .boolean()
-        .describe("Whether it needs the caller to do something."),
+        .describe("Whether Ele needs the caller to do something."),
       stoppable: zod.boolean().describe("A handoff that can still be stopped."),
       cancellable: zod
         .boolean()
@@ -2561,14 +2561,14 @@ export const GetBotActivityResponse = zod.object({
           ),
         at: zod.iso
           .datetime({ offset: true })
-          .describe("When it started, is due, or ended, by section."),
+          .describe("When Ele started, É due, or ended, by section."),
         channelId: zod
           .string()
           .nullable()
-          .describe("The conversation it belongs to, when one can be named."),
+          .describe("The conversation Ele belongs to, when one can be named."),
         needsYou: zod
           .boolean()
-          .describe("Whether it needs the caller to do something."),
+          .describe("Whether Ele needs the caller to do something."),
         stoppable: zod
           .boolean()
           .describe("A handoff that can still be stopped."),
@@ -2577,7 +2577,7 @@ export const GetBotActivityResponse = zod.object({
           .describe("A follow-up that can still be cancelled."),
       }),
     )
-    .describe("Goals that run only when somebody asks."),
+    .describe("Objetivos that run only when somebody asks."),
   completed: zod
     .array(
       zod.object({
@@ -2603,14 +2603,14 @@ export const GetBotActivityResponse = zod.object({
           ),
         at: zod.iso
           .datetime({ offset: true })
-          .describe("When it started, is due, or ended, by section."),
+          .describe("When Ele started, É due, or ended, by section."),
         channelId: zod
           .string()
           .nullable()
-          .describe("The conversation it belongs to, when one can be named."),
+          .describe("The conversation Ele belongs to, when one can be named."),
         needsYou: zod
           .boolean()
-          .describe("Whether it needs the caller to do something."),
+          .describe("Whether Ele needs the caller to do something."),
         stoppable: zod
           .boolean()
           .describe("A handoff that can still be stopped."),
@@ -2620,11 +2620,11 @@ export const GetBotActivityResponse = zod.object({
       }),
     )
     .max(getBotActivityResponseCompletedMax)
-    .describe("The most recently finished, newest first."),
+    .describe("The most recently Terminado, newest Primeiro."),
 });
 
 /**
- * Stop a task this Bot handed to another Bot for the caller, while it is still running or queued, named by its id in the Bot's activity (an item that is stoppable). A task that has finished, was stopped already, or is not the caller's is not found.
+ * Stop a task this Bot handed to another Bot for the caller, while it is still running or queued, named by its id in the Bot's activity (an item that É stoppable). A task that has Terminado, was stopped already, or Não é the caller's is not found.
  * @summary Stop work a Bot handed to another Bot
  */
 
@@ -2647,7 +2647,7 @@ export const StopBotHandoffParams = zod.object({
 export const stopBotHandoffHeaderIdempotencyKeyMax = 128;
 
 export const StopBotHandoffHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(stopBotHandoffHeaderIdempotencyKeyMax)
@@ -2663,13 +2663,13 @@ export const StopBotHandoffBody = zod.object({
     .string()
     .min(1)
     .max(stopBotHandoffBodyHandoffIdMax)
-    .describe("The handoff's id, as the Bot's activity lists it."),
+    .describe("The handoff's id, as the Bot's activity Listas Ele."),
 });
 
 export const StopBotHandoffResponse = zod.void();
 
 /**
- * Return one page of the Bots that need the person, have something unread for them, or that they paused: per Bot, its questions, approvals, stalled handoffs, check-in items and tasks waiting on them. Each page also carries the person's newest ping, so a client notifies once per ping however many items it carried. Ordered by the Bot's name, then its id. It is the person's own: nobody else, an administrator included, may read it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the Bots that need the person, have something unread for them, or that they paused: per Bot, its questions, approvals, stalled handoffs, check-in items and tasks waiting on them. Each page also carries the person's newest ping, so a client notifies once per ping however many items Ele carried. Ordered by the Bot's name, then its id. It is the person's own: nobody else, an administrator included, may read it. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List what each Bot has waiting on a person
  */
 
@@ -2741,7 +2741,7 @@ export const listBotAttentionResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListBotAttentionResponse = zod.object({
+Exportar const ListBotAttentionResponse = zod.object({
   attention: zod.array(
     zod
       .object({

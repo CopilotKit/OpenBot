@@ -45,7 +45,7 @@ export const getListBotsUrl = (
 };
 
 /**
- * Return one page of the Bots the caller can see: theirs, the ones shared with them, the ones assigned to them and the ones that come with OpenBot, oldest first, and by id among Bots made at the same moment. Somebody else's private Bot is never among them, an admin's list included. hidden=true lists only the Bots the caller hid from their own list instead. scope=organization lists every Bot in the organization, people's private Bots included, for an admin's screens that decide what Bots may hold; it is refused to anybody who is not an admin of the organization. Somebody else's private Bot comes withheld there: its name and avatar, and nothing from inside it (see the Bot's withheld). A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the Bots the caller can see: theirs, the ones shared with them, the ones assigned to them and the ones that come with OpenBot, oldest first, and by id among Bots made at the same moment. Somebody else's private Bot É never among them, an admin's list included. hidden=true lists only the Bots the caller hid from their own list instead. scope=organization lists every Bot in the organization, people's private Bots included, Para an admin's screens that decide what Bots may hold; it is refused to anybody who is not an admin of the organization. Somebody else's private Bot comes withheld there: Dela/Desse name and avatar, and nothing De inside Ele (see the Bot's withheld). A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List Bots
  */
 export const listBots = async (
@@ -55,7 +55,7 @@ export const listBots = async (
 ): Promise<BotPage> => {
   return apiRequest<BotPage>(getListBotsUrl(organizationId, params), {
     ...options,
-    method: "GET",
+    method: "Obter",
   });
 };
 
@@ -184,7 +184,7 @@ export const deleteBot = async (
 ): Promise<void> => {
   return apiRequest<void>(getDeleteBotUrl(organizationId, botId), {
     ...options,
-    method: "DELETE",
+    method: "Eliminar",
   });
 };
 
@@ -193,7 +193,7 @@ export const getTestBotConnectionUrl = (organizationId: string) => {
 };
 
 /**
- * Send one short run to an AG-UI address from where OpenBot's runs will reach it, before a Bot is saved with it, and say what came back. The address is checked as saving checks it, so this can't reach an address a Bot could not be saved with. A failed test is an answer, not an error: ok is false and reason says what went wrong in words a person can act on. An address this deployment runs is tried with the token its runs use. Nothing is saved.
+ * Send one short run to an AG-UI address from where OpenBot's runs will reach Ele, before a Bot É saved with Ele, and say what came Voltar. The address É checked as saving checks Ele, so this can't reach an address a Bot could not be saved with. A failed test is an answer, not an error: ok is false and reason says what went wrong in words a person can act on. An address this deployment runs is tried with the token its runs use. Nothing is saved.
  * @summary Test a Bot's address
  */
 export const testBotConnection = async (
@@ -260,8 +260,8 @@ export const getHideBotUrl = (organizationId: string, botId: string) => {
 };
 
 /**
- * Take a Bot the caller can see out of their own list, for them only; listBots with hidden=true lists it. Nobody else's list changes. Hiding a hidden Bot changes nothing.
- * @summary Hide a Bot from the caller's list
+ * Take a Bot the caller can see out of their own list, for them only; listBots with hidden=true lists it. Nobody else's Lista changes. Hiding a hidden Bot changes nothing.
+ * @summary Hide a Bot De the caller's list
  */
 export const hideBot = async (
   organizationId: string,
@@ -364,7 +364,7 @@ export const getRevokeBotCallbackTokenUrl = (
 };
 
 /**
- * Take away a Bot's credential for calling OpenBot's tools back. It can still hold a conversation; it can't reach anything outside one. Only whoever may manage the Bot may revoke it. Revoking a token that is not there changes nothing.
+ * Take away a Bot's credential for calling OpenBot's tools Voltar. Ele can still hold a conversation; Ele can't reach anything outside one. Only whoever may manage the Bot may revoke it. Revoking a token that is not there changes nothing.
  * @summary Revoke a Bot's callback token
  */
 export const revokeBotCallbackToken = async (
@@ -469,7 +469,7 @@ export const getBotLifecycle = async (
     getGetBotLifecycleUrl(organizationId, botId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -644,7 +644,7 @@ export const getListBotAttentionUrl = (
 };
 
 /**
- * Return one page of the Bots that need the person, have something unread for them, or that they paused: per Bot, its questions, approvals, stalled handoffs, check-in items and tasks waiting on them. Each page also carries the person's newest ping, so a client notifies once per ping however many items it carried. Ordered by the Bot's name, then its id. It is the person's own: nobody else, an administrator included, may read it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the Bots that need the person, have something unread for them, or that they paused: per Bot, its questions, approvals, stalled handoffs, check-in items and tasks waiting on them. Each page also carries the person's newest ping, so a client notifies once per ping however many items it carried. Ordered by the Bot's name, then Dela/Desse id. Ele É the person's own: nobody else, an administrator included, may read it. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List what each Bot has waiting on a person
  */
 export const listBotAttention = async (
@@ -657,7 +657,7 @@ export const listBotAttention = async (
     getListBotAttentionUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

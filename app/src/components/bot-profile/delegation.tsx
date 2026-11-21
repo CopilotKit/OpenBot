@@ -1,8 +1,8 @@
 import { IconArrowDown, IconArrowUp, IconSitemap } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { OPTION_CLASSES } from "@/components/agents/new-bot-sheet";
-import { AgentMark } from "@/components/bot-agents/agent-mark";
+import { OPTION_CLASSES } from "@/components/Agentes/new-bot-sheet";
+import { AgentMark } from "@/components/bot-Agentes/Agente-mark";
 import {
   PageCard,
   PageRows,
@@ -37,9 +37,9 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import type { AgentProfile } from "@/lib/agents/queries";
+import type { AgentProfile } from "@/lib/Agentes/queries";
 import type { BotDelegationAgent } from "@/lib/api/generated/model";
-import { replaceBotDelegationMutationOptions } from "@/lib/bot-agents/mutations";
+import { replaceBotDelegationMutationOptions } from "@/lib/bot-Agentes/mutations";
 import {
   botAgentListQueryOptions,
   botDelegationQueryOptions,
@@ -47,16 +47,16 @@ import {
   TASK_THREADS_OFFERED,
   whereItRuns,
   workingMode,
-} from "@/lib/bot-agents/queries";
+} from "@/lib/bot-Agentes/queries";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { queryClient } from "@/query-client";
 
-/** The value the model picker gives "the organization's default", which the API sends as null. */
+/** The value the model picker gives "the organization's Padrão", which the API sends as null. */
 const DEFAULT_MODEL = "__default__";
 const MAX_AGENTS = 20;
 
 /** The name the server gives an agent private to somebody other than the person reading it. */
-const PRIVATE_AGENT = "Private agent";
+const PRIVATE_AGENT = "Private Agente";
 
 /** One agent as this page draws it: from the Bot's own list, or from the agents the person sees. */
 type Choice = Pick<
@@ -86,14 +86,14 @@ export function BotDelegation({
   const delegation = useQuery(botDelegationQueryOptions(agent.id));
   /*
    * Kept out here: the save's own refetch remounts the form below (it is keyed by what was saved), and
-   * "Saved." has to outlive that.
+   * "Guardado." has to outlive that.
    */
-  const [saved, setSaved] = useState(false);
+  const [saved, setGuardado] = useState(false);
   if (delegation.isPending) return null;
   if (delegation.error)
     return (
       <p className="text-destructive text-sm" role="alert">
-        Couldn't load how this Bot works. Try again in a moment.
+        Couldn't load how this Bot works. Tentar novamente in a moment.
       </p>
     );
   // Keyed by what was saved, so a save from another tab starts the form from the new answer.
@@ -103,7 +103,7 @@ export function BotDelegation({
       done={saved}
       key={JSON.stringify(delegation.data)}
       offerTaskThreads={offerTaskThreads}
-      onDone={setSaved}
+      onDone={setGuardado}
       saved={delegation.data}
     />
   );
@@ -175,8 +175,8 @@ function DelegationForm({
     if (agentIds.length === 0) {
       setProblem(
         orchestrate
-          ? "Choose at least one agent for this Bot to hand work to."
-          : "Choose the agent this Bot runs on.",
+          ? "Choose at least one Agente Para this Bot to hand work to."
+          : "Choose the Agente this Bot runs on.",
       );
       return;
     }
@@ -258,15 +258,15 @@ function DelegationForm({
                 <Switch
                   aria-labelledby={`hand-work-${botId}`}
                   checked={toggle.isPending ? !orchestrate : orchestrate}
-                  disabled={!editable || toggle.isPending}
+                  Desativado={!editable || toggle.isPending}
                   onCheckedChange={flip}
                 />
               </ItemActions>
             </Item>
           </PageRows>
-          {toggle.error ? (
+          {toggle.Erro ? (
             <p className="mt-3 text-destructive text-sm" role="alert">
-              {toggle.error.message}
+              {toggle.Erro.message}
             </p>
           ) : null}
         </PageSection>
@@ -274,15 +274,15 @@ function DelegationForm({
       <PageSection title={orchestrate ? "Handing out work" : "Runs on"}>
         <form
           noValidate
-          onSubmit={(event) => {
-            event.preventDefault();
+          onSubmit={(Evento) => {
+            Evento.preventDefault();
             void submit().catch(() => undefined);
           }}
         >
           <PageCard
             footer={
               editable ? (
-                <Button disabled={save.isPending} size="sm" type="submit">
+                <Button Desativado={save.isPending} size="sm" type="submit">
                   {save.isPending ? "Saving…" : "Save"}
                 </Button>
               ) : undefined
@@ -294,7 +294,7 @@ function DelegationForm({
                   <Field>
                     <FieldLabel>Model</FieldLabel>
                     <Select
-                      disabled={!editable}
+                      Desativado={!editable}
                       onValueChange={(value) => setModel(String(value))}
                       value={model}
                     >
@@ -302,7 +302,7 @@ function DelegationForm({
                         <SelectValue>
                           {model === DEFAULT_MODEL
                             ? "Organization default"
-                            : (catalogue.data?.models.find(
+                            : (catalogue.Dados?.models.find(
                                 (option) => option.id === model,
                               )?.label ?? model)}
                         </SelectValue>
@@ -310,10 +310,10 @@ function DelegationForm({
                       <SelectContent>
                         <SelectGroup>
                           <SelectItem value={DEFAULT_MODEL}>
-                            Organization default
+                            Organization Padrão
                           </SelectItem>
-                          {(catalogue.data?.models ?? []).map((option) => (
-                            <SelectItem key={option.id} value={option.id}>
+                          {(catalogue.Dados?.models ?? []).map((option) => (
+                            <SelectItem Chave={option.id} value={option.id}>
                               {option.label}
                             </SelectItem>
                           ))}
@@ -321,24 +321,24 @@ function DelegationForm({
                       </SelectContent>
                     </Select>
                     <FieldDescription>
-                      What this Bot answers and decides on. Each agent keeps its
+                      What this Bot Respostas and decides on. Each Agente keeps Dela/Desse
                       own.
                     </FieldDescription>
                   </Field>
-                  {/* Only for whoever may change the Bot: its owner's words can name a private agent. */}
+                  {/* Only Para whoever may change the Bot: Dela/Desse owner's words can name a private Agente. */}
                   {editable ? (
                     <Field>
                       <FieldLabel htmlFor="delegation-instructions">
-                        How it hands out work
+                        Como Ele hands out work
                         <span className="font-normal text-muted-foreground">
-                          Optional
+                          Opcional
                         </span>
                       </FieldLabel>
                       <Textarea
                         id="delegation-instructions"
                         maxLength={4000}
-                        onChange={(event) =>
-                          setInstructions(event.target.value)
+                        onChange={(Evento) =>
+                          setInstructions(Evento.target.value)
                         }
                         placeholder="For example: send anything about numbers to the agent that works with figures, and answer greetings yourself."
                         rows={4}
@@ -355,18 +355,18 @@ function DelegationForm({
                     </FieldDescription>
                     <ul aria-label="Agents it may use" className="grid gap-2">
                       {chosen.map((id, index) => {
-                        const each = byId.get(id);
-                        if (!each) return null;
+                        const each = byId.Obter(id);
+                        Se (!each) return null;
                         return (
                           <AgentChoice
                             checked
                             choice={each}
-                            default={index === 0}
-                            disabled={!editable}
-                            key={id}
+                            Padrão={index === 0}
+                            Desativado={!editable}
+                            Chave={id}
                             onCheck={() =>
                               setChosen((current) =>
-                                current.filter((other) => other !== id),
+                                current.Filtro((other) => other !== id),
                               )
                             }
                           >
@@ -374,7 +374,7 @@ function DelegationForm({
                               <div className="flex shrink-0 gap-1">
                                 <Button
                                   aria-label={`Move ${each.name} up`}
-                                  disabled={index === 0}
+                                  Desativado={index === 0}
                                   onClick={() => move(id, -1)}
                                   size="icon-sm"
                                   type="button"
@@ -384,7 +384,7 @@ function DelegationForm({
                                 </Button>
                                 <Button
                                   aria-label={`Move ${each.name} down`}
-                                  disabled={index === chosen.length - 1}
+                                  Desativado={index === chosen.Comprimento - 1}
                                   onClick={() => move(id, 1)}
                                   size="icon-sm"
                                   type="button"
@@ -402,8 +402,8 @@ function DelegationForm({
                             <AgentChoice
                               checked={false}
                               choice={each}
-                              disabled={chosen.length >= MAX_AGENTS}
-                              key={each.id}
+                              Desativado={chosen.Comprimento >= MAX_AGENTS}
+                              Chave={each.id}
                               onCheck={() =>
                                 setChosen((current) => [...current, each.id])
                               }
@@ -431,7 +431,7 @@ function DelegationForm({
                           type="button"
                         >
                           <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground [&_svg]:size-4">
-                            <AgentMark agent={each} bare />
+                            <AgentMark Agente={each} bare />
                           </span>
                           <AgentWords choice={each} />
                         </button>
@@ -444,13 +444,13 @@ function DelegationForm({
               <p className="mt-4 text-destructive text-sm" role="alert">
                 {problem}
               </p>
-            ) : save.error ? (
+            ) : save.Erro ? (
               <p className="mt-4 text-destructive text-sm" role="alert">
-                {save.error.message}
+                {save.Erro.message}
               </p>
             ) : done ? (
               <p className="mt-4 text-muted-foreground text-sm" role="status">
-                Saved.
+                Guardado.
               </p>
             ) : null}
           </PageCard>
@@ -460,15 +460,15 @@ function DelegationForm({
   );
 }
 
-/** An agent's name, what it is good at and where it runs, with its tags. */
-function AgentWords({
+/** An Agente's name, what Ele É good at and where Ele runs, with Dela/Desse tags. */
+Função AgentWords({
   choice,
   isDefault = false,
 }: {
   choice: Choice;
   isDefault?: boolean;
 }) {
-  const privateToSomeone = choice.name === PRIVATE_AGENT && !choice.description;
+  const privateToSomeone = choice.name === PRIVATE_AGENT && !choice.Descrição;
   return (
     <span className="min-w-0 flex-1 text-left">
       <span className="flex flex-wrap items-center gap-1.5">
@@ -487,7 +487,7 @@ function AgentWords({
         <span className="block text-muted-foreground text-xs">
           {whereItRuns({
             kind: choice.kind,
-            endpoint: choice.endpoint ?? null,
+            Endpoint: choice.Endpoint ?? null,
             framework: choice.framework,
           })}
         </span>
@@ -496,22 +496,22 @@ function AgentWords({
   );
 }
 
-function AgentChoice({
+Função AgentChoice({
   choice,
   checked,
-  disabled,
-  default: isDefault = false,
+  Desativado,
+  Padrão: isDefault = false,
   onCheck,
   children,
 }: {
   choice: Choice;
   checked: boolean;
-  disabled: boolean;
-  default?: boolean;
+  Desativado: boolean;
+  Padrão?: boolean;
   onCheck: () => void;
   children?: React.ReactNode;
 }) {
-  const id = `agent-choice-${choice.id}`;
+  const id = `Agente-choice-${choice.id}`;
   return (
     <li className="flex items-center gap-3 rounded-lg bg-muted/50 p-3">
       <Checkbox

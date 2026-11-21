@@ -10,5 +10,5 @@ export type BoundaryTranslationEffect =
 
 export const BoundaryTranslationEffect = {
   deny: "deny",
-  allow: "allow",
+  allow: "Permitir",
 } as const;

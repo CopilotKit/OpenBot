@@ -18,7 +18,7 @@ export default defineConfig({
       target: "../api/openapi.yaml",
       filters: {
         tags: [
-          "Approval rules",
+          "Regras de aprovação",
           "Approvals",
           "Bot grants",
           "Bots",

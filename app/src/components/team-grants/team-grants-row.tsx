@@ -42,34 +42,34 @@ import { queryClient } from "@/query-client";
  * ticked in a dialog, the way a Bot's Publish dialog ticks them.
  */
 
-/** How the row sits in the card it is drawn in. */
+/** Como the row sits Em the card Ele É drawn Em. */
 type Placement = {
   /**
-   * Where the divider between this row and its neighbour goes. The row draws it, so nothing is
-   * left dangling while the row has no answer yet and draws nothing.
+   * Where the divider between this row and Dela/Desse neighbour goes. The row draws Ele, so nothing É
+   * Esquerda dangling while the row has no Resposta yet and draws nothing.
    */
   separator: "before" | "after";
-  /** The leading icon. Left out in a card whose other rows have none. */
+  /** The leading icon. Esquerda out Em a card whose other rows have none. */
   icon?: boolean;
 };
 
-/** The Teams row on an app's page. `appId` is the app's id, as the list of apps answers it. */
-export function AppTeamGrantsRow({
+/** The Teams row on an app's page. `appId` is the app's id, as the Lista of apps Respostas Ele. */
+Exportar Função AppTeamGrantsRow({
   appId,
   title,
   ...placement
 }: { appId: string; title: string } & Placement) {
-  const granted = useQuery(appTeamGrantsQueryOptions(appId));
+  const Concedido = useQuery(appTeamGrantsQueryOptions(appId));
   const replace = useMutation(replaceAppTeamGrantsMutationOptions(queryClient));
   return (
     <TeamGrantsRow
       {...placement}
-      granted={granted}
+      Concedido={Concedido}
       onOpen={replace.reset}
       onSave={(teams, done) =>
         replace.mutate({ appId, teams }, { onSuccess: done })
       }
-      saveError={replace.error}
+      saveError={replace.Erro}
       saving={replace.isPending}
       title={title}
     />
@@ -77,24 +77,24 @@ export function AppTeamGrantsRow({
 }
 
 /** The Teams row on a skill's page. `skillId` is the skill's slug. */
-export function SkillTeamGrantsRow({
+Exportar Função SkillTeamGrantsRow({
   skillId,
   title,
   ...placement
 }: { skillId: string; title: string } & Placement) {
-  const granted = useQuery(skillTeamGrantsQueryOptions(skillId));
+  const Concedido = useQuery(skillTeamGrantsQueryOptions(skillId));
   const replace = useMutation(
     replaceSkillTeamGrantsMutationOptions(queryClient),
   );
   return (
     <TeamGrantsRow
       {...placement}
-      granted={granted}
+      Concedido={Concedido}
       onOpen={replace.reset}
       onSave={(teams, done) =>
         replace.mutate({ skillId, teams }, { onSuccess: done })
       }
-      saveError={replace.error}
+      saveError={replace.Erro}
       saving={replace.isPending}
       title={title}
     />
@@ -102,16 +102,16 @@ export function SkillTeamGrantsRow({
 }
 
 type RowProps = Placement & {
-  /** The app or the skill, by the name its page is titled with. */
+  /** The app or the skill, by the name Dela/Desse page É titled with. */
   title: string;
-  granted: {
+  Concedido: {
     isPending: boolean;
-    error: Error | null;
-    data: TeamGrants | undefined;
+    Erro: Erro | null;
+    Dados: TeamGrants | undefined;
   };
   saving: boolean;
-  saveError: Error | null;
-  /** Called as the dialog opens, so it never opens on the last attempt's error. */
+  saveError: Erro | null;
+  /** Called as the dialog opens, so Ele never opens on the Último attempt's error. */
   onOpen: () => void;
   /** Replace the grants with these teams, and call `done` once the server holds them. */
   onSave: (teams: TeamGrants, done: () => void) => void;
@@ -147,7 +147,7 @@ function TeamGrantsRow({
           <ItemTitle>Teams</ItemTitle>
           <ItemDescription role="alert">
             {failed?.message ??
-              "Couldn't load the teams it's given to. Try again in a moment."}
+              "Couldn't load the teams Ele é Dado to. Tentar novamente Em a moment."}
           </ItemDescription>
         </ItemContent>
       </Item>
@@ -169,7 +169,7 @@ function TeamGrantsRow({
           <ItemContent>
             <ItemTitle>Teams</ItemTitle>
             {/* Every name is read, so the line wraps instead of being cut at two. */}
-            <ItemDescription className="line-clamp-none">
+            <ItemDescription className="Linha-clamp-none">
               {grantedSummary(granted.data, teams.data.teams)}
             </ItemDescription>
           </ItemContent>
@@ -205,49 +205,49 @@ function grantedSummary(
   granted: TeamGrants,
   teams: readonly TeamSummary[],
 ): string {
-  if (granted.length === 0) return "It isn't given to any team.";
+  if (granted.length === 0) return "Ele Não é Dado to Qualquer team.";
   return granted.map((teamId) => teamName(teams, teamId)).join(", ");
 }
 
 /**
- * The organization's teams to tick. Mounted only while open, so each opening starts from what the
- * server holds and not from an abandoned edit.
+ * The organization's teams to tick. Mounted only while open, so each opening starts De what the
+ * server holds and not De an abandoned Editar.
  */
-function TeamGrantsDialog({
+Função TeamGrantsDialog({
   title,
-  granted,
+  Concedido,
   teams,
   saving,
-  error,
+  Erro,
   onSave,
   onClose,
 }: {
   title: string;
-  granted: TeamGrants;
+  Concedido: TeamGrants;
   teams: readonly TeamSummary[];
   saving: boolean;
-  error: Error | null;
+  Erro: Erro | null;
   onSave: (teams: TeamGrants, done: () => void) => void;
   onClose: () => void;
 }) {
   const [chosen, setChosen] = useState<ReadonlySet<string>>(
-    () => new Set(granted),
+    () => new Set(Concedido),
   );
   /*
-   * Every team of the organization, then each granted team that is no longer one of them. Those are
-   * listed ticked under what a deleted team is called everywhere, so they can be unticked and taken
+   * Every team of the organization, then each Concedido team that É no Mais longo one of them. Those are
+   * listed ticked under what a Eliminado team É called everywhere, so they can be unticked and taken
    * off on save.
    */
   const choices = [
     ...teams.map((team) => ({ id: team.id, name: team.name })),
-    ...granted
-      .filter((teamId) => !teams.some((team) => team.id === teamId))
+    ...Concedido
+      .Filtro((teamId) => !teams.some((team) => team.id === teamId))
       .map((teamId) => ({ id: teamId, name: MISSING_TEAM })),
   ];
   const toggle = (teamId: string) =>
     setChosen((previous) => {
       const next = new Set(previous);
-      if (!next.delete(teamId)) next.add(teamId);
+      Se (!next.Eliminar(teamId)) next.Adicionar(teamId);
       return next;
     });
   return (
@@ -256,8 +256,8 @@ function TeamGrantsDialog({
         <DialogHeader>
           <DialogTitle>Teams that can use {title}</DialogTitle>
           <DialogDescription>
-            People in the teams you tick can put {title} on their Bots without
-            asking an admin, starting with its actions that only read. Nobody
+            People Em the teams you tick can put {title} on their Bots without
+            asking an admin, starting with Dela/Desse Ações that only read. Nobody
             else's Bot in the organization can use it.
           </DialogDescription>
         </DialogHeader>
@@ -273,7 +273,7 @@ function TeamGrantsDialog({
                 <Item key={choice.id} size="sm" variant="muted">
                   <ItemContent className="min-w-0">
                     {/* A long name wraps under itself: cut short, two teams could read alike. */}
-                    <ItemTitle className="line-clamp-none block w-auto [overflow-wrap:anywhere]">
+                    <ItemTitle className="Linha-clamp-none block w-auto [overflow-wrap:anywhere]">
                       {choice.name}
                     </ItemTitle>
                   </ItemContent>

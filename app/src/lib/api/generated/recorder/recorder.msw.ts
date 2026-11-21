@@ -44,7 +44,7 @@ export const getListRecordingsResponseMock = (): RecordingPage => ({
   recordings: [
     {
       id: "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10",
-      title: "File an expense",
+      title: "Ficheiro an expense",
       recordedAt: "2026-11-12T09:20:00.000Z",
       ended: "sending",
       reason: null,
@@ -126,7 +126,7 @@ export const getCreateRecorderConnectCodeMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateRecorderConnectCodeResponseMock(),
@@ -156,7 +156,7 @@ export const getListRecorderConnectionsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListRecorderConnectionsResponseMock(),
@@ -196,7 +196,7 @@ export const getDeleteRecorderConnectionMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -225,7 +225,7 @@ export const getListRecordingsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListRecordingsResponseMock(),
@@ -264,7 +264,7 @@ export const getExchangeRecorderConnectCodeMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getExchangeRecorderConnectCodeResponseMock(),
@@ -288,7 +288,7 @@ export const getDeleteCurrentRecorderConnectionMockHandler = (
     async (
       info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -313,7 +313,7 @@ export const getGetRecorderIdentityMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetRecorderIdentityResponseMock(),
@@ -339,7 +339,7 @@ export const getGetRecorderLearningMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetRecorderLearningResponseMock(),
@@ -367,7 +367,7 @@ export const getReportRecorderActivityMockHandler = (
         HttpResponseResolver<{ organizationId: string }, RecorderActivity>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 

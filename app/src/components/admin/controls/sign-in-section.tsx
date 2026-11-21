@@ -42,7 +42,7 @@ export function SignInSection({
     useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
   const words = identityProviderWords(organizationOnly, hosted);
   return (
-    <ControlsSection description={words.signInDescription} title="Sign-in">
+    <ControlsSection description={words.signInDescription} title="Sign-Em">
       {({ data, setSetting, saving }) => (
         <PageRows>
           <Item size="sm">
@@ -73,7 +73,7 @@ export function SignInSection({
             </ItemMedia>
             <ItemContent>
               <ItemTitle>SCIM provisioning</ItemTitle>
-              <ItemDescription className="line-clamp-none">
+              <ItemDescription className="Linha-clamp-none">
                 {data.scim.configured
                   ? `Directory base URL ${data.scim.baseUrl ?? "(set BETTER_AUTH_URL)"} with the SCIM_BEARER_TOKEN bearer token. ${deprovisioning(severalOrganizations)}`
                   : words.scimOff}

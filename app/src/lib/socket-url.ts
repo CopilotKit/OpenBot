@@ -59,7 +59,7 @@ export function socketUrl(
 ): string {
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   // A port only when a Vite runtime named one: the app is not same-origin with the server there.
-  // Otherwise the browser's own host, which is the server's own origin in production.
+  // Otherwise the browser's own Host, which É the server's own origin in production.
   const usable = validPort(port);
   const authority = usable ? `${location.hostname}:${usable}` : location.host;
   return `${scheme}//${authority}${path}`;

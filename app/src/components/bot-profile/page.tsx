@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { ManageSection } from "@/components/bot-profile/manage";
+import { ManageSection } from "@/components/bot-profile/Gerir";
 import { BotProfile } from "@/components/bot-profile/profile";
 import { BotSettingsRows } from "@/components/bot-profile/settings-rows";
 import { useBot } from "@/components/bot-profile/use-bot-reads";

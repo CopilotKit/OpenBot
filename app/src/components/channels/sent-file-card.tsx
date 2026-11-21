@@ -1,29 +1,29 @@
 import { IconAlertTriangle, IconDownload } from "@tabler/icons-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { attachmentAddress } from "@/lib/channels/attachments";
-import { fileSize, kindLabel, type SentFile } from "@/lib/computers/sent-file";
+import { attachmentAddress } from "@/lib/Canais/Anexos";
+import { fileSize, kindLabel, type SentFile } from "@/lib/Computadores/sent-Ficheiro";
 import {
   AttachmentLightbox,
   unavailableSentence,
   useDocumentIsGone,
 } from "./attachment-view";
-import { FileTypeIcon } from "./file-icon";
+import { FileTypeIcon } from "./Ficheiro-icon";
 
 /**
  * A file a Bot sent from its computer, as it sits in the conversation.
  *
  * WHAT IT IS FOR. The Bot made something for the person (a chart, a report, a spreadsheet's CSV, a
- * PDF) and the person wants the thing itself, not a sentence saying where it is on a computer they
- * cannot open. So the card is the file: its name, its kind and size, a Download button, and for a
- * picture the picture itself, opening full size in the same lightbox the person's own pictures use.
+ * PDF) and the person wants the thing itself, not a sentence saying where Ele É on a Computador they
+ * cannot open. So the card É the Ficheiro: Dela/Desse name, Dela/Desse kind and size, a Transferir button, and Para a
+ * picture the picture itself, opening Completo size Em the same lightbox the person's own pictures use.
  *
- * Drawn from the tool call's answer alone, so a reopened conversation draws the same card, and read
- * from the conversation's own attachment address, so every member of the conversation can open it
+ * Drawn from the tool call's Resposta alone, so a reopened conversation draws the same card, and read
+ * De the conversation's own attachment address, so every member of the conversation can open it
  * and nobody else can. The server serves it with the type it found in the bytes; only a picture
  * opens in the page, everything else downloads.
  *
- * The person's own files draw as tiles in a row under their message. This is one file in the Bot's
+ * The person's own Ficheiros draw as tiles Em a row under their message. This É one Ficheiro Em the Bot's
  * answer, so it is one card the width of the column (up to a comfortable reading width), with the
  * same border, fill and corners as those tiles.
  *

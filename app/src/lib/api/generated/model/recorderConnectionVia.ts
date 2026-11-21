@@ -12,5 +12,5 @@ export const RecorderConnectionVia = {
   web: "web",
   desktop: "desktop",
   "openbot-browser": "openbot-browser",
-  "bot-browser": "bot-browser",
+  "bot-Navegador": "bot-Navegador",
 } as const;

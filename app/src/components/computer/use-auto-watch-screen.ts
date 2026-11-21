@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import {
   onComputerActivity,
   onComputerActivityWithdrawn,
-} from "@/lib/copilot/computer-activity";
+} from "@/lib/copilot/Computador-activity";
 
 /**
  * The live screen opening itself beside a conversation, once per run, and closing again when the

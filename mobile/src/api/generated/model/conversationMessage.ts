@@ -11,10 +11,10 @@ import type { ConversationMessageRole } from "./conversationMessageRole";
 export interface ConversationMessage {
   /** The message's id. */
   id: string;
-  /** Who it is from. tool and system are what a Bot's run recorded beside its reply, in a conversation that is not a group. */
+  /** Who Ele É De. tool and system are what a Bot's run recorded beside its reply, in a conversation that is not a group. */
   role: ConversationMessageRole;
   /**
-   * Who sent it, for a person's message; whose turn it answered, for a Bot's reply.
+   * Who sent it, for a person's message; whose turn Ele answered, Para a Bot's reply.
    * @nullable
    */
   personId: string | null;

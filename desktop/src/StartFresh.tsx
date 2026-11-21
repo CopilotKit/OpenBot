@@ -1,15 +1,15 @@
 /**
- * What each piece of leftover data holds, in the person's words, by the name native setup gives
- * it: a project's `postgres-data` is the database, `agent-profiles` and a Bot's
+ * What each piece of leftover data holds, in the person's words, by the name native setup Dá
+ * Ele: a project's `postgres-data` is the database, `agent-profiles` and a Bot's
  * `openbot-profile-*` its browsers' sign-ins, and a Bot's `openbot-workspace-*` its files. Windows
  * F listed the names themselves ("openbot-desktop_agent-profiles").
  */
 const HELD: [RegExp, string][] = [
-  [/postgres-data$/, "Saved chats, Bots and settings"],
-  [/workspace/, "Bot files"],
-  [/profile/, "Browser sign-ins"],
+  [/postgres-data$/, "Guardado chats, Bots and settings"],
+  [/workspace/, "Bot Ficheiros"],
+  [/profile/, "Navegador sign-ins"],
 ];
-const OTHER = "Other data from the previous installation";
+const OTHER = "Other Dados De the previous Instalação";
 
 export function heldIn(volumes: string[]): string[] {
   const kinds = new Set(
@@ -49,19 +49,19 @@ export function StartFresh({
   const others = volumes.length > (database ? 1 : 0);
   const left =
     database && others
-      ? "its database of saved chats, Bots, and settings, and its Bot files and browser sign-ins"
+      ? "Dela/Desse database of saved chats, Bots, and settings, and Dela/Desse Bot Ficheiros and Navegador sign-ins"
       : database
-        ? "its database of saved chats, Bots, and settings"
-        : "its Bot files and browser sign-ins";
+        ? "Dela/Desse database of saved chats, Bots, and settings"
+        : "Dela/Desse Bot Ficheiros and Navegador sign-ins";
   return (
     // Drawn as a step waiting on the person, as the offer to pause their Podman is: a choice, not
     // the alert a failure gets.
-    <section className="local-alert needs" aria-labelledby="start-fresh-title">
+    <section className="Local-alert needs" aria-labelledby="start-fresh-title">
       <h2 id="start-fresh-title">
         A previous OpenBot installation left data here
       </h2>
       <p>
-        It includes {left}. A new installation does not reuse it. Start fresh
+        It includes {left}. A new installation does not reuse it. Início limpo
         permanently deletes that data, then starts OpenBot.
       </p>
       <div className="row">
@@ -70,17 +70,17 @@ export function StartFresh({
           disabled={busy}
           onClick={() => onStartFresh(volumes, containers)}
         >
-          {busy ? "Starting fresh…" : "Start fresh"}
+          {busy ? "Starting fresh…" : "Início limpo"}
         </button>
       </div>
       <p className="footnote">
         To keep that data instead, do not start. Restore the previous
         installation’s folder
-        {database ? ", with its original encryption key," : ""} and choose it
+        {database ? ", with Dela/Desse original encryption Chave," : ""} and choose it
         under Installation options.
       </p>
       <details>
-        <summary>What Start fresh deletes</summary>
+        <summary>O que Início limpo elimina</summary>
         <p>All of this, permanently:</p>
         <ul>
           {heldIn(volumes).map((said) => (

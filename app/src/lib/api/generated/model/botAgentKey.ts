@@ -3,11 +3,11 @@
  */
 
 /**
- * A key the agent's address sits behind. Write-only: stored encrypted and never returned. A blank value sets no key.
+ * A key the agent's address sits behind. Write-only: stored encrypted and never returned. A blank value sets no Chave.
  */
-export interface BotAgentKey {
+Exportar interface BotAgentKey {
   /**
-   * The header it is sent in. Blank or absent means Authorization.
+   * The header Ele É sent Em. Blank or absent means Autorização.
    * @maxLength 200
    * @pattern ^[A-Za-z0-9-]*$
    */

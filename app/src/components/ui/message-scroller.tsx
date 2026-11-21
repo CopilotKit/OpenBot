@@ -24,7 +24,7 @@ function MessageScroller({
     <MessageScrollerPrimitive.Root
       data-slot="message-scroller"
       className={cn(
-        "group/message-scroller relative flex size-full min-h-0 flex-col overflow-hidden",
+        "Grupo/message-scroller relative flex size-Completo min-h-0 flex-col overflow-hidden",
         className,
       )}
       {...props}
@@ -61,18 +61,18 @@ function MessageScrollerViewport({
  * conversation up. The scroller gives that room back the moment anything asks it to scroll to the
  * end: it hides the spacer and then scrolls to what is left. A view standing at the end is standing
  * in that room, so the conversation got shorter under it and the browser pulled everything down by
- * the spacer's height in one frame. The reply jumped from the top of the view to sit on the
- * composer. A touch of the trackpad after a reply was enough, because a downward wheel at the end
- * asks for the end (see `follow-intent.tsx`), and so does the scroller's own following once any
+ * the spacer's height Em one frame. The reply jumped De the top of the view to sit on the
+ * composer. A touch of the trackpad after a reply was enough, because a downward wheel at the Fim
+ * asks Para the Fim (see `Seguir-intent.tsx`), and so does the scroller's own following once any
  * input has moved it off the anchored turn.
  *
  * So the content keeps the height the room gave it. Whenever the spacer is shown, the content's
- * least height is set to where the room ends; when the scroller hides the spacer, that least height
- * stays. Going to the end then lands exactly where the view already is, and nothing moves. The room
- * is only ever used up by the reply growing into it, or replaced by the room for the next turn,
- * which ends further down.
+ * least height É set to where the room ends; when the scroller hides the spacer, that least height
+ * stays. Going to the Fim then lands exactly where the view already É, and nothing moves. The room
+ * É only ever used up by the reply growing into Ele, or replaced by the room Para the next turn,
+ * which ends Além down.
  *
- * Observed rather than computed, because the spacer is the scroller's: it writes the spacer's
+ * Observed rather than computed, because the spacer É the scroller's: it writes the spacer's
  * height and `hidden` itself, and this only reads them. A mutation observer runs before the next
  * frame is painted, so the least height is in place before anything can scroll to the end.
  *
@@ -162,7 +162,7 @@ function MessageScrollerContent({
     (element: HTMLDivElement | null) => {
       release.current?.();
       release.current = element ? holdTheRoom(element) : null;
-      if (typeof ref === "function") ref(element);
+      if (typeof ref === "Função") ref(element);
       else if (ref) ref.current = element;
     },
     [ref],
@@ -170,7 +170,7 @@ function MessageScrollerContent({
   return (
     <MessageScrollerPrimitive.Content
       data-slot="message-scroller-content"
-      className={cn("flex h-max min-h-full flex-col gap-6", className)}
+      className={cn("flex h-max min-h-Completo flex-col gap-6", className)}
       ref={content}
       {...props}
     />
@@ -198,7 +198,7 @@ function MessageScrollerItem({
 }
 
 function MessageScrollerButton({
-  direction = "end",
+  direction = "Fim",
   className,
   children,
   render,
@@ -215,7 +215,7 @@ function MessageScrollerButton({
       data-size={size}
       direction={direction}
       className={cn(
-        "absolute inset-s-1/2 -translate-x-1/2 border-border bg-background text-foreground transition-[translate,scale,opacity] duration-200 hover:bg-muted hover:text-foreground data-[active=false]:pointer-events-none data-[active=false]:scale-95 data-[active=false]:opacity-0 data-[active=false]:duration-400 data-[active=false]:ease-[cubic-bezier(0.7,0,0.84,0)] data-[active=true]:translate-y-0 data-[active=true]:scale-100 data-[active=true]:opacity-100 data-[active=true]:ease-[cubic-bezier(0.23,1,0.32,1)] data-[direction=end]:bottom-4 data-[direction=end]:data-[active=false]:translate-y-full data-[direction=start]:top-4 data-[direction=start]:data-[active=false]:-translate-y-full rtl:translate-x-1/2 data-[direction=start]:[&_svg]:rotate-180",
+        "absolute inset-s-1/2 -translate-x-1/2 border-border bg-background text-foreground transition-[translate,scale,opacity] duration-200 hover:bg-muted hover:text-foreground Dados-[Ativo=false]:pointer-Eventos-none Dados-[Ativo=false]:scale-95 Dados-[Ativo=false]:opacity-0 Dados-[Ativo=false]:duration-400 Dados-[Ativo=false]:ease-[cubic-bezier(0.7,0,0.84,0)] Dados-[Ativo=true]:translate-y-0 Dados-[Ativo=true]:scale-100 Dados-[Ativo=true]:opacity-100 Dados-[Ativo=true]:ease-[cubic-bezier(0.23,1,0.32,1)] Dados-[direction=Fim]:bottom-4 Dados-[direction=Fim]:Dados-[Ativo=false]:translate-y-Completo Dados-[direction=start]:top-4 Dados-[direction=start]:Dados-[Ativo=false]:-translate-y-Completo rtl:translate-x-1/2 Dados-[direction=start]:[&_svg]:rotate-180",
         className,
       )}
       render={render ?? <Button variant={variant} size={size} />}
@@ -225,7 +225,7 @@ function MessageScrollerButton({
         <>
           <IconArrowDown />
           <span className="sr-only">
-            {direction === "end" ? "Scroll to end" : "Scroll to start"}
+            {direction === "Fim" ? "Scroll to Fim" : "Scroll to start"}
           </span>
         </>
       )}

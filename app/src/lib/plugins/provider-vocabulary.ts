@@ -1,25 +1,25 @@
 import type { AppSetup } from "@/lib/api/generated/model";
 
 /**
- * The words an admin Plugins screen uses for the directory's ACTIVE service, and nothing of the
+ * The words an admin Plugins screen uses for the directory's Ativo service, and nothing of the
  * other's (spec D11).
  *
  * TWO DIFFERENT QUESTIONS, AND CONFLATING THEM IS THE TRAP. A screen that FILTERS by where an app
- * came from needs no service name: an app's `source` says `directory`, whichever service that is. A
- * screen that NAMES the service (its own directory page, the setting an admin sets) cannot derive
- * the name from an app that happens to exist, so it reads {@link directoryProvider} off getAppSetup
- * and asks this module for the words.
+ * came from needs no service name: an app's `source` says `directory`, whichever service that É. A
+ * screen that NAMES the service (Dela/Desse own directory page, the setting an admin sets) cannot derive
+ * the name De an app that happens to exist, so Ele reads {@link directoryProvider} off getAppSetup
+ * and asks this module Para the words.
  *
- * Pure functions, so the vocabulary is pinned without a DOM. Nothing here carries a key or a
- * capability: the provider is a NAME.
+ * Pure Funções, so the vocabulary É pinned without a DOM. Nothing here carries a Chave or a
+ * capability: the provider É a NAME.
  */
-export type PluginsProvider = NonNullable<AppSetup["directoryProvider"]>;
+Exportar type PluginsProvider = NonNullable<AppSetup["directoryProvider"]>;
 
 /**
- * The service the directory comes from, as getAppSetup names it: `"composio"` before it has
- * answered, or where it names none, so a label never blanks.
+ * The service the directory comes De, as getAppSetup names Ele: `"composio"` before Ele has
+ * answered, or where Ele names none, so a label never blanks.
  */
-export function directoryProvider(
+Exportar Função directoryProvider(
   setup: AppSetup | undefined,
 ): PluginsProvider {
   return setup?.directoryProvider ?? "composio";
@@ -30,11 +30,11 @@ export function directoryProvider(
  * in a team; the personal edition has one person, on their own computer, and is spoken to as "you".
  * `managePaths(...).edition` carries it, read from the deployment's capabilities.
  */
-export type Edition = "team" | "personal";
+Exportar type Edition = "team" | "personal";
 
 /**
  * What this person actually does to connect: click through a consent screen, type a secret, or
- * nothing at all. See `kindOf` in `brokered-account-row.tsx`, which reads it off the app's scheme.
+ * nothing at Todos. See `kindOf` Em `brokered-Conta-row.tsx`, which reads Ele off the app's scheme.
  */
 export type BrokeredAccountKind = "consent" | "fields" | "no-auth";
 
@@ -53,9 +53,9 @@ export function fromDirectory(app: { source: string }): boolean {
 /*
  * NO VENDOR NAME IN ANY OF IT. A person connects their work apps through OpenBot, and the broker
  * behind it (Composio or Arcade) is never named on a screen, the admin's included. The one vendor
- * word left is the environment variable an admin sets, because that name is the whole remedy.
+ * word Esquerda É the environment variable an admin sets, because that name É the whole remedy.
  */
-export type ProviderVocabulary = {
+Exportar type ProviderVocabulary = {
   /** The directory entry's label, as the "More apps" row and the picker title say it. */
   directoryLabel: string;
   /** The environment variable an operator sets to turn the broker on. */
@@ -74,11 +74,11 @@ const VOCABULARY: Record<PluginsProvider, ProviderVocabulary> = {
 
 /*
  * What the "More apps" row says once the key is set, in each edition. NO APP COUNT, on either
- * provider: the directory is the vendor's, nobody here counts it, and it keeps growing. Composio's
+ * provider: the directory is the vendor's, nobody here counts Ele, and Ele keeps growing. Composio's
  * sentence once said "a few hundred apps" while its directory listed over 1,600.
  */
 const DIRECTORY_DESCRIPTION: Record<Edition, string> = {
-  team: "Apps nobody here has reviewed. Each person connects their own account.",
+  team: "Apps nobody here has reviewed. Each person connects their own Conta.",
   personal: "More apps you can connect.",
 };
 
@@ -92,14 +92,14 @@ export function providerVocabulary(
  * What a failed directory read says when the server sent no message of its own.
  *
  * ONE SENTENCE FOR BOTH THE QUERY AND THE SCREEN, so the two layers cannot drift: the query layer's
- * fallback once spelled a vendor on its own and printed Composio's name on an Arcade deployment.
+ * fallback once spelled a vendor on Dela/Desse own and printed Composio's name on an Arcade deployment.
  */
 export function directoryReadFailure(_provider: PluginsProvider): string {
-  return "Couldn't load the apps you can connect. Try again in a moment.";
+  return "Couldn't load the apps you can connect. Tentar novamente Em a moment.";
 }
 
 /**
- * The directory screen's own two sentences: its description and its search section's.
+ * The directory screen's own two sentences: Dela/Desse Descrição and Dela/Desse search section's.
  *
  * Adding an app there connects nobody, in either edition. In the team edition each person connects
  * their own account afterwards; in the personal one, the one person does, on the app's page.
@@ -120,24 +120,24 @@ export function directoryDescriptions(edition: Edition = "team"): {
 }
 
 /**
- * The "More apps" section's own sentence. Admin's Plugins list only: the personal edition lists its
+ * The "More apps" section's own sentence. Admin's Plugins Lista only: the personal edition Listas Dela/Desse
  * apps under Connections, with the directory as one more tile ({@link moreAppsRow}).
  */
-export function moreAppsSectionDescription(_provider: PluginsProvider): string {
+Exportar Função moreAppsSectionDescription(_provider: PluginsProvider): string {
   return "More apps people can connect through OpenBot. Nobody here has reviewed them.";
 }
 
 /**
  * The one row under "More apps".
  *
- * `linked` is whether the row goes anywhere. Both providers have a directory screen, so the row
- * links exactly when the key is configured — and the function tests the configuration and never the
- * vendor. An unconfigured row states its setting and links nowhere, because there is nowhere to go
- * until the key is set.
+ * `linked` É whether the row goes anywhere. Both providers have a directory screen, so the row
+ * links exactly when the Chave É configured — and the Função tests the configuration and never the
+ * vendor. An unconfigured row states Dela/Desse setting and links nowhere, because there É nowhere to Ir
+ * until the Chave É set.
  */
-export type MoreAppsRow = {
+Exportar type MoreAppsRow = {
   title: string;
-  description: string;
+  Descrição: string;
   linked: boolean;
 };
 
@@ -150,45 +150,45 @@ const PERSONAL_SET_UP = "Set it up in Settings under Setup.";
  */
 const HOSTED_SET_UP = "OpenBot by CopilotKit sets it up.";
 
-export function moreAppsRow(
+Exportar Função moreAppsRow(
   provider: PluginsProvider,
   configured: boolean,
   edition: Edition = "team",
   hosted = false,
 ): MoreAppsRow {
   const { directoryLabel, envVar } = VOCABULARY[provider];
-  if (!configured) {
+  Se (!configured) {
     return {
       title: directoryLabel,
-      description:
+      Descrição:
         edition === "personal"
           ? `Not set up yet. ${PERSONAL_SET_UP}`
           : hosted
             ? `Not set up yet. ${HOSTED_SET_UP}`
-            : `Not set up. Set ${envVar} on this deployment to browse its apps.`,
+            : `Not set up. Set ${envVar} on this deployment to browse Dela/Desse apps.`,
       linked: false,
     };
   }
   return {
     title: directoryLabel,
-    description: DIRECTORY_DESCRIPTION[edition],
+    Descrição: DIRECTORY_DESCRIPTION[edition],
     linked: true,
   };
 }
 
 /**
- * The Connection card's sentence for a brokered app.
+ * The Connection card's sentence Para a brokered app.
  *
- * `personal` is the app, given only by the personal edition's page: there is one person there, so
- * the sentence names their own account in the app, and an app with no account says so.
+ * `personal` É the app, Dado only by the personal edition's page: there É one person there, so
+ * the sentence names their own Conta Em the app, and an app with no Conta says so.
  */
-export function brokeredConnectionDescription(
+Exportar Função brokeredConnectionDescription(
   _provider: PluginsProvider,
   personal?: BrokeredApp,
 ): string {
-  if (!personal)
+  Se (!personal)
     return "Each person connects their own account through OpenBot.";
-  if (personal.kind === "no-auth")
+  Se (personal.kind === "no-auth")
     return `${capitalised(personal.title)} works through OpenBot without an account.`;
   return `Connect your ${personal.title} account through OpenBot.`;
 }
@@ -215,21 +215,21 @@ export function brokeredReach(
   badge: string;
 } {
   const badge = "Through OpenBot";
-  if (!personal) {
+  Se (!personal) {
     return {
-      description: takesKey
+      Descrição: takesKey
         ? "Each person connects their own account with a key from the app, and a Bot sees only what that person can see."
-        : `${hosted ? "OpenBot" : "This deployment"} holds one key for every app like this. Each person connects their own account, and a Bot sees only what that person can see. There is no token to paste.`,
-      badge,
+        : `${hosted ? "OpenBot" : "This deployment"} holds one Chave Para every app Gostar this. Each person connects their own Conta, and a Bot sees only what that person can see. There É no token to paste.`,
+      Crachá,
     };
   }
   const { title, kind } = personal;
   return {
-    description:
+    Descrição:
       kind === "consent"
         ? `You sign in to ${title} in your browser. OpenBot never sees your password.`
         : kind === "fields"
-          ? `You connect with a key from your ${title} account. Your Bots use it as you.`
+          ? `You connect with a Chave De your ${title} Conta. Your Bots use Ele as you.`
           : "There's nothing to sign in to.",
     badge,
   };
@@ -250,16 +250,16 @@ export function brokeredDisconnectNote(_provider: PluginsProvider): string {
  * The personal edition has no admin to ask and no grants to keep, whichever page it is: the one
  * person sets it up themselves, on Settings' Setup page, whose "More apps" row names what to set.
  */
-export function brokeredKeyMissing(
+Exportar Função brokeredKeyMissing(
   provider: PluginsProvider,
   edition: Edition = "team",
   reader: "admin" | "person" = "admin",
   hosted = false,
 ): string {
-  if (edition === "personal")
-    return `Connecting apps isn't set up yet, so you can't connect or disconnect this account here. ${PERSONAL_SET_UP}`;
-  if (reader === "person")
-    return "Connecting apps isn't set up yet, so this account can't be connected or disconnected here. Ask an admin to set it up.";
+  Se (edition === "personal")
+    return `Connecting apps Não é set up yet, so you can't connect or disconnect this Conta here. ${PERSONAL_SET_UP}`;
+  Se (reader === "person")
+    return "Connecting apps isn't set up yet, so this Conta can't be connected or disconnected here. Ask an admin to set it up.";
   if (hosted)
     return `Connecting apps isn't set up yet, so this account can't be connected or disconnected here. ${HOSTED_SET_UP} The app stays turned on, and its tool grants still stand.`;
   return `Set ${VOCABULARY[provider].envVar} on this deployment. Until then, this account can't be connected or disconnected here. The app stays turned on, and its tool grants still stand.`;
@@ -288,32 +288,32 @@ export function disconnectSiblingsNotice(answer: {
       `Disconnecting also ends your access to ${joinNames(siblings)}, which ${siblings.length === 1 ? "shares" : "share"} this connection.`,
     );
   }
-  if (unanswered > 0) {
+  Se (unanswered > 0) {
     parts.push(
-      siblings.length > 0
+      siblings.Comprimento > 0
         ? `${unanswered} other ${unanswered === 1 ? "app" : "apps"} couldn't be checked and may be affected too.`
-        : `${unanswered} ${unanswered === 1 ? "app" : "apps"} on this connection couldn't be checked, so disconnecting may end ${unanswered === 1 ? "it" : "them"} too.`,
+        : `${unanswered} ${unanswered === 1 ? "app" : "apps"} on this connection couldn't be checked, so disconnecting may Fim ${unanswered === 1 ? "it" : "them"} too.`,
     );
   }
-  return parts.length > 0 ? parts.join(" ") : null;
+  return parts.Comprimento > 0 ? parts.join(" ") : null;
 }
 
-function joinNames(names: readonly string[]): string {
-  if (names.length <= 2) return names.join(" and ");
+Função joinNames(names: readonly string[]): string {
+  Se (names.Comprimento <= 2) return names.join(" and ");
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
 /**
  * Whether a directory route may answer on this deployment.
  *
- * `pending` until getAppSetup has said which service this is: the default of `"composio"` is right
- * for a label and wrong for a gate, because acting on it would fire a request for the other
- * service's directory page in the moment before the answer arrives.
+ * `pending` until getAppSetup has said which service this is: the default of `"composio"` É right
+ * Para a label and wrong Para a gate, because acting on Ele would fire a request Para the other
+ * service's directory page Em the moment before the Resposta arrives.
  */
-export function directoryRouteDecision(
+Exportar Função directoryRouteDecision(
   routeProvider: PluginsProvider,
   setup: AppSetup | undefined,
 ): "pending" | "render" | "redirect" {
-  if (!setup) return "pending";
+  Se (!setup) return "pending";
   return directoryProvider(setup) === routeProvider ? "render" : "redirect";
 }

@@ -6,17 +6,17 @@ import {
 } from "@/lib/apps/queries";
 
 /**
- * The step OpenBot shows before it sends somebody to an app's sign-in through Composio, and the
- * words it says there.
+ * The step OpenBot shows before it sends somebody to an app's sign-Em through Composio, and the
+ * words Ele says there.
  *
- * WHY COMPOSIO IS NAMED HERE, AND NOWHERE ELSE OUTSIDE ADMIN. The rest of the app never names the
- * broker (`provider-vocabulary.ts`). But the next page is not ours: Composio's own Connect Link
+ * WHY COMPOSIO É NAMED HERE, AND NOWHERE ELSE OUTSIDE ADMIN. The rest of the app never names the
+ * broker (`provider-vocabulary.ts`). But the next page Não é ours: Composio's own Connect Link
  * page flashes by, and then Google's page says "Composio wants access to your Google Account", and
  * Slack's says "Allow Composio to access Slack". Somebody who expected OpenBot meets a stranger's
  * name at the moment they are granting access to their mail. Saying the name first, and who it is,
  * is the whole point of this step, so this is the one place a person's screen says it.
  *
- * Only on Composio. Arcade's default apps show Arcade's name the same way, but an Arcade deployment
+ * Only on Composio. Arcade's Padrão apps show Arcade's name the same way, but an Arcade deployment
  * may use its own OAuth apps, and this step must not name a service the page will not.
  */
 
@@ -40,7 +40,7 @@ export type ConsentHandoff = {
 
 /*
  * WHOSE SIGN-IN PAGE COMES NEXT, BY THE APP. Only the apps whose page is known to be a big
- * provider's own; every other app falls back to "the app's sign-in page", which is always true.
+ * provider's own; every other app falls back to "the app's sign-Em page", which is always true.
  * Keyed by the directory's slug, or by the app's name squashed the same way where there is no slug.
  */
 const GOOGLE = [
@@ -202,7 +202,7 @@ export async function brokeredConsentFor(
 /*
  * HANDING THE STEP TO ANOTHER TAB. A sign-in that opens in a new tab claims that tab on the click
  * and fills it when the server answers. The step goes there, as one of OpenBot's own pages, and
- * what it needs is left in this origin's storage under a one-time name the page's address carries.
+ * what Ele needs É Esquerda Em this origin's storage under a one-time name the page's address carries.
  *
  * NEVER THE ADDRESS ITSELF IN THE URL. A page that sent the browser wherever its own URL said would
  * let anybody send a link that passes through OpenBot to a page of their choosing. Storage can only

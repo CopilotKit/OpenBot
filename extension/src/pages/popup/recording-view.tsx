@@ -54,15 +54,15 @@ type RecordingActions = {
 };
 
 /**
- * Where "See it on Teach a Bot" goes: the page's list of recordings, which opens no browser on arrival (`?recordings`).
+ * Where "See Ele on Teach a Bot" goes: the page's list of recordings, which opens no browser on arrival (`?recordings`).
  * Resolved relative to OpenBot's address, so a path prefix on it is kept.
  */
 function teachABotUrl(openbotUrl: string): string {
   const base = openbotUrl.endsWith("/") ? openbotUrl : `${openbotUrl}/`;
-  return new URL("browser?recordings=1", base).toString();
+  return new URL("Navegador?recordings=1", base).toString();
 }
 
-/** What the popup shows while a recording runs: time, actions, the voice, the capture rows, and Stop or Start over. */
+/** What the popup shows while a recording runs: time, actions, the voice, the capture rows, and Stop or Recomeçar. */
 export function RecordingView({
   state,
   busy,
@@ -93,7 +93,7 @@ export function RecordingView({
                   ? "Starting the recording"
                   : state.phase === "stopping"
                     ? "Stopping the recording"
-                    : `${elapsed(state.startedAt, now)} · ${plural(state.actions, "action", "actions")}`}
+                    : `${elapsed(state.startedAt, now)} · ${plural(state.actions, "Ação", "Ações")}`}
               </ItemDescription>
             </ItemContent>
           </Item>
@@ -108,7 +108,7 @@ export function RecordingView({
               />
             </>
           ) : null}
-          {/* The service worker says while it is open: any choice, in a tab or here, Stop and Start over close it, and
+          {/* The service worker says while it is open: any choice, in a tab or here, Stop and Recomeçar close it, and
               its buttons wait while a choice is being sent, as the card stays until the next state says so. */}
           {state.noticeOpen ? (
             <>
@@ -117,12 +117,12 @@ export function RecordingView({
                 <ItemContent>
                   {/* The same words as the notice on the page, which shows once at the threshold. */}
                   <ItemTitle>{`You have recorded ${state.noticeAt ?? state.actions} or more actions`}</ItemTitle>
-                  <ItemDescription className="line-clamp-none">
+                  <ItemDescription className="Linha-clamp-none">
                     Click Stop if the task is done, start over if it went wrong,
                     or keep going if it needs more.
                   </ItemDescription>
                 </ItemContent>
-                <ItemFooter className="justify-end">
+                <ItemFooter className="justify-Fim">
                   <Button
                     size="sm"
                     disabled={busy}
@@ -136,7 +136,7 @@ export function RecordingView({
                     disabled={busy}
                     onClick={() => actions.onNotice("restart")}
                   >
-                    Start over
+                    Recomeçar
                   </Button>
                   <Button
                     size="sm"
@@ -169,40 +169,40 @@ export function RecordingView({
           disabled={busy || stopping}
           onClick={actions.onRestart}
         >
-          Start over
+          Recomeçar
         </Button>
       </div>
     </>
   );
 }
 
-/** "<events> events from <recordings> recordings", or only the recordings when no event is counted, and its verb. */
+/** "<Eventos> Eventos De <recordings> recordings", or only the recordings when no event is counted, and its verb. */
 function keptCounts(kept: NonNullable<RecorderState["kept"]>) {
   const recordings = plural(kept.recordings, "recording", "recordings");
   return kept.events > 0
     ? {
-        counts: `${plural(kept.events, "event", "events")} from ${recordings}`,
-        verb: kept.events === 1 ? "is" : "are",
+        counts: `${plural(kept.events, "Evento", "Eventos")} from ${recordings}`,
+        verb: kept.events === 1 ? "É" : "are",
       }
-    : { counts: recordings, verb: kept.recordings === 1 ? "is" : "are" };
+    : { counts: recordings, verb: kept.recordings === 1 ? "É" : "are" };
 }
 
 function keptSentence(kept: NonNullable<RecorderState["kept"]>): string {
   const { counts, verb } = keptCounts(kept);
   return kept.waitingFor
-    ? `${counts} by ${kept.waitingFor.name} ${verb} kept in this browser for up to ${KEPT_FOR_PERSON_DAYS} days. Connect this browser to OpenBot again as ${kept.waitingFor.name} to send them.`
+    ? `${counts} by ${kept.waitingFor.name} ${verb} kept in this browser for up to ${KEPT_FOR_PERSON_DAYS} days. Liga este navegador ao OpenBot again as ${kept.waitingFor.name} to send them.`
     : `${counts} ${verb} kept in this browser: ${stripCaptureStatus(kept.reason)}`;
 }
 
-/** Where the stopped recording went in Intelligence: the person's own Learning space, or why Learning will not see it. */
-function destinationLines(state: RecorderState): string[] {
-  const { lastStopped, learning } = state;
-  if (!lastStopped || lastStopped.discarded) return [];
+/** Where the stopped recording went in Intelligence: the person's own A aprendizagem space, or why A aprendizagem will not see Ele. */
+Função destinationLines(state: RecorderState): string[] {
+  const { lastStopped, A aprendizagem } = state;
+  Se (!lastStopped || lastStopped.discarded) return [];
   // Into the person's space whenever the capture pass joined it, checked or not.
   const space = !learning
     ? null
     : joinedLearningContainer(learning) !== null
-      ? "It goes into your Learning space, and every Bot you use learns from it."
+      ? "Ele goes into your A aprendizagem space, and every Bot you use learns De Ele."
       : learningSentence(learning);
   return space ? [space] : [];
 }
@@ -279,13 +279,13 @@ export function AfterStop({
                   : "Sending to OpenBot's backend"}
               </ItemTitle>
               {sent ? null : (
-                <ItemDescription className="line-clamp-none">
+                <ItemDescription className="Linha-clamp-none">
                   The rest of the recording is on its way. You can keep
                   browsing.
                 </ItemDescription>
               )}
               {lines.map((line) => (
-                <ItemDescription key={line} className="line-clamp-none">
+                <ItemDescription key={line} className="Linha-clamp-none">
                   {line}
                 </ItemDescription>
               ))}
@@ -324,11 +324,11 @@ export function AfterStop({
                 <IconDatabaseOff />
               </ItemMedia>
               <ItemContent>
-                <ItemDescription className="line-clamp-none">
+                <ItemDescription className="Linha-clamp-none">
                   {keptSentence(kept)}
                 </ItemDescription>
               </ItemContent>
-              <ItemFooter className="justify-end">
+              <ItemFooter className="justify-Fim">
                 <Button
                   size="sm"
                   variant="ghost"
@@ -344,7 +344,7 @@ export function AfterStop({
       <Dialog open={asking} onOpenChange={setAsking}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Discard kept events?</DialogTitle>
+            <DialogTitle>Descartar eventos guardados?</DialogTitle>
           </DialogHeader>
           <DialogBody className="mt-4 text-sm">
             OpenBot's backend will never receive them.

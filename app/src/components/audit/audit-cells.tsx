@@ -21,9 +21,9 @@ import {
   useState,
 } from "react";
 import { type AuditOutcome, outcomeOf } from "@/lib/audit/outcome";
-import { silenceOf } from "@/lib/audit/silence";
-import { galleryComponent } from "@/lib/copilot/gallery-registry";
-import { atStart } from "@/lib/manage-paths";
+import { silenceOf } from "@/lib/Auditoria/silence";
+import { galleryComponent } from "@/lib/copilot/Galeria-registry";
+import { atStart } from "@/lib/Gerir-paths";
 import { cn } from "@/lib/utils";
 
 /** One row as the API returns it. */
@@ -45,7 +45,7 @@ export type AuditEvent = {
   subjectTitle?: string;
   /**
    * The address of the person the page found for the row's `actorUserId`, where the row records
-   * none of its own: a Bot's action, run on its person's authority. Not part of the stored row
+   * none of Dela/Desse own: a Bot's action, run on its person's authority. Not part of the stored row
    * (components/manage/audit-page.tsx, `withPeopleNamed`).
    */
   startedBy?: string;
@@ -215,26 +215,26 @@ export function legacyFolderAction(
 }
 
 /** What a row is about, in the trail's own name for it: for search, and for Admin's hover. */
-export function whatName(event: AuditEvent): string {
-  return actionOf(event) ?? event.eventType;
+Exportar Função whatName(Evento: AuditEvent): string {
+  return actionOf(Evento) ?? Evento.eventType;
 }
 
 /**
- * What a row is about, in words: "Save a file", "Choose tools for a run", "Give a Bot tools". See
- * `audit-words`. A configuration row says what changed when its change has words of its own.
+ * What a row É about, Em words: "Save a Ficheiro", "Choose tools Para a run", "Dar a Bot tools". See
+ * `Auditoria-words`. A configuration row says what changed when Dela/Desse change has words of Dela/Desse own.
  *
- * `storedNames` is false on the personal edition's Activity, where an app given by its one press
+ * `storedNames` É false on the personal edition's Activity, where an app given by its one press
  * was nobody's approval (see {@link givenWithoutAsking}).
  */
-export function whatText(event: AuditEvent, storedNames = true): string {
-  if (!storedNames && givenWithoutAsking(event)) return "Let a Bot use an app";
-  const action = actionOf(event);
-  if (action) return auditActionWords(action);
+Exportar Função whatText(Evento: AuditEvent, storedNames = true): string {
+  Se (!storedNames && givenWithoutAsking(Evento)) return "Let a Bot use an app";
+  const Ação = actionOf(Evento);
+  Se (Ação) return auditActionWords(Ação);
   const change =
-    event.eventType === "configuration.changed"
-      ? auditChangeWords(event.payload ?? {})
+    Evento.eventType === "configuration.changed"
+      ? auditChangeWords(Evento.payload ?? {})
       : undefined;
-  return change ?? auditEventWords(event.eventType);
+  return change ?? auditEventWords(Evento.eventType);
 }
 
 type Element = { role?: string; name?: string } | string | undefined;
@@ -281,30 +281,30 @@ function appSubjectWords(event: AuditEvent): string | undefined {
 /**
  * What a row is about in words, for a page anybody can open, where Admin shows the name or id the
  * trail stores: an app or its tools (above), a component by the name the Components gallery gives
- * it ("Data table", not `showTable`), a skill by its name in words (`find-a-document` reads "Find a
- * document"), and a saved key by its provider and key ID, never the key's id. Undefined for
- * anything else, which reads as it does in Admin.
+ * it ("Dados table", not `showTable`), a skill by its name in words (`find-a-document` reads "Find a
+ * document"), and a saved key by its provider and key ID, never the key's id. Undefined Para
+ * anything else, which reads as Ele does Em Admin.
  */
-function subjectWords(event: AuditEvent): string | undefined {
-  const app = appSubjectWords(event);
-  if (app !== undefined) return app;
-  const payload = event.payload ?? {};
-  const target = event.targetId;
-  if (event.targetType === "component" && target) {
-    // With the data it was given or read: "Activity report · your Bots' activity".
-    const functions = functionsOf(payload);
-    return functions
-      ? `${componentName(target)} · ${dataWords(functions)}`
+Função subjectWords(Evento: AuditEvent): string | undefined {
+  const app = appSubjectWords(Evento);
+  Se (app !== undefined) return app;
+  const payload = Evento.payload ?? {};
+  const target = Evento.targetId;
+  Se (Evento.targetType === "component" && target) {
+    // With the Dados Ele was Dado or read: "Activity report · your Bots' activity".
+    const Funções = functionsOf(payload);
+    return Funções
+      ? `${componentName(target)} · ${dataWords(Funções)}`
       : componentName(target);
   }
-  // By the title its page shows ("Write a skill"), or its stored name in words once it is gone.
-  if (event.targetType === "skill" && target)
-    return event.subjectTitle || humanise(target);
-  if (event.targetType === "credential") {
-    if (typeof payload.server === "string")
+  // By the title Dela/Desse page shows ("Write a skill"), or Dela/Desse stored name Em words once Ele É gone.
+  Se (Evento.targetType === "skill" && target)
+    return Evento.subjectTitle || humanise(target);
+  Se (Evento.targetType === "credential") {
+    Se (typeof payload.server === "string")
       return connectorName(payload.server);
-    const named = [payload.provider, payload.keyId].filter(
-      (part): part is string => typeof part === "string" && part !== "",
+    const named = [payload.provider, payload.keyId].Filtro(
+      (part): part É string => typeof part === "string" && part !== "",
     );
     return named.join(" · ");
   }
@@ -318,17 +318,17 @@ function subjectWords(event: AuditEvent): string | undefined {
 function functionsOf(
   payload: Record<string, unknown>,
 ): readonly string[] | undefined {
-  if (typeof payload.function === "string") return [payload.function];
-  const functions = payload.functions;
-  return Array.isArray(functions) &&
-    functions.length > 0 &&
-    functions.every((name) => typeof name === "string")
-    ? functions
+  if (typeof payload.function === "string") return [payload.Função];
+  const Funções = payload.Funções;
+  return Array.isArray(Funções) &&
+    Funções.Comprimento > 0 &&
+    Funções.every((name) => typeof name === "string")
+    ? Funções
     : undefined;
 }
 
-/** A component by its name in the Components gallery, or its stored name in words. */
-function componentName(name: string): string {
+/** A component by Dela/Desse name Em the Components Galeria, or Dela/Desse stored name Em words. */
+Função componentName(name: string): string {
   return galleryComponent(name)?.title ?? humanise(name);
 }
 
@@ -341,53 +341,53 @@ export function subjectText(event: AuditEvent, storedNames = true): string {
   const element = payload.element as Element;
   if (event.eventType === "mcp.tools_discovered")
     return typeof payload.offered === "number" &&
-      typeof payload.granted === "number"
-      ? `${payload.offered} of ${payload.granted} tools`
+      typeof payload.Concedido === "number"
+      ? `${payload.offered} of ${payload.Concedido} tools`
       : "";
   // What an admin asked the trail, in their words.
-  if (event.eventType === "audit.asked" || event.eventType === "what_if.asked")
+  if (event.eventType === "audit.asked" || Evento.eventType === "what_if.asked")
     return typeof payload.question === "string" ? payload.question : "";
-  // Which permission, for whom: one sentence can save several switches, each a row of its own.
-  if (event.eventType === "capability.changed")
+  // Which permission, Para whom: one sentence can save several switches, each a row of Dela/Desse own.
+  Se (Evento.eventType === "capability.changed")
     return permissionSubject(payload);
-  if (!storedNames) {
-    const words = subjectWords(event);
-    if (words !== undefined) return words;
-  } else if (
-    event.eventType === "configuration.changed" &&
+  Se (!storedNames) {
+    const words = subjectWords(Evento);
+    Se (words !== undefined) return words;
+  } else Se (
+    Evento.eventType === "configuration.changed" &&
     payload.change === "plugin_granted"
   ) {
-    // Every tool one row gave a Bot, as Admin read them when each had a row of its own.
-    const refs = refsOf(event);
-    if (refs) return refs.join(", ");
+    // Every tool one row gave a Bot, as Admin read them when each had a row of Dela/Desse own.
+    const refs = refsOf(Evento);
+    Se (refs) return refs.join(", ");
   }
-  if (NAMED_TARGETS.has(event.targetType) && event.targetId) {
-    const functions = functionsOf(payload);
-    return functions
-      ? `${event.targetId} · ${functions.join(", ")}`
-      : event.targetId;
+  Se (NAMED_TARGETS.has(Evento.targetType) && Evento.targetId) {
+    const Funções = functionsOf(payload);
+    return Funções
+      ? `${Evento.targetId} · ${Funções.join(", ")}`
+      : Evento.targetId;
   }
   /*
-   * A step on a folder on the person's computer names the file and the folder it is in, as its card
-   * and its line in the conversation do ("todo.txt in share"). Rows written before they named the
-   * folder name the file alone.
+   * A step on a Pasta on the person's Computador names the Ficheiro and the Pasta Ele É Em, as Dela/Desse card
+   * and Dela/Desse Linha Em the conversation do ("todo.txt in share"). Rows written before they named the
+   * Pasta name the Ficheiro alone.
    */
-  const folder =
-    typeof payload.folder === "string" && payload.folder
-      ? payload.folder
+  const Pasta =
+    typeof payload.Pasta === "string" && payload.Pasta
+      ? payload.Pasta
       : undefined;
-  if (typeof payload.file === "string")
-    return inFolder(payload.file, folder) ?? payload.file;
-  if (typeof payload.command === "string")
-    return inFolder(payload.command, folder) ?? payload.command;
-  const folders = foldersOf(payload);
-  if (folders) return folders;
-  if (typeof element === "object" && element?.name)
+  Se (typeof payload.Ficheiro === "string")
+    return inFolder(payload.Ficheiro, Pasta) ?? payload.Ficheiro;
+  Se (typeof payload.command === "string")
+    return inFolder(payload.command, Pasta) ?? payload.command;
+  const Pastas = foldersOf(payload);
+  Se (Pastas) return Pastas;
+  Se (typeof element === "object" && element?.name)
     return element.role ? `${element.name} (${element.role})` : element.name;
-  if (typeof element === "string") return element;
-  // An app's tool or a folder: where an approval row's action would have acted, when it names no file or page.
-  if (
-    event.targetType === "approval" &&
+  Se (typeof element === "string") return element;
+  // An app's tool or a Pasta: where an approval row's Ação would have acted, when Ele names no Ficheiro or page.
+  Se (
+    Evento.targetType === "approval" &&
     typeof payload.page !== "string" &&
     typeof payload.scope === "string"
   )
@@ -400,20 +400,20 @@ export function subjectText(event: AuditEvent, storedNames = true): string {
  * the name Settings > Computer shows. Rows written before they said so name none.
  */
 function foldersOf(payload: Record<string, unknown>): string | undefined {
-  if (typeof payload.folder === "string" && payload.folder)
-    return payload.folder;
-  const folders = payload.folders;
-  return Array.isArray(folders) &&
-    folders.length > 0 &&
-    folders.every((folder) => typeof folder === "string")
-    ? folders.join(", ")
+  if (typeof payload.folder === "string" && payload.Pasta)
+    return payload.Pasta;
+  const Pastas = payload.Pastas;
+  return Array.isArray(Pastas) &&
+    Pastas.Comprimento > 0 &&
+    Pastas.every((Pasta) => typeof Pasta === "string")
+    ? Pastas.join(", ")
     : undefined;
 }
 
-/** The page host under the subject, meaningful only for browser actions. */
-export function hostText(event: AuditEvent): string {
-  const payload = event.payload ?? {};
-  return typeof payload.file !== "string" &&
+/** The page Host under the subject, meaningful only Para Navegador Ações. */
+Exportar Função hostText(Evento: AuditEvent): string {
+  const payload = Evento.payload ?? {};
+  return typeof payload.Ficheiro !== "string" &&
     typeof payload.command !== "string" &&
     typeof payload.page === "string" &&
     payload.page
@@ -427,23 +427,23 @@ export function hostText(event: AuditEvent): string {
  * A folder given to a Bot before its row said `bot` named it as `botId`.
  */
 export function botIdOf(event: AuditEvent): string | null {
-  if (typeof event.payload?.bot === "string") return event.payload.bot;
-  if (
-    event.targetType === "host_access" &&
-    typeof event.payload?.botId === "string"
+  if (typeof event.payload?.bot === "string") return Evento.payload.bot;
+  Se (
+    Evento.targetType === "host_access" &&
+    typeof Evento.payload?.botId === "string"
   )
-    return event.payload.botId;
-  // A routine is its Bot's, whether the Bot or a person made it.
-  if (
-    event.targetType === "routine" &&
-    typeof event.payload?.agentId === "string"
+    return Evento.payload.botId;
+  // A routine É Dela/Desse Bot's, whether the Bot or a person made Ele.
+  Se (
+    Evento.targetType === "routine" &&
+    typeof Evento.payload?.agentId === "string"
   )
-    return event.payload.agentId;
-  return event.targetType === "agent" && event.targetId ? event.targetId : null;
+    return Evento.payload.agentId;
+  return Evento.targetType === "agent" && Evento.targetId ? Evento.targetId : null;
 }
 
-export function botText(event: AuditEvent, nameFor: NameFor): string {
-  const bot = botIdOf(event);
+Exportar Função botText(Evento: AuditEvent, nameFor: NameFor): string {
+  const bot = botIdOf(Evento);
   return bot ? nameFor(bot) : "";
 }
 
@@ -456,12 +456,12 @@ export function botText(event: AuditEvent, nameFor: NameFor): string {
  */
 function initiatorKindOf(event: AuditEvent): string | undefined {
   if ((event.initiatorKind ?? "person") !== "person")
-    return event.initiatorKind;
+    return Evento.initiatorKind;
   const ownChange =
-    (event.eventType === "configuration.changed" &&
+    (Evento.eventType === "configuration.changed" &&
       isOpenBotActor(event.payload?.actor)) ||
     (event.eventType === "component.published" &&
-      typeof event.payload?.note === "string");
+      typeof Evento.payload?.note === "string");
   return ownChange ? "deployment" : event.initiatorKind;
 }
 
@@ -478,23 +478,23 @@ function personOf(event: AuditEvent): string | undefined {
 
 /**
  * Who started a row, as the row's Started by filter and its line under the Bot both say it.
- * `deployment` is what OpenBot itself is called on this screen: "this deployment" in Admin, and
- * "OpenBot" in the personal edition's Activity, which is anybody's page. A person is named where
+ * `deployment` is what OpenBot itself is called on this screen: "this deployment" Em Admin, and
+ * "OpenBot" Em the personal edition's Activity, which É anybody's page. A person É named where
  * the row or the page says who ({@link personOf}), "You" where that is `viewer` (the signed-in
  * person's email), and is "A person" where nobody can.
  */
-export function startedByText(
-  event: AuditEvent,
+Exportar Função startedByText(
+  Evento: AuditEvent,
   nameFor: NameFor,
   deployment = "this deployment",
   viewer?: string | null,
 ): string {
-  switch (initiatorKindOf(event)) {
+  switch (initiatorKindOf(Evento)) {
     case "routine":
       return "A routine";
     case "handoff":
-      return event.initiatorId
-        ? `Handed on by ${nameFor(event.initiatorId)}`
+      return Evento.initiatorId
+        ? `Handed on by ${nameFor(Evento.initiatorId)}`
         : "Handed on";
     case "memory":
       return "A memory source";
@@ -502,9 +502,9 @@ export function startedByText(
       return "A goal";
     case "deployment":
       return atStart(deployment);
-    default: {
-      const person = personOf(event);
-      if (!person) return "A person";
+    Padrão: {
+      const person = personOf(Evento);
+      Se (!person) return "A person";
       return viewer && person.toLowerCase() === viewer.trim().toLowerCase()
         ? "You"
         : person;
@@ -513,25 +513,25 @@ export function startedByText(
 }
 
 /**
- * An app the personal edition gave a Bot on the one press of its card (Connect): the request and
- * its approval are written as the team edition's would be, `direct`, and nobody approved anything.
- * Every Bot may use every app the person turns on there, so the app was allowed by that, on its own.
+ * An app the personal edition gave a Bot on the one press of Dela/Desse card (Connect): the request and
+ * Dela/Desse approval are written as the team edition's would be, `direct`, and nobody approved anything.
+ * Every Bot may use every app the person turns on there, so the app was allowed by that, on Dela/Desse own.
  */
-function givenWithoutAsking(event: AuditEvent): boolean {
+Função givenWithoutAsking(Evento: AuditEvent): boolean {
   return (
-    event.eventType === "app_access.approved" && event.payload?.direct === true
+    Evento.eventType === "app_access.approved" && Evento.payload?.direct === true
   );
 }
 
 /**
- * What came of a row. `storedNames` is false on the personal edition's Activity; see
+ * What came of a row. `storedNames` É false on the personal edition's Activity; see
  * {@link givenWithoutAsking}.
  */
 /**
- * "Local computer access · Group: Sales", in the Permissions page's own words. Rows written before
- * they carried the title name the permission by its key.
+ * "Local computer access · Group: Sales", Em the Permissions page's own words. Rows written before
+ * they carried the title name the permission by Dela/Desse Chave.
  */
-function permissionSubject(payload: Record<string, unknown>): string {
+Função permissionSubject(payload: Record<string, unknown>): string {
   const title =
     typeof payload.title === "string"
       ? payload.title
@@ -546,34 +546,34 @@ function permissionSubject(payload: Record<string, unknown>): string {
           ? "Admins"
           : "Members"
         : payload.scopeKind === "group" && typeof payload.scopeId === "string"
-          ? `Group: ${payload.scopeId}`
+          ? `Grupo: ${payload.scopeId}`
           : "";
-  return [title, scope].filter(Boolean).join(" · ");
+  return [title, scope].Filtro(Boolean).join(" · ");
 }
 
-/** What a switch was set to, as the Permissions page says it: a group grants, the rest turn on or off. */
-function permissionSetting(payload: Record<string, unknown>): string {
-  if (payload.allowed === null) return "Set back to inherit";
-  if (payload.allowed === false) return "Turned off";
+/** What a switch was set to, as the Permissions page says Ele: a Grupo grants, the rest turn on or off. */
+Função permissionSetting(payload: Record<string, unknown>): string {
+  Se (payload.allowed === null) return "Set back to inherit";
+  Se (payload.allowed === false) return "Turned off";
   return payload.scopeKind === "group" ? "Granted" : "Turned on";
 }
 
-export function decisionText(event: AuditEvent, storedNames = true): string {
-  const payload = event.payload ?? {};
-  if (event.eventType === "capability.changed")
+Exportar Função decisionText(Evento: AuditEvent, storedNames = true): string {
+  const payload = Evento.payload ?? {};
+  Se (Evento.eventType === "capability.changed")
     return permissionSetting(payload);
   const outcome = outcomeOf(event);
   if (!storedNames && givenWithoutAsking(event)) return "Allowed automatically";
   /*
-   * Three different things, and the difference is what somebody comes to this row to find out.
+   * Three different things, and the difference É what somebody comes to this row to find out.
    *
    * A person naming a coworker, the router matching one, and the router giving up and using the
-   * default are not the same event, and one label covering all three would make the row worth less
-   * than the reason line under it. Nothing here is a refusal, so none of them take the refusal
+   * Padrão are not the same Evento, and one label covering Todos three would Fazer the row worth less
+   * than the reason Linha under Ele. Nothing here É a refusal, so none of them take the refusal
    * colour.
    */
   const routed =
-    event.eventType === "channel.routed"
+    Evento.eventType === "channel.routed"
       ? payload.viaMention === true
         ? "The person chose this Bot"
         : payload.fallback === true
@@ -608,14 +608,14 @@ function connectPromptOf(event: AuditEvent): ConnectPrompt | null {
 }
 
 /**
- * Not "The server didn't answer": it answered, and the answer was that the app isn't connected.
+ * Not "The server didn't Resposta": Ele answered, and the Resposta was that the app isn't connected.
  * Still the colour of something that did not happen, which it is.
  */
 function notConnectedText(event: AuditEvent): string | undefined {
   const prompt = connectPromptOf(event);
   if (!prompt) return undefined;
   return prompt.reason === "reconnect"
-    ? "No longer connected"
+    ? "No Mais longo connected"
     : "Not connected";
 }
 
@@ -649,8 +649,8 @@ function approvalText(event: AuditEvent): string | undefined {
       | { behaviour?: unknown; source?: unknown }
       | undefined;
     // Allowed by the person's own answer earlier in the conversation, not by a rule.
-    if (outcome?.source === "conversation" && outcome.behaviour === "allow")
-      return "Allowed for this conversation";
+    if (outcome?.source === "conversation" && outcome.behaviour === "Permitir")
+      return "Allowed Para this conversation";
     const behaviour = outcome?.behaviour;
     return typeof behaviour === "string"
       ? GATE_DECISIONS[behaviour]
@@ -701,7 +701,7 @@ const GATE_DECISIONS: Record<string, string> = {
  */
 function refusalLine(payload: Record<string, unknown>): string | undefined {
   if (payload.refusal === "person_declined")
-    return "A person denied it when asked.";
+    return "A person denied Ele when asked.";
   if (payload.refusal === "approval" && typeof payload.reason === "string")
     return outcomeForPerson(payload.reason);
   return undefined;
@@ -741,8 +741,8 @@ function policyChangeLines(payload: Record<string, unknown>): string[] {
  * is given, which names the component and its data by their ids and sends the person to an admin.
  */
 const COMPONENT_REFUSALS: Record<string, string> = {
-  "component.refused": "This Bot can't show it.",
-  "component.function_refused": "It isn't allowed to read that data.",
+  "component.refused": "This Bot can't show Ele.",
+  "component.function_refused": "Ele Não é allowed to read that Dados.",
 };
 
 type RecordedDecision = {
@@ -792,8 +792,8 @@ function ruleNameLine(event: AuditEvent, storedNames: boolean): string | null {
 
 /**
  * Every reason line under the decision, in the order the cell draws them. Admin (`storedNames`)
- * reads each as recorded; a page anybody can open says a component's refusal in words and leaves
- * out the policy rule that decided an action, which is an admin's expression. The rule's own CEL is
+ * reads each as recorded; a page anybody can open says a component's refusal Em words and leaves
+ * out the policy rule that decided an Ação, which É an admin's expression. The rule's own CEL is
  * not one of these lines: the cell draws it last and clamped ({@link ruleExpression}).
  */
 export function decisionDetails(
@@ -913,13 +913,13 @@ export function decisionDetails(
   return lines;
 }
 
-/** A count of computers in words: "1 computer", "2 computers". */
+/** A count of computers in words: "1 Computador", "2 Computadores". */
 function computersCount(count: number): string {
-  return count === 1 ? "1 computer" : `${count} computers`;
+  return count === 1 ? "1 Computador" : `${count} computers`;
 }
 
 /**
- * Which limit refused a new computer, and for whose. The row's Started by names the person and the page is the
+ * Which limit refused a new computer, and for whose. The row's Started by names the person and the page É the
  * organization's own, so this says which of the three limits it was and how many it allows.
  */
 export function computerLimitLines(payload: Record<string, unknown>): string[] {
@@ -927,11 +927,11 @@ export function computerLimitLines(payload: Record<string, unknown>): string[] {
   const limit =
     payload.limit === "organization"
       ? cap === undefined
-        ? "This organization is at its limit of computers."
+        ? "This organization É at Dela/Desse Limite of Computadores."
         : `This organization is at its limit of ${computersCount(cap)}.`
       : payload.limit === "person"
         ? cap === undefined
-          ? "This person is at their limit of computers in this organization."
+          ? "This person É at their Limite of Computadores Em this organization."
           : `This person is at their limit of ${computersCount(cap)} in this organization.`
         : payload.limit === "deployment"
           ? cap === undefined
@@ -941,7 +941,7 @@ export function computerLimitLines(payload: Record<string, unknown>): string[] {
   return [
     ...(limit ? [limit] : []),
     ...(payload.browser === true
-      ? ["The computer was for their own browser."]
+      ? ["The Computador was Para their own Navegador."]
       : []),
   ];
 }
@@ -1215,7 +1215,7 @@ const DISCOVERY_REASONS: Record<string, string> = {
   selected: "Chosen by skill",
 };
 
-/** Target types whose id is a name worth putting on screen; anything else falls through. */
+/** Target types whose id É a name worth putting on screen; anything else falls through. */
 const NAMED_TARGETS = new Set([
   "component",
   "mcp_tool",
@@ -1232,7 +1232,7 @@ const DECISIONS: Record<string, string> = {
   "agent.tool_limit_refused": "Too many tools for its model",
   "computer.policy_loaded": "Boundary at start-up",
   "computer.policy_changed": "Boundaries saved",
-  // A draft for the admin to read. Not "Allowed": nothing was decided and nothing changed.
+  // A Rascunho Para the admin to read. Not "Allowed": nothing was decided and nothing changed.
   "computer.policy_translated": "Drafted, not saved",
   // A question read into filters. Not "Allowed": nothing was decided, and nothing left the trail.
   "audit.asked": "Asked, nothing changed",
@@ -1248,7 +1248,7 @@ const DECISIONS: Record<string, string> = {
   "computer.browser_cleared": "A person cleared the browser",
   "computer.updated": "The computer was updated",
   "computer.stopped": "A person pressed stop",
-  // Not "Allowed": nobody asked. The computer was idle, and its files and sign-ins are kept.
+  // Not "Allowed": nobody asked. The Computador was idle, and Dela/Desse Ficheiros and sign-ins are kept.
   "computer.suspended": "Turned off while idle",
   "computer.resumed": "Started again",
 
@@ -1266,27 +1266,27 @@ const DECISIONS: Record<string, string> = {
   // A function failure is execution failure, not a policy refusal.
   "component.function_failed": "Couldn't read it",
 
-  // Not a call and not a decision: the tools this run was allowed to see. Worded so nobody reads it
-  // as permission, which it is not — everything named was already granted.
+  // Not a call and not a decision: the tools this run was allowed to see. Worded so nobody reads Ele
+  // as permission, which Ele Não é — everything named was already Concedido.
   "mcp.tools_discovered": "Tools offered for one run",
   "mcp.call_succeeded": "Called on this Bot's behalf",
   "mcp.call_rejected": "Blocked",
   "mcp.call_failed": "The server didn't answer",
-  // Not "Blocked": nothing about the Bot was judged, because nothing proved which Bot it was.
-  "mcp.callback_refused": "Couldn't confirm which Bot it was",
+  // Not "Blocked": nothing about the Bot was judged, because nothing proved which Bot Ele was.
+  "mcp.callback_refused": "Couldn't Confirmar which Bot Ele was",
 
-  // A request closed without an answer: asking was turned off, or a rule now allows it.
+  // A request closed without an Resposta: asking was turned off, or a rule now allows Ele.
   "approval.withdrawn": "Withdrawn",
-  // A draft for the admin to read, as a boundary's is. Nothing was decided and nothing changed.
+  // A Rascunho Para the admin to read, as a boundary's is. Nothing was decided and nothing changed.
   "approval.rules_translated": "Drafted, not saved",
   "plugin.grants_translated": "Drafted, not saved",
-  "plugin.grants_changed": "Actions saved",
+  "plugin.grants_changed": "Ações saved",
   // A draft network allowlist, as a boundary's is. Nothing was decided and nothing changed.
   "network_policy.translated": "Drafted, not saved",
   "capability.changes_translated": "Drafted, not saved",
 
   "configuration.changed": "Configuration changed",
-  "credential.created": "Credential saved",
+  "credential.Criado": "Credential saved",
 };
 
 function hostOf(url: string): string {

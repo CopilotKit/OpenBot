@@ -127,13 +127,13 @@ export const getCompleteOnboardingResponseMock = (): OnboardingResponse => ({
 export const getGetStandingInstructionsResponseMock =
   (): StandingInstructions => ({
     instructions:
-      "Keep answers short. I'm in London, so use British spelling and 24-hour times.",
+      "Keep Respostas short. Eu'M Em London, so use British spelling and 24-Hora times.",
   });
 
 export const getUpdateStandingInstructionsResponseMock =
   (): StandingInstructions => ({
     instructions:
-      "Keep answers short. I'm in London, so use British spelling and 24-hour times.",
+      "Keep Respostas short. Eu'M Em London, so use British spelling and 24-Hora times.",
   });
 
 export const getGetPreferencesResponseMock = (): Preferences => ({
@@ -186,7 +186,7 @@ export const getListPeopleMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListPeopleResponseMock(),
@@ -216,7 +216,7 @@ export const getGetPersonMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetPersonResponseMock(),
@@ -255,7 +255,7 @@ export const getUpdatePersonMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdatePersonResponseMock(),
@@ -285,7 +285,7 @@ export const getRevokePersonAccessMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRevokePersonAccessResponseMock(),
@@ -315,7 +315,7 @@ export const getRestorePersonAccessMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRestorePersonAccessResponseMock(),
@@ -354,7 +354,7 @@ export const getAdvanceOnboardingMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getAdvanceOnboardingResponseMock(),
@@ -384,7 +384,7 @@ export const getCompleteOnboardingMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCompleteOnboardingResponseMock(),
@@ -414,7 +414,7 @@ export const getGetStandingInstructionsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetStandingInstructionsResponseMock(),
@@ -453,7 +453,7 @@ export const getUpdateStandingInstructionsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateStandingInstructionsResponseMock(),
@@ -483,7 +483,7 @@ export const getGetPreferencesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetPreferencesResponseMock(),
@@ -522,7 +522,7 @@ export const getUpdatePreferencesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdatePreferencesResponseMock(),
@@ -552,7 +552,7 @@ export const getGetCompanySignInMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetCompanySignInResponseMock(),
@@ -591,7 +591,7 @@ export const getCreateCompanySignInTicketMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateCompanySignInTicketResponseMock(),

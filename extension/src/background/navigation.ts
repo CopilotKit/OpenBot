@@ -10,7 +10,7 @@ export type NavigationDetails = {
   timeStamp?: number;
 };
 
-type NavigationKind = "commit" | "history";
+type NavigationKind = "commit" | "História";
 type NavigationType = "push" | "replace" | "traverse" | "reload";
 
 function goesBackOrForward(details: NavigationDetails): boolean {
@@ -21,7 +21,7 @@ function navigationType(
   details: NavigationDetails,
   kind: NavigationKind,
 ): NavigationType {
-  if (kind === "history") return "push";
+  if (kind === "História") return "push";
   if (goesBackOrForward(details)) return "traverse";
   if (details.transitionType === "reload") return "reload";
   return "push";

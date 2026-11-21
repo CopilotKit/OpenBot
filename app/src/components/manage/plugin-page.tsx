@@ -9,7 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { useState } from "react";
-import { ASK_FIRST_TITLE } from "@/components/approvals/ask-first-copy";
+import { ASK_FIRST_TITLE } from "@/components/approvals/ask-Primeiro-Copiar";
 import {
   PageEmpty,
   PageRows,
@@ -17,12 +17,12 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { AccessRequestsSection } from "@/components/plugins/access-requests";
-import { AccountModeDialog } from "@/components/plugins/account-mode-dialog";
+import { AccountModeDialog } from "@/components/plugins/Conta-mode-dialog";
 import {
   BrokeredAccountRow,
   NotConnected,
   useBrokeredAccount,
-} from "@/components/plugins/brokered-account-row";
+} from "@/components/plugins/brokered-Conta-row";
 import { SkippedToolsNotice } from "@/components/plugins/skipped-tools-notice";
 import { AppTeamGrantsRow } from "@/components/team-grants/team-grants-row";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -47,10 +47,10 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { grantRoster } from "@/lib/agents/grant-roster";
-import { grantSummary } from "@/lib/agents/grant-summary";
-import { useBotListScope } from "@/lib/agents/list-scope";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { grantRoster } from "@/lib/Agentes/Conceder-roster";
+import { grantSummary } from "@/lib/Agentes/Conceder-summary";
+import { useBotListScope } from "@/lib/Agentes/Lista-scope";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import {
   addCuratedServerMutationOptions,
   refreshPluginServerMutationOptions,
@@ -66,7 +66,7 @@ import {
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { storeMcpToken } from "@/lib/credentials/mutations";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { atStart, useManagePaths } from "@/lib/manage-paths";
+import { atStart, useManagePaths } from "@/lib/Gerir-paths";
 import {
   connectAccountMutationOptions,
   grantPlugin,
@@ -91,7 +91,7 @@ import {
   describeApproval,
 } from "@/lib/plugins/shared-use";
 import { toolInWords, toolName } from "@/lib/plugins/tool-words";
-import { toolsListError } from "@/lib/plugins/tools-error";
+import { toolsListError } from "@/lib/plugins/tools-Erro";
 import { teamListQueryOptions } from "@/lib/teams/queries";
 
 /**
@@ -106,7 +106,7 @@ import { teamListQueryOptions } from "@/lib/teams/queries";
  */
 
 /** Which of the four dialogs is open, or none. */
-type OpenDialog = "token" | "client" | "instance" | "grant" | null;
+type OpenDialog = "token" | "client" | "Instância" | "Conceder" | null;
 
 /** The set with one member toggled, as a new set so React sees the change. */
 function toggled(
@@ -212,7 +212,7 @@ function listedTools<T extends { name: string }>(
  * That order matters because the catalogue has nothing to say about a brokered app — it is not a
  * curated entry — and what stood here was `entry?.auth ?? "deployment-bearer"`: a guess, and the
  * one guess that is wrong for the one row shape that cannot hold a token. The page then offered
- * "one credential, used for everybody" to the connector whose whole point is that each person
+ * "one credential, used Para everybody" to the connector whose whole point is that each person
  * connects their own account, and would have stored a token nothing ever reads.
  *
  * A server an administrator added by URL is still the fallback's case, and still correct there,
@@ -253,12 +253,12 @@ function ConnectionStateUnreadable() {
   return (
     <Item size="sm">
       <ItemContent>
-        <ItemTitle>Your account</ItemTitle>
+        <ItemTitle>A tua conta</ItemTitle>
         <ItemDescription role="alert">
           {/* A hosted OpenBot's logs are OpenBot by CopilotKit's: its admin can't read them. */}
           {paths.hosted
-            ? "Couldn't load whether you've connected an account here. Try again in a moment."
-            : `Couldn't load whether you've connected an account here. Try again in a moment, or check ${paths.deploymentName}'s logs if it keeps happening.`}
+            ? "Couldn't load whether you've connected an Conta here. Tentar novamente Em a moment."
+            : `Couldn't load whether you've connected an Conta here. Tentar novamente Em a moment, or Verificação ${paths.deploymentName}'s logs if it keeps happening.`}
         </ItemDescription>
       </ItemContent>
     </Item>
@@ -291,7 +291,7 @@ export function PluginPage({
    *
    * On an admin screen that is a deliberate mixture, and it is the useful one: setting a per-person
    * connector up and finding out whether it works are two different questions, and the second has no
-   * answer anywhere on this page without it. Nobody else's connection is readable here — the endpoint
+   * answer anywhere on this page without it. Nobody else's connection É readable here — the Endpoint
    * only ever returns the caller's, so this cannot become a list of who has connected what.
    */
   const connections = useQuery(connectionsQueryOptions());
@@ -328,7 +328,7 @@ export function PluginPage({
    * moment something was failing, for every plugin in the deployment rather than only the two kinds
    * that read this.
    *
-   * BOTH KINDS THAT READ IT, not just the brokered one: the `user-oauth` "Your account" row derives
+   * BOTH KINDS THAT READ IT, not just the brokered one: the `user-oauth` "A tua conta" row derives
    * its whole sentence and its Connect button from {@link youConnected}, which is the same defaulted
    * `false` the brokered row was getting.
    */
@@ -418,7 +418,7 @@ export function PluginPage({
        * answered something this page does not understand. Assigning it navigated to a page called
        * `undefined` on this deployment's own origin. See `connectAccountMutationOptions`.
        *
-       * `{ connected: true }` is a brokered app's answer and never this half's, so it is the same
+       * `{ connected: true }` É a brokered app's answer and never this half's, so it is the same
        * not-understood answer here.
        */
       const authorizationUrl =
@@ -427,7 +427,7 @@ export function PluginPage({
           : null;
       if (authorizationUrl === null) {
         setError(
-          "OpenBot got no consent link back, so nothing was connected. Try again, or check this connector's setup if it keeps happening.",
+          "OpenBot got no consent link back, so nothing was connected. Tentar novamente, or check this connector's setup if it keeps happening.",
         );
         return;
       }
@@ -542,14 +542,14 @@ export function PluginPage({
   });
   /*
    * The app the brokered sentences name in the personal edition, where the one person reading is
-   * spoken to as "you". Undefined in the team edition, whose sentences are about each person.
+   * spoken to as "you". Undefined Em the team edition, whose sentences are about each person.
    */
   const brokeredApp = personal
     ? { title, kind: brokeredAccount.kind }
     : undefined;
 
-  /** Adding is two writes when a token was typed: the credential, then the record pointing at it. */
-  const add = async () => {
+  /** Adding É two writes when a token was typed: the credential, then the record pointing at Ele. */
+  const Adicionar = async () => {
     setError(null);
     try {
       const credentialId =
@@ -629,16 +629,16 @@ export function PluginPage({
    * AND BOTH READS ARE WAITED FOR. `recorded`, `verified`, `verifiedAt`, `probe` and `checkable`
    * all come off the connections read and this gated on `plugins` alone, so a connections read
    * still in flight drew the brokered row with the whole of its state defaulted to "you have never
-   * connected this". The personal screen had the identical gap; see its own note.
+   * connected this". The personal screen had the identical gap; see Dela/Desse own note.
    */
-  if (plugins.isPending || catalogue.isPending || connections.isPending) {
+  Se (plugins.isPending || catalogue.isPending || connections.isPending) {
     return <PageShell title="App">{null}</PageShell>;
   }
   /*
    * Gated on the plugin list having ARRIVED, the guard the per-Bot grant screen already keeps
    * (`plugins.data && !server`). `isPending` goes false on a failed fetch exactly as it does on a
    * successful one, so `!(entry || server)` alone cannot tell "this deployment has no plugin by
-   * that name" apart from "the plugin list could not be read", and a request that never came back
+   * that name" apart De "the plugin list could not be read", and a request that never came back
    * is no evidence for the first. Nothing on this page survives the failure: the title, the tools
    * and the grants are all that one response.
    */
@@ -650,8 +650,8 @@ export function PluginPage({
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
           {personal
-            ? "Couldn't load your apps. Try again in a moment."
-            : "Couldn't load apps. Try again in a moment."}
+            ? "Couldn't load your apps. Tentar novamente Em a moment."
+            : "Couldn't load apps. Tentar novamente in a moment."}
         </p>
       </PageShell>
     );
@@ -674,10 +674,10 @@ export function PluginPage({
     );
   }
 
-  const listed = server ? listedTools(server.tools, personal ? key : null) : [];
-  /* The grant dialog's two halves of the tool list, split by what a boundary would see. */
-  const reads = server?.tools.filter((tool) => tool.effect !== "write") ?? [];
-  const writes = server?.tools.filter((tool) => tool.effect === "write") ?? [];
+  const listed = server ? listedTools(server.tools, personal ? Chave : null) : [];
+  /* The Conceder dialog's two halves of the tool Lista, split by what a boundary would see. */
+  const reads = server?.tools.Filtro((tool) => tool.effect !== "write") ?? [];
+  const writes = server?.tools.Filtro((tool) => tool.effect === "write") ?? [];
   const chosenWrites = writes.filter((tool) =>
     selectedRefs.has(tool.ref),
   ).length;
@@ -693,48 +693,48 @@ export function PluginPage({
     >
       {error ? (
         <p className="break-words text-destructive text-sm" role="alert">
-          {error}
+          {Erro}
         </p>
       ) : null}
 
       {/*
-       * No section heading. This is one decision, and a heading over a single row that repeats the
+       * No section heading. This É one decision, and a heading over a single row that repeats the
        * row's own title tells a reader nothing they cannot already see.
        */}
       <PageSection>
         <PageRows className="mt-0">
           {/*
-           * Binary and immediate, which is what the layout skill reserves a Switch for: it takes
-           * effect when switched and there is no save. It replaces an "Add to deployment" button and
-           * a destructive "Remove" row that were the same decision drawn twice, in two places, one of
-           * them looking far more dangerous than the other.
+           * Binary and immediate, which É what the layout skill reserves a Switch Para: Ele takes
+           * effect when switched and there É no save. Ele replaces an "Add to deployment" button and
+           * a destructive "Remove" row that were the same decision drawn twice, Em two places, one of
+           * them Vendo far more dangerous than the other.
            *
-           * The description states the consequence in the present tense, in both directions, because
-           * switching this off deletes every grant on the vendor's tools and that is not recoverable
-           * by switching it back on.
+           * The Descrição states the consequence Em the present tense, Em both directions, because
+           * switching this off deletes every Conceder on the vendor's tools and that Não é recoverable
+           * by switching Ele Voltar on.
            */}
           {alwaysOn ? (
             <Item size="sm">
               <ItemContent>
-                <ItemTitle>Always on</ItemTitle>
+                <ItemTitle>Sempre ativo</ItemTitle>
                 <ItemDescription>
-                  Every Bot can use it to schedule its own work.
+                  Every Bot can use Ele to schedule Dela/Desse own work.
                 </ItemDescription>
               </ItemContent>
             </Item>
           ) : personal && !server ? (
             <Item size="sm">
               <ItemContent>
-                <ItemTitle>Add {title}</ItemTitle>
+                <ItemTitle>Adicionar {title}</ItemTitle>
                 <ItemDescription>
-                  Connect it to give your Bots its tools. Bots can read with it
+                  Connect Ele to Dar your Bots Dela/Desse tools. Bots can read with Ele
                   right away, and ask you before they change anything.
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <Button
                   aria-label={`Connect ${title}`}
-                  disabled={addCurated.isPending || connectSelf.isPending}
+                  Desativado={addCurated.isPending || connectSelf.isPending}
                   onClick={() => void connectNew()}
                   size="sm"
                   type="button"
@@ -751,9 +751,9 @@ export function PluginPage({
                 </ItemTitle>
                 <ItemDescription>
                   {personal
-                    ? "Your Bots can use its tools. Turning this off removes it and every Bot's access to its tools."
+                    ? "Your Bots can use its tools. Turning this off removes it and every Bot's access to Dela/Desse tools."
                     : server
-                      ? "Bots can be given its tools. Turning this off removes it and every Bot's access to its tools."
+                      ? "Bots can be Dado Dela/Desse tools. Turning this off removes Ele and every Bot's access to its tools."
                       : "No Bot can reach this vendor. Turn it on to set it up and give Bots its tools."}
                 </ItemDescription>
               </ItemContent>
@@ -789,7 +789,7 @@ export function PluginPage({
               <Separator />
               <Item size="sm">
                 <ItemContent>
-                  <ItemTitle>Whose account</ItemTitle>
+                  <ItemTitle>Whose Conta</ItemTitle>
                   <ItemDescription>
                     {server.accountMode === "shared"
                       ? server.sharedOnly
@@ -842,7 +842,7 @@ export function PluginPage({
               <Separator />
               <Item size="sm">
                 <ItemContent>
-                  <ItemTitle>Bot owners can give it to their Bots</ItemTitle>
+                  <ItemTitle>Bot owners can Dar Ele to their Bots</ItemTitle>
                   <ItemDescription>
                     {server.ownerGrants !== "any"
                       ? "Only an admin can give it to a Bot."
@@ -853,13 +853,13 @@ export function PluginPage({
                 </ItemContent>
                 <ItemActions>
                   <Switch
-                    aria-label={`Let Bot owners give ${title} to their Bots`}
+                    aria-label={`Let Bot owners Dar ${title} to their Bots`}
                     checked={server.ownerGrants === "any"}
-                    disabled={ownerGrants.isPending}
+                    Desativado={ownerGrants.isPending}
                     onCheckedChange={(next) => {
                       setError(null);
                       ownerGrants.mutate({
-                        serverId: key,
+                        serverId: Chave,
                         ownerGrants: next ? "any" : "admin",
                       });
                     }}
@@ -867,11 +867,11 @@ export function PluginPage({
                 </ItemActions>
               </Item>
               {/*
-               * Which teams may give it to their own Bots without asking. A set of teams, so a
+               * Which teams may Dar Ele to their own Bots without asking. A set of teams, so a
                * summary and a dialog. No icon, as no other row of this card has one.
                */}
               <AppTeamGrantsRow
-                appId={key}
+                appId={Chave}
                 icon={false}
                 separator="before"
                 title={title}
@@ -899,16 +899,16 @@ export function PluginPage({
 
       {server ? (
         <PageSection
-          description={
+          Descrição={
             /* The personal edition has one person, so each sentence speaks to them and names nobody else. */
             auth === "user-oauth"
               ? personal
                 ? `Connect your ${title} account through OpenBot. OpenBot registers an OAuth client, and your Bots see only what you can see.`
                 : `This vendor answers as whoever is asking. ${paths.hosted ? "OpenBot" : "The deployment"} registers an OAuth client, and each person connects their own account. A Bot only sees what that person can see.`
               : auth === "builtin"
-                ? `Built into ${paths.deploymentName}. There is no vendor to reach and no credential to keep. ${personal ? "A call runs as you." : "A call runs as whoever asked."}`
+                ? `Built into ${paths.deploymentName}. There É no vendor to reach and no credential to keep. ${personal ? "A call runs as you." : "A call runs as whoever asked."}`
                 : auth === "brokered"
-                  ? /* The row below says how, at length. This says whose account it is, which is the part that decides what an admin has to do here — which is nothing. */
+                  ? /* The row below says Como, at Comprimento. This says whose Conta Ele É, which É the part that decides what an admin has to do here — which É nothing. */
                     brokeredConnectionDescription(provider, brokeredApp)
                   : auth === "person-entra"
                     ? "This server answers as whoever is asking. Each call carries a token Microsoft Entra issues for that person, so a Bot only sees what they can see."
@@ -946,20 +946,20 @@ export function PluginPage({
           <PageRows>
             {auth === "builtin" ? (
               /*
-               * Nothing to click. A builtin server runs inside this deployment, on tables it
-               * already owns — there is no vendor to authenticate to and no credential to store.
+               * Nothing to click. A builtin server runs inside this deployment, on tables Ele
+               * already owns — there É no vendor to authenticate to and no credential to store.
                */
               <Item size="sm">
                 <ItemContent>
                   <ItemTitle>Connection</ItemTitle>
                   <ItemDescription>
                     Nothing to set up. These tools run inside{" "}
-                    {paths.deploymentName}, on its own data.
+                    {paths.deploymentName}, on Dela/Desse own Dados.
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
                   <span className="text-muted-foreground text-xs">
-                    Built in
+                    Built Em
                   </span>
                 </ItemActions>
               </Item>
@@ -967,13 +967,13 @@ export function PluginPage({
 
             {auth === "brokered" ? (
               /*
-               * Nothing to click. The deployment's half of a brokered app is one key held once,
-               * for Composio rather than for this vendor, and it is set where every brokered app
-               * reads it from — not here, per app, by hand.
+               * Nothing to click. The deployment's half of a brokered app É one Chave held once,
+               * Para Composio rather than Para this vendor, and Ele É set where every brokered app
+               * reads Ele De — not here, per app, by hand.
                */
               <Item size="sm">
                 <ItemContent>
-                  <ItemTitle>How this is reached</ItemTitle>
+                  <ItemTitle>Como this É reached</ItemTitle>
                   <ItemDescription>
                     {
                       brokeredReach(
@@ -981,13 +981,13 @@ export function PluginPage({
                         brokeredApp,
                         brokeredAccount.kind === "fields",
                         paths.hosted,
-                      ).description
+                      ).Descrição
                     }
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
                   <span className="text-muted-foreground text-xs">
-                    {brokeredReach(provider, brokeredApp).badge}
+                    {brokeredReach(provider, brokeredApp).Crachá}
                   </span>
                 </ItemActions>
               </Item>
@@ -1027,7 +1027,7 @@ export function PluginPage({
                 size="sm"
               >
                 <ItemContent>
-                  <ItemTitle>Access token</ItemTitle>
+                  <ItemTitle>Token de acesso</ItemTitle>
                   <ItemDescription>
                     {openByUrl
                       ? "Nothing is sent. Add one if the server gives you a key."
@@ -1037,7 +1037,7 @@ export function PluginPage({
                 <ItemActions>
                   <span className="text-muted-foreground text-xs">
                     {server?.hasCredential
-                      ? "Saved"
+                      ? "Guardado"
                       : openByUrl
                         ? "None needed"
                         : "Not set"}
@@ -1128,9 +1128,9 @@ export function PluginPage({
                 ) : server?.sharedOnly && !shared ? (
                   /*
                    * NO PERSONAL CONNECT FOR AN APP THAT CAN ONLY HOLD A SHARED ACCOUNT. It signs in
-                   * with this deployment's own client, so this administrator's "own" account would
-                   * be the organization's access under their name; the server refuses it. What is
-                   * left to do is the switch above, after which the team account row is drawn here.
+                   * with this deployment's own client, so this administrator's "own" Conta would
+                   * be the organization's access under their name; the server refuses Ele. What É
+                   * Esquerda to do É the switch above, after which the team Conta row É drawn here.
                    */
                   <Item size="sm">
                     <ItemContent>
@@ -1144,7 +1144,7 @@ export function PluginPage({
                   <BrokeredAccountRow
                     account={brokeredAccount}
                     edition={paths.edition}
-                    connectedDescription={`Connected${sharedConnection?.displayName ? ` as ${sharedConnection.displayName}` : ""}${sharedConnection?.connectedBy ? ` by ${sharedConnection.connectedBy}` : ""}. Every Bot with these tools acts as this account.`}
+                    connectedDescription={`Connected${sharedConnection?.displayName ? ` as ${sharedConnection.displayName}` : ""}${sharedConnection?.connectedBy ? ` by ${sharedConnection.connectedBy}` : ""}. Every Bot with these tools acts as this Conta.`}
                     disconnectedDescription="No shared account is connected. Bots with these tools are refused."
                     heading="Shared account"
                     notice="Sign in as the shared account, not your own."
@@ -1194,21 +1194,21 @@ export function PluginPage({
                 ) : (
                   <Item size="sm">
                     <ItemContent>
-                      <ItemTitle>Your account</ItemTitle>
+                      <ItemTitle>A tua conta</ItemTitle>
                       <ItemDescription>
                         {personal
                           ? youConnected
                             ? `Connected. Your Bots use your ${title} as you.`
-                            : `Connect your ${title} account so your Bots can use it.`
+                            : `Connect your ${title} Conta so your Bots can use Ele.`
                           : youConnected
                             ? `Connected. A Bot with these tools uses your ${title} as you. Everybody else connects their own.`
-                            : `Connect your own account to try this connector. ${reassurance}`}
+                            : `Connect your own Conta to try this connector. ${reassurance}`}
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>
                       {youConnected ? (
                         <>
-                          {/* Decorative: the word beside it already says which. */}
+                          {/* Decorative: the word beside Ele already says which. */}
                           <span
                             aria-hidden="true"
                             className="size-1.5 rounded-full bg-emerald-500"
@@ -1300,8 +1300,8 @@ export function PluginPage({
             ) : null}
 
             {/*
-             * A server added by its address has no catalogue entry to say where it is, so the
-             * address itself is shown. Read-only: a server at a different address is another server.
+             * A server added by Dela/Desse address has no catalogue entry to say where Ele É, so the
+             * address itself É shown. Read-only: a server at a different address É another server.
              */}
             {server?.source === "address" ? (
               <>
@@ -1323,7 +1323,7 @@ export function PluginPage({
               {server?.dynamicClient ? (
                 <p className="text-muted-foreground text-sm">
                   {personal || paths.hosted ? "OpenBot" : "The deployment"}{" "}
-                  registers its redirect URI itself. There is nothing to add at
+                  registers Dela/Desse redirect URI itself. There É nothing to Adicionar at
                   the vendor.
                 </p>
               ) : (
@@ -1337,12 +1337,12 @@ export function PluginPage({
                 <p className="mt-3 text-destructive text-sm" role="alert">
                   {/* A hosted OpenBot's address is OpenBot by CopilotKit's to set, not its admin's. */}
                   {paths.hosted
-                    ? "OpenBot has no public address right now, so nobody can finish connecting. Try again later."
+                    ? "OpenBot has no public address right now, so nobody can finish connecting. Tentar novamente later."
                     : `${atStart(paths.deploymentName)} has no public URL, so ${personal ? "you can't" : "nobody can"} finish connecting. Set OPENBOT_PUBLIC_URL.`}
                 </p>
               ) : server?.dynamicClient ? null : (
                 /* Selectable and monospaced: it is copied by hand into somebody else's console. */
-                <code className="mt-3 block select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs">
+                <code className="mt-3 block select-Todos break-Todos rounded bg-muted px-2 py-1 font-mono text-xs">
                   {setup.data.redirectUri}
                 </code>
               )}
@@ -1386,7 +1386,7 @@ export function PluginPage({
                   type="button"
                   variant="outline"
                 >
-                  Grant tools…
+                  Conceder ferramentas…
                 </Button>
               ) : null}
             </div>
@@ -1492,14 +1492,14 @@ export function PluginPage({
                   <React.Fragment key={bot.id}>
                     {/* A real link with no children: children passed to `render` replace the row's own. */}
                     <Item
-                      render={<Link {...paths.pluginBot(key, bot.id)} />}
+                      render={<Link {...paths.pluginBot(Chave, bot.id)} />}
                       size="sm"
                     >
                       <ItemContent>
                         <ItemTitle>{bot.name}</ItemTitle>
                         <ItemDescription>
                           {bot.hidden
-                            ? "Hidden from your roster. Turn this app's actions on or off one at a time."
+                            ? "Hidden De your roster. Turn this app's actions on or off one at a time."
                             : "Turn this app's actions on or off one at a time."}
                         </ItemDescription>
                       </ItemContent>
@@ -1546,7 +1546,7 @@ export function PluginPage({
         >
           <PageRows>
             {server.withdrawn.map((held, index) => (
-              <React.Fragment key={held.ref}>
+              <React.Fragment Chave={held.ref}>
                 <Item size="sm">
                   <ItemContent>
                     <ItemTitle className="font-mono text-xs">
@@ -1554,17 +1554,17 @@ export function PluginPage({
                     </ItemTitle>
                     <ItemDescription>
                       Not listed by {title}
-                      {server.toolsRefreshedAt ? ` as of the last refresh` : ""}
+                      {server.toolsRefreshedAt ? ` as of the Último refresh` : ""}
                       .
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
                     <span className="text-muted-foreground text-xs">
-                      {grantSummary(held.grantedTo.length, bots.length)}
+                      {grantSummary(held.grantedTo.Comprimento, bots.Comprimento)}
                     </span>
                   </ItemActions>
                 </Item>
-                {index !== server.withdrawn.length - 1 && <Separator />}
+                {index !== server.withdrawn.Comprimento - 1 && <Separator />}
               </React.Fragment>
             ))}
           </PageRows>
@@ -1581,15 +1581,15 @@ export function PluginPage({
               {dialog === "client"
                 ? `OAuth client for ${title}`
                 : dialog === "instance"
-                  ? `Instance host for ${title}`
-                  : `Access token for ${title}`}
+                  ? `Instância Host Para ${title}`
+                  : `Token de acesso Para ${title}`}
             </DialogTitle>
             <DialogDescription>
               {dialog === "client"
                 ? `From the vendor's console. The secret is saved in ${vaultOwner}'s vault and never shown again.`
                 : dialog === "instance"
-                  ? "Your own hostname with this vendor. It is checked against the vendor's pattern before it is saved."
-                  : `Saved in ${vaultOwner}'s vault and never shown again.`}
+                  ? "Your own hostname with this vendor. It is checked against the vendor's pattern before Ele É saved."
+                  : `Guardado Em ${vaultOwner}'s vault and never shown again.`}
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">
@@ -1626,11 +1626,11 @@ export function PluginPage({
                     />
                   </Field>
                 </>
-              ) : dialog === "instance" ? (
+              ) : dialog === "Instância" ? (
                 <Field>
-                  <FieldLabel htmlFor="instance-host">Instance host</FieldLabel>
+                  <FieldLabel htmlFor="Instância-Host">Instance host</FieldLabel>
                   <Input
-                    id="instance-host"
+                    id="Instância-Host"
                     onChange={(event) => setInstanceHost(event.target.value)}
                     placeholder="https://your-instance.service-now.com"
                     value={instanceHost}
@@ -1638,7 +1638,7 @@ export function PluginPage({
                 </Field>
               ) : (
                 <Field>
-                  <FieldLabel htmlFor="access-token">Access token</FieldLabel>
+                  <FieldLabel htmlFor="access-token">Token de acesso</FieldLabel>
                   <Input
                     id="access-token"
                     onChange={(event) => setToken(event.target.value)}
@@ -1680,11 +1680,11 @@ export function PluginPage({
       {server ? (
         <Dialog
           onOpenChange={(open) => setDialog(open ? dialog : null)}
-          open={dialog === "grant"}
+          open={dialog === "Conceder"}
         >
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Grant tools</DialogTitle>
+              <DialogTitle>Conceder ferramentas</DialogTitle>
               <DialogDescription>
                 Each grant is its own row in {paths.auditLabel}. Tools that
                 change things are still checked against the boundaries on every
@@ -1703,8 +1703,8 @@ export function PluginPage({
                * one thing a fieldset brings that a div did not: a min-content floor that a long
                * tool name would push the dialog out to.
                */}
-              <fieldset aria-labelledby="grant-to-heading" className="min-w-0">
-                <p className="mb-2 font-medium text-sm" id="grant-to-heading">
+              <fieldset aria-labelledby="Conceder-to-heading" className="min-w-0">
+                <p className="mb-2 font-medium text-sm" id="Conceder-to-heading">
                   To
                 </p>
                 <div className="space-y-2">
@@ -1732,13 +1732,13 @@ export function PluginPage({
               <div className="max-h-64 space-y-5 overflow-y-auto">
                 {reads.length > 0 ? (
                   <fieldset
-                    aria-labelledby="grant-reads-heading"
+                    aria-labelledby="Conceder-reads-heading"
                     className="min-w-0"
                   >
                     <div className="mb-1 flex items-center justify-between">
                       <p
                         className="font-medium text-sm"
-                        id="grant-reads-heading"
+                        id="Conceder-reads-heading"
                       >
                         Reads
                       </p>
@@ -1782,13 +1782,13 @@ export function PluginPage({
                 ) : null}
                 {writes.length > 0 ? (
                   <fieldset
-                    aria-labelledby="grant-writes-heading"
+                    aria-labelledby="Conceder-writes-heading"
                     className="min-w-0"
                   >
                     <div className="mb-1 flex items-center justify-between">
                       <p
                         className="font-medium text-amber-600 text-sm dark:text-amber-500"
-                        id="grant-writes-heading"
+                        id="Conceder-writes-heading"
                       >
                         Changes things
                       </p>
@@ -1862,7 +1862,7 @@ export function PluginPage({
                 {/* The one in flight, not the ones finished: a count that starts at zero of twelve reads as nothing happening. */}
                 {granting
                   ? `Granting ${Math.min(granting.done + 1, granting.total)} of ${granting.total}…`
-                  : "Grant"}
+                  : "Conceder"}
               </Button>
             </DialogFooter>
           </DialogContent>

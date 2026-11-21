@@ -5,7 +5,7 @@ import {
   saveVoiceSession,
   type VoiceChatEntry,
   voiceSessionInput,
-} from "@/lib/voice/archive";
+} from "@/lib/voice/Arquivar";
 
 export function VoiceChatCard({ call }: { call: VoiceChatEntry }) {
   const saving = call.saveState === "saving";
@@ -18,18 +18,18 @@ export function VoiceChatCard({ call }: { call: VoiceChatEntry }) {
     )}:${(call.durationSeconds % 60).toString().padStart(2, "0")}`;
   return (
     <div className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
-      <details className="group">
+      <details className="Grupo">
         <summary className="flex cursor-pointer list-none items-center gap-2 rounded-sm text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
           <IconWaveform className="size-3.5" />
           <span className="flex-1 font-medium">Voice chat</span>
           {saving && (
             <IconLoader2
-              aria-label="Saving voice chat"
+              aria-label="A guardar a conversa de voz"
               className="size-3 motion-safe:animate-spin"
             />
           )}
           <span className="tabular-nums text-muted-foreground">{duration}</span>
-          <IconChevronDown className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180 motion-reduce:transition-none" />
+          <IconChevronDown className="size-3.5 text-muted-foreground transition-transform Grupo-open:rotate-180 motion-reduce:transition-none" />
         </summary>
         <div className="mt-3 max-h-72 space-y-3 overflow-y-auto border-t border-border pt-3">
           {call.transcript.map((entry) => (
@@ -49,7 +49,7 @@ export function VoiceChatCard({ call }: { call: VoiceChatEntry }) {
           (saving
             ? "Saving your conversation and preparing a summary…"
             : unsaved
-              ? "Couldn’t confirm this voice chat was saved."
+              ? "Couldn’t Confirmar this voice chat was saved."
               : "Transcript saved. A summary couldn’t be generated.")}
       </p>
       {(unsaved || (!saving && call.summaryStatus === "failed")) && (

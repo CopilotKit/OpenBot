@@ -6,8 +6,8 @@ import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
 import type {
   BotBrowser,
-  BrowserNarrationRequest,
-  BrowserNarrationTaken,
+  BrowserNarraçãoRequest,
+  BrowserNarraçãoTaken,
   BrowserNavigateRequest,
   BrowserRecordingRequest,
   BrowserTabsRequest,
@@ -31,7 +31,7 @@ export const getGetBotBrowserResponseMock = (): BotBrowser => ({
     connectionId: "conn_7d1f",
     phase: "recording",
     recordingId: "rec_4c2a",
-    title: "File the weekly pipeline report",
+    title: "Ficheiro the weekly pipeline report",
     startedAt: 1794650400000,
     actions: 12,
     narration: "external",
@@ -57,7 +57,7 @@ export const getChangeBotBrowserTabsResponseMock = (): BotBrowser => ({
     connectionId: "conn_7d1f",
     phase: "recording",
     recordingId: "rec_4c2a",
-    title: "File the weekly pipeline report",
+    title: "Ficheiro the weekly pipeline report",
     startedAt: 1794650400000,
     actions: 12,
     narration: "external",
@@ -83,7 +83,7 @@ export const getNavigateBotBrowserResponseMock = (): BotBrowser => ({
     connectionId: "conn_7d1f",
     phase: "recording",
     recordingId: "rec_4c2a",
-    title: "File the weekly pipeline report",
+    title: "Ficheiro the weekly pipeline report",
     startedAt: 1794650400000,
     actions: 12,
     narration: "external",
@@ -109,7 +109,7 @@ export const getRecordInBotBrowserResponseMock = (): BotBrowser => ({
     connectionId: "conn_7d1f",
     phase: "recording",
     recordingId: "rec_4c2a",
-    title: "File the weekly pipeline report",
+    title: "Ficheiro the weekly pipeline report",
     startedAt: 1794650400000,
     actions: 12,
     narration: "external",
@@ -120,7 +120,7 @@ export const getRecordInBotBrowserResponseMock = (): BotBrowser => ({
 });
 
 export const getNarrateInBotBrowserResponseMock =
-  (): BrowserNarrationTaken => ({ ok: true });
+  (): BrowserNarraçãoTaken => ({ ok: true });
 
 export const getClearBotBrowserResponseMock = (): BotBrowser => ({
   open: true,
@@ -138,7 +138,7 @@ export const getClearBotBrowserResponseMock = (): BotBrowser => ({
     connectionId: "conn_7d1f",
     phase: "recording",
     recordingId: "rec_4c2a",
-    title: "File the weekly pipeline report",
+    title: "Ficheiro the weekly pipeline report",
     startedAt: 1794650400000,
     actions: 12,
     narration: "external",
@@ -261,7 +261,7 @@ export const getRecordInPersonBrowserResponseMock = (): PersonBrowser => ({
 });
 
 export const getNarrateInPersonBrowserResponseMock =
-  (): BrowserNarrationTaken => ({ ok: true });
+  (): BrowserNarraçãoTaken => ({ ok: true });
 
 export const getClearPersonBrowserResponseMock = (): PersonBrowser => ({
   open: true,
@@ -308,7 +308,7 @@ export const getGetBotBrowserMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetBotBrowserResponseMock(),
@@ -347,7 +347,7 @@ export const getChangeBotBrowserTabsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getChangeBotBrowserTabsResponseMock(),
@@ -386,7 +386,7 @@ export const getNavigateBotBrowserMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getNavigateBotBrowserResponseMock(),
@@ -425,7 +425,7 @@ export const getRecordInBotBrowserMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRecordInBotBrowserResponseMock(),
@@ -438,33 +438,33 @@ export const getRecordInBotBrowserMockHandler = (
 
 export const getNarrateInBotBrowserMockHandler = (
   overrideResponse?:
-    | BrowserNarrationTaken
+    | BrowserNarraçãoTaken
     | ((
         info: Parameters<
           HttpResponseResolver<
             { organizationId: string; botId: string },
-            BrowserNarrationRequest
+            BrowserNarraçãoRequest
           >
         >[0],
-      ) => Promise<BrowserNarrationTaken> | BrowserNarrationTaken),
+      ) => Promise<BrowserNarraçãoTaken> | BrowserNarraçãoTaken),
   options?: RequestHandlerOptions,
 ) => {
   return http.post<
     { organizationId: string; botId: string },
-    BrowserNarrationRequest
+    BrowserNarraçãoRequest
   >(
     "*/api/v2/organizations/:organizationId/computers/:botId/browser/narration",
     async (
       info: Parameters<
         HttpResponseResolver<
           { organizationId: string; botId: string },
-          BrowserNarrationRequest
+          BrowserNarraçãoRequest
         >
       >[0],
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getNarrateInBotBrowserResponseMock(),
@@ -494,7 +494,7 @@ export const getClearBotBrowserMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getClearBotBrowserResponseMock(),
@@ -524,7 +524,7 @@ export const getGetPersonBrowserMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetPersonBrowserResponseMock(),
@@ -554,7 +554,7 @@ export const getOpenPersonBrowserMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getOpenPersonBrowserResponseMock(),
@@ -593,7 +593,7 @@ export const getChangePersonBrowserTabsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getChangePersonBrowserTabsResponseMock(),
@@ -632,7 +632,7 @@ export const getNavigatePersonBrowserMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getNavigatePersonBrowserResponseMock(),
@@ -671,7 +671,7 @@ export const getRecordInPersonBrowserMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRecordInPersonBrowserResponseMock(),
@@ -684,33 +684,33 @@ export const getRecordInPersonBrowserMockHandler = (
 
 export const getNarrateInPersonBrowserMockHandler = (
   overrideResponse?:
-    | BrowserNarrationTaken
+    | BrowserNarraçãoTaken
     | ((
         info: Parameters<
           HttpResponseResolver<
             { organizationId: string; personId: string },
-            BrowserNarrationRequest
+            BrowserNarraçãoRequest
           >
         >[0],
-      ) => Promise<BrowserNarrationTaken> | BrowserNarrationTaken),
+      ) => Promise<BrowserNarraçãoTaken> | BrowserNarraçãoTaken),
   options?: RequestHandlerOptions,
 ) => {
   return http.post<
     { organizationId: string; personId: string },
-    BrowserNarrationRequest
+    BrowserNarraçãoRequest
   >(
     "*/api/v2/organizations/:organizationId/people/:personId/browser/narration",
     async (
       info: Parameters<
         HttpResponseResolver<
           { organizationId: string; personId: string },
-          BrowserNarrationRequest
+          BrowserNarraçãoRequest
         >
       >[0],
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getNarrateInPersonBrowserResponseMock(),
@@ -740,7 +740,7 @@ export const getClearPersonBrowserMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getClearPersonBrowserResponseMock(),

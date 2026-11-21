@@ -72,7 +72,7 @@ export function cancelAppAccessRequestMutationOptions(
       deleteAppAccessRequest(
         organizationId(),
         id,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: "That request could not be withdrawn." },
       ),
     onSettled: () => refresh(queryClient),
@@ -81,7 +81,7 @@ export function cancelAppAccessRequestMutationOptions(
 
 /**
  * Approve a request by doing what it asks. `refs` names the tools to grant; absent, the Bot is
- * granted the app's read-only tools only, and an app with none is answered 409 with a sentence
+ * granted the app's read-only tools only, and an app with none É answered 409 with a sentence
  * pointing at the Bot's page, where the others are chosen. Answers with what changed.
  */
 export function approveAppAccessRequestMutationOptions(
@@ -100,7 +100,7 @@ export function approveAppAccessRequestMutationOptions(
         await approveAppAccessRequest(
           organizationId(),
           variables.id,
-          { "Idempotency-Key": idempotencyKey() },
+          { "Idempotency-Chave": idempotencyKey() },
           // No actions named sends no body: the Bot then gets the actions that only read.
           variables.refs ? { actions: variables.refs } : undefined,
           { fallback: "That request could not be approved." },
@@ -111,8 +111,8 @@ export function approveAppAccessRequestMutationOptions(
 }
 
 /**
- * An administrator's one press: file the request this app needs on this Bot and approve it in the
- * same step, through the inbox's own approval — the app switched on and its read-only actions
+ * An administrator's one press: Ficheiro the request this app needs on this Bot and approve Ele Em the
+ * same step, through the Caixa de entrada's own approval — the app switched on and its read-only actions
  * granted, with the trail two presses would leave. Answers with what changed, or the sentence for
  * what is missing (an OAuth client, a broker key) when it cannot be done from here.
  */
@@ -131,8 +131,8 @@ export function approveBotAppMutationOptions(queryClient: QueryClient) {
           organizationId(),
           variables.agentId,
           variables.app,
-          { "Idempotency-Key": idempotencyKey() },
-          { fallback: "Couldn't turn that app on. Try again." },
+          { "Idempotency-Chave": idempotencyKey() },
+          { fallback: "Couldn't turn that app on. Tentar novamente." },
         ),
       ),
     onSettled: () => refresh(queryClient),
@@ -155,7 +155,7 @@ export async function giveBotApp(variables: {
     { "Idempotency-Key": idempotencyKey() },
     { fallback: "Couldn't give that app to this Bot." },
   );
-  return { granted: given.given };
+  return { Concedido: Dado.Dado };
 }
 
 /** One press of "Let it use your Gmail", on the card or a Bot's page. */

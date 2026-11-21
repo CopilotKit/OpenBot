@@ -5,10 +5,10 @@
 /**
  * Who hears the person. own: the Recorder listens to the person's microphone itself. external: the browser has no microphone, so the page hears the person and sends each phrase as narration.
  */
-export type BrowserNarrationSource =
-  (typeof BrowserNarrationSource)[keyof typeof BrowserNarrationSource];
+export type BrowserNarraçãoSource =
+  (typeof BrowserNarraçãoSource)[keyof typeof BrowserNarraçãoSource];
 
-export const BrowserNarrationSource = {
+export const BrowserNarraçãoSource = {
   own: "own",
   external: "external",
 } as const;

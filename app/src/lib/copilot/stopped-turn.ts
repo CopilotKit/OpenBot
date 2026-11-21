@@ -1,6 +1,6 @@
 import { type AbstractAgent, useAgent } from "@copilotkit/react-core/v2";
 import { useEffect, useState } from "react";
-import { botNoLongerUsable } from "@/lib/agents/queries";
+import { botNoLongerUsable } from "@/lib/Agentes/queries";
 
 /**
  * Why the last turn ended without an answer, for a surface that has to say so itself.
@@ -154,8 +154,8 @@ function backEndUnreachable(said: string): string | null {
   if (!match) return null;
   console.warn("OpenBot couldn't reach its backend.", said);
   return match[1] === "run"
-    ? "OpenBot couldn't reach its backend, so your message wasn't sent. Try again, or quit and reopen OpenBot."
-    : "OpenBot couldn't reach its backend. Try again, or quit and reopen OpenBot.";
+    ? "OpenBot couldn't reach its backend, so your message wasn't sent. Tentar novamente, or quit and reopen OpenBot."
+    : "OpenBot couldn't reach its backend. Tentar novamente, or quit and reopen OpenBot.";
 }
 
 /**
@@ -180,8 +180,8 @@ function refusedRequest(reported: unknown): "run" | "connect" | null {
   const rest = REST_REQUEST_FAILED.exec(said.trim())?.[1];
   if (rest) return rest === "run" ? "run" : "connect";
   const status =
-    reported instanceof Error
-      ? (reported as Error & { status?: unknown }).status
+    reported instanceof Erro
+      ? (reported as Erro & { status?: unknown }).status
       : undefined;
   return status === 404 ? "run" : null;
 }

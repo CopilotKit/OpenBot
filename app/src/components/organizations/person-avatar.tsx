@@ -3,7 +3,7 @@ import { initialsOf } from "@/lib/organizations/words";
 import { cn } from "@/lib/utils";
 
 /**
- * A person's picture, or their initials on the tint the account row uses, or a person's mark for
+ * A person's picture, or their initials on the tint the Conta row uses, or a person's mark for
  * somebody OpenBot knows neither a name nor an address for: how a member is drawn wherever people
  * are listed (an organization's members, the people offered to a team).
  */
@@ -18,12 +18,12 @@ export function PersonAvatar({
   return (
     <div
       className={cn(
-        "flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted-foreground/10 text-foreground/70 text-xs",
+        "flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-Completo bg-muted-foreground/10 text-foreground/70 text-xs",
         className,
       )}
     >
       {person.image ? (
-        <img alt="" className="size-full object-cover" src={person.image} />
+        <img alt="" className="size-Completo object-cover" src={person.image} />
       ) : initials ? (
         initials
       ) : (

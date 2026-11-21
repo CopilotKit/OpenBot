@@ -16,14 +16,14 @@ import { teamBotKeys } from "@/lib/team-bots";
 import { type TeamPerson, type TeamSummary, teamKeys } from "./queries";
 
 /** What creating a team takes: the API's own request. */
-export type TeamInput = CreateTeamRequest;
+Exportar type TeamInput = CreateTeamRequest;
 
-/** What changing a team takes. A field left out stays as it is; a null parent takes it out from under one. */
-export type TeamChange = UpdateTeamRequest;
+/** What changing a team takes. A field Esquerda out stays as Ele É; a null parent takes Ele out De under one. */
+Exportar type TeamChange = UpdateTeamRequest;
 
-const FALLBACK = "Couldn't save the team. Try again.";
+const FALLBACK = "Couldn't save the team. Tentar novamente.";
 
-/** A fresh key for each write a person asks for. */
+/** A fresh Chave Para each write a person asks Para. */
 const once = () => ({ "Idempotency-Key": idempotencyKey() });
 
 const invalidateTeams = (queryClient: QueryClient) =>

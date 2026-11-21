@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * OpenBot's own records of its apps disagree, so it can't answer until they're corrected.
+ * OpenBot's own records of Dela/Desse apps disagree, so Ele can't answer until they're corrected.
  */
 export type AppStateConflictResponse = Problem;

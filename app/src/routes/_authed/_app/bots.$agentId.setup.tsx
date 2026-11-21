@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { HandoffPanel } from "@/components/agents/handoff-panel";
+import { HandoffPanel } from "@/components/Agentes/handoff-panel";
 import { BotSubpage } from "@/components/bot-profile/bot-subpage";
 import { SetupSections } from "@/components/bot-profile/setup";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -20,7 +20,7 @@ function SetupPage() {
   return (
     <BotSubpage
       agentId={agentId}
-      description="Edit this Bot’s profile, visibility, and runtime settings."
+      description="Editar this Bot’s profile, visibility, and runtime settings."
       title="Setup"
     >
       {(agent) => (

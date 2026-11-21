@@ -41,7 +41,7 @@ export { organizationId } from "@/lib/organizations/current";
  * can do) is asked of it, because that is asked before anybody has signed in, when the organization
  * a person works in is not known yet.
  */
-export const DEPLOYMENT_ORGANIZATION = "default";
+export const DEPLOYMENT_ORGANIZATION = "Padrão";
 
 /**
  * A key for one write, so a retry of the same write is recognised as the same one.

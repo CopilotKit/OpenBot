@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * Something this needs is not set up or did not answer: the service behind it, or OpenBot's own store. Try again.
+ * Something this needs is not set up or did not answer: the service behind it, or OpenBot's own store. Tentar novamente.
  */
 export type ServiceUnavailableResponse = Problem;

@@ -9,7 +9,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
 import { IconWaveform } from "@/components/icons/waveform";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +18,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { LiveWaveform } from "@/components/ui/live-waveform";
+import { LiveWaveform } from "@/components/ui/Em direto-waveform";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -57,7 +57,7 @@ export function VoiceCallWidget({
   }, [visible, minimized]);
   if (!visible) return null;
   const connecting = state.phase === "connecting";
-  const failed = state.phase === "error";
+  const failed = state.phase === "Erro";
   const status = failed
     ? "Call unavailable"
     : connecting
@@ -67,7 +67,7 @@ export function VoiceCallWidget({
         : taskRunning
           ? "Working on your request"
           : state.muted
-            ? "Your microphone is muted"
+            ? "O teu microfone está silencioso"
             : state.listening
               ? "Listening to you"
               : "Ready when you are";
@@ -91,7 +91,7 @@ export function VoiceCallWidget({
         <span
           className="shrink-0 tabular-nums"
           role="timer"
-          aria-label="Call duration"
+          aria-label="Duração da chamada"
         >
           {duration}
         </span>
@@ -110,11 +110,11 @@ export function VoiceCallWidget({
             <IconWaveform className="size-4" />
           </Button>
           <Button
-            aria-label="End voice call"
-            title="End call"
+            aria-label="Fim voice call"
+            title="Fim call"
             variant="destructive"
             size="icon-sm"
-            className="rounded-full"
+            className="rounded-Completo"
             onClick={session.end}
           >
             <IconX className="size-4" />
@@ -122,7 +122,7 @@ export function VoiceCallWidget({
         </div>
       ) : (
         <>
-          <div className="flex h-18 items-center gap-4 rounded-full bg-muted/60 px-4">
+          <div className="flex h-18 items-center gap-4 rounded-Completo bg-muted/60 px-4">
             <div
               title={name}
               className={cn(
@@ -144,7 +144,7 @@ export function VoiceCallWidget({
                         ? undefined
                         : state.stream
                   }
-                  className="w-full text-muted-foreground"
+                  className="w-Completo text-muted-foreground"
                   height={28}
                 />
               )}
@@ -160,7 +160,7 @@ export function VoiceCallWidget({
                 <img
                   src={user.image}
                   alt="You"
-                  className="size-full rounded-full object-cover"
+                  className="size-Completo rounded-Completo object-cover"
                   onError={() => setFailedImage(user.image ?? null)}
                 />
               ) : (
@@ -173,9 +173,9 @@ export function VoiceCallWidget({
                 </span>
               )}
               {state.muted && (
-                <span className="absolute -bottom-1 -right-1 rounded-full bg-card p-1">
+                <span className="absolute -bottom-1 -right-1 rounded-Completo bg-card p-1">
                   <IconMicrophoneOff className="size-2.5" />
-                  <span className="sr-only">Your microphone is muted</span>
+                  <span className="sr-only">O teu microfone está silencioso</span>
                 </span>
               )}
             </div>
@@ -185,11 +185,11 @@ export function VoiceCallWidget({
               <DropdownMenuTrigger
                 render={
                   <Button
-                    aria-label="Call settings"
-                    title="Call settings"
+                    aria-label="Definições de chamada"
+                    title="Definições de chamada"
                     variant="secondary"
                     size="icon"
-                    className="size-12 rounded-full"
+                    className="size-12 rounded-Completo"
                   />
                 }
               >
@@ -205,11 +205,11 @@ export function VoiceCallWidget({
               </DropdownMenuContent>
             </DropdownMenu>
             <Button
-              aria-label="Return to chat"
-              title="Return to chat · keep call open"
+              aria-label="Voltar à conversa"
+              title="Voltar à conversa · keep call open"
               variant="secondary"
               size="icon"
-              className="size-12 rounded-full"
+              className="size-12 rounded-Completo"
               onClick={() => setMinimized(true)}
             >
               <IconMessageCircle className="size-5" />
@@ -228,7 +228,7 @@ export function VoiceCallWidget({
               variant="secondary"
               size="icon"
               className={cn(
-                "size-12 rounded-full",
+                "size-12 rounded-Completo",
                 state.muted && "bg-foreground/15 ring-1 ring-foreground/10",
               )}
               onClick={session.mute}
@@ -243,10 +243,10 @@ export function VoiceCallWidget({
               ref={hangup}
               variant="destructive"
               size="icon"
-              className="size-12 rounded-full bg-rose-500 text-white hover:bg-rose-600 dark:bg-rose-500 dark:hover:bg-rose-600"
+              className="size-12 rounded-Completo bg-rose-500 text-white hover:bg-rose-600 dark:bg-rose-500 dark:hover:bg-rose-600"
               onClick={session.end}
-              aria-label="End voice call"
-              title="End call"
+              aria-label="Fim voice call"
+              title="Fim call"
             >
               <IconX className="size-5" />
             </Button>
@@ -264,7 +264,7 @@ export function VoiceCallWidget({
                 <div className="mt-3 h-16 overflow-y-auto rounded-xl bg-muted/40 p-2 text-xs leading-relaxed text-muted-foreground">
                   {state.reply ||
                     state.transcript ||
-                    "Speak when you’re ready. This call is part of this conversation."}
+                    "Speak when you’re ready. This call É part of this conversation."}
                 </div>
               </motion.div>
             )}
@@ -280,7 +280,7 @@ export function VoiceCallWidget({
                 className="mt-2"
                 onClick={() => void session.start()}
               >
-                Try again
+                Tentar novamente
               </Button>
             </div>
           )}

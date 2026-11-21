@@ -31,7 +31,7 @@ export const getListBotsResponseMock = (): BotPage => ({
       name: "General Assistant",
       title: "Everyday Work",
       roleDescription:
-        "Help with everyday work using clear, concise, and accurate answers.",
+        "Ajuda with everyday work using clear, concise, and accurate Respostas.",
       avatarSeed: "general-assistant",
       visibility: "public",
       hidden: false,
@@ -89,7 +89,7 @@ export const getGetBotResponseMock = (): BotResponse => ({
     name: "General Assistant",
     title: "Everyday Work",
     roleDescription:
-      "Help with everyday work using clear, concise, and accurate answers.",
+      "Ajuda with everyday work using clear, concise, and accurate Respostas.",
     avatarSeed: "general-assistant",
     visibility: "public",
     hidden: false,
@@ -334,7 +334,7 @@ export const getGetBotLifecycleResponseMock = (): BotLifecycle => ({
   botId: "agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
   paused: false,
   pausedAt: null,
-  notify: "all",
+  notify: "Todos",
 });
 
 export const getPauseBotResponseMock = (): BotPause => ({
@@ -342,7 +342,7 @@ export const getPauseBotResponseMock = (): BotPause => ({
     botId: "agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
     paused: true,
     pausedAt: "2026-11-14T09:30:00.000Z",
-    notify: "all",
+    notify: "Todos",
   },
   stoppedTurns: 1,
 });
@@ -351,7 +351,7 @@ export const getResumeBotResponseMock = (): BotLifecycle => ({
   botId: "agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
   paused: false,
   pausedAt: null,
-  notify: "all",
+  notify: "Todos",
 });
 
 export const getResetBotResponseMock = (): BotReset => ({
@@ -375,7 +375,7 @@ export const getGetBotActivityResponseMock = (): BotActivity => ({
     {
       id: "run:run_51ac",
       kind: "routine",
-      title: "Morning inbox summary",
+      title: "Morning Caixa de entrada summary",
       detail: null,
       status: "running",
       at: "2026-11-14T09:00:00.000Z",
@@ -413,7 +413,7 @@ export const getListBotAttentionResponseMock = (): BotAttentionPage => ({
       handoffs: 0,
       unread: 2,
       paused: false,
-      notify: "all",
+      notify: "Todos",
       items: 0,
       tasks: { needsInput: 0, ready: 1, failed: 0 },
       waitingIn: "chn_2b7d",
@@ -438,7 +438,7 @@ export const getListBotsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListBotsResponseMock(),
@@ -468,7 +468,7 @@ export const getCreateBotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateBotResponseMock(),
@@ -498,7 +498,7 @@ export const getGetBotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetBotResponseMock(),
@@ -537,7 +537,7 @@ export const getUpdateBotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateBotResponseMock(),
@@ -565,7 +565,7 @@ export const getDeleteBotMockHandler = (
         HttpResponseResolver<{ organizationId: string; botId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -600,7 +600,7 @@ export const getTestBotConnectionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getTestBotConnectionResponseMock(),
@@ -630,7 +630,7 @@ export const getDuplicateBotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getDuplicateBotResponseMock(),
@@ -660,7 +660,7 @@ export const getHideBotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getHideBotResponseMock(),
@@ -690,7 +690,7 @@ export const getUnhideBotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUnhideBotResponseMock(),
@@ -720,7 +720,7 @@ export const getPinBotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getPinBotResponseMock(),
@@ -750,7 +750,7 @@ export const getUnpinBotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUnpinBotResponseMock(),
@@ -780,7 +780,7 @@ export const getIssueBotCallbackTokenMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getIssueBotCallbackTokenResponseMock(),
@@ -810,7 +810,7 @@ export const getRevokeBotCallbackTokenMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRevokeBotCallbackTokenResponseMock(),
@@ -844,7 +844,7 @@ export const getReportBotDeclineMockHandler = (
         >
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -873,7 +873,7 @@ export const getGetBotHandoffMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetBotHandoffResponseMock(),
@@ -903,7 +903,7 @@ export const getGetBotLifecycleMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetBotLifecycleResponseMock(),
@@ -933,7 +933,7 @@ export const getPauseBotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getPauseBotResponseMock(),
@@ -963,7 +963,7 @@ export const getResumeBotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getResumeBotResponseMock(),
@@ -999,7 +999,7 @@ export const getResetBotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getResetBotResponseMock(),
@@ -1029,7 +1029,7 @@ export const getGetBotActivityMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetBotActivityResponseMock(),
@@ -1066,7 +1066,7 @@ export const getStopBotHandoffMockHandler = (
         >
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -1095,7 +1095,7 @@ export const getListBotAttentionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListBotAttentionResponseMock(),

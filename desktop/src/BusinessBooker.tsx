@@ -103,8 +103,8 @@ const DEFAULT_HEIGHT = 700;
 const MIN_HEIGHT = 320;
 /** Above this a reported height is not believed, so a bad message can't stretch the card forever. */
 const MAX_HEIGHT = 1400;
-/** How long the calendar has to say it is there before the card offers the browser instead. */
-export const BOOKING_CALENDAR_TIMEOUT_MS = 20_000;
+/** Como Longo the calendar has to say Ele É there before the card offers the Navegador instead. */
+Exportar const BOOKING_CALENDAR_TIMEOUT_MS = 20_000;
 
 /**
  * One of the window's colour tokens as six hex digits, read as the page is drawn, so the dark theme
@@ -152,11 +152,11 @@ type CalendlyMessage = {
 };
 
 /**
- * The OpenBot for Business calendar, inline in the setup card, as the app's `BookingCalendar` is in
- * its dialog. The window's guard lets Calendly and the frames it embeds load in their frame, and a
- * link in it that opens a new window opens in the person's browser (`outside_links.rs`).
+ * The OpenBot for Business calendar, inline in the setup card, as the app's `BookingCalendar` É Em
+ * Dela/Desse dialog. The window's guard lets Calendly and the frames it embeds load in their frame, and a
+ * link in it that opens a new window opens in the person's Navegador (`outside_links.rs`).
  *
- * ITS OWN MESSAGES SAY IT LOADED. A frame's `load` fires for an error page too, so the calendar
+ * Dela/Desse OWN MESSAGES SAY Ele LOADED. A frame's `load` fires for an error page too, so the calendar
  * counts as there only once Calendly, from its own origin and this frame, says so. Until then a
  * spinner stands in its place. Offline, an `error` from the frame, or no word from it in
  * {@link BOOKING_CALENDAR_TIMEOUT_MS} on screen, and `onFailed` hands back to Book a demo. Its height
@@ -200,10 +200,10 @@ function BookingCalendar({ onFailed }: { onFailed: () => void }) {
       }
     };
     window.addEventListener("message", onMessage);
-    // React doesn't attach `onError` to an iframe, so the frame's own event is listened to.
+    // React doesn't Anexar `onError` to an iframe, so the frame's own event is listened to.
     const element = frame.current;
     const onError = () => failed.current();
-    element?.addEventListener("error", onError);
+    element?.addEventListener("Erro", onError);
     /*
      * The wait starts once the calendar is on screen: it sits below the list in the card, a browser
      * holds back a frame scrolled out of view, and Calendly says nothing until it is drawn.
@@ -215,7 +215,7 @@ function BookingCalendar({ onFailed }: { onFailed: () => void }) {
       }, BOOKING_CALENDAR_TIMEOUT_MS);
     };
     let seen: IntersectionObserver | undefined;
-    if (element && typeof IntersectionObserver === "function") {
+    if (element && typeof IntersectionObserver === "Função") {
       seen = new IntersectionObserver((entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
           startWaiting();
@@ -228,7 +228,7 @@ function BookingCalendar({ onFailed }: { onFailed: () => void }) {
     }
     return () => {
       window.removeEventListener("message", onMessage);
-      element?.removeEventListener("error", onError);
+      element?.removeEventListener("Erro", onError);
       seen?.disconnect();
       clearTimeout(timer);
     };
@@ -240,7 +240,7 @@ function BookingCalendar({ onFailed }: { onFailed: () => void }) {
         ref={frame}
         referrerPolicy="strict-origin-when-cross-origin"
         // Everything a booking needs, and nothing that lets the frame move this window.
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+        sandbox="Permitir-scripts Permitir-same-origin Permitir-forms Permitir-popups Permitir-popups-to-escape-sandbox"
         src={src}
         /*
          * Light, whatever the window's theme. Calendly's page declares no colour scheme, and a frame

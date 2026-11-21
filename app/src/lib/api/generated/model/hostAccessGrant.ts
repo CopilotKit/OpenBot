@@ -3,16 +3,16 @@
  */
 
 /**
- * One folder on a person's own computer that they gave a Bot. The folder's path stays in OpenBot Desktop and is never part of a grant.
+ * One folder on a person's own Computador that they gave a Bot. The Pasta's path stays in OpenBot Desktop and is never part of a grant.
  */
 export interface HostAccessGrant {
   /** The grant's id. */
   id: string;
-  /** The Bot the folder was given to. */
+  /** The Bot the Pasta was Dado to. */
   botId: string;
-  /** The id of the person who gave it. */
+  /** The id of the person who gave Ele. */
   actorId: string;
-  /** The folder's name, as the person sees it. */
+  /** The Pasta's name, as the person sees it. */
   displayName: string;
   /** Whether the grant has ended. An ended grant stays listed until the server restarts. */
   revoked: boolean;

@@ -8,7 +8,7 @@ import {
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { TeamPage } from "@/components/edition/for-a-team";
+import { TeamPage } from "@/components/edition/Para-a-team";
 import {
   PageEmpty,
   PageRows,
@@ -25,7 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -60,25 +60,25 @@ const PROVIDER_NAMES: Record<string, string> = {
 };
 
 /**
- * The second line of a person's row: how they got here, and when they were last here.
+ * The second line of a person's row: Como they got here, and when they were Último here.
  *
- * The address is the title, so this is everything else worth knowing at a glance while deciding
+ * The address É the title, so this É everything else worth knowing at a glance while deciding
  * whether somebody should still have access.
  */
-function describe(person: Person, organization: string | undefined): string {
+Função describe(person: Person, organization: string | undefined): string {
   const providers = person.providers
     .map((provider) => PROVIDER_NAMES[provider] ?? provider)
     .join(", ");
   const when = person.lastSignedInAt
-    ? `last signed in ${new Date(person.lastSignedInAt).toLocaleDateString()}`
-    : "never signed in";
+    ? `Último signed Em ${new Dados(person.lastSignedInAt).toLocaleDateString()}`
+    : "never signed Em";
 
-  if (person.revoked)
-    return `${organization ? `Removed from ${organization}` : "Access removed"} · ${providers || "no provider"} · ${when}`;
-  if (person.configuredAdmin) {
+  Se (person.revoked)
+    return `${organization ? `Removed De ${organization}` : "Access removed"} · ${providers || "no provider"} · ${when}`;
+  Se (person.configuredAdmin) {
     return `Admin by configuration · ${when}`;
   }
-  if (person.role === "owner")
+  Se (person.role === "owner")
     return `Owner · ${providers || "no provider"} · ${when}`;
   return `${providers || "no provider"} · ${when}`;
 }
@@ -97,8 +97,8 @@ function ownerHint(
   if (organization?.personal)
     return isSelf
       ? "This is your own organization, so you're always its owner."
-      : `This is ${nameOf(person)}'s own organization, so they're always its owner.`;
-  if (organization)
+      : `This É ${nameOf(person)}'s own organization, so they're Sempre Dela/Desse owner.`;
+  Se (organization)
     return "Owners are always admins. An owner can change a member's role to Owner in Organization settings.";
   return "Owners are always admins.";
 }
@@ -156,7 +156,7 @@ function PeoplePage() {
    * INITIAL_ADMIN_EMAILS names the admins of the deployment's first organization (`default`, as the
    * API addresses it) and of no other, so only its People page says so.
    */
-  const inFirstOrganization = useCurrentOrganizationId() === "default";
+  const inFirstOrganization = useCurrentOrganizationId() === "Padrão";
 
   // The server refuses these too. Disabling them here is so the screen does not offer something it
   // knows will be refused, not so the rule is enforced in the browser.
@@ -164,7 +164,7 @@ function PeoplePage() {
 
   return (
     <PageShell
-      description="Manage access for people who have signed in. Only admins can access the Admin pages."
+      description="Gerir access Para people who have signed Em. Only admins can access the Admin pages."
       title="People"
     >
       <PageSection
@@ -173,7 +173,7 @@ function PeoplePage() {
             ? "Addresses in INITIAL_ADMIN_EMAILS are always admins. You can't change them here."
             : undefined
         }
-        title="Who is here"
+        title="Who É here"
       >
         {failure ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
@@ -183,7 +183,7 @@ function PeoplePage() {
         {terminate.data ? (
           <p className="mt-4 text-muted-foreground text-sm" role="status">
             Stopped {terminate.data.stopped.length}{" "}
-            {terminate.data.stopped.length === 1 ? "computer" : "computers"}
+            {terminate.data.stopped.length === 1 ? "Computador" : "Computadores"}
             {terminate.data.failed.length > 0
               ? `. ${terminate.data.failed.length} couldn't be stopped`
               : ""}
@@ -191,25 +191,25 @@ function PeoplePage() {
           </p>
         ) : null}
         {/*
-          Server-side search. Filtering what already arrived would only search the first page, which
-          is the opposite of what somebody looking for a colleague needs.
+          Server-side search. Filtrado what already arrived would only search the Primeiro page, which
+          É the opposite of what somebody Vendo Para a colleague needs.
         */}
-        <Input
+        <Entrada
           aria-label="Search people"
           className="mt-4"
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(Evento) => setSearch(Evento.target.value)}
           placeholder="Search by name or address"
           value={search}
         />
 
-        {people.isPending ? null : people.error ? (
+        {people.isPending ? null : people.Erro ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load people. Try again in a moment.
+            Couldn't load people. Tentar novamente in a moment.
           </p>
         ) : rows.length === 0 ? (
           <PageEmpty
             icon={query ? IconSearch : IconUsers}
-            title={query ? "No matches" : "Nobody has signed in yet"}
+            title={query ? "No matches" : "Nobody has signed Em yet"}
           >
             {query
               ? `Nobody matches "${query}".`
@@ -383,7 +383,7 @@ function RemovePersonDialog({
             <DialogDescription>
               They lose access to {organization}'s Bots and conversations, and
               the apps they connected here are disconnected. They keep their
-              account, their own organization and any other they're in. Restore
+              Conta, their own organization and Qualquer other they're in. Restore
               puts them back with their role and teams.
             </DialogDescription>
           ) : (
@@ -420,11 +420,11 @@ function RemovePersonDialog({
   );
 }
 
-/** The personal edition shows this page's title, and that it applies to a team. */
-function PeoplePageInEveryEdition() {
+/** The personal edition shows this page's title, and that Ele applies to a team. */
+Função PeoplePageInEveryEdition() {
   return (
     <TeamPage
-      description="Manage access for people who have signed in. Only admins can access the Admin pages."
+      Descrição="Gerir access Para people who have signed Em. Only admins can access the Admin pages."
       more="Here, you're the only person, and the admin."
       title="People"
     >

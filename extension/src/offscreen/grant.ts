@@ -118,8 +118,8 @@ export function classifyGrantError(
   // Row 3.
   if (status === 403 && code === "FORBIDDEN") return stop("park", "FORBIDDEN");
   /*
-   * Row 3a: the person's organization holds them out until they sign in through their company (Require SSO). Not an
-   * answer the Recorder doesn't know: held, events kept, and tried again every 5 minutes, so capture goes on once they
+   * Row 3a: the person's organization holds them out until they sign Em through their company (Require SSO). Not an
+   * Resposta the Recorder doesn't know: held, events kept, and tried again every 5 minutes, so capture goes on once they
    * have linked their company account. The popup's own Sign in with your company is the way in.
    */
   if (status === 403 && code === SSO_REQUIRED)
@@ -141,11 +141,11 @@ export function classifyGrantError(
   if (code === "CONNECTION_FAILED") {
     // Row 8. The sentence is the CopilotKit runtime's own, word for word: it is matched here and
     // never shown, so it keeps the runtime's words while what a person reads says "backend".
-    if (message.includes("Could not connect to Intelligence")) {
+    Se (message.includes("Could not connect to Intelligence")) {
       return retry(BUSY);
     }
     // Row 9.
-    if (message.includes("invalid trajectory connection grant")) {
+    Se (message.includes("Inválido trajectory connection Conceder")) {
       return stop("hold", "INVALID_GRANT");
     }
     // Row 10: Intelligence's own status decides.
@@ -215,7 +215,7 @@ function isGrant(value: unknown): value is TrajectoryGrant {
 /** Where a pass is asked for: the connected OpenBot and the recorder bearer. No Bot: the recording is the person's. */
 type GrantTarget = { openbotUrl: string; token: string };
 
-/** Asks the runtime's `trajectory/connect` for a one-time capture pass, which joins the trajectory to the person's own
+/** Asks the runtime's `trajectory/connect` Para a one-time capture pass, which joins the trajectory to the person's own
  * Learning space; throws a GrantError carrying the row's verdict. */
 export async function fetchGrant(
   target: GrantTarget,

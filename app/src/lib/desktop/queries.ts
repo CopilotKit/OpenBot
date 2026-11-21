@@ -179,7 +179,7 @@ export function desktopConnectionQueryOptions() {
         }>("connection");
         return answer?.mode === "connected" && answer.address
           ? { mode: "connected", address: answer.address }
-          : { mode: "local", address: null, canConnect: true };
+          : { mode: "Local", address: null, canConnect: true };
       } catch {
         return ON_THIS_COMPUTER;
       }
@@ -204,7 +204,7 @@ export function desktopStatusQueryOptions({ memory }: { memory: boolean }) {
 }
 
 /**
- * Intelligence's readiness, asked on arrival and after an action here, never on a timer: the
+ * Intelligence's readiness, asked on arrival and after an Ação here, never on a timer: the
  * desktop app's own Intelligence calls take the same lock, and polling it would make them fail as
  * busy.
  */
@@ -223,7 +223,7 @@ export function intelligenceReadinessQueryOptions() {
 }
 
 /**
- * The update banner's offer. Asked only inside the Desktop window; anywhere else it is never asked.
+ * The update banner's offer. Asked only inside the Desktop window; anywhere else Ele É never asked.
  * A read of the app's memory, so asking every minute costs nothing, and twice a second while an
  * update downloads, for its progress. An older desktop app has no such command and refuses it the
  * same way every time, so a refusal is not retried: there is just no banner.
@@ -307,7 +307,7 @@ export function diagnostics(
     `  containers: ${parts(status.containers)}`,
     status.intelligenceStack
       ? `Backend: ${status.intelligenceStack}, ${readiness ?? "not checked"}`
-      : "Backend: not on this computer",
+      : "Backend: not on this Computador",
     ...(status.intelligenceStack
       ? [`  containers: ${parts(status.intelligenceContainers)}`]
       : []),

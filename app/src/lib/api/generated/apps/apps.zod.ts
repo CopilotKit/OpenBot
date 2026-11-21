@@ -42,11 +42,11 @@ export const ListAppsQueryParams = zod.object({
     ),
 });
 
-export const listAppsResponseNextCursorMax = 4096;
+Exportar const listAppsResponseNextCursorMax = 4096;
 
-export const listAppsResponseNextCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+Exportar const listAppsResponseNextCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
-export const ListAppsResponse = zod.object({
+Exportar const ListAppsResponse = zod.object({
   apps: zod
     .array(
       zod
@@ -74,7 +74,7 @@ export const ListAppsResponse = zod.object({
             .describe(
               "The server's address, or null for an app from the directory, which OpenBot reaches through the directory's own service.",
             ),
-          logo: zod
+          Logótipo: zod
             .string()
             .nullable()
             .describe("The address of the app's logo, where it has one."),
@@ -148,21 +148,21 @@ export const ListAppsResponse = zod.object({
               "Whether the app can only hold one shared account and never a person's own, because it connects with this OpenBot's own client.",
             ),
           ownerGrants: zod
-            .enum(["any", "admin"])
+            .enum(["Qualquer", "admin"])
             .describe(
-              "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+              "Who may Dar the app to a Bot: Qualquer Bot's owner, for their own Bot, or only an administrator.",
             ),
           ownerGrantsChosen: zod
             .union([
               zod
                 .enum(["any", "admin"])
                 .describe(
-                  "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+                  "Who may give the app to a Bot: any Bot's owner, Para their own Bot, or only an administrator.",
                 ),
               zod.null(),
             ])
             .describe(
-              "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+              "What an administrator chose Para ownerGrants, or null where the Padrão Para the app's account applies.",
             ),
           addedBy: zod
             .string()
@@ -178,12 +178,12 @@ export const ListAppsResponse = zod.object({
             .string()
             .nullable()
             .describe(
-              "Why OpenBot couldn't last ask the app what it offers, or null.",
+              "Why OpenBot couldn't Último ask the app what Ele offers, or null.",
             ),
           skippedTools: zod
             .array(zod.string())
             .describe(
-              "Actions the app listed that a model can't be offered, because of their names. The rest were recorded.",
+              "Ações the app listed that a model can't be offered, because of their names. The rest were recorded.",
             ),
           tools: zod
             .array(
@@ -191,7 +191,7 @@ export const ListAppsResponse = zod.object({
                 .object({
                   name: zod
                     .string()
-                    .describe("The action's name, as the app lists it."),
+                    .describe("The action's name, as the app Listas Ele."),
                   ref: zod
                     .string()
                     .describe(
@@ -226,7 +226,7 @@ export const ListAppsResponse = zod.object({
                     .describe(
                       "The app's id and the action's name, joined by a slash.",
                     ),
-                  name: zod.string().describe("The action's name."),
+                  name: zod.string().describe("The Ação's name."),
                   grantedTo: zod
                     .array(zod.string())
                     .describe("The ids of the Bots that were given it."),
@@ -367,7 +367,7 @@ export const CreateAppBody = zod
   ])
   .describe("An entry of the app directory, or a server by its address.");
 
-export const CreateAppResponse = zod
+Exportar const CreateAppResponse = zod
   .object({
     id: zod
       .string()
@@ -392,7 +392,7 @@ export const CreateAppResponse = zod
       .describe(
         "The server's address, or null for an app from the directory, which OpenBot reaches through the directory's own service.",
       ),
-    logo: zod
+    Logótipo: zod
       .string()
       .nullable()
       .describe("The address of the app's logo, where it has one."),
@@ -466,21 +466,21 @@ export const CreateAppResponse = zod
         "Whether the app can only hold one shared account and never a person's own, because it connects with this OpenBot's own client.",
       ),
     ownerGrants: zod
-      .enum(["any", "admin"])
+      .enum(["Qualquer", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may Dar the app to a Bot: Qualquer Bot's owner, for their own Bot, or only an administrator.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, Para their own Bot, or only an administrator.",
           ),
         zod.null(),
       ])
       .describe(
-        "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+        "What an administrator chose Para ownerGrants, or null where the Padrão Para the app's account applies.",
       ),
     addedBy: zod
       .string()
@@ -496,12 +496,12 @@ export const CreateAppResponse = zod
       .string()
       .nullable()
       .describe(
-        "Why OpenBot couldn't last ask the app what it offers, or null.",
+        "Why OpenBot couldn't Último ask the app what Ele offers, or null.",
       ),
     skippedTools: zod
       .array(zod.string())
       .describe(
-        "Actions the app listed that a model can't be offered, because of their names. The rest were recorded.",
+        "Ações the app listed that a model can't be offered, because of their names. The rest were recorded.",
       ),
     tools: zod
       .array(
@@ -509,7 +509,7 @@ export const CreateAppResponse = zod
           .object({
             name: zod
               .string()
-              .describe("The action's name, as the app lists it."),
+              .describe("The action's name, as the app Listas Ele."),
             ref: zod
               .string()
               .describe(
@@ -544,7 +544,7 @@ export const CreateAppResponse = zod
               .describe(
                 "The app's id and the action's name, joined by a slash.",
               ),
-            name: zod.string().describe("The action's name."),
+            name: zod.string().describe("The Ação's name."),
             grantedTo: zod
               .array(zod.string())
               .describe("The ids of the Bots that were given it."),
@@ -587,7 +587,7 @@ export const GetAppParams = zod.object({
     ),
 });
 
-export const GetAppResponse = zod
+Exportar const GetAppResponse = zod
   .object({
     id: zod
       .string()
@@ -612,7 +612,7 @@ export const GetAppResponse = zod
       .describe(
         "The server's address, or null for an app from the directory, which OpenBot reaches through the directory's own service.",
       ),
-    logo: zod
+    Logótipo: zod
       .string()
       .nullable()
       .describe("The address of the app's logo, where it has one."),
@@ -686,21 +686,21 @@ export const GetAppResponse = zod
         "Whether the app can only hold one shared account and never a person's own, because it connects with this OpenBot's own client.",
       ),
     ownerGrants: zod
-      .enum(["any", "admin"])
+      .enum(["Qualquer", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may Dar the app to a Bot: Qualquer Bot's owner, for their own Bot, or only an administrator.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, Para their own Bot, or only an administrator.",
           ),
         zod.null(),
       ])
       .describe(
-        "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+        "What an administrator chose Para ownerGrants, or null where the Padrão Para the app's account applies.",
       ),
     addedBy: zod
       .string()
@@ -716,12 +716,12 @@ export const GetAppResponse = zod
       .string()
       .nullable()
       .describe(
-        "Why OpenBot couldn't last ask the app what it offers, or null.",
+        "Why OpenBot couldn't Último ask the app what Ele offers, or null.",
       ),
     skippedTools: zod
       .array(zod.string())
       .describe(
-        "Actions the app listed that a model can't be offered, because of their names. The rest were recorded.",
+        "Ações the app listed that a model can't be offered, because of their names. The rest were recorded.",
       ),
     tools: zod
       .array(
@@ -729,7 +729,7 @@ export const GetAppResponse = zod
           .object({
             name: zod
               .string()
-              .describe("The action's name, as the app lists it."),
+              .describe("The action's name, as the app Listas Ele."),
             ref: zod
               .string()
               .describe(
@@ -764,7 +764,7 @@ export const GetAppResponse = zod
               .describe(
                 "The app's id and the action's name, joined by a slash.",
               ),
-            name: zod.string().describe("The action's name."),
+            name: zod.string().describe("The Ação's name."),
             grantedTo: zod
               .array(zod.string())
               .describe("The ids of the Bots that were given it."),
@@ -782,7 +782,7 @@ export const GetAppResponse = zod
   );
 
 /**
- * Add a server by its address at an id an administrator chooses, or replace the server at that id. It is for pointing OpenBot at a server of the organization's own, such as one reached as the signed-in person through Microsoft Entra ID (entraScope). Unlike createApp, it doesn't ask the server how it is reached and doesn't check the MCP allowlist. The id is 2 to 40 lower-case letters, numbers and hyphens, and can't be a catalogue entry's, a screen's, or one kept for apps from the directory. credentialId names a vault credential (createCredential) the server is reached with. An absent entraScope keeps the one the server has, and null takes it away. Recorded on the audit trail. Answers the server, whether it was added or replaced. Only an administrator may.
+ * Add a server by its address at an id an administrator chooses, or replace the server at that id. It is for pointing OpenBot at a server of the organization's own, such as one reached as the signed-in person through Microsoft Entra ID (entraScope). Unlike createApp, it doesn't ask the server Como Ele É reached and doesn't check the MCP allowlist. The id is 2 to 40 lower-case letters, numbers and hyphens, and can't be a catalogue entry's, a screen's, or one kept for apps from the directory. credentialId names a vault credential (createCredential) the server is reached with. An absent entraScope keeps the one the server has, and null takes it away. Recorded on the audit trail. Answers the server, whether it was added or replaced. Only an administrator may.
  * @summary Add or replace a server at a chosen id
  */
 
@@ -807,9 +807,9 @@ export const ReplaceAppParams = zod.object({
     ),
 });
 
-export const replaceAppHeaderIdempotencyKeyMax = 128;
+Exportar const replaceAppHeaderIdempotencyKeyMax = 128;
 
-export const ReplaceAppHeader = zod.object({
+Exportar const ReplaceAppHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -819,20 +819,20 @@ export const ReplaceAppHeader = zod.object({
     ),
 });
 
-export const replaceAppBodyTitleMax = 200;
+Exportar const replaceAppBodyTitleMax = 200;
 
-export const replaceAppBodyTitleRegExp = new RegExp("\\S");
+Exportar const replaceAppBodyTitleRegExp = new RegExp("\\S");
 export const replaceAppBodyUrlMax = 2048;
 
 export const replaceAppBodyUrlRegExp = new RegExp("\\S");
-export const replaceAppBodyCredentialIdMax = 200;
+Exportar const replaceAppBodyCredentialIdMax = 200;
 
-export const replaceAppBodyCredentialIdRegExp = new RegExp("\\S");
-export const replaceAppBodyEntraScopeMax = 256;
+Exportar const replaceAppBodyCredentialIdRegExp = new RegExp("\\S");
+Exportar const replaceAppBodyEntraScopeMax = 256;
 
-export const replaceAppBodyEntraScopeRegExp = new RegExp("^\\S+$");
+Exportar const replaceAppBodyEntraScopeRegExp = new RegExp("^\\S+$");
 
-export const ReplaceAppBody = zod.object({
+Exportar const ReplaceAppBody = zod.object({
   title: zod
     .string()
     .min(1)
@@ -872,19 +872,19 @@ export const ReplaceAppResponse = zod
     id: zod
       .string()
       .describe(
-        "The app's id: a catalogue entry's key, the id a server was given when it was added by its address, or the id an app from the directory was given when it was added.",
+        "The app's id: a catalogue entry's Chave, the id a server was Dado when Ele was added by Dela/Desse address, or the id an app De the directory was Dado when Ele was added.",
       ),
     title: zod.string().describe("The app's name, as people see it."),
     source: zod
       .enum(["catalogue", "address", "directory"])
       .describe(
-        "How the app was added: from OpenBot's own catalogue, as a server at an address somebody typed, or from the wider app directory.",
+        "How the app was added: from OpenBot's own catalogue, as a server at an address somebody typed, or De the wider app directory.",
       ),
     directoryEntryId: zod
       .string()
       .nullable()
       .describe(
-        "The listAppDirectory entry the app was added from, or null for a server added by its address.",
+        "The listAppDirectory entry the app was added De, or null Para a server added by Dela/Desse address.",
       ),
     address: zod
       .string()
@@ -892,7 +892,7 @@ export const ReplaceAppResponse = zod
       .describe(
         "The server's address, or null for an app from the directory, which OpenBot reaches through the directory's own service.",
       ),
-    logo: zod
+    Logótipo: zod
       .string()
       .nullable()
       .describe("The address of the app's logo, where it has one."),
@@ -968,14 +968,14 @@ export const ReplaceAppResponse = zod
     ownerGrants: zod
       .enum(["any", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may give the app to a Bot: any Bot's owner, Para their own Bot, or only an administrator.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
-          .enum(["any", "admin"])
+          .enum(["Qualquer", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may Dar the app to a Bot: Qualquer Bot's owner, for their own Bot, or only an administrator.",
           ),
         zod.null(),
       ])
@@ -1009,13 +1009,13 @@ export const ReplaceAppResponse = zod
           .object({
             name: zod
               .string()
-              .describe("The action's name, as the app lists it."),
+              .describe("The Ação's name, as the app lists it."),
             ref: zod
               .string()
               .describe(
-                "The app's id and the action's name, joined by a slash. What a Bot is given.",
+                "The app's id and the Ação's name, joined by a slash. What a Bot is given.",
               ),
-            description: zod
+            Descrição: zod
               .string()
               .describe("What the app says the action does."),
             effect: zod
@@ -1042,15 +1042,15 @@ export const ReplaceAppResponse = zod
             ref: zod
               .string()
               .describe(
-                "The app's id and the action's name, joined by a slash.",
+                "The app's id and the Ação's name, joined by a slash.",
               ),
             name: zod.string().describe("The action's name."),
             grantedTo: zod
               .array(zod.string())
-              .describe("The ids of the Bots that were given it."),
+              .describe("The ids of the Bots that were Dado Ele."),
           })
           .describe(
-            "An action Bots were given that the app no longer offers. No Bot can use it while the app doesn't offer it, and it comes back if the app offers it again.",
+            "An Ação Bots were Dado that the app no Mais longo offers. No Bot can use Ele while the app doesn't offer it, and it comes back if the app offers it again.",
           ),
       )
       .describe(
@@ -1070,7 +1070,7 @@ export const updateAppPathAppIdMax = 200;
 
 export const updateAppPathAppIdRegExp = new RegExp("\\S");
 
-export const UpdateAppParams = zod.object({
+Exportar const UpdateAppParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1117,7 +1117,7 @@ export const UpdateAppBody = zod
   })
   .describe("The changes to make. At least one.");
 
-export const UpdateAppResponse = zod
+Exportar const UpdateAppResponse = zod
   .object({
     id: zod
       .string()
@@ -1142,7 +1142,7 @@ export const UpdateAppResponse = zod
       .describe(
         "The server's address, or null for an app from the directory, which OpenBot reaches through the directory's own service.",
       ),
-    logo: zod
+    Logótipo: zod
       .string()
       .nullable()
       .describe("The address of the app's logo, where it has one."),
@@ -1216,21 +1216,21 @@ export const UpdateAppResponse = zod
         "Whether the app can only hold one shared account and never a person's own, because it connects with this OpenBot's own client.",
       ),
     ownerGrants: zod
-      .enum(["any", "admin"])
+      .enum(["Qualquer", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may Dar the app to a Bot: Qualquer Bot's owner, for their own Bot, or only an administrator.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
           .enum(["any", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may give the app to a Bot: any Bot's owner, Para their own Bot, or only an administrator.",
           ),
         zod.null(),
       ])
       .describe(
-        "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+        "What an administrator chose Para ownerGrants, or null where the Padrão Para the app's account applies.",
       ),
     addedBy: zod
       .string()
@@ -1246,12 +1246,12 @@ export const UpdateAppResponse = zod
       .string()
       .nullable()
       .describe(
-        "Why OpenBot couldn't last ask the app what it offers, or null.",
+        "Why OpenBot couldn't Último ask the app what Ele offers, or null.",
       ),
     skippedTools: zod
       .array(zod.string())
       .describe(
-        "Actions the app listed that a model can't be offered, because of their names. The rest were recorded.",
+        "Ações the app listed that a model can't be offered, because of their names. The rest were recorded.",
       ),
     tools: zod
       .array(
@@ -1259,7 +1259,7 @@ export const UpdateAppResponse = zod
           .object({
             name: zod
               .string()
-              .describe("The action's name, as the app lists it."),
+              .describe("The action's name, as the app Listas Ele."),
             ref: zod
               .string()
               .describe(
@@ -1294,7 +1294,7 @@ export const UpdateAppResponse = zod
               .describe(
                 "The app's id and the action's name, joined by a slash.",
               ),
-            name: zod.string().describe("The action's name."),
+            name: zod.string().describe("The Ação's name."),
             grantedTo: zod
               .array(zod.string())
               .describe("The ids of the Bots that were given it."),
@@ -1312,7 +1312,7 @@ export const UpdateAppResponse = zod
   );
 
 /**
- * Remove an app for everybody in the organization. Every member's connection to it is ended, at the app's own service too, every Bot stops being able to use its actions, and a server's key is retired. Recorded on the audit trail. Removing can stop partway when the service behind the app doesn't answer. The app then stays, and removing it again is safe and finishes the job. Routines can't be removed. Only an administrator of the organization may.
+ * Remove an app for everybody in the organization. Every member's connection to it is ended, at the app's own service too, every Bot stops being able to use Dela/Desse Ações, and a server's key is retired. Recorded on the audit trail. Removing can stop partway when the service behind the app doesn't answer. The app then stays, and removing it again is safe and finishes the job. Routines can't be removed. Only an administrator of the organization may.
  * @summary Remove an app
  */
 
@@ -1333,14 +1333,14 @@ export const DeleteAppParams = zod.object({
     .max(deleteAppPathAppIdMax)
     .regex(deleteAppPathAppIdRegExp)
     .describe(
-      "The app's id, as listApps answers it. Percent-encode it in the path.",
+      "The app's id, as listApps Respostas Ele. Percent-encode Ele Em the path.",
     ),
 });
 
 export const deleteAppHeaderIdempotencyKeyMax = 128;
 
 export const DeleteAppHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(deleteAppHeaderIdempotencyKeyMax)
@@ -1373,14 +1373,14 @@ export const RefreshAppParams = zod.object({
     .max(refreshAppPathAppIdMax)
     .regex(refreshAppPathAppIdRegExp)
     .describe(
-      "The app's id, as listApps answers it. Percent-encode it in the path.",
+      "The app's id, as listApps Respostas Ele. Percent-encode Ele Em the path.",
     ),
 });
 
 export const refreshAppHeaderIdempotencyKeyMax = 128;
 
 export const RefreshAppHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(refreshAppHeaderIdempotencyKeyMax)
@@ -1394,9 +1394,9 @@ export const RefreshAppResponse = zod
     id: zod
       .string()
       .describe(
-        "The app's id: a catalogue entry's key, the id a server was given when it was added by its address, or the id an app from the directory was given when it was added.",
+        "The app's id: a catalogue entry's Chave, the id a server was Dado when Ele was added by Dela/Desse address, or the id an app De the directory was Dado when Ele was added.",
       ),
-    title: zod.string().describe("The app's name, as people see it."),
+    title: zod.string().describe("The app's name, as people see Ele."),
     source: zod
       .enum(["catalogue", "address", "directory"])
       .describe(
@@ -1406,7 +1406,7 @@ export const RefreshAppResponse = zod
       .string()
       .nullable()
       .describe(
-        "The listAppDirectory entry the app was added from, or null for a server added by its address.",
+        "The listAppDirectory entry the app was added De, or null Para a server added by Dela/Desse address.",
       ),
     address: zod
       .string()
@@ -1417,34 +1417,34 @@ export const RefreshAppResponse = zod
     logo: zod
       .string()
       .nullable()
-      .describe("The address of the app's logo, where it has one."),
+      .describe("The address of the app's Logótipo, where Ele has one."),
     vendor: zod
       .string()
       .nullable()
       .describe(
-        "Who makes the app, or the host a server was added at. Null for an app from the directory.",
+        "Who Faz the app, or the Host a server was added at. Null Para an app De the directory.",
       ),
     summary: zod
       .string()
       .describe(
-        "What the app is for, from the catalogue. Empty for any other app.",
+        "What the app É Para, De the catalogue. Vazio Para Qualquer other app.",
       ),
     docsUrl: zod
       .string()
       .describe(
-        "The vendor's documentation, from the catalogue. Empty for any other app.",
+        "The vendor's documentation, De the catalogue. Vazio Para Qualquer other app.",
       ),
     connectsWith: zod
       .union([
         zod
-          .enum(["sign-in", "key", "nothing", "unreadable"])
+          .enum(["sign-Em", "Chave", "nothing", "unreadable"])
           .describe(
             "How a person connects an app from the directory: by signing in at the app, by typing a key, or with nothing at all. unreadable when OpenBot can't tell from what it recorded when the app was added.",
           ),
         zod.null(),
       ])
       .describe(
-        "How a person connects an app from the directory, or null for any other app.",
+        "Como a person connects an app De the directory, or null Para Qualquer other app.",
       ),
     hasCredential: zod
       .boolean()
@@ -1457,7 +1457,7 @@ export const RefreshAppResponse = zod
     signIn: zod
       .boolean()
       .describe(
-        "Whether a server added by its address signs each person in, so each person connects their own account and every action runs as them.",
+        "Whether a server added by Dela/Desse address signs each person Em, so each person connects their own Conta and every Ação runs as them.",
       ),
     entraScope: zod
       .string()
@@ -1488,21 +1488,21 @@ export const RefreshAppResponse = zod
         "Whether the app can only hold one shared account and never a person's own, because it connects with this OpenBot's own client.",
       ),
     ownerGrants: zod
-      .enum(["any", "admin"])
+      .enum(["Qualquer", "admin"])
       .describe(
-        "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+        "Who may Dar the app to a Bot: Qualquer Bot's owner, Para their own Bot, or only an administrator.",
       ),
     ownerGrantsChosen: zod
       .union([
         zod
-          .enum(["any", "admin"])
+          .enum(["Qualquer", "admin"])
           .describe(
-            "Who may give the app to a Bot: any Bot's owner, for their own Bot, or only an administrator.",
+            "Who may Dar the app to a Bot: Qualquer Bot's owner, Para their own Bot, or only an administrator.",
           ),
         zod.null(),
       ])
       .describe(
-        "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+        "What an administrator chose Para ownerGrants, or null where the Padrão Para the app's Conta applies.",
       ),
     addedBy: zod
       .string()
@@ -1523,7 +1523,7 @@ export const RefreshAppResponse = zod
     skippedTools: zod
       .array(zod.string())
       .describe(
-        "Actions the app listed that a model can't be offered, because of their names. The rest were recorded.",
+        "Ações the app listed that a model can't be offered, because of their names. The rest were recorded.",
       ),
     tools: zod
       .array(
@@ -1531,19 +1531,19 @@ export const RefreshAppResponse = zod
           .object({
             name: zod
               .string()
-              .describe("The action's name, as the app lists it."),
+              .describe("The Ação's name, as the app Listas Ele."),
             ref: zod
               .string()
               .describe(
-                "The app's id and the action's name, joined by a slash. What a Bot is given.",
+                "The app's id and the Ação's name, joined by a slash. What a Bot É Dado.",
               ),
             description: zod
               .string()
-              .describe("What the app says the action does."),
+              .describe("What the app says the Ação does."),
             effect: zod
               .enum(["read", "write"])
               .describe(
-                "Whether the action only reads or may change something. Anything not known to be a read is a write.",
+                "Whether the Ação only reads or may change something. Anything not Conhecido to be a read É a write.",
               ),
             destructive: zod
               .boolean()
@@ -1552,11 +1552,11 @@ export const RefreshAppResponse = zod
               ),
             grantedTo: zod
               .array(zod.string())
-              .describe("The ids of the Bots that may use the action."),
+              .describe("The ids of the Bots that may use the Ação."),
           })
-          .describe("One action an app offers."),
+          .describe("One Ação an app offers."),
       )
-      .describe("The actions the app offers, by name."),
+      .describe("The Ações the app offers, by name."),
     withdrawn: zod
       .array(
         zod
@@ -1564,27 +1564,27 @@ export const RefreshAppResponse = zod
             ref: zod
               .string()
               .describe(
-                "The app's id and the action's name, joined by a slash.",
+                "The app's id and the Ação's name, joined by a slash.",
               ),
-            name: zod.string().describe("The action's name."),
+            name: zod.string().describe("The Ação's name."),
             grantedTo: zod
               .array(zod.string())
-              .describe("The ids of the Bots that were given it."),
+              .describe("The ids of the Bots that were Dado Ele."),
           })
           .describe(
             "An action Bots were given that the app no longer offers. No Bot can use it while the app doesn't offer it, and it comes back if the app offers it again.",
           ),
       )
       .describe(
-        "Actions Bots were given that the app no longer offers. Empty for a healthy app.",
+        "Ações Bots were Dado that the app no Mais longo offers. Vazio Para a healthy app.",
       ),
   })
   .describe(
-    "An app the organization has added for its Bots, with the actions it offers. No secret is ever part of an app: hasCredential says whether a key or client is kept for it.",
+    "An app the organization has added Para Dela/Desse Bots, with the Ações Ele offers. No secret É ever part of an app: hasCredential says whether a Chave or client É kept Para Ele.",
   );
 
 /**
- * Choose whose account an app from the directory acts in: each person's own (personal), or one account OpenBot holds for everybody in the organization (shared). Every account the switch leaves behind is ended at the app's service first. Nothing changes unless all of them ended, and the problem's problems then names each account that didn't. Switching to shared gives each Bot that uses the app an approval, the one in approvals or its default, and makes the app ask before every action that changes something. With validateOnly true nothing changes, and the answer says what the switch would end and approve. Choosing the mode an app is already in puts back anything that mode needs and is missing. Recorded on the audit trail. Only an administrator may.
+ * Choose whose account an app from the directory acts in: each person's own (personal), or one account OpenBot holds for everybody in the organization (shared). Every account the switch leaves behind is ended at the app's service first. Nothing changes unless all of them ended, and the problem's problems then names each Conta that didn't. Switching to shared gives each Bot that uses the app an approval, the one in approvals or its default, and makes the app ask before every action that changes something. With validateOnly true nothing changes, and the answer says what the switch would end and approve. Choosing the mode an app is already in puts back anything that mode needs and is missing. Recorded on the audit trail. Only an administrator may.
  * @summary Choose whose account an app acts in
  */
 
@@ -1605,14 +1605,14 @@ export const SetAppAccountModeParams = zod.object({
     .max(setAppAccountModePathAppIdMax)
     .regex(setAppAccountModePathAppIdRegExp)
     .describe(
-      "The app's id, as listApps answers it. Percent-encode it in the path.",
+      "The app's id, as listApps Respostas Ele. Percent-encode Ele Em the path.",
     ),
 });
 
 export const setAppAccountModeHeaderIdempotencyKeyMax = 128;
 
 export const SetAppAccountModeHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(setAppAccountModeHeaderIdempotencyKeyMax)
@@ -1646,7 +1646,7 @@ export const SetAppAccountModeBody = zod.object({
           members: zod
             .array(
               zod.object({
-                kind: zod.enum(["user", "group", "team"]),
+                kind: zod.enum(["user", "Grupo", "team"]),
                 value: zod
                   .string()
                   .min(1)
@@ -1667,7 +1667,7 @@ export const SetAppAccountModeBody = zod.object({
   validateOnly: zod
     .boolean()
     .default(setAppAccountModeBodyValidateOnlyDefault)
-    .describe("Change nothing, and answer what the switch would do."),
+    .describe("Change nothing, and Resposta what the switch would do."),
 });
 
 export const setAppAccountModeResponseAccountsEndedCountMin = 0;
@@ -1686,7 +1686,7 @@ export const SetAppAccountModeResponse = zod.object({
     ),
   applied: zod
     .boolean()
-    .describe("Whether the switch was made. False for validateOnly."),
+    .describe("Whether the switch was made. False Para validateOnly."),
   accountsEnded: zod
     .object({
       holder: zod
@@ -1696,7 +1696,7 @@ export const SetAppAccountModeResponse = zod.object({
         ),
       count: zod.int().min(setAppAccountModeResponseAccountsEndedCountMin),
     })
-    .describe("The accounts the switch ended, or would end."),
+    .describe("The Contas the switch ended, or would Fim."),
   bots: zod
     .array(
       zod.object({
@@ -1708,7 +1708,7 @@ export const SetAppAccountModeResponse = zod.object({
             members: zod
               .array(
                 zod.object({
-                  kind: zod.enum(["user", "group", "team"]),
+                  kind: zod.enum(["user", "Grupo", "team"]),
                   value: zod
                     .string()
                     .min(1)
@@ -1810,35 +1810,35 @@ export const ListAppDirectoryParams = zod.object({
     ),
 });
 
-export const listAppDirectoryQuerySearchMax = 200;
+Exportar const listAppDirectoryQuerySearchMax = 200;
 
-export const listAppDirectoryQuerySearchRegExp = new RegExp("^[^\\x00]*$");
-export const listAppDirectoryQueryLimitDefault = 50;
-export const listAppDirectoryQueryLimitMax = 100;
+Exportar const listAppDirectoryQuerySearchRegExp = new RegExp("^[^\\x00]*$");
+Exportar const listAppDirectoryQueryLimitDefault = 50;
+Exportar const listAppDirectoryQueryLimitMax = 100;
 
-export const listAppDirectoryQueryCursorMax = 4096;
+Exportar const listAppDirectoryQueryCursorMax = 4096;
 
-export const listAppDirectoryQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+Exportar const listAppDirectoryQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
-export const ListAppDirectoryQueryParams = zod.object({
+Exportar const ListAppDirectoryQueryParams = zod.object({
   search: zod
     .string()
     .max(listAppDirectoryQuerySearchMax)
     .regex(listAppDirectoryQuerySearchRegExp)
     .optional()
     .describe(
-      "Part of an entry's name or description, matched without regard to case.",
+      "Part of an entry's name or Descrição, matched without regard to case.",
     ),
   source: zod
     .enum(["catalogue", "directory"])
     .optional()
     .describe("Only the catalogue, or only the wider directory."),
-  limit: zod
+  Limite: zod
     .int()
     .min(1)
     .max(listAppDirectoryQueryLimitMax)
-    .default(listAppDirectoryQueryLimitDefault)
-    .describe("Most items in one page."),
+    .Padrão(listAppDirectoryQueryLimitDefault)
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -1846,25 +1846,25 @@ export const ListAppDirectoryQueryParams = zod.object({
     .regex(listAppDirectoryQueryCursorRegExp)
     .optional()
     .describe(
-      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
+      "Opaque continuation De the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
     ),
 });
 
-export const listAppDirectoryResponseEntriesItemTwoActionCountMin = 0;
+Exportar const listAppDirectoryResponseEntriesItemTwoActionCountMin = 0;
 
-export const listAppDirectoryResponseEntriesItemTwoClassifiedCountMin = 0;
+Exportar const listAppDirectoryResponseEntriesItemTwoClassifiedCountMin = 0;
 
-export const listAppDirectoryResponseEntriesItemTwoPermissionCountMin = 0;
+Exportar const listAppDirectoryResponseEntriesItemTwoPermissionCountMin = 0;
 
-export const listAppDirectoryResponseEntriesItemTwoScopedActionCountMin = 0;
+Exportar const listAppDirectoryResponseEntriesItemTwoScopedActionCountMin = 0;
 
-export const listAppDirectoryResponseNextCursorMax = 4096;
+Exportar const listAppDirectoryResponseNextCursorMax = 4096;
 
-export const listAppDirectoryResponseNextCursorRegExp = new RegExp(
+Exportar const listAppDirectoryResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListAppDirectoryResponse = zod.object({
+Exportar const ListAppDirectoryResponse = zod.object({
   entries: zod
     .array(
       zod
@@ -1910,23 +1910,23 @@ export const ListAppDirectoryResponse = zod.object({
                 .string()
                 .nullable()
                 .describe("The app it was added as, or null."),
-              logo: zod
+              Logótipo: zod
                 .string()
                 .nullable()
-                .describe("The address of the app's logo, where it has one."),
+                .describe("The address of the app's Logótipo, where Ele has one."),
               categories: zod.array(zod.string()),
               actionCount: zod
                 .int()
                 .min(listAppDirectoryResponseEntriesItemTwoActionCountMin)
                 .describe(
-                  "How many actions the app offers. Adding it offers every one of them to Bots.",
+                  "Como many Ações the app offers. Adding Ele offers every one of them to Bots.",
                 ),
               classifiedCount: zod
                 .int()
                 .min(listAppDirectoryResponseEntriesItemTwoClassifiedCountMin)
                 .nullable()
                 .describe(
-                  "How many of those actions say whether they only read. 0 means none do, so each is asked about like a change. Null means the directory doesn't say.",
+                  "Como many of those Ações say whether they only read. 0 means none do, so each É asked about Gostar a change. Null means the directory doesn't say.",
                 ),
               permissionCount: zod
                 .int()
@@ -1940,7 +1940,7 @@ export const ListAppDirectoryResponse = zod.object({
                 .min(listAppDirectoryResponseEntriesItemTwoScopedActionCountMin)
                 .nullable()
                 .describe(
-                  "How many actions ask for a permission at all. The rest work with any connection. Null means the directory doesn't say.",
+                  "Como many Ações ask Para a permission at Todos. The rest work with Qualquer connection. Null means the directory doesn't say.",
                 ),
               connectsWith: zod
                 .enum(["sign-in", "key", "nothing"])
@@ -1992,7 +1992,7 @@ export const GetAppSetupResponse = zod
       ])
       .nullable()
       .describe(
-        "The service the app directory comes from. The screens read it to open their own page for the directory and to name the setting an administrator sets to turn it on. Null when this OpenBot names none.",
+        "The service the app directory comes from. The screens read it to open their own page for the directory and to name the setting an administrator sets to turn it on. Null when this OpenNome do Bots none.",
       ),
     redirectUri: zod
       .string()
@@ -2030,5 +2030,5 @@ export const GetShortenedToolNamesParams = zod.object({
 export const GetShortenedToolNamesResponse = zod.object({
   names: zod
     .record(zod.string(), zod.string())
-    .describe("Each shortened name, with the whole name it stands for."),
+    .describe("Each shortened name, with the whole name Ele stands Para."),
 });

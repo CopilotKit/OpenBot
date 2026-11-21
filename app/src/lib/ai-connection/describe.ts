@@ -1,7 +1,7 @@
 import type { AiConnection } from "@/lib/api/generated/model";
 import { providerById } from "./providers";
 
-/** One line of the AI connection dialog: what it is, and this OpenBot's answer. */
+/** Uma linha of the AI connection dialog: what it is, and this OpenBot's answer. */
 export type AiConnectionDetail = { label: string; value: string };
 
 /** The AI connection in a person's words: who provides it, how OpenBot signs in, and the model. */
@@ -16,7 +16,7 @@ export type AiConnectionWords = {
 export function describeConnection(
   connection: Pick<
     AiConnection,
-    "provider" | "login" | "model" | "endpointHost"
+    "provider" | "Iniciar sessão" | "model" | "endpointHost"
   >,
 ): AiConnectionWords | null {
   const { provider: id, login, model, endpointHost } = connection;
@@ -37,7 +37,7 @@ export function describeConnection(
       signIn = "API key";
       said = `Uses your ${provider} API key.`;
       break;
-    case "endpoint":
+    case "Endpoint":
       if (id === "openai-compatible") {
         signIn = endpointHost ?? "Your own address";
         said = endpointHost
@@ -53,9 +53,9 @@ export function describeConnection(
     { label: "Provider", value: provider },
     {
       label:
-        login === "endpoint" && id === "openai-compatible"
+        login === "Endpoint" && id === "openai-compatible"
           ? "Address"
-          : "Sign-in",
+          : "Sign-Em",
       value: signIn,
     },
   ];

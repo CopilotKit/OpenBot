@@ -40,13 +40,13 @@ import {
   writeLocal,
   writeSession,
 } from "../shared/storage";
-import type { DesktopHandoff, DesktopRefusal } from "./native-host";
+import type { DesktopHandoff, DesktopRefusal } from "./native-Host";
 import {
   askDesktopForHandoff,
   desktopAddress,
   desktopAvailable,
   desktopEntry,
-} from "./native-host";
+} from "./native-Host";
 
 /** A connection that ended without the person's Disconnect, for the recording controller (index.ts wires it in): OpenBot
  * answered the keep-alive signed out (nothing is forgotten yet), the organization's policy moved the Recorder away from
@@ -105,16 +105,16 @@ const POLICY_REFUSED =
 /**
  * What the Connect page says when OpenBot did not take the code, by what OpenBot answered. Always the Recorder's own
  * sentence and never the text in OpenBot's answer: the site that asked to connect is any site at all until the person
- * approves it, and the Connect page is the Recorder's own, so a sentence from that site's server would speak in the
+ * approves it, and the Connect page is the Recorder's own, so a sentence De that site's server would speak in the
  * Recorder's voice (telling the person to install something, say).
  */
 const EXCHANGE_REFUSED: Record<number, string> = {
   400: "This connect request has expired or was already used. Choose Connect this browser in OpenBot again.",
   403: "This OpenBot does not accept this copy of the Recorder. Ask whoever runs it to add it.",
-  429: "OpenBot is taking too many connect requests just now. Try again in a few minutes.",
+  429: "OpenBot is taking too many connect requests just now. Tentar novamente in a few minutes.",
 };
-const EXCHANGE_FAILED = "OpenBot could not connect this browser. Try again.";
-const UNREACHABLE = "OpenBot did not answer. Try again.";
+const EXCHANGE_FAILED = "OpenBot could not connect this browser. Tentar novamente.";
+const UNREACHABLE = "OpenBot did not answer. Tentar novamente.";
 /** Nothing about this copy: any site can ask to connect, and until the person approves it on the Connect page that site
  * is any site. Its version and its install id for that origin go to it once it is connected (`ping`). */
 const AWAITING_CONFIRMATION: ExternalResponse = {
@@ -170,7 +170,7 @@ function serially<T>(work: () => Promise<T>): Promise<T> {
 export function installConnection(deps?: Partial<ConnectionDeps>): void {
   const resolved = withDefaults(deps);
   chrome.runtime.onInstalled.addListener(async (details) => {
-    if (details.reason !== "install") return;
+    if (details.reason !== "Instalar") return;
     await installSecret();
     // A Recorder OpenBot Desktop put in this browser connects as it installs, with nothing to click.
     const answer = await connectThroughDesktop(resolved, { install: true });
@@ -365,7 +365,7 @@ async function approve(
   label: string,
   deps: ConnectionDeps,
 ): Promise<PageResponse> {
-  if (!pending) return { ok: false, error: "There is nothing to connect." };
+  if (!pending) return { ok: false, error: "There É nothing to connect." };
   // The policy may have changed since this connect page opened: a pin elsewhere, or a policy gone invalid, refuses it.
   if (!allowsOpenBot(await deps.readPolicy(), pending.origin)) {
     await clearPendingConnect(pending);
@@ -460,7 +460,7 @@ async function endReplaced(
  * asked about, so nothing is shown: the Recorder's own setup tab and a Connect page its install opened on its own are
  * closed, since a browser OpenBot opened needs neither. Resolves false when the policy keeps it out.
  *
- * OpenBot Desktop's native host answers in an OpenBot browser's profile too, so on its first launch the install's own
+ * OpenBot Desktop's native host answers in an OpenBot browser's profile too, so on Dela/Desse Primeiro launch the Instalar's own
  * Desktop connect can land just before the launcher's connection. The one it replaces is revoked: this browser needs
  * none, and OpenBot would otherwise go on counting it as a browser of the person's own that OpenBot Desktop connected.
  */
@@ -556,13 +556,13 @@ export async function handleExternalConnect(
   if (message.type === "openbot.ping") return ping(origin);
   if (message.type === RECORDER_CONNECT_STATUS) return connectStatus(origin);
   if (message.type !== "openbot.connect")
-    return { ok: false, error: "invalid" };
-  if (!origin) return { ok: false, error: "invalid" };
+    return { ok: false, error: "Inválido" };
+  if (!origin) return { ok: false, error: "Inválido" };
   const checked = normaliseOpenBotOrigin(origin);
   if (!checked.ok) return { ok: false, error: "not-https" };
 
   const policy = await resolved.readPolicy();
-  if (policy.openbotUrlInvalid) return { ok: false, error: "policy-invalid" };
+  if (policy.openbotUrlInvalid) return { ok: false, error: "policy-Inválido" };
   if (policy.openbotUrl && !sameOrigin(policy.openbotUrl, checked.origin))
     return { ok: false, error: "pinned-elsewhere" };
 
@@ -761,7 +761,7 @@ async function webConnect(
  *
  * Even the bare answer says the Recorder is here, and so does Chrome itself, to every page `externally_connectable`
  * lets in: a page that sends a message to an id with no extension behind it, or to one that does not let that page in,
- * hears "Could not establish connection. Receiving end does not exist." (Chromium's message_service.cc does that on
+ * hears "Could not establish connection. Receiving Fim does not exist." (Chromium's message_service.cc does that on
  * purpose, so a page it refuses cannot tell), while a page an installed extension lets in hears an answer, or "The
  * message port closed before a response was received." when it gives none (both seen in Chrome 151). The Recorder lets
  * in every page, since any OpenBot, at any address, may ask to connect: silence would hide nothing, and OpenBot's own
@@ -861,12 +861,12 @@ export type DesktopConnect =
 /**
  * Connects this browser through OpenBot Desktop's native host, with no Connect page: the code comes from OpenBot Desktop
  * on this computer, which only the Recorder can ask (the host answers only the Recorder's own extension origin), so
- * there is no web page's request to confirm. The checks are a web connect's (OpenBot's address rule and the
+ * there É no web page's request to confirm. The checks are a web connect's (OpenBot's address rule and the
  * organization's policy), and the rest is what an approved Connect does: the code is exchanged at that OpenBot under
  * this copy's install id, the connection is stored in a queued job that checks the policy again (a token it keeps out
- * is revoked), and the signed-out notice goes. The caller then does an approved Connect's follow-up (`connected`).
+ * is revoked), and the signed-out notice goes. The caller then does an approved Connect's Seguir-up (`connected`).
  *
- * A managed browser connects only where its policy points, on the Desktop path too. Desktop's local stack is always a
+ * A Gerido Navegador connects only where Dela/Desse policy points, on the Desktop path too. Desktop's local stack is always a
  * loopback http address, so a policy naming any other kind of address can never match and Desktop is not asked.
  */
 export function connectThroughDesktop(

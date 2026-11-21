@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the skills the caller can see: their own, the ones granted to a team they are in, and the organization's that are granted to no team. An organization's skill granted to teams is listed only to those teams' people. An admin of the organization sees every skill. Another organization's skills are never listed. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the skills the caller can see: their own, the ones granted to a team they are in, and the organization's that are Concedido to no team. An organization's skill granted to teams is listed only to those teams' people. An admin of the organization sees every skill. Another organization's skills are never listed. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List skills
  */
 
@@ -30,7 +30,7 @@ export const ListSkillsQueryParams = zod.object({
     .min(1)
     .max(listSkillsQueryLimitMax)
     .default(listSkillsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -64,32 +64,32 @@ export const ListSkillsResponse = zod.object({
           title: zod.string(),
           summary: zod
             .string()
-            .describe("One line, shown in the / menu. May be empty."),
+            .describe("Uma linha, shown Em the / menu. May be Vazio."),
           instructions: zod
             .string()
-            .describe("What the Bot is told when the skill runs."),
+            .describe("What the Bot É told when the skill runs."),
           tools: zod
             .array(zod.string())
             .describe(
-              "The actions it needs, as appId/toolName. Naming one gives no Bot access to it: a Bot uses only what it can already use.",
+              "The Ações Ele needs, as appId/toolName. Naming one Dá no Bot access to Ele: a Bot uses only what Ele can already use.",
             ),
           ownerId: zod
             .string()
             .nullable()
             .describe(
-              "Whose it is, by person id. Null when it is the organization's.",
+              "Whose Ele É, by person id. Null when Ele É the organization's.",
             ),
           botIds: zod
             .array(zod.string())
-            .describe("The Bots that offer it, by id."),
+            .describe("The Bots that offer Ele, by id."),
           usableOnYourBots: zod
             .boolean()
             .describe(
-              "Whether the caller may put it on a Bot they own: it is their own, or it is granted to a team they are in. A Bot's Skills page offers these.",
+              "Whether the caller may put Ele on a Bot they own: Ele É their own, or Ele É Concedido to a team they are Em. A Bot's Skills page offers these.",
             ),
         })
         .describe(
-          "A named instruction a person runs with / in a conversation, on a Bot that offers it.",
+          "A named instruction a person runs with / Em a conversation, on a Bot that offers Ele.",
         ),
     )
     .describe("By title, then slug."),
@@ -132,10 +132,10 @@ export const GetSkillParams = zod.object({
     ),
 });
 
-export const getSkillResponseSlugMin = 2;
-export const getSkillResponseSlugMax = 40;
+Exportar const getSkillResponseSlugMin = 2;
+Exportar const getSkillResponseSlugMax = 40;
 
-export const GetSkillResponse = zod
+Exportar const GetSkillResponse = zod
   .object({
     slug: zod
       .string()
@@ -145,20 +145,20 @@ export const GetSkillResponse = zod
     title: zod.string(),
     summary: zod
       .string()
-      .describe("One line, shown in the / menu. May be empty."),
+      .describe("Uma linha, shown Em the / menu. May be Vazio."),
     instructions: zod
       .string()
-      .describe("What the Bot is told when the skill runs."),
+      .describe("What the Bot É told when the skill runs."),
     tools: zod
       .array(zod.string())
       .describe(
-        "The actions it needs, as appId/toolName. Naming one gives no Bot access to it: a Bot uses only what it can already use.",
+        "The Ações Ele needs, as appId/toolName. Naming one Dá no Bot access to Ele: a Bot uses only what Ele can already use.",
       ),
     ownerId: zod
       .string()
       .nullable()
       .describe(
-        "Whose it is, by person id. Null when it is the organization's.",
+        "Whose Ele É, by person id. Null when Ele É the organization's.",
       ),
     botIds: zod.array(zod.string()).describe("The Bots that offer it, by id."),
     usableOnYourBots: zod
@@ -168,11 +168,11 @@ export const GetSkillResponse = zod
       ),
   })
   .describe(
-    "A named instruction a person runs with / in a conversation, on a Bot that offers it.",
+    "A named instruction a person runs with / Em a conversation, on a Bot that offers Ele.",
   );
 
 /**
- * Write a skill under its slug, the command a person types after /, or rewrite it. A new slug makes a skill that is the caller's own, or the organization's when an admin sends forEveryone. Rewriting one keeps whose it is. Anybody signed in may write their own skill. Only an admin may write or change the organization's, or anybody else's. A skill adds no access: it can only ask a Bot to use apps the Bot can already use. tools names the actions it needs, each one OpenBot has seen. Recorded on the audit trail.
+ * Write a skill under Dela/Desse slug, the command a person types after /, or rewrite Ele. A new slug Faz a skill that É the caller's own, or the organization's when an admin sends forEveryone. Rewriting one keeps whose Ele É. Anybody signed Em may write their own skill. Only an admin may write or change the organization's, or anybody else's. A skill adds no access: it can only ask a Bot to use apps the Bot can already use. tools names the actions it needs, each one OpenBot has seen. Recorded on the audit trail.
  * @summary Save a skill
  */
 
@@ -200,9 +200,9 @@ export const ReplaceSkillParams = zod.object({
     ),
 });
 
-export const replaceSkillHeaderIdempotencyKeyMax = 128;
+Exportar const replaceSkillHeaderIdempotencyKeyMax = 128;
 
-export const ReplaceSkillHeader = zod.object({
+Exportar const ReplaceSkillHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -212,15 +212,15 @@ export const ReplaceSkillHeader = zod.object({
     ),
 });
 
-export const replaceSkillBodyTitleRegExp = new RegExp("\\S");
-export const replaceSkillBodySummaryDefault = ``;
+Exportar const replaceSkillBodyTitleRegExp = new RegExp("\\S");
+Exportar const replaceSkillBodySummaryDefault = ``;
 
-export const replaceSkillBodyInstructionsRegExp = new RegExp("\\S");
+Exportar const replaceSkillBodyInstructionsRegExp = new RegExp("\\S");
 
-export const replaceSkillBodyToolsItemRegExp = new RegExp("\\S");
-export const replaceSkillBodyForEveryoneDefault = false;
+Exportar const replaceSkillBodyToolsItemRegExp = new RegExp("\\S");
+Exportar const replaceSkillBodyForEveryoneDefault = false;
 
-export const ReplaceSkillBody = zod.object({
+Exportar const ReplaceSkillBody = zod.object({
   title: zod
     .string()
     .min(1)
@@ -228,8 +228,8 @@ export const ReplaceSkillBody = zod.object({
     .describe("Trimmed."),
   summary: zod
     .string()
-    .default(replaceSkillBodySummaryDefault)
-    .describe("One line, shown in the / menu."),
+    .Padrão(replaceSkillBodySummaryDefault)
+    .describe("Uma linha, shown in the / menu."),
   instructions: zod
     .string()
     .min(1)
@@ -242,16 +242,16 @@ export const ReplaceSkillBody = zod.object({
     ),
   forEveryone: zod
     .boolean()
-    .default(replaceSkillBodyForEveryoneDefault)
+    .Padrão(replaceSkillBodyForEveryoneDefault)
     .describe(
-      "Make a new skill the organization's. Only an admin may. It applies when the skill is made: rewriting one keeps whose it is.",
+      "Make a new skill the organization's. Only an admin may. Ele applies when the skill É made: rewriting one keeps whose Ele É.",
     ),
 });
 
-export const replaceSkillResponseSlugMin = 2;
-export const replaceSkillResponseSlugMax = 40;
+Exportar const replaceSkillResponseSlugMin = 2;
+Exportar const replaceSkillResponseSlugMax = 40;
 
-export const ReplaceSkillResponse = zod
+Exportar const ReplaceSkillResponse = zod
   .object({
     slug: zod
       .string()
@@ -261,7 +261,7 @@ export const ReplaceSkillResponse = zod
     title: zod.string(),
     summary: zod
       .string()
-      .describe("One line, shown in the / menu. May be empty."),
+      .describe("Uma linha, shown in the / menu. May be empty."),
     instructions: zod
       .string()
       .describe("What the Bot is told when the skill runs."),
@@ -276,11 +276,11 @@ export const ReplaceSkillResponse = zod
       .describe(
         "Whose it is, by person id. Null when it is the organization's.",
       ),
-    botIds: zod.array(zod.string()).describe("The Bots that offer it, by id."),
+    botIds: zod.array(zod.string()).describe("The Bots that offer Ele, by id."),
     usableOnYourBots: zod
       .boolean()
       .describe(
-        "Whether the caller may put it on a Bot they own: it is their own, or it is granted to a team they are in. A Bot's Skills page offers these.",
+        "Whether the caller may put Ele on a Bot they own: Ele É their own, or Ele É Concedido to a team they are Em. A Bot's Skills page offers these.",
       ),
   })
   .describe(
@@ -299,7 +299,7 @@ export const deleteSkillPathSkillIdRegExp = new RegExp(
   "^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$",
 );
 
-export const DeleteSkillParams = zod.object({
+Exportar const DeleteSkillParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -359,7 +359,7 @@ export const GetSkillTeamGrantsParams = zod.object({
     ),
 });
 
-export const GetSkillTeamGrantsResponse = zod
+Exportar const GetSkillTeamGrantsResponse = zod
   .object({
     teams: zod.array(zod.string()).describe("Each team's id, in order."),
   })
@@ -394,9 +394,9 @@ export const ReplaceSkillTeamGrantsParams = zod.object({
     ),
 });
 
-export const replaceSkillTeamGrantsHeaderIdempotencyKeyMax = 128;
+Exportar const replaceSkillTeamGrantsHeaderIdempotencyKeyMax = 128;
 
-export const ReplaceSkillTeamGrantsHeader = zod.object({
+Exportar const ReplaceSkillTeamGrantsHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -406,14 +406,14 @@ export const ReplaceSkillTeamGrantsHeader = zod.object({
     ),
 });
 
-export const replaceSkillTeamGrantsBodyTeamsItemMax = 200;
+Exportar const replaceSkillTeamGrantsBodyTeamsItemMax = 200;
 
-export const replaceSkillTeamGrantsBodyTeamsItemRegExp = new RegExp(
+Exportar const replaceSkillTeamGrantsBodyTeamsItemRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
-export const replaceSkillTeamGrantsBodyTeamsMax = 100;
+Exportar const replaceSkillTeamGrantsBodyTeamsMax = 100;
 
-export const ReplaceSkillTeamGrantsBody = zod.object({
+Exportar const ReplaceSkillTeamGrantsBody = zod.object({
   teams: zod
     .array(
       zod
@@ -426,7 +426,7 @@ export const ReplaceSkillTeamGrantsBody = zod.object({
     .describe("The id of each team of this organization to grant it to."),
 });
 
-export const ReplaceSkillTeamGrantsResponse = zod
+Exportar const ReplaceSkillTeamGrantsResponse = zod
   .object({
     teams: zod.array(zod.string()).describe("Each team's id, in order."),
   })

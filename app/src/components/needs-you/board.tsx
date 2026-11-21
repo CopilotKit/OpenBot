@@ -1,7 +1,7 @@
 import { IconChevronDown } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useState } from "react";
-import { BotOrb } from "@/components/agents/bot-orb";
+import { BotOrb } from "@/components/Agentes/bot-orb";
 import {
   useHeldAnswers,
   useWaitingByBot,
@@ -12,14 +12,14 @@ import { SuggestionRow } from "@/components/suggestions/suggestion-row";
 import { TaskBoardRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import {
   type ProactiveSetting,
   proactiveSettingsQueryOptions,
 } from "@/lib/proactive";
 import type { ReadFailure } from "@/lib/read-failure";
 import { relativeTime } from "@/lib/relative-time";
-import { countsAsWaiting, heldByTaskOf } from "@/lib/tasks/groups";
+import { countsAsWaiting, heldByTaskOf } from "@/lib/tasks/Grupos";
 import { useNeedsYou } from "./needs-you";
 import { StalledHandoffBoardRow, useStalledHandoffs } from "./stalled-handoffs";
 
@@ -106,8 +106,8 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
     },
     { key: "tasks", what: "tasks", failure: list.failures.tasks },
     {
-      key: "check-ins",
-      what: "check-in findings",
+      key: "Verificações",
+      what: "Verificação-Em findings",
       failure: list.failures.checkIns,
     },
   ].flatMap(({ failure, ...source }) =>
@@ -145,7 +145,7 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
           </div>
         ) : null}
         {blocked.size ? (
-          <Half title={waitingCount ? "Waiting on you" : "Your tasks"}>
+          <Half title={waitingCount ? "A te aguardar" : "Your tasks"}>
             {[...blocked].map(([botId, group]) => (
               <BotGroup
                 bot={bot(botId)}
@@ -167,7 +167,7 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
           </Half>
         ) : null}
         {found.size ? (
-          <Half title="From check-ins">
+          <Half title="De Verificações">
             {[...found].map(([botId, items]) => {
               const watched = [
                 ...new Set(
@@ -185,7 +185,7 @@ export function NeedsYouBoard({ agentId }: { agentId?: string }) {
                   note={
                     watched.length
                       ? `watching ${watched.join(", ")}`
-                      : "from its check-ins"
+                      : "De Dela/Desse Verificações"
                   }
                   settingOf={settingOf}
                 />
@@ -236,8 +236,8 @@ function Half({ title, children }: { title: string; children: ReactNode }) {
 
 type GroupBot = { name: string; avatarSeed: string } | undefined;
 
-/** One Bot's rows in a bordered card, opened by its orb, its name and a note on what they are. */
-function BotGroup({
+/** One Bot's rows Em a bordered card, opened by Dela/Desse orb, Dela/Desse name and a note on what they are. */
+Função BotGroup({
   bot,
   botId,
   note,
@@ -303,7 +303,7 @@ function FoundGroup({
   if (folded)
     rows.push(
       <button
-        className="flex w-full items-center justify-between px-3.5 py-2.5 text-left text-muted-foreground text-[13px] hover:bg-muted"
+        className="flex w-Completo items-center justify-between px-3.5 py-2.5 text-Esquerda text-muted-foreground text-[13px] hover:bg-muted"
         key="more"
         onClick={() => setExpanded(true)}
         type="button"

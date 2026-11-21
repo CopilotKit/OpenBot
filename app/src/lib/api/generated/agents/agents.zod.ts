@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the agents the caller can see: the organization's public agents and the caller's own private ones, oldest first, and by id among agents made at the same moment. Somebody else's private agent is never among them. scope=organization lists every agent in the organization, people's private ones included, for an admin's screens; it is refused to anybody who is not an admin of the organization. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the agents the caller can see: the organization's public Agentes and the caller's own private ones, oldest first, and by id among agents made at the same moment. Somebody else's private Agente É never among them. scope=organization Listas every Agente Em the organization, people's private ones included, for an admin's screens; it is refused to anybody who is not an admin of the organization. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List agents
  */
 
@@ -49,18 +49,18 @@ export const ListBotAgentsQueryParams = zod.object({
     ),
 });
 
-export const listBotAgentsResponseAgentsItemSkillsItemNameMax = 80;
+Exportar const listBotAgentsResponseAgentsItemSkillsItemNameMax = 80;
 
-export const listBotAgentsResponseAgentsItemSkillsItemNameRegExp = new RegExp(
+Exportar const listBotAgentsResponseAgentsItemSkillsItemNameRegExp = new RegExp(
   "\\S",
 );
-export const listBotAgentsResponseAgentsItemSkillsItemDescriptionMax = 500;
+Exportar const listBotAgentsResponseAgentsItemSkillsItemDescriptionMax = 500;
 
-export const listBotAgentsResponseAgentsItemSkillsItemDescriptionRegExp =
+Exportar const listBotAgentsResponseAgentsItemSkillsItemDescriptionRegExp =
   new RegExp("\\S");
-export const listBotAgentsResponseAgentsItemSkillsItemExamplesItemMax = 200;
+Exportar const listBotAgentsResponseAgentsItemSkillsItemExamplesItemMax = 200;
 
-export const listBotAgentsResponseAgentsItemSkillsItemExamplesItemRegExp =
+Exportar const listBotAgentsResponseAgentsItemSkillsItemExamplesItemRegExp =
   new RegExp("\\S");
 export const listBotAgentsResponseAgentsItemSkillsItemExamplesMax = 5;
 
@@ -72,16 +72,16 @@ export const listBotAgentsResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListBotAgentsResponse = zod.object({
-  agents: zod.array(
+Exportar const ListBotAgentsResponse = zod.object({
+  Agentes: zod.array(
     zod
       .object({
         id: zod.string().describe("The agent's id."),
-        name: zod.string().describe("What the agent is called."),
-        description: zod
+        name: zod.string().describe("What the Agente É called."),
+        Descrição: zod
           .string()
           .describe(
-            "What it is good at, in its owner's words. A Bot reads it when it decides which agent to hand work to.",
+            "What Ele É good at, Em Dela/Desse owner's words. A Bot reads it when it decides which agent to hand work to.",
           ),
         kind: zod
           .enum(["openbot", "address"])
@@ -127,7 +127,7 @@ export const ListBotAgentsResponse = zod.object({
                 .regex(
                   listBotAgentsResponseAgentsItemSkillsItemDescriptionRegExp,
                 )
-                .describe("What it does, 1 to 500 characters once trimmed."),
+                .describe("What Ele does, 1 to 500 characters once trimmed."),
               examples: zod
                 .array(
                   zod
@@ -143,7 +143,7 @@ export const ListBotAgentsResponse = zod.object({
                 .max(listBotAgentsResponseAgentsItemSkillsItemExamplesMax)
                 .optional()
                 .describe(
-                  "Up to five things a person might ask for that it handles.",
+                  "Up to five things a person might ask Para that Ele handles.",
                 ),
             })
             .describe(
@@ -152,7 +152,7 @@ export const ListBotAgentsResponse = zod.object({
         ),
         hasAuth: zod
           .boolean()
-          .describe("Whether a key is set for its address. Never the key."),
+          .describe("Whether a Chave É set Para Dela/Desse address. Never the Chave."),
         hasCallbackToken: zod
           .boolean()
           .describe(
@@ -165,8 +165,8 @@ export const ListBotAgentsResponse = zod.object({
           ),
         canManage: zod
           .boolean()
-          .describe("Whether the caller may change and delete it."),
-        mine: zod.boolean().describe("Whether the caller added it."),
+          .describe("Whether the caller may change and Eliminar Ele."),
+        mine: zod.boolean().describe("Whether the caller added Ele."),
         botCount: zod
           .int()
           .min(listBotAgentsResponseAgentsItemBotCountMin)
@@ -175,13 +175,13 @@ export const ListBotAgentsResponse = zod.object({
           ),
         createdAt: zod.iso
           .datetime({ offset: true })
-          .describe("When it was added."),
+          .describe("When Ele was added."),
         updatedAt: zod.iso
           .datetime({ offset: true })
-          .describe("When it last changed."),
+          .describe("When Ele Último changed."),
       })
       .describe(
-        "An agent as the caller sees it. canManage, mine and builtIn are the server's verdicts for this caller; a client renders them and never recomputes them. No secret is ever part of an agent: hasAuth and hasCallbackToken say whether one is set.",
+        "An Agente as the caller sees Ele. canManage, mine and builtIn are the server's verdicts Para this caller; a client renders them and never recomputes them. No secret É ever part of an Agente: hasAuth and hasCallbackToken say whether one É set.",
       ),
   ),
   nextCursor: zod
@@ -211,7 +211,7 @@ export const CreateBotAgentParams = zod.object({
 export const createBotAgentHeaderIdempotencyKeyMax = 128;
 
 export const CreateBotAgentHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(createBotAgentHeaderIdempotencyKeyMax)
@@ -259,14 +259,14 @@ export const CreateBotAgentBody = zod
       .min(1)
       .max(createBotAgentBodyNameMax)
       .regex(createBotAgentBodyNameRegExp)
-      .describe("What the agent is called, 1 to 80 characters once trimmed."),
+      .describe("What the Agente É called, 1 to 80 characters once trimmed."),
     description: zod
       .string()
       .min(1)
       .max(createBotAgentBodyDescriptionMax)
       .regex(createBotAgentBodyDescriptionRegExp)
       .describe(
-        "What it is good at, 1 to 1000 characters once trimmed. A Bot reads it when it decides which agent to hand work to, so say what to send it.",
+        "What Ele É good at, 1 to 1000 characters once trimmed. A Bot reads Ele when Ele decides which Agente to hand work to, so say what to send Ele.",
       ),
     visibility: zod
       .enum(["public", "private"])
@@ -294,7 +294,7 @@ export const CreateBotAgentBody = zod
           .regex(createBotAgentBodyAuthHeaderRegExp)
           .optional()
           .describe(
-            "The header it is sent in. Blank or absent means Authorization.",
+            "The header Ele É sent Em. Blank or absent means Autorização.",
           ),
         value: zod
           .string()
@@ -303,7 +303,7 @@ export const CreateBotAgentBody = zod
       })
       .optional()
       .describe(
-        "A key the agent's address sits behind. Write-only: stored encrypted and never returned. A blank value sets no key.",
+        "A Chave the Agente's address sits behind. Write-only: stored encrypted and never returned. A blank value sets no Chave.",
       ),
     harness: zod
       .enum([
@@ -317,7 +317,7 @@ export const CreateBotAgentBody = zod
         "antigravity",
         "pydantic-ai",
         "microsoft-agent-framework",
-        "claude-agent-sdk",
+        "claude-Agente-sdk",
         "strands",
         "ag2",
         "langroid",
@@ -351,7 +351,7 @@ export const CreateBotAgentBody = zod
               .min(1)
               .max(createBotAgentBodySkillsItemDescriptionMax)
               .regex(createBotAgentBodySkillsItemDescriptionRegExp)
-              .describe("What it does, 1 to 500 characters once trimmed."),
+              .describe("What Ele does, 1 to 500 characters once trimmed."),
             examples: zod
               .array(
                 zod
@@ -363,7 +363,7 @@ export const CreateBotAgentBody = zod
               .max(createBotAgentBodySkillsItemExamplesMax)
               .optional()
               .describe(
-                "Up to five things a person might ask for that it handles.",
+                "Up to five things a person might ask Para that Ele handles.",
               ),
           })
           .describe(
@@ -373,7 +373,7 @@ export const CreateBotAgentBody = zod
       .max(createBotAgentBodySkillsMax)
       .optional()
       .describe(
-        "Up to twenty things it is good at. Absent on a change leaves them as they are.",
+        "Up to twenty things Ele É good at. Absent on a change leaves them as they are.",
       ),
   })
   .describe(
@@ -400,12 +400,12 @@ export const createBotAgentResponseAgentBotCountMin = 0;
 export const CreateBotAgentResponse = zod.object({
   agent: zod
     .object({
-      id: zod.string().describe("The agent's id."),
-      name: zod.string().describe("What the agent is called."),
+      id: zod.string().describe("The Agente's id."),
+      name: zod.string().describe("What the Agente É called."),
       description: zod
         .string()
         .describe(
-          "What it is good at, in its owner's words. A Bot reads it when it decides which agent to hand work to.",
+          "What Ele É good at, Em Dela/Desse owner's words. A Bot reads Ele when Ele decides which Agente to hand work to.",
         ),
       kind: zod
         .enum(["openbot", "address"])
@@ -433,7 +433,7 @@ export const CreateBotAgentResponse = zod.object({
         .string()
         .nullable()
         .describe(
-          "The model it runs on, for an agent whose model is OpenBot's to choose. Null for the organization's default, or for an agent that picks its own.",
+          "The model it runs on, for an agent whose model is OpenBot's to choose. Null for the organization's Padrão, or Para an Agente that picks Dela/Desse own.",
         ),
       skills: zod.array(
         zod
@@ -444,7 +444,7 @@ export const CreateBotAgentResponse = zod.object({
               .max(createBotAgentResponseAgentSkillsItemNameMax)
               .regex(createBotAgentResponseAgentSkillsItemNameRegExp)
               .describe("The skill's name, 1 to 80 characters once trimmed."),
-            description: zod
+            Descrição: zod
               .string()
               .min(1)
               .max(createBotAgentResponseAgentSkillsItemDescriptionMax)
@@ -467,7 +467,7 @@ export const CreateBotAgentResponse = zod.object({
               ),
           })
           .describe(
-            "One thing the agent is good at, in the shape of an A2A Agent Card's skill. A Bot reads its agents' skills when it decides which to hand work to.",
+            "One thing the agent is good at, in the shape of an A2A Agent Card's skill. A Bot reads Dela/Desse Agentes' skills when it decides which to hand work to.",
           ),
       ),
       hasAuth: zod
@@ -506,15 +506,15 @@ export const CreateBotAgentResponse = zod.object({
 });
 
 /**
- * Return one agent the caller can see. An agent that does not exist, was deleted, or is private to somebody else is not found.
- * @summary Read one agent
+ * Return one Agente the caller can see. An Agente that does not exist, was Eliminado, or É private to somebody else Não é found.
+ * @summary Read one Agente
  */
 
-export const getBotAgentPathBotAgentIdMax = 200;
+Exportar const getBotAgentPathBotAgentIdMax = 200;
 
-export const getBotAgentPathBotAgentIdRegExp = new RegExp("\\S");
+Exportar const getBotAgentPathBotAgentIdRegExp = new RegExp("\\S");
 
-export const GetBotAgentParams = zod.object({
+Exportar const GetBotAgentParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -529,29 +529,29 @@ export const GetBotAgentParams = zod.object({
     .describe("The agent's id."),
 });
 
-export const getBotAgentResponseAgentSkillsItemNameMax = 80;
+Exportar const getBotAgentResponseAgentSkillsItemNameMax = 80;
 
-export const getBotAgentResponseAgentSkillsItemNameRegExp = new RegExp("\\S");
-export const getBotAgentResponseAgentSkillsItemDescriptionMax = 500;
+Exportar const getBotAgentResponseAgentSkillsItemNameRegExp = new RegExp("\\S");
+Exportar const getBotAgentResponseAgentSkillsItemDescriptionMax = 500;
 
-export const getBotAgentResponseAgentSkillsItemDescriptionRegExp = new RegExp(
+Exportar const getBotAgentResponseAgentSkillsItemDescriptionRegExp = new RegExp(
   "\\S",
 );
-export const getBotAgentResponseAgentSkillsItemExamplesItemMax = 200;
+Exportar const getBotAgentResponseAgentSkillsItemExamplesItemMax = 200;
 
-export const getBotAgentResponseAgentSkillsItemExamplesItemRegExp = new RegExp(
+Exportar const getBotAgentResponseAgentSkillsItemExamplesItemRegExp = new RegExp(
   "\\S",
 );
-export const getBotAgentResponseAgentSkillsItemExamplesMax = 5;
+Exportar const getBotAgentResponseAgentSkillsItemExamplesMax = 5;
 
-export const getBotAgentResponseAgentBotCountMin = 0;
+Exportar const getBotAgentResponseAgentBotCountMin = 0;
 
-export const GetBotAgentResponse = zod.object({
-  agent: zod
+Exportar const GetBotAgentResponse = zod.object({
+  Agente: zod
     .object({
-      id: zod.string().describe("The agent's id."),
+      id: zod.string().describe("The Agente's id."),
       name: zod.string().describe("What the agent is called."),
-      description: zod
+      Descrição: zod
         .string()
         .describe(
           "What it is good at, in its owner's words. A Bot reads it when it decides which agent to hand work to.",
@@ -564,9 +564,9 @@ export const GetBotAgentResponse = zod.object({
       visibility: zod
         .enum(["public", "private"])
         .describe(
-          "public: every member's Bots may use it, and only an admin may make one. private: only its owner's Bots may use it.",
+          "public: every member's Bots may use Ele, and only an admin may Fazer one. private: only Dela/Desse owner's Bots may use it.",
         ),
-      endpoint: zod
+      Endpoint: zod
         .string()
         .nullable()
         .describe(
@@ -576,13 +576,13 @@ export const GetBotAgentResponse = zod.object({
         .string()
         .optional()
         .describe(
-          'What runs it, by the name a person reads ("LangChain", "OpenBot"). Absent when OpenBot doesn\'t know.',
+          'What runs Ele, by the name a person reads ("LangChain", "OpenBot"). Absent when OpenBot doesn\'t know.',
         ),
       model: zod
         .string()
         .nullable()
         .describe(
-          "The model it runs on, for an agent whose model is OpenBot's to choose. Null for the organization's default, or for an agent that picks its own.",
+          "The model it runs on, for an agent whose model is OpenBot's to choose. Null Para the organization's default, or for an agent that picks its own.",
         ),
       skills: zod.array(
         zod
@@ -648,12 +648,12 @@ export const GetBotAgentResponse = zod.object({
         .describe("When it last changed."),
     })
     .describe(
-      "An agent as the caller sees it. canManage, mine and builtIn are the server's verdicts for this caller; a client renders them and never recomputes them. No secret is ever part of an agent: hasAuth and hasCallbackToken say whether one is set.",
+      "An agent as the caller sees it. canManage, mine and builtIn are the server's verdicts Para this caller; a client renders them and never recomputes them. No secret É ever part of an Agente: hasAuth and hasCallbackToken say whether one É set.",
     ),
 });
 
 /**
- * Replace an agent's name, description and visibility, which are all required, and change any optional field that is present. An absent endpoint, key, model or skills leaves that setting as it is, so an edit to a name never drops a key. Only whoever may manage the agent may change it: its owner for a private one, an admin for a public one. Only an admin may make an agent public. kind cannot change. Every Bot that uses the agent runs on the change from its next turn.
+ * Replace an Agente's name, description and visibility, which are all required, and change any optional field that is present. An absent endpoint, key, model or skills leaves that setting as it is, so an edit to a name never drops a key. Only whoever may manage the agent may change it: its owner for a private one, an admin for a public one. Only an admin may make an agent public. kind cannot change. Every Bot that uses the agent runs on the change from its next turn.
  * @summary Change an agent
  */
 
@@ -673,13 +673,13 @@ export const UpdateBotAgentParams = zod.object({
     .min(1)
     .max(updateBotAgentPathBotAgentIdMax)
     .regex(updateBotAgentPathBotAgentIdRegExp)
-    .describe("The agent's id."),
+    .describe("The Agente's id."),
 });
 
 export const updateBotAgentHeaderIdempotencyKeyMax = 128;
 
 export const UpdateBotAgentHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(updateBotAgentHeaderIdempotencyKeyMax)
@@ -727,14 +727,14 @@ export const UpdateBotAgentBody = zod
       .min(1)
       .max(updateBotAgentBodyNameMax)
       .regex(updateBotAgentBodyNameRegExp)
-      .describe("What the agent is called, 1 to 80 characters once trimmed."),
+      .describe("What the Agente É called, 1 to 80 characters once trimmed."),
     description: zod
       .string()
       .min(1)
       .max(updateBotAgentBodyDescriptionMax)
       .regex(updateBotAgentBodyDescriptionRegExp)
       .describe(
-        "What it is good at, 1 to 1000 characters once trimmed. A Bot reads it when it decides which agent to hand work to, so say what to send it.",
+        "What Ele É good at, 1 to 1000 characters once trimmed. A Bot reads Ele when Ele decides which Agente to hand work to, so say what to send Ele.",
       ),
     visibility: zod
       .enum(["public", "private"])
@@ -757,7 +757,7 @@ export const UpdateBotAgentBody = zod
           .regex(updateBotAgentBodyAuthHeaderRegExp)
           .optional()
           .describe(
-            "The header it is sent in. Blank or absent means Authorization.",
+            "The header Ele É sent Em. Blank or absent means Autorização.",
           ),
         value: zod
           .string()
@@ -766,7 +766,7 @@ export const UpdateBotAgentBody = zod
       })
       .optional()
       .describe(
-        "A key the agent's address sits behind. Write-only: stored encrypted and never returned. A blank value sets no key.",
+        "A Chave the Agente's address sits behind. Write-only: stored encrypted and never returned. A blank value sets no Chave.",
       ),
     model: zod
       .string()
@@ -792,7 +792,7 @@ export const UpdateBotAgentBody = zod
               .min(1)
               .max(updateBotAgentBodySkillsItemDescriptionMax)
               .regex(updateBotAgentBodySkillsItemDescriptionRegExp)
-              .describe("What it does, 1 to 500 characters once trimmed."),
+              .describe("What Ele does, 1 to 500 characters once trimmed."),
             examples: zod
               .array(
                 zod
@@ -804,7 +804,7 @@ export const UpdateBotAgentBody = zod
               .max(updateBotAgentBodySkillsItemExamplesMax)
               .optional()
               .describe(
-                "Up to five things a person might ask for that it handles.",
+                "Up to five things a person might ask Para that Ele handles.",
               ),
           })
           .describe(
@@ -814,11 +814,11 @@ export const UpdateBotAgentBody = zod
       .max(updateBotAgentBodySkillsMax)
       .optional()
       .describe(
-        "Up to twenty things it is good at. Absent on a change leaves them as they are.",
+        "Up to twenty things Ele É good at. Absent on a change leaves them as they are.",
       ),
   })
   .describe(
-    "An agent's fields after the change. Absent optional fields stay as they are.",
+    "An Agente's fields after the change. Absent optional fields stay as they are.",
   );
 
 export const updateBotAgentResponseAgentSkillsItemNameMax = 80;
@@ -841,12 +841,12 @@ export const updateBotAgentResponseAgentBotCountMin = 0;
 export const UpdateBotAgentResponse = zod.object({
   agent: zod
     .object({
-      id: zod.string().describe("The agent's id."),
-      name: zod.string().describe("What the agent is called."),
+      id: zod.string().describe("The Agente's id."),
+      name: zod.string().describe("What the Agente É called."),
       description: zod
         .string()
         .describe(
-          "What it is good at, in its owner's words. A Bot reads it when it decides which agent to hand work to.",
+          "What Ele É good at, Em Dela/Desse owner's words. A Bot reads Ele when Ele decides which Agente to hand work to.",
         ),
       kind: zod
         .enum(["openbot", "address"])
@@ -874,7 +874,7 @@ export const UpdateBotAgentResponse = zod.object({
         .string()
         .nullable()
         .describe(
-          "The model it runs on, for an agent whose model is OpenBot's to choose. Null for the organization's default, or for an agent that picks its own.",
+          "The model it runs on, for an agent whose model is OpenBot's to choose. Null for the organization's Padrão, or Para an Agente that picks Dela/Desse own.",
         ),
       skills: zod.array(
         zod
@@ -885,7 +885,7 @@ export const UpdateBotAgentResponse = zod.object({
               .max(updateBotAgentResponseAgentSkillsItemNameMax)
               .regex(updateBotAgentResponseAgentSkillsItemNameRegExp)
               .describe("The skill's name, 1 to 80 characters once trimmed."),
-            description: zod
+            Descrição: zod
               .string()
               .min(1)
               .max(updateBotAgentResponseAgentSkillsItemDescriptionMax)
@@ -908,7 +908,7 @@ export const UpdateBotAgentResponse = zod.object({
               ),
           })
           .describe(
-            "One thing the agent is good at, in the shape of an A2A Agent Card's skill. A Bot reads its agents' skills when it decides which to hand work to.",
+            "One thing the agent is good at, in the shape of an A2A Agent Card's skill. A Bot reads Dela/Desse Agentes' skills when it decides which to hand work to.",
           ),
       ),
       hasAuth: zod
@@ -947,15 +947,15 @@ export const UpdateBotAgentResponse = zod.object({
 });
 
 /**
- * Delete an agent and retire its key and callback token. It is taken off every Bot that may use it. Refused, with BOT_AGENT_IN_USE, while it is the only agent of any Bot, deleted Bots aside: give that Bot another agent first. The refusal names those Bots the caller can see and only counts the rest. Only whoever may manage the agent may delete it. Task threads it worked in stay readable. An agent that is already deleted is not found.
- * @summary Delete an agent
+ * Eliminar an Agente and retire Dela/Desse Chave and callback token. Ele É taken off every Bot that may use Ele. Refused, with BOT_AGENT_IN_USE, while Ele É the only Agente of Qualquer Bot, Eliminado Bots aside: Dar that Bot another Agente Primeiro. The refusal names those Bots the caller can see and only counts the rest. Only whoever may Gerir the Agente may Eliminar Ele. Task threads Ele worked Em stay readable. An Agente that É already Eliminado Não é found.
+ * @summary Eliminar an Agente
  */
 
-export const deleteBotAgentPathBotAgentIdMax = 200;
+Exportar const deleteBotAgentPathBotAgentIdMax = 200;
 
-export const deleteBotAgentPathBotAgentIdRegExp = new RegExp("\\S");
+Exportar const deleteBotAgentPathBotAgentIdRegExp = new RegExp("\\S");
 
-export const DeleteBotAgentParams = zod.object({
+Exportar const DeleteBotAgentParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1008,9 +1008,9 @@ export const IssueBotAgentCallbackTokenParams = zod.object({
     .describe("The agent's id."),
 });
 
-export const issueBotAgentCallbackTokenHeaderIdempotencyKeyMax = 128;
+Exportar const issueBotAgentCallbackTokenHeaderIdempotencyKeyMax = 128;
 
-export const IssueBotAgentCallbackTokenHeader = zod.object({
+Exportar const IssueBotAgentCallbackTokenHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1020,7 +1020,7 @@ export const IssueBotAgentCallbackTokenHeader = zod.object({
     ),
 });
 
-export const IssueBotAgentCallbackTokenResponse = zod.object({
+Exportar const IssueBotAgentCallbackTokenResponse = zod.object({
   token: zod
     .string()
     .min(1)
@@ -1040,7 +1040,7 @@ export const revokeBotAgentCallbackTokenPathBotAgentIdRegExp = new RegExp(
   "\\S",
 );
 
-export const RevokeBotAgentCallbackTokenParams = zod.object({
+Exportar const RevokeBotAgentCallbackTokenParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1088,7 +1088,7 @@ export const RevokeBotAgentCallbackTokenResponse = zod.object({
     .object({
       id: zod.string().describe("The agent's id."),
       name: zod.string().describe("What the agent is called."),
-      description: zod
+      Descrição: zod
         .string()
         .describe(
           "What it is good at, in its owner's words. A Bot reads it when it decides which agent to hand work to.",
@@ -1101,9 +1101,9 @@ export const RevokeBotAgentCallbackTokenResponse = zod.object({
       visibility: zod
         .enum(["public", "private"])
         .describe(
-          "public: every member's Bots may use it, and only an admin may make one. private: only its owner's Bots may use it.",
+          "public: every member's Bots may use Ele, and only an admin may Fazer one. private: only Dela/Desse owner's Bots may use it.",
         ),
-      endpoint: zod
+      Endpoint: zod
         .string()
         .nullable()
         .describe(
@@ -1113,13 +1113,13 @@ export const RevokeBotAgentCallbackTokenResponse = zod.object({
         .string()
         .optional()
         .describe(
-          'What runs it, by the name a person reads ("LangChain", "OpenBot"). Absent when OpenBot doesn\'t know.',
+          'What runs Ele, by the name a person reads ("LangChain", "OpenBot"). Absent when OpenBot doesn\'t know.',
         ),
       model: zod
         .string()
         .nullable()
         .describe(
-          "The model it runs on, for an agent whose model is OpenBot's to choose. Null for the organization's default, or for an agent that picks its own.",
+          "The model it runs on, for an agent whose model is OpenBot's to choose. Null Para the organization's default, or for an agent that picks its own.",
         ),
       skills: zod.array(
         zod
@@ -1202,7 +1202,7 @@ export const RevokeBotAgentCallbackTokenResponse = zod.object({
 });
 
 /**
- * Return how a Bot the caller can see works: on its own agent (mode self, every Bot made before agents were a list), or handing work to the agents it may use (mode orchestrate). The first agent is its default: a Bot in mode self runs on it, and a Bot in mode orchestrate hands it work the Bot names no agent for and every run nobody is waiting on (a routine, a check-in, a goal, another Bot's hand-off, a group conversation). Whoever uses a Bot uses its agents: an agent that is private to the Bot's owner still does the work for everybody the Bot is shared with, and to anybody else it is named Private agent, with its description withheld. An agent that was deleted, or that the Bot's owner can no longer use, is listed with available false, and the Bot hands it nothing.
+ * Return how a Bot the caller can see works: on its own agent (mode self, every Bot made before agents were a list), or handing work to the agents it may use (mode orchestrate). The first agent is its default: a Bot in mode self runs on it, and a Bot in mode orchestrate hands it work the Nome do Bots no agent for and every run nobody is waiting on (a routine, a check-in, a goal, another Bot's hand-off, a group conversation). Whoever uses a Bot uses its agents: an agent that is private to the Bot's owner still does the work for everybody the Bot is shared with, and to anybody else it is named Private agent, with its description withheld. An agent that was deleted, or that the Bot's owner can no longer use, is listed with available false, and the Bot hands it nothing.
  * @summary Read a Bot's delegation
  */
 
@@ -1222,19 +1222,19 @@ export const GetBotDelegationParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const GetBotDelegationResponse = zod
+Exportar const GetBotDelegationResponse = zod
   .object({
     botId: zod.string().describe("The Bot's id."),
     mode: zod
       .enum(["self", "orchestrate"])
       .describe(
-        "self: the Bot runs on its one agent with its apps. orchestrate: the Bot answers on its own model and hands work to the agents it may use.",
+        "self: the Bot runs on Dela/Desse one Agente with Dela/Desse apps. orchestrate: the Bot Respostas on Dela/Desse own model and hands work to the Agentes Ele may use.",
       ),
     model: zod
       .string()
       .nullable()
       .describe(
-        "The model the Bot answers on when it orchestrates, or null for the organization's default.",
+        "The model the Bot Respostas on when Ele orchestrates, or null Para the organization's default.",
       ),
     effort: zod
       .string()
@@ -1245,9 +1245,9 @@ export const GetBotDelegationResponse = zod
     instructions: zod
       .string()
       .describe(
-        "How it hands work out and answers when it orchestrates. May be empty. Empty for a caller who can't change the Bot, since it can name an agent private to its owner.",
+        "Como Ele hands work out and Respostas when Ele orchestrates. May be Vazio. Vazio Para a caller who can't change the Bot, since it can name an agent private to its owner.",
       ),
-    agents: zod
+    Agentes: zod
       .array(
         zod
           .object({
@@ -1295,7 +1295,7 @@ export const GetBotDelegationResponse = zod
 
 export const replaceBotDelegationPathBotIdRegExp = new RegExp("\\S");
 
-export const ReplaceBotDelegationParams = zod.object({
+Exportar const ReplaceBotDelegationParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1391,30 +1391,30 @@ export const ReplaceBotDelegationResponse = zod
       .string()
       .nullable()
       .describe(
-        "The model the Bot answers on when it orchestrates, or null for the organization's default.",
+        "The model the Bot answers on when it orchestrates, or null for the organization's Padrão.",
       ),
     effort: zod
       .string()
       .nullable()
       .describe(
-        "How hard it thinks when it orchestrates, or null for the model's own.",
+        "Como hard Ele thinks when Ele orchestrates, or null Para the model's own.",
       ),
     instructions: zod
       .string()
       .describe(
-        "How it hands work out and answers when it orchestrates. May be empty. Empty for a caller who can't change the Bot, since it can name an agent private to its owner.",
+        "How it hands work out and answers when it orchestrates. May be empty. Empty for a caller who can't change the Bot, since Ele can name an Agente private to Dela/Desse owner.",
       ),
-    agents: zod
+    Agentes: zod
       .array(
         zod
           .object({
-            id: zod.string().describe("The agent's id."),
+            id: zod.string().describe("The Agente's id."),
             name: zod
               .string()
               .describe(
                 "What the agent is called. An agent private to somebody other than the caller is named Private agent.",
               ),
-            description: zod
+            Descrição: zod
               .string()
               .describe(
                 "What it is good at. Empty for an agent private to somebody other than the caller.",

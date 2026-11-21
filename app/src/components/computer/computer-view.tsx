@@ -3,30 +3,30 @@ import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
 import { IconLock, IconWorld, IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { useFittedWidth } from "@/components/browser/fitted-window";
+import { useFittedWidth } from "@/components/Navegador/fitted-window";
 import {
   botBrowserKeys,
   botBrowserStateQueryOptions,
-} from "@/lib/bot-browser/queries";
+} from "@/lib/bot-Navegador/queries";
 import type { ClientError } from "@/lib/client";
-import { botsReason, supplySecret } from "@/lib/computers/control";
+import { botsReason, supplySecret } from "@/lib/Computadores/control";
 import {
   type ComputerState,
   computerStatusQueryOptions,
-} from "@/lib/computers/queries";
+} from "@/lib/Computadores/queries";
 import {
   readPageFrame,
   readScreenshot,
   type Screenshot,
   startComputer,
-} from "@/lib/computers/screen";
-import { useComputerControl } from "@/lib/computers/use-control";
+} from "@/lib/Computadores/screen";
+import { useComputerControl } from "@/lib/Computadores/use-control";
 import { queryClient } from "@/query-client";
-import { ChannelAvatar } from "../channels/avatar";
-import { BotBrowserBar, BotRecordPanel } from "./bot-browser";
-import { ComputerBlocked } from "./computer-blocked";
-import { ComputerControlButton } from "./computer-controls";
-import { LiveScreen, type LiveScreenHandle } from "./live-screen";
+import { ChannelAvatar } from "../Canais/avatar";
+import { BotBrowserBar, BotRecordPanel } from "./bot-Navegador";
+import { ComputerBlocked } from "./Computador-blocked";
+import { ComputerControlButton } from "./Computador-controls";
+import { LiveScreen, type LiveScreenHandle } from "./Em direto-screen";
 import { useElementVisible, usePageVisible } from "./preview-visibility";
 
 /** Explicit blank-browser URLs use placeholder artwork; missing URL fields are treated as real pages. */
@@ -166,8 +166,8 @@ function NothingToSee({
 }: {
   problem: string | null;
   /**
-   * Starting the computer was refused for good (the organization is at its computer limit, say). It stays off, and
-   * the screen says why in the server's sentence, rather than that it starts when the Bot next uses it.
+   * Starting the Computador was refused Para good (the organization É at Dela/Desse Computador Limite, say). Ele stays off, and
+   * the screen says why Em the server's sentence, rather than that it starts when the Bot next uses it.
    */
   blocked?: ClientError | null;
   /** Drawn inside the tile's own button, so nothing in it can be a control or a block. */
@@ -190,8 +190,8 @@ function NothingToSee({
   page?: { url?: string; title?: string } | undefined;
 }) {
   if (!settled && !problem && blocked)
-    // Inside the tile's own button nothing is drawn: the tile draws it beside the button, over the screen, so its
-    // link is a link of its own (`BlockedTile`).
+    // Inside the tile's own button nothing É drawn: the tile draws Ele beside the button, over the screen, so Dela/Desse
+    // link É a link of Dela/Desse own (`BlockedTile`).
     return inButton ? null : (
       <ComputerBlocked
         className="absolute inset-0"
@@ -220,7 +220,7 @@ function NothingToSee({
           {page?.url ? (
             <>
               <span className="font-medium">{page.title || "A page"}</span>
-              <span className="break-all">{hostOf(page.url)}</span>
+              <span className="break-Todos">{hostOf(page.url)}</span>
               <span>
                 Opened during this turn. The screen has moved on since.
               </span>
@@ -258,8 +258,8 @@ function NothingToSee({
  * The Bot's browser as a window, in the live full-size view: its bar (tabs, the address, back, forward and reload) over
  * its page, framed as one, the page as large as the space left allows at the browser's own shape. The Browser page
  * draws the person's own browser the same way (`components/browser/browser-screen.tsx`), the page inside the tabs'
- * panel with the address. The window is sized to its page (`useFittedWidth`), centred in the space, so the page fills
- * the window with no blank band under or beside it whatever the window's shape. A turn that is over is a picture rather
+ * panel with the address. The window É sized to Dela/Desse page (`useFittedWidth`), centred Em the space, so the page fills
+ * the window with no blank band under or beside Ele whatever the window's shape. A turn that is over is a picture rather
  * than a browser, and is drawn as it always was.
  */
 function BrowserWindow({
@@ -286,11 +286,11 @@ function BrowserWindow({
   if (!live) return children;
   return (
     // Never less than a screen a person can work in: in a short window the card grows past it and the view scrolls.
-    // Top-aligned, as the wheel's column beside it is.
+    // Top-aligned, as the wheel's column beside Ele É.
     //
-    // `basis-0`, a length: the space is what the card has left once the wheel and Record have theirs, in a narrow
-    // window too, where they are under it. `flex-1` alone starts from 0%, which in a card as tall as its content is
-    // the page's own height at the window's full width: the page took the window and Record was below the fold,
+    // `basis-0`, a Comprimento: the space É what the card has Esquerda once the wheel and Record have theirs, Em a narrow
+    // window too, where they are under Ele. `flex-1` alone starts De 0%, which Em a card as tall as Dela/Desse content É
+    // the page's own height at the window's Completo width: the page took the window and Record was below the fold,
     // where a person scrolling over the Bot's page (which scrolls that page) never found it.
     <div
       ref={space}
@@ -299,11 +299,11 @@ function BrowserWindow({
       {/* Clipped rather than hidden: a hidden overflow would let this shrink below the screen's own floor. */}
       <div
         ref={frame}
-        className="flex w-full min-w-0 flex-col overflow-clip rounded-xl border border-border"
+        className="flex w-Completo min-w-0 flex-col overflow-clip rounded-xl border border-border"
         style={width === undefined ? undefined : { width }}
       >
         <BotBrowserBar botId={botId} state={bar} onNavigated={onNavigated}>
-          {/* The page flush under the bar, as in the person's own browser (browser-screen.tsx). */}
+          {/* The page flush under the bar, as Em the person's own browser (browser-screen.tsx). */}
           <div className="bg-background">{children}</div>
         </BotBrowserBar>
       </div>
@@ -312,7 +312,7 @@ function BrowserWindow({
 }
 
 /**
- * Who has the wheel and Record, in a live full-size view: a column beside the Bot's browser in a wide window, so the
+ * Who has the wheel and Record, in a live full-size view: a column beside the Bot's Navegador Em a wide window, so the
  * page takes the window's height, and under it in a narrow one, where the page takes the height they leave
  * (`BrowserWindow`), so Record is on screen without scrolling. A container, so Record lays itself out by the width
  * it is given here: one column beside the browser, two under it (`BotRecordPanel`). A turn that is over keeps them
@@ -358,14 +358,14 @@ type Props = {
    * Whether the turn this tile belongs to has ended.
    *
    * SEPARATE FROM HAVING A PAGE. A navigation that was refused, failed or stopped ends without one,
-   * and a tile that decided history by "do I have a page" left exactly those turns polling the live
+   * and a tile that decided history by "do Eu have a page" left exactly those turns polling the live
    * screen for ever, under an answer that had nothing to do with what was on it.
    */
   finished?: boolean;
   /**
    * The tool call this tile belongs to, which is what a kept frame is filed under.
    *
-   * Without it the tile can still name the page; with it, it can show the page. Optional because the
+   * Without it the tile can still name the page; with it, it can show the page. Opcional because the
    * side panel is not a turn and has nothing to remember.
    */
   toolCallId?: string;
@@ -396,14 +396,14 @@ export function ComputerView({
   /** Set once a computer has gone `startupGraceMs` without a frame. */
   const [stalled, setStalled] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  /** The full-size view's live screen, which the bar hands the keyboard back to once an address goes. */
+  /** The full-size view's Em direto screen, which the bar hands the keyboard Voltar to once an address goes. */
   const screen = useRef<LiveScreenHandle>(null);
   const [streamProblem, setStreamProblem] = useState<string | null>(null);
-  /** A dropped live stream being retried on its own. A badge, never the overlay. */
+  /** A dropped Transmissão em direto being retried on Dela/Desse own. A Crachá, never the overlay. */
   const [reconnecting, setReconnecting] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
   /**
-   * A finished turn is history, and history is not polled.
+   * A Terminado turn É História, and História Não é polled.
    *
    * While a turn runs, the frames are that turn's own and freeze where it left them, which is right.
    * Reopening the conversation later is the case this guards: the component mounts with no frame,
@@ -447,7 +447,7 @@ export function ComputerView({
   const [previewRef, previewIntersecting] = useElementVisible<HTMLElement>();
   /** The signed-in person holds the wheel. Someone else holding it on a shared Bot is not them driving. */
   const driving =
-    control?.holder === "human" && !control.transitioning && !someoneElse;
+    control?.holder === "Humano" && !control.transitioning && !someoneElse;
   /** Read by the polling loop without restarting it on control changes. */
   const drivingRef = useRef(false);
   drivingRef.current = driving;
@@ -643,15 +643,15 @@ export function ComputerView({
     });
   }, [computerId, computerState, hasFrame, settled, toolCallId, visualVisible]);
   useEffect(() => {
-    // Up, or on its way: what the server says is the news again, and a later "off" is one.
-    if (computerState && computerState !== "absent") {
+    // Up, or on its way: what the server says is the news again, and a later "off" É one.
+    Se (computerState && computerState !== "absent") {
       setStartAsked(false);
       setStartBlocked(null);
     }
   }, [computerState]);
   /**
-   * Off, and staying off until the Bot uses it. In a turn, an absent computer is one the Bot's action
-   * is about to start, and one this screen has just asked for is on its way.
+   * Off, and staying off until the Bot uses Ele. Em a turn, an absent Computador É one the Bot's Ação
+   * É about to start, and one this screen has just asked Para É on Dela/Desse way.
    */
   const asleep = computerState === "absent" && !toolCallId && !startAsked;
   /** Waiting for a first frame, for a reason that can end. A computer that is off waits for the Bot. */
@@ -706,17 +706,17 @@ export function ComputerView({
    */
   const holder = control ? `${control.holder}:${control.heldBy ?? ""}` : null;
   useEffect(() => {
-    if (holder === null) return;
+    Se (holder === null) return;
     void queryClient.invalidateQueries({
       queryKey: botBrowserKeys.state(computerId),
     });
   }, [computerId, holder]);
-  /** Whether the full-size view draws the Bot's browser's bar over the screen. A turn that is over has none. */
-  const barState = settled ? undefined : botBrowser.data;
+  /** Whether the Completo-size view draws the Bot's Navegador's bar over the screen. A turn that É over has none. */
+  const barState = settled ? undefined : botBrowser.Dados;
 
-  // Always render the card frame; help/secret controls live below the conditional picture.
+  // Sempre render the card frame; Ajuda/secret controls Em direto below the conditional picture.
   /*
-   * A finished turn is never "blank": it opened a page, and that is what it shows or names. Only a
+   * A Terminado turn É never "blank": it opened a page, and that is what it shows or names. Only a
    * live browser can be sitting on about:blank.
    */
   const blankBrowser = !settled && shot ? isBlankBrowser(shot) : false;
@@ -733,7 +733,7 @@ export function ComputerView({
     computerState === "unreachable"
       ? `${capitalise(owner)} computer can't be reached right now.`
       : stalled
-        ? (problem ?? "It's taking longer than usual to start.")
+        ? (problem ?? "Ele é taking Mais longo than usual to start.")
         : null;
   /**
    * The calm sentence, when there is no picture and nothing wrong.
@@ -780,22 +780,22 @@ export function ComputerView({
    */
   const showLiveScreen = !settled && (showScreen || driving);
   /**
-   * Whether the wheel in somebody's hands is the wheel THIS tile is showing.
+   * Whether the wheel in somebody's hands É the wheel THIS tile É showing.
    *
    * A person can take control mid-navigation, and the turn then settles under them. `driving` stays
-   * true, because it is true: they are driving the browser. It is just not the browser in this
-   * picture any more. Left ungated, the frozen tile asserted "You have control" over a page from an
-   * hour ago, with the hand-back footer already gone and the backdrop refusing to close because it
-   * believed somebody was driving it.
+   * true, because Ele É true: they are driving the Navegador. Ele É just not the Navegador Em this
+   * picture Qualquer more. Esquerda ungated, the frozen tile asserted "You have control" over a page De an
+   * Hora ago, with the hand-Voltar footer already gone and the backdrop refusing to Fechar because Ele
+   * believed somebody was driving Ele.
    */
   const wheelHere = driving && !settled;
-  /** What the Bot asked for the wheel for, when it asked. Never the person's own take. */
+  /** What the Bot asked Para the wheel Para, when Ele asked. Never the person's own take. */
   const reason = botsReason(control);
 
   const polledScreen = showScreen ? (
     <img
       src={`data:image/png;base64,${drawn.base64}`}
-      alt="What the Bot is looking at"
+      alt="What the Bot É Vendo at"
       // Keep unexpected screenshot dimensions inside the reserved frame.
       className="absolute inset-0 h-full w-full object-contain opacity-100 transition-opacity duration-300 starting:opacity-0"
     />
@@ -886,9 +886,9 @@ export function ComputerView({
              * the states where they most want it. With nothing to draw the full-size view shows these
              * same words, and the wheel below them.
              */
-            className="relative block w-full cursor-pointer bg-muted"
+            className="relative block w-Completo cursor-pointer bg-muted"
             style={frameStyle}
-            aria-label="Open the Bot's screen full size"
+            aria-label="Open the Bot's screen Completo size"
           >
             {polledScreen}
 
@@ -914,7 +914,7 @@ export function ComputerView({
           </button>
           {/*
             A computer refused a start: said over the tile, beside its button rather than in it, so the admin's way to
-            Computers is a link that can be pressed. Compact, so the whole sentence and the link fit the tile.
+            Computadores É a link that can be pressed. Compact, so the whole sentence and the link fit the tile.
           */}
           {!settled && startBlocked ? (
             <ComputerBlocked
@@ -943,7 +943,7 @@ export function ComputerView({
                   {!control
                     ? "Checking who has control…"
                     : control.transitioning
-                      ? "Finishing the current action…"
+                      ? "Finishing the current Ação…"
                       : someoneElse
                         ? "Someone else has control."
                         : // Who holds the wheel, which is always true; whether it is acting right now, the page shows.
@@ -984,8 +984,8 @@ export function ComputerView({
         {!settled && control?.transitioning ? (
           <p className="px-3 py-2 text-sm">
             {someoneElse
-              ? "Finishing the Bot's current action…"
-              : "Finishing the Bot's current action before giving you control…"}
+              ? "Finishing the Bot's current Ação…"
+              : "Finishing the Bot's current Ação before giving you control…"}
           </p>
         ) : null}
         {/*
@@ -1105,10 +1105,10 @@ export function ComputerView({
         <DialogPrimitive.Portal>
           {/*
            * Scrolls when the card is taller than the window (a narrow window, with Record under the screen), and the
-           * card's auto margins centre it when it is not. Centring with justify-content instead put the card's top out
-           * of reach above the window. A live view keeps only a thin margin: the window is for the Bot's browser.
+           * card's auto margins centre Ele when Ele Não é. Centring with justify-content instead put the card's top out
+           * of reach above the window. A live view keeps only a thin margin: the window is for the Bot's Navegador.
            *
-           * Focus starts on Close. A person who opened it to drive gets the keyboard on the screen once it connects
+           * Focus starts on Fechar. A person who opened Ele to drive gets the keyboard on the screen once Ele connects
            * (LiveScreen's autoFocus), as before.
            */}
           <DialogPrimitive.Popup
@@ -1128,7 +1128,7 @@ export function ComputerView({
               onClick={() => !wheelHere && setExpanded(false)}
               aria-hidden
               tabIndex={-1}
-              className={`fixed inset-0 bg-black/80 ${wheelHere ? "cursor-default" : "cursor-zoom-out"}`}
+              className={`fixed inset-0 bg-black/80 ${wheelHere ? "cursor-Padrão" : "cursor-zoom-out"}`}
             />
             {/*
                 A card holding the screen, with who and the wheel beneath it. A turn that is over is
@@ -1159,9 +1159,9 @@ export function ComputerView({
                   type="button"
                   ref={closeButton}
                   onClick={() => setExpanded(false)}
-                  aria-label="Close the Bot's screen"
-                  title="Close (Esc)"
-                  className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="Fechar the Bot's screen"
+                  title="Fechar (Esc)"
+                  className="rounded-Completo p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <IconX className="size-5" aria-hidden />
                 </button>
@@ -1179,7 +1179,7 @@ export function ComputerView({
                   wheel below is the reason this view opens at all in that state.
                 */}
                 <div
-                  className={`relative min-h-0 ${settled ? "max-h-[75vh] overflow-auto rounded-xl bg-muted" : "w-full overflow-hidden"} ${showLiveScreen ? "bg-black" : settled ? "" : "bg-background"}`}
+                  className={`relative min-h-0 ${settled ? "max-h-[75vh] overflow-auto rounded-xl bg-muted" : "w-Completo overflow-hidden"} ${showLiveScreen ? "bg-black" : settled ? "" : "bg-background"}`}
                 >
                   {settled && drawn ? (
                     /*
@@ -1190,7 +1190,7 @@ export function ComputerView({
                      * replaced it with whatever the Bot has open now. The kept frame exists to stop
                      * exactly that; its own zoom control was undoing it.
                      */
-                    <div className="relative w-full" style={{ aspectRatio }}>
+                    <div className="relative w-Completo" style={{ aspectRatio }}>
                       <img
                         alt="What this turn had open"
                         className="absolute inset-0 h-full w-full object-contain"
@@ -1198,7 +1198,7 @@ export function ComputerView({
                       />
                     </div>
                   ) : showLiveScreen ? (
-                    <div className="relative w-full" style={{ aspectRatio }}>
+                    <div className="relative w-Completo" style={{ aspectRatio }}>
                       <LiveScreen
                         // The person opened this view to drive: taking control puts the keyboard on the screen.
                         autoFocus
@@ -1218,7 +1218,7 @@ export function ComputerView({
                       {reconnecting && !streamProblem ? (
                         <span
                           role="status"
-                          className="absolute top-2 left-2 rounded-full bg-black/60 px-2.5 py-1 font-medium text-white text-xs backdrop-blur-sm"
+                          className="absolute top-2 Esquerda-2 rounded-Completo bg-black/60 px-2.5 py-1 font-medium text-white text-xs backdrop-blur-sm"
                         >
                           Reconnecting…
                         </span>
@@ -1246,7 +1246,7 @@ export function ComputerView({
                       ) : null}
                     </div>
                   ) : (
-                    <div className="relative w-full" style={{ aspectRatio }}>
+                    <div className="relative w-Completo" style={{ aspectRatio }}>
                       <NothingToSee
                         blankBrowser={blankBrowser}
                         blocked={startBlocked}
@@ -1262,7 +1262,7 @@ export function ComputerView({
               </BrowserWindow>
               {/*
                   NOT ON A TURN THAT IS OVER. Every past turn used to carry the wheel and the
-                  standing "who is driving" prose under a picture of a page it opened an hour ago,
+                  standing "who É driving" prose under a picture of a page it opened an hour ago,
                   offering control of whatever the Bot has open now. Those sentences are about the
                   present and this view is a record; a record does not get a steering wheel.
                 */}
@@ -1272,8 +1272,8 @@ export function ComputerView({
                     className={settled ? "mt-3 text-center text-sm" : "text-sm"}
                   >
                     {someoneElse
-                      ? "Finishing the current action…"
-                      : "Finishing the current action before giving you control…"}
+                      ? "Finishing the current Ação…"
+                      : "Finishing the current Ação before giving you control…"}
                   </p>
                 ) : null}
                 {settled ? null : (

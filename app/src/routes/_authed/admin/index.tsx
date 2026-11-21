@@ -30,7 +30,7 @@ function RouteComponent() {
   const sections = useAdminSections();
   return (
     <PageShell
-      description="Manage settings that apply to everyone and every Bot in this organization."
+      description="Gerir settings that apply to everyone and every Bot Em this organization."
       title="Admin"
     >
       <SharedComputersNotice />

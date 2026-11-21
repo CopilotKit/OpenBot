@@ -3,7 +3,7 @@
  */
 
 /**
- * Where a team comes from. openbot is a team made here. directory is a group of the company's directory, kept in step with it: its name and its people are the directory's and can't be changed here.
+ * Where a team comes from. openbot is a team made here. directory is a group of the company's directory, kept Em step with Ele: Dela/Desse name and Dela/Desse people are the directory's and can't be changed here.
  */
 export type TeamSource = (typeof TeamSource)[keyof typeof TeamSource];
 

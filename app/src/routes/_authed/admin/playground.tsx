@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import { Textarea } from "@/components/ui/textarea";
 import {
   deletePlaygroundComponentMutationOptions,
@@ -42,7 +42,7 @@ const STARTER = {
   css: `.card { font: 14px system-ui; border: 1px solid #e5e5e5; border-radius: 8px; padding: 12px; }\n.card h3 { margin: 0 0 4px; font-size: 15px; }`,
   jsFunctions: `// The arguments are on window.__args by the time this runs.\nconst args = window.__args || {};\ndocument.getElementById("title").textContent = args.title || "Untitled";\ndocument.getElementById("body").textContent = args.body || "";`,
   argumentSchema: `{\n  "type": "object",\n  "properties": {\n    "title": { "type": "string" },\n    "body": { "type": "string" }\n  }\n}`,
-  sampleArguments: `{\n  "title": "A worked example",\n  "body": "Edit the panels on the left and this redraws."\n}`,
+  sampleArguments: `{\n  "title": "A worked example",\n  "body": "Editar the panels on the Esquerda and this redraws."\n}`,
 };
 
 type Draft = typeof STARTER;
@@ -168,7 +168,7 @@ function PlaygroundPage() {
     setNotice(null);
     const payload = input();
     if (!payload) return;
-    saveDraft.mutate(payload, { onSuccess: () => setNotice("Draft saved.") });
+    saveDraft.mutate(payload, { onSuccess: () => setNotice("Rascunho saved.") });
   };
 
   const publish = () => {
@@ -270,12 +270,12 @@ function PlaygroundPage() {
             />
           </div>
           <TextField
-            label="What the model is told about it"
-            onChange={set("description")}
-            placeholder="Show a refund with its amount, reason and status."
+            label="What the model É told about Ele"
+            onChange={set("Descrição")}
+            placeholder="Show a refund with Dela/Desse amount, reason and status."
             value={draft.description}
           />
-          <CodeField label="HTML" onChange={set("html")} value={draft.html} />
+          <CodeField label="HTML" onChange={set("HTML")} value={draft.html} />
           <CodeField label="CSS" onChange={set("css")} value={draft.css} />
           <CodeField
             label="JavaScript"
@@ -332,7 +332,7 @@ function PlaygroundPage() {
 
           <div className="rounded-lg border border-border bg-card">
             <div className="border-border border-b px-4 py-2 font-medium text-sm">
-              Saved here
+              Guardado here
             </div>
             {(components ?? []).length === 0 ? (
               <p className="px-4 py-3 text-muted-foreground text-sm">
@@ -350,9 +350,9 @@ function PlaygroundPage() {
                       <div className="text-xs text-muted-foreground">
                         {component.published
                           ? `published, revision ${component.revision}`
-                          : "draft only, no Bot can draw it"}
+                          : "Rascunho only, no Bot can draw Ele"}
                         {component.hasUnpublishedChanges
-                          ? " · edited since publishing"
+                          ? " · Editado since publishing"
                           : ""}
                       </div>
                     </div>
@@ -400,7 +400,7 @@ function PlaygroundPage() {
           <DialogHeader>
             <DialogTitle>Delete {deleting}?</DialogTitle>
             <DialogDescription>
-              It's removed from this organization, and no Bot can draw it. You
+              It's removed De this organization, and no Bot can draw Ele. You
               can't undo this.
             </DialogDescription>
           </DialogHeader>

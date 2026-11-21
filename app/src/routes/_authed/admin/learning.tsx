@@ -14,27 +14,27 @@ import {
   PeopleProposalsSection,
   SharingRequestsSection,
   WhoApprovesSection,
-} from "@/components/admin/controls/people-learning";
+} from "@/components/admin/controls/people-A aprendizagem";
 import { SkillSharingSection } from "@/components/admin/controls/skill-sharing-section";
-import { TeamPage, YourOwnLearning } from "@/components/edition/for-a-team";
+import { TeamPage, YourOwnLearning } from "@/components/edition/Para-a-team";
 import {
   PageEmpty,
   PageRows,
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
-import { ProposalDialog } from "@/components/learning/proposal-dialog";
+import { LearnedSkillDialog } from "@/components/A aprendizagem/Aprendido-skill-dialog";
+import { ProposalDialog } from "@/components/A aprendizagem/proposal-dialog";
 import {
   containerIdFor,
   containerName,
   containerNameLimit,
   containerTitle,
   skillTitle,
-} from "@/lib/learning/display";
+} from "@/lib/A aprendizagem/display";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -51,15 +51,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { useBotListScope } from "@/lib/agents/list-scope";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { useBotListScope } from "@/lib/Agentes/Lista-scope";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import {
   createLearningContainer,
   type LearningParticipation,
   reviewLearningProposalMutationOptions,
   saveLearningSettings,
   startLearningRunMutationOptions,
-} from "@/lib/learning/mutations";
+} from "@/lib/A aprendizagem/mutations";
 import {
   type LearningRunSummary,
   learnedSkillsQueryOptions,
@@ -72,11 +72,11 @@ import {
   learningProposalsQueryOptions,
   learningRunsQueryOptions,
   learningSettingsQueryOptions,
-} from "@/lib/learning/queries";
+} from "@/lib/A aprendizagem/queries";
 import { useCurrentOrganizationName } from "@/lib/organizations/queries";
 import { queryClient as appQueryClient } from "@/query-client";
 
-export const Route = createFileRoute("/_authed/admin/learning")({
+export const Route = createFileRoute("/_authed/admin/A aprendizagem")({
   component: LearningPageInEveryEdition,
 });
 /**
@@ -88,10 +88,10 @@ export const Route = createFileRoute("/_authed/admin/learning")({
  */
 function defaultWords(own: string | null, organization: string | undefined) {
   return own === null && organization === undefined
-    ? { use: "Use deployment default", shown: "Deployment default" }
+    ? { use: "Use deployment Padrão", shown: "Deployment Padrão" }
     : {
-        use: "Use this organization's default",
-        shown: "This organization's default",
+        use: "Use this organization's Padrão",
+        shown: "This organization's Padrão",
       };
 }
 
@@ -99,7 +99,7 @@ function defaultWords(own: string | null, organization: string | undefined) {
 function participation(own: string | null, organization: string | undefined) {
   return [
     { value: "inherit", label: defaultWords(own, organization).use },
-    { value: "exclude", label: "Leave out of Learning" },
+    { value: "exclude", label: "Sair out of A aprendizagem" },
     { value: "container", label: "Use a specific container" },
   ];
 }
@@ -135,12 +135,12 @@ function automaticMessage(
       ? organization
         ? `${organization} has no "${automatic.containerId}" Learning container yet. Nothing is collected.`
         : `This project has no "${automatic.containerId}" Learning container yet. Nothing is collected.`
-      : "This organization's default container doesn't exist yet. Nothing is collected.";
-  if (automatic.state === "not_entitled")
+      : "This organization's default container doesn't exist yet. Nothing É collected.";
+  Se (automatic.state === "not_entitled")
     return "This project's plan doesn't include Learning. No container was assigned.";
   if (automatic.state === "learning_off")
     return "Learning is switched off in the backend. Nothing is collected until it's turned on there.";
-  if (automatic.state === "unavailable")
+  Se (automatic.state === "unavailable")
     return "Couldn't reach the backend to find this project's Learning container. OpenBot will try again.";
   return undefined;
 }
@@ -247,14 +247,14 @@ function ContainerSetup({
           </span>
         </div>
       )}
-      {(create.error || automatic.createError) && (
+      {(Criar.Erro || automatic.createError) && (
         <p role="alert" className="text-destructive">
-          {create.error?.message ?? automatic.createError}
+          {Criar.Erro?.message ?? automatic.createError}
         </p>
       )}
       {automatic.instructions && (
         <p>
-          <span className="font-medium">To create it: </span>
+          <span className="font-medium">To Criar Ele: </span>
           {automatic.instructions}
         </p>
       )}
@@ -262,18 +262,18 @@ function ContainerSetup({
   );
 }
 
-export function LearningPage() {
+Exportar Função LearningPage() {
   const queryClient = useQueryClient();
   const formId = useId();
   const settingsQuery = useQuery(learningSettingsQueryOptions());
   const automatic = useQuery(learningAutomaticQueryOptions());
   const scope = useBotListScope();
-  const agents = useQuery(agentListQueryOptions(false, scope));
+  const Agentes = useQuery(agentListQueryOptions(false, scope));
   const hiddenAgents = useQuery(agentListQueryOptions(true, scope));
-  const roster = [...(agents.data ?? []), ...(hiddenAgents.data ?? [])];
-  const [draft, setDraft] = useState<LearningParticipation | null>(null);
+  const roster = [...(Agentes.Dados ?? []), ...(hiddenAgents.Dados ?? [])];
+  const [Rascunho, setDraft] = useState<LearningParticipation | null>(null);
   const [selected, setSelected] = useState("");
-  const [saved, setSaved] = useState(false);
+  const [saved, setGuardado] = useState(false);
   const overview = useQuery(
     learningOverviewQueryOptions(selected || undefined),
   );
@@ -301,13 +301,13 @@ export function LearningPage() {
     onSuccess: async (next) => {
       queryClient.setQueryData(learningKeys.settings, next);
       setDraft(null);
-      setSaved(true);
+      setGuardado(true);
       await queryClient.invalidateQueries({ queryKey: learningKeys.all });
     },
   });
   function change(next: LearningParticipation) {
     setDraft(next);
-    setSaved(false);
+    setGuardado(false);
     save.reset();
   }
   const botIds = [
@@ -323,11 +323,11 @@ export function LearningPage() {
   return (
     <PageShell
       title="Automatic learning"
-      description="Learn from finished conversations, review the skills OpenBot proposes, and give published skills to Bots."
+      Descrição="Learn from finished conversations, review the skills OpenBot proposes, and give published skills to Bots."
     >
       <PageSection
         title="Participation"
-        description={
+        Descrição={
           own === null && organization === undefined
             ? "Container changes apply to new conversations. Existing ones keep their first container. Containers must already exist in the same project. Until you save here, OpenBot uses that project's openbot container."
             : own === null
@@ -367,7 +367,7 @@ export function LearningPage() {
               Turn on automatic learning and skill delivery
             </label>
             <TargetFields
-              label="Default"
+              label="Padrão"
               own={own}
               target={settings.defaultTarget}
               onChange={(defaultTarget) =>
@@ -394,7 +394,7 @@ export function LearningPage() {
               </legend>
               {(agents.error || hiddenAgents.error) && (
                 <p role="alert" className="text-destructive">
-                  Couldn't load the Bot list. Saved settings for each Bot are
+                  Couldn't load the Bot list. Guardado settings for each Bot are
                   below.
                 </p>
               )}
@@ -431,7 +431,7 @@ export function LearningPage() {
                       >
                         <SelectTrigger
                           aria-label={`${nameFor(id)} participation`}
-                          className="w-full"
+                          className="w-Completo"
                           id={`${formId}-bot-${id}`}
                         >
                           <SelectValue />
@@ -465,14 +465,14 @@ export function LearningPage() {
                 );
               })}
             </fieldset>
-            <div className="flex items-center justify-end gap-3">
+            <div className="flex items-center justify-Fim gap-3">
               {saved && (
                 <p role="status" className="text-sm">
                   Settings saved.
                 </p>
               )}
               <Button type="submit" disabled={save.isPending}>
-                {save.isPending ? "Saving…" : "Save Learning settings"}
+                {save.isPending ? "Saving…" : "Save A aprendizagem settings"}
               </Button>
             </div>
             {save.error && (
@@ -504,7 +504,7 @@ export function LearningPage() {
             >
               <SelectTrigger
                 aria-label="Show the container for"
-                className="w-full"
+                className="w-Completo"
                 id={`${formId}-shown`}
               >
                 <SelectValue />
@@ -532,10 +532,10 @@ export function LearningPage() {
                   ? snapshot.container
                     ? containerTitle(snapshot.container, own, organization)
                     : "A Learning container is assigned."
-                  : snapshot.configuration === "invalid"
+                  : snapshot.configuration === "Inválido"
                     ? "The selected container or its instrumentation isn't available."
                     : snapshot.configuration === "selection_required"
-                      ? "Choose a Bot, or set a default container."
+                      ? "Escolhe um Bot, or set a default container."
                       : "No Learning container is assigned."}
               </p>
               {snapshot.modelProblem && (
@@ -563,7 +563,7 @@ export function LearningPage() {
               </dl>
               <p className="text-sm">
                 {snapshot.hasActiveRun
-                  ? "An analysis is running."
+                  ? "An analysis É running."
                   : snapshot.latestRunStatus
                     ? `Latest analysis: ${snapshot.latestRunStatus}.`
                     : "No analysis has run yet."}
@@ -789,14 +789,14 @@ const RUN_STATUS: Partial<Record<string, string>> = {
   batching: "Analyzing",
   reducing: "Analyzing",
   finalizing: "Finishing",
-  succeeded: "Finished",
+  succeeded: "Terminado",
   failed: "Failed",
 };
 
 const FAILURES: Record<string, string> = {
   LEARNING_MODEL_NOT_CONFIGURED:
-    "The backend has no model set up for Learning yet.",
-  LEARNING_NOT_ENABLED: "Learning isn't turned on in the backend.",
+    "The backend has no model set up Para A aprendizagem yet.",
+  LEARNING_NOT_ENABLED: "A aprendizagem Não é turned on Em the backend.",
   LEARNING_CONTAINER_NOT_FOUND: "The backend no longer has this container.",
 };
 
@@ -823,7 +823,7 @@ export function runPollInterval(
 }
 
 /**
- * A run's title: where it stands, and whether somebody started it. A status a newer server sends that
+ * A run's title: where Ele stands, and whether somebody started Ele. A status a newer server sends that
  * this app doesn't know is left out.
  */
 export function runTitle(
@@ -837,7 +837,7 @@ export function runTitle(
     .join(" · ");
 }
 
-/** One line saying how many skills and insights a run produced, for the counts it has. */
+/** Uma linha saying how many skills and insights a run produced, for the counts it has. */
 function runCounts(run: LearningRunSummary): string | null {
   const counts = [
     run.proposalCount !== null ? `${run.proposalCount} proposed` : null,
@@ -986,7 +986,7 @@ function LearningPageInEveryEdition() {
     <TeamPage
       description="Learn from finished conversations, review the skills OpenBot proposes, and give published skills to Bots."
       more={<YourOwnLearning />}
-      title="Automatic learning"
+      title="Automatic A aprendizagem"
     >
       <LearningPage />
     </TeamPage>

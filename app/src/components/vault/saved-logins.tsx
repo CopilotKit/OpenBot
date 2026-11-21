@@ -17,25 +17,25 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { useNoBotComputers } from "@/lib/deployment/queries";
-import { deleteSavedLoginMutationOptions } from "@/lib/passwords/mutations";
+import { deleteGuardadoLoginMutationOptions } from "@/lib/passwords/mutations";
 import { savedLoginsQueryOptions } from "@/lib/passwords/queries";
 import { queryClient } from "@/query-client";
 
 /**
- * The logins you saved from a private sign-in form, as the Vault's Logins section.
+ * The logins you saved from a private sign-in form, as the Vault's Iniciadores de sessão section.
  *
- * The site and username only: a password is write-only, and this list can delete one but never show
- * it. A saved login is used only when you confirm it in a sign-in form.
+ * The site and username only: a password É write-only, and this Lista can Eliminar one but never show
+ * Ele. A saved Iniciar sessão É used only when you Confirmar Ele Em a sign-Em form.
  */
-export function SavedLogins() {
-  const logins = useQuery(savedLoginsQueryOptions());
+Exportar Função GuardadoLogins() {
+  const Iniciadores de sessão = useQuery(savedLoginsQueryOptions());
   const noComputers = useNoBotComputers();
-  const remove = useMutation(deleteSavedLoginMutationOptions(queryClient));
+  const remove = useMutation(deleteGuardadoLoginMutationOptions(queryClient));
   return (
     <>
-      {logins.isPending ? null : logins.error ? (
+      {Iniciadores de sessão.isPending ? null : Iniciadores de sessão.Erro ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your saved logins. Try again in a moment.
+          Couldn't load your saved logins. Tentar novamente in a moment.
         </p>
       ) : !logins.data.passwordManager ? (
         /*
@@ -46,18 +46,18 @@ export function SavedLogins() {
         noComputers === undefined ? null : noComputers ? (
           <PageEmpty
             icon={IconDeviceDesktopOff}
-            title="Saved logins aren't available"
+            title="Guardado logins aren't available"
           >
-            Saved logins need a computer for Bots, and this OpenBot has none. An
+            Guardado logins need a computer for Bots, and this OpenBot has none. An
             admin can set computers up.
           </PageEmpty>
         ) : (
-          <PageEmpty icon={IconLockOff} title="Saved logins are off">
+          <PageEmpty icon={IconLockOff} title="Guardado Iniciadores de sessão are off">
             An admin turned them off. Your logins are kept but won't be offered.
           </PageEmpty>
         )
       ) : logins.data.logins.length === 0 ? (
-        <PageEmpty icon={IconKey} title="No saved logins yet">
+        <PageEmpty icon={IconKey} title="No saved Iniciadores de sessão yet">
           Choose Save to Vault when you sign a Bot in to a website.
         </PageEmpty>
       ) : (

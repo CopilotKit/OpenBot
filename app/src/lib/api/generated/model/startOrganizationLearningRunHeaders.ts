@@ -9,5 +9,5 @@ export type StartOrganizationLearningRunHeaders = {
    * @minLength 1
    * @maxLength 128
    */
-  "Idempotency-Key": IdempotencyKeyParameter;
+  "Idempotency-Chave": IdempotencyKeyParameter;
 };

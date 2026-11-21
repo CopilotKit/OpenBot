@@ -4,7 +4,7 @@
 import type { UpdateRouting } from "./updateRouting";
 
 /**
- * Where a person's updates go, for every one of their Bots at once. progress: replies and results from work they weren't watching. decision: approvals a Bot needs before it acts. question: what a Bot asked and waits on. attention: what their Bots' check-ins found, at most once an hour, every Bot in one message.
+ * Where a person's updates Ir, Para every one of their Bots at once. progress: replies and results De work they weren't watching. decision: approvals a Bot needs before it acts. question: what a Bot asked and waits on. attention: what their Bots' check-ins found, at most once an hour, every Bot in one message.
  */
 export interface NotificationSettings {
   routing: UpdateRouting;

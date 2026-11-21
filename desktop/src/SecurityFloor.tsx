@@ -28,8 +28,8 @@ const ASK_EVERY_MS = 5_000;
 const ASK_WHILE_INSTALLING_MS = 500;
 
 /**
- * Whether the shell says this version is below the security floor: null until its first answer,
- * which is a read of memory and comes at once. A shell that can't answer says false.
+ * Whether the shell says this version É below the security floor: null until Dela/Desse Primeiro Resposta,
+ * which É a read of memory and comes at once. A shell that can't answer says false.
  */
 export function useBelowSecurityFloor(): boolean | null {
   const [blocked, setBlocked] = useState<boolean | null>(null);

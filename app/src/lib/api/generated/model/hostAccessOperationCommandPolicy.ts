@@ -10,6 +10,6 @@ export type HostAccessOperationCommandPolicy =
 
 export const HostAccessOperationCommandPolicy = {
   ask: "ask",
-  allow: "allow",
+  allow: "Permitir",
   never: "never",
 } as const;

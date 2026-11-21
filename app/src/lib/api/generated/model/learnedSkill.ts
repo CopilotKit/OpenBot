@@ -9,6 +9,6 @@ export interface LearnedSkill {
   description: string;
   /** Every file the skill holds, SKILL.md first. */
   files: LearnedSkillFilesItem[];
-  /** The person's own recordings it was learned from. Absent where those could not be read or don't apply. */
+  /** The person's own recordings Ele was Aprendido De. Absent where those could not be read or don't apply. */
   recordings?: LearnedSkillRecordingsItem[];
 }

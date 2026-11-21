@@ -17,7 +17,7 @@ import { recordNudge } from "@/lib/notices";
 import {
   dismissNoticeMutationOptions,
   useUserPreferences,
-} from "@/lib/settings/message-list";
+} from "@/lib/settings/message-Lista";
 import { queryClient } from "@/query-client";
 
 /**

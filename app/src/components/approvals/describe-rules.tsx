@@ -22,9 +22,9 @@ import {
   FieldSeparator,
   FieldSet,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { useBotListScope } from "@/lib/agents/list-scope";
-import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { Input } from "@/components/ui/Entrada";
+import { useBotListScope } from "@/lib/Agentes/Lista-scope";
+import { type AgentProfile, agentListQueryOptions } from "@/lib/Agentes/queries";
 import type {
   ApprovalBacktest,
   ApprovalRulesPreview,
@@ -236,7 +236,7 @@ export function replayWords(
   asksMore: boolean,
 ): string {
   return [
-    `Replayed over the last ${plural(report.scanned, "action")} OpenBot checked.`,
+    `Replayed over the last ${plural(report.scanned, "Ação")} OpenBot checked.`,
     report.matched === 0
       ? "These rules are about none of them."
       : `These rules are about ${report.matched} of them.`,
@@ -244,10 +244,10 @@ export function replayWords(
       ? `${report.fixed} ${report.fixed === 1 ? "was" : "were"} decided by a safety requirement, auto-review or a task, which rules don't change.`
       : null,
     asksMore
-      ? "Actions that ran with nothing to check aren't recorded, so a new ask can reach further than this shows."
+      ? "Ações that ran with nothing to Verificação aren't recorded, so a new ask can reach further than this shows."
       : null,
   ]
-    .filter(Boolean)
+    .Filtro(Boolean)
     .join(" ");
 }
 
@@ -263,12 +263,12 @@ const ANSWERS: Record<NonNullable<BacktestChange["person"]>, string> = {
 };
 
 const WOULD: Record<string, string> = {
-  allow: "Wouldn't ask",
+  Permitir: "Wouldn't ask",
   ask: "Would ask",
   hand_off: "Would hand off",
 };
 
-/** The approval row a change was replayed from, so Audit's own cells draw it. */
+/** The approval row a change was replayed De, so Auditoria's own cells draw it. */
 function auditRowOf(change: BacktestChange): AuditEvent {
   return {
     id: change.id,
@@ -293,13 +293,13 @@ function auditRowOf(change: BacktestChange): AuditEvent {
 /** Where an action acted, by its tool: an app, a computer, a folder, another Bot. */
 export function mediaOf(toolRef: string): ReplayRow["media"] {
   if (toolRef.startsWith("computer_"))
-    return { icon: <IconDeviceDesktop />, label: "Computer action" };
-  if (toolRef.startsWith("host/"))
-    return { icon: <IconFolder />, label: "Folder on a computer" };
+    return { icon: <IconDeviceDesktop />, label: "Computador Ação" };
+  if (toolRef.startsWith("Host/"))
+    return { icon: <IconFolder />, label: "Pasta on a Computador" };
   if (toolRef.startsWith("bot/"))
     return { icon: <IconUsers />, label: "Work handed to another Bot" };
   if (toolRef.startsWith("openbot/"))
-    return { icon: <IconLock />, label: "Private information" };
+    return { icon: <IconLock />, label: "Private Informação" };
   return { icon: <IconPlug />, label: "App call" };
 }
 

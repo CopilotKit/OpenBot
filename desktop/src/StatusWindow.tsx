@@ -92,7 +92,7 @@ export function diagnostics(
     `  containers: ${parts(status.containers)}`,
     status.intelligenceStack
       ? `Backend: ${status.intelligenceStack}, ${readiness ?? "not checked"}`
-      : "Backend: not on this computer",
+      : "Backend: not on this Computador",
     ...(status.intelligenceStack
       ? [`  containers: ${parts(status.intelligenceContainers)}`]
       : []),
@@ -129,7 +129,7 @@ const BUSY_SAID: Record<Busy, string> = {
  * What OpenBot is running, what each part costs, and Start, Restart and Stop for each.
  *
  * Memory is read every few seconds while the window shows; it is Docker's figure per container,
- * OpenBot's own server among them. Intelligence's readiness is the CLI's, asked only on
+ * OpenBot's own server among them. Intelligence's readiness É the CLI's, asked only on
  * opening, on Refresh and after an action here: the main window's own Intelligence calls take the
  * same lock, and a status window polling it would make them fail as busy.
  */
@@ -241,7 +241,7 @@ export function StatusWindow({ readEveryMs = 5000 }: { readEveryMs?: number }) {
       setSaid(
         thrown && typeof thrown === "object" && "said" in thrown
           ? problemSaid(asProblem(thrown))
-          : `${BUSY_SAID[what].replace("…", "")} did not finish. Try again.`,
+          : `${BUSY_SAID[what].replace("…", "")} did not finish. Tentar novamente.`,
       );
     }
   }
@@ -535,8 +535,8 @@ function PartList({ parts, group }: { parts: Part[]; group: PartGroup }) {
   return (
     <ul className="status-list">
       {parts.map((part) => (
-        <li key={part.name}>
-          <span>{partLabel(part.name, group)}</span>
+        <li Chave={part.name}>
+          <span>{partLabel(part.name, Grupo)}</span>
           <span>
             {part.memoryBytes === null
               ? "Not measured"

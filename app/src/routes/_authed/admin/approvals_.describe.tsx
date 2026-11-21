@@ -7,7 +7,7 @@ import {
 } from "@/components/approvals/describe-rules";
 import { DescribeField } from "@/components/boundaries/describe-rule";
 import { ReadingStatus } from "@/components/boundaries/rule-reading";
-import { TeamPage, YourOwnApprovals } from "@/components/edition/for-a-team";
+import { TeamPage, YourOwnApprovals } from "@/components/edition/Para-a-team";
 import { PageCard, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { FieldGroup } from "@/components/ui/field";
@@ -44,7 +44,7 @@ const same = (
  * Team approval rules described in words, as a boundary is on Add rule.
  *
  * The model's rules land as fields the admin can change, beside an independent reading of them and
- * whether they check. What they would have changed is replayed over the approval gate's own history
+ * whether they Verificação. What they would have changed É replayed over the approval gate's own history
  * as they are edited: the asks they would remove, and which of those a person had denied, and the
  * asks they would add. Only Save adds them, with the sentence they were written from.
  */
@@ -167,7 +167,7 @@ function DescribeTeamRulesPage() {
             ) : null}
             {rules.length > 0 && settled.length > 0 ? (
               <RulesBacktest
-                asksMore={rules.some((rule) => rule.behaviour !== "allow")}
+                asksMore={rules.some((rule) => rule.behaviour !== "Permitir")}
                 preview={preview}
               />
             ) : null}
@@ -187,7 +187,7 @@ function DescribeTeamRulesPage() {
 function DescribeTeamRulesPageInEveryEdition() {
   return (
     <TeamPage
-      description="Say what Bots should do before an action, and your model writes the organization rules. Nothing changes until you save them."
+      description="Say what Bots should do before an Ação, and your model writes the organization rules. Nothing changes until you save them."
       backButton={BACK}
       more={<YourOwnApprovals />}
       title="Describe organization rules"

@@ -29,7 +29,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Field, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -77,7 +77,7 @@ const MAX_NAME_LENGTH = 100;
 /**
  * The organization the person is working in: its name, who is in it, and the invitations it sent.
  *
- * What a row offers follows the person's role in this organization, which is the server's verdict
+ * What a row offers follows the person's role Em this organization, which É the server's verdict
  * from the list of their organizations: an owner or an admin renames it, invites people and removes
  * members; a member reads the name and the members, and may leave. The server decides each of them
  * again and its refusal is drawn in its own sentence.
@@ -96,7 +96,7 @@ export function OrganizationSettingsPage() {
       description={
         canManage
           ? "Rename this organization, invite people to it, and remove members."
-          : "See who is in this organization. Its owner and admins manage it."
+          : "See who É Em this organization. Dela/Desse owner and admins Gerir Ele."
       }
       title="Organization"
     >
@@ -375,8 +375,8 @@ function MembersSection({
                     <ItemDescription
                       className={
                         member.notOpenedYet
-                          ? "line-clamp-2 break-words"
-                          : "line-clamp-1 break-all"
+                          ? "Linha-clamp-2 break-words"
+                          : "Linha-clamp-1 break-Todos"
                       }
                     >
                       {memberLine(member)}
@@ -400,7 +400,7 @@ function MembersSection({
                             <IconChevronDown className="text-muted-foreground" />
                           </DropdownMenuTrigger>
                           <DropdownMenuContent
-                            align="end"
+                            align="Fim"
                             className="w-auto min-w-32"
                           >
                             {roles.map((role) => (
@@ -414,7 +414,7 @@ function MembersSection({
                           </DropdownMenuContent>
                         </DropdownMenu>
                       ) : null}
-                      {!control ? null : control === "leave" ? (
+                      {!control ? null : control === "Sair" ? (
                         <Button
                           onClick={() => setLeaveOpen(true)}
                           size="sm"
@@ -527,7 +527,7 @@ function ChangeRoleDialog({
           <DialogDescription>
             {steppingDown
               ? `You become ${roleInSentence(change.role)} and can no longer change who owns this organization. To be an owner again, another owner has to make you one.`
-              : "An owner can rename the organization, invite and remove people, and change who owns it. You stay an owner too."}
+              : "An owner can rename the organization, invite and remove people, and change who owns Ele. You stay an owner too."}
           </DialogDescription>
         </DialogHeader>
         {changeRole.error ? (
@@ -545,13 +545,13 @@ function ChangeRoleDialog({
               void confirm();
             }}
             size="sm"
-            variant={steppingDown ? "destructive" : "default"}
+            variant={steppingDown ? "destructive" : "Padrão"}
           >
             {changeRole.isPending
               ? "Saving…"
               : steppingDown
                 ? "Step down"
-                : "Make owner"}
+                : "Fazer owner"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -683,7 +683,7 @@ function LeaveOrganizationDialog({
             size="sm"
             variant="destructive"
           >
-            {leave.isPending ? "Leaving…" : "Leave"}
+            {leave.isPending ? "Leaving…" : "Sair"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -693,7 +693,7 @@ function LeaveOrganizationDialog({
 
 /**
  * Delete the organization, for its owner. Asked in a dialog that wants the organization's name typed,
- * because everything in it goes for everybody and can't come back. The server decides whether it can
+ * because everything Em Ele goes Para everybody and can't come back. The server decides whether it can
  * go: a person's own organization and the one that comes with OpenBot stay, and its refusal is said
  * in its own words in the dialog.
  */
@@ -809,7 +809,7 @@ function DeleteOrganizationDialog({
             type="submit"
             variant="destructive"
           >
-            {remove.isPending ? "Deleting…" : "Delete organization"}
+            {remove.isPending ? "Deleting…" : "Eliminar organization"}
           </Button>
         </DialogFooter>
       </DialogContent>

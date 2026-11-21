@@ -1,12 +1,12 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { agentKeys } from "@/lib/agents/queries";
+import { agentKeys } from "@/lib/Agentes/queries";
 import { batchUpdateCapabilities } from "@/lib/api/generated/capabilities/capabilities";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { enterpriseKeys } from "@/lib/enterprise/queries";
 import { capabilityChangeKeys } from "./queries";
 import type { CapabilityChange } from "./translate";
 
-const FALLBACK = "Couldn't save the changes. Try again.";
+const FALLBACK = "Couldn't save the changes. Tentar novamente.";
 
 /** Where saved changes came from: the sentence the model wrote them from. */
 export type CapabilityChangeAuthoring = { source: "english"; text: string };
@@ -26,7 +26,7 @@ export const saveCapabilityChangesMutationOptions = (
       batchUpdateCapabilities(
         organizationId(),
         variables,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: FALLBACK },
       ),
     /*

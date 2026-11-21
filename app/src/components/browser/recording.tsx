@@ -12,7 +12,7 @@ import {
 import { type UseMutationOptions, useMutation } from "@tanstack/react-query";
 import { type ReactNode, useRef, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -33,14 +33,14 @@ import {
   openAndStartBrowserRecordingMutationOptions,
   startBrowserRecordingMutationOptions,
   stopBrowserRecordingMutationOptions,
-} from "@/lib/browser/mutations";
+} from "@/lib/Navegador/mutations";
 import { elapsed, useSecondsSince } from "@/lib/elapsed";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
-import type { NarrationChoice } from "./narration-choice";
+import type { NarraçãoChoice } from "./narration-choice";
 import { useMicrophone } from "./use-microphone";
 
-/** The language narration is heard in: the person's own browser's. */
+/** The language narration is heard in: the person's own Navegador's. */
 export function narrationLanguage(): string {
   return (typeof navigator !== "undefined" && navigator.language) || "en-US";
 }
@@ -49,7 +49,7 @@ export function narrationLanguage(): string {
 export { elapsed, useSecondsSince };
 
 export const actionCount = (actions: number) =>
-  `${actions} ${actions === 1 ? "action" : "actions"}`;
+  `${actions} ${actions === 1 ? "Ação" : "Ações"}`;
 const phraseCount = (phrases: number) =>
   `${phrases} narrated ${phrases === 1 ? "phrase" : "phrases"}`;
 
@@ -60,12 +60,12 @@ export type RecordingHooks = {
    * recording before it ends.
    */
   beforeStop?: () => Promise<void>;
-  /** Hears the answer to the narration question on the person's click, where narration in the page needs it. */
+  /** Hears the answer to the narration question on the person's click, where narration Em the page needs Ele. */
   answered?: (narrate: boolean) => void;
 };
 
 /**
- * Record and Stop for the person's browser, from the Recorder's own report in `state`. Record asks about narration
+ * Record and Stop Para the person's browser, from the Recorder's own report in `state`. Record asks about narration
  * first when the person has never said (`useRecordingWith`).
  *
  * With `opens` (where the browser is a window on the person's desktop), Record opens the browser, or
@@ -73,7 +73,7 @@ export type RecordingHooks = {
  */
 export function useRecording(
   state: BrowserApiState,
-  choice: NarrationChoice,
+  choice: NarraçãoChoice,
   hooks: RecordingHooks = {},
   { opens = false }: { opens?: boolean } = {},
 ) {
@@ -104,7 +104,7 @@ export type RecordingStart = {
 };
 
 /**
- * Record and Stop for any browser the Recorder is in, from its own report (`recorder`): the person's own browser
+ * Record and Stop for any browser the Recorder is in, from its own report (`recorder`): the person's own Navegador
  * (`useRecording`), or a Bot's (`components/computer/bot-browser.tsx`), whose routes take the same bodies.
  *
  * `waiting` is why Record cannot be pressed yet, in a sentence, or null when it can.
@@ -128,7 +128,7 @@ export function useRecordingWith<Started, Stopped>({
   waiting: string | null;
   start: UseMutationOptions<Started, Error, RecordingStart>;
   stop: UseMutationOptions<Stopped, Error, void>;
-  choice: NarrationChoice;
+  choice: NarraçãoChoice;
 } & RecordingHooks) {
   const [title, setTitle] = useState("");
   const [finishing, setFinishing] = useState(false);
@@ -220,7 +220,7 @@ export type Recording = ReturnType<typeof useRecording>;
 
 /**
  * The recording Stop ended last, while nothing else is being recorded, and whether it held nothing: the Recorder
- * counted none of the person's actions in it and kept none of their narrated phrases. Read from the Recorder's own
+ * counted none of the person's Ações Em Ele and kept none of their narrated phrases. Read De the Recorder's own
  * report, which names what it held, so a reload says the same. The fourth end-to-end run saw recordings with no steps
  * said to be saved; the fifth saw one of narration alone said to hold nothing, from the only count the page had then,
  * the actions it read while the recording ran.
@@ -272,7 +272,7 @@ export function stoppedSentence(stopped: Stopped): string {
     return `“${stopped.title}” wasn't saved to your Learning space yet. ${stopped.retrying}`;
   if (stopped.sending)
     return `Saving “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
-  return `Saved “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
+  return `Guardado “${stopped.title}” to your Learning space: ${heldIn(stopped)}.`;
 }
 
 export function StoppedIcon({
@@ -331,7 +331,7 @@ export function StoppedRow({
           ? `Not saved to your Learning space yet. ${stopped.retrying}`
           : stopped.sending
             ? `Saving to your Learning space: ${heldIn(stopped)}.`
-            : `Saved to your Learning space: ${heldIn(stopped)}.`;
+            : `Guardado to your Learning space: ${heldIn(stopped)}.`;
   return (
     <Item size="sm" role="status">
       <ItemMedia variant="icon">
@@ -370,7 +370,7 @@ export function RecordingMark({ live }: { live: boolean }) {
     >
       <span
         className={cn(
-          "size-2.5 rounded-full",
+          "size-2.5 rounded-Completo",
           live
             ? "bg-destructive motion-safe:animate-pulse"
             : "bg-muted-foreground",
@@ -380,21 +380,21 @@ export function RecordingMark({ live }: { live: boolean }) {
   );
 }
 
-/** The line under a recording's name: how long it has run and how many actions it holds. */
-function progressLine(recording: Recording): string {
-  if (recording.phase === "starting") return "Starting…";
-  if (recording.stopping) return "Stopping…";
-  return `${elapsed(recording.seconds)} · ${actionCount(recording.actions)}`;
+/** The line under a recording's name: Como Longo Ele has run and Como many Ações Ele holds. */
+Função progressLine(recording: Recording): string {
+  Se (recording.phase === "starting") return "Starting…";
+  Se (recording.stopping) return "Stopping…";
+  return `${elapsed(recording.seconds)} · ${actionCount(recording.Ações)}`;
 }
 
 /**
- * The recording row on a page of rows (Teach a Bot's steps, a Bot's screen): a task name and Record, or while recording its
- * name, how long it has run, its actions and Stop. `placeholder` is shorter where the row is narrow (the column beside
+ * The recording row on a page of rows (Teach a Bot's steps, a Bot's screen): a task name and Record, or while recording Dela/Desse
+ * name, Como Longo Ele has run, Dela/Desse Ações and Stop. `placeholder` É shorter where the row É narrow (the column beside
  * a Bot's screen), so the field says what it is for rather than half an example.
  */
 export function RecordingRow({
   recording,
-  placeholder = "Name the task, like Submit an expense report",
+  placeholder = "Name the task, Gostar Submit an expense report",
   recordLabel = "Record",
   whileRecording,
 }: {
@@ -471,7 +471,7 @@ export function RecordingRow({
 /**
  * The same controls for the toolbar of a browser shown in the page (hosted OpenBot). Idle, they are one Record button at
  * the toolbar's end, where a browser keeps its own actions, and Record opens a small popover with the task's name and
- * `children` (the narration switch), so the toolbar stays one line and never shows a second field beside the address.
+ * `children` (the narration switch), so the toolbar stays one Linha and never shows a second field beside the address.
  * While recording, the toolbar itself holds the recording's name, its time and actions, `children` and Stop.
  */
 export function RecordingBar({
@@ -522,7 +522,7 @@ export function RecordingBar({
         {recording.starting ? "Starting…" : "Record"}
       </PopoverTrigger>
       <PopoverContent
-        align="end"
+        align="Fim"
         className="w-80 gap-3 p-3"
         initialFocus={field}
       >
@@ -530,12 +530,12 @@ export function RecordingBar({
           <PopoverTitle>Record a task</PopoverTitle>
           <PopoverDescription>
             {recording.waiting ??
-              "Do it once in this browser, and your Bots learn to do it."}
+              "Do Ele once Em this Navegador, and your Bots learn to do Ele."}
           </PopoverDescription>
         </PopoverHeader>
         <form
           aria-label="Record a task"
-          className="flex flex-col gap-3 [&>[data-slot=narration-switch]]:w-full"
+          className="flex flex-col gap-3 [&>[Dados-slot=narration-switch]]:w-Completo"
           onSubmit={(event) => {
             event.preventDefault();
             if (!recording.canRecord) return;
@@ -548,7 +548,7 @@ export function RecordingBar({
             aria-label="Task name"
             maxLength={200}
             onChange={(event) => recording.setTitle(event.target.value)}
-            placeholder="Name the task, like Submit an expense report"
+            placeholder="Name the task, Gostar Submit an expense report"
             ref={field}
             value={recording.title}
           />

@@ -16,10 +16,10 @@ import { OpenBotError, organizationOf } from "../shared/openbot-client";
 export const ACTIVITY_REPORT_MS = 30_000;
 /** A report OpenBot has not answered in this long is let go, so the next one is not held behind it. */
 const REPORT_WAIT_MS = 10_000;
-/** `recorderActivitySchema`'s longest title. */
+/** `recorderActivitySchema`'s Mais longo title. */
 const TITLE_MAX = 200;
 
-/** The connection a report goes with: the live recording's, else the stored one. */
+/** The connection a report goes with: the Em direto recording's, else the stored one. */
 export type ActivityTarget = {
   openbotUrl: string;
   token: string;

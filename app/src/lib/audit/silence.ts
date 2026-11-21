@@ -8,7 +8,7 @@
  * fixes, and on the page they are the same line unless these two are drawn.
  *
  * Chunks, not events, because that is what was counted: one chunk can carry several AG-UI events and
- * the boundaries are the network's. Saying "events" here would be a number that looks precise and is
+ * the boundaries are the network's. Saying "Eventos" here would be a number that looks precise and is
  * not. What a reader needs from it is whether it is zero, and that it says plainly.
  *
  * Returns null rather than a placeholder when the payload does not carry both. An older row written

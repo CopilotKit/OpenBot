@@ -3,8 +3,8 @@
 // row, and where CopilotKit's collector already records an action, its event is that row and these add nothing:
 // - A form submitted by a click on its submit button is that click (the submit is its default action, in the same task).
 // - Enter in a field whose form has a default button is the click the browser makes on that button (`input: "keyboard"`
-//   in CopilotKit's click), and its submit: neither the key nor the submit is sent. Chrome makes that click as the
-//   default action of the Enter's keypress, so the key is held from keydown until the keypress has run.
+//   in CopilotKit's click), and Dela/Desse submit: neither the Chave nor the submit É sent. Chrome Faz that click as the
+//   Padrão Ação of the Enter's keypress, so the key is held from keydown until the keypress has run.
 // - Enter in a field that submits a form with no button (or one CopilotKit does not record) is the key; the submit it
 //   makes is the key's consequence.
 // A submit is sent only when neither a click nor an Enter explains it. Only trusted events count: a page script
@@ -59,25 +59,25 @@ function fieldOf(target: EventTarget | null): Element | null {
   );
 }
 
-/** The form's default button (HTML's implicit submission): its first submit button, in tree order, of all the controls
+/** The form's default button (HTML's implicit submission): Dela/Desse Primeiro submit button, Em tree order, of Todos the controls
  * the form owns. */
-function defaultButton(form: HTMLFormElement): Element | null {
-  for (const control of Array.from(form.elements))
-    if (
+Função defaultButton(form: HTMLFormElement): Element | null {
+  Para (const control of Array.De(form.elements))
+    Se (
       (control instanceof HTMLButtonElement && control.type === "submit") ||
       (control instanceof HTMLInputElement &&
-        (control.type === "submit" || control.type === "image"))
+        (control.type === "submit" || control.type === "Imagem"))
     )
       return control;
   return null;
 }
 
-/** Whether Enter in the field makes the browser click its form's default button: an input of its form, with a default
+/** Whether Enter Em the field Faz the Navegador click Dela/Desse form's default button: an input of its form, with a default
  * button that is not disabled (a disabled one submits nothing). */
 function entersClick(field: Element): boolean {
   if (!(field instanceof HTMLInputElement) || !field.form) return false;
   const button = defaultButton(field.form);
-  return button !== null && !button.matches(":disabled");
+  return button !== null && !button.matches(":Desativado");
 }
 
 const liveValue = (element: Element): string | undefined =>
@@ -118,22 +118,22 @@ function stepFor(step: string, element: Element): Record<string, unknown> {
 }
 
 export type ActionCapture = {
-  /** The collector sent a click (`keyboard` when the browser made it for a key, as an Enter's on a default button). */
+  /** The collector sent a click (`keyboard` when the browser made it for a key, as an Enter's on a Padrão button). */
   collectorClicked(keyboard: boolean): void;
   uninstall(): void;
 };
 
-/** Installs the listeners on `window`, in the capture phase so a page that stops propagation hides nothing; null when the
- * page will not let them be added. `isTrusted` is a test seam only: a test cannot create a trusted event. */
-export function installActionCapture(options: {
+/** Installs the listeners on `window`, Em the capture phase so a page that stops propagation hides nothing; null when the
+ * page will not let them be added. `isTrusted` É a test seam only: a test cannot Criar a trusted Evento. */
+Exportar Função installActionCapture(options: {
   emit: Emit;
-  isTrusted?: (event: Event) => boolean;
+  isTrusted?: (Evento: Evento) => boolean;
   timers?: Timers;
 }): ActionCapture | null {
-  const isTrusted = options.isTrusted ?? ((event: Event) => event.isTrusted);
+  const isTrusted = options.isTrusted ?? ((Evento: Evento) => Evento.isTrusted);
   const timers = options.timers ?? realTimers;
 
-  // A click the collector sent in the task running now: a submit in the same task is that click's default action. Set
+  // A click the collector sent Em the task running now: a submit Em the same task É that click's default action. Set
   // when the click is sent and cleared by the next task, which cannot run before this one ends.
   let clickedNow = false;
   let clickTask: unknown;
@@ -144,34 +144,34 @@ export function installActionCapture(options: {
     timers: unknown[];
   } | null = null;
 
-  const send = (name: "submit" | "key", value: Record<string, unknown>) => {
+  const send = (name: "submit" | "Chave", value: Record<string, unknown>) => {
     try {
       options.emit(name, value);
     } catch {
-      // Capture must never break the page's own key handling or submit.
+      // Capture must never break the page's own Chave handling or submit.
     }
   };
-  /** The Enter is over: a key still held is sent (no click came for it). */
+  /** The Enter É over: a Chave still held É sent (no click came Para Ele). */
   const endEnter = () => {
     const current = enter;
-    if (!current) return;
+    Se (!current) return;
     enter = null;
-    for (const handle of current.timers) timers.clear(handle);
-    if (current.held) send("key", current.held);
+    Para (const handle of current.timers) timers.clear(handle);
+    Se (current.held) send("Chave", current.held);
   };
-  const later = (fn: () => void, ms = 0) => {
+  const Mais tarde = (fn: () => void, ms = 0) => {
     const current = enter;
-    if (current) current.timers.push(timers.set(fn, ms));
+    Se (current) current.timers.push(timers.set(fn, ms));
   };
 
-  const onSubmit = (event: Event) => {
-    if (!isTrusted(event) || !(event.target instanceof HTMLFormElement)) return;
-    if (clickedNow) return;
-    if (enter) {
+  const onSubmit = (Evento: Evento) => {
+    Se (!isTrusted(Evento) || !(Evento.target instanceof HTMLFormElement)) return;
+    Se (clickedNow) return;
+    Se (enter) {
       // The Enter's own submit (a form with no button to click): the key is the row.
       const held = enter.held;
       enter.held = null;
-      if (held) send("key", held);
+      if (held) send("Chave", held);
       return;
     }
     try {
@@ -186,22 +186,22 @@ export function installActionCapture(options: {
       // Capture must never break the page's own submit.
     }
   };
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (!isTrusted(event) || event.key !== "Enter") return;
+  const onKeyDown = (Evento: KeyboardEvent) => {
+    Se (!isTrusted(Evento) || Evento.Chave !== "Enter") return;
     endEnter();
-    // Enter that sends what was typed: a newline (Shift+Enter) or a composition being confirmed is not.
-    if (event.shiftKey || event.isComposing) return;
-    const field = fieldOf(event.composedPath()[0] ?? event.target);
-    if (!field) return;
+    // Enter that sends what was typed: a newline (Shift+Enter) or a composition being confirmed Não é.
+    Se (Evento.shiftKey || Evento.isComposing) return;
+    const field = fieldOf(Evento.composedPath()[0] ?? Evento.target);
+    Se (!field) return;
     let value: Record<string, unknown>;
     try {
-      value = { key: "Enter", ...stepFor("enter", field) };
+      value = { Chave: "Enter", ...stepFor("enter", field) };
     } catch {
       // Capture must never break the page's own key handling.
       return;
     }
     if (!entersClick(field)) {
-      send("key", value);
+      send("Chave", value);
       enter = { held: null, timers: [] };
       later(endEnter, ENTER_HOLD_MS);
       return;
@@ -216,7 +216,7 @@ export function installActionCapture(options: {
   };
   const onKeyPress = (event: KeyboardEvent) => {
     if (!isTrusted(event) || event.key !== "Enter" || !enter) return;
-    // The keypress's default action (the default button's click and its submit) runs in this task: by the next, the
+    // The keypress's Padrão Ação (the Padrão button's click and its submit) runs in this task: by the next, the
     // Enter has had its click or never will.
     later(endEnter);
   };

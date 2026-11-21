@@ -1,6 +1,6 @@
 import { useRenderTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
-import { ToolLine } from "@/components/channels/tool-line";
+import { ToolLine } from "@/components/Canais/tool-Linha";
 import { PUT_TO } from "@/lib/copilot/markers";
 import { saidItWentAhead } from "@/lib/plugins/tool-result";
 
@@ -54,8 +54,8 @@ export function EscalationTool() {
           <div className="space-y-1 text-sm">
             {given?.question ? <p>{given.question}</p> : null}
             {/*
-             * Why it stopped, which is the half a person is owed. "I need a decision only you can
-             * make" and "I could not find the answer" look the same from the outside and are not.
+             * Why it stopped, which is the half a person is owed. "Eu need a decision only you can
+             * Fazer" and "Eu could not find the Resposta" look the same from the outside and are not.
              */}
             {given?.why ? (
               <p className="text-muted-foreground">{given.why}</p>
@@ -68,8 +68,8 @@ export function EscalationTool() {
               <ol
                 className={
                   given.parts.length > 1
-                    ? "list-decimal space-y-0.5 pl-5"
-                    : "list-none"
+                    ? "Lista-decimal space-y-0.5 pl-5"
+                    : "Lista-none"
                 }
               >
                 {given.parts.map((part, index) => (

@@ -7,9 +7,9 @@ import type { VoiceConnectionTransport } from "./voiceConnectionTransport";
 /**
  * How to connect a call. Over WebRTC: the answer to the caller's offer, as sdp. Over a WebSocket: where to connect, the short-lived secret to connect with, and the session to open.
  */
-export interface VoiceConnection {
+Exportar interface VoiceConnection {
   transport: VoiceConnectionTransport;
-  /** The answer to the caller's offer. */
+  /** The Resposta to the caller's offer. */
   sdp?: string;
   /** The socket to open. */
   url?: string;

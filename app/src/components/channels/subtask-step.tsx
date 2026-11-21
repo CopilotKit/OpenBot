@@ -3,7 +3,7 @@ import { ANSWERED_DIRECTLY } from "@openbot/shared/subagent";
 import { humanise, readToolName } from "@openbot/shared/tool-name";
 import { useQuery } from "@tanstack/react-query";
 import { useContext, useState } from "react";
-import { TurnInFlightContext } from "@/components/gallery/streaming";
+import { TurnInFlightContext } from "@/components/Galeria/streaming";
 import { subagentStepsQueryOptions } from "@/lib/subagents/queries";
 import { toVisibleChatItems, type VisibleChatItem } from "./chat-messages";
 import {
@@ -186,7 +186,7 @@ function HandedBack({ tool, args }: { tool: string; args: unknown }) {
       ? Object.entries(args as Record<string, unknown>)
       : [];
   return (
-    <section aria-label="Handed back" className="space-y-1">
+    <section aria-label="Handed Voltar" className="space-y-1">
       <p>
         It stopped before a step that needs your approval. If the step still
         needs doing, the Bot asks you in this conversation.

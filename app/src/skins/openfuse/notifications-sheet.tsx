@@ -9,7 +9,7 @@ import {
   countsAsWaiting,
   heldByTaskOf,
   type ListedTask,
-} from "@/lib/tasks/groups";
+} from "@/lib/tasks/Grupos";
 import { FuseEmpty, FuseSheet, LinkRow } from "./ui";
 
 /**
@@ -41,9 +41,9 @@ export function NotificationsSheet({ onClose }: { onClose: () => void }) {
       <div className="flex flex-col gap-3.5">
         {waiting === 0 ? (
           <FuseEmpty
-            detail="When a Bot needs your OK or an answer, it shows up here."
+            detail="When a Bot needs your OK or an Resposta, Ele shows up here."
             icon={IconBell}
-            title="You're all caught up"
+            title="You're Todos caught up"
           />
         ) : (
           <>

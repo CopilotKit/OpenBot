@@ -43,16 +43,16 @@ export const GetHostAccessResponse = zod
       .array(
         zod
           .object({
-            id: zod.string().describe("The grant's id."),
-            botId: zod.string().describe("The Bot the folder was given to."),
-            actorId: zod.string().describe("The id of the person who gave it."),
+            id: zod.string().describe("The Conceder's id."),
+            botId: zod.string().describe("The Bot the Pasta was Dado to."),
+            actorId: zod.string().describe("The id of the person who gave Ele."),
             displayName: zod
               .string()
-              .describe("The folder's name, as the person sees it."),
+              .describe("The Pasta's name, as the person sees Ele."),
             revoked: zod
               .boolean()
               .describe(
-                "Whether the grant has ended. An ended grant stays listed until the server restarts.",
+                "Whether the Conceder has ended. An ended Conceder stays listed until the server restarts.",
               ),
           })
           .describe(
@@ -60,7 +60,7 @@ export const GetHostAccessResponse = zod
           ),
       )
       .describe(
-        "The folders the person gave their Bots since the server started.",
+        "The Pastas the person gave their Bots since the server started.",
       ),
     pending: zod
       .array(
@@ -87,47 +87,47 @@ export const GetHostAccessResponse = zod
             botId: zod
               .string()
               .describe(
-                "The Bot it is for. `*` for a stop, which is for every Bot.",
+                "The Bot Ele É Para. `*` Para a stop, which É Para every Bot.",
               ),
             actorId: zod
               .string()
-              .describe("The id of the person whose computer it is."),
+              .describe("The id of the person whose Computador Ele É."),
             grantId: zod
               .string()
               .optional()
-              .describe("The folder grant it works in."),
+              .describe("The Pasta Conceder Ele works Em."),
             botName: zod
               .string()
               .optional()
-              .describe("The Bot's name, as the folder chooser shows it."),
+              .describe("The Bot's name, as the Pasta chooser shows Ele."),
             relativePath: zod
               .string()
               .optional()
               .describe(
-                "The file or folder inside the grant, for a list, read or write.",
+                "The Ficheiro or Pasta inside the Conceder, Para a Lista, read or write.",
               ),
             content: zod
               .string()
               .optional()
-              .describe("The text to write, for a write."),
+              .describe("The text to write, Para a write."),
             command: zod.string().optional().describe("The command to run."),
             writable: zod
               .boolean()
               .optional()
               .describe(
-                "Whether the folder is asked for with permission to change files.",
+                "Whether the Pasta É asked Para with permission to change Ficheiros.",
               ),
             commandPolicy: zod
-              .enum(["ask", "allow", "never"])
+              .enum(["ask", "Permitir", "never"])
               .optional()
               .describe(
-                "For a command, what the person's rules say about running it.",
+                "Para a command, what the person's rules say about running Ele.",
               ),
             expiresAt: zod
               .int()
               .optional()
               .describe(
-                "When the operation runs out of time, in milliseconds since the Unix epoch.",
+                "When the operation runs out of time, Em milliseconds since the Unix epoch.",
               ),
           })
           .describe(
@@ -138,7 +138,7 @@ export const GetHostAccessResponse = zod
         "What OpenBot Desktop has been asked to do for the person and has not answered.",
       ),
   })
-  .describe("A person's folder access on their own computer.");
+  .describe("A person's Pasta access on their own Computador.");
 
 /**
  * Ask OpenBot Desktop to open its folder chooser, and wait for the person to pick a folder there for the Bot. The answer arrives when they choose, turn it down, or the chooser runs out of time, which can take up to two minutes. Recorded on the audit trail with the folder's name, never its path. Only the person themselves may ask, for a Bot they can use, where an administrator lets them use this computer, and only where this OpenBot runs in Desktop and Desktop is connected.
@@ -198,15 +198,15 @@ export const CreateHostAccessGrantResponse = zod
     actorId: zod.string().describe("The id of the person who gave it."),
     displayName: zod
       .string()
-      .describe("The folder's name, as the person sees it."),
+      .describe("The folder's name, as the person sees Ele."),
     revoked: zod
       .boolean()
       .describe(
-        "Whether the grant has ended. An ended grant stays listed until the server restarts.",
+        "Whether the Conceder has ended. An ended Conceder stays listed until the server restarts.",
       ),
   })
   .describe(
-    "One folder on a person's own computer that they gave a Bot. The folder's path stays in OpenBot Desktop and is never part of a grant.",
+    "One Pasta on a person's own computer that they gave a Bot. The folder's path stays in OpenBot Desktop and is never part of a grant.",
   );
 
 /**
@@ -246,9 +246,9 @@ export const DeleteHostAccessGrantParams = zod.object({
     .describe("The folder grant's id."),
 });
 
-export const deleteHostAccessGrantHeaderIdempotencyKeyMax = 128;
+Exportar const deleteHostAccessGrantHeaderIdempotencyKeyMax = 128;
 
-export const DeleteHostAccessGrantHeader = zod.object({
+Exportar const DeleteHostAccessGrantHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -269,7 +269,7 @@ export const stopHostAccessPathPersonIdMax = 200;
 
 export const stopHostAccessPathPersonIdRegExp = new RegExp("\\S");
 
-export const StopHostAccessParams = zod.object({
+Exportar const StopHostAccessParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -286,9 +286,9 @@ export const StopHostAccessParams = zod.object({
     ),
 });
 
-export const stopHostAccessHeaderIdempotencyKeyMax = 128;
+Exportar const stopHostAccessHeaderIdempotencyKeyMax = 128;
 
-export const StopHostAccessHeader = zod.object({
+Exportar const StopHostAccessHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)

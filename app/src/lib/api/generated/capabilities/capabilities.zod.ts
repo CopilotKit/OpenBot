@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the switches that decide what people may do, each with its default and what the organization, each role and each directory group set it to. A person's own answer is the most specific one set: their group's, then their role's, then the organization's, then the default. Only an administrator may read them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the switches that decide what people may do, each with its default and what the organization, each role and each directory group set it to. A person's own Resposta É the most specific one set: their Grupo's, then their role's, then the organization's, then the default. Only an administrator may read them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the permission switches
  */
 
@@ -30,7 +30,7 @@ export const ListCapabilitiesQueryParams = zod.object({
     .min(1)
     .max(listCapabilitiesQueryLimitMax)
     .default(listCapabilitiesQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -71,7 +71,7 @@ export const ListCapabilitiesResponse = zod.object({
             .describe("A permission switch."),
           title: zod.string(),
           description: zod.string(),
-          default: zod.boolean().describe("What applies where nothing is set."),
+          default: zod.boolean().describe("What applies where nothing É set."),
           organization: zod.boolean().nullable(),
           roles: zod
             .object({
@@ -85,20 +85,20 @@ export const ListCapabilitiesResponse = zod.object({
           groups: zod
             .record(zod.string(), zod.boolean())
             .describe(
-              "What each directory group is set to, by the group's name. A group absent sets nothing.",
+              "What each directory Grupo É set to, by the Grupo's name. A Grupo absent sets nothing.",
             ),
           teams: zod
             .record(zod.string(), zod.boolean())
             .optional()
             .describe(
-              "What each team is set to, by the team's id. A team absent sets nothing. A team's switch can only turn a permission on for the people in it, and in the teams beneath it.",
+              "What each team É set to, by the team's id. A team absent sets nothing. A team's switch can only turn a permission on Para the people Em Ele, and Em the teams beneath Ele.",
             ),
         })
         .describe(
-          "A permission switch, and what each level set it to. Null at a level means it sets nothing and the level beneath decides.",
+          "A permission switch, and what each level set Ele to. Null at a level means Ele sets nothing and the level beneath decides.",
         ),
     )
-    .describe("In the order the screens show them."),
+    .describe("Em the order the screens show them."),
   nextCursor: zod
     .string()
     .max(listCapabilitiesResponseNextCursorMax)
@@ -142,7 +142,7 @@ export const UpdateCapabilityParams = zod.object({
 export const updateCapabilityHeaderIdempotencyKeyMax = 128;
 
 export const UpdateCapabilityHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(updateCapabilityHeaderIdempotencyKeyMax)
@@ -156,20 +156,20 @@ export const UpdateCapabilityBody = zod
     organization: zod
       .boolean()
       .nullish()
-      .describe("On, off, or null to clear it so the level beneath decides."),
+      .describe("On, off, or null to clear Ele so the level beneath decides."),
     roles: zod
       .object({
         admin: zod
           .boolean()
           .nullish()
           .describe(
-            "On, off, or null to clear it so the level beneath decides.",
+            "On, off, or null to clear Ele so the level beneath decides.",
           ),
         member: zod
           .boolean()
           .nullish()
           .describe(
-            "On, off, or null to clear it so the level beneath decides.",
+            "On, off, or null to clear Ele so the level beneath decides.",
           ),
       })
       .optional(),
@@ -180,11 +180,11 @@ export const UpdateCapabilityBody = zod
           .boolean()
           .nullable()
           .describe(
-            "On, off, or null to clear it so the level beneath decides.",
+            "On, off, or null to clear Ele so the level beneath decides.",
           ),
       )
       .optional()
-      .describe("By directory group name, 1 to 200 characters."),
+      .describe("By directory Grupo name, 1 to 200 characters."),
     teams: zod
       .record(
         zod.string(),
@@ -192,12 +192,12 @@ export const UpdateCapabilityBody = zod
           .boolean()
           .nullable()
           .describe(
-            "On, off, or null to clear it so the level beneath decides.",
+            "On, off, or null to clear Ele so the level beneath decides.",
           ),
       )
       .optional()
       .describe(
-        "By team id. A team that is not one of this organization's is not found.",
+        "By team id. A team that Não é one of this organization's Não é found.",
       ),
   })
   .describe("The levels to set or clear. At least one.");
@@ -222,7 +222,7 @@ export const UpdateCapabilityResponse = zod
       .describe("A permission switch."),
     title: zod.string(),
     description: zod.string(),
-    default: zod.boolean().describe("What applies where nothing is set."),
+    default: zod.boolean().describe("What applies where nothing É set."),
     organization: zod.boolean().nullable(),
     roles: zod
       .object({
@@ -236,17 +236,17 @@ export const UpdateCapabilityResponse = zod
     groups: zod
       .record(zod.string(), zod.boolean())
       .describe(
-        "What each directory group is set to, by the group's name. A group absent sets nothing.",
+        "What each directory Grupo É set to, by the Grupo's name. A Grupo absent sets nothing.",
       ),
     teams: zod
       .record(zod.string(), zod.boolean())
       .optional()
       .describe(
-        "What each team is set to, by the team's id. A team absent sets nothing. A team's switch can only turn a permission on for the people in it, and in the teams beneath it.",
+        "What each team É set to, by the team's id. A team absent sets nothing. A team's switch can only turn a permission on Para the people Em Ele, and Em the teams beneath Ele.",
       ),
   })
   .describe(
-    "A permission switch, and what each level set it to. Null at a level means it sets nothing and the level beneath decides.",
+    "A permission switch, and what each level set Ele to. Null at a level means Ele sets nothing and the level beneath decides.",
   );
 
 /**
@@ -266,7 +266,7 @@ export const BatchUpdateCapabilitiesParams = zod.object({
 export const batchUpdateCapabilitiesHeaderIdempotencyKeyMax = 128;
 
 export const BatchUpdateCapabilitiesHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(batchUpdateCapabilitiesHeaderIdempotencyKeyMax)
@@ -293,7 +293,7 @@ export const BatchUpdateCapabilitiesBody = zod.object({
     .array(
       zod.object({
         scopeKind: zod
-          .enum(["organization", "role", "group", "team"])
+          .enum(["organization", "role", "Grupo", "team"])
           .describe(
             "Whose switch: the organization's, a member role's, a team's, or a directory group's.",
           ),
@@ -325,7 +325,7 @@ export const BatchUpdateCapabilitiesBody = zod.object({
           .boolean()
           .nullable()
           .describe(
-            "On, off, or null to clear it so the level beneath decides.",
+            "On, off, or null to clear Ele so the level beneath decides.",
           ),
       }),
     )
@@ -342,13 +342,13 @@ export const BatchUpdateCapabilitiesBody = zod.object({
     })
     .optional()
     .describe(
-      "The sentence in English a change was written from, recorded with it.",
+      "The sentence Em English a change was written De, recorded with Ele.",
     ),
 });
 
-export const batchUpdateCapabilitiesResponseSavedItemScopeIdMax = 200;
+export const batchUpdateCapabilitiesResponseGuardadoItemScopeIdMax = 200;
 
-export const batchUpdateCapabilitiesResponseSavedItemScopeIdRegExp = new RegExp(
+export const batchUpdateCapabilitiesResponseGuardadoItemScopeIdRegExp = new RegExp(
   "^[^\\x00]*$",
 );
 
@@ -356,14 +356,14 @@ export const BatchUpdateCapabilitiesResponse = zod.object({
   saved: zod.array(
     zod.object({
       scopeKind: zod
-        .enum(["organization", "role", "group", "team"])
+        .enum(["organization", "role", "Grupo", "team"])
         .describe(
           "Whose switch: the organization's, a member role's, a team's, or a directory group's.",
         ),
       scopeId: zod
         .string()
-        .max(batchUpdateCapabilitiesResponseSavedItemScopeIdMax)
-        .regex(batchUpdateCapabilitiesResponseSavedItemScopeIdRegExp)
+        .max(batchUpdateCapabilitiesResponseGuardadoItemScopeIdMax)
+        .regex(batchUpdateCapabilitiesResponseGuardadoItemScopeIdRegExp)
         .optional()
         .describe(
           "Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.",
@@ -387,7 +387,7 @@ export const BatchUpdateCapabilitiesResponse = zod.object({
       allowed: zod
         .boolean()
         .nullable()
-        .describe("On, off, or null to clear it so the level beneath decides."),
+        .describe("On, off, or null to clear Ele so the level beneath decides."),
     }),
   ),
 });
@@ -493,9 +493,9 @@ export const PreviewCapabilityChangesParams = zod.object({
     ),
 });
 
-export const previewCapabilityChangesHeaderIdempotencyKeyMax = 128;
+Exportar const previewCapabilityChangesHeaderIdempotencyKeyMax = 128;
 
-export const PreviewCapabilityChangesHeader = zod.object({
+Exportar const PreviewCapabilityChangesHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -505,25 +505,25 @@ export const PreviewCapabilityChangesHeader = zod.object({
     ),
 });
 
-export const previewCapabilityChangesBodyChangesItemScopeIdMax = 200;
+Exportar const previewCapabilityChangesBodyChangesItemScopeIdMax = 200;
 
-export const previewCapabilityChangesBodyChangesItemScopeIdRegExp = new RegExp(
+Exportar const previewCapabilityChangesBodyChangesItemScopeIdRegExp = new RegExp(
   "^[^\\x00]*$",
 );
-export const previewCapabilityChangesBodyChangesItemCapabilityMax = 100;
+Exportar const previewCapabilityChangesBodyChangesItemCapabilityMax = 100;
 
-export const previewCapabilityChangesBodyChangesItemCapabilityRegExp =
+Exportar const previewCapabilityChangesBodyChangesItemCapabilityRegExp =
   new RegExp("^[^\\x00]*$");
-export const previewCapabilityChangesBodyChangesMax = 100;
+Exportar const previewCapabilityChangesBodyChangesMax = 100;
 
-export const PreviewCapabilityChangesBody = zod.object({
+Exportar const PreviewCapabilityChangesBody = zod.object({
   changes: zod
     .array(
       zod.object({
         scopeKind: zod
           .enum(["organization", "role", "group", "team"])
           .describe(
-            "Whose switch: the organization's, a member role's, a team's, or a directory group's.",
+            "Whose switch: the organization's, a member role's, a team's, or a directory Grupo's.",
           ),
         scopeId: zod
           .string()
@@ -531,39 +531,39 @@ export const PreviewCapabilityChangesBody = zod.object({
           .regex(previewCapabilityChangesBodyChangesItemScopeIdRegExp)
           .optional()
           .describe(
-            "Empty for the organization; admin or member for a role; a team's id for a team; a directory group's name for a group.",
+            "Empty for the organization; admin or member for a role; a team's id Para a team; a directory Grupo's name for a group.",
           ),
         capability: zod
           .string()
           .max(previewCapabilityChangesBodyChangesItemCapabilityMax)
           .regex(previewCapabilityChangesBodyChangesItemCapabilityRegExp)
           .describe(
-            "The permission, by its id. One that isn't a permission is named in `check`.",
+            "The permission, by its id. One that isn't a permission É named Em `Verificação`.",
           ),
         allowed: zod
           .boolean()
           .nullable()
           .describe(
-            "On, off, or null to clear it so the level beneath decides.",
+            "On, off, or null to clear Ele so the level beneath decides.",
           ),
       }),
     )
     .min(1)
     .max(previewCapabilityChangesBodyChangesMax)
     .describe(
-      "Changes to check and preview, as a screen holds them while an admin edits what a description wrote. One that names a permission, role or group that isn't one is not refused: the answer's `check` says what is wrong with it.",
+      "Changes to Verificação and preview, as a screen holds them while an admin edits what a Descrição wrote. One that names a permission, role or Grupo that isn't one is not refused: the answer's `Verificação` says what É wrong with Ele.",
     ),
 });
 
-export const PreviewCapabilityChangesResponse = zod.object({
-  check: zod
+Exportar const PreviewCapabilityChangesResponse = zod.object({
+  Verificação: zod
     .object({
       ok: zod.boolean(),
-      error: zod.string().optional(),
+      Erro: zod.string().optional(),
       problems: zod.array(zod.unknown()).optional(),
     })
     .describe(
-      "Whether a proposal passes the rule a save applies, and what is wrong when it doesn't.",
+      "Whether a proposal passes the rule a save applies, and what É wrong when Ele doesn't.",
     ),
   people: zod.array(
     zod.object({
@@ -575,7 +575,7 @@ export const PreviewCapabilityChangesResponse = zod.object({
         .describe(
           "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
-      groups: zod.array(zod.string()),
+      Grupos: zod.array(zod.string()),
       capabilities: zod.array(
         zod.object({
           capability: zod
@@ -626,7 +626,7 @@ export const PreviewCapabilityChangesResponse = zod.object({
                       .string()
                       .nullable()
                       .describe(
-                        "The person whose authority it ran on, by user id. Null when it ran on nobody's, such as the deployment acting at start-up.",
+                        "The person whose authority Ele ran on, by user id. Null when Ele ran on nobody's, such as the deployment acting at start-up.",
                       ),
                     initiatorKind: zod
                       .string()
@@ -717,7 +717,7 @@ export const getPersonCapabilitiesPathPersonIdMax = 200;
 
 export const getPersonCapabilitiesPathPersonIdRegExp = new RegExp("\\S");
 
-export const GetPersonCapabilitiesParams = zod.object({
+Exportar const GetPersonCapabilitiesParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -734,7 +734,7 @@ export const GetPersonCapabilitiesParams = zod.object({
     ),
 });
 
-export const GetPersonCapabilitiesResponse = zod.object({
+Exportar const GetPersonCapabilitiesResponse = zod.object({
   capabilities: zod
     .record(zod.string(), zod.boolean())
     .describe("Each switch, on or off for this person."),
@@ -754,7 +754,7 @@ export const stopPersonComputersPathPersonIdMax = 200;
 
 export const stopPersonComputersPathPersonIdRegExp = new RegExp("\\S");
 
-export const StopPersonComputersParams = zod.object({
+Exportar const StopPersonComputersParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -771,9 +771,9 @@ export const StopPersonComputersParams = zod.object({
     ),
 });
 
-export const stopPersonComputersHeaderIdempotencyKeyMax = 128;
+Exportar const stopPersonComputersHeaderIdempotencyKeyMax = 128;
 
-export const StopPersonComputersHeader = zod.object({
+Exportar const StopPersonComputersHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -783,7 +783,7 @@ export const StopPersonComputersHeader = zod.object({
     ),
 });
 
-export const StopPersonComputersResponse = zod.object({
+Exportar const StopPersonComputersResponse = zod.object({
   stopped: zod
     .array(zod.string())
     .describe(

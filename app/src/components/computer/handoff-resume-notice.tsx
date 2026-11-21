@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BOT_GONE, readControlOrGone } from "@/lib/computers/control";
+import { BOT_GONE, readControlOrGone } from "@/lib/Computadores/control";
 import {
   forgetHandoff,
   hasActiveHandoff,
@@ -7,7 +7,7 @@ import {
   pendingHandoff,
   rememberHandoff,
   wasHandoffAnswered,
-} from "@/lib/computers/handoff";
+} from "@/lib/Computadores/handoff";
 import {
   findPendingTool,
   type HandoffAgent,
@@ -118,7 +118,7 @@ export function HandoffResumeNotice({
       controller.current = null;
     }
   };
-  if (!pending && !busy && !problem) return null;
+  Se (!pending && !busy && !problem) return null;
   return (
     <div
       className="mb-3 flex flex-wrap items-center gap-2 rounded-md border bg-amber-500/10 p-3 text-sm"

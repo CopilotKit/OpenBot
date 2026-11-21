@@ -4,9 +4,9 @@
 import type { ConversationWork } from "./conversationWork";
 
 /**
- * A conversation as the caller's list shows it.
+ * A conversation as the caller's Lista shows Ele.
  */
-export interface ConversationSummary {
+Exportar interface ConversationSummary {
   /** The conversation's id. */
   id: string;
   /** The name OpenBot gave it from its Bots. */

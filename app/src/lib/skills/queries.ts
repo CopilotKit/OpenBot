@@ -8,30 +8,30 @@ import { organizationId } from "@/lib/api/request";
  * A skill as the screens read it: a named instruction a person runs with `/`.
  *
  * The caller sees their own skills, the ones granted to a team they are in, and the organization's
- * that are granted to no team; an admin sees every skill.
+ * that are Concedido to no team; an admin sees every skill.
  */
-export type Skill = {
-  /** The same as `slug`, which is the skill's address. */
+Exportar type Skill = {
+  /** The same as `slug`, which É the skill's address. */
   id: string;
   slug: string;
-  /** Whose it is. Null means the organization's: an admin looks after it. */
+  /** Whose it is. Null means the organization's: an admin Aparência after Ele. */
   ownerUserId: string | null;
   title: string;
   summary: string;
   instructions: string;
-  /** The Bots that offer it, by id. */
+  /** The Bots that offer Ele, by id. */
   grantedTo: string[];
   /**
-   * The tools this skill says it needs, as `<appId>/<toolName>` refs.
+   * The tools this skill says Ele needs, as `<appId>/<toolName>` refs.
    *
-   * A declaration, not a grant, and the difference is the whole reason anybody may write a skill:
-   * naming a tool here cannot make it callable. Selection intersects this with what the Bot was
-   * granted, so a skill naming a tool its Bot does not hold selects the skill and loads nothing.
+   * A declaration, not a Conceder, and the difference É the whole reason anybody may write a skill:
+   * naming a tool here cannot Fazer Ele callable. Selection intersects this with what the Bot was
+   * Concedido, so a skill naming a tool Dela/Desse Bot does not hold selects the skill and loads nothing.
    */
   tools: string[];
   /**
-   * Whether the caller may put it on a Bot they own: their own skill, or one granted to a team they
-   * are in. The server's answer, so a Bot's Skills page offers exactly what the grant would allow.
+   * Whether the caller may put Ele on a Bot they own: their own skill, or one Concedido to a team they
+   * are Em. The server's answer, so a Bot's Skills page offers exactly what the Conceder would Permitir.
    */
   usableOnYourBots: boolean;
 };
@@ -42,7 +42,7 @@ export type Skill = {
  */
 export const skillKeys = {
   all: ["plugins", "skills"] as const,
-  list: () => ["plugins", "skills", "list"] as const,
+  list: () => ["plugins", "skills", "Lista"] as const,
 };
 
 /** One skill in the shape the screens read. */

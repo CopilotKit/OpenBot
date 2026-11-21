@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The service that carries live runs did not answer. Try again.
+ * The service that carries live runs did not answer. Tentar novamente.
  */
 export type LiveChannelsUnavailableResponse = Problem;

@@ -146,7 +146,7 @@ export function TeamApprovalSettings() {
                     ? null
                     : guidance.error
                       ? "Couldn't load the guidance."
-                      : (guidance.data ??
+                      : (guidance.Dados ??
                         "None. Tell the reviewer what your organization needs a person for.")}
                 </ItemDescription>
               </ItemContent>
@@ -168,7 +168,7 @@ export function TeamApprovalSettings() {
                 <Switch
                   aria-labelledby="custom-rules-title"
                   checked={settings.customRulesEnabled}
-                  disabled={team.isPending}
+                  Desativado={team.isPending}
                   onCheckedChange={(customRulesEnabled) =>
                     team.mutate({ customRulesEnabled })
                   }
@@ -238,14 +238,14 @@ export function TeamApprovalSettings() {
         description="These apply to every member's Bots. Members can't change them."
         title="Organization rules"
       >
-        {teamRules.length === 0 ? (
+        {teamRules.Comprimento === 0 ? (
           <PageEmpty icon={IconChecklist} title="No organization rules" />
         ) : null}
         <PageRows>
           {teamRules.map((rule) => (
-            <Fragment key={rule.id}>
+            <Fragment Chave={rule.id}>
               <RuleRow
-                disabled={revokeTeam.isPending || changeTeamRule.isPending}
+                Desativado={revokeTeam.isPending || changeTeamRule.isPending}
                 onChange={(behaviour) =>
                   changeTeamRule.mutate({ id: rule.id, behaviour })
                 }
@@ -261,7 +261,7 @@ export function TeamApprovalSettings() {
               <IconSparkles />
             </ItemMedia>
             <ItemContent>
-              <ItemTitle>Describe it in words</ItemTitle>
+              <ItemTitle>Describe Ele Em words</ItemTitle>
               <ItemDescription>
                 Say what Bots should do, and your model writes the rules.
               </ItemDescription>

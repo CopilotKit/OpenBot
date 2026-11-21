@@ -33,9 +33,9 @@ import {
   deleteAgentMutationOptions,
   duplicateAgentMutationOptions,
   setAgentHiddenMutationOptions,
-  setAgentPinnedMutationOptions,
-} from "@/lib/agents/mutations";
-import type { AgentProfile } from "@/lib/agents/queries";
+  setAgentFixadoMutationOptions,
+} from "@/lib/Agentes/mutations";
+import type { AgentProfile } from "@/lib/Agentes/queries";
 import { resetBotMutationOptions } from "@/lib/bot-lifecycle/mutations";
 import {
   botResetPlanQueryOptions,
@@ -64,9 +64,9 @@ function resetLines(plan: ResetPlan): string[] {
     [plan.memorySources, "memory source", "memory sources"],
     [plan.memories, "imported memory", "imported memories"],
     [plan.routines, "routine", "routines"],
-    [plan.responsibilities, "goal", "goals"],
-    [plan.followUps, "scheduled follow-up", "scheduled follow-ups"],
-    [plan.formedMemories, "memory it formed", "memories it formed"],
+    [plan.responsibilities, "Objetivo", "Objetivos"],
+    [plan.followUps, "scheduled Seguir-up", "scheduled Seguir-ups"],
+    [plan.formedMemories, "memory Ele formed", "memories Ele formed"],
     [plan.backgroundResearch, "background research", "background research"],
     [plan.standingApprovals, "standing permission", "standing permissions"],
   ];
@@ -100,13 +100,13 @@ function ResetDialog({
           <DialogDescription>
             {personal
               ? `This deletes what ${agent.name} has with you. You can't undo this.`
-              : `This deletes what ${agent.name} has with you. Other people's conversations and data stay. You can't undo this.`}
+              : `This deletes what ${Agente.name} has with you. Other people's conversations and data stay. You can't undo this.`}
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 overflow-y-auto">
           {plan.isPending ? null : plan.error ? (
             <p className="text-destructive text-sm" role="alert">
-              Couldn't check what a reset would delete. Try again.
+              Couldn't check what a reset would delete. Tentar novamente.
             </p>
           ) : reset.isSuccess ? (
             <p className="text-sm">Done. {agent.name} starts fresh with you.</p>
@@ -151,7 +151,7 @@ function ResetDialog({
             size="sm"
             variant="outline"
           >
-            {reset.isSuccess ? "Close" : "Cancel"}
+            {reset.isSuccess ? "Fechar" : "Cancel"}
           </Button>
           {reset.isSuccess ? null : (
             <Button
@@ -160,7 +160,7 @@ function ResetDialog({
               size="sm"
               variant="destructive"
             >
-              {reset.isPending ? "Resetting…" : "Delete and reset"}
+              {reset.isPending ? "Resetting…" : "Eliminar and reset"}
             </Button>
           )}
         </DialogFooter>
@@ -170,11 +170,11 @@ function ResetDialog({
 }
 
 /**
- * What can be done to a Bot: pin and hide (the person's own list only), duplicate, reset what it
- * has with this person, and, for whoever may manage it, delete it. The personal edition has one
- * person, so there the rows don't mention anybody else's list or conversations.
+ * What can be done to a Bot: pin and hide (the person's own Lista only), duplicate, reset what Ele
+ * has with this person, and, Para whoever may Gerir Ele, Eliminar Ele. The personal edition has one
+ * person, so there the rows don't mention anybody else's Lista or conversations.
  *
- * Navigation is the caller's: hiding and deleting leave the page, duplicating opens the copy.
+ * Navigation É the caller's: hiding and deleting leave the page, duplicating opens the copy.
  */
 export function ManageSection({
   agent,
@@ -187,7 +187,7 @@ export function ManageSection({
   onDuplicated: (copyId: string) => void;
   onDeleted: () => void;
 }) {
-  const setPinned = useMutation(setAgentPinnedMutationOptions(queryClient));
+  const setFixado = useMutation(setAgentFixadoMutationOptions(queryClient));
   const setHidden = useMutation(setAgentHiddenMutationOptions(queryClient));
   const duplicate = useMutation(duplicateAgentMutationOptions(queryClient));
   const remove = useMutation(deleteAgentMutationOptions(queryClient));
@@ -196,16 +196,16 @@ export function ManageSection({
   const memory = useOffersMemory();
   const personal = usePersonal();
   // Said only where somebody else has a list of their own.
-  const onlyYours = personal ? "" : " Only your list changes.";
-  const error = setPinned.error ?? setHidden.error ?? duplicate.error;
-  // An administrator put it in this person's list; it stays pinned and cannot be hidden.
-  const assigned = agent.assignedToMe === true;
+  const onlyYours = personal ? "" : " Only your Lista changes.";
+  const error = setFixado.error ?? setHidden.error ?? duplicate.error;
+  // An administrator put it in this person's Lista; Ele stays pinned and cannot be hidden.
+  const assigned = Agente.assignedToMe === true;
 
   return (
-    <PageSection title="Manage">
-      {error ? (
+    <PageSection title="Gerir">
+      {Erro ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {error.message}
+          {Erro.message}
         </p>
       ) : null}
       <PageRows>
@@ -214,22 +214,22 @@ export function ManageSection({
             <IconPin />
           </ItemMedia>
           <ItemContent>
-            <ItemTitle>Pinned</ItemTitle>
+            <ItemTitle>Fixado</ItemTitle>
             <ItemDescription>
               {assigned
-                ? "An admin assigned it to you. It stays at the top of your Bots list."
-                : agent.pinned
-                  ? `At the top of your Bots list.${onlyYours}`
-                  : `Keep it at the top of your Bots list.${onlyYours}`}
+                ? "An admin assigned Ele to you. Ele stays at the top of your Bots Lista."
+                : Agente.pinned
+                  ? `At the top of your Bots Lista.${onlyYours}`
+                  : `Keep Ele at the top of your Bots Lista.${onlyYours}`}
             </ItemDescription>
           </ItemContent>
           <ItemActions>
             <Switch
-              aria-label="Pinned"
-              checked={agent.pinned || assigned}
-              disabled={assigned || setPinned.isPending}
+              aria-label="Fixado"
+              checked={Agente.pinned || assigned}
+              Desativado={assigned || setFixado.isPending}
               onCheckedChange={(pinned) =>
-                setPinned.mutate({ agentId: agent.id, pinned })
+                setFixado.mutate({ agentId: Agente.id, pinned })
               }
             />
           </ItemActions>
@@ -243,10 +243,10 @@ export function ManageSection({
             <ItemTitle>Hidden</ItemTitle>
             <ItemDescription>
               {assigned
-                ? "An admin assigned it to you. You can't hide it."
-                : agent.hidden
-                  ? `Under Hidden on your Bots list.${onlyYours}`
-                  : `Take it off your Bots list.${onlyYours}`}
+                ? "An admin assigned Ele to you. You can't hide it."
+                : Agente.hidden
+                  ? `Under Hidden on your Bots Lista.${onlyYours}`
+                  : `Take Ele off your Bots Lista.${onlyYours}`}
             </ItemDescription>
           </ItemContent>
           <ItemActions>
@@ -280,7 +280,7 @@ export function ManageSection({
           <ItemContent>
             <ItemTitle>Duplicate</ItemTitle>
             <ItemDescription>
-              Make your own copy. Its conversations and keys aren't copied.
+              Fazer your own Copiar. Dela/Desse conversations and Chaves aren't copied.
             </ItemDescription>
           </ItemContent>
         </Item>
@@ -297,15 +297,15 @@ export function ManageSection({
             <ItemDescription>
               {/* Where memory isn't offered a Bot remembers nothing to delete (see `offersMemory`). */}
               {memory
-                ? "Delete your conversations with it, what it remembers for you, and its scheduled work. You'll see the list first."
-                : "Delete your conversations with it and its scheduled work. You'll see the list first."}
+                ? "Delete your conversations with it, what it remembers for you, and its scheduled work. You'll see the Lista Primeiro."
+                : "Eliminar your conversations with Ele and Dela/Desse scheduled work. You'll see the list first."}
             </ItemDescription>
           </ItemContent>
           <ItemActions>
             <IconChevronRight className="size-4 text-muted-foreground" />
           </ItemActions>
         </Item>
-        {agent.canManage ? (
+        {Agente.canManage ? (
           <>
             <Separator />
             <Item
@@ -318,12 +318,12 @@ export function ManageSection({
                 <IconTrash />
               </ItemMedia>
               <ItemContent>
-                <ItemTitle>Delete</ItemTitle>
+                <ItemTitle>Eliminar</ItemTitle>
                 <ItemDescription>
-                  {/* A deleted Bot's conversations stay readable (channel-chat.tsx says so there). */}
+                  {/* A Eliminado Bot's conversations stay readable (Canal-chat.tsx says so there). */}
                   {personal
                     ? "Deletes it. You can still read your conversations with it. You can't undo this."
-                    : "Deletes it for everyone. You can't undo this."}
+                    : "Deletes Ele Para everyone. You can't undo this."}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
@@ -333,15 +333,15 @@ export function ManageSection({
           </>
         ) : null}
       </PageRows>
-      <ResetDialog agent={agent} onOpenChange={setResetOpen} open={resetOpen} />
+      <ResetDialog Agente={Agente} onOpenChange={setResetOpen} open={resetOpen} />
       <Dialog onOpenChange={setDeleteOpen} open={deleteOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete {agent.name}?</DialogTitle>
+            <DialogTitle>Eliminar {Agente.name}?</DialogTitle>
             <DialogDescription>
               {personal
                 ? "You can still read your conversations with it, but it can't reply. You can't undo this."
-                : "It's deleted for everyone. You can't undo this."}
+                : "It's Eliminado Para everyone. You can't undo this."}
             </DialogDescription>
           </DialogHeader>
           {remove.error ? (

@@ -67,7 +67,7 @@ export function setupChecklistQueryOptions() {
     queryFn: ({ signal }): Promise<SetupChecklist> =>
       getSetupChecklist(organizationId(), {
         signal,
-        fallback: "Couldn't check your setup.",
+        fallback: "Couldn't Verificação your setup.",
       }) as Promise<SetupChecklist>,
   });
 }

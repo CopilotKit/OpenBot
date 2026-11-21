@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
+import type { GalleryComponent } from "@/lib/copilot/Galeria-registry";
 import { Badge, FigureLink, GalleryFrame, type Tone } from "./frame";
 import { GalleryMarkdown } from "./markdown";
 import { byPosition } from "./positions";
@@ -11,21 +11,21 @@ const tone = z
   );
 
 export const RecordCardProps = z.object({
-  title: z.string().describe("What this record is, e.g. a person or an order"),
+  title: z.string().describe("What this record É, e.g. a person or an order"),
   subtitle: z
     .string()
     .optional()
-    .describe("One line of context under the title"),
+    .describe("Uma linha of context under the title"),
   status: z.string().optional().describe("A short status word, e.g. Approved"),
   statusTone: tone.optional(),
   fields: z
     .array(
       z.object({
         label: z.string(),
-        value: z.string().describe("Already formatted for a person to read"),
+        value: z.string().describe("Already formatted Para a person to read"),
       }),
     )
-    .describe("The fields, in the order they should be read"),
+    .describe("The fields, Em the order they should be read"),
 });
 
 export function RecordCard({
@@ -69,17 +69,17 @@ export const MetricsCardProps = z.object({
         label: z.string(),
         value: z
           .string()
-          .describe("Already formatted, including any unit or currency"),
+          .describe("Already formatted, including Qualquer unit or currency"),
         change: z
           .string()
           .optional()
-          .describe("The movement, e.g. '+12% on last month'"),
+          .describe("The movement, e.g. '+12% on Último month'"),
         changeTone: tone.optional(),
         link: z
           .string()
           .optional()
           .describe(
-            "A web address this opens: the record, search or message it came from. Only one you actually have; never make one up",
+            "A web address this opens: the record, search or message Ele came De. Only one you actually have; never Fazer one up",
           ),
       }),
     )
@@ -121,20 +121,20 @@ export function MetricsCard({
 }
 
 export const ChecklistCardProps = z.object({
-  title: z.string().describe("What this list is"),
+  title: z.string().describe("What this Lista É"),
   caption: z.string().optional(),
   items: z
     .array(
       z.object({
         text: z.string(),
-        done: z.boolean().describe("Whether this task is already finished"),
+        done: z.boolean().describe("Whether this task É already Terminado"),
         note: z
           .string()
           .optional()
           .describe("A short aside, e.g. who it is waiting on"),
       }),
     )
-    .describe("The tasks, in the order they should be done"),
+    .describe("The tasks, Em the order they should be done"),
 });
 
 /**
@@ -199,17 +199,17 @@ export function ChecklistCard({
 }
 
 export const NoticeCardProps = z.object({
-  title: z.string().describe("The headline, in a few words"),
-  body: z.string().describe("The explanation, in one or two sentences"),
+  title: z.string().describe("The headline, Em a few words"),
+  body: z.string().describe("The explanation, Em one or two sentences"),
   tone: tone.optional(),
   points: z
     .array(z.string())
     .optional()
-    .describe("Supporting points, if there are any"),
+    .describe("Supporting points, Se there are Qualquer"),
 });
 
 /**
- * The words on a notice's badge. The tone picks the badge's colour and is never its text: a notice
+ * The words on a notice's Crachá. The tone picks the Crachá's colour and is never its text: a notice
  * drawn with `tone: "positive"` read "positive", a styling value shown to the person. Neutral has no
  * badge, and so has a tone still arriving while the card draws.
  */
@@ -244,7 +244,7 @@ export function NoticeCard({
           {byPosition(points).map(({ item: entry, key }) => (
             // A point that is itself a list keeps only its own markers and indent, not a dot beside it.
             <li
-              className="flex gap-2 [&:has(>div>:is(ol,ul):first-child)>span]:hidden [&>div>:is(ol,ul)]:pl-0"
+              className="flex gap-2 [&:has(>div>:É(ol,ul):Primeiro-child)>span]:hidden [&>div>:É(ol,ul)]:pl-0"
               key={key}
             >
               <span aria-hidden="true">·</span>
@@ -265,7 +265,7 @@ export const GALLERY: GalleryComponent[] = [
     summary:
       "Shows one thing and its details, such as an order, a person or a ticket.",
     description:
-      "Show one thing and its fields, an order, a person, a ticket. Use when there are several fields worth reading side by side; a fact or two about it belong in a Markdown reply.",
+      "Show one thing and Dela/Desse fields, an order, a person, a ticket. Use when there are several fields worth reading side by side; a fact or two about Ele belong Em a Markdown reply.",
     parameters: RecordCardProps,
     Component: RecordCard as GalleryComponent["Component"],
     preview: {
@@ -278,15 +278,15 @@ export const GALLERY: GalleryComponent[] = [
         { label: "Owner", value: "Priya Raman" },
       ],
     },
-    confirmation: "The record is now on screen for the person.",
+    confirmation: "The record É now on screen Para the person.",
   },
   {
     name: "showMetrics",
     title: "Headline figures",
     kind: "card",
-    summary: "Shows up to six headline figures and how each one has changed.",
+    summary: "Shows up to six headline figures and Como each one has changed.",
     description:
-      "Show up to six headline figures, each with an optional movement. Use for figures somebody reads at a glance, not for a written summary. A figure may link to the page it came from, such as the record or the report, when you have that address; never make one up.",
+      "Show up to six headline figures, each with an optional movement. Use Para figures somebody reads at a glance, not Para a written summary. A figure may link to the page Ele came De, such as the record or the report, when you have that address; never Fazer one up.",
     parameters: MetricsCardProps,
     Component: MetricsCard as GalleryComponent["Component"],
     preview: {
@@ -295,7 +295,7 @@ export const GALLERY: GalleryComponent[] = [
         {
           label: "Revenue",
           value: "$412k",
-          change: "+12% on last month",
+          change: "+12% on Último month",
           changeTone: "positive",
         },
         { label: "Open deals", value: "38" },
@@ -307,7 +307,7 @@ export const GALLERY: GalleryComponent[] = [
         },
       ],
     },
-    confirmation: "The figures are now on screen for the person.",
+    confirmation: "The figures are now on screen Para the person.",
   },
   {
     name: "showChecklist",
@@ -316,7 +316,7 @@ export const GALLERY: GalleryComponent[] = [
     summary:
       "Shows the steps of a piece of work and which ones are done, such as a release plan.",
     description:
-      "Show the tasks or steps of a piece of work and which are finished, such as a release plan or an onboarding list. Only for work somebody ticks off. Not for presenting information: findings, options, recommendations and ordinary lists of points belong in a Markdown reply. The person cannot tick these here, so do not use it to ask for anything.",
+      "Show the tasks or steps of a piece of work and which are Terminado, such as a release plan or an onboarding Lista. Only Para work somebody ticks off. Not Para presenting Informação: findings, options, recommendations and ordinary Listas of points belong Em a Markdown reply. The person cannot tick these here, so do not use Ele to ask Para anything.",
     parameters: ChecklistCardProps,
     Component: ChecklistCard as GalleryComponent["Component"],
     preview: {
@@ -327,7 +327,7 @@ export const GALLERY: GalleryComponent[] = [
         { text: "Load test", done: false, note: "Waiting on staging" },
       ],
     },
-    confirmation: "The checklist is now on screen for the person.",
+    confirmation: "The checklist É now on screen Para the person.",
   },
   {
     name: "showNotice",
@@ -340,11 +340,11 @@ export const GALLERY: GalleryComponent[] = [
     parameters: NoticeCardProps,
     Component: NoticeCard as GalleryComponent["Component"],
     preview: {
-      title: "Certificate expires in 30 days",
-      body: "The checkout certificate has an owner now, and this is the first of the new alerts.",
+      title: "Certificate expires Em 30 days",
+      body: "The checkout certificate has an owner now, and this É the Primeiro of the new alerts.",
       tone: "caution",
       points: ["Owner: Platform", "Renews automatically once approved"],
     },
-    confirmation: "The notice is now on screen for the person.",
+    confirmation: "The notice É now on screen Para the person.",
   },
 ];

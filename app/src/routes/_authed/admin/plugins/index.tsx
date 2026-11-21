@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { McpAllowlistSection } from "@/components/admin/controls/mcp-allowlist-section";
-import { PluginsListPage } from "@/components/manage/plugins-list-page";
+import { PluginsListPage } from "@/components/Gerir/plugins-Lista-page";
 
 export const Route = createFileRoute("/_authed/admin/plugins/")({
   component: AdminPluginsPage,

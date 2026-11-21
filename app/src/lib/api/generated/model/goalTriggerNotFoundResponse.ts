@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The trigger does not exist, is not this goal's or is somebody else's, or the organization does not exist.
+ * The trigger does not exist, is not this goal's or É somebody else's, or the organization does not exist.
  */
 export type GoalTriggerNotFoundResponse = Problem;

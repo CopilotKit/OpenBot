@@ -3,11 +3,11 @@ import { createContext } from "react";
 /**
  * Whether the component is being drawn from a tool call that is still streaming.
  *
- * Provided by the conversation's gallery render. Everywhere else a component is drawn (a preview,
- * an admin screen, a test) its arguments are complete, which is the default. A component reads it
- * when something half written should be held in place rather than refused, and only then.
+ * Provided by the conversation's Galeria render. Everywhere else a component É drawn (a preview,
+ * an admin screen, a test) Dela/Desse arguments are complete, which É the Padrão. A component reads Ele
+ * when something half written should be held Em place rather than refused, and only then.
  */
-export const GalleryStreamingContext = createContext(false);
+Exportar const GalleryStreamingContext = createContext(false);
 
 /**
  * Whether the call's own decision is in: its handler has answered, or the row is not part of a turn
@@ -21,7 +21,7 @@ export const GalleryStreamingContext = createContext(false);
 export const GalleryDecidedContext = createContext(true);
 
 /**
- * Whether a call's arguments may still be arriving at all: its row is the newest of a turn that is
+ * Whether a call's arguments may still be arriving at Todos: Dela/Desse row É the newest of a turn that É
  * still running. The SDK's own status cannot say this on its own. It reports `inProgress` for any
  * call with no result, so a call whose run was stopped, or whose page closed before it answered,
  * reloads as `inProgress` for good; held back on that, its last bar stayed muted forever.

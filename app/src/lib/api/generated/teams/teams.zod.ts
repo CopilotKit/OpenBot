@@ -48,7 +48,7 @@ export const listTeamsResponseNextCursorMax = 4096;
 
 export const listTeamsResponseNextCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
-export const ListTeamsResponse = zod.object({
+Exportar const ListTeamsResponse = zod.object({
   teams: zod
     .array(
       zod
@@ -96,12 +96,12 @@ export const ListTeamsResponse = zod.object({
           canMove: zod
             .boolean()
             .describe(
-              "Whether the caller may put the team under another team or take it out from under one: the server's verdict, true for an owner or an admin of the organization.",
+              "Whether the caller may put the team under another team or take Ele out De under one: the server's verdict, true for an owner or an admin of the organization.",
             ),
           canDelete: zod
             .boolean()
             .describe(
-              "Whether the caller may delete the team: the server's verdict, true for an owner or an admin of the organization, and never for a team that comes from the company's directory.",
+              "Whether the caller may delete the team: the server's verdict, true Para an owner or an admin of the organization, and never Para a team that comes De the company's directory.",
             ),
           createdAt: zod.iso
             .datetime({ offset: true })
@@ -144,7 +144,7 @@ export const CreateTeamParams = zod.object({
 export const createTeamHeaderIdempotencyKeyMax = 128;
 
 export const CreateTeamHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(createTeamHeaderIdempotencyKeyMax)
@@ -171,13 +171,13 @@ export const CreateTeamBody = zod.object({
     .min(1)
     .max(createTeamBodyNameMax)
     .regex(createTeamBodyNameRegExp)
-    .describe("What people call it."),
+    .describe("What people call Ele."),
   description: zod
     .string()
     .max(createTeamBodyDescriptionMax)
     .regex(createTeamBodyDescriptionRegExp)
     .optional()
-    .describe("What the team is for."),
+    .describe("What the team É Para."),
   parentTeamId: zod
     .string()
     .min(1)
@@ -195,7 +195,7 @@ export const CreateTeamResponse = zod.object({
       id: zod.string().describe("The team's id. Opaque."),
       name: zod
         .string()
-        .describe("What people call it. Unique in its organization."),
+        .describe("What people call Ele. Unique Em Dela/Desse organization."),
       description: zod
         .string()
         .nullable()
@@ -214,7 +214,7 @@ export const CreateTeamResponse = zod.object({
       memberCount: zod
         .int()
         .min(createTeamResponseTeamMemberCountMin)
-        .describe("How many people are in the team itself."),
+        .describe("Como many people are Em the team itself."),
       role: zod
         .union([
           zod
@@ -225,26 +225,26 @@ export const CreateTeamResponse = zod.object({
           zod.null(),
         ])
         .describe(
-          "The caller's role in the team. Null when they are not in it.",
+          "The caller's role Em the team. Null when they are not Em Ele.",
         ),
       canManage: zod
         .boolean()
         .describe(
-          "Whether the caller may rename the team and add and remove its people: the server's verdict.",
+          "Whether the caller may rename the team and Adicionar and remove Dela/Desse people: the server's verdict.",
         ),
       canMove: zod
         .boolean()
         .describe(
-          "Whether the caller may put the team under another team or take it out from under one: the server's verdict, true for an owner or an admin of the organization.",
+          "Whether the caller may put the team under another team or take Ele out De under one: the server's verdict, true Para an owner or an admin of the organization.",
         ),
       canDelete: zod
         .boolean()
         .describe(
-          "Whether the caller may delete the team: the server's verdict, true for an owner or an admin of the organization, and never for a team that comes from the company's directory.",
+          "Whether the caller may Eliminar the team: the server's verdict, true Para an owner or an admin of the organization, and never Para a team that comes De the company's directory.",
         ),
       createdAt: zod.iso
         .datetime({ offset: true })
-        .describe("When the team was created."),
+        .describe("When the team was Criado."),
     })
     .describe(
       "One team of an organization, as one of the organization's members sees it. role and canManage are the server's verdicts about the caller.",
@@ -323,12 +323,12 @@ export const GetTeamResponse = zod.object({
       canMove: zod
         .boolean()
         .describe(
-          "Whether the caller may put the team under another team or take it out from under one: the server's verdict, true for an owner or an admin of the organization.",
+          "Whether the caller may put the team under another team or take Ele out De under one: the server's verdict, true for an owner or an admin of the organization.",
         ),
       canDelete: zod
         .boolean()
         .describe(
-          "Whether the caller may delete the team: the server's verdict, true for an owner or an admin of the organization, and never for a team that comes from the company's directory.",
+          "Whether the caller may delete the team: the server's verdict, true Para an owner or an admin of the organization, and never Para a team that comes De the company's directory.",
         ),
       createdAt: zod.iso
         .datetime({ offset: true })
@@ -348,7 +348,7 @@ export const updateTeamPathTeamIdMax = 200;
 
 export const updateTeamPathTeamIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
-export const UpdateTeamParams = zod.object({
+Exportar const UpdateTeamParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -421,7 +421,7 @@ export const UpdateTeamResponse = zod.object({
       name: zod
         .string()
         .describe("What people call it. Unique in its organization."),
-      description: zod
+      Descrição: zod
         .string()
         .nullable()
         .describe("What the team is for, when somebody has said."),
@@ -434,7 +434,7 @@ export const UpdateTeamResponse = zod.object({
       source: zod
         .enum(["openbot", "directory"])
         .describe(
-          "Where a team comes from. openbot is a team made here. directory is a group of the company's directory, kept in step with it: its name and its people are the directory's and can't be changed here.",
+          "Where a team comes from. openbot is a team made here. directory is a group of the company's directory, kept Em step with Ele: Dela/Desse name and Dela/Desse people are the directory's and can't be changed here.",
         ),
       memberCount: zod
         .int()
@@ -450,22 +450,22 @@ export const UpdateTeamResponse = zod.object({
           zod.null(),
         ])
         .describe(
-          "The caller's role in the team. Null when they are not in it.",
+          "The caller's role Em the team. Null when they are not Em Ele.",
         ),
       canManage: zod
         .boolean()
         .describe(
-          "Whether the caller may rename the team and add and remove its people: the server's verdict.",
+          "Whether the caller may rename the team and Adicionar and remove Dela/Desse people: the server's verdict.",
         ),
       canMove: zod
         .boolean()
         .describe(
-          "Whether the caller may put the team under another team or take it out from under one: the server's verdict, true for an owner or an admin of the organization.",
+          "Whether the caller may put the team under another team or take it out from under one: the server's verdict, true Para an owner or an admin of the organization.",
         ),
       canDelete: zod
         .boolean()
         .describe(
-          "Whether the caller may delete the team: the server's verdict, true for an owner or an admin of the organization, and never for a team that comes from the company's directory.",
+          "Whether the caller may Eliminar the team: the server's verdict, true for an owner or an admin of the organization, and never for a team that comes from the company's directory.",
         ),
       createdAt: zod.iso
         .datetime({ offset: true })
@@ -503,7 +503,7 @@ export const DeleteTeamParams = zod.object({
 export const deleteTeamHeaderIdempotencyKeyMax = 128;
 
 export const DeleteTeamHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(deleteTeamHeaderIdempotencyKeyMax)
@@ -580,7 +580,7 @@ export const ListTeamMembersResponse = zod.object({
             .string()
             .nullable()
             .describe("What OpenBot calls them. Null until they choose."),
-          image: zod
+          Imagem: zod
             .string()
             .nullable()
             .describe("Their picture's address, when they have one."),
@@ -671,7 +671,7 @@ export const PutTeamMemberResponse = zod.object({
         .string()
         .nullable()
         .describe("What OpenBot calls them. Null until they choose."),
-      image: zod
+      Imagem: zod
         .string()
         .nullable()
         .describe("Their picture's address, when they have one."),

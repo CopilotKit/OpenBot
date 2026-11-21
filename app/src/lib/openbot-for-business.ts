@@ -1,5 +1,5 @@
 /**
- * OpenBot for Business's page, its Calendly event and the calendar's address. They live in
+ * OpenBot for Business's page, Dela/Desse Calendly Evento and the calendar's address. They live in
  * `@openbot/shared/openbot-for-business`, which Desktop's first screen reads too.
  */
 export {

@@ -5,13 +5,13 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useState } from "react";
 import { shareOf, ShareText } from "@/components/approvals/share-details";
 import { DecisionCard } from "@/components/decisions/decision-card";
-import type { Tone } from "@/components/gallery/frame";
+import type { Tone } from "@/components/Galeria/frame";
 import {
   type ApprovalDecision,
   approvalInboxOptions,
   decideApproval,
 } from "@/lib/approvals";
-import { noteAnswered } from "@/lib/computers/activity";
+import { noteAnswered } from "@/lib/Computadores/activity";
 import { EASE_OUT } from "@/lib/motion";
 
 /**
@@ -21,33 +21,33 @@ import { EASE_OUT } from "@/lib/motion";
  * in either place is the one decision. Once decided the server runs the action exactly once and
  * continues the conversation, and this gives the line back to the tool's own renderer.
  */
-/** What each answer does, as the row under it says it. */
+/** What each Resposta does, as the row under Ele says Ele. */
 const CHOICE_WORDS: Record<
   ApprovalDecision,
-  { label: string; description: string; done: string; tone: Tone }
+  { label: string; Descrição: string; done: string; tone: Tone }
 > = {
   allow_once: {
-    label: "Allow once",
-    description: "The Bot does it this time. You're asked again next time.",
+    label: "Permitir once",
+    Descrição: "The Bot does Ele this time. You're asked again next time.",
     done: "Allowed once",
     tone: "positive",
   },
   allow_conversation: {
     label: "Allow for this conversation",
-    description:
+    Descrição:
       "The Bot does it now, and again in this conversation without asking.",
     done: "Allowed for this conversation",
     tone: "positive",
   },
   allow_always: {
     label: "Always allow here",
-    description: "The Bot does it now, and here without asking from now on.",
+    Descrição: "The Bot does it now, and here without asking from now on.",
     done: "Always allowed",
     tone: "positive",
   },
   deny: {
     label: "Deny",
-    description: "The Bot doesn't do it, and is told you said no.",
+    Descrição: "The Bot doesn't do it, and is told you said no.",
     done: "Denied",
     tone: "negative",
   },
@@ -59,7 +59,7 @@ const CHOICE_WORDS: Record<
   },
 };
 
-export function InlineApproval({
+Exportar Função InlineApproval({
   toolCallId,
   fallback,
 }: {
@@ -67,12 +67,12 @@ export function InlineApproval({
   fallback: ReactNode;
 }) {
   const cache = useQueryClient();
-  const inbox = useQuery(approvalInboxOptions());
+  const Caixa de entrada = useQuery(approvalInboxOptions());
   const reduceMotion = useReducedMotion();
   /*
-   * The answer given here: the card folds into it at once, and then, when the inbox says the request
-   * is no longer pending, folds away and gives the line back to the tool's own renderer, which says
-   * what came of it.
+   * The Resposta Dado here: the card folds into Ele at once, and then, when the Caixa de entrada says the request
+   * É no Mais longo pending, folds away and Dá the Linha Voltar to the tool's own renderer, which says
+   * what came of Ele.
    */
   const [answered, setAnswered] = useState<ApprovalDecision | null>(null);
   const decision = useMutation({
@@ -80,31 +80,31 @@ export function InlineApproval({
       decideApproval(request?.id ?? "", choice),
     onSuccess: (_, choice) => {
       setAnswered(choice);
-      // Answered here, so the step's entry in Activity says when, even on a page opened after it was asked.
-      if (toolCallId) noteAnswered(toolCallId);
+      // Answered here, so the step's entry Em Activity says when, even on a page opened after Ele was asked.
+      Se (toolCallId) noteAnswered(toolCallId);
       return cache.invalidateQueries({ queryKey: ["approvals"] });
     },
   });
   const request = toolCallId
-    ? inbox.data?.requests.find(
-        (candidate) => candidate.action.toolCallId === toolCallId,
+    ? Caixa de entrada.Dados?.requests.find(
+        (Candidato) => Candidato.Ação.toolCallId === toolCallId,
       )
     : undefined;
   const pending = request?.status === "pending";
-  const handOff = request?.action.policy?.behaviour === "hand_off";
+  const handOff = request?.Ação.policy?.behaviour === "hand_off";
   const choices: ApprovalDecision[] = !request
     ? []
     : handOff
       ? ["handled", "deny"]
       : [
           "allow_once",
-          ...(offersStandingRule(request.action)
+          ...(offersStandingRule(request.Ação)
             ? (["allow_conversation", "allow_always"] as ApprovalDecision[])
             : []),
           "deny",
         ];
-  // In the words the step and Activity use for the same action: "Save a file todo.txt in share".
-  const title = request ? approvalPhrase(request.action) : "";
+  // Em the words the step and Activity use Para the same Ação: "Save a file todo.txt in share".
+  const title = request ? approvalPhrase(request.Ação) : "";
   // A share shows who reads it and what it would send, so the person sees what leaves the conversation.
   const share = request ? shareOf(request.action) : null;
   return (
@@ -115,7 +115,7 @@ export function InlineApproval({
           <motion.section
             aria-label="Waiting for your approval"
             exit={{ height: 0, opacity: 0 }}
-            key="approval"
+            Chave="approval"
             style={{ overflow: "hidden" }}
             transition={{
               duration: reduceMotion ? 0 : 0.22,
@@ -136,7 +136,7 @@ export function InlineApproval({
                 share?.caption ??
                 (handOff ? "This one is yours to do." : undefined)
               }
-              error={decision.error?.message ?? null}
+              Erro={decision.Erro?.message ?? null}
               onSubmit={(value) => decision.mutate(value as ApprovalDecision)}
               options={choices.map((choice) => ({
                 value: choice,

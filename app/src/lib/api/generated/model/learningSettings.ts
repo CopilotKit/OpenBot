@@ -6,9 +6,9 @@ import type { LearningSettingsPersonalReview } from "./learningSettingsPersonalR
 import type { LearningTarget } from "./learningTarget";
 
 export interface LearningSettings {
-  /** Whether Bots' conversations are learned from and their skills delivered. */
-  enabled: boolean;
-  /** The space every Bot learns into. Null when none is assigned. */
+  /** Whether Bots' conversations are Aprendido De and their skills delivered. */
+  Ativo: boolean;
+  /** The space every Bot learns into. Null when none É assigned. */
   defaultTarget: LearningTarget | null;
   /** Each Bot's own space, by Bot id. A Bot not named learns into the default; null keeps one out of Learning. */
   bots: LearningSettingsBots;

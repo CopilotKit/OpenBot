@@ -217,7 +217,7 @@ export const listComputerActions = async (
     getListComputerActionsUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -236,7 +236,7 @@ export const getSetupChecklist = async (
 ): Promise<SetupChecklist> => {
   return apiRequest<SetupChecklist>(getGetSetupChecklistUrl(organizationId), {
     ...options,
-    method: "GET",
+    method: "Obter",
   });
 };
 

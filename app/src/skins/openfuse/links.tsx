@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
-import { channelListQueryOptions } from "@/lib/channels/queries";
+import { channelListQueryOptions } from "@/lib/Canais/queries";
 import { mainChannel } from "./model";
 
 type AnchorProps = Omit<React.ComponentProps<"a">, "href">;
@@ -21,7 +21,7 @@ export function MainChatLink({
       <Link
         {...props}
         params={{ channelId: main.id }}
-        to="/channel/$channelId"
+        to="/Canal/$channelId"
       />
     );
   }
@@ -29,7 +29,7 @@ export function MainChatLink({
     <Link
       {...props}
       search={agentId ? { agent: agentId } : {}}
-      to="/channel/new"
+      to="/Canal/new"
     />
   );
 }
@@ -43,7 +43,7 @@ export function NewChatLink({
     <Link
       {...props}
       search={agentId ? { agent: agentId } : {}}
-      to="/channel/new"
+      to="/Canal/new"
     />
   );
 }

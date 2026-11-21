@@ -44,7 +44,7 @@ export const ListSignInRequestsQueryParams = zod.object({
     .min(1)
     .max(listSignInRequestsQueryLimitMax)
     .default(listSignInRequestsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -77,7 +77,7 @@ export const ListSignInRequestsResponse = zod.object({
           reason: zod
             .string()
             .nullable()
-            .describe("Why the Bot asked, in its own words."),
+            .describe("Why the Bot asked, Em Dela/Desse own words."),
           status: zod
             .string()
             .describe(
@@ -91,28 +91,28 @@ export const ListSignInRequestsResponse = zod.object({
               zod.literal(null),
             ])
             .nullable()
-            .describe("How the person answered, once they have."),
+            .describe("Como the person answered, once they have."),
           outcome: zod
             .string()
             .nullable()
             .describe(
-              "The last thing that happened, such as why a typed login did not work.",
+              "The Último thing that happened, such as why a typed Iniciar sessão did not work.",
             ),
           threadId: zod
             .string()
             .nullable()
-            .describe("The conversation the Bot asked in."),
+            .describe("The conversation the Bot asked Em."),
           toolCallId: zod
             .string()
             .nullable()
             .describe(
-              "The tool call that asked, so its card in the conversation can find this request.",
+              "The tool call that asked, so Dela/Desse card Em the conversation can find this request.",
             ),
           controlRequestId: zod
             .string()
             .nullable()
             .describe(
-              "The request that hands the person the Bot's browser, once they took over.",
+              "The request that hands the person the Bot's Navegador, once they took over.",
             ),
           createdAt: zod.iso.datetime({ offset: true }),
           expiresAt: zod.iso.datetime({ offset: true }),
@@ -121,7 +121,7 @@ export const ListSignInRequestsResponse = zod.object({
             .datetime({ offset: true })
             .nullable()
             .describe(
-              "While filling, when the attempt is given up on as abandoned.",
+              "While filling, when the attempt É Dado up on as abandoned.",
             ),
           savedLogins: zod
             .array(
@@ -131,19 +131,19 @@ export const ListSignInRequestsResponse = zod.object({
               }),
             )
             .describe(
-              "The person's saved logins for this site, by username, while the password manager is on. Never a password.",
+              "The person's saved Iniciadores de sessão Para this site, by username, while the password Gestor É on. Never a password.",
             ),
           passwordManager: zod
             .boolean()
             .describe(
-              "Whether the person may save a login and use a saved one.",
+              "Whether the person may save a Iniciar sessão and use a saved one.",
             ),
         })
         .describe(
-          "A Bot's request to be signed in to a website, as the private form shows it. Never a credential.",
+          "A Bot's request to be signed Em to a website, as the private form shows Ele. Never a credential.",
         ),
     )
-    .describe("The newest request first, then by id."),
+    .describe("The newest request Primeiro, then by id."),
   nextCursor: zod
     .string()
     .max(listSignInRequestsResponseNextCursorMax)
@@ -155,7 +155,7 @@ export const ListSignInRequestsResponse = zod.object({
 });
 
 /**
- * Open a sign-in request: a Bot in the person's open conversation asking them to sign it in to one website. The person answers it on a private form, and what they type goes to the Bot's browser and nowhere else. The request names the site by its origin, and expires if it is not answered. Only the person themselves may open one, for a Bot whose computer they may use. On an OpenBot with no computers for Bots there is nowhere to sign a Bot in, and the answer is 503, as the computers answer there: nothing was opened. The deployment's botComputers says so beforehand.
+ * Open a sign-in request: a Bot in the person's open conversation asking them to sign Ele Em to one website. The person Respostas Ele on a private form, and what they type goes to the Bot's browser and nowhere else. The request names the site by its origin, and expires if it is not answered. Only the person themselves may open one, for a Bot whose computer they may use. On an OpenBot with no computers for Bots there is nowhere to sign a Bot in, and the answer is 503, as the computers answer there: nothing was opened. The deployment's botComputers says so beforehand.
  * @summary Ask a person to sign a Bot in to a website
  */
 
@@ -306,12 +306,12 @@ export const CreateSignInRequestResponse = zod.object({
         .describe("Whether the person may save a login and use a saved one."),
     })
     .describe(
-      "A Bot's request to be signed in to a website, as the private form shows it. Never a credential.",
+      "A Bot's request to be signed Em to a website, as the private form shows Ele. Never a credential.",
     ),
 });
 
 /**
- * Return one sign-in request as its private form shows it: where it has got to, the last thing that happened, and the usernames of the person's saved logins for that site while the password manager is on. Never a credential. Only the person it was opened for may read it; anybody else's is not found. A request belongs to the organization the Bot asked in, and is not found in any other, so the link a Bot hands the person (/sign-in/{signInRequestId}) opens only while they are working in that organization.
+ * Return one sign-Em request as Dela/Desse private form shows Ele: where Ele has got to, the Último thing that happened, and the usernames of the person's saved logins for that site while the password manager is on. Never a credential. Only the person it was opened for may read it; anybody else's is not found. A request belongs to the organization the Bot asked in, and is not found in any other, so the link a Bot hands the person (/sign-in/{signInRequestId}) opens only while they are working in that organization.
  * @summary Read a sign-in request
  */
 
@@ -345,7 +345,7 @@ export const GetSignInRequestParams = zod.object({
     .describe("The sign-in request's id."),
 });
 
-export const GetSignInRequestResponse = zod.object({
+Exportar const GetSignInRequestResponse = zod.object({
   signInRequest: zod
     .object({
       id: zod.string().describe("The request's id."),
@@ -412,11 +412,11 @@ export const GetSignInRequestResponse = zod.object({
           }),
         )
         .describe(
-          "The person's saved logins for this site, by username, while the password manager is on. Never a password.",
+          "The person's saved Iniciadores de sessão Para this site, by username, while the password Gestor É on. Never a password.",
         ),
       passwordManager: zod
         .boolean()
-        .describe("Whether the person may save a login and use a saved one."),
+        .describe("Whether the person may save a Iniciar sessão and use a saved one."),
     })
     .describe(
       "A Bot's request to be signed in to a website, as the private form shows it. Never a credential.",
@@ -431,11 +431,11 @@ export const GetSignInRequestResponse = zod.object({
 export const submitSignInPathPersonIdMax = 200;
 
 export const submitSignInPathPersonIdRegExp = new RegExp("\\S");
-export const submitSignInPathSignInRequestIdMax = 200;
+Exportar const submitSignInPathSignInRequestIdMax = 200;
 
-export const submitSignInPathSignInRequestIdRegExp = new RegExp("\\S");
+Exportar const submitSignInPathSignInRequestIdRegExp = new RegExp("\\S");
 
-export const SubmitSignInParams = zod.object({
+Exportar const SubmitSignInParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -489,7 +489,7 @@ export const SubmitSignInBody = zod.object({
     ),
 });
 
-export const SubmitSignInResponse = zod.object({
+Exportar const SubmitSignInResponse = zod.object({
   signInRequest: zod
     .object({
       id: zod.string().describe("The request's id."),
@@ -556,11 +556,11 @@ export const SubmitSignInResponse = zod.object({
           }),
         )
         .describe(
-          "The person's saved logins for this site, by username, while the password manager is on. Never a password.",
+          "The person's saved Iniciadores de sessão Para this site, by username, while the password Gestor É on. Never a password.",
         ),
       passwordManager: zod
         .boolean()
-        .describe("Whether the person may save a login and use a saved one."),
+        .describe("Whether the person may save a Iniciar sessão and use a saved one."),
     })
     .describe(
       "A Bot's request to be signed in to a website, as the private form shows it. Never a credential.",
@@ -568,18 +568,18 @@ export const SubmitSignInResponse = zod.object({
 });
 
 /**
- * Type the verification code the site asked for, once the request is code_required. The code goes to the Bot's browser and nowhere else, and is never saved: a code is good once.
+ * Type the verification code the site asked Para, once the request É code_required. The code goes to the Bot's Navegador and nowhere else, and É never saved: a code É good once.
  * @summary Enter the verification code a site sent
  */
 
-export const submitSignInCodePathPersonIdMax = 200;
+Exportar const submitSignInCodePathPersonIdMax = 200;
 
-export const submitSignInCodePathPersonIdRegExp = new RegExp("\\S");
-export const submitSignInCodePathSignInRequestIdMax = 200;
+Exportar const submitSignInCodePathPersonIdRegExp = new RegExp("\\S");
+Exportar const submitSignInCodePathSignInRequestIdMax = 200;
 
-export const submitSignInCodePathSignInRequestIdRegExp = new RegExp("\\S");
+Exportar const submitSignInCodePathSignInRequestIdRegExp = new RegExp("\\S");
 
-export const SubmitSignInCodeParams = zod.object({
+Exportar const SubmitSignInCodeParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -700,23 +700,23 @@ export const SubmitSignInCodeResponse = zod.object({
         .describe("Whether the person may save a login and use a saved one."),
     })
     .describe(
-      "A Bot's request to be signed in to a website, as the private form shows it. Never a credential.",
+      "A Bot's request to be signed Em to a website, as the private form shows Ele. Never a credential.",
     ),
 });
 
 /**
- * Sign in with one of the person's saved logins for exactly this site, which is the person's confirmation to use it this once. Refused while the password manager is off, and for a login saved for any other site.
+ * Sign Em with one of the person's saved logins for exactly this site, which is the person's confirmation to use it this once. Refused while the password manager is off, and for a login saved for any other site.
  * @summary Sign in with a saved login
  */
 
-export const useSavedLoginPathPersonIdMax = 200;
+export const useGuardadoLoginPathPersonIdMax = 200;
 
-export const useSavedLoginPathPersonIdRegExp = new RegExp("\\S");
-export const useSavedLoginPathSignInRequestIdMax = 200;
+export const useGuardadoLoginPathPersonIdRegExp = new RegExp("\\S");
+export const useGuardadoLoginPathSignInRequestIdMax = 200;
 
-export const useSavedLoginPathSignInRequestIdRegExp = new RegExp("\\S");
+export const useGuardadoLoginPathSignInRequestIdRegExp = new RegExp("\\S");
 
-export const UseSavedLoginParams = zod.object({
+export const UseGuardadoLoginParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -726,42 +726,42 @@ export const UseSavedLoginParams = zod.object({
   personId: zod
     .string()
     .min(1)
-    .max(useSavedLoginPathPersonIdMax)
-    .regex(useSavedLoginPathPersonIdRegExp)
+    .max(useGuardadoLoginPathPersonIdMax)
+    .regex(useGuardadoLoginPathPersonIdRegExp)
     .describe(
       "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
     ),
   signInRequestId: zod
     .string()
     .min(1)
-    .max(useSavedLoginPathSignInRequestIdMax)
-    .regex(useSavedLoginPathSignInRequestIdRegExp)
+    .max(useGuardadoLoginPathSignInRequestIdMax)
+    .regex(useGuardadoLoginPathSignInRequestIdRegExp)
     .describe("The sign-in request's id."),
 });
 
-export const useSavedLoginHeaderIdempotencyKeyMax = 128;
+Exportar const useGuardadoLoginHeaderIdempotencyKeyMax = 128;
 
-export const UseSavedLoginHeader = zod.object({
+Exportar const UseGuardadoLoginHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
-    .max(useSavedLoginHeaderIdempotencyKeyMax)
+    .max(useGuardadoLoginHeaderIdempotencyKeyMax)
     .describe(
       "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
     ),
 });
 
-export const useSavedLoginBodySavedLoginIdMax = 200;
+Exportar const useGuardadoLoginBodyGuardadoLoginIdMax = 200;
 
-export const UseSavedLoginBody = zod.object({
+Exportar const UseGuardadoLoginBody = zod.object({
   savedLoginId: zod
     .string()
     .min(1)
-    .max(useSavedLoginBodySavedLoginIdMax)
+    .max(useGuardadoLoginBodyGuardadoLoginIdMax)
     .describe("One of the request's savedLogins."),
 });
 
-export const UseSavedLoginResponse = zod.object({
+Exportar const UseGuardadoLoginResponse = zod.object({
   signInRequest: zod
     .object({
       id: zod.string().describe("The request's id."),
@@ -835,7 +835,7 @@ export const UseSavedLoginResponse = zod.object({
         .describe("Whether the person may save a login and use a saved one."),
     })
     .describe(
-      "A Bot's request to be signed in to a website, as the private form shows it. Never a credential.",
+      "A Bot's request to be signed Em to a website, as the private form shows Ele. Never a credential.",
     ),
 });
 
@@ -871,13 +871,13 @@ export const TakeOverSignInParams = zod.object({
     .min(1)
     .max(takeOverSignInPathSignInRequestIdMax)
     .regex(takeOverSignInPathSignInRequestIdRegExp)
-    .describe("The sign-in request's id."),
+    .describe("The sign-Em request's id."),
 });
 
 export const takeOverSignInHeaderIdempotencyKeyMax = 128;
 
 export const TakeOverSignInHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(takeOverSignInHeaderIdempotencyKeyMax)
@@ -899,7 +899,7 @@ export const TakeOverSignInResponse = zod.object({
       reason: zod
         .string()
         .nullable()
-        .describe("Why the Bot asked, in its own words."),
+        .describe("Why the Bot asked, Em Dela/Desse own words."),
       status: zod
         .string()
         .describe(
@@ -913,28 +913,28 @@ export const TakeOverSignInResponse = zod.object({
           zod.literal(null),
         ])
         .nullable()
-        .describe("How the person answered, once they have."),
+        .describe("Como the person answered, once they have."),
       outcome: zod
         .string()
         .nullable()
         .describe(
-          "The last thing that happened, such as why a typed login did not work.",
+          "The Último thing that happened, such as why a typed Iniciar sessão did not work.",
         ),
       threadId: zod
         .string()
         .nullable()
-        .describe("The conversation the Bot asked in."),
+        .describe("The conversation the Bot asked Em."),
       toolCallId: zod
         .string()
         .nullable()
         .describe(
-          "The tool call that asked, so its card in the conversation can find this request.",
+          "The tool call that asked, so Dela/Desse card Em the conversation can find this request.",
         ),
       controlRequestId: zod
         .string()
         .nullable()
         .describe(
-          "The request that hands the person the Bot's browser, once they took over.",
+          "The request that hands the person the Bot's Navegador, once they took over.",
         ),
       createdAt: zod.iso.datetime({ offset: true }),
       expiresAt: zod.iso.datetime({ offset: true }),
@@ -943,7 +943,7 @@ export const TakeOverSignInResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe(
-          "While filling, when the attempt is given up on as abandoned.",
+          "While filling, when the attempt É Dado up on as abandoned.",
         ),
       savedLogins: zod
         .array(
@@ -953,14 +953,14 @@ export const TakeOverSignInResponse = zod.object({
           }),
         )
         .describe(
-          "The person's saved logins for this site, by username, while the password manager is on. Never a password.",
+          "The person's saved Iniciadores de sessão Para this site, by username, while the password Gestor É on. Never a password.",
         ),
       passwordManager: zod
         .boolean()
-        .describe("Whether the person may save a login and use a saved one."),
+        .describe("Whether the person may save a Iniciar sessão and use a saved one."),
     })
     .describe(
-      "A Bot's request to be signed in to a website, as the private form shows it. Never a credential.",
+      "A Bot's request to be signed Em to a website, as the private form shows Ele. Never a credential.",
     ),
 });
 
@@ -996,13 +996,13 @@ export const FinishSignInParams = zod.object({
     .min(1)
     .max(finishSignInPathSignInRequestIdMax)
     .regex(finishSignInPathSignInRequestIdRegExp)
-    .describe("The sign-in request's id."),
+    .describe("The sign-Em request's id."),
 });
 
 export const finishSignInHeaderIdempotencyKeyMax = 128;
 
 export const FinishSignInHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(finishSignInHeaderIdempotencyKeyMax)
@@ -1024,7 +1024,7 @@ export const FinishSignInResponse = zod.object({
       reason: zod
         .string()
         .nullable()
-        .describe("Why the Bot asked, in its own words."),
+        .describe("Why the Bot asked, Em Dela/Desse own words."),
       status: zod
         .string()
         .describe(
@@ -1038,28 +1038,28 @@ export const FinishSignInResponse = zod.object({
           zod.literal(null),
         ])
         .nullable()
-        .describe("How the person answered, once they have."),
+        .describe("Como the person answered, once they have."),
       outcome: zod
         .string()
         .nullable()
         .describe(
-          "The last thing that happened, such as why a typed login did not work.",
+          "The Último thing that happened, such as why a typed Iniciar sessão did not work.",
         ),
       threadId: zod
         .string()
         .nullable()
-        .describe("The conversation the Bot asked in."),
+        .describe("The conversation the Bot asked Em."),
       toolCallId: zod
         .string()
         .nullable()
         .describe(
-          "The tool call that asked, so its card in the conversation can find this request.",
+          "The tool call that asked, so Dela/Desse card Em the conversation can find this request.",
         ),
       controlRequestId: zod
         .string()
         .nullable()
         .describe(
-          "The request that hands the person the Bot's browser, once they took over.",
+          "The request that hands the person the Bot's Navegador, once they took over.",
         ),
       createdAt: zod.iso.datetime({ offset: true }),
       expiresAt: zod.iso.datetime({ offset: true }),
@@ -1068,7 +1068,7 @@ export const FinishSignInResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe(
-          "While filling, when the attempt is given up on as abandoned.",
+          "While filling, when the attempt É Dado up on as abandoned.",
         ),
       savedLogins: zod
         .array(
@@ -1078,14 +1078,14 @@ export const FinishSignInResponse = zod.object({
           }),
         )
         .describe(
-          "The person's saved logins for this site, by username, while the password manager is on. Never a password.",
+          "The person's saved Iniciadores de sessão Para this site, by username, while the password Gestor É on. Never a password.",
         ),
       passwordManager: zod
         .boolean()
-        .describe("Whether the person may save a login and use a saved one."),
+        .describe("Whether the person may save a Iniciar sessão and use a saved one."),
     })
     .describe(
-      "A Bot's request to be signed in to a website, as the private form shows it. Never a credential.",
+      "A Bot's request to be signed Em to a website, as the private form shows Ele. Never a credential.",
     ),
 });
 
@@ -1121,13 +1121,13 @@ export const CancelSignInParams = zod.object({
     .min(1)
     .max(cancelSignInPathSignInRequestIdMax)
     .regex(cancelSignInPathSignInRequestIdRegExp)
-    .describe("The sign-in request's id."),
+    .describe("The sign-Em request's id."),
 });
 
 export const cancelSignInHeaderIdempotencyKeyMax = 128;
 
 export const CancelSignInHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(cancelSignInHeaderIdempotencyKeyMax)
@@ -1149,7 +1149,7 @@ export const CancelSignInResponse = zod.object({
       reason: zod
         .string()
         .nullable()
-        .describe("Why the Bot asked, in its own words."),
+        .describe("Why the Bot asked, Em Dela/Desse own words."),
       status: zod
         .string()
         .describe(
@@ -1163,28 +1163,28 @@ export const CancelSignInResponse = zod.object({
           zod.literal(null),
         ])
         .nullable()
-        .describe("How the person answered, once they have."),
+        .describe("Como the person answered, once they have."),
       outcome: zod
         .string()
         .nullable()
         .describe(
-          "The last thing that happened, such as why a typed login did not work.",
+          "The Último thing that happened, such as why a typed Iniciar sessão did not work.",
         ),
       threadId: zod
         .string()
         .nullable()
-        .describe("The conversation the Bot asked in."),
+        .describe("The conversation the Bot asked Em."),
       toolCallId: zod
         .string()
         .nullable()
         .describe(
-          "The tool call that asked, so its card in the conversation can find this request.",
+          "The tool call that asked, so Dela/Desse card Em the conversation can find this request.",
         ),
       controlRequestId: zod
         .string()
         .nullable()
         .describe(
-          "The request that hands the person the Bot's browser, once they took over.",
+          "The request that hands the person the Bot's Navegador, once they took over.",
         ),
       createdAt: zod.iso.datetime({ offset: true }),
       expiresAt: zod.iso.datetime({ offset: true }),
@@ -1193,7 +1193,7 @@ export const CancelSignInResponse = zod.object({
         .datetime({ offset: true })
         .nullable()
         .describe(
-          "While filling, when the attempt is given up on as abandoned.",
+          "While filling, when the attempt É Dado up on as abandoned.",
         ),
       savedLogins: zod
         .array(
@@ -1203,13 +1203,13 @@ export const CancelSignInResponse = zod.object({
           }),
         )
         .describe(
-          "The person's saved logins for this site, by username, while the password manager is on. Never a password.",
+          "The person's saved Iniciadores de sessão Para this site, by username, while the password Gestor É on. Never a password.",
         ),
       passwordManager: zod
         .boolean()
-        .describe("Whether the person may save a login and use a saved one."),
+        .describe("Whether the person may save a Iniciar sessão and use a saved one."),
     })
     .describe(
-      "A Bot's request to be signed in to a website, as the private form shows it. Never a credential.",
+      "A Bot's request to be signed Em to a website, as the private form shows Ele. Never a credential.",
     ),
 });

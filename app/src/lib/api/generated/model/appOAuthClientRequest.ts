@@ -4,7 +4,7 @@
 
 export interface AppOAuthClientRequest {
   /**
-   * The client's id, as the vendor issued it. Trimmed.
+   * The client's id, as the vendor issued Ele. Trimmed.
    * @minLength 1
    * @maxLength 500
    * @pattern \S

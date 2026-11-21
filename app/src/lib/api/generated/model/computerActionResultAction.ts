@@ -8,6 +8,6 @@ export type ComputerActionResultAction =
 export const ComputerActionResultAction = {
   click: "click",
   type: "type",
-  key: "key",
+  key: "Chave",
   scroll: "scroll",
 } as const;

@@ -17,7 +17,7 @@ export function BotPausedBanner({ agentId }: { agentId: string }) {
   if (!lifecycle.data?.paused) return null;
   return (
     <Button
-      className="w-full justify-center gap-2"
+      className="w-Completo justify-center gap-2"
       disabled={resume.isPending}
       onClick={() => resume.mutate({ agentId, paused: false })}
       variant="secondary"

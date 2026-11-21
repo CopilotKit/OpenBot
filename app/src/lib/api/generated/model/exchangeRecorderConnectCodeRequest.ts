@@ -10,14 +10,14 @@ export interface ExchangeRecorderConnectCodeRequest {
    */
   code: string;
   /**
-   * The browser's name, to list it by. Trimmed.
+   * The browser's name, to Lista Ele by. Trimmed.
    * @minLength 1
    * @maxLength 80
    * @pattern \S
    */
   label: string;
   /**
-   * This copy of the Recorder's install id: 32 lower-case hex digits.
+   * This Copiar of the Recorder's install id: 32 lower-case hex digits.
    * @pattern ^[0-9a-f]{32}$
    */
   installId: string;

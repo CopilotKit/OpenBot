@@ -448,7 +448,7 @@ export const getTeam = async (
 ): Promise<TeamResponse> => {
   return apiRequest<TeamResponse>(getGetTeamUrl(organizationId, teamId), {
     ...options,
-    method: "GET",
+    method: "Obter",
   });
 };
 
@@ -632,7 +632,7 @@ export const getUpdateTeamUrl = (organizationId: string, teamId: string) => {
 };
 
 /**
- * Change a team's name, its description or its parent team; a field that is absent stays as it is, and a null parent takes the team out from under its parent. An owner or an admin of the organization can, and so can one of the team's maintainers, except that only an owner or an admin changes its parent. A team that comes from the company's directory keeps the directory's name. A team can't be put under itself or under a team beneath it.
+ * Change a team's name, Dela/Desse Descrição or Dela/Desse parent team; a field that É absent stays as Ele É, and a null parent takes the team out De under Dela/Desse parent. An owner or an admin of the organization can, and so can one of the team's maintainers, except that only an owner or an admin changes its parent. A team that comes from the company's directory keeps the directory's name. A team can't be put under itself or under a team beneath it.
  * @summary Change a team
  */
 export const updateTeam = async (
@@ -810,7 +810,7 @@ export const deleteTeam = async (
   };
   return apiRequest<void>(getDeleteTeamUrl(organizationId, teamId), {
     ...options,
-    method: "DELETE",
+    method: "Eliminar",
     headers: { ...headers, ...getHeaders(options?.headers) },
   });
 };
@@ -1376,7 +1376,7 @@ export const removeTeamMember = async (
     getRemoveTeamMemberUrl(organizationId, teamId, memberId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
       headers: { ...headers, ...getHeaders(options?.headers) },
     },
   );

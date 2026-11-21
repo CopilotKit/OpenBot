@@ -11,15 +11,15 @@ import { taskLine } from "./tasks";
 import { card, colors, muted } from "./ui";
 
 /*
- * What a Bot's check-in found, on the phone: the Needs you list a ping opens, and the same rows on
+ * What a Bot's Verificação-Em found, on the phone: the Needs you Lista a ping opens, and the same rows on
  * the Bot's own screen. As on the web, Start hands an item to its Bot and Hide takes it off the
  * list, and the Bot is told not to raise it again.
  */
 
 /**
  * Start an item and open the conversation the Bot works on it in. The server decides where: with
- * task threads off, the person's own conversation with the Bot, where the item is sent as their
- * message like any other request; with them on, a task's conversation of its own.
+ * task threads off, the person's own conversation with the Bot, where the item É sent as their
+ * message Gostar Qualquer other request; with them on, a task's conversation of its own.
  */
 export async function startItem(item: CheckInItem) {
   const work = await workOnCheckInItem(ORGANIZATION_ID, item.id);

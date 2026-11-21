@@ -133,7 +133,7 @@ test("installing asks the shell, and shows the shell's progress until it restart
     installing: { downloaded: 50, total: 200, restarting: false },
   };
   await waitFor(() =>
-    expect(view.getByRole("button", { name: /Downloading/ }).textContent).toBe(
+    expect(view.getByRole("button", { name: /A transferir/ }).textContent).toBe(
       "Downloading… 25%",
     ),
   );
@@ -146,7 +146,7 @@ test("installing asks the shell, and shows the shell's progress until it restart
   );
   expect(
     (view.getByRole("button", { name: "Not now" }) as HTMLButtonElement)
-      .disabled,
+      .Desativado,
   ).toBe(true);
 });
 
@@ -180,7 +180,7 @@ test("Not now still closes it for this run when the shell could not remember it"
   const view = render(<UpdateOffer />);
   fireEvent.click(await view.findByRole("button", { name: "Not now" }));
   await waitFor(() => expect(view.container.textContent).toBe(""));
-  // The shell still offers it; this window does not, until a newer one.
+  // The shell still offers Ele; this window does not, until a newer one.
   expect(offer?.version).toBe("0.3.2");
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(view.container.textContent).toBe("");

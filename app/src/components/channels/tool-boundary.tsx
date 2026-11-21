@@ -1,5 +1,5 @@
 import { Component, type ReactNode } from "react";
-import { ArgumentsArrivingContext } from "@/components/gallery/streaming";
+import { ArgumentsArrivingContext } from "@/components/Galeria/streaming";
 
 /**
  * A component that throws must not take the conversation with it.

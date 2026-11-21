@@ -68,10 +68,10 @@ export const getCheckWhatIfResponseMock = (): WhatIfCheck => ({
   result: {
     outcome: "refused",
     decidedBy: "boundaries",
-    headline: "Refused. Boundaries decide it.",
+    headline: "Refused. Boundaries decide Ele.",
     layers: [
       {
-        id: "grant",
+        id: "Conceder",
         title: "App access",
         verdict: "allows",
         summary: 'The Sales Bot has been given "Send email" on Gmail.',
@@ -116,7 +116,7 @@ export const getExplainAuditEventResponseMock = (): WhatIfExplanation => ({
   result: {
     outcome: "refused",
     decidedBy: "boundaries",
-    headline: "Refused. Boundaries decide it.",
+    headline: "Refused. Boundaries decide Ele.",
     layers: [
       {
         id: "boundaries",
@@ -156,7 +156,7 @@ export const getGetWhatIfVocabularyMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetWhatIfVocabularyResponseMock(),
@@ -186,7 +186,7 @@ export const getAskWhatIfMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getAskWhatIfResponseMock(),
@@ -216,7 +216,7 @@ export const getCheckWhatIfMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCheckWhatIfResponseMock(),
@@ -246,7 +246,7 @@ export const getExplainAuditEventMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getExplainAuditEventResponseMock(),

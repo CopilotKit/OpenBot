@@ -1,7 +1,7 @@
 import { withCurrentFrameworkNames } from "@openbot/shared/harnesses";
 
 /**
- * A Bot's subtitle as a person reads it: the Personal Assistant's seed shows Atai's wording, and a
+ * A Bot's subtitle as a person reads Ele: the Personal Assistant's seed shows Atai's wording, and a
  * "Powered by" OpenBot wrote under a framework's earlier name shows its current one.
  *
  * Display only, and so applied where a subtitle is drawn, never where the profile is read. What the

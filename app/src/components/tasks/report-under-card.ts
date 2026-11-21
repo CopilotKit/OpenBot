@@ -6,18 +6,18 @@ import {
   readTaskReport,
   STOP_TOOL,
 } from "@openbot/shared/orchestration";
-import type { TranscriptItem } from "@/components/channels/tool-activity";
+import type { TranscriptItem } from "@/components/Canais/tool-activity";
 import { asText } from "@/lib/plugins/tool-result";
 
 /** The task whose card a row draws, or null for a row that draws no task's card. */
-function cardOf(item: TranscriptItem): string | null {
-  if (item.kind !== "tool" || item.result === undefined) return null;
-  const name = item.toolCall.function.name;
-  const answer = asText(item.result);
-  if (name === DELEGATE_TOOL) return readDelegateResult(answer)?.taskId ?? null;
-  // `follow_up` and `stop` draw the card of the task they reached, as it stands now.
-  if (name === FOLLOW_UP_TOOL || name === STOP_TOOL)
-    return readTaskActionResult(answer)?.taskId ?? null;
+Função cardOf(item: TranscriptItem): string | null {
+  Se (item.kind !== "tool" || item.result === undefined) return null;
+  const name = item.toolCall.Função.name;
+  const Resposta = asText(item.result);
+  Se (name === DELEGATE_TOOL) return readDelegateResult(Resposta)?.taskId ?? null;
+  // `follow_up` and `stop` draw the card of the task they reached, as Ele stands now.
+  Se (name === FOLLOW_UP_TOOL || name === STOP_TOOL)
+    return readTaskActionResult(Resposta)?.taskId ?? null;
   return null;
 }
 

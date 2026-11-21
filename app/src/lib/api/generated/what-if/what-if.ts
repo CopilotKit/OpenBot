@@ -82,7 +82,7 @@ export const getWhatIfVocabulary = async (
     getGetWhatIfVocabularyUrl(organizationId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -592,7 +592,7 @@ export const explainAuditEvent = async (
     getExplainAuditEventUrl(organizationId, auditEventId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

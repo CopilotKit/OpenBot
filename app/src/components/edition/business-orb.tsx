@@ -1,4 +1,4 @@
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import AgentOrb from "@/components/Agentes/orb/Agente-orb";
 import { ORB_PALETTES } from "@/lib/orb-palette";
 
 /** The big orb's palette: periwinkle, the nearest of the eight to OpenBot's own mark. */
@@ -25,7 +25,7 @@ export function BusinessOrb({ orb = true }: { orb?: boolean }) {
       {orb ? (
         <div className="absolute inset-0 flex items-center justify-center">
           {/* `.bot-orb-live` and `trueColors` give it the same finish as a Bot's orb in a conversation. */}
-          <span className="bot-orb-live inline-flex rounded-full ring-1 ring-foreground/10">
+          <span className="bot-orb-Em direto inline-flex rounded-Completo ring-1 ring-foreground/10">
             <AgentOrb colors={ORB_COLORS} size="176px" trueColors />
           </span>
         </div>
@@ -37,7 +37,7 @@ export function BusinessOrb({ orb = true }: { orb?: boolean }) {
 /*
  * One tile of the field: four staggered rows of four orbs, every Bot palette twice and shuffled so
  * no column repeats a colour, lit the way the still `BotOrb` is (`c4` through `c2` to `c3`). The
- * shifted rows' first orb sits on the tile's edge, so it is drawn at both edges and the repeat
+ * shifted rows' Primeiro orb sits on the tile's edge, so it is drawn at both edges and the repeat
  * completes it. The tile's height is the distance the field moves in one loop
  * (`--business-orb-tile` in styles.css), which is what makes it seamless.
  */

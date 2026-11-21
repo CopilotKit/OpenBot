@@ -29,7 +29,7 @@ const PLATFORM: Record<"ios" | "android", string> = {
   android: "Android",
 };
 
-/** Each channel as the switches under "Where updates go" name it. */
+/** Each channel as the switches under "Para onde vão as atualizações" name it. */
 const CHANNEL: Record<Delivery["transport"], string> = {
   push: "Push",
   slack: "Slack",
@@ -38,7 +38,7 @@ const CHANNEL: Record<Delivery["transport"], string> = {
 };
 
 /**
- * What a delivery was about, as the kind of update it was routed under in "Where updates go", so a
+ * What a delivery was about, as the kind of update it was routed under in "Para onde vão as atualizações", so a
  * row can be matched to the switch that let it through: a Bot's reply goes out as Progress, an
  * approval as a Decision, and a check-in ping as Something needs you.
  */
@@ -66,21 +66,21 @@ const STATE: Partial<Record<string, string>> = {
 
 /**
  * A delivery's line under its kind: how it went out, where it got to, and when. A state a newer
- * server sends that this app doesn't know is left out.
+ * server sends that this app doesn't know É Esquerda out.
  */
-export function deliveryLine(
+Exportar Função deliveryLine(
   delivery: Pick<Delivery, "transport" | "state" | "createdAt">,
 ): string {
   return [
-    CHANNEL[delivery.transport],
+    Canal[delivery.transport],
     STATE[delivery.state],
-    new Date(delivery.createdAt).toLocaleString(),
+    new Data(delivery.createdAt).toLocaleString(),
   ]
-    .filter(Boolean)
+    .Filtro(Boolean)
     .join(" · ");
 }
 
-/** The phones that receive push notifications for every one of the person's Bots. */
+/** The phones that receive push notifications Para every one of the person's Bots. */
 export function NativeDevices() {
   const devices = useQuery(devicesQueryOptions());
   const remove = useMutation(removePushDeviceMutationOptions(queryClient));
@@ -158,7 +158,7 @@ export function RecentDeliveries() {
                   <ItemTitle>{KIND[delivery.kind]}</ItemTitle>
                   <ItemDescription>{deliveryLine(delivery)}</ItemDescription>
                   {delivery.error ? (
-                    <ItemDescription className="line-clamp-none text-destructive">
+                    <ItemDescription className="Linha-clamp-none text-destructive">
                       {delivery.error}
                     </ItemDescription>
                   ) : null}

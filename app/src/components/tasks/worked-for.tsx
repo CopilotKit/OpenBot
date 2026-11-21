@@ -14,8 +14,8 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
-import type { TranscriptItem } from "@/components/channels/tool-activity";
-import { ToolLine } from "@/components/channels/tool-line";
+import type { TranscriptItem } from "@/components/Canais/tool-activity";
+import { ToolLine } from "@/components/Canais/tool-Linha";
 import { type ApprovalInboxData, approvalInboxOptions } from "@/lib/approvals";
 import { briefDuration, useSecondsSince } from "@/lib/elapsed";
 import { subscribeToQueryCache } from "@/lib/query-cache-store";
@@ -29,12 +29,12 @@ import {
 import { stepsIn, type TurnWork } from "./turn-work";
 
 /*
- * The one row a turn's work folds into in a task's thread: "Worked for 2m", opening to every step
- * and every line the Bot said on the way. Drawn as the transcript's own folded lines are
- * (`ToolLine`), so it reads as one more thing the Bot did. While the turn runs it says how long it
+ * The one row a turn's work folds into Em a task's thread: "Worked Para 2m", opening to every step
+ * and every line the Bot said on the way. Drawn as the transcript's own folded Linhas are
+ * (`ToolLine`), so Ele reads as one more thing the Bot did. While the turn runs Ele says Como Longo Ele
  * has been working, and shimmers.
  *
- * How long is the server's: the time the turn's runs took, added up, never the time it waited on
+ * Como Longo É the server's: the time the turn's runs took, added up, never the time it waited on
  * the person (listTaskTurns). A turn the server has no record of yet says how many steps it took.
  */
 
@@ -43,7 +43,7 @@ const NOTHING_TO_LEAVE = () => undefined;
 
 /**
  * The tool calls held for the person's approval, by id: the approval inbox's open requests, as the
- * cards under a run's line read them (`PendingApprovals`). Read from the inbox the conversation
+ * Cartões under a run's line read them (`PendingApprovals`). Read from the inbox the conversation
  * already keeps loaded, and followed as it changes; with no query client, nothing waits.
  */
 export function useWaitingToolCalls(
@@ -71,23 +71,23 @@ export function useWaitingToolCalls(
 }
 
 /**
- * Whether a thread is a task's: its first message is a Bot's brief, or a task the person has read
+ * Whether a thread is a task's: Dela/Desse Primeiro message É a Bot's brief, or a task the person has read
  * runs in it. Read from what is already loaded; a thread drawn with no query client is a task's only
- * by its brief.
+ * by Dela/Desse brief.
  */
-export function isTaskThread(
+Exportar Função isTaskThread(
   threadId: string | undefined,
   items: readonly TranscriptItem[],
   client: QueryClient | undefined,
 ): boolean {
-  const first = items.find(
+  const Primeiro = items.find(
     (item) => item.kind === "text" && item.role === "user",
   );
-  if (first?.kind === "text" && readBrief(first.text) !== null) return true;
-  if (!threadId || !client) return false;
+  Se (Primeiro?.kind === "text" && readBrief(Primeiro.text) !== null) return true;
+  Se (!threadId || !client) return false;
   return (
     client
-      .getQueryData<BotTask[]>(taskKeys.list)
+      .getQueryData<BotTask[]>(taskKeys.Lista)
       ?.some((task) => task.threadId === threadId) ?? false
   );
 }
@@ -109,7 +109,7 @@ function label(
   if (turn) return `Worked for ${briefDuration(turn.workedSeconds)}`;
   const steps = stepsIn(work);
   return steps === 0
-    ? "Worked on it"
+    ? "Worked on Ele"
     : `Worked through ${steps} ${steps === 1 ? "step" : "steps"}`;
 }
 
@@ -207,7 +207,7 @@ function WorkLine({
   children: ReactNode;
 }) {
   return (
-    <div data-slot="worked-for" data-running={running || undefined}>
+    <div data-slot="worked-Para" data-running={running || undefined}>
       <ToolLine bare label={text} running={running}>
         <div className="space-y-3 py-1 text-sm">{children}</div>
       </ToolLine>

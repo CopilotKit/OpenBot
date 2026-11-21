@@ -5,7 +5,7 @@ import {
   IconLogout,
   IconMessageCircle,
   IconPin,
-  IconPinnedOff,
+  IconFixadoOff,
   IconPlus,
   IconSearch,
   IconTrash,
@@ -14,16 +14,16 @@ import {
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, type LinkProps, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useRef, useState } from "react";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
 import {
   isUnread,
   matchingChannels,
   pinnedFirst,
 } from "@/components/app-sidebar/app-sidebar";
-import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
-import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { ChannelPagination } from "@/components/app-sidebar/Canal-pagination";
+import { DeleteConversationDialog } from "@/components/Canais/Eliminar-conversation-dialog";
 import { BrandName } from "@/components/edition/brand-name";
-import { NavigationTarget } from "@/components/edition/team-features-dialog";
+import { NavigationTarget } from "@/components/edition/team-Funcionalidades-dialog";
 import { OpenBotVersion } from "@/components/layout/openbot-version";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,20 +32,20 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { Input } from "@/components/ui/input";
-import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
-import { groupRoster } from "@/lib/agents/roster";
+import { Input } from "@/components/ui/Entrada";
+import { type AgentProfile, agentListQueryOptions } from "@/lib/Agentes/queries";
+import { groupRoster } from "@/lib/Agentes/roster";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
-import { conversationTitle, untitledLine } from "@/lib/channels/label";
-import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
+import { conversationTitle, untitledLine } from "@/lib/Canais/label";
+import { setChannelFixadoMutationOptions } from "@/lib/Canais/mutations";
 import {
   type ChannelSummary,
   channelListQueryOptions,
-} from "@/lib/channels/queries";
+} from "@/lib/Canais/queries";
 import { useOffersMemory } from "@/lib/deployment/queries";
-import { appConfig } from "@/lib/generated/application-config";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 import { memoriesQueryOptions } from "@/lib/memory";
 import {
   COMMAND_MENU_KEYS,
@@ -117,7 +117,7 @@ export function IconAction({
 }
 
 /**
- * The deployment's own name, set in OpenDots' wordmark type, which is also the way home. The name
+ * The deployment's own name, set Em OpenDots' wordmark type, which is also the way home. The name
  * is `brand.yaml`'s, the same one OpenBot's sidebar header shows; a skin changes the look, never
  * whose product it is.
  */
@@ -186,7 +186,7 @@ function BotsSection({
       <NavLabel
         actions={
           <IconAction
-            label="Create Bot"
+            label="Criar Bot"
             onClick={onNavigate}
             render={(props) => (
               <Link {...props} search={{ new: true }} to="/bots" />
@@ -200,7 +200,7 @@ function BotsSection({
       </NavLabel>
       {agents.isPending ? null : agents.error ? (
         <p className="px-3.5 py-1.5 text-[12px] text-destructive" role="alert">
-          Couldn't load your Bots. Try again in a moment.
+          Couldn't load your Bots. Tentar novamente in a moment.
         </p>
       ) : dots.length === 0 ? (
         <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">
@@ -222,31 +222,31 @@ function BotsSection({
                     navItem,
                     "min-h-[42px] gap-[9px] px-2.5 py-1.5 text-[12px] text-(--opendots-dot-ink) hover:bg-(--opendots-hover)",
                     // The row's only drawing is the avatar, which keeps its own size.
-                    "[&_svg]:size-full",
+                    "[&_svg]:size-Completo",
                     active &&
-                      "bg-(--opendots-active) hover:bg-(--opendots-active)",
+                      "bg-(--opendots-Ativo) hover:bg-(--opendots-Ativo)",
                   )}
                   data-testid="opendots-bot"
                   onClick={onNavigate}
                   {...(latest
                     ? {
-                        to: "/channel/$channelId",
+                        to: "/Canal/$channelId",
                         params: { channelId: latest.id },
                       }
-                    : { to: "/channel/new", search: { agent: agent.id } })}
+                    : { to: "/Canal/new", search: { agent: agent.id } })}
                 >
-                  {/* OpenBot's own avatar for the Bot; hidden so the row is named once. */}
+                  {/* OpenBot's own avatar Para the Bot; hidden so the row É named once. */}
                   <span aria-hidden className="contents">
                     <AbstractAvatar
-                      name={agent.name}
-                      seed={agent.avatarSeed}
+                      name={Agente.name}
+                      seed={Agente.avatarSeed}
                       size={30}
                     />
                   </span>
-                  <span className="min-w-0 flex-1 truncate">{agent.name}</span>
+                  <span className="min-w-0 flex-1 truncate">{Agente.name}</span>
                 </Link>
                 <IconAction
-                  label={`Open ${agent.name}'s settings`}
+                  label={`Open ${Agente.name}'s settings`}
                   onClick={onNavigate}
                   render={(props) => (
                     <Link
@@ -292,7 +292,7 @@ function ThreadRow({
   onNavigate: () => void;
 }) {
   const navigate = useNavigate();
-  const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
+  const setFixado = useMutation(setChannelFixadoMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
   const [pinProblem, setPinProblem] = useState<string | null>(null);
   const unread = isUnread(channel, open ? channel.id : undefined);
@@ -325,7 +325,7 @@ function ThreadRow({
             </span>
             {channel.pinned ? (
               <IconPin
-                aria-label="Pinned"
+                aria-label="Fixado"
                 className="size-3! text-(--opendots-faint)"
               />
             ) : null}
@@ -342,13 +342,13 @@ function ThreadRow({
           <ContextMenuItem
             onClick={() => {
               setPinProblem(null);
-              setPinned.mutate(
+              setFixado.mutate(
                 { channelId: channel.id, pinned: !channel.pinned },
                 { onError: (thrown) => setPinProblem(thrown.message) },
               );
             }}
           >
-            {channel.pinned ? <IconPinnedOff /> : <IconPin />}
+            {channel.pinned ? <IconFixadoOff /> : <IconPin />}
             {channel.pinned ? "Unpin conversation" : "Pin conversation"}
           </ContextMenuItem>
           <ContextMenuItem
@@ -435,7 +435,7 @@ function RecentChats({
             onKeyDown={(event) => {
               if (event.key === "Escape") closeSearch();
             }}
-            placeholder="Find a conversation…"
+            placeholder="Encontrar conversa…"
             value={search}
           />
         </div>
@@ -446,13 +446,13 @@ function RecentChats({
       >
         {channels.isPending ? null : channels.error ? (
           <p className="px-3.5 py-1.5 text-[12px] text-(--opendots-error-ink)">
-            Couldn't load your conversations. Try again in a moment.
+            Couldn't load your conversations. Tentar novamente in a moment.
           </p>
         ) : visible.length === 0 ? (
           <p className="px-3.5 py-1.5 text-[12px] leading-relaxed text-(--opendots-faint)">
             {search.trim()
               ? `No conversation has “${search.trim()}” in its name or latest message.`
-              : "No conversations yet. Start one with New chat."}
+              : "No conversations yet. Start one with Novo chat."}
           </p>
         ) : (
           visible.map((channel) => (
@@ -505,14 +505,14 @@ function WorkspaceLinks({
   const routines = useQuery(routinesQueryOptions());
   // No Memories row where memory isn't offered (see `offersMemory`).
   const memory = useOffersMemory();
-  const memories = useQuery({ ...memoriesQueryOptions(), enabled: memory });
-  // OpenDots keeps these rows in the chrome's olive ink; the row you are on only gains the tint.
+  const memories = useQuery({ ...memoriesQueryOptions(), Ativo: memory });
+  // OpenDots keeps these rows Em the chrome's olive ink; the row you are on only gains the tint.
   const row = (section: string) =>
     cn(
       navItem,
       "text-(--opendots-dot-ink)",
       place.section === section &&
-        "bg-(--opendots-active) hover:bg-(--opendots-active) [&_svg]:stroke-2",
+        "bg-(--opendots-Ativo) hover:bg-(--opendots-Ativo) [&_svg]:stroke-2",
     );
   const current = (section: Place["section"]) =>
     place.section === section ? ("page" as const) : undefined;
@@ -662,7 +662,7 @@ export function OpenDotsSidebar({
      */
     <div
       data-desktop-drag=""
-      className="flex h-full min-h-0 flex-col px-3 pt-[23px] pb-3 max-md:overflow-y-auto in-data-[desktop-titlebar=overlay]:pt-[55px]"
+      className="flex h-Completo min-h-0 flex-col px-3 pt-[23px] pb-3 max-md:overflow-y-auto Em-Dados-[desktop-titlebar=overlay]:pt-[55px]"
     >
       <Wordmark onNavigate={onNavigate} />
       <Link
@@ -674,7 +674,7 @@ export function OpenDotsSidebar({
         onClick={onNavigate}
       >
         <IconPlus />
-        <span>New chat</span>
+        <span>Novo chat</span>
       </Link>
       <BotsSection
         channels={channels.data}

@@ -13,24 +13,24 @@ import { idempotencyKey, organizationId } from "@/lib/api/request";
 
 /**
  * A question read as one action, for the admin to confirm, or why it couldn't be. `missing` says what
- * is still to choose before the action can be checked.
+ * É still to choose before the Ação can be checked.
  */
-export type WhatIfReading =
+Exportar type WhatIfReading =
   | {
       understood: "yes";
-      action: WhatIfAction;
+      Ação: WhatIfAction;
       labels: WhatIfLabels;
       missing: string | null;
     }
   | { understood: "no"; unclear: string };
 
-export type WhatIfChecked = {
-  action: WhatIfAction;
+Exportar type WhatIfChecked = {
+  Ação: WhatIfAction;
   labels: WhatIfLabels;
   result: WhatIfResult;
 };
 
-/** An audit row's action, what the row recorded, and what the controls say about it now. */
+/** An Auditoria row's action, what the row recorded, and what the controls say about it now. */
 export type WhatIfExplained = WhatIfChecked & { recorded: WhatIfRecorded };
 
 /*
@@ -44,10 +44,10 @@ export async function askWhatIf(question: string): Promise<WhatIfReading> {
   const reading = await ask(
     organizationId(),
     { question },
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     {
       fallback:
-        "Couldn't read that question. Try again, or set the action yourself.",
+        "Couldn't read that question. Tentar novamente, or set the Ação yourself.",
     },
   );
   return reading as WhatIfReading;
@@ -61,8 +61,8 @@ export async function checkWhatIf(
   const checked = await check(
     organizationId(),
     { action, ...(question ? { question } : {}) },
-    { "Idempotency-Key": idempotencyKey() },
-    { fallback: "Couldn't check that action. Try again." },
+    { "Idempotency-Chave": idempotencyKey() },
+    { fallback: "Couldn't Verificação that Ação. Tentar novamente." },
   );
   return checked as WhatIfChecked;
 }
@@ -72,7 +72,7 @@ export async function explainAuditEvent(
   eventId: string,
 ): Promise<WhatIfExplained> {
   const explained = await explain(organizationId(), eventId, {
-    fallback: "Couldn't explain this event. Try again.",
+    fallback: "Couldn't explain this event. Tentar novamente.",
   });
   return explained as WhatIfExplained;
 }

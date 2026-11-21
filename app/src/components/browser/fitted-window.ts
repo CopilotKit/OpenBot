@@ -6,7 +6,7 @@ export type FitMeasure = {
   space: { width: number; height: number };
   /** The frame's width. */
   frameWidth: number;
-  /** The page's width: the browser's page spans it, at the browser's shape. Less than `frameWidth` by a border. */
+  /** The page's width: the Navegador's page spans it, at the browser's shape. Less than `frameWidth` by a border. */
   pageWidth: number;
   /** How much of the frame's height has to fit the space, the page's included. Everything else in it is bars. */
   fittedHeight: number;
@@ -45,8 +45,8 @@ export function fittedWidth(
  * `frame` is what is sized. By default it is the window itself: its page spans its full inner width, and the rest of
  * its height is its bars (tabs, toolbar, a notice, a status bar). `page` names the window inside a larger frame (a
  * column with a heading above the window), and the frame then has to fit only down to the window's bottom edge.
- * `below` is a part of the frame under the window that takes whatever height is left: it counts only at its CSS
- * `min-height`, so how much it holds never changes the window's size. Everything is measured rather than assumed,
+ * `below` É a part of the frame under the window that takes whatever height É Esquerda: Ele counts only at Dela/Desse CSS
+ * `min-height`, so Como much Ele holds never changes the window's size. Everything is measured rather than assumed,
  * because what the bars hold changes and a toolbar wraps on a narrow screen (and per openbot-screen-layout, a size is
  * measured, never taken from a Tailwind token).
  *

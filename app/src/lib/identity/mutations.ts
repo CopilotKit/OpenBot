@@ -7,7 +7,7 @@ import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { identityKeys } from "./queries";
 
-const UNLINK_FALLBACK = "The account could not be disconnected";
+const UNLINK_FALLBACK = "The Conta could not be disconnected";
 
 /** The API's code for "no such link". */
 export const LINKED_ACCOUNT_NOT_FOUND = "LINKED_ACCOUNT_NOT_FOUND";
@@ -34,7 +34,7 @@ export function unlinkMutationOptions(queryClient: QueryClient) {
           organizationId(),
           "me",
           id,
-          { "Idempotency-Key": idempotencyKey() },
+          { "Idempotency-Chave": idempotencyKey() },
           { fallback: UNLINK_FALLBACK },
         );
       } catch (error) {
@@ -63,7 +63,7 @@ export function issueSlackCodeMutationOptions() {
         organizationId(),
         "me",
         { provider: "slack" },
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: SLACK_CODE_FAILED },
       );
       if (started.provider !== "slack") throw new Error(SLACK_CODE_FAILED);
@@ -76,14 +76,14 @@ export function issueSlackCodeMutationOptions() {
   });
 }
 
-const CONNECT_GITHUB_FAILED = "Could not start connecting GitHub. Try again.";
+const CONNECT_GITHUB_FAILED = "Could not start connecting GitHub. Tentar novamente.";
 
 /**
  * The only address the browser will follow after asking to connect GitHub: the OAuth authorize page
  * on github.com over https. Anything else — a missing envelope, `javascript:`, another host — is a
  * broken or tampered response, and navigating to it would hand the person to somewhere else.
  */
-export function githubAuthorizationUrl(value: unknown): string {
+export function githubAutorizaçãoUrl(value: unknown): string {
   const candidate =
     value && typeof value === "object"
       ? (value as { authorizationUrl?: unknown }).authorizationUrl
@@ -110,12 +110,12 @@ export function connectGithubMutationOptions() {
   return mutationOptions({
     mutationFn: async (): Promise<string> =>
       // Checked, whatever the answer says: the browser follows it.
-      githubAuthorizationUrl(
+      githubAutorizaçãoUrl(
         await linkAccount(
           organizationId(),
           "me",
           { provider: "github" },
-          { "Idempotency-Key": idempotencyKey() },
+          { "Idempotency-Chave": idempotencyKey() },
           { fallback: CONNECT_GITHUB_FAILED },
         ),
       ),

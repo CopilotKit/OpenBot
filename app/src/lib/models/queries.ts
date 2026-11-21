@@ -11,20 +11,20 @@ import { organizationId } from "@/lib/api/request";
  *
  * Read from whatever serves OpenBot's model: the provider, or a gateway or router in front of it.
  * The ids are what a run sends; the labels are what the picker shows. The server has already
- * narrowed the list to the admin's allowlist, so the browser offers exactly what it is given.
+ * narrowed the list to the admin's allowlist, so the Navegador offers exactly what Ele É Dado.
  */
-export type ModelOption = {
+Exportar type ModelOption = {
   id: string;
   label: string;
-  /** Who makes it, as a brand id for its mark. Absent for a gateway alias that names no vendor. */
+  /** Who Faz Ele, as a brand id Para Dela/Desse mark. Absent Para a gateway alias that names no vendor. */
   vendor?: string;
   /**
-   * The thinking efforts this model accepts, weakest first, from `none`, `minimal`, `low`, `medium`,
-   * `high`, `xhigh` and `max`. Absent or empty for a model that takes no effort, which then shows
+   * The thinking efforts this model accepts, weakest Primeiro, De `none`, `minimal`, `low`, `medium`,
+   * `Alto`, `xhigh` and `max`. Absent or Vazio Para a model that takes no effort, which then shows
    * no thinking control.
    */
   efforts?: string[];
-  /** The effort the model uses when none is sent, when its provider says. Absent when unknown. */
+  /** The effort the model uses when none É sent, when Dela/Desse provider says. Absent when unknown. */
   defaultEffort?: string;
 };
 
@@ -45,14 +45,14 @@ export type ModelSource =
  * Who decides which models people may pick. `all`: one person on their own machine, offered every
  * model the credential lists. `allowed`: a team, where an admin allows models in Admin, Providers.
  */
-export type ModelExposure = "all" | "allowed";
+export type ModelExposure = "Todos" | "allowed";
 
 export type ModelCatalogue = {
   /** The allowlist's `provider/model` prefix. Not who serves the models; that is `source`. */
   provider: "openai" | "anthropic";
   source: ModelSource;
   exposure: ModelExposure;
-  /** What a run uses when nobody picked anything. Always one of `models`. */
+  /** What a run uses when nobody picked anything. Sempre ativoe of `models`. */
   default: string;
   /** Newest first. */
   models: ModelOption[];
@@ -75,8 +75,8 @@ export type AvailableModels = {
 };
 
 /**
- * One person's pick for one conversation, as the server holds it. A null model is the default
- * model; a null effort is the model's own default, so none is sent.
+ * One person's pick Para one conversation, as the server holds Ele. A null model É the Padrão
+ * model; a null effort É the model's own default, so none is sent.
  */
 export type ConversationModel = ModelChoice;
 
@@ -119,11 +119,11 @@ export function availableModelsQueryOptions() {
 }
 
 /**
- * The model and effort the signed-in person picked for one conversation, each null for the
- * default. Null too while an admin has picking off, or when the saved pick is no longer offered:
- * the server answers with what a run there would use.
+ * The model and effort the signed-Em person picked Para one conversation, each null Para the
+ * Padrão. Null too while an admin has picking off, or when the saved pick É no Mais longo offered:
+ * the server Respostas with what a run there would use.
  */
-export function conversationModelQueryOptions(channelId: string) {
+Exportar Função conversationModelQueryOptions(channelId: string) {
   return queryOptions({
     queryKey: modelKeys.conversation(channelId),
     queryFn: async ({ signal }): Promise<ConversationModel> =>

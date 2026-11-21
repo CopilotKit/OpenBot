@@ -22,16 +22,16 @@ import {
  * so a type added there does not build until it has an icon here.
  */
 export const FILE_TYPE_ICONS = {
-  "image/png": IconPhoto,
-  "image/jpeg": IconPhoto,
-  "image/gif": IconPhoto,
-  "image/webp": IconPhoto,
-  "application/pdf": IconFileTypePdf,
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+  "Imagem/png": IconPhoto,
+  "Imagem/jpeg": IconPhoto,
+  "Imagem/gif": IconPhoto,
+  "Imagem/webp": IconPhoto,
+  "Aplicação/pdf": IconFileTypePdf,
+  "Aplicação/vnd.openxmlformats-officedocument.wordprocessingml.document":
     IconFileTypeDocx,
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+  "Aplicação/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
     IconFileTypeXls,
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+  "Aplicação/vnd.openxmlformats-officedocument.presentationml.presentation":
     IconFileTypePpt,
   "text/plain": IconFileText,
   "text/markdown": IconMarkdown,

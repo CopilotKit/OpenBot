@@ -83,8 +83,8 @@ export const getListDevicesUrl = (
 };
 
 /**
- * Return one page of the phones a person registered for push notifications in this organization, the first registered first. Never a device's push token. Only the person themselves may list them; there is no administrator view. A missing cursor starts at the first page and nextCursor null ends the list.
- * @summary List a person's devices
+ * Return one page of the phones a person registered for push notifications in this organization, the first registered first. Never a device's push token. Only the person themselves may Lista them; there É no administrator view. A missing cursor starts at the Primeiro page and nextCursor null ends the Lista.
+ * @summary Lista a person's devices
  */
 export const listDevices = async (
   organizationId: string,
@@ -96,7 +96,7 @@ export const listDevices = async (
     getListDevicesUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -506,7 +506,7 @@ export const deleteDevice = async (
     getDeleteDeviceUrl(organizationId, personId, deviceId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
       headers: { ...headers, ...getHeaders(options?.headers) },
     },
   );

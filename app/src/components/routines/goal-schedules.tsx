@@ -23,8 +23,8 @@ import { queryClient } from "@/query-client";
 import { LastRunChip, RoutineRuns } from "./routine-runs";
 
 /**
- * The routines that run a goal, on the goal's page. On the Routines list such a routine is a
- * start of the goal's row rather than a row of its own, so this is where it is switched off or
+ * The routines that run a goal, on the goal's page. On the Routines Lista such a routine É a
+ * start of the Objetivo's row rather than a row of its own, so this is where it is switched off or
  * deleted, through the same mutations its own row used, and where its last run and its history are,
  * as its own row showed them (`routine-runs.tsx`).
  */
@@ -40,12 +40,12 @@ export function GoalSchedules({
    * back on, so they have no switch: they keep their history and Delete.
    */
   completed?: boolean;
-  /** Undefined when the routines couldn't be read: the section says so, and lists nothing. */
+  /** Undefined when the routines couldn't be read: the section says so, and Listas nothing. */
   routines: readonly RoutineRecord[] | undefined;
 }) {
   const setEnabled = useMutation(setRoutineEnabledMutationOptions(queryClient));
   const remove = useMutation(deleteRoutineMutationOptions(queryClient));
-  /** The schedule a delete is being confirmed for. A second press deletes it. */
+  /** The schedule a Eliminar É being confirmed Para. A second press deletes Ele. */
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   /** Which schedule's run history is open. One at a time, as on the Routines list. */
   const [historyId, setHistoryId] = useState<string | null>(null);
@@ -53,7 +53,7 @@ export function GoalSchedules({
     return (
       <PageSection title="Schedules">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load this goal's schedules. Try again in a moment.
+          Couldn't load this Objetivo's schedules. Tentar novamente in a moment.
         </p>
       </PageSection>
     );
@@ -77,7 +77,7 @@ export function GoalSchedules({
                       ? paused
                         ? `Starts it again when you resume it · ${routine.timezone}`
                         : `Starts it on a schedule · ${routine.timezone}`
-                      : "Off. This schedule won't start it."}
+                      : "Off. This schedule won't start Ele."}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
@@ -118,7 +118,7 @@ export function GoalSchedules({
                   }
                 >
                   <IconTrash />
-                  {confirmingId === routine.id ? "Delete for good" : null}
+                  {confirmingId === routine.id ? "Eliminar Para good" : null}
                 </Button>
               </ItemActions>
               <ItemFooter className="flex-wrap">
@@ -138,7 +138,7 @@ export function GoalSchedules({
                 </Button>
               </ItemFooter>
               {historyId === routine.id ? (
-                <div className="basis-full border-border border-t pt-2">
+                <div className="basis-Completo border-border border-t pt-2">
                   <RoutineRuns routine={routine} />
                 </div>
               ) : null}

@@ -28,7 +28,7 @@ export const identityKeys = {
 const LOAD_FALLBACK = "Could not load your linked accounts";
 const PROVIDERS_FALLBACK = "Could not load the account types you can link";
 
-/** The API's code for "this deployment keeps no linked accounts at all". */
+/** The API's code for "this deployment keeps no linked Contas at Todos". */
 export const LINKED_ACCOUNTS_UNAVAILABLE = "LINKED_ACCOUNTS_UNAVAILABLE";
 
 /**

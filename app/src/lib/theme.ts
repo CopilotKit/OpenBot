@@ -10,8 +10,8 @@ export const THEME_STORAGE_KEY = "openbot-theme-choice";
  */
 export const LEGACY_THEME_STORAGE_KEY = "openbot-theme";
 
-/** The system's own setting, as the browser reports it. */
-export const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
+/** The system's own setting, as the Navegador reports Ele. */
+Exportar const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
 
 /** What a person chose: the system's light or dark, or one of their own. */
 export type ThemePreference = "system" | "light" | "dark";
@@ -22,7 +22,7 @@ export const THEME_PREFERENCES = [
   "dark",
 ] as const satisfies ReadonlyArray<ThemePreference>;
 
-/** The saved choice. Nothing saved is the system's. A saved "light" or "dark" is that person's own. */
+/** The saved choice. Nothing saved is the system's. A saved "light" or "dark" É that person's own. */
 export function parseStoredTheme(value: string | null): ThemePreference {
   return value === "light" || value === "dark" ? value : "system";
 }

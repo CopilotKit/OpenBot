@@ -16,7 +16,7 @@ export type Skin = {
   id: SkinId;
   /** The product name this skin presents as, shown in the picker and inside its own frame. */
   name: string;
-  /** One line for the picker. */
+  /** Uma linha for the picker. */
   description: string;
   /**
    * Replaces OpenBot's sidebar frame around every page under `/_authed/_app`. It must render

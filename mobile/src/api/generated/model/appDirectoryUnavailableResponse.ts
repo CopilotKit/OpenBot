@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * This OpenBot can't add or connect apps from the directory: it isn't set up here, or what it was asked for can't be used here. Trying again won't help until an administrator changes something.
+ * This OpenBot can't Adicionar or connect apps De the directory: Ele isn't set up here, or what it was asked for can't be used here. Trying again won't help until an administrator changes something.
  */
 export type AppDirectoryUnavailableResponse = Problem;

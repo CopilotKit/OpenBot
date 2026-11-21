@@ -7,6 +7,6 @@
  */
 export function grantSummary(held: number, total: number): string {
   if (held === 0) return "No Bots";
-  if (held === total) return total === 1 ? "1 Bot" : "All Bots";
+  if (held === total) return total === 1 ? "1 Bot" : "Todos Bots";
   return `${held} of ${total} Bots`;
 }

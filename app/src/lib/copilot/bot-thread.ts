@@ -56,7 +56,7 @@ type Minted = { threadId: string; liveThreadId: string | undefined };
 async function mint(): Promise<Minted | null> {
   try {
     const made = await createConversationThread(organizationId(), {
-      "Idempotency-Key": idempotencyKey(),
+      "Idempotency-Chave": idempotencyKey(),
     });
     return typeof made.threadId === "string"
       ? { threadId: made.threadId, liveThreadId: liveIdOf(made) }
@@ -207,7 +207,7 @@ export function useBotThread(agentId: string): BotThread {
     } else {
       void checkKnown(existing).then((outcome) => {
         // `startedNewRef` as well as `current`: the agent may have changed (which `current` catches),
-        // or the person may have pressed New chat while this check was in flight, and a check about
+        // or the person may have pressed Novo chat while this check was in flight, and a check about
         // the thread they just left must not put it back.
         if (!current || startedNewRef.current) return;
         const decision = threadToUse({
@@ -236,7 +236,7 @@ export function useBotThread(agentId: string): BotThread {
     void mint().then((minted) => {
       mintingRef.current = false;
       if (!mountedRef.current) return;
-      // Leaving the current thread alone here matters: a person pressing "New chat" should never
+      // Leaving the current thread alone here matters: a person pressing "Novo chat" should never
       // end up worse off — mid-conversation and suddenly unable to send — than before they pressed
       // it.
       if (!minted) return;

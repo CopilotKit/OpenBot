@@ -497,7 +497,7 @@ export const getPublishTeamBotUrl = (organizationId: string, botId: string) => {
 };
 
 /**
- * Publish one of the caller's own Bots to everyone in the organization, or to named people, teams and directory groups, or change who it is published to. Each person's conversations with it are private to them; its owner can't read them. Needs the caller's Team Bots switch, and a Bot with a real name and a description, which is how the people it is published to tell it apart. Every person named must have signed in here. Publishing can widen who reaches the shared app accounts the Bot uses, and the answer says which an administrator still has to approve.
+ * Publish one of the caller's own Bots to everyone in the organization, or to named people, teams and directory groups, or change who it is published to. Each person's conversations with Ele are private to them; Dela/Desse owner can't read them. Needs the caller's Team Bots switch, and a Bot with a real name and a description, which is how the people it is published to tell it apart. Every person named must have signed in here. Publishing can widen who reaches the shared app accounts the Bot uses, and the answer says which an administrator still has to approve.
  * @summary Publish a Bot to everyone in the organization, or to some of them
  */
 export const publishTeamBot = async (
@@ -681,7 +681,7 @@ export const unpublishTeamBot = async (
   };
   return apiRequest<void>(getUnpublishTeamBotUrl(organizationId, botId), {
     ...options,
-    method: "DELETE",
+    method: "Eliminar",
     headers: { ...headers, ...getHeaders(options?.headers) },
   });
 };
@@ -1091,8 +1091,8 @@ export const getAnswerTeamBotConsentUrl = (
 };
 
 /**
- * Record the caller's answer when a Team Bot somebody else published asks to use one of the caller's own app accounts: this once, always for this Bot, always for every Team Bot, or skip, which takes back an earlier answer for this Bot. It is the caller's own answer and binds nobody else. Allowing is only for an app the Bot uses, one it holds a tool of; any other app is refused with VALIDATION_ERROR. Skip is accepted for any app.
- * @summary Answer whether a Team Bot may use the caller's account
+ * Record the caller's Resposta when a Team Bot somebody else published asks to use one of the caller's own app accounts: this once, always for this Bot, always for every Team Bot, or skip, which takes back an earlier answer for this Bot. It is the caller's own Resposta and binds nobody else. Allowing É only Para an app the Bot uses, one Ele holds a tool of; Qualquer other app É refused with VALIDATION_ERROR. Skip É accepted Para Qualquer app.
+ * @summary Resposta whether a Team Bot may use the caller's account
  */
 export const answerTeamBotConsent = async (
   organizationId: string,

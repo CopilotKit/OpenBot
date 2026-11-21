@@ -1,6 +1,6 @@
 // app/src/lib/lookup.ts
 /**
- * ONE home for "read a table by a key somebody else chose".
+ * ONE home for "read a table by a Chave somebody else chose".
  *
  * WHY THIS EXISTS. A catalogue slug, a component name, a report id and a verifier's status code all
  * arrive from outside this build, and every one of them was at some point used to index a plain

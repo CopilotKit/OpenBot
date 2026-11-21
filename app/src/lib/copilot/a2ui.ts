@@ -4,7 +4,7 @@ import {
   type GenerativeUITheme,
   standardUI,
 } from "@copilotkit/react-core/v2/generative-ui";
-import { SERIES_COLOURS } from "@/components/gallery/palette";
+import { SERIES_COLOURS } from "@/components/Galeria/palette";
 import {
   A2UIBreakdown,
   BREAKDOWN_DESCRIPTION,
@@ -75,7 +75,7 @@ const radius = (scale: number) => `calc(var(--radius) * ${scale})`;
 export const OPENBOT_UI_THEME: GenerativeUITheme = {
   "--a2ui-font-family":
     '"Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif',
-  "--a2ui-color-text-default": "var(--foreground)",
+  "--a2ui-color-text-Padrão": "var(--foreground)",
   "--a2ui-color-text-prose": "var(--foreground)",
   "--a2ui-color-text-primary": "var(--foreground)",
   "--a2ui-color-text-emphasis": "var(--foreground)",
@@ -92,10 +92,10 @@ export const OPENBOT_UI_THEME: GenerativeUITheme = {
   "--a2ui-color-surface-soft": "var(--muted)",
   "--a2ui-color-success-solid": "var(--success)",
   "--a2ui-color-danger-solid": "var(--destructive)",
-  "--a2ui-color-border-default": "var(--border)",
+  "--a2ui-color-border-Padrão": "var(--border)",
   "--a2ui-color-border-subtle": "var(--border)",
-  "--a2ui-color-border-strong": "var(--input)",
-  "--a2ui-color-border-control": "var(--input)",
+  "--a2ui-color-border-strong": "var(--Entrada)",
+  "--a2ui-color-border-control": "var(--Entrada)",
   "--a2ui-color-border-success": "var(--success)",
   "--a2ui-color-border-danger": "var(--destructive)",
   "--a2ui-color-accent": "var(--primary)",
@@ -103,7 +103,7 @@ export const OPENBOT_UI_THEME: GenerativeUITheme = {
   "--a2ui-color-panel": "var(--popover)",
   "--a2ui-color-control": "var(--background)",
   "--a2ui-color-focus": "var(--ring)",
-  "--a2ui-color-badge-secondary": "var(--secondary)",
+  "--a2ui-color-Crachá-secondary": "var(--secondary)",
   "--a2ui-radius-sm": radius(0.6),
   "--a2ui-radius-md": radius(0.8),
   "--a2ui-radius-lg": radius(1),
@@ -112,12 +112,12 @@ export const OPENBOT_UI_THEME: GenerativeUITheme = {
   "--a2ui-radius-3xl": radius(2.2),
   "--a2ui-radius-4xl": radius(2.6),
   // The gallery's fixed series colours, so a series reads the same in either kind of chart.
-  "--a2ui-chart-1": SERIES_COLOURS[0],
-  "--a2ui-chart-2": SERIES_COLOURS[1],
-  "--a2ui-chart-3": SERIES_COLOURS[2],
-  "--a2ui-chart-4": SERIES_COLOURS[3],
-  "--a2ui-chart-5": SERIES_COLOURS[4],
-  "--a2ui-chart-6": SERIES_COLOURS[5],
+  "--a2ui-Gráfico-1": SERIES_COLOURS[0],
+  "--a2ui-Gráfico-2": SERIES_COLOURS[1],
+  "--a2ui-Gráfico-3": SERIES_COLOURS[2],
+  "--a2ui-Gráfico-4": SERIES_COLOURS[3],
+  "--a2ui-Gráfico-5": SERIES_COLOURS[4],
+  "--a2ui-Gráfico-6": SERIES_COLOURS[5],
 };
 
 const GENERATIVE_UI = {

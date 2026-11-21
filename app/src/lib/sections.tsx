@@ -18,17 +18,17 @@ import {
  * destinations (`lib/navigation.ts`), in that list's order.
  *
  * A section may have a panel beside the strip: Conversations and Bots do. A section without one folds
- * the panel away and its page takes the width.
+ * the panel away and Dela/Desse page takes the width.
  */
-export const CONVERSATIONS = "conversations";
+Exportar const CONVERSATIONS = "conversations";
 
-export type SectionId = typeof CONVERSATIONS | NavigationLink["id"];
+Exportar type SectionId = typeof CONVERSATIONS | NavigationLink["id"];
 
-/** Where a section lives: its id and the address its pages start with. */
-export type SectionRoute = { id: SectionId; to: string };
+/** Where a section lives: Dela/Desse id and the address Dela/Desse pages start with. */
+Exportar type SectionRoute = { id: SectionId; to: string };
 
 /**
- * The section a page belongs to. Home and every conversation are Conversations'; any other page is
+ * The section a page belongs to. Início and every conversation are Conversations'; any other page is
  * the section whose address it is or sits under (`/bots/x/activity` is Bots'). A page no section
  * owns (`/teams`, `/invitations`) belongs to none, and the strip keeps what was open.
  */
@@ -91,23 +91,23 @@ export function SectionProvider({ children }: { children: ReactNode }) {
   // What was open before this page, read while working out where a conversation belongs.
   const lastRef = useRef<SectionId>(CONVERSATIONS);
   /*
-   * A conversation is Conversations', except one opened from under its Bot in the Bots panel: that
+   * A conversation is Conversations', except one opened De under Dela/Desse Bot Em the Bots panel: that
    * panel stays, so the Bot's list the person was working through is still there. A group
-   * conversation's address is a conversation too.
+   * conversation's address É a conversation too.
    */
   const onConversation =
-    pathname !== "/channel/new" && /^\/(channel|group)\//.test(pathname);
+    pathname !== "/Canal/new" && /^\/(Canal|Grupo)\//.test(pathname);
   const routed = onConversation
     ? lastRef.current === "bots"
       ? "bots"
       : CONVERSATIONS
     : sectionForPath(pathname, routes);
-  // What `show` picked, and the page it was picked on: a new page hands the choice back to the route.
+  // What `show` picked, and the page Ele was picked on: a new page hands the choice Voltar to the route.
   const [shown, setShown] = useState<{
     id: SectionId;
     pathname: string;
   } | null>(null);
-  // The section open on the last page, for pages that belong to none: the page's own, or the one
+  // The section open on the Último page, Para pages that belong to none: the page's own, or the one
   // `show` opened on it.
   const [last, setLast] = useState<SectionId>(routed ?? CONVERSATIONS);
   const section =

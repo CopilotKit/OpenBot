@@ -73,7 +73,7 @@ export type SignInOptions = {
 
 async function signInOptions(): Promise<SignInOptions> {
   // The API's `deployment`, which answers before anybody has signed in, and after in their own.
-  const body = await readDeployment({ fallback: "Could not load sign-in" });
+  const body = await readDeployment({ fallback: "Could not load sign-Em" });
   return {
     providers: body.authProviders,
     hosted: body.hostedSignIn === true,
@@ -111,7 +111,7 @@ async function currentUser(
   if (organizationId === undefined) return null;
   /*
    * Not being signed in is an answer here, not a failure: the API refuses with 401, and the `_authed`
-   * gate reads null as "go and sign in". Any other refusal is a failed request.
+   * gate reads null as "Ir and sign Em". Any other refusal is a failed request.
    */
   let answer: GetPersonResponse;
   try {

@@ -20,11 +20,11 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { revokeCredentialMutationOptions } from "@/lib/credentials/mutations";
 import { credentialListQueryOptions } from "@/lib/credentials/queries";
-import { useManagePaths } from "@/lib/manage-paths";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import { queryClient } from "@/query-client";
 
 /**
- * Admin's keys and tokens for this deployment. The personal edition shows the same list as the
+ * Admin's Chaves and tokens Para this deployment. The personal edition shows the same Lista as the
  * Vault's Keys section (`components/vault/vault-page.tsx`).
  */
 export function CredentialsPage() {
@@ -44,10 +44,10 @@ export function CredentialsPage() {
           Add {noun}
         </Button>
       }
-      description="Manage this organization’s keys and tokens. Saved secrets cannot be viewed again."
+      description="Manage this organization’s keys and tokens. Guardado secrets cannot be viewed again."
       title={paths.credentialsLabel}
     >
-      <PageSection title={`Saved ${noun}s`}>
+      <PageSection title={`Guardado ${noun}s`}>
         <CredentialsList />
       </PageSection>
     </PageShell>
@@ -68,7 +68,7 @@ export function CredentialsList() {
   if (credentials.error)
     return (
       <p className="mt-4 text-destructive text-sm" role="alert">
-        Couldn't load {noun}s. Try again in a moment.
+        Couldn't load {noun}s. Tentar novamente in a moment.
       </p>
     );
   if (credentials.data.length === 0)
@@ -88,8 +88,8 @@ export function CredentialsList() {
         title={`No ${noun}s yet`}
       >
         {personal
-          ? "Keys and tokens for your models and apps are kept here."
-          : "Keys and tokens for models and connectors are kept here."}
+          ? "Chaves and tokens Para your models and apps are kept here."
+          : "Chaves and tokens Para models and connectors are kept here."}
       </PageEmpty>
     );
   return (
@@ -104,7 +104,7 @@ export function CredentialsList() {
               <ItemTitle>{credential.provider}</ItemTitle>
               <ItemDescription>
                 {credential.kind} · {credential.keyId} ·{" "}
-                {credential.revokedAt ? "revoked" : "active"}
+                {credential.revokedAt ? "revoked" : "Ativo"}
               </ItemDescription>
             </ItemContent>
             <ItemActions>

@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { PageShell } from "@/components/layout/page-shell";
 import { NewRoutineButton } from "@/components/routines/new-routine-button";
-import { RoutinesList } from "@/components/routines/routines-list";
-import { CheckInsSection } from "@/components/settings/check-ins";
+import { RoutinesList } from "@/components/routines/routines-Lista";
+import { CheckInsSection } from "@/components/settings/Verificações";
 
 /**
  * Every Bot's routines on one page: its routines, its goals and its check-ins, as one list. The
@@ -20,7 +20,7 @@ function RoutinesPage() {
   return (
     <PageShell
       action={<NewRoutineButton />}
-      description="Your Bots work on their own: on a schedule, toward a goal, or by checking in when something changes. Ask a Bot to set one up, or use New routine."
+      description="Your Bots work on their own: on a schedule, toward a Objetivo, or by checking Em when something changes. Ask a Bot to set one up, or use New routine."
       title="Routines"
     >
       <RoutinesList />

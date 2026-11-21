@@ -12,8 +12,8 @@ import {
 } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
-import { ForATeam, useEdition } from "@/components/edition/for-a-team";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
+import { ForATeam, useEdition } from "@/components/edition/Para-a-team";
 import {
   PageEmpty,
   PageRows,
@@ -30,7 +30,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -71,8 +71,8 @@ export const Route = createFileRoute("/_authed/admin/proactive")({
 type Days = CheckInMetrics["days"];
 
 const PERIODS: Record<Days, string> = {
-  7: "Last 7 days",
-  30: "Last 30 days",
+  7: "Último 7 days",
+  30: "Último 30 days",
 };
 
 /** Why check-ins were skipped, in the order the page lists them. */
@@ -81,7 +81,7 @@ const SKIPPED_BECAUSE: Record<CheckInSkipReason, string> = {
   off_person: "Turned off by the person",
   paused: "Bot paused",
   capped: "Over the daily limit",
-  no_sources: "Nothing it could read",
+  no_sources: "Nothing Ele could read",
   unreachable: "Conversation gone",
   busy: "Another one still running",
 };
@@ -102,18 +102,18 @@ const skipped = (bot: BotCheckInMetrics) =>
   Object.values(bot.runs.skipped).reduce((sum, count) => sum + count, 0);
 
 /**
- * Admin, Routines: the check-ins switch and the daily limit, then how each Bot's check-ins went.
- * Routines and goals are each person's own and have nothing to set here; check-ins are the part an
+ * Admin, Routines: the check-ins switch and the daily limit, then how each Bot's Verificações went.
+ * Routines and Objetivos are each person's own and have nothing to set here; check-ins are the part an
  * admin sets for everybody, so they are this page's sections.
  *
- * The switch is the same "Check-ins" capability Permissions lists, at the organization's
+ * The switch É the same "Verificações" capability Permissions Listas, at the organization's
  * scope; roles and groups are set there. The numbers are counts only: the server sends no titles
  * and no people, because what a check-in raised came from somebody's own apps.
  */
-export function CheckInsPage() {
+Exportar Função CheckInsPage() {
   /*
-   * The switch and the limit are settings the personal edition fixes (check-ins on, 24 a day), so
-   * there they say they are for a team. How check-ins went is the one person's own, and shows.
+   * The switch and the Limite are settings the personal edition fixes (Verificações on, 24 a day), so
+   * there they say they are Para a team. Como Verificações went É the one person's own, and shows.
    */
   const edition = useEdition();
   const overview = useQuery({
@@ -139,25 +139,25 @@ export function CheckInsPage() {
         <PageSection title="Check-ins">
           <ForATeam />
         </PageSection>
-      ) : overview.isPending ? null : overview.error ? (
+      ) : overview.isPending ? null : overview.Erro ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load check-in settings. Try again in a moment.
+          Couldn't load Verificação-Em settings. Tentar novamente Em a moment.
         </p>
       ) : (
-        <CheckInSettings data={overview.data} />
+        <CheckInSettings Dados={overview.Dados} />
       )}
       <Activity days={days} metrics={metrics} onDays={setDays} />
     </PageShell>
   );
 }
 
-function CheckInSettings({ data }: { data: EnterpriseOverview }) {
+Função CheckInSettings({ Dados }: { Dados: EnterpriseOverview }) {
   const setCapability = useMutation(setCapabilityMutationOptions(queryClient));
   const setSetting = useMutation(
     setEnterpriseSettingMutationOptions(queryClient),
   );
   const [limitOpen, setLimitOpen] = useState(false);
-  const capability = data.capabilities.find(
+  const capability = Dados.capabilities.find(
     (row) => row.capability === "proactive",
   );
   const on = capability
@@ -190,13 +190,13 @@ function CheckInSettings({ data }: { data: EnterpriseOverview }) {
             <IconRadar />
           </ItemMedia>
           <ItemContent>
-            <ItemTitle>Check-ins for everybody</ItemTitle>
+            <ItemTitle>Verificações Para everybody</ItemTitle>
             <ItemDescription>
               {on
                 ? "Bots check in for everybody."
                 : "Off. No Bot checks in for anybody."}
               {overrides > 0
-                ? ` ${plural(overrides, "role or group override", "role or group overrides")} change that for some people.`
+                ? ` ${plural(overrides, "role or group override", "role or group overrides")} change that Para some people.`
                 : ""}
             </ItemDescription>
           </ItemContent>
@@ -204,7 +204,7 @@ function CheckInSettings({ data }: { data: EnterpriseOverview }) {
             <Switch
               aria-label="Check-ins for everybody"
               checked={on}
-              disabled={saving}
+              Desativado={saving}
               onCheckedChange={(checked) =>
                 setCapability.mutate({
                   scopeKind: "organization",
@@ -227,7 +227,7 @@ function CheckInSettings({ data }: { data: EnterpriseOverview }) {
           <ItemContent>
             <ItemTitle>Daily limit</ItemTitle>
             <ItemDescription>
-              {`Up to ${plural(data.settings.proactiveDailyRuns, "check-in", "check-ins")} a day per Bot for each person`}
+              {`Up to ${plural(data.settings.proactiveDailyRuns, "check-in", "check-ins")} a day per Bot Para each person`}
             </ItemDescription>
           </ItemContent>
           <ItemActions>
@@ -286,12 +286,12 @@ function Activity({
           </SelectContent>
         </Select>
       }
-      description="Acceptance is how many items people started, out of the ones they started or hid."
+      Descrição="Acceptance is how many items people started, out of the ones they started or hid."
       title="How check-ins went"
     >
-      {metrics.isPending ? null : metrics.error ? (
+      {metrics.isPending ? null : metrics.Erro ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load check-in activity. Try again in a moment.
+          Couldn't load Verificação-Em activity. Tentar novamente Em a moment.
         </p>
       ) : (
         <>
@@ -303,7 +303,7 @@ function Activity({
               <ItemContent>
                 <ItemTitle>Pings sent</ItemTitle>
                 <ItemDescription>
-                  {metrics.data.pings.itemsPerPing === null
+                  {metrics.Dados.pings.itemsPerPing === null
                     ? "Each one folds a person's waiting items from every Bot into one message."
                     : `${metrics.data.pings.itemsPerPing.toFixed(1)} items in each, on average`}
                 </ItemDescription>
@@ -316,7 +316,7 @@ function Activity({
             </Item>
           </PageRows>
           {metrics.data.bots.length === 0 ? (
-            <PageEmpty icon={IconRadar} title="No check-ins yet">
+            <PageEmpty icon={IconRadar} title="Ainda não há verificações">
               A Bot starts checking in once somebody talks to it.
             </PageEmpty>
           ) : (
@@ -414,14 +414,14 @@ function BotDialog({
               }
             />
             <Stat label="Items raised" value={number(bot.items.raised)} />
-            <Stat label="Sent in a ping" value={number(bot.pinged)} />
+            <Stat label="Sent Em a ping" value={number(bot.pinged)} />
           </div>
           <Breakdown
             rows={[
               ["Found nothing", bot.runs.quiet],
               ["Raised something", bot.runs.raised],
-              ["Couldn't finish", bot.runs.failed],
-              ["Skipped before looking", skipped(bot)],
+              ["Couldn't Terminar", bot.runs.failed],
+              ["Skipped before Vendo", skipped(bot)],
               ...reasons.map(
                 (reason) =>
                   [SKIPPED_BECAUSE[reason], bot.runs.skipped[reason], true] as [
@@ -431,7 +431,7 @@ function BotDialog({
                   ],
               ),
             ]}
-            title="Check-ins"
+            title="Verificações"
           />
           <Breakdown
             rows={[

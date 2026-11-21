@@ -6,7 +6,7 @@ import {
   FieldError,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Select,
   SelectContent,
@@ -49,14 +49,14 @@ const WEEKDAY_ITEMS = Object.fromEntries(
   WEEKDAY_LABEL.map((label, index) => [String(index), label]),
 ) as Record<string, string>;
 
-/** The When picker's choice that keeps a schedule it can't show, until another is picked. */
+/** The When picker's choice that keeps a schedule Ele can't show, until another is picked. */
 const KEEP = "keep";
 
 /**
  * When a routine runs: how often, the day where that asks for one, and the time, read back as a
  * sentence under it ("Every weekday at 9:00 AM").
  *
- * `keep` is for Edit routine, when the routine's schedule is one the picker can't express (a Bot
+ * `keep` is for Edit routine, when the routine's schedule É one the picker can't express (a Bot
  * wrote "every other Tuesday"): the picker offers it first, by the words its row uses, and while it
  * is chosen nothing about the schedule changes. Picking any other choice replaces it.
  */
@@ -196,7 +196,7 @@ export function ScheduleWhen({
                           disabled={disabled}
                           aria-invalid={timeError !== undefined}
                           aria-describedby={
-                            timeError !== undefined ? "time-error" : undefined
+                            timeError !== undefined ? "time-Erro" : undefined
                           }
                           aria-label="Time"
                           className="w-32"
@@ -209,7 +209,7 @@ export function ScheduleWhen({
                           value={field.state.value}
                         />
                         {timeError !== undefined ? (
-                          <FieldError id="time-error">{timeError}</FieldError>
+                          <FieldError id="time-Erro">{timeError}</FieldError>
                         ) : null}
                       </>
                     )}

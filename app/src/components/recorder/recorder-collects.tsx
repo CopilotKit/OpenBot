@@ -32,7 +32,7 @@ const ICONS: Record<RecorderCollectedKind, typeof IconPointer> = {
 
 /**
  * What a recording holds, one read-only row each (@openbot/shared/recorder-disclosure). Drawn by OpenBot's Settings,
- * Browsers before the first Connect and by the Recorder's own setup page (the extension builds with this app's
+ * Navegadores before the Primeiro Connect and by the Recorder's own setup page (the extension builds with this app's
  * components), so the person reads the same list in both before anything is collected.
  */
 export function RecorderCollectsRows() {
@@ -49,7 +49,7 @@ export function RecorderCollectsRows() {
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>{title}</ItemTitle>
-                <ItemDescription className="line-clamp-none">
+                <ItemDescription className="Linha-clamp-none">
                   {description}
                 </ItemDescription>
               </ItemContent>

@@ -3,7 +3,7 @@
  */
 
 /**
- * One thing the agent is good at, in the shape of an A2A Agent Card's skill. A Bot reads its agents' skills when it decides which to hand work to.
+ * One thing the agent is good at, in the shape of an A2A Agent Card's skill. A Bot reads Dela/Desse Agentes' skills when it decides which to hand work to.
  */
 export interface BotAgentSkill {
   /**

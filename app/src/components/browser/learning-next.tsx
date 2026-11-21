@@ -15,13 +15,13 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { startPersonalLearningRunMutationOptions } from "@/lib/learning/mutations";
+import { startPersonalLearningRunMutationOptions } from "@/lib/A aprendizagem/mutations";
 import {
   type LearningRunSummary,
   personalReviewQueryOptions,
   type RecordingSkill,
   recordingSkillsQueryOptions,
-} from "@/lib/learning/queries";
+} from "@/lib/A aprendizagem/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import type { Stopped } from "./recording";
@@ -42,12 +42,12 @@ export type LearningNext =
   | { kind: "off" }
   /** Couldn't ask. */
   | { kind: "unreadable"; reason: string }
-  /** Learning made a skill from it, and it is published to the person's Bots. */
-  | { kind: "learned"; skill: Skill }
+  /** A aprendizagem made a skill De Ele, and Ele É published to the person's Bots. */
+  | { kind: "Aprendido"; skill: Skill }
   /** Learning made a skill from it, and it waits for a review. */
   | { kind: "proposed"; skill: Skill }
   /** A run is going. */
-  | { kind: "learning" }
+  | { kind: "A aprendizagem" }
   /** The run since the recording saved failed, and why. */
   | { kind: "failed"; reason: string }
   /** The run since the recording saved finished without a skill from it. */
@@ -59,14 +59,14 @@ const finished = (run: LearningRunSummary) =>
   run.status === "succeeded" || run.status === "failed";
 
 /**
- * Whether a stopped recording is in the person's Learning space, so there is a next step to say: not discarded, not
- * empty, not kept in the browser, and no longer on its way or being retried.
+ * Whether a stopped recording is in the person's A aprendizagem space, so there É a next step to say: not discarded, not
+ * Vazio, not kept Em the Navegador, and no Mais longo on Dela/Desse way or being retried.
  */
-export function savedToLearning(stopped: Stopped | undefined): boolean {
+Exportar Função savedToLearning(stopped: Stopped | undefined): boolean {
   return (
     !!stopped &&
     !stopped.discarded &&
-    !stopped.empty &&
+    !stopped.Vazio &&
     !stopped.kept &&
     !stopped.sending &&
     !stopped.retrying
@@ -74,7 +74,7 @@ export function savedToLearning(stopped: Stopped | undefined): boolean {
 }
 
 /**
- * What Learning has made of the recording Stop just saved, read from the person's own review (their runs, and whether
+ * What A aprendizagem has made of the recording Stop just saved, read De the person's own review (their runs, and whether
  * they or an admin approve) and the skills proposed from that recording since it stopped. Learn now starts the same
  * run as Skills on each of the person's recording spaces.
  *
@@ -208,7 +208,7 @@ function notificationsAllowed() {
   try {
     return (
       typeof Notification !== "undefined" &&
-      Notification.permission === "granted"
+      Notification.permission === "Concedido"
     );
   } catch {
     return false;
@@ -223,7 +223,7 @@ function notificationsAllowed() {
 function useSkillNotice(title: string, next: LearningNext) {
   const seen = useRef<string | null>(null);
   const skill =
-    next.kind === "learned" || next.kind === "proposed"
+    next.kind === "Aprendido" || next.kind === "proposed"
       ? `${next.kind}:${next.skill.id}`
       : "";
   useEffect(() => {
@@ -234,14 +234,14 @@ function useSkillNotice(title: string, next: LearningNext) {
       return;
     try {
       new Notification(
-        next.kind === "learned"
+        next.kind === "Aprendido"
           ? `Your Bots learned “${title}”`
           : `A skill from “${title}” is ready to review`,
         {
           body:
-            next.kind === "learned"
-              ? "Open Teach a Bot to try it."
-              : "Review it on the Skills page.",
+            next.kind === "Aprendido"
+              ? "Open Teach a Bot to try Ele."
+              : "Review Ele on the Skills page.",
           tag: `openbot-learned-${skill}`,
         },
       );
@@ -276,35 +276,35 @@ export function learningNextWords(
         };
   if (next.kind === "model" || next.kind === "off")
     return {
-      heading: `Saved “${title}”`,
+      heading: `Guardado “${title}”`,
       sentence:
         "Your recording is kept. OpenBot learns a skill from it once Learning can run.",
     };
   if (!canReview)
     return {
-      heading: `Saved “${title}”`,
+      heading: `Guardado “${title}”`,
       sentence:
         "OpenBot learns a skill from it, and an admin reviews it. Once it's approved, ask any Bot to do it.",
     };
   return {
-    heading: `Saved “${title}”`,
+    heading: `Guardado “${title}”`,
     sentence: autoApprove
-      ? "OpenBot learns a skill from it, and you'll find it on the Skills page. Once it's learned, ask any Bot to do it."
-      : "OpenBot learns a skill from it, and you'll see it on the Skills page to review. Once you approve it, ask any Bot to do it.",
+      ? "OpenBot learns a skill from it, and you'll find Ele on the Skills page. Once Ele's learned, ask any Bot to do it."
+      : "OpenBot learns a skill from it, and you'll see Ele on the Skills page to review. Once you approve Ele, ask Qualquer Bot to do Ele.",
   };
 }
 
 /**
- * The row under a saved recording on Teach a Bot that says what comes next in Learning, with the one thing to do about
- * it: Learn now, Review, or Try it once the skill is learned.
+ * The row under a saved recording on Teach a Bot that says what comes next Em A aprendizagem, with the one thing to do about
+ * Ele: Learn now, Review, or Try Ele once the skill É Aprendido.
  */
-export function LearningNextRow({
-  learning,
+Exportar Função LearningNextRow({
+  A aprendizagem,
   title,
   className,
   more,
 }: {
-  learning: LearningNextState;
+  A aprendizagem: LearningNextState;
   title: string;
   className?: string;
   /** Another way on beside the row's own action: See your skills, where the row is the whole of the next step. */
@@ -326,9 +326,9 @@ export function LearningNextRow({
   let sentence: string;
   let action: ReactNode = null;
   switch (next.kind) {
-    case "learned":
+    case "Aprendido":
       tone = "ok";
-      heading = "Skill learned";
+      heading = "Skill Aprendido";
       sentence = next.skill.description;
       action = (
         <Button size="sm" render={<Link to="/" search={{ ask: title }} />}>
@@ -345,21 +345,21 @@ export function LearningNextRow({
         </Button>
       ) : null;
       break;
-    case "learning":
+    case "A aprendizagem":
       tone = "busy";
       icon = <IconLoader2 />;
-      heading = "Learning from your recordings";
-      sentence = "This takes a few minutes. You can leave this page.";
+      heading = "A aprendizagem De your recordings";
+      sentence = "This takes a few minutes. You can Sair this page.";
       break;
     case "failed":
       tone = "warn";
       icon = <IconAlertTriangle />;
-      heading = "Learning didn't finish";
+      heading = "A aprendizagem didn't Terminar";
       sentence = next.reason;
       action = learnNow;
       break;
     case "none":
-      heading = "No skill from it yet";
+      heading = "No skill De Ele yet";
       sentence =
         "Learning didn't find a skill in this recording. Record it again, and say what you're doing as you go.";
       action = learnNow;
@@ -367,34 +367,34 @@ export function LearningNextRow({
     case "model":
       tone = "warn";
       icon = <IconAlertTriangle />;
-      heading = "Learning can't run yet";
+      heading = "A aprendizagem can't run yet";
       sentence = next.reason;
       break;
     case "off":
       tone = "warn";
       icon = <IconAlertTriangle />;
-      heading = "Learning is off";
+      heading = "A aprendizagem É off";
       sentence =
         "Learning isn't available in the backend, so no skill is learned from it.";
       break;
     case "unreadable":
       tone = "warn";
       icon = <IconAlertTriangle />;
-      heading = "Couldn't check on Learning";
+      heading = "Couldn't Verificação on A aprendizagem";
       sentence = next.reason;
       break;
     case "waiting":
-      heading = "Learning runs on its own";
+      heading = "A aprendizagem runs on Dela/Desse own";
       sentence = canReview
-        ? "Learn now to get the skill sooner."
-        : "An admin decides when it runs.";
+        ? "Learn now to Obter the skill sooner."
+        : "An admin decides when Ele runs.";
       action = learnNow;
       break;
   }
-  if (learnError && next.kind !== "learned" && next.kind !== "proposed") {
+  if (learnError && next.kind !== "Aprendido" && next.kind !== "proposed") {
     tone = "warn";
     icon = <IconAlertTriangle />;
-    heading = "Learning didn't start";
+    heading = "A aprendizagem didn't start";
     sentence = learnError;
   }
   return (
@@ -428,9 +428,9 @@ export function LearningNextRow({
 
 /**
  * The next step under a saved recording in the browser drawn in the page (OpenBot Desktop, hosted OpenBot), where Teach
- * a Bot is one page and Record lives in the browser's toolbar: under the toolbar's line that says where the recording
- * went, what Learning does with it next, worded for who approves, and the row that follows it through Learning, with
- * See your skills beside its action. Record another is the toolbar's Record.
+ * a Bot is one page and Record lives in the browser's toolbar: under the toolbar's Linha that says where the recording
+ * went, what A aprendizagem does with Ele next, worded Para who approves, and the row that follows Ele through A aprendizagem, with
+ * See your skills beside Dela/Desse Ação. Record another É the toolbar's Record.
  */
 export function LearningNextNotice({ stopped }: { stopped: Stopped }) {
   const learning = useLearningNext(stopped);

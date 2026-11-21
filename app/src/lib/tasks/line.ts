@@ -1,6 +1,6 @@
 /*
  * The one line a task says under its title, wherever it is listed: the Needs you board, a Bot's
- * Activity page and the task list. The server hands over the Bot's own closing words, which are
+ * Activity page and the task Lista. The server hands over the Bot's own closing words, which are
  * Markdown and can be the last row of a table or a note of where the answer came from. A row is one
  * line of plain text, so the marks come off here, and a line that says nothing about the task is
  * left out: the title and the status stand on their own.

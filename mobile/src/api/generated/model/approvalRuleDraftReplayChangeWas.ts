@@ -9,7 +9,7 @@ export type ApprovalRuleDraftReplayChangeWas =
   (typeof ApprovalRuleDraftReplayChangeWas)[keyof typeof ApprovalRuleDraftReplayChangeWas];
 
 export const ApprovalRuleDraftReplayChangeWas = {
-  allow: "allow",
+  allow: "Permitir",
   ask: "ask",
   hand_off: "hand_off",
   deny: "deny",

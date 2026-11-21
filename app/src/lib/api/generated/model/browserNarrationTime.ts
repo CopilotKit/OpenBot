@@ -7,4 +7,4 @@
  * @minimum 1
  * @maximum 8640000000000000
  */
-export type BrowserNarrationTime = number;
+export type BrowserNarraçãoTime = number;

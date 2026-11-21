@@ -138,7 +138,7 @@ export const getListComputersUrl = (
 };
 
 /**
- * Return one page of the computers the organization's Bots run on: each person's, and each isolated Bot's. Where every person's Bots share one computer, each entry is one person's seat on one Bot there. A computer another organization's Bots run on is never listed. Ordered by whose computer it is, then by Bot. Only an administrator of the organization may read them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the computers the organization's Bots run on: each person's, and each isolated Bot's. Where every person's Bots share one computer, each entry is one person's seat on one Bot there. A Computador another organization's Bots run on is never listed. Ordered by whose computer it is, then by Bot. Only an administrator of the organization may read them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the organization's computers
  */
 export const listComputers = async (
@@ -787,7 +787,7 @@ export const getGetComputerUrl = (organizationId: string, botId: string) => {
 };
 
 /**
- * Say where the Bot's computer is in its life for the caller: absent (not running, and it starts on the Bot's next action), starting, ready or unreachable. Reading it never starts the computer.
+ * Say where the Bot's Computador É Em Dela/Desse life Para the caller: absent (not running, and Ele starts on the Bot's next action), starting, ready or unreachable. Reading it never starts the computer.
  * @summary Read a Bot's computer
  */
 export const getComputer = async (
@@ -1383,7 +1383,7 @@ export const getGetComputerPageFrameUrl = (
 };
 
 /**
- * Return the picture taken when one tool call of the caller's opened its page, for reading a conversation back. frame is null when none was kept. Only the caller's own frames are ever returned.
+ * Return the picture taken when one tool call of the caller's opened Dela/Desse page, Para reading a conversation Voltar. frame É null when none was kept. Only the caller's own frames are ever returned.
  * @summary Read the frame kept when a page was opened
  */
 export const getComputerPageFrame = async (
@@ -1396,7 +1396,7 @@ export const getComputerPageFrame = async (
     getGetComputerPageFrameUrl(organizationId, botId, toolCallId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -1629,7 +1629,7 @@ export const getReadComputerPageUrl = (
 };
 
 /**
- * Return the text of the page the Bot's browser is showing, with its address and title.
+ * Return the text of the page the Bot's Navegador É showing, with Dela/Desse address and title.
  * @summary Read the page a Bot's browser is on
  */
 export const readComputerPage = async (
@@ -1641,7 +1641,7 @@ export const readComputerPage = async (
     getReadComputerPageUrl(organizationId, botId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -2144,7 +2144,7 @@ export const getRequestComputerControlUrl = (
 };
 
 /**
- * Raise a request for a person to drive the Bot's computer: the Bot asking for help with something it cannot do, or a person asking to take over themselves (source manual).
+ * Raise a request for a person to drive the Bot's Computador: the Bot asking Para Ajuda with something Ele cannot do, or a person asking to take over themselves (source manual).
  * @summary Ask a person to take over a Bot's computer
  */
 export const requestComputerControl = async (
@@ -2474,7 +2474,7 @@ export const getReleaseComputerControlUrl = (
 };
 
 /**
- * Hand the mouse and keyboard back to the Bot. Any recording in the Bot's browser ends, and a task that stopped for the person carries on.
+ * Hand the mouse and keyboard back to the Bot. Any recording in the Bot's Navegador ends, and a task that stopped Para the person carries on.
  * @summary Hand a Bot's computer back
  */
 export const releaseComputerControl = async (
@@ -2804,7 +2804,7 @@ export const getRequestComputerSecretUrl = (
 };
 
 /**
- * A Bot's tool call: ask the person to type a password or other secret into one field of the page, named by a ref from the Bot's latest snapshot. The Bot never sees the value. Needs the password manager to be on for the caller.
+ * A Bot's tool call: ask the person to type a password or other secret into one field of the page, named by a ref De the Bot's latest snapshot. The Bot never sees the value. Needs the password manager to be on for the caller.
  * @summary Ask a person for a value a Bot must not be told
  */
 export const requestComputerSecret = async (
@@ -3129,7 +3129,7 @@ export const useSupplyComputerSecret = <
 export const getSendComputerHumanInputUrl = (
   organizationId: string,
   botId: string,
-  kind: "click" | "type" | "key" | "scroll",
+  kind: "click" | "type" | "Chave" | "scroll",
 ) => {
   return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/computers/${encodeURIComponent(String(botId))}/human-input/${encodeURIComponent(String(kind))}`;
 };
@@ -3141,7 +3141,7 @@ export const getSendComputerHumanInputUrl = (
 export const sendComputerHumanInput = async (
   organizationId: string,
   botId: string,
-  kind: "click" | "type" | "key" | "scroll",
+  kind: "click" | "type" | "Chave" | "scroll",
   computerHumanInput: ComputerHumanInput,
   headers: SendComputerHumanInputHeaders,
   options?: Parameters<typeof apiRequest>[1],
@@ -3254,7 +3254,7 @@ export type SendComputerHumanInputMutationError =
 export type SendComputerHumanInputMutationVariables = {
   organizationId: string;
   botId: string;
-  kind: "click" | "type" | "key" | "scroll";
+  kind: "click" | "type" | "Chave" | "scroll";
   data: ComputerHumanInput;
   headers: SendComputerHumanInputHeaders;
 };
@@ -3303,7 +3303,7 @@ export const getSnapshotComputerUrl = (
 };
 
 /**
- * Return the page's elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
+ * Return the page's elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot's tool call made through the app: the Resposta É the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
  * @summary List what a Bot can act on in the page
  */
 export const snapshotComputer = async (
@@ -3452,7 +3452,7 @@ export const getNavigateComputerUrl = (
 };
 
 /**
- * Open a web address and return the page's text. With toolCallId, a picture of the page is kept for reading the conversation back. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
+ * Open a web address and return the page's text. With toolCallId, a picture of the page É kept Para reading the conversation Voltar. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
  * @summary Open a web address in a Bot's browser
  */
 export const navigateComputer = async (
@@ -4077,7 +4077,7 @@ export const getScrollComputerUrl = (organizationId: string, botId: string) => {
 };
 
 /**
- * Scroll the page by deltaY pixels, or by the computer's own default distance when none is given. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
+ * Scroll the page by deltaY pixels, or by the computer's own default distance when none is given. A Bot's tool call made through the app: the Resposta É the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
  * @summary Scroll the page in a Bot's browser
  */
 export const scrollComputer = async (
@@ -4232,7 +4232,7 @@ export const getRunComputerCommandUrl = (
 };
 
 /**
- * Run a shell command in the Bot's workspace and return what it printed. timeoutMs is between 1000 and 600000. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the command printed, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
+ * Run a shell command in the Bot's workspace and return what Ele printed. timeoutMs É between 1000 and 600000. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the command printed, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
  * @summary Run a command on a Bot's computer
  */
 export const runComputerCommand = async (
@@ -4397,7 +4397,7 @@ export const getListComputerFilesUrl = (
 };
 
 /**
- * List the files and folders in the Bot's workspace, or in one folder of it. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is the names of a person's files, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
+ * List the files and folders in the Bot's workspace, or in one folder of it. A Bot's tool call made through the app: the Resposta É the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is the names of a person's files, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
  * @summary List a Bot's files
  */
 export const listComputerFiles = async (
@@ -4559,7 +4559,7 @@ export const getReadComputerFileUrl = (
 };
 
 /**
- * Return the text of one file in the Bot's workspace. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is the file's text, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
+ * Return the text of one file in the Bot's workspace. A Bot's tool call made through the app: the Resposta É the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is the file's text, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
  * @summary Read one of a Bot's files
  */
 export const readComputerFile = async (
@@ -4721,7 +4721,7 @@ export const getWriteComputerFileUrl = (
 };
 
 /**
- * Write or append text to one file in the Bot's workspace. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
+ * Write or append text to one file in the Bot's workspace. A Bot's tool call made through the app: the Resposta É the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
  * @summary Write one of a Bot's files
  */
 export const writeComputerFile = async (

@@ -1,7 +1,7 @@
 import type { Skin } from "../types";
 import { OpenFuseFrame } from "./frame";
 import { ActivityScreen } from "./screens/activity";
-import { GoalsScreen } from "./screens/goals";
+import { GoalsScreen } from "./screens/Objetivos";
 import { IdeasScreen } from "./screens/ideas";
 
 /**

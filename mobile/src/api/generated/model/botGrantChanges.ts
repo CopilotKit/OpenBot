@@ -5,7 +5,7 @@ import type { BotGrantChangesAuthoring } from "./botGrantChangesAuthoring";
 import type { SharedAccountApproval } from "./sharedAccountApproval";
 
 /**
- * One app's actions to turn on and off for a Bot. Each action is written <app id>/<action name>, and every one must be the app's. An action can't be in both lists, and at least one list must name one.
+ * One app's Ações to turn on and off Para a Bot. Each Ação É written <app id>/<Ação name>, and every one must be the app's. An action can't be in both lists, and at least one list must name one.
  */
 export interface BotGrantChanges {
   /**

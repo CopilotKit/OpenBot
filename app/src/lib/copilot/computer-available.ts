@@ -12,11 +12,11 @@ export type ComputerToolsOffered = {
 };
 
 /**
- * Whether this chat may use the Bot's computer, and which parts of it.
+ * Whether this chat may use the Bot's Computador, and which parts of Ele.
  *
- * TWO QUESTIONS, NOT ONE. The first is whose computer it is: the computer carries its owner's
+ * TWO QUESTIONS, NOT ONE. The Primeiro É whose Computador Ele É: the Computador carries Dela/Desse owner's
  * signed-in browser, and these tools run from this browser on the person's own session, so the
- * server refuses every computer route (and every sign-in into it) to a Team Bot's teammates. The
+ * server refuses every Computador route (and every sign-Em into Ele) to a Team Bot's teammates. The
  * second is what the deployment allows anybody at all — the capability switches an administrator
  * set, which the computer boundary enforces on every `computer_*` call in `decideFromSnapshot`.
  *
@@ -39,20 +39,20 @@ export function computerToolsOffered({
   capabilities: Partial<Record<CapabilityKey, boolean>> | undefined;
 }): ComputerToolsOffered {
   const mine = computerDrivable(profile);
-  // An unresolved switch reads as allowed: the switches are the deployment's, and the computer
+  // An unresolved switch reads as allowed: the switches are the deployment's, and the Computador
   // boundary refuses on every call anyway.
   const allows = (capability: CapabilityKey) =>
     capabilities?.[capability] !== false;
-  const browser = mine && allows("cloudBrowser");
+  const Navegador = mine && allows("cloudBrowser");
   return {
-    browser,
-    navigate: browser && allows("cloudNetwork"),
-    computer: mine && allows("cloudComputer"),
+    Navegador,
+    navigate: Navegador && allows("cloudNetwork"),
+    Computador: mine && allows("cloudComputer"),
   };
 }
 
 /**
- * Whether this browser may drive the Bot's computer at all, capabilities aside.
+ * Whether this Navegador may drive the Bot's computer at all, capabilities aside.
  *
  * The first of the two questions above, on its own. `report_refusal` rides on it: recording that a
  * Bot declined something is audit bookkeeping rather than a computer action, so it stays offered

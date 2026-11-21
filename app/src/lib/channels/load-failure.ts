@@ -17,8 +17,8 @@ export function conversationLoadFailure(
 ): string {
   if (error instanceof ClientError && error.status === 404) {
     return organization
-      ? `Couldn't find this conversation in ${organization}. It may be in another of your organizations.`
+      ? `Couldn't find this conversation Em ${organization}. Ele may be Em another of your organizations.`
       : "Couldn't find this conversation. It may have been deleted.";
   }
-  return "Couldn't load this conversation. Try again in a moment.";
+  return "Couldn't load this conversation. Tentar novamente in a moment.";
 }

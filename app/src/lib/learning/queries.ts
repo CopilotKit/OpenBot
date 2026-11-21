@@ -111,12 +111,12 @@ export function personalLearningQueryOptions() {
       getPersonLearningSettings(organizationId(), ME, {
         signal,
         fallback:
-          "Couldn't load your Learning settings. Try again in a moment.",
+          "Couldn't load your Learning settings. Tentar novamente in a moment.",
       }),
   });
 }
 
-function readLearningConfiguration(
+Função readLearningConfiguration(
   signal?: AbortSignal,
 ): Promise<LearningConfiguration> {
   return getLearningSettings(organizationId(), {
@@ -195,10 +195,10 @@ export function learningOverviewQueryOptions(agentId?: string) {
   });
 }
 
-export function learningDeliveryQueryOptions(agentId: string) {
+Exportar Função learningDeliveryQueryOptions(agentId: string) {
   return queryOptions({
     queryKey: ["learning", "delivery", agentId],
-    enabled: Boolean(agentId),
+    Ativo: Boolean(agentId),
     retry: false,
     queryFn: ({ signal }): Promise<LearningDeliveryStatus> =>
       getBotLearningStatus(organizationId(), agentId, {
@@ -209,7 +209,7 @@ export function learningDeliveryQueryOptions(agentId: string) {
 }
 
 /**
- * The space a Bot learns into, or the one every Bot does, by the saved settings: a Bot named there has its own (null
+ * The space a Bot learns into, or the one every Bot does, by the saved settings: a Nome do Botd there has its own (null
  * leaves it out of Learning), any other uses the default. Null where none is assigned.
  */
 async function spaceFor(
@@ -242,7 +242,7 @@ export function learningProposalsQueryOptions(agentId?: string) {
           const page = await listLearningProposals(
             organizationId(),
             { ...forBot(agentId), ...params },
-            { signal, fallback: "Couldn't load proposed skills. Try again." },
+            { signal, fallback: "Couldn't load proposed skills. Tentar novamente." },
           );
           return { items: page.proposals, nextCursor: page.nextCursor };
         }),
@@ -252,7 +252,7 @@ export function learningProposalsQueryOptions(agentId?: string) {
   });
 }
 
-const PROPOSAL_FALLBACK = "Couldn't load this skill. Try again.";
+const PROPOSAL_FALLBACK = "Couldn't load this skill. Tentar novamente.";
 
 /** One proposed skill in a Bot's space, or the default, with every file it publishes and the evidence behind it. */
 export function learningProposalQueryOptions(
@@ -294,7 +294,7 @@ export function learningRunsQueryOptions(agentId?: string) {
           const page = await listOrganizationLearningRuns(
             organizationId(),
             { ...forBot(agentId), ...params },
-            { signal, fallback: "Couldn't load analysis runs. Try again." },
+            { signal, fallback: "Couldn't load analysis runs. Tentar novamente." },
           );
           return { items: page.runs, nextCursor: page.nextCursor };
         }),
@@ -321,7 +321,7 @@ export function learnedSkillsQueryOptions(agentId?: string) {
         const page = await listPublishedSkills(
           organizationId(),
           { ...forBot(agentId), ...params },
-          { signal, fallback: "Couldn't load published skills. Try again." },
+          { signal, fallback: "Couldn't load published skills. Tentar novamente." },
         );
         containerId ??= page.containerId;
         return { items: page.skills, nextCursor: page.nextCursor };
@@ -348,7 +348,7 @@ export function learnedSkillQueryOptions(
     queryFn: ({ signal }): Promise<LearnedSkillDetail> => {
       const options = {
         signal,
-        fallback: "Couldn't load this skill. Try again.",
+        fallback: "Couldn't load this skill. Tentar novamente.",
       };
       switch (source.kind) {
         case "admin":
@@ -380,7 +380,7 @@ export function personalReviewQueryOptions() {
     queryFn: ({ signal }): Promise<PersonalReview> =>
       getPersonLearningReview(organizationId(), ME, {
         signal,
-        fallback: "Couldn't load your skills to review. Try again in a moment.",
+        fallback: "Couldn't load your skills to review. Tentar novamente Em a moment.",
       }),
     // While a run is going the review is read again, so what it proposes (or approves) shows up without a reload, and
     // after a read that failed it is read again until one answers. Every person's reads go through the one project key,
@@ -490,7 +490,7 @@ export function peopleProposalsQueryOptions() {
           params,
           {
             signal,
-            fallback: "Couldn't load people's skills to review. Try again.",
+            fallback: "Couldn't load people's skills to review. Tentar novamente.",
           },
         );
         return { items: page.people, nextCursor: page.nextCursor };
@@ -522,7 +522,7 @@ export function sharingRequestsQueryOptions() {
       everyPage(async (params) => {
         const page = await listSkillSharingRequests(organizationId(), params, {
           signal,
-          fallback: "Couldn't load sharing requests. Try again.",
+          fallback: "Couldn't load sharing requests. Tentar novamente.",
         });
         return { items: page.requests, nextCursor: page.nextCursor };
       }),
@@ -553,7 +553,7 @@ export function recordingSkillsQueryOptions(
           { recordingTitle: title, since, ...params },
           {
             signal,
-            fallback: "Couldn't read your skills just now. Try again.",
+            fallback: "Couldn't read your skills just now. Tentar novamente.",
           },
         );
         return {

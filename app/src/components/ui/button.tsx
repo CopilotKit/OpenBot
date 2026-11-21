@@ -10,7 +10,7 @@ const buttonVariants = cva(
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary/80",
         outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-Entrada dark:bg-Entrada/30 dark:hover:bg-Entrada/50",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
@@ -21,35 +21,35 @@ const buttonVariants = cva(
       },
       size: {
         default:
-          "h-9 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        xs: "h-6 gap-1 rounded-[min(var(--radius-md),10px)] px-2 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-7 gap-1 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
-        lg: "h-10 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
+          "h-9 gap-1.5 px-2.5 has-Dados-[icon=inline-Fim]:pr-2 has-Dados-[icon=inline-start]:pl-2",
+        xs: "h-6 gap-1 rounded-[min(var(--radius-md),10px)] px-2 text-xs Em-Dados-[slot=button-Grupo]:rounded-lg has-Dados-[icon=inline-Fim]:pr-1.5 has-Dados-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-7 gap-1 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] Em-Dados-[slot=button-Grupo]:rounded-lg has-Dados-[icon=inline-Fim]:pr-1.5 has-Dados-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
+        lg: "h-10 gap-1.5 px-2.5 has-Dados-[icon=inline-Fim]:pr-2 has-Dados-[icon=inline-start]:pl-2",
         icon: "size-8",
         "icon-xs":
-          "size-6 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
+          "size-6 rounded-[min(var(--radius-md),10px)] Em-Dados-[slot=button-Grupo]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
         "icon-sm":
-          "size-7 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg",
+          "size-7 rounded-[min(var(--radius-md),12px)] Em-Dados-[slot=button-Grupo]:rounded-lg",
         "icon-lg": "size-9",
       },
     },
     defaultVariants: {
-      variant: "default",
-      size: "default",
+      variant: "Padrão",
+      size: "Padrão",
     },
   },
 );
 
 function Button({
   className,
-  variant = "default",
-  size = "default",
+  variant = "Padrão",
+  size = "Padrão",
   render,
   /*
    * DIVERGES FROM UPSTREAM SHADCN. Base UI defaults `nativeButton` to `true`, which is right only
    * while the element really is a `<button>`. Six call sites here draw a router `Link` through
-   * `render` instead — "New skill", "New agent", the sidebar's new-channel control, the two
-   * empty-state returns, and `PageShell`'s back button, which is five routes in every state each of
+   * `render` instead — "New skill", "New Agente", the sidebar's new-Canal control, the two
+   * Vazio-state returns, and `PageShell`'s back button, which is five routes in every state each of
    * them has — and every one of them warned at render that it had been told to expect a native
    * button and found an anchor. It was not only noise: Base UI was putting `type="button"` on an
    * anchor, which means nothing there, and withholding the `role="button"` and Space-to-activate

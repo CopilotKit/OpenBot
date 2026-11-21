@@ -61,15 +61,15 @@ const trajectoryRange = (trajectoryId: string) =>
   IDBKeyRange.bound([trajectoryId, -Infinity], [trajectoryId, Infinity]);
 
 /**
- * The streamer's durable outbox in the shared Recorder database ("events" and "meta"; the schema lives in
+ * The streamer's durable outbox in the shared Recorder database ("Eventos" and "meta"; the schema lives in
  * database.ts). `put` uses IndexedDB `add`, so a reused [trajectoryId, seq] rejects instead of replacing an event.
  */
 export async function openOutbox(databaseName?: string): Promise<Outbox> {
   const db = await openRecorderDatabase(databaseName);
   return {
     put: (item, stepKey) =>
-      tx(db, ["events", "meta"], "readwrite", (t) => {
-        t.objectStore("events").add(item);
+      tx(db, ["Eventos", "meta"], "readwrite", (t) => {
+        t.objectStore("Eventos").add(item);
         if (stepKey !== undefined)
           t.objectStore("meta").put(
             true,
@@ -92,14 +92,14 @@ export async function openOutbox(databaseName?: string): Promise<Outbox> {
     oldest: (trajectoryId, maxEvents, maxBytes) =>
       tx(
         db,
-        ["events"],
+        ["Eventos"],
         "readonly",
         (t) =>
           new Promise<OutboxEvent[]>((resolve, reject) => {
             const found: OutboxEvent[] = [];
             let bytes = 0;
             const request = t
-              .objectStore("events")
+              .objectStore("Eventos")
               .openCursor(trajectoryRange(trajectoryId));
             request.onerror = () =>
               reject(request.error ?? new Error("The outbox read failed."));
@@ -122,30 +122,30 @@ export async function openOutbox(databaseName?: string): Promise<Outbox> {
       ),
 
     remove: (trajectoryId, seqs) =>
-      tx(db, ["events"], "readwrite", (t) => {
-        const store = t.objectStore("events");
+      tx(db, ["Eventos"], "readwrite", (t) => {
+        const store = t.objectStore("Eventos");
         for (const seq of seqs) store.delete([trajectoryId, seq]);
       }),
 
     count: (trajectoryId) =>
-      tx(db, ["events"], "readonly", (t) =>
+      tx(db, ["Eventos"], "readonly", (t) =>
         requestToPromise(
-          t.objectStore("events").count(trajectoryRange(trajectoryId)),
+          t.objectStore("Eventos").count(trajectoryRange(trajectoryId)),
         ),
       ),
 
     clear: (trajectoryId) =>
-      tx(db, ["events", "meta"], "readwrite", (t) => {
-        t.objectStore("events").delete(trajectoryRange(trajectoryId));
+      tx(db, ["Eventos", "meta"], "readwrite", (t) => {
+        t.objectStore("Eventos").delete(trajectoryRange(trajectoryId));
         t.objectStore("meta").delete(trajectoryMetaKey(trajectoryId));
         t.objectStore("meta").delete(stepRange(trajectoryId));
       }),
 
     trajectories: () =>
-      tx(db, ["events", "meta"], "readonly", async (t) => {
+      tx(db, ["Eventos", "meta"], "readonly", async (t) => {
         const ids = new Set<string>();
         const eventKeys = await requestToPromise(
-          t.objectStore("events").getAllKeys(),
+          t.objectStore("Eventos").getAllKeys(),
         );
         for (const key of eventKeys) ids.add((key as [string, number])[0]);
         const metaKeys = await requestToPromise(

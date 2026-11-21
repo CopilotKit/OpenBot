@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * No component has that name, the caller isn't an admin and it isn't published, or the organization does not exist.
+ * No component has that name, the caller isn't an admin and Ele isn't published, or the organization does not exist.
  */
 export type ComponentNotFoundResponse = Problem;

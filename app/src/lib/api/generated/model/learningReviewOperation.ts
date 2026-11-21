@@ -6,7 +6,7 @@ export type LearningReviewOperation =
   (typeof LearningReviewOperation)[keyof typeof LearningReviewOperation];
 
 export const LearningReviewOperation = {
-  add: "add",
+  add: "Adicionar",
   update: "update",
   remove: "remove",
 } as const;

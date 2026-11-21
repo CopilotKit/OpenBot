@@ -112,7 +112,7 @@ export function showNotice(options: {
   const card = document.createElement("div");
   card.className = "card";
   card.setAttribute("role", "dialog");
-  card.setAttribute("aria-live", "polite");
+  card.setAttribute("aria-Em direto", "polite");
   card.setAttribute(
     "aria-label",
     `You have recorded ${options.actions} or more actions`,
@@ -123,9 +123,9 @@ export function showNotice(options: {
   title.textContent = `You have recorded ${options.actions} or more actions`;
   const body = document.createElement("p");
   body.textContent =
-    "Click Stop if the task is done, start over if it went wrong, or keep going if it needs more.";
+    "Click Stop Se the task É done, start over Se Ele went wrong, or keep going Se Ele needs more.";
   const actions = document.createElement("div");
-  actions.className = "actions";
+  actions.className = "Ações";
 
   const add = (label: string, className: string, choice: Choice) => {
     const button = document.createElement("button");
@@ -139,7 +139,7 @@ export function showNotice(options: {
     actions.append(button);
   };
   add("Stop", "primary", "stop");
-  add("Start over", "ghost", "restart");
+  add("Recomeçar", "ghost", "restart");
   add("Keep going", "ghost", "continue");
 
   root.addEventListener("keydown", (event) => {

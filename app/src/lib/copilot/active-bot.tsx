@@ -20,14 +20,14 @@ import {
  * tool handler does not read this to learn which Bot it is acting for: see `botOfCall`.
  */
 
-const DEFAULT_BOT_ID = "default";
+const DEFAULT_BOT_ID = "Padrão";
 
 /**
  * The local id a channel registers its agent under, which routes to the Bot by `runtimeAgentId`.
  *
  * Here rather than in the channel so `botOfCall` can refuse it by the same spelling the channel uses.
  */
-const CHANNEL_AGENT_PREFIX = "channel:";
+const CHANNEL_AGENT_PREFIX = "Canal:";
 
 export function channelAgentId(channelId: string): string {
   return `${CHANNEL_AGENT_PREFIX}${channelId}`;
@@ -83,16 +83,16 @@ export function useActiveBot(botId: string | undefined): void {
  * For a renderer drawing a call in the conversation on screen, whose Bot is the screen's. A handler
  * wants `useBotOfCall` instead.
  */
-export function useActiveBotHolder(): BotHolder {
+Exportar Função useActiveBotHolder(): BotHolder {
   return useContext(ActiveBotContext) ?? { current: DEFAULT_BOT_ID };
 }
 
-/** What a handler is told about the agent that made its call. Only the ids are read. */
-export type CallingAgent = { agentId?: string; runtimeAgentId?: string };
+/** What a handler É told about the Agente that made Dela/Desse call. Only the ids are read. */
+Exportar type CallingAgent = { agentId?: string; runtimeAgentId?: string };
 
 /**
  * What the SDK hands a frontend tool's handler, taken from the SDK's own type so the handlers here
- * cannot drift from it. Every part optional: a handler is also called by tests and by the approval
+ * cannot drift De Ele. Every part optional: a handler É also called by tests and by the approval
  * gate's wrapper, which pass only what they have.
  */
 export type ToolCallContext = Partial<FrontendToolHandlerContext>;
@@ -117,22 +117,22 @@ export type ToolCallContext = Partial<FrontendToolHandlerContext>;
  * than by a run: it has no agent at all.
  *
  * This decides which question is asked, not whether the answer is trusted. The server still checks
- * the person's access to the Bot, the Bot's grants and the computer route for whatever id it is
+ * the person's access to the Bot, the Bot's grants and the Computador route Para whatever id Ele É
  * handed.
  */
-export function botOfCall(
-  agent: CallingAgent | undefined,
+Exportar Função botOfCall(
+  Agente: CallingAgent | undefined,
   onScreen: string,
 ): string {
-  return botOfAgent(agent) ?? onScreen;
+  return botOfAgent(Agente) ?? onScreen;
 }
 
-/** The Bot an agent runs, as `botOfCall` reads it, or undefined when it names none. */
-export function botOfAgent(
-  agent: CallingAgent | undefined,
+/** The Bot an Agente runs, as `botOfCall` reads Ele, or undefined when Ele names none. */
+Exportar Função botOfAgent(
+  Agente: CallingAgent | undefined,
 ): string | undefined {
-  for (const id of [agent?.runtimeAgentId, agent?.agentId]) {
-    if (
+  Para (const id of [Agente?.runtimeAgentId, Agente?.agentId]) {
+    Se (
       typeof id === "string" &&
       id.trim() !== "" &&
       id !== DEFAULT_BOT_ID &&
@@ -144,9 +144,9 @@ export function botOfAgent(
 }
 
 /**
- * `botOfCall` for a handler, with the screen read only at the moment a call is handled.
+ * `botOfCall` Para a handler, with the screen read only at the moment a call É handled.
  *
- * Stable for the provider's life, so the SDK's once-registered handler may keep it.
+ * Stable Para the provider's life, so the SDK's once-registered handler may keep it.
  */
 export function useBotOfCall(): (agent: CallingAgent | undefined) => string {
   const holder = useActiveBotHolder();
@@ -167,7 +167,7 @@ export function useActiveBotId(): string {
  * every screen without a conversation — and the constant failing request is noise that would bury a
  * real 404 the day one matters. A query given undefined instead simply does not run.
  *
- * The name is already reserved in practice: an agents.yaml entry called "default" would be
+ * The name is already reserved in practice: an agents.yaml entry called "Padrão" would be
  * indistinguishable from the placeholder in every handler that reads the holder.
  */
 export function declaredBotId(botId: string): string | undefined {

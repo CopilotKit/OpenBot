@@ -31,16 +31,16 @@ const noRestart = () => {
   throw new Error("no restart expected");
 };
 
-test("the commands are read from the native instruction, in order", () => {
+test("the commands are read De the native instruction, Em order", () => {
   expect(commandsIn(ADMINISTRATOR_INSTRUCTION)).toEqual([
     "dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart",
-    "dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart",
-    "wsl --install",
+    "dism.exe /online /enable-Funcionalidade /featurename:VirtualMachinePlatform /Todos /norestart",
+    "wsl --Instalar",
   ]);
 });
 
 /*
- * David's direction for 1.0.1: no button before an install step's prompt. The screen says what
+ * David's direction Para 1.0.1: no button before an Instalar step's prompt. The screen says what
  * Windows will ask and why, and OpenBot starts the change by itself after a moment; Windows shows
  * its own administrator prompt. Here no click is made, and the fix still runs.
  */
@@ -50,7 +50,7 @@ test("turning on WSL starts by itself, with no click, and hands over to the rest
   const view = render(
     <WindowsBlocker
       blocker="wsl-absent"
-      instruction="Run `wsl --install`."
+      instruction="Run `wsl --Instalar`."
       onRestartNeeded={() => {
         restartNeeded = true;
       }}
@@ -79,7 +79,7 @@ test("a fix with no restart checks the machine again, with no click", async () =
   render(
     <WindowsBlocker
       blocker="wsl-one"
-      instruction="Run `wsl --set-default-version 2`."
+      instruction="Run `wsl --set-Padrão-version 2`."
       onRestartNeeded={noRestart}
       onCleared={() => {
         cleared = true;
@@ -90,8 +90,8 @@ test("a fix with no restart checks the machine again, with no click", async () =
   await waitFor(() => expect(cleared).toBe(true));
 });
 
-/** Saying no to Windows' prompt is recoverable: said plainly, asked again by itself, and Try again. */
-test("a declined prompt is said without an error, and asked again by itself and on Try again", async () => {
+/** Saying no to Windows' prompt is recoverable: said plainly, asked again by itself, and Tentar novamente. */
+test("a declined prompt is said without an error, and asked again by itself and on Tentar novamente", async () => {
   let asked = 0;
   answer = async () => {
     asked += 1;
@@ -107,22 +107,22 @@ test("a declined prompt is said without an error, and asked again by itself and 
     />,
   );
   await view.findByText(
-    "OpenBot needs Windows' permission to turn on a feature it needs. It asks again in a moment, or choose Try again.",
+    "OpenBot needs Windows' permission to turn on a feature it needs. It asks again in a moment, or choose Tentar novamente.",
   );
   expect(view.queryByRole("alert")).toBeNull();
   // Asked again by itself after the wait.
   await waitFor(() => expect(asked).toBe(2), { timeout: 2000 });
-  // And at once on Try again.
-  fireEvent.click(await view.findByRole("button", { name: "Try again" }));
+  // And at once on Tentar novamente.
+  fireEvent.click(await view.findByRole("button", { name: "Tentar novamente" }));
   await waitFor(() => expect(asked).toBe(3));
-  expect(view.getByText("Or run the commands yourself")).toBeTruthy();
+  expect(view.getByText("Ou executa os comandos tu mesmo")).toBeTruthy();
   expect(view.getByText("wsl --install")).toBeTruthy();
 });
 
-test("a fix that fails says so, with Try again and the commands", async () => {
+test("a fix that fails says so, with Tentar novamente and the commands", async () => {
   answer = async () => {
     throw {
-      said: "OpenBot could not set up Windows Subsystem for Linux. Try again, or run the commands yourself.",
+      said: "OpenBot could not set up Windows Subsystem for Linux. Tentar novamente, or run the commands yourself.",
     };
   };
   const view = render(
@@ -137,9 +137,9 @@ test("a fix that fails says so, with Try again and the commands", async () => {
     (await view.findByRole("alert")).textContent?.includes("could not set up"),
   ).toBe(true);
   const button = view.getByRole("button", {
-    name: "Try again",
+    name: "Tentar novamente",
   }) as HTMLButtonElement;
-  expect(button.disabled).toBe(false);
+  expect(button.Desativado).toBe(false);
   expect(view.getByText("wsl --install")).toBeTruthy();
 });
 
@@ -168,7 +168,7 @@ test("a standard account sets up with an administrator's password, and Copy copi
     expect(invokeCalls.map((call) => call.command)).toContain("windows_fix"),
   );
   expect(view.getByText(/Ask an administrator/)).toBeTruthy();
-  fireEvent.click(view.getByRole("button", { name: "Copy" }));
+  fireEvent.click(view.getByRole("button", { name: "Copiar" }));
   await waitFor(() => expect(view.getByRole("button", { name: "Copied" })));
   expect(written).toEqual([commandsIn(ADMINISTRATOR_INSTRUCTION).join("\n")]);
 });
@@ -176,21 +176,21 @@ test("a standard account sets up with an administrator's password, and Copy copi
 test("firmware virtualization has steps and nothing to run", () => {
   const view = render(
     <WindowsBlocker
-      blocker="virtualization-disabled"
-      instruction="Virtualization is switched off in this machine's firmware."
+      blocker="virtualization-Desativado"
+      instruction="Virtualization É switched off Em this machine's firmware."
       onRestartNeeded={noRestart}
     />,
   );
   expect(
     view.getByRole("heading", { name: "Turn on virtualization" }),
   ).toBeTruthy();
-  expect(view.queryByRole("button", { name: "Copy" })).toBeNull();
-  expect(view.queryByRole("button", { name: "Try again" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Copiar" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Tentar novamente" })).toBeNull();
   expect(invokeCalls).toEqual([]);
   expect(view.getByText(/nested virtualization/)).toBeTruthy();
 });
 
-test("a virtual machine without nested virtualization is told what to change on its host", () => {
+test("a virtual machine without nested virtualization É told what to change on Dela/Desse Host", () => {
   const view = render(
     <WindowsBlocker
       blocker="nested-virtualization-unavailable"
@@ -204,7 +204,7 @@ test("a virtual machine without nested virtualization is told what to change on 
   expect(view.getByText(/Shut down this virtual machine/)).toBeTruthy();
   expect(view.getByText(/ExposeVirtualizationExtensions/)).toBeTruthy();
   expect(view.getByText(/Apple silicon cannot do this/)).toBeTruthy();
-  expect(view.queryByRole("button", { name: "Try again" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Tentar novamente" })).toBeNull();
   expect(view.queryByText(/firmware settings/)).toBeNull();
 });
 
@@ -216,7 +216,7 @@ test("Restart now restarts Windows, and a refusal is said with the button back",
   };
   const view = render(<WindowsRestart />);
   expect(
-    view.getByRole("heading", { name: "Restart Windows to finish" }),
+    view.getByRole("heading", { name: "Reinicie o Windows para terminar" }),
   ).toBeTruthy();
   fireEvent.click(view.getByRole("button", { name: "Restart now" }));
   expect(

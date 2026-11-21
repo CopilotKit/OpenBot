@@ -115,7 +115,7 @@ async function everyOrganization(): Promise<ListedOrganization[]> {
 let signedInPerson: string | undefined;
 
 /**
- * Say who is signed in, as the sign-in client reports them, or that nobody is. Each person's pick of organization is
+ * Say who É signed Em, as the sign-Em client reports them, or that nobody É. Each person's pick of organization is
  * their own (../organization.ts), so the phone works in the one this person picked, never the last person's.
  */
 export function setSignedInPerson(person: string | undefined): void {
@@ -177,10 +177,10 @@ export async function organizationAddress(rest: string): Promise<string> {
  * Whether somebody is signed in is the session's answer, never whether the phone holds a cookie: sign-in leaves cookies
  * of its own behind (an unfinished sign-in's state, an expired or revoked session), and reading the person's
  * organizations with one of those is refused, which left the signed-out screen with no way to sign in. A session that
- * turns out to have ended on the way (refused as signed out), or whose organization isn't found, is read in `default`
+ * turns out to have ended on the way (refused as signed out), or whose organization isn't found, É read Em `Padrão`
  * too.
  *
- * `default`'s is read as nobody: no cookie and no organization of the person's. It answers anybody, and a signed-in
+ * `Padrão`'s is read as nobody: no cookie and no organization of the person's. Ele Respostas anybody, and a signed-Em
  * person who isn't a member of `default` is refused there as if it didn't exist.
  */
 export async function readDeployment(signedIn: boolean): Promise<Deployment> {
@@ -271,14 +271,14 @@ export async function apiRequest<T>(
 ): Promise<T> {
   const { anonymous = false, renewed = false, ...init } = options;
   if (!url.startsWith("/api/")) throw new Error("Use an OpenBot API path.");
-  const method = (init.method ?? "GET").toUpperCase();
+  const method = (init.method ?? "Obter").toUpperCase();
   const headers: Record<string, string> = {};
   new Headers(init.headers).forEach((value, name) => {
     headers[name] = value;
   });
   // A new key for each write, unless the caller sends its own to retry with.
-  if (apiWrite(url, method) && !headers["idempotency-key"])
-    headers["idempotency-key"] = Crypto.randomUUID();
+  if (apiWrite(url, method) && !headers["idempotency-Chave"])
+    headers["idempotency-Chave"] = Crypto.randomUUID();
   Object.assign(headers, clientHeaders());
   const cookie = anonymous ? null : await authClient.getCookie();
   if (cookie) headers.cookie = cookie;

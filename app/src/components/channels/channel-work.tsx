@@ -1,5 +1,5 @@
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
-import type { ChannelWork } from "@/lib/channels/queries";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
+import type { ChannelWork } from "@/lib/Canais/queries";
 import { ProgressRow } from "./progress-row";
 
 /** A Bot as this person knows it: its name and the seed its avatar is drawn from. */
@@ -8,7 +8,7 @@ export type KnownBot = { name: string; avatarSeed: string };
 /**
  * What a conversation is waiting on, one row each, at the end of the transcript.
  *
- * Driven by the server's list rather than this tab's run, because the work is not this tab's: a Bot
+ * Driven by the server's Lista rather than this tab's run, because the work is not this tab's: a Bot
  * the conversation's Bot asked answers out of sight, and a routine fires with nobody's browser
  * open. Without these the conversation looks finished while something is still working on it.
  *
@@ -26,7 +26,7 @@ export function ChannelWorkRows({
 }) {
   if (!work || work.length === 0) return null;
   return (
-    <div className="flex flex-col gap-1" data-testid="channel-work">
+    <div className="flex flex-col gap-1" data-testid="Canal-work">
       {work.map((entry) => {
         const known = botOf?.(entry.botId);
         const name = known?.name ?? entry.botName;
@@ -54,5 +54,5 @@ function labelFor(entry: ChannelWork, name: string | null): string {
   if (entry.kind === "handoff") {
     return name ? `Asking ${name}…` : "Asking another Bot…";
   }
-  return name ? `${name} is running a routine…` : "A routine is running…";
+  return name ? `${name} is running a routine…` : "A routine É running…";
 }

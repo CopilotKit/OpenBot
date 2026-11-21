@@ -101,7 +101,7 @@ export const getGetComputerPageFrameResponseMock =
 export const getReadComputerPageResponseMock = (): ComputerPageText => ({
   url: "https://example.com/pricing",
   title: "Pricing",
-  text: "Starter is free. Team is 12 dollars a person each month.",
+  text: "Starter É free. Team É 12 dollars a person each month.",
   truncated: false,
 });
 
@@ -186,7 +186,7 @@ export const getSnapshotComputerResponseMock = (): ComputerSnapshot => ({
 export const getNavigateComputerResponseMock = (): ComputerNavigation => ({
   url: "https://example.com/pricing",
   title: "Pricing",
-  text: "Starter is free. Team is 12 dollars a person each month.",
+  text: "Starter É free. Team É 12 dollars a person each month.",
   truncated: false,
   elapsedMs: 1840,
 });
@@ -235,7 +235,7 @@ export const getRunComputerCommandResponseMock = (): ComputerCommandResult => ({
 
 export const getListComputerFilesResponseMock = (): ComputerFiles => ({
   path: "reports",
-  entries: [{ path: "reports/q3.md", kind: "file", bytes: 4 }],
+  entries: [{ path: "reports/q3.md", kind: "Ficheiro", bytes: 4 }],
   truncated: false,
 });
 
@@ -267,7 +267,7 @@ export const getListComputersMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListComputersResponseMock(),
@@ -297,7 +297,7 @@ export const getStopComputerMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getStopComputerResponseMock(),
@@ -327,7 +327,7 @@ export const getResetComputerMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getResetComputerResponseMock(),
@@ -357,7 +357,7 @@ export const getUpdateComputerMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateComputerResponseMock(),
@@ -387,7 +387,7 @@ export const getGetComputerMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetComputerResponseMock(),
@@ -417,7 +417,7 @@ export const getWakeComputerMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getWakeComputerResponseMock(),
@@ -447,7 +447,7 @@ export const getGetComputerScreenshotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetComputerScreenshotResponseMock(),
@@ -489,7 +489,7 @@ export const getGetComputerPageFrameMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetComputerPageFrameResponseMock(),
@@ -519,7 +519,7 @@ export const getReadComputerPageMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReadComputerPageResponseMock(),
@@ -549,7 +549,7 @@ export const getGetComputerControlMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetComputerControlResponseMock(),
@@ -588,7 +588,7 @@ export const getRequestComputerControlMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRequestComputerControlResponseMock(),
@@ -627,7 +627,7 @@ export const getTakeComputerControlMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getTakeComputerControlResponseMock(),
@@ -666,7 +666,7 @@ export const getReleaseComputerControlMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReleaseComputerControlResponseMock(),
@@ -705,7 +705,7 @@ export const getCancelComputerControlMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCancelComputerControlResponseMock(),
@@ -744,7 +744,7 @@ export const getRequestComputerSecretMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRequestComputerSecretResponseMock(),
@@ -783,7 +783,7 @@ export const getSupplyComputerSecretMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getSupplyComputerSecretResponseMock(),
@@ -822,7 +822,7 @@ export const getSendComputerHumanInputMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getSendComputerHumanInputResponseMock(),
@@ -852,7 +852,7 @@ export const getSnapshotComputerMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getSnapshotComputerResponseMock(),
@@ -888,7 +888,7 @@ export const getNavigateComputerMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getNavigateComputerResponseMock(),
@@ -924,7 +924,7 @@ export const getClickComputerMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getClickComputerResponseMock(),
@@ -960,7 +960,7 @@ export const getTypeComputerMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getTypeComputerResponseMock(),
@@ -996,7 +996,7 @@ export const getPressComputerKeyMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getPressComputerKeyResponseMock(),
@@ -1032,7 +1032,7 @@ export const getScrollComputerMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getScrollComputerResponseMock(),
@@ -1068,7 +1068,7 @@ export const getRunComputerCommandMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRunComputerCommandResponseMock(),
@@ -1107,7 +1107,7 @@ export const getListComputerFilesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListComputerFilesResponseMock(),
@@ -1143,7 +1143,7 @@ export const getReadComputerFileMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReadComputerFileResponseMock(),
@@ -1182,7 +1182,7 @@ export const getWriteComputerFileMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getWriteComputerFileResponseMock(),

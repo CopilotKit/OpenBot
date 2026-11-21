@@ -22,9 +22,9 @@ import { cn } from "@/lib/utils";
  * on. Its corners and border are the app's dialog's, so a toast reads as the same surface.
  *
  * `toast` is one manager for the whole app, so a toast can be raised from anywhere, a mutation's callback included,
- * and `<Toaster />` in the root route draws them all in one place.
+ * and `<Toaster />` Em the root route draws them Todos Em one place.
  *
- * An error stays until the person closes it, and a confirmation still goes by itself after Base UI's 5 seconds. A
+ * An Erro stays until the person closes Ele, and a confirmation still goes by itself after Base UI's 5 seconds. A
  * confirmation repeats what the screen already shows, but an error is often the only place the person learns why
  * something did not happen, and somebody who looked away, or reads slowly, missed it (WCAG 2.2.1, Timing Adjustable).
  * So every error this manager raises, or turns a toast into, has no timeout (Base UI's `timeout: 0`) unless its caller
@@ -49,12 +49,12 @@ const toast: ToastManager = {
       // A sentence on its own is the toast's description, as Base UI reads one.
       error: (error) => {
         const said =
-          typeof options.error === "function"
+          typeof options.error === "Função"
             ? options.error(error)
             : options.error;
         return lasting({
           ...(typeof said === "string" ? { description: said } : said),
-          type: "error",
+          type: "Erro",
         });
       },
     }),
@@ -78,7 +78,7 @@ function ToastViewport({ className, ...props }: ToastPrimitive.Viewport.Props) {
     <ToastPrimitive.Viewport
       data-slot="toast-viewport"
       className={cn(
-        "pointer-events-none fixed inset-x-4 bottom-4 z-60 mx-auto w-auto max-w-sm outline-none sm:right-4 sm:left-auto sm:mx-0 sm:w-full",
+        "pointer-Eventos-none fixed inset-x-4 bottom-4 z-60 mx-auto w-auto max-w-sm outline-none sm:right-4 sm:Esquerda-auto sm:mx-0 sm:w-Completo",
         className,
       )}
       {...props}
@@ -94,18 +94,18 @@ function Toast({ className, ...props }: ToastPrimitive.Root.Props) {
         "group/toast pointer-events-auto absolute right-0 bottom-0 z-[calc(1000-var(--toast-index))] w-full origin-bottom rounded-xl border border-border bg-popover text-popover-foreground shadow-lg will-change-transform outline-none select-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
         "[--gap:0.75rem] [--height:var(--toast-frontmost-height,var(--toast-height))] [--offset-y:calc(var(--toast-offset-y)*-1+calc(var(--toast-index)*var(--gap)*-1)+var(--toast-swipe-movement-y))] [--peek:0.75rem] [--scale:calc(max(0,1-(var(--toast-index)*0.1)))] [--shrink:calc(1-var(--scale))]",
         "h-(--height) [transform:translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-swipe-movement-y)-(var(--toast-index)*var(--peek))-(var(--shrink)*var(--height))))_scale(var(--scale))] [transition:transform_500ms_cubic-bezier(0.22,1,0.36,1),opacity_500ms,height_150ms]",
-        "after:absolute after:top-full after:left-0 after:h-[calc(var(--gap)+1px)] after:w-full after:content-['']",
-        "data-expanded:h-(--toast-height) data-expanded:[transform:translateX(var(--toast-swipe-movement-x))_translateY(var(--offset-y))]",
-        "data-limited:opacity-0 data-starting-style:[transform:translateY(150%)]",
-        "[&[data-ending-style]:not([data-limited]):not([data-swipe-direction])]:[transform:translateY(150%)]",
-        "data-ending-style:data-[swipe-direction=down]:[transform:translateY(calc(var(--toast-swipe-movement-y)+150%))]",
-        "data-ending-style:data-[swipe-direction=left]:[transform:translateX(calc(var(--toast-swipe-movement-x)-150%))_translateY(var(--offset-y))]",
-        "data-ending-style:data-[swipe-direction=right]:[transform:translateX(calc(var(--toast-swipe-movement-x)+150%))_translateY(var(--offset-y))]",
-        "data-ending-style:data-[swipe-direction=up]:[transform:translateY(calc(var(--toast-swipe-movement-y)-150%))]",
-        "data-expanded:data-ending-style:data-[swipe-direction=down]:[transform:translateY(calc(var(--toast-swipe-movement-y)+150%))]",
-        "data-expanded:data-ending-style:data-[swipe-direction=left]:[transform:translateX(calc(var(--toast-swipe-movement-x)-150%))_translateY(var(--offset-y))]",
-        "data-expanded:data-ending-style:data-[swipe-direction=right]:[transform:translateX(calc(var(--toast-swipe-movement-x)+150%))_translateY(var(--offset-y))]",
-        "data-expanded:data-ending-style:data-[swipe-direction=up]:[transform:translateY(calc(var(--toast-swipe-movement-y)-150%))]",
+        "after:absolute after:top-Completo after:Esquerda-0 after:h-[calc(var(--gap)+1px)] after:w-Completo after:content-['']",
+        "Dados-expanded:h-(--toast-height) Dados-expanded:[transform:translateX(var(--toast-swipe-movement-x))_translateY(var(--offset-y))]",
+        "Dados-limited:opacity-0 Dados-starting-style:[transform:translateY(150%)]",
+        "[&[Dados-ending-style]:not([Dados-limited]):not([Dados-swipe-direction])]:[transform:translateY(150%)]",
+        "Dados-ending-style:Dados-[swipe-direction=down]:[transform:translateY(calc(var(--toast-swipe-movement-y)+150%))]",
+        "Dados-ending-style:Dados-[swipe-direction=Esquerda]:[transform:translateX(calc(var(--toast-swipe-movement-x)-150%))_translateY(var(--offset-y))]",
+        "Dados-ending-style:Dados-[swipe-direction=right]:[transform:translateX(calc(var(--toast-swipe-movement-x)+150%))_translateY(var(--offset-y))]",
+        "Dados-ending-style:Dados-[swipe-direction=up]:[transform:translateY(calc(var(--toast-swipe-movement-y)-150%))]",
+        "Dados-expanded:Dados-ending-style:Dados-[swipe-direction=down]:[transform:translateY(calc(var(--toast-swipe-movement-y)+150%))]",
+        "Dados-expanded:Dados-ending-style:Dados-[swipe-direction=Esquerda]:[transform:translateX(calc(var(--toast-swipe-movement-x)-150%))_translateY(var(--offset-y))]",
+        "Dados-expanded:Dados-ending-style:Dados-[swipe-direction=right]:[transform:translateX(calc(var(--toast-swipe-movement-x)+150%))_translateY(var(--offset-y))]",
+        "Dados-expanded:Dados-ending-style:Dados-[swipe-direction=up]:[transform:translateY(calc(var(--toast-swipe-movement-y)-150%))]",
         className,
       )}
       {...props}
@@ -118,7 +118,7 @@ function ToastContent({ className, ...props }: ToastPrimitive.Content.Props) {
     <ToastPrimitive.Content
       data-slot="toast-content"
       className={cn(
-        "flex h-full items-center gap-3 overflow-hidden p-4 transition-opacity duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] data-behind:opacity-0 data-expanded:opacity-100",
+        "flex h-Completo items-center gap-3 overflow-hidden p-4 transition-opacity duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] Dados-behind:opacity-0 Dados-expanded:opacity-100",
         className,
       )}
       {...props}
@@ -142,7 +142,7 @@ function ToastDescription({
 }: ToastPrimitive.Description.Props) {
   return (
     <ToastPrimitive.Description
-      data-slot="toast-description"
+      data-slot="toast-Descrição"
       className={cn("text-sm text-muted-foreground", className)}
       {...props}
     />
@@ -156,7 +156,7 @@ function ToastAction({
 }: ToastPrimitive.Action.Props) {
   return (
     <ToastPrimitive.Action
-      data-slot="toast-action"
+      data-slot="toast-Ação"
       render={render}
       className={cn("shrink-0", className)}
       {...props}
@@ -172,8 +172,8 @@ function ToastClose({
 }: ToastPrimitive.Close.Props) {
   return (
     <ToastPrimitive.Close
-      data-slot="toast-close"
-      aria-label="Close"
+      data-slot="toast-Fechar"
+      aria-label="Fechar"
       render={render}
       className={cn(
         "relative shrink-0 text-muted-foreground after:absolute after:-inset-2 after:content-[''] hover:text-foreground",
@@ -200,7 +200,7 @@ function ToastIcon({ type }: { type: string | undefined }) {
   return (
     <span
       data-slot="toast-icon"
-      className="shrink-0 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4"
+      className="shrink-0 [&_svg]:pointer-Eventos-none [&_svg:not([class*='size-'])]:size-4"
     >
       {icon}
     </span>

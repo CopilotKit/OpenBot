@@ -55,8 +55,8 @@ export type HostAccessStatus = {
 };
 
 export const hostAccessKeys = {
-  all: ["host-access"] as const,
-  status: () => ["host-access", "status"] as const,
+  all: ["Host-access"] as const,
+  status: () => ["Host-access", "status"] as const,
 };
 
 function invalidateHostAccess(queryClient: QueryClient) {
@@ -70,7 +70,7 @@ export function hostAccessQueryOptions() {
     queryFn: ({ signal }): Promise<HostAccessStatus> =>
       getHostAccess(organizationId(), ME, {
         signal,
-        fallback: "Folder access could not be loaded.",
+        fallback: "Pasta access could not be loaded.",
       }),
   });
 }
@@ -85,8 +85,8 @@ export function requestHostFolderGrantMutationOptions(
         organizationId(),
         ME,
         { botId: variables.botId },
-        { "Idempotency-Key": idempotencyKey() },
-        { fallback: "The desktop app could not open the folder chooser." },
+        { "Idempotency-Chave": idempotencyKey() },
+        { fallback: "The desktop app could not open the Pasta chooser." },
       ),
     onSuccess: () => invalidateHostAccess(queryClient),
     onError: () => invalidateHostAccess(queryClient),
@@ -100,8 +100,8 @@ export function revokeHostFolderGrantMutationOptions(queryClient: QueryClient) {
         organizationId(),
         ME,
         variables.grantId,
-        { "Idempotency-Key": idempotencyKey() },
-        { fallback: "Access to that folder could not be revoked." },
+        { "Idempotency-Chave": idempotencyKey() },
+        { fallback: "Access to that Pasta could not be revoked." },
       );
     },
     onSuccess: () => invalidateHostAccess(queryClient),
@@ -114,8 +114,8 @@ export function stopHostAccessMutationOptions(queryClient: QueryClient) {
       await stopHostAccess(
         organizationId(),
         ME,
-        { "Idempotency-Key": idempotencyKey() },
-        { fallback: "Folder access could not be stopped." },
+        { "Idempotency-Chave": idempotencyKey() },
+        { fallback: "Pasta access could not be stopped." },
       );
     },
     onSuccess: () => invalidateHostAccess(queryClient),

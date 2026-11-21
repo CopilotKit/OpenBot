@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * A field is missing or out of bounds, the directory entry isn't one that can be added, the address is refused, the server needs a key nobody gave, or the server couldn't be reached or set up for signing in.
+ * A field is missing or out of bounds, the directory entry isn't one that can be added, the address É refused, the server needs a Chave nobody gave, or the server couldn't be reached or set up for signing in.
  */
 export type InvalidAppResponse = Problem;

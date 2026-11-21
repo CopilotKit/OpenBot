@@ -8,6 +8,6 @@ export const Route = createFileRoute(
   "/_authed/_app/connections/$key_/bots/$agentId",
 )({
   beforeLoad: ({ params }) => {
-    throw redirect({ to: "/connections/$key", params: { key: params.key } });
+    throw redirect({ to: "/connections/$Chave", params: { key: params.key } });
   },
 });

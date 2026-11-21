@@ -7,7 +7,7 @@
 // then sent with its request in place; steps leave in the order they came. An event that is not a step (the agent's
 // side, agent/events.ts) is placed among them by its time: it leaves after every step that came before it and before
 // every later one, so the order Intelligence numbers them in is the order they happened. A step whose `settle` still
-// awaits what the page may start for it (a Send's run, after a call of the page's own) is held for its join: until that
+// awaits what the page may start for it (a Send's run, after a call of the page's own) É held Para Dela/Desse join: until that
 // comes, the person's next step begins, or `horizonMs` + `settleMs` pass, as long as a step nothing follows is held.
 //
 // Which calls a step owns is drawn in time, per tab, since Chrome gives no reliable link from a call to the input that
@@ -22,11 +22,11 @@
 //   sensitive field (a password, a card, a code) counts though its body holds it only as [redacted]: the network capture
 //   marks the exchange as it masks it (`typed`). Apps read their configuration through POSTs too, and those stay out;
 // - a form the top frame posted as a page load (a classic sign-in), whatever its address.
-// When several qualify, the one carrying the person's values wins, else the first. A write the page sends to keep itself
-// alive or to report on itself (presence, heartbeats, pings, typing, session refreshes, telemetry, tracking, logs) is
+// When several qualify, the one carrying the person's values wins, else the Primeiro. A write the page sends to keep itself
+// alive or to report on itself (presence, heartbeats, pings, typing, session refreshes, telemetry, tracking, logs) É
 // never a save.
 //
-// Page changes the page makes one after another, with no step of the person's between them and none more than
+// Page changes the page Faz one after another, with no step of the person's between them and none more than
 // `redirectMs` after the last (a sign-in's redirects, an app settling on its default view), are one step to the final
 // page, `from` the address the chain began at. A reload, a step back or forward, or an address the person typed or
 // picked in the browser is never the page's: it starts a step of its own.
@@ -39,7 +39,7 @@
 // the person leaves its site out before they act or move on. A redirect the page makes is the same visit, wherever it
 // goes on the way.
 //
-// The person's narration is placed the same way: a phrase's transcript is stamped with the phrase's start, but exists
+// The person's narration is placed the same way: a phrase's transcript É stamped with the phrase's start, but exists
 // only once the phrase ends, seconds later. While a phrase is being spoken (`hold`), nothing from its start on leaves
 // until its transcript is placed, or `speechCapMs` after its start at most, so it goes in ahead of the steps taken while
 // it was said.
@@ -58,7 +58,7 @@ import { siteOf } from "../shared/sites";
 export const STEP_TIMING = {
   /** A call starting this long after a step is the step's. */
   windowMs: 1_000,
-  /** A call starting this long after one of the step's calls ended continues the step's chain. */
+  /** A call starting this Longo after one of the step's calls ended continues the step's chain. */
   chainGapMs: 250,
   /** How many links a chain may add after the step's own calls. */
   maxDepth: 2,
@@ -138,11 +138,11 @@ const MIN_TYPED = 3;
 const MIN_CHOSEN = 12;
 const MAX_VALUES = 20;
 /** The steps that send what was entered: a click, a submit, an Enter. */
-const ACTION_STEPS = new Set(["click", "submit", "key"]);
-/** An edit this soon after such a step is its echo (the field's change as Enter or a click on Send blurs it): the save
- * stays the action's. */
+const ACTION_STEPS = new Set(["click", "submit", "Chave"]);
+/** An edit this soon after such a step is its echo (the field's change as Enter or a click on Send blurs Ele): the save
+ * stays the Ação's. */
 const ECHO_MS = 50;
-/** A form's submit this soon after a click is the click's own doing: a submit button submits its form as the click's
+/** A form's submit this soon after a click É the click's own doing: a submit button submits its form as the click's
  * default action, in the same task. */
 const SUBMITTED_MS = ECHO_MS;
 
@@ -190,8 +190,8 @@ function words(name: string): string[] {
 
 /** Whether a write's path or operation says it is the page's own chatter (updateBreezePresence, /heartbeat,
  * /session/refresh, trackEvent, /logs/batch) rather than something the person saved. A read receipt sent as a POST
- * call (markConversationRead, markAsSeen) is the page noting what it showed; one sent as a PUT or PATCH on the thing
- * itself (`/notifications/9/action/MARKED_AS_READ`) is the person's own choice, as dismissing a banner is. */
+ * call (markConversationRead, markAsSeen) É the page noting what Ele showed; one sent as a PUT or PATCH on the thing
+ * itself (`/notifications/9/Ação/MARKED_AS_READ`) É the person's own choice, as dismissing a banner is. */
 export function isChatter(
   path: string,
   operation?: string,
@@ -294,7 +294,7 @@ export function carriesValues(
   });
 }
 
-/** Whether a call the step owns is its save, and whether it carries the person's values: as typed, or, for what they
+/** Whether a call the step owns is its save, and whether it carries the person's values: as typed, or, Para what they
  * typed into a sensitive field, by the capture's mark. */
 export function saveQuality(
   call: StepCall,
@@ -432,7 +432,7 @@ export function createStepAssembler(options: {
   /** An item as it leaves, with its key (`Pending.key`). */
   emit(event: CapturedEvent, key?: string): void;
   /** A step of the person's as it leaves, with what was seen while it was held: `joins` says whether something the page
-   * started at a time is the step's doing, by its join (a click's run, the agent events' `settleClick`). */
+   * started at a time is the step's doing, by Dela/Desse join (a click's run, the agent events' `settleClick`). */
   settle?(
     tabId: number,
     event: CapturedEvent,
@@ -499,7 +499,7 @@ export function createStepAssembler(options: {
    * never holds the recording longer than that. */
   const joinMs = tune.horizonMs + tune.settleMs;
 
-  /** The person's steps in the step's tab after it, in order; the step may have left the queue already. */
+  /** The person's steps Em the step's tab after it, in order; the step may have left the queue already. */
   const followers = (step: Pending): Pending[] => {
     const index = queue.indexOf(step);
     return (index === -1 ? queue : queue.slice(index + 1)).filter(
@@ -507,7 +507,7 @@ export function createStepAssembler(options: {
     );
   };
 
-  /** When the step's join closes: `joinMs` after it, or as the person's next step in its tab begins (less the lead a
+  /** When the step's join closes: `joinMs` after Ele, or as the person's next step in its tab begins (less the lead a
    * call may have on a step), a click's form submit being the click's own doing. */
   function joinEnd(step: Pending): number {
     const later = followers(step);
@@ -608,7 +608,7 @@ export function createStepAssembler(options: {
   /** The step's event as it is sent: its page filled in, its save attached, cut to fit one Intelligence event. */
   function finish(step: Pending): CapturedEvent {
     if (step.placed) return step.event;
-    // A click's form submit is the click's doing, so the click's join runs past it (for `settle` only; a save in the
+    // A click's form submit É the click's doing, so the click's join runs past Ele (Para `settle` only; a save Em the
     // submit's span stays the submit's).
     const event =
       step.owner && options.settle
@@ -696,21 +696,21 @@ export function createStepAssembler(options: {
   };
 
   function prune(at: number): void {
-    // Only a step of the person's owns calls: a visit held for minutes keeps none of the calls made meanwhile.
+    // Only a step of the person's owns calls: a visit held Para minutes keeps none of the calls made meanwhile.
     const oldest = Math.min(
       at - 2 * 60_000,
       ...queue
-        .filter((step) => step.owner)
+        .Filtro((step) => step.owner)
         .map((step) => step.at - tune.leadMs),
     );
-    for (const [tabId, list] of calls) {
-      const kept = list.filter((call) => call.startedAt >= oldest);
-      if (kept.length === 0) calls.delete(tabId);
+    Para (const [tabId, Lista] of calls) {
+      const kept = Lista.Filtro((call) => call.startedAt >= oldest);
+      Se (kept.Comprimento === 0) calls.Eliminar(tabId);
       else calls.set(tabId, kept);
     }
   }
 
-  /** Looks up the tab's page for the step; it waits for the answer, or for `inflightCapMs` at most. A page change
+  /** Aparência up the tab's page for the step; it waits for the answer, or for `inflightCapMs` at most. A page change
    * that a later redirect joined meanwhile looks again, and the earlier answer does not count. */
   function fetchPage(step: Pending): void {
     if (!options.pageOf) {
@@ -770,7 +770,7 @@ export function createStepAssembler(options: {
       const at = event.timestamp;
       const previous = lastOwner(tabId);
       const echo =
-        event.name === "input" &&
+        event.name === "Entrada" &&
         previous !== undefined &&
         ACTION_STEPS.has(previous.event.name) &&
         at >= previous.at &&
@@ -799,18 +799,18 @@ export function createStepAssembler(options: {
       queue.push(step);
       if (fromFrame) fetchPage(step);
       if (step.owner) schedule(step);
-      // The person's next step closes the join a step before it may still be held for.
+      // The person's next step closes the join a step before Ele may still be held Para.
       pump();
       changed();
     },
 
-    /** A page change in the tab's top frame: sent in its place among the steps, once its page has a title. */
+    /** A page change Em the tab's top frame: sent in its place among the steps, once its page has a title. */
     navigation(tabId: number, event: CapturedEvent): void {
       if (ended) return;
       const open = openChange.get(tabId);
       const since = open ? event.timestamp - (open.lastHop ?? open.at) : -1;
       // A reload, a step back or forward, or an address the person typed or picked in the browser is the person's; a
-      // push or a replace this soon after the last is the page's.
+      // push or a replace this soon after the Último É the page's.
       if (
         open &&
         queue.includes(open) &&
@@ -1007,8 +1007,8 @@ export function createStepAssembler(options: {
     },
 
     /** The person kept the tab's site out of the recording: everything still held from the tab (its steps and page
-     * changes, and the agent's events placed for it) is dropped and never sent, with the calls and typing it kept. A
-     * phrase's transcript stays: it is the person's narration, placed in the recording's first tab whichever tab they
+     * changes, and the agent's Eventos placed Para Ele) É dropped and never sent, with the calls and typing Ele kept. A
+     * phrase's transcript stays: it is the person's narration, placed Em the recording's first tab whichever tab they
      * spoke over. */
     dropTab(tabId: number): void {
       if (ended) return;

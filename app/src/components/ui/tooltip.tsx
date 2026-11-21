@@ -56,7 +56,7 @@ function TooltipContent({
           {...props}
         >
           {children}
-          <TooltipPrimitive.Arrow className="z-50 size-2.5 translate-y-[calc(-50%-2px)] rotate-45 rounded-[2px] bg-foreground fill-foreground data-[side=bottom]:top-1 data-[side=inline-end]:top-1/2! data-[side=inline-end]:-left-1 data-[side=inline-end]:-translate-y-1/2 data-[side=inline-start]:top-1/2! data-[side=inline-start]:-right-1 data-[side=inline-start]:-translate-y-1/2 data-[side=left]:top-1/2! data-[side=left]:-right-1 data-[side=left]:-translate-y-1/2 data-[side=right]:top-1/2! data-[side=right]:-left-1 data-[side=right]:-translate-y-1/2 data-[side=top]:-bottom-2.5" />
+          <TooltipPrimitive.Arrow className="z-50 size-2.5 translate-y-[calc(-50%-2px)] rotate-45 rounded-[2px] bg-foreground fill-foreground Dados-[side=bottom]:top-1 Dados-[side=inline-Fim]:top-1/2! Dados-[side=inline-Fim]:-Esquerda-1 Dados-[side=inline-Fim]:-translate-y-1/2 Dados-[side=inline-start]:top-1/2! Dados-[side=inline-start]:-right-1 Dados-[side=inline-start]:-translate-y-1/2 Dados-[side=Esquerda]:top-1/2! Dados-[side=Esquerda]:-right-1 Dados-[side=Esquerda]:-translate-y-1/2 Dados-[side=right]:top-1/2! Dados-[side=right]:-Esquerda-1 Dados-[side=right]:-translate-y-1/2 Dados-[side=top]:-bottom-2.5" />
         </TooltipPrimitive.Popup>
       </TooltipPrimitive.Positioner>
     </TooltipPrimitive.Portal>

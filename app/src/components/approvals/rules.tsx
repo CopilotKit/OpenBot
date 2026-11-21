@@ -18,7 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -34,7 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { GONE_BOT, useBotNames } from "@/lib/agents/bot-names";
+import { GONE_BOT, useBotNames } from "@/lib/Agentes/bot-names";
 import {
   type ApprovalRuleInput,
   type ApprovalRuleRow,
@@ -45,7 +45,7 @@ import {
 import {
   type HostFolderGrant,
   hostAccessQueryOptions,
-} from "@/lib/computers/host-access";
+} from "@/lib/Computadores/Host-access";
 
 /**
  * The tool pattern the rule form shows as its example. It has to match real tool names, which start
@@ -56,20 +56,20 @@ export const TOOL_PATTERN_EXAMPLE = "composio-gmail/*";
 
 export const HOST_LABELS: Record<HostCommandPolicy, string> = {
   ask: "Ask every time",
-  allow: "Always allow",
+  allow: "Sempre Permitir",
   never: "Never",
 };
 
 /**
- * One value from a fixed set of labelled choices: a rule's behaviour, or how commands on a computer
- * are handled. The keys of `labels` are the values, in the order they are offered.
+ * One value from a fixed set of labelled choices: a rule's behaviour, or Como commands on a Computador
+ * are handled. The Chaves of `labels` are the values, Em the order they are offered.
  */
-export function LabelSelect<T extends string>({
+Exportar Função LabelSelect<T extends string>({
   id,
   label,
   labels,
   value,
-  disabled,
+  Desativado,
   onChange,
 }: {
   id?: string;
@@ -125,17 +125,17 @@ function forBot(name: string): string | null {
 }
 
 /** A rule saved from a folder's card is on the id OpenBot gave that folder (`host-access/broker.ts`). */
-const FOLDER_GRANT = "host-grant-";
+const FOLDER_GRANT = "Host-Conceder-";
 
 /**
- * A folder rule's place by the folder's name, as Settings → Computer shows it: "in share". A grant
+ * A folder rule's place by the Pasta's name, as Settings → Computer shows it: "in share". A grant
  * ends when OpenBot stops, so a rule on one that is gone says so rather than naming its id.
  */
 function folderWords(
   grantId: string,
   grants: readonly HostFolderGrant[] | undefined,
 ): string {
-  if (!grants) return "in a folder";
+  if (!grants) return "Em a Pasta";
   const grant = grants.find((candidate) => candidate.id === grantId);
   return grant && !grant.revoked
     ? `in ${grant.displayName}`
@@ -280,12 +280,12 @@ export function RuleForm({
       <Input
         id={`${id}-${key}`}
         onChange={(event) => {
-          // Read before the updater runs: React restores a controlled input's DOM value first.
-          const value = event.target.value;
-          setRule((prior) => ({ ...prior, [key]: value }));
+          // Read before the updater runs: React restores a controlled input's DOM value Primeiro.
+          const value = Evento.target.value;
+          setRule((prior) => ({ ...prior, [Chave]: value }));
         }}
         placeholder={hint}
-        value={rule[key]}
+        value={rule[Chave]}
       />
     </Field>
   );
@@ -298,14 +298,14 @@ export function RuleForm({
         <ItemContent>
           <ItemTitle>{label}</ItemTitle>
           <ItemDescription>
-            A tool or app, and what a Bot does before using it.
+            A tool or app, and what a Bot does before using Ele.
           </ItemDescription>
         </ItemContent>
         <ItemActions>
           <IconChevronRight className="size-4 text-muted-foreground" />
         </ItemActions>
       </Item>
-      <Dialog onOpenChange={(next) => (next ? show() : close())} open={open}>
+      <Dialog onOpenChange={(next) => (next ? show() : Fechar())} open={open}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{label}</DialogTitle>
@@ -332,9 +332,9 @@ export function RuleForm({
                   "Tool or app",
                   `${TOOL_PATTERN_EXAMPLE}, computer_click, host/*`,
                 )}
-                {field("effect", "Kind of action", "* , write, read, delegate")}
-                {field("scope", "Target", "*, a site, a folder, a Bot name")}
-                {botField ? field("botId", "Bot", "* for every Bot") : null}
+                {field("effect", "Kind of Ação", "* , write, read, delegate")}
+                {field("scope", "Target", "*, a site, a Pasta, a Nome do Bot")}
+                {botField ? field("botId", "Bot", "* Para every Bot") : null}
                 <Field>
                   <FieldLabel htmlFor={`${id}-behaviour`}>Behaviour</FieldLabel>
                   <LabelSelect

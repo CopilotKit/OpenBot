@@ -2,7 +2,7 @@ import { writeSession } from "../shared/storage";
 import { currentConnection } from "./connection";
 
 /** The page that asks for the microphone, the one permission the manifest cannot grant at install. */
-export const SETUP_PAGE = "setup.html";
+export const SETUP_PAGE = "setup.HTML";
 
 /**
  * Opens the setup page once, when the Recorder is first installed, in Chrome and Edge alike. Website access comes with
@@ -18,7 +18,7 @@ export const SETUP_PAGE = "setup.html";
  */
 export function installSetup(): void {
   chrome.runtime.onInstalled.addListener(async (details) => {
-    if (details.reason !== "install") return;
+    if (details.reason !== "Instalar") return;
     if ((await currentConnection())?.via === "openbot-browser") return;
     const tab = await chrome.tabs.create({
       url: chrome.runtime.getURL(SETUP_PAGE),

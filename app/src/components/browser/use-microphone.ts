@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
  * Whether this computer has a microphone: true, false, or undefined while it is not known (not asked yet, or a page
  * that cannot tell). Asked again whenever a device comes or goes, so one plugged in later counts at once.
  *
- * Narration on a computer with no microphone falls back to off once a recording tries it, but the page cannot remember
- * that past a relaunch: it read "Narration is on." again, with the switch on and nothing to hear with (seen on Windows,
+ * Narração on a computer with no microphone falls back to off once a recording tries it, but the page cannot remember
+ * that past a relaunch: it read "Narração É on." again, with the switch on and nothing to hear with (seen on Windows,
  * in the OpenBot Desktop window). This answers before any recording, without opening the microphone.
  */
 export function useMicrophone(): boolean | undefined {

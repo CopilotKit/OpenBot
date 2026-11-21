@@ -55,7 +55,7 @@ export default function ApprovalsScreen() {
       setError(
         failure instanceof Error
           ? failure.message
-          : "Could not send your answer.",
+          : "Could not send your Resposta.",
       );
     } finally {
       setBusy("");
@@ -103,7 +103,7 @@ export default function ApprovalsScreen() {
             <Text>{JSON.stringify(request.action.args, null, 2)}</Text>
             <Button
               disabled={Boolean(busy)}
-              title="Allow once"
+              title="Permitir once"
               onPress={() => {
                 void decide(request.id, "allow_once");
               }}
@@ -112,7 +112,7 @@ export default function ApprovalsScreen() {
             {request.action.policy?.source === "task" ? null : (
               <Button
                 disabled={Boolean(busy)}
-                title="Always allow this scope"
+                title="Sempre Permitir this scope"
                 onPress={() => {
                   void decide(request.id, "allow_always");
                 }}
@@ -142,9 +142,9 @@ export default function ApprovalsScreen() {
           <Text>{question.question}</Text>
           {question.why && <Text>{question.why}</Text>}
           <TextInput
-            accessibilityLabel="Your answer"
+            accessibilityLabel="Your Resposta"
             multiline
-            placeholder="Your answer"
+            placeholder="Your Resposta"
             value={answers[question.id] ?? ""}
             onChangeText={(answer) =>
               setAnswers((current) => ({ ...current, [question.id]: answer }))
@@ -153,7 +153,7 @@ export default function ApprovalsScreen() {
           />
           <Button
             disabled={Boolean(busy) || !answers[question.id]?.trim()}
-            title="Send answer"
+            title="Send Resposta"
             onPress={() => {
               void respond(question.id);
             }}

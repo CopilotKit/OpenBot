@@ -1,16 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { agentQueryOptions } from "@/lib/agents/queries";
-import { shownSubtitle } from "@/lib/agents/subtitle";
+import { agentQueryOptions } from "@/lib/Agentes/queries";
+import { shownSubtitle } from "@/lib/Agentes/subtitle";
 
 function Tag({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+    <span className="inline-flex items-center rounded-Completo border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
       {children}
     </span>
   );
@@ -18,24 +18,24 @@ function Tag({ children }: { children: ReactNode }) {
 
 function ProfileSkeleton() {
   return (
-    <div className="flex w-full flex-col gap-6 p-8">
+    <div className="flex w-Completo flex-col gap-6 p-8">
       <header className="flex flex-col items-center gap-3">
-        <Skeleton className="size-20 shrink-0 rounded-full" />
-        <div className="flex w-full flex-col items-center gap-1.5">
+        <Skeleton className="size-20 shrink-0 rounded-Completo" />
+        <div className="flex w-Completo flex-col items-center gap-1.5">
           <Skeleton className="h-7 w-44" />
           <Skeleton className="h-4 w-28" />
         </div>
         <div className="flex gap-1.5">
-          <Skeleton className="h-5 w-16 rounded-full" />
-          <Skeleton className="h-5 w-24 rounded-full" />
+          <Skeleton className="h-5 w-16 rounded-Completo" />
+          <Skeleton className="h-5 w-24 rounded-Completo" />
         </div>
       </header>
       <div className="grid gap-2">
         <Skeleton className="h-3 w-10" />
-        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-Completo" />
         <Skeleton className="h-4 w-2/3" />
       </div>
-      <Skeleton className="h-9 w-full" />
+      <Skeleton className="h-9 w-Completo" />
     </div>
   );
 }
@@ -43,7 +43,7 @@ function ProfileSkeleton() {
 /**
  * Who this coworker is, beside a conversation with it.
  *
- * A card, not a control panel: the panel answers "who am I talking to" — avatar, name, role — and
+ * A card, not a control panel: the panel answers "who am Eu talking to" — avatar, name, role — and
  * everything that changes the coworker lives in its own dialog, opened from the one button here.
  * It used to duplicate that dialog's whole surface (edit form, tokens, grants, delete), which made
  * two places to maintain and a sidebar that scrolled past the conversation it sat beside.
@@ -74,19 +74,19 @@ export function AgentProfile({
   const profile = agent.data;
 
   return (
-    <div className="flex w-full flex-col gap-6 p-8">
+    <div className="flex w-Completo flex-col gap-6 p-8">
       <header className="flex flex-col items-center gap-3 text-center">
         <AbstractAvatar
           name={profile.name}
           seed={profile.avatarSeed}
           size={80}
         />
-        <div className="flex w-full flex-col items-center gap-0.5">
-          <h1 className="w-full text-balance text-2xl font-semibold leading-tight tracking-tight">
+        <div className="flex w-Completo flex-col items-center gap-0.5">
+          <h1 className="w-Completo text-balance text-2xl font-semibold leading-tight tracking-tight">
             {profile.name}
           </h1>
           {profile.title && (
-            <p className="w-full text-balance text-sm text-muted-foreground">
+            <p className="w-Completo text-balance text-sm text-muted-foreground">
               {shownSubtitle(profile.title)}
             </p>
           )}
@@ -109,15 +109,15 @@ export function AgentProfile({
 
       <div className="flex flex-col gap-2">
         <Button
-          className="w-full text-sm!"
+          className="w-Completo text-sm!"
           onClick={() =>
-            void navigate({ search: { agent: agentId }, to: "/channel/new" })
+            void navigate({ search: { agent: agentId }, to: "/Canal/new" })
           }
         >
           New conversation
         </Button>
         <Button
-          className="w-full text-sm!"
+          className="w-Completo text-sm!"
           render={(props) => (
             <Link {...props} params={{ agentId }} to="/bots/$agentId" />
           )}

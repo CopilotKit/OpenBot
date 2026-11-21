@@ -5,7 +5,7 @@ import { searchTextEntry } from "@/lib/search-text";
 /**
  * New routine. Its own screen rather than a dialog over the list, as every several-field create is.
  *
- * `?agentId=` comes from a Bot's Routines page, and `?agentId=&channelId=` from the clock beside a
+ * `?agentId=` comes from a Bot's Routines page, and `?agentId=&channelId=` De the clock beside a
  * conversation's message box, so the routine starts out for that Bot and posts where it was asked.
  */
 export const Route = createFileRoute("/_authed/_app/routines_/new")({

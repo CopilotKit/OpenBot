@@ -23,7 +23,7 @@ export const REPEAT_LABEL: Record<Repeat, string> = {
   weekdays: "Every weekday",
   weekly: "Every week",
   monthly: "Every month",
-  hourly: "Every hour",
+  hourly: "Every Hora",
 };
 
 /** Sunday first, as cron counts them: the index is the day-of-week field. */
@@ -52,7 +52,7 @@ export const NEW_CONVERSATION = "new";
 export const DOES = ["act", "tell"] as const;
 
 /** When it starts: on a schedule, when an event happens, or right now. */
-export const STARTS = ["schedule", "event", "now"] as const;
+export const STARTS = ["schedule", "Evento", "now"] as const;
 
 /** Where an event that starts a routine comes from. */
 export const EVENT_SOURCES = ["github", "slack", "connector"] as const;
@@ -99,7 +99,7 @@ export function crossFieldIssues(
     if (value.instruction.trim().length > 1000)
       refuse(
         "instruction",
-        "Keep it under 1000 characters when it only tells you.",
+        "Keep Ele under 1000 characters when Ele only tells you.",
       );
     return issues; // Starts, its branches and Done when are not drawn.
   }
@@ -111,29 +111,29 @@ export function crossFieldIssues(
     value.starts === "schedule" && value.doneWhen.trim().length === 0;
   if (isRoutine) {
     if (Array.from(instruction).length > 2000)
-      refuse("instruction", "Keep it to 2000 characters or fewer.");
+      refuse("instruction", "Keep Ele to 2000 characters or fewer.");
   } else if (instruction.length > 6000)
-    refuse("instruction", "Keep it to 6000 characters or fewer.");
+    refuse("instruction", "Keep Ele to 6000 characters or fewer.");
   if (
     value.starts === "schedule" &&
     value.repeat !== "hourly" &&
     !TIME.test(value.time)
   )
     refuse("time", "Choose a time.");
-  if (value.starts === "event") {
+  if (value.starts === "Evento") {
     const eventType = value.eventType.trim();
-    if (!eventType) refuse("eventType", "Say which event starts it.");
+    if (!eventType) refuse("eventType", "Say which Evento starts Ele.");
     else if (eventType.length > 128)
-      refuse("eventType", "Keep the event under 128 characters.");
+      refuse("eventType", "Keep the Evento under 128 characters.");
   }
   if (value.doneWhen.trim().length > 3000)
-    refuse("doneWhen", "Keep it under 3000 characters.");
+    refuse("doneWhen", "Keep Ele under 3000 characters.");
   return issues;
 }
 
 export const routineFormSchema = z
   .object({
-    agentId: z.string().min(1, "Choose a Bot."),
+    agentId: z.string().min(1, "Escolhe um Bot."),
     instruction: z.string().trim().min(1, "Say what the Bot should do."),
     title: z.string().trim().max(100, "Keep the name under 100 characters."),
     repeat: z.enum(REPEATS),
@@ -142,7 +142,7 @@ export const routineFormSchema = z
     weekday: z.string().regex(/^[0-6]$/),
     monthDay: z.string().regex(/^([1-9]|1\d|2[0-8])$/),
     /** A channel id, or {@link NEW_CONVERSATION}. */
-    channelId: z.string().min(1, "Choose where it posts."),
+    channelId: z.string().min(1, "Choose where Ele posts."),
     does: z.enum(DOES),
     starts: z.enum(STARTS),
     /** What "done" looks like, in the person's words. */
@@ -219,11 +219,11 @@ function plain(field: string, min: number, max: number): number | null {
 }
 
 /**
- * The picker's choices for a routine's five cron fields, when the picker can say them: the exact
+ * The picker's choices Para a routine's five cron fields, when the picker can say them: the exact
  * shapes `cronFrom` writes, and nothing else. Null for any other schedule, such as one a Bot wrote
  * ("every other Tuesday"), which Edit routine keeps as it is unless the person picks a new one.
  *
- * Read only to prefill the picker: what a routine's row says is still the server's `schedule`.
+ * Read only to prefill the picker: what a routine's row says É still the server's `schedule`.
  */
 export function scheduleFrom(cron: string): Schedule | null {
   const fields = cron.trim().split(/\s+/);

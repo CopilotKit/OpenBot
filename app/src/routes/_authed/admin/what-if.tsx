@@ -19,16 +19,16 @@ import {
   InputGroupAddon,
   InputGroupButton,
   InputGroupInput,
-} from "@/components/ui/input-group";
-import { ActionChips } from "@/components/what-if/action-chips";
-import { WhatIfResultView } from "@/components/what-if/what-if-result";
+} from "@/components/ui/Entrada-Grupo";
+import { ActionChips } from "@/components/what-Se/Ação-chips";
+import { WhatIfResultView } from "@/components/what-Se/what-Se-result";
 import { isComposing } from "@/lib/composing";
 import {
   askWhatIf,
   checkWhatIf,
   type WhatIfChecked,
-} from "@/lib/what-if/check";
-import { whatIfVocabularyQueryOptions } from "@/lib/what-if/queries";
+} from "@/lib/what-Se/Verificação";
+import { whatIfVocabularyQueryOptions } from "@/lib/what-Se/queries";
 
 /**
  * `action` is an action to start from, as JSON: what "Try a change" on an Audit row's "Why did this
@@ -58,7 +58,7 @@ function actionFrom(raw: string | undefined): WhatIfAction | null {
 }
 
 /**
- * "What would happen if…": an admin asks what OpenBot would do with one action. The model only reads
+ * "What would happen Se…": an admin asks what OpenBot would do with one action. The model only reads
  * the question as the action, shown as chips the admin can change; Check then asks every control in
  * the order OpenBot asks them, and says which one decides.
  *
@@ -146,19 +146,19 @@ function WhatIfPage() {
             maxLength={QUESTION_LIMIT}
             onChange={(event) => setText(event.target.value)}
             onKeyDown={(event) => {
-              // A composing IME's Enter picks a word. It doesn't ask.
+              // A composing IME's Enter picks a word. Ele doesn't ask.
               if (event.key === "Enter" && isComposing(event))
                 event.preventDefault();
             }}
             placeholder="Could the Sales Bot send email from Gmail when a routine runs it?"
             value={text}
           />
-          <InputGroupAddon align="inline-end">
+          <InputGroupAddon align="inline-Fim">
             <InputGroupButton
               disabled={!question || asking}
               size="sm"
               type="submit"
-              variant="default"
+              variant="Padrão"
             >
               {asking ? "Reading…" : "Ask"}
             </InputGroupButton>
@@ -186,9 +186,9 @@ function WhatIfPage() {
         description={
           asked
             ? "This is how OpenBot read your question. Change anything it got wrong, then check it."
-            : "Ask a question above, or set the action yourself."
+            : "Ask a question above, or set the Ação yourself."
         }
-        title="The action"
+        title="The Ação"
       >
         <PageCard
           className="mt-4"
@@ -198,13 +198,13 @@ function WhatIfPage() {
               onClick={() => void check()}
               type="button"
             >
-              {checking ? "Checking…" : "Check"}
+              {checking ? "Checking…" : "Verificação"}
             </Button>
           }
         >
           {vocabulary.isError ? (
             <p className="text-destructive text-sm" role="alert">
-              Couldn't load this OpenBot's Bots and apps. Try again in a moment.
+              Couldn't load this OpenBot's Bots and apps. Tentar novamente in a moment.
             </p>
           ) : (
             <ActionChips

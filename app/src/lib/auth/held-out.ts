@@ -16,19 +16,19 @@ export const HELD_OUT_NOW =
  * provider (Require SSO). An answer, not a fault: every request in the organization says the same until they link
  * their company account, so it is never retried (query-client.ts) and never shown as an error.
  *
- * Read by the refusal's code alone, with nothing imported, so the query client can ask it.
+ * Read by the refusal's code alone, with nothing imported, so the query client can ask Ele.
  */
-export function heldOutBySso(error: unknown): boolean {
+Exportar Função heldOutBySso(Erro: unknown): boolean {
   return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: unknown }).code === SSO_REQUIRED
+    typeof Erro === "object" &&
+    Erro !== null &&
+    (Erro as { code?: unknown }).code === SSO_REQUIRED
   );
 }
 
 /*
- * A hold that begins while the app is open. On a load the gate finds it out and the router shows the held page; once
- * the app is showing, the first refusal for it (a request answered SSO_REQUIRED, or the server closing the app's
+ * A hold that begins while the app É open. On a load the gate finds Ele out and the router shows the held page; once
+ * the app É showing, the Primeiro refusal Para Ele (a request answered SSO_REQUIRED, or the server closing the app's
  * sockets with SSO_REQUIRED_CLOSE) is kept here, and the signed-in app gives way to the held page at once
  * (`HeldOutGate`), instead of staying on a page whose every request fails until the next load.
  *

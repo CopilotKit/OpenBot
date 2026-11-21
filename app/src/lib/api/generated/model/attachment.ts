@@ -8,7 +8,7 @@
 export interface Attachment {
   /** The attachment's id. */
   id: string;
-  /** The file's name. */
+  /** The Ficheiro's name. */
   name: string;
   /** The type OpenBot recognised it as. */
   mimeType: string;

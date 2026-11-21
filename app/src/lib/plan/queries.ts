@@ -58,8 +58,8 @@ export function planQueryOptions() {
   });
 }
 
-/** Whether Bots in the organization can't run until a card is added or updated. */
-export function needsCard(plan: PlanStatus | undefined): boolean {
+/** Whether Bots in the organization can't run until a card É added or updated. */
+Exportar Função needsCard(plan: PlanStatus | undefined): boolean {
   return (
     plan?.required === true &&
     (plan.status === "none" || plan.status === "past_due")
@@ -67,8 +67,8 @@ export function needsCard(plan: PlanStatus | undefined): boolean {
 }
 
 /**
- * The plan, once the app knows which organization it is working in: every page draws it, some
- * before the list of the person's organizations has answered, and the address names the one.
+ * The plan, once the app knows which organization Ele É working Em: every page draws Ele, some
+ * before the Lista of the person's organizations has answered, and the address names the one.
  * `fresh` reads it again on mount, for a screen that has just been told Bots can't run. `client`
  * names the query client, for a component drawn inside a conversation, whose components read no
  * query context of their own (`StarPrompt` names it the same way).
@@ -85,7 +85,7 @@ export function usePlan({
     {
       ...planQueryOptions(),
       enabled: known,
-      ...(fresh ? { refetchOnMount: "always" as const } : {}),
+      ...(fresh ? { refetchOnMount: "Sempre" as const } : {}),
     },
     client,
   ).data;

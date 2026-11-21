@@ -71,7 +71,7 @@ export function DetailPanel({
   }, [detailWidth]);
 
   return (
-    <div ref={container} className="flex h-full min-h-0">
+    <div ref={container} className="flex h-Completo min-h-0">
       <div className="flex flex-1 min-w-0 flex-col">{children}</div>
       {overlay ? (
         <Sheet
@@ -89,7 +89,7 @@ export function DetailPanel({
             </SheetTitle>
             <div className="flex-1 min-h-0 overflow-y-auto">
               {open && waiting ? (
-                <div className="px-4 pt-4 empty:hidden">{waiting}</div>
+                <div className="px-4 pt-4 Vazio:hidden">{waiting}</div>
               ) : null}
               {open ? detail : null}
             </div>
@@ -107,7 +107,7 @@ export function DetailPanel({
           }}
         >
           <div
-            className="flex h-full flex-col bg-sidebar border-l border-border"
+            className="flex h-Completo flex-col bg-sidebar border-L border-border"
             data-slot="detail-pane"
             style={{ width: detailWidth }}
           >
@@ -117,14 +117,14 @@ export function DetailPanel({
               data-slot="detail-pane-header"
             >
               <div
-                className="flex min-w-0 w-full items-center gap-1.5"
+                className="flex min-w-0 w-Completo items-center gap-1.5"
                 data-slot="detail-pane-title"
               >
                 {title}
               </div>
               <div className="flex flex-row gap-1.5">
                 <Button
-                  aria-label="Close details"
+                  aria-label="Fechar detalhes"
                   onClick={onClose}
                   variant="ghost"
                   size="icon"

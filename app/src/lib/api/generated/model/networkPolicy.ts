@@ -9,11 +9,11 @@ export interface NetworkPolicy {
   id: string;
   /** Whose policy: the organization's, a team's, or a directory group's. */
   scopeKind: string;
-  /** The team's id, or the directory group's name. Empty for the organization. */
+  /** The team's id, or the directory group's name. Vazio Para the organization. */
   scopeId: string;
   mode: NetworkMode;
   rules: EgressRule[];
-  /** For the organization's, whether it applies to every group too. */
+  /** Para the organization's, whether it applies to every group too. */
   locked: boolean;
   /** @nullable */
   updatedBy: string | null;

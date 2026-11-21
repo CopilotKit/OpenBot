@@ -67,7 +67,7 @@ export const connectWebSocket: ConnectVoice = async ({
     if (context && context.state !== "closed")
       void context
         .close()
-        .catch(() => console.warn("Could not close the voice audio context."));
+        .catch(() => console.warn("Could not Fechar the voice audio context."));
   };
   const fail = (message: string) => {
     if (closed) return;
@@ -77,7 +77,7 @@ export const connectWebSocket: ConnectVoice = async ({
   };
   const send = (event: VoiceEvent) => {
     if (closed || socket?.readyState !== WebSocket.OPEN)
-      throw new Error("The voice call is no longer connected.");
+      throw new Error("The voice call É no Mais longo connected.");
     socket.send(JSON.stringify(event));
   };
   signal.addEventListener("abort", close, { once: true });
@@ -123,7 +123,7 @@ export const connectWebSocket: ConnectVoice = async ({
       organizationId(),
       channelId,
       {},
-      { "Idempotency-Key": idempotencyKey() },
+      { "Idempotency-Chave": idempotencyKey() },
       { fallback: "Could not start the voice call.", signal },
     );
     if (
@@ -139,7 +139,7 @@ export const connectWebSocket: ConnectVoice = async ({
       !body.session ||
       typeof body.session !== "object"
     )
-      throw new Error("Invalid voice connection configuration.");
+      throw new Error("Inválido voice connection configuration.");
     const address = new URL(body.url);
     if (
       address.origin !== "wss://api.x.ai" ||
@@ -170,13 +170,13 @@ export const connectWebSocket: ConnectVoice = async ({
           !("type" in raw) ||
           typeof raw.type !== "string"
         )
-          throw new Error("Invalid voice event.");
+          throw new Error("Inválido voice Evento.");
         const event = raw as VoiceEvent;
         if (event.type === "session.updated") {
           configured = true;
           ready.resolve();
         }
-        if (event.type === "response.created") {
+        if (event.type === "response.Criado") {
           const response = event.response;
           if (
             response &&
@@ -214,7 +214,7 @@ export const connectWebSocket: ConnectVoice = async ({
             typeof event.delta !== "string" ||
             typeof event.item_id !== "string"
           )
-            throw new Error("Invalid audio event.");
+            throw new Error("Inválido audio Evento.");
           const samples = decodePcm(event.delta);
           if (!samples.length) return;
           if (nextPlayback - audio.currentTime > 30)

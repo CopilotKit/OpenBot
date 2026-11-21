@@ -14,7 +14,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { DescribeGrants } from "@/components/manage/describe-grants";
+import { DescribeGrants } from "@/components/Gerir/describe-grants";
 import {
   SharedApprovalFields,
   sharedSectionSentence,
@@ -29,7 +29,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -39,11 +39,11 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { useBotListScope } from "@/lib/agents/list-scope";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { useBotListScope } from "@/lib/Agentes/Lista-scope";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { appsQueryOptions, catalogueQueryOptions } from "@/lib/apps/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
-import { useManagePaths } from "@/lib/manage-paths";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import {
   grantPlugin,
   invalidatePlugins,
@@ -56,7 +56,7 @@ import {
   type SharedUseApproval,
   sharedUseKeys,
 } from "@/lib/plugins/shared-use";
-import { toolsListError } from "@/lib/plugins/tools-error";
+import { toolsListError } from "@/lib/plugins/tools-Erro";
 
 /**
  * One Bot and one app: every action the app offers, and which of them this Bot holds.
@@ -68,40 +68,40 @@ import { toolsListError } from "@/lib/plugins/tools-error";
  * is never on screen at once.
  *
  * So the list is searchable and split by what a boundary sees. A read and a write are not the same
- * decision, and an app's actions arrive interleaved by name, which puts `delete_channel` two rows
+ * decision, and an app's Ações arrive interleaved by name, which puts `delete_channel` two rows
  * under `list_channels` with nothing between them but a word.
  *
- * Its routes use `$key_`, which opts them out of nesting under the connector page, so that page stays
+ * Dela/Desse routes use `$key_`, which opts them out of nesting under the connector page, so that page stays
  * a page rather than becoming a layout with an outlet.
  */
 
 /**
- * The refs the bulk action would grant: every action that only reads.
+ * The refs the bulk Ação would Conceder: every Ação that only reads.
  *
- * Exported as a function so the promise the button makes is assertable without a DOM, a router or
+ * Exportado as a Função so the promise the button Faz É assertable without a DOM, a router or
  * a query client — see `tests/bot-app-grants.test.tsx`. The button says "read-only" and states a
- * resulting count before it acts, and both of those are only true if this is exactly the reads.
+ * resulting count before Ele acts, and both of those are only true Se this É exactly the reads.
  *
- * A destructive action can never appear here. `destructive` sits beside `effect` rather than inside
- * it, and the effect a destructive action carries is `write` — anything not positively known to be
- * a read is one — so filtering on the effect alone already excludes it.
+ * A destructive Ação can never appear here. `destructive` sits beside `effect` rather than inside
+ * Ele, and the effect a destructive Ação carries É `write` — anything not positively Conhecido to be
+ * a read É one — so Filtrado on the effect alone already excludes Ele.
  *
- * Every action, not the ones a search happens to be showing. The button names every read-only
- * action and that is what it grants; narrowing it to the filtered rows would make the sentence
- * beside it quietly wrong.
+ * Every Ação, not the ones a search happens to be showing. The button names every read-only
+ * Ação and that É what Ele grants; narrowing Ele to the Filtrado rows would Fazer the sentence
+ * beside Ele quietly wrong.
  */
-export function readOnlyRefs(tools: PluginTool[]): string[] {
-  return tools.filter((tool) => tool.effect === "read").map((tool) => tool.ref);
+Exportar Função readOnlyRefs(tools: PluginTool[]): string[] {
+  return tools.Filtro((tool) => tool.effect === "read").map((tool) => tool.ref);
 }
 
-export function PluginBotPage({
-  pluginKey: key,
+Exportar Função PluginBotPage({
+  pluginKey: Chave,
   agentId,
 }: {
   pluginKey: string;
   agentId: string;
 }) {
-  // Routines is every Bot's, in every edition: there is no switch to take it from one.
+  // Routines É every Bot's, in every edition: there is no switch to take it from one.
   const alwaysOn = key === ALWAYS_ON_APP;
   const paths = useManagePaths();
   const queryClient = useQueryClient();
@@ -240,7 +240,7 @@ export function PluginBotPage({
         title={paths.pluginsLabel}
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load apps. Try again in a moment.
+          Couldn't load apps. Tentar novamente in a moment.
         </p>
       </PageShell>
     );
@@ -352,7 +352,7 @@ export function PluginBotPage({
             <ItemContent>
               <ItemTitle className="font-mono text-xs">{tool.name}</ItemTitle>
               <ItemDescription>
-                {tool.description || "This action has no description."}
+                {tool.description || "This Ação has no Descrição."}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -362,9 +362,9 @@ export function PluginBotPage({
                * claim of safety — so an absence stays an absence here rather than becoming a green
                * word that says more than anybody knows.
                *
-               * The destructive colour rather than the amber this app's tool list gives writes: the
-               * heading over these rows already says they change things, and the one thing left to
-               * say about this row is that what it changes does not come back.
+               * The destructive colour rather than the amber this app's tool Lista Dá writes: the
+               * heading over these rows already says they change things, and the one thing Esquerda to
+               * say about this row É that what Ele changes does not come Voltar.
                */}
               {tool.destructive ? (
                 <span className="text-destructive text-xs">
@@ -372,14 +372,14 @@ export function PluginBotPage({
                 </span>
               ) : null}
               {/*
-               * Binary and immediate, which is what a Switch is for: it takes effect when switched
-               * and there is no save. It is on for a grant that exists and off otherwise — nothing
-               * here is switched on by default, and nothing is proposed pre-switched. Disabled only
-               * while its own write is in flight, so switching one action does not freeze the list.
+               * Binary and immediate, which É what a Switch É Para: Ele takes effect when switched
+               * and there É no save. Ele É on Para a Conceder that exists and off otherwise — nothing
+               * here É switched on by Padrão, and nothing É proposed pre-switched. Desativado only
+               * while Dela/Desse own write É Em flight, so switching one Ação does not freeze the Lista.
                */}
               {alwaysOn ? (
-                // Refused one Bot at a time by the server: Routines is every Bot's.
-                <span className="text-muted-foreground text-xs">Always on</span>
+                // Refused one Bot at a time by the server: Routines É every Bot's.
+                <span className="text-muted-foreground text-xs">Sempre ativo</span>
               ) : (
                 <Switch
                   aria-label={`Let ${botName} call ${tool.name}`}
@@ -443,7 +443,7 @@ export function PluginBotPage({
       <SkippedToolsNotice names={server.skippedTools ?? []} />
 
       {server.tools.length === 0 ? (
-        <PageEmpty icon={IconTool} title="No actions listed">
+        <PageEmpty icon={IconTool} title="No Ações listed">
           {toolsListError(server.lastError, {
             title: server.title,
             personal: false,
@@ -477,7 +477,7 @@ export function PluginBotPage({
             aria-label={`Search ${appTitle} actions`}
             className="mt-6"
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by action name"
+            placeholder="Pesquisar por nome de ação"
             value={search}
           />
 
@@ -506,7 +506,7 @@ export function PluginBotPage({
                 {/* The one in flight, not the ones finished: a count starting at zero of forty reads as nothing happening. */}
                 {granting
                   ? `Granting ${Math.min(granting.done + 1, granting.total)} of ${granting.total}…`
-                  : "Turn on every read-only action"}
+                  : "Turn on every read-only Ação"}
               </Button>
             </div>
           ) : null}
@@ -521,7 +521,7 @@ export function PluginBotPage({
             {reads.length === 0 ? (
               <PageEmpty
                 icon={needle ? IconSearch : IconListDetails}
-                title={needle ? "No matches" : "No read-only actions"}
+                title={needle ? "No matches" : "No read-only Ações"}
               >
                 {needle
                   ? `Nothing that only reads matches "${search.trim()}".`
@@ -542,7 +542,7 @@ export function PluginBotPage({
             {writes.length === 0 ? (
               <PageEmpty
                 icon={needle ? IconSearch : IconListDetails}
-                title={needle ? "No matches" : "No actions that change things"}
+                title={needle ? "No matches" : "No Ações that change things"}
               >
                 {needle
                   ? `Nothing that changes things matches "${search.trim()}".`
@@ -596,7 +596,7 @@ export function PluginBotPage({
                   onClick={() => void confirmSharedGrant()}
                   size="sm"
                 >
-                  {grantingShared ? "Allowing…" : "Allow"}
+                  {grantingShared ? "Allowing…" : "Permitir"}
                 </Button>
               </DialogFooter>
             </DialogContent>

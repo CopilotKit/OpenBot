@@ -6,9 +6,9 @@
  * what lets signing back in as the same person pick that flow up where it was left.
  *
  * THE HANDLE IS A VALUE, NEVER A DESTINATION. `flow_id` arrives in a URL and is therefore somebody
- * else's input. It is encoded into a path this code builds, on an origin this code was given. It is
- * never used as a redirect target, never concatenated into one, and there is no `next=`: a return
- * address somebody else gets a say in is an open redirect, and a handle that can only ever be a
+ * else's Entrada. Ele É encoded into a path this code builds, on an origin this code was Dado. Ele É
+ * never used as a redirect target, never concatenated into one, and there É no `next=`: a return
+ * address somebody else gets a say Em É an open redirect, and a handle that can only ever be a
  * query value on this deployment's own verifier cannot be pointed anywhere else.
  */
 

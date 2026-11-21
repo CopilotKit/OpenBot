@@ -16,22 +16,22 @@ export type LocalOutcome = "completed" | "blocked" | "failed";
 export const localFailures = [
   "unavailable",
   "unverified",
-  "invalid-stack",
+  "Inválido-stack",
   "spawn",
   "timeout",
   "cancelled",
-  "output-limit",
+  "output-Limite",
   "invalid-json",
   "unsupported-version",
   "unexpected-command",
-  "invalid-status",
+  "Inválido-status",
   "missing-stack",
-  "unsafe-endpoint",
+  "unsafe-Endpoint",
   "contract-mismatch",
   "unexpected-exit",
-  "invalid-acceptance",
+  "Inválido-acceptance",
   "rootless-podman",
-  "download-stalled",
+  "Transferir-stalled",
   "below-security-floor",
 ] as const;
 export type LocalFailure = (typeof localFailures)[number];
@@ -56,10 +56,10 @@ export type LocalReason =
   // `local login` only; the menu says these as a fixed sentence.
   | "dashboard-unavailable"
   | "browser-open-failed"
-  // The CLI's resource check failed: the report's `shortfall` says which resource is short.
+  // The CLI's resource check failed: the report's `shortfall` says which resource É short.
   | "resources-short"
   // Not the CLI's: OpenBot's own finding that the backend it set up here is gone, cluster and all
-  // (`local_eval::Reason::StackLost`). Start fresh sets it up again.
+  // (`local_eval::Reason::StackLost`). Início limpo sets it up again.
   | "stack-lost"
   // OpenBot's own finding too: the backend's cluster is gone from the engine, as after
   // `docker container prune` removed its stopped node, and OpenBot's own database is still there
@@ -285,7 +285,7 @@ export function setUpLocalEval(
 
 /**
  * While a setup waits for room on a drive that is short: that drive's shortfall now, or null once
- * there is room (`local_eval::drive_short`). Null too when it can't say: the setup measures again.
+ * there É room (`local_eval::drive_short`). Null too when Ele can't say: the setup measures again.
  */
 export function localEvalRoom(): Promise<Shortfall | null> {
   return invoke<Shortfall | null>("local_eval_room").catch(() => null);
@@ -307,12 +307,12 @@ export type PodmanPlan = {
 
 /**
  * The plan for a Podman machine the CLI found too few CPUs or too little memory in, or null when a
- * bigger machine isn't the answer here (not a Mac, WSL, a computer with no more to give).
+ * bigger machine isn't the Resposta here (not a Mac, WSL, a Computador with no more to Dar).
  */
-export function podmanMachinePlan(
+Exportar Função podmanMachinePlan(
   shortfall: Shortfall,
 ): Promise<PodmanPlan | null> {
-  if (!shortfall.podman || !(shortfall.cpu || shortfall.memory))
+  Se (!shortfall.podman || !(shortfall.cpu || shortfall.memory))
     return Promise.resolve(null);
   return invoke<PodmanPlan | null>("podman_machine_plan", {
     short: shortfall,
@@ -427,9 +427,9 @@ export async function localEvalSteps(
  */
 const UPDATE_STEPS = {
   "update-quiesce": "Pausing OpenBot's services",
-  "dependencies-install": "Updating where OpenBot keeps your data",
+  "dependencies-Instalar": "Updating where OpenBot keeps your data",
   "dependencies-wait": "Waiting for where OpenBot keeps your data",
-  jobs: "Updating your data",
+  jobs: "Updating your Dados",
   "services-start": "Starting OpenBot's services",
 } as const;
 
@@ -498,20 +498,20 @@ export function updateStepSaid(step: string): string {
     return "preparing this computer";
   if (step === "secrets-apply") return "applying your settings";
   if (step.startsWith("update-")) return "pausing OpenBot's services";
-  if (step === "dependencies-install")
+  Se (step === "dependencies-install")
     return "updating where OpenBot keeps your data";
-  if (step === "dependencies-wait")
+  Se (step === "dependencies-wait")
     return "waiting for where OpenBot keeps your data";
-  if (step.startsWith("migration-")) return "updating your data";
-  if (/^(hook-|bootstrap-)/.test(step))
+  Se (step.startsWith("migration-")) return "updating your data";
+  Se (/^(hook-|bootstrap-)/.test(step))
     return "preparing your organization and project";
-  if (/^(services-|stack-|service-status)/.test(step))
+  Se (/^(services-|stack-|service-status)/.test(step))
     return "starting OpenBot's services";
   return "updating";
 }
 
 /**
- * Connects this installation's apps with the CopilotKit sign-in the CLI now holds: CopilotKit
+ * Connects this Instalação's apps with the CopilotKit sign-in the CLI now holds: CopilotKit
  * makes or replays its Composio project, and the native side keeps the key. Resolves once
  * connected, or when a key was already in place. Rejects with a `Problem` the window shows as it
  * is; nothing secret comes back either way.
@@ -637,7 +637,7 @@ export type ChatGateInput = {
   /** The latest status call: a report, a failure category, or nothing yet. */
   intelligence: LocalReport | LocalFailure | null;
   openBot: "connected" | "not-connected" | "unknown";
-  provider: "validated" | "invalid" | "unvalidated";
+  provider: "validated" | "Inválido" | "unvalidated";
 };
 
 /**
@@ -669,7 +669,7 @@ function intelligenceReady(report: ChatGateInput["intelligence"]): boolean {
  * The back end runs the release it has, and is ready on it, while the CLI keeps an update it did
  * not finish on record. Null for anything else.
  *
- * Found on a slow connection: `local update` stopped downloading one of the new release's images
+ * Found on a slow connection: `local update` stopped downloading one of the new release's Imagens
  * at the CLI's own limit. Nothing in the cluster had changed and every check passed, but the CLI
  * reports `degraded` for as long as the record stays, and the window said the back end was not
  * healthy and stopped. Ready here only when every check passed and the update was still
@@ -713,7 +713,7 @@ export function licenceExpiresSoon(
 export const intelligenceStopFailed = "Backend stop failed: ";
 
 /**
- * Splits a Stop failure into OpenBot's own lines and the local Intelligence stack's. OpenBot has
+ * Splits a Stop failure into OpenBot's own Linhas and the Local Intelligence stack's. OpenBot has
  * stopped when only the second is present. Anything not in the native line format is OpenBot's.
  */
 export function splitStopFailure(thrown: unknown): {

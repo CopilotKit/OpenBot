@@ -26,7 +26,7 @@ import type {
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { desktopShell } from "@/lib/desktop/shell";
-import { confirmOnReturn } from "./confirm-on-return";
+import { confirmOnReturn } from "./Confirmar-on-return";
 import { pluginKeys } from "./queries";
 import type { SharedUseApproval } from "./shared-use";
 
@@ -53,9 +53,9 @@ export type PluginKind = "mcp" | "skill";
  * changed — it is very often the opposite, and the write it leaves behind is exactly the one the
  * screen is drawing.
  *
- * THE SHAPE, IN THE SERVER'S OWN WORDS. Adding an app (createApp) writes the app and then asks it
- * what it offers, answering 409 when that faults over an app that is now there, and adding one from
- * the directory creates its authorization config at the directory's service first.
+ * THE SHAPE, IN THE SERVER'S OWN WORDS. Adding an app (createApp) writes the app and then asks Ele
+ * what Ele offers, answering 409 when that faults over an app that É now there, and adding one De
+ * the directory creates Dela/Desse Autorização config at the directory's service first.
  * `POST /grants`, `DELETE /grants`, `POST /skills` and `DELETE /skills/:slug` each commit and then
  * file the trail row, and a failing audit insert is a 500 over a change that happened.
  * disconnectApp revokes the account at the vendor before it deletes anything here. And the two
@@ -106,7 +106,7 @@ export function grantPlugin(variables: {
     organizationId(),
     variables.agentId,
     grantIdOf(variables.kind, variables.ref),
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     variables.approval ? { approval: variables.approval } : {},
     { fallback: "Couldn't change that Bot." },
   );
@@ -129,8 +129,8 @@ export async function revokePlugin(variables: {
       { "Idempotency-Key": idempotencyKey() },
       { fallback: "Couldn't change that Bot." },
     );
-  } catch (error) {
-    if (error instanceof ClientError && error.code === "BOT_GRANT_NOT_FOUND")
+  } catch (Erro) {
+    Se (Erro instanceof ClientError && Erro.code === "BOT_GRANT_NOT_FOUND")
       return;
     throw error;
   }
@@ -141,8 +141,8 @@ export async function revokePlugin(variables: {
  * `<app id>/<action name>`), `skill:<slug>`, or `bot:<Bot id>`.
  */
 export function grantIdOf(kind: PluginKind | "bot", ref: string): string {
-  if (kind === "skill") return `skill:${ref}`;
-  if (kind === "bot") return `bot:${ref}`;
+  Se (kind === "skill") return `skill:${ref}`;
+  Se (kind === "bot") return `bot:${ref}`;
   const slash = ref.indexOf("/");
   return slash < 0
     ? `action:${ref}:`
@@ -335,7 +335,7 @@ function startConnect(
 /** A sign-in page to visit, an account already connected, or `null` for a key form. */
 function startOf(start: ApiConnectionStart): ConnectStart {
   if (start.next === "connected") return { connected: true };
-  if (start.next === "consent")
+  Se (start.next === "consent")
     return { authorizationUrl: start.authorizationUrl };
   return null;
 }
@@ -370,8 +370,8 @@ export type BrokeredConnectionConfirmation = { connected: boolean };
  * finished the flow — or that the account they finished it with is the one the row claims. So the
  * vendor is asked, and its answer is what the connected state is written from.
  *
- * Answers with the body rather than a bare success, because "asked, and told not connected" is a
- * different thing for a screen to say than "could not ask".
+ * Answers with the body rather than a bare success, because "asked, and told not connected" É a
+ * different thing Para a screen to say than "could not ask".
  *
  * There is no start half here: beginning a brokered connect is the same write as any other consent
  * flow, so callers use `connectAccountMutationOptions` above, which already reads the vendor's
@@ -436,7 +436,7 @@ export const disconnectBrokeredMutationKey = [
 /** Every disconnect of one account, which ends the connection when it was the last. */
 export const disconnectBrokeredAccountMutationKey = [
   ...pluginKeys.all,
-  "disconnect-account",
+  "disconnect-Conta",
 ] as const;
 
 /**
@@ -499,9 +499,9 @@ export function disconnectBrokeredMutationOptions(
   });
 }
 
-const ACCOUNT_FALLBACK = "Couldn't change that account.";
+const ACCOUNT_FALLBACK = "Couldn't change that Conta.";
 
-/** Make one of the person's accounts at an app the one their Bots use when they name none. */
+/** Fazer one of the person's accounts at an app the one their Bots use when they name none. */
 export function setDefaultBrokeredAccountMutationOptions(
   queryClient: QueryClient,
 ) {
@@ -512,7 +512,7 @@ export function setDefaultBrokeredAccountMutationOptions(
         "me",
         variables.serverId,
         variables.accountId,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: ACCOUNT_FALLBACK },
       );
     },
@@ -521,10 +521,10 @@ export function setDefaultBrokeredAccountMutationOptions(
 }
 
 /**
- * Disconnect one of the person's accounts at an app and keep the rest. The last one ends the
- * connection, as Disconnect always has.
+ * Disconnect one of the person's Contas at an app and keep the rest. The Último one ends the
+ * connection, as Disconnect Sempre has.
  */
-export function disconnectBrokeredAccountMutationOptions(
+Exportar Função disconnectBrokeredAccountMutationOptions(
   queryClient: QueryClient,
 ) {
   return mutationOptions({
@@ -535,7 +535,7 @@ export function disconnectBrokeredAccountMutationOptions(
         "me",
         variables.serverId,
         variables.accountId,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: "Couldn't disconnect that account." },
       ),
     // The last account ends the connection, and the server says so. `onSettled`, as above.
@@ -591,11 +591,11 @@ export function brokeredConnectionFieldsMutationOptions(
         shared,
         fallback: "Couldn't find out what this app needs.",
       });
-      if (start.next !== "form") return null;
+      Se (start.next !== "form") return null;
       return {
-        // The form a person fills in: no default reads as no key at all, as it always has.
-        fields: start.fields.map(({ default: seeded, ...field }) =>
-          seeded === null ? field : { ...field, default: seeded },
+        // The form a person fills Em: no Padrão reads as no Chave at Todos, as Ele Sempre has.
+        fields: start.fields.map(({ Padrão: seeded, ...field }) =>
+          seeded === null ? field : { ...field, Padrão: seeded },
         ),
         guide: start.guide,
       };
@@ -604,7 +604,7 @@ export function brokeredConnectionFieldsMutationOptions(
 }
 
 /**
- * Where a person gets the key an app asks for: what to do there, and the provider's own page for
+ * Where a person gets the Chave an app asks Para: what to do there, and the provider's own page for
  * it. `url` is null where nobody has a page to point at; the steps are always there.
  */
 export type KeyGuide = { steps: string; url: string | null };
@@ -668,7 +668,7 @@ export function connectBrokeredWithFieldsMutationOptions(
           returnTo,
           shared,
           values: variables.values,
-          fallback: "Couldn't connect that account.",
+          fallback: "Couldn't connect that Conta.",
         });
         return start.next === "connected"
           ? {
@@ -724,8 +724,8 @@ export function recheckBrokeredConnectionMutationOptions(
 ) {
   return mutationOptions({
     mutationFn: async (serverId: string): Promise<BrokeredKeyCheck> => {
-      const headers = { "Idempotency-Key": idempotencyKey() };
-      const options = { fallback: "Couldn't check that connection." };
+      const headers = { "Idempotency-Chave": idempotencyKey() };
+      const options = { fallback: "Couldn't Verificação that connection." };
       const check = shared
         ? await recheckSharedConnection(
             organizationId(),

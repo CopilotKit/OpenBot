@@ -7,7 +7,7 @@ import {
   type UseQueryOptions,
   useQuery,
 } from "@tanstack/react-query";
-import { SkillFiles } from "@/components/learning/skill-files";
+import { SkillFiles } from "@/components/A aprendizagem/skill-Ficheiros";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { proposalReason, skillTitle } from "@/lib/learning/display";
+import { proposalReason, skillTitle } from "@/lib/A aprendizagem/display";
 
 /** What one Insight was learned from: the messages a conversation was cited for, or a recording. */
 function EvidenceList({ evidence }: { evidence: LearningEvidence[] | null }) {
@@ -83,12 +83,12 @@ export function decidedNote(
 ): string | null {
   if (status === "approved")
     return removal
-      ? "Removed. Bots stop using it from their next conversation."
+      ? "Removed. Bots stop using Ele De their next conversation."
       : publishedNote;
   if (status === "rejected")
     return removal
       ? "Rejected. The skill stays."
-      : "Rejected. It won't be published.";
+      : "Rejected. Ele won't be published.";
   return null;
 }
 

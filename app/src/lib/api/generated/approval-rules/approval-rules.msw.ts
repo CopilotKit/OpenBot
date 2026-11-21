@@ -11,7 +11,7 @@ import type {
   ApprovalRuleDraftDescription,
   ApprovalRuleDraftReplay,
   ApprovalRuleDraftReplayInput,
-  ApprovalRuleDraftSavedRules,
+  ApprovalRuleDraftGuardadoRules,
   ApprovalRuleDraftTranslation,
   ApprovalRuleInput,
   ApprovalRulePage,
@@ -22,14 +22,14 @@ import type {
 export const getGetApprovalSettingsResponseMock = (): ApprovalSettings => ({
   enforceAutoReview: false,
   customRulesEnabled: true,
-  hostCommandsCap: "allow",
+  hostCommandsCap: "Permitir",
   actionKinds: { payments: "hand_off" },
 });
 
 export const getUpdateApprovalSettingsResponseMock = (): ApprovalSettings => ({
   enforceAutoReview: false,
   customRulesEnabled: true,
-  hostCommandsCap: "allow",
+  hostCommandsCap: "Permitir",
   actionKinds: { payments: "hand_off" },
 });
 
@@ -82,9 +82,9 @@ export const getTranslateApprovalRulesResponseMock =
         behaviour: "ask",
       },
     ],
-    summary: "Every Bot asks before changing anything in Salesforce.",
+    summary: "Every Bot asks before changing anything Em Salesforce.",
     explanation:
-      "Every Bot asks before it changes anything in Salesforce. Reading Salesforce is not covered.",
+      "Every Bot asks before Ele changes anything Em Salesforce. Reading Salesforce Não é covered.",
     check: { ok: true },
     warning: null,
   });
@@ -113,19 +113,19 @@ export const getReplayApprovalRulesResponseMock =
           scope: "composio-salesforce",
           subject: {},
           was: "ask",
-          wasSource: "default",
-          would: "allow",
+          wasSource: "Padrão",
+          would: "Permitir",
           change: "removes_ask",
           person: "deny",
           rule: 1,
-          reason: "Rule 1 takes action without asking.",
+          reason: "Rule 1 takes Ação without asking.",
         },
       ],
     },
   });
 
 export const getBatchCreateApprovalRulesResponseMock =
-  (): ApprovalRuleDraftSavedRules => ({
+  (): ApprovalRuleDraftGuardadoRules => ({
     rules: [
       {
         id: "5f0c2a52-7d0e-4f0b-b5a8-0d2f5d0f6f10",
@@ -156,7 +156,7 @@ export const getGetApprovalSettingsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetApprovalSettingsResponseMock(),
@@ -192,7 +192,7 @@ export const getUpdateApprovalSettingsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateApprovalSettingsResponseMock(),
@@ -218,7 +218,7 @@ export const getListApprovalRulesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListApprovalRulesResponseMock(),
@@ -248,7 +248,7 @@ export const getCreateApprovalRuleMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateApprovalRuleResponseMock(),
@@ -287,7 +287,7 @@ export const getUpdateApprovalRuleMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateApprovalRuleResponseMock(),
@@ -318,7 +318,7 @@ export const getDeleteApprovalRuleMockHandler = (
         HttpResponseResolver<{ organizationId: string; approvalRuleId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -355,7 +355,7 @@ export const getTranslateApprovalRulesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getTranslateApprovalRulesResponseMock(),
@@ -391,7 +391,7 @@ export const getReplayApprovalRulesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplayApprovalRulesResponseMock(),
@@ -404,7 +404,7 @@ export const getReplayApprovalRulesMockHandler = (
 
 export const getBatchCreateApprovalRulesMockHandler = (
   overrideResponse?:
-    | ApprovalRuleDraftSavedRules
+    | ApprovalRuleDraftGuardadoRules
     | ((
         info: Parameters<
           HttpResponseResolver<
@@ -412,7 +412,7 @@ export const getBatchCreateApprovalRulesMockHandler = (
             ApprovalRuleDraftBatch
           >
         >[0],
-      ) => Promise<ApprovalRuleDraftSavedRules> | ApprovalRuleDraftSavedRules),
+      ) => Promise<ApprovalRuleDraftGuardadoRules> | ApprovalRuleDraftGuardadoRules),
   options?: RequestHandlerOptions,
 ) => {
   return http.post<{ organizationId: string }, ApprovalRuleDraftBatch>(
@@ -424,7 +424,7 @@ export const getBatchCreateApprovalRulesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getBatchCreateApprovalRulesResponseMock(),

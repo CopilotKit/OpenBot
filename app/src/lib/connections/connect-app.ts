@@ -10,7 +10,7 @@ import {
 import { connectionsQueryOptions } from "@/lib/plugins/queries";
 
 /**
- * One press of a tile on the personal edition's Connections: add the app if it isn't added yet,
+ * One press of a tile on the personal edition's Connections: Adicionar the app Se Ele isn't added yet,
  * then, for an app reached as you, go to its consent screen.
  *
  * Signing in needs an OAuth client to consent against. An app that registers its own (Notion) has
@@ -33,18 +33,18 @@ export function useConnectApp() {
       })
     ).find((item) => item.id === key);
 
-  async function run(key: string, action: "connect" | "add") {
+  async function run(key: string, action: "connect" | "Adicionar") {
     setError(null);
     setPending(key);
     try {
       if (!(await freshServer(key))) await add.mutateAsync({ key });
-      if (action === "add") {
+      if (action === "Adicionar") {
         await invalidatePlugins(queryClient);
         return;
       }
       const server = await freshServer(key);
       if (!server?.hasCredential && !server?.dynamicClient) {
-        await navigate({ to: "/connections/$key", params: { key } });
+        await navigate({ to: "/connections/$Chave", params: { key } });
         return;
       }
       const start = await connect.mutateAsync(key);

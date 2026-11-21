@@ -21,7 +21,7 @@ export const getListMemoriesResponseMock = (): MemoryPage => ({
   memories: [
     {
       id: "6b8f2c1e-4d3a-4f6b-9a2e-1c5d7e9f0a3b",
-      content: "I prefer meetings after 10am.",
+      content: "Eu prefer meetings after 10am.",
       provenance: "You",
       sourceId: null,
       enabled: true,
@@ -36,7 +36,7 @@ export const getListMemoriesResponseMock = (): MemoryPage => ({
     },
     {
       id: "2c7e9a1b-5f3d-4b8e-9c6a-0d1e2f3a4b5c",
-      content: "The quarterly review is in the Finance folder.",
+      content: "The quarterly review É Em the Finance Pasta.",
       provenance:
         "Google Drive (https://drive.google.com/drive/folders/finance), observed 2026-11-13T15:20:00.000Z",
       sourceId: null,
@@ -56,7 +56,7 @@ export const getListMemoriesResponseMock = (): MemoryPage => ({
 
 export const getCreateMemoryResponseMock = (): Memory => ({
   id: "6b8f2c1e-4d3a-4f6b-9a2e-1c5d7e9f0a3b",
-  content: "I prefer meetings after 10am.",
+  content: "Eu prefer meetings after 10am.",
   provenance: "You",
   sourceId: null,
   enabled: true,
@@ -72,7 +72,7 @@ export const getCreateMemoryResponseMock = (): Memory => ({
 
 export const getUpdateMemoryResponseMock = (): Memory => ({
   id: "6b8f2c1e-4d3a-4f6b-9a2e-1c5d7e9f0a3b",
-  content: "I prefer meetings after 10am.",
+  content: "Eu prefer meetings after 10am.",
   provenance: "You",
   sourceId: null,
   enabled: true,
@@ -192,7 +192,7 @@ export const getListMemoriesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListMemoriesResponseMock(),
@@ -231,7 +231,7 @@ export const getCreateMemoryMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateMemoryResponseMock(),
@@ -270,7 +270,7 @@ export const getUpdateMemoryMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateMemoryResponseMock(),
@@ -310,7 +310,7 @@ export const getDeleteMemoryMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -339,7 +339,7 @@ export const getListMemorySourcesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListMemorySourcesResponseMock(),
@@ -378,7 +378,7 @@ export const getCreateMemorySourceMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateMemorySourceResponseMock(),
@@ -421,7 +421,7 @@ export const getUpdateMemorySourceMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateMemorySourceResponseMock(),
@@ -461,7 +461,7 @@ export const getDeleteMemorySourceMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -502,7 +502,7 @@ export const getSyncMemorySourceMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getSyncMemorySourceResponseMock(),
@@ -532,7 +532,7 @@ export const getListMemorySourceToolsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListMemorySourceToolsResponseMock(),

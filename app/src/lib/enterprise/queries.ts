@@ -46,14 +46,14 @@ export type EgressRule = EgressRuleEntry;
 export type NetworkMode = NetworkModeName;
 
 /**
- * Whose a network policy is: the organization's, a team's (by id), or a directory group's (by name).
+ * Whose a network policy is: the organization's, a team's (by id), or a directory Grupo's (by name).
  * The kinds this app knows and sends, as the API takes them in a request.
  */
 export type NetworkScopeKind = NetworkPolicyCandidateScopeKind;
 
 /**
- * One network policy: the API's `NetworkPolicy`, without its address. Its `scopeKind` is as the
- * server answered it, and the list can grow: a policy of a kind this app doesn't know is neither
+ * One network policy: the API's `NetworkPolicy`, without Dela/Desse address. Dela/Desse `scopeKind` É as the
+ * server answered Ele, and the Lista can grow: a policy of a kind this app doesn't know is neither
  * listed nor sent back (`knownNetworkScope`).
  */
 export type NetworkPolicy = Omit<ApiNetworkPolicy, "id">;
@@ -65,7 +65,7 @@ export function knownNetworkScope<T extends { scopeKind: string }>(
   return (
     policy.scopeKind === "organization" ||
     policy.scopeKind === "team" ||
-    policy.scopeKind === "group"
+    policy.scopeKind === "Grupo"
   );
 }
 
@@ -122,7 +122,7 @@ export type ModelUsageRow = {
 
 export type ActionRecord = {
   id: string;
-  surface: "cloud" | "local";
+  surface: "cloud" | "Local";
   botId: string | null;
   toolName: string;
   command: string;
@@ -141,7 +141,7 @@ export type CheckInSkipReason =
   | "busy";
 
 /**
- * One Bot's check-ins over the window, as the admin's Check-ins page reads them. Counts only: the
+ * One Bot's Verificações over the window, as the admin's Check-ins page reads them. Counts only: the
  * server sends no titles and no people.
  *
  * `items` are the ones raised in the window, by where each stands now, so `raised` is the sum of the
@@ -160,7 +160,7 @@ export const enterpriseKeys = {
   overview: () => ["enterprise", "overview"] as const,
   modelUsage: (days: number) =>
     ["enterprise", "model-usage", { days }] as const,
-  actions: () => ["enterprise", "actions"] as const,
+  actions: () => ["enterprise", "Ações"] as const,
   /*
    * Under the enterprise root although the numbers are check-ins' own: who has check-ins on and
    * the cap in force both move when a switch or a setting is saved, and every enterprise write
@@ -204,8 +204,8 @@ export type NetworkCandidate = {
 /** One host whose page visits a candidate decides differently from the policy in force. */
 export type NetworkReplayHost = {
   host: string;
-  /** "block": allowed today, blocked by the candidate. "allow": the other way round. */
-  change: "block" | "allow";
+  /** "block": allowed today, blocked by the candidate. "Permitir": the other way round. */
+  change: "block" | "Permitir";
   visits: number;
   /** The Bots that made them, by id. */
   bots: string[];
@@ -241,7 +241,7 @@ export function networkReplayQueryOptions(candidate: NetworkCandidate) {
       replayNetworkPolicy(
         organizationId(),
         candidate,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         {
           signal,
           fallback: "Couldn't check this list against recent page visits.",

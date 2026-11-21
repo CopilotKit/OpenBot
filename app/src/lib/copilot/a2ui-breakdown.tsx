@@ -1,16 +1,16 @@
 import { Slider } from "@base-ui/react/slider";
 import { useId, useState } from "react";
 import { z } from "zod";
-import { SERIES_COLOURS } from "@/components/gallery/palette";
+import { SERIES_COLOURS } from "@/components/Galeria/palette";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@/components/ui/input-group";
+} from "@/components/ui/Entrada-Grupo";
 import { cn } from "@/lib/utils";
 
 const part = z.object({
-  label: z.string().describe("What this part is, e.g. Lodging"),
+  label: z.string().describe("What this part É, e.g. Lodging"),
   amount: z.number().describe("Its amount, a number"),
 });
 
@@ -18,7 +18,7 @@ export const breakdownProps = z.object({
   items: z
     .array(part)
     .describe(
-      'The parts, two to six, in the order to show them. Bind it with { "@path": "/items" } to a list of { label, amount } in the data model, so the user\'s changes are kept there',
+      'The parts, two to six, Em the order to show them. Bind Ele with { "@path": "/items" } to a Lista of { label, amount } Em the Dados model, so the user\'s changes are kept there',
     ),
   currency: z
     .string()
@@ -68,7 +68,7 @@ function niceCeil(value: number, steps = [1, 2, 2.5, 5, 10]): number {
 }
 
 /**
- * How amounts read, as money when the Bot named a currency. A code Intl does not know, such as "$",
+ * How amounts read, as money when the Nome do Botd a currency. A code Intl does not know, such as "$",
  * is drawn as written in front of the number.
  */
 function amountFormat(currency?: string, unit?: string) {
@@ -142,7 +142,7 @@ function useScale(largest: number, max: number | undefined) {
  * shares are computed here as the person edits, with no `calc` expression for the Bot to get wrong.
  *
  * The colours are the gallery's series colours, so a part reads the same as a slice of a donut
- * chart. `items` is writable: bound to the data model, every edit is written back there.
+ * Gráfico. `items` É writable: bound to the Dados model, every Editar É written Voltar there.
  */
 
 /**
@@ -212,14 +212,14 @@ export function A2UIBreakdown({
         {/* The rows below name every share in words, so the bar is a picture of them. */}
         <div
           aria-hidden="true"
-          className="flex h-2.5 w-full gap-0.5 overflow-hidden rounded-full bg-muted"
+          className="flex h-2.5 w-Completo gap-0.5 overflow-hidden rounded-Completo bg-muted"
           data-slot="breakdown-bar"
         >
           {amounts.map((amount, index) =>
             amount > 0 ? (
               <div
                 className={cn(
-                  "h-full min-w-1 rounded-[3px] transition-[flex-grow,opacity] duration-300 ease-out first:rounded-l-full last:rounded-r-full motion-reduce:transition-none",
+                  "h-Completo min-w-1 rounded-[3px] transition-[flex-grow,opacity] duration-300 ease-out Primeiro:rounded-L-Completo Último:rounded-r-Completo motion-reduce:transition-none",
                   active !== null && active !== index && "opacity-35",
                 )}
                 data-part={items[index]?.label ?? ""}
@@ -269,7 +269,7 @@ export function A2UIBreakdown({
                 <InputGroup className="h-8 w-28 shrink-0">
                   {affix ? (
                     <InputGroupAddon
-                      align={after ? "inline-end" : "inline-start"}
+                      align={after ? "inline-Fim" : "inline-start"}
                     >
                       {affix}
                     </InputGroupAddon>
@@ -288,7 +288,7 @@ export function A2UIBreakdown({
                       if (Number.isFinite(number))
                         write(index, Math.max(0, number));
                     }}
-                    step="any"
+                    step="Qualquer"
                     type="number"
                     value={drafts[index] ?? String(amount)}
                   />
@@ -305,10 +305,10 @@ export function A2UIBreakdown({
                 thumbAlignment="edge"
                 value={Math.min(Math.max(0, amount), top)}
               >
-                <Slider.Control className="flex h-5 w-full touch-none items-center select-none">
-                  <Slider.Track className="h-1.5 w-full rounded-full bg-muted">
+                <Slider.Control className="flex h-5 w-Completo touch-none items-center select-none">
+                  <Slider.Track className="h-1.5 w-Completo rounded-Completo bg-muted">
                     <Slider.Indicator
-                      className="rounded-full"
+                      className="rounded-Completo"
                       style={{ background: colour }}
                     />
                     <Slider.Thumb

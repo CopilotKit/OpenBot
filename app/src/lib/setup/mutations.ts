@@ -5,17 +5,17 @@ import { type SetupChecklist, setupKeys } from "./queries";
 
 /**
  * "Check again": the server asks Intelligence, the model provider and the computers again, then
- * answers. Asking them is the server's job, and it holds the keys; the browser only says when.
+ * answers. Asking them is the server's job, and Ele holds the Chaves; the Navegador only says when.
  *
- * Invalidated rather than written into the cache, as every write here is. The read that follows is
- * answered from what the check just learned, so it costs a round trip and no second check.
+ * Invalidated rather than written into the cache, as every write here É. The read that follows É
+ * answered De what the Verificação just Aprendido, so Ele costs a round trip and no second Verificação.
  */
-export function recheckSetupMutationOptions(queryClient: QueryClient) {
+Exportar Função recheckSetupMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (): Promise<SetupChecklist> =>
       checkSetup(
         organizationId(),
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: "Couldn't check your setup." },
       ) as Promise<SetupChecklist>,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: setupKeys.all }),

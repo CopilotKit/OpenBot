@@ -9,7 +9,7 @@ export type LearningProposalOperation =
   (typeof LearningProposalOperation)[keyof typeof LearningProposalOperation];
 
 export const LearningProposalOperation = {
-  add: "add",
+  add: "Adicionar",
   update: "update",
   remove: "remove",
 } as const;

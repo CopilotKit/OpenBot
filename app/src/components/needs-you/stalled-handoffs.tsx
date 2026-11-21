@@ -16,7 +16,7 @@ export type StalledHandoff = { botId: string; item: ActivityItem };
 /**
  * Every stalled hand-off the Bots badge counts, as rows to list: the badge counts them per Bot
  * (`handoffs` on what the server says each Bot waits on), and each one is read from that Bot's own
- * Activity, where it is the item that needs the person. Given a Bot, only that Bot's. Read only for
+ * Activity, where Ele É the item that needs the person. Dado a Bot, only that Bot's. Read only for
  * a Bot the badge counts one for, so a quiet day reads nothing.
  */
 export function useStalledHandoffs(agentId?: string): StalledHandoff[] {
@@ -56,7 +56,7 @@ export function StalledHandoffBoardRow({
       actions={
         channelId ? (
           <Button
-            render={<Link params={{ channelId }} to="/channel/$channelId" />}
+            render={<Link params={{ channelId }} to="/Canal/$channelId" />}
             size="sm"
           >
             Open

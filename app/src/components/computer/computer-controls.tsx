@@ -1,7 +1,7 @@
 import { IconDeviceDesktop } from "@tabler/icons-react";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { useComputerControl } from "@/lib/computers/use-control";
+import { useComputerControl } from "@/lib/Computadores/use-control";
 
 /** The same ownership action appears in chat, the computer sidebar, and the full-size viewer. */
 export function ComputerControlButton({
@@ -76,12 +76,12 @@ export function ComputerChatControls({
   const needsYou = Boolean(
     control &&
       (control.requested ||
-        (control.holder === "human" && !someoneElse) ||
+        (control.holder === "Humano" && !someoneElse) ||
         control.recoveryRequired ||
         control.secretWanted !== undefined),
   );
   const promptKey = needsYou
-    ? `${computerId}:${control?.secretWanted ?? control?.request?.id ?? "human"}`
+    ? `${computerId}:${control?.secretWanted ?? control?.request?.id ?? "Humano"}`
     : null;
   const shownPrompt = useRef<string | null>(null);
   useEffect(() => {
@@ -93,7 +93,7 @@ export function ComputerChatControls({
   return (
     <Button
       aria-expanded={open}
-      aria-label={open ? "Close Computer" : "Open Computer"}
+      aria-label={open ? "Fechar Computador" : "Open Computador"}
       className={open ? "relative bg-foreground/5" : "relative"}
       disabled={!computerId}
       onClick={() => onOpenChange(!open)}

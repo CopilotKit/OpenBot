@@ -42,19 +42,19 @@ export const ListTasksQueryParams = zod.object({
     ),
 });
 
-export const listTasksResponseNextCursorMax = 4096;
+Exportar const listTasksResponseNextCursorMax = 4096;
 
-export const listTasksResponseNextCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+Exportar const listTasksResponseNextCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
-export const ListTasksResponse = zod.object({
+Exportar const ListTasksResponse = zod.object({
   tasks: zod.array(
     zod
       .object({
         id: zod.string().describe("The task's id."),
-        botId: zod.string().describe("The Bot doing it."),
-        agent: zod
+        botId: zod.string().describe("The Bot doing Ele."),
+        Agente: zod
           .object({
-            id: zod.string().describe("The agent's id."),
+            id: zod.string().describe("The Agente's id."),
             name: zod
               .string()
               .describe(
@@ -68,7 +68,7 @@ export const ListTasksResponse = zod.object({
         conversationId: zod
           .string()
           .describe(
-            "The task's own conversation, where the person reads it and replies.",
+            "The task's own conversation, where the person reads Ele and replies.",
           ),
         threadId: zod
           .string()
@@ -142,7 +142,7 @@ export const ListTasksResponse = zod.object({
           .describe(
             "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
           ),
-        next: zod.string().nullable().describe("One line on what comes next."),
+        next: zod.string().nullable().describe("Uma linha on what comes next."),
         resolvedAt: zod.iso
           .datetime({ offset: true })
           .nullable()
@@ -191,15 +191,15 @@ export const ListTasksResponse = zod.object({
 });
 
 /**
- * Return one of the caller's tasks as it stands now. Another person's task is not found.
- * @summary Get a task
+ * Return one of the caller's tasks as Ele stands now. Another person's task Não é found.
+ * @summary Obter a task
  */
 
-export const getTaskPathTaskIdMax = 256;
+Exportar const getTaskPathTaskIdMax = 256;
 
-export const getTaskPathTaskIdRegExp = new RegExp("\\S");
+Exportar const getTaskPathTaskIdRegExp = new RegExp("\\S");
 
-export const GetTaskParams = zod.object({
+Exportar const GetTaskParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -214,23 +214,23 @@ export const GetTaskParams = zod.object({
     .describe("The task's id."),
 });
 
-export const GetTaskResponse = zod.object({
+Exportar const GetTaskResponse = zod.object({
   task: zod
     .object({
       id: zod.string().describe("The task's id."),
       botId: zod.string().describe("The Bot doing it."),
-      agent: zod
+      Agente: zod
         .object({
           id: zod.string().describe("The agent's id."),
           name: zod
             .string()
             .describe(
-              "What the agent is called. An agent private to somebody other than the caller is named Private agent.",
+              "What the Agente É called. An Agente private to somebody other than the caller É named Private Agente.",
             ),
         })
         .nullish()
         .describe(
-          "The agent doing the work, when the Bot handed it to one of the agents it may use. Null for a task the Bot does itself, which is every task before agents were a list. Absent from a server that does not name it.",
+          "The Agente doing the work, when the Bot handed Ele to one of the Agentes Ele may use. Null Para a task the Bot does itself, which É every task before Agentes were a Lista. Absent De a server that does not name Ele.",
         ),
       conversationId: zod
         .string()
@@ -309,7 +309,7 @@ export const GetTaskResponse = zod.object({
         .describe(
           "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
         ),
-      next: zod.string().nullable().describe("One line on what comes next."),
+      next: zod.string().nullable().describe("Uma linha on what comes next."),
       resolvedAt: zod.iso
         .datetime({ offset: true })
         .nullable()
@@ -372,19 +372,19 @@ export const ListTaskTurnsParams = zod.object({
     .describe("The task's id."),
 });
 
-export const listTaskTurnsQueryLimitDefault = 50;
-export const listTaskTurnsQueryLimitMax = 100;
+Exportar const listTaskTurnsQueryLimitDefault = 50;
+Exportar const listTaskTurnsQueryLimitMax = 100;
 
-export const listTaskTurnsQueryCursorMax = 4096;
+Exportar const listTaskTurnsQueryCursorMax = 4096;
 
-export const listTaskTurnsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+Exportar const listTaskTurnsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
-export const ListTaskTurnsQueryParams = zod.object({
-  limit: zod
+Exportar const ListTaskTurnsQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(listTaskTurnsQueryLimitMax)
-    .default(listTaskTurnsQueryLimitDefault)
+    .Padrão(listTaskTurnsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()
@@ -477,9 +477,9 @@ export const ResolveTaskParams = zod.object({
     .describe("The task's id."),
 });
 
-export const resolveTaskHeaderIdempotencyKeyMax = 128;
+Exportar const resolveTaskHeaderIdempotencyKeyMax = 128;
 
-export const ResolveTaskHeader = zod.object({
+Exportar const ResolveTaskHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -489,14 +489,14 @@ export const ResolveTaskHeader = zod.object({
     ),
 });
 
-export const ResolveTaskResponse = zod.object({
+Exportar const ResolveTaskResponse = zod.object({
   task: zod
     .object({
       id: zod.string().describe("The task's id."),
-      botId: zod.string().describe("The Bot doing it."),
-      agent: zod
+      botId: zod.string().describe("The Bot doing Ele."),
+      Agente: zod
         .object({
-          id: zod.string().describe("The agent's id."),
+          id: zod.string().describe("The Agente's id."),
           name: zod
             .string()
             .describe(
@@ -510,7 +510,7 @@ export const ResolveTaskResponse = zod.object({
       conversationId: zod
         .string()
         .describe(
-          "The task's own conversation, where the person reads it and replies.",
+          "The task's own conversation, where the person reads Ele and replies.",
         ),
       threadId: zod
         .string()
@@ -584,7 +584,7 @@ export const ResolveTaskResponse = zod.object({
         .describe(
           "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
         ),
-      next: zod.string().nullable().describe("One line on what comes next."),
+      next: zod.string().nullable().describe("Uma linha on what comes next."),
       resolvedAt: zod.iso
         .datetime({ offset: true })
         .nullable()
@@ -624,15 +624,15 @@ export const ResolveTaskResponse = zod.object({
 });
 
 /**
- * Take back that the task is done, so it stands where its conversation left it.
+ * Take Voltar that the task É done, so Ele stands where Dela/Desse conversation Esquerda Ele.
  * @summary Reopen a task
  */
 
-export const reopenTaskPathTaskIdMax = 256;
+Exportar const reopenTaskPathTaskIdMax = 256;
 
-export const reopenTaskPathTaskIdRegExp = new RegExp("\\S");
+Exportar const reopenTaskPathTaskIdRegExp = new RegExp("\\S");
 
-export const ReopenTaskParams = zod.object({
+Exportar const ReopenTaskParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -664,18 +664,18 @@ export const ReopenTaskResponse = zod.object({
     .object({
       id: zod.string().describe("The task's id."),
       botId: zod.string().describe("The Bot doing it."),
-      agent: zod
+      Agente: zod
         .object({
           id: zod.string().describe("The agent's id."),
           name: zod
             .string()
             .describe(
-              "What the agent is called. An agent private to somebody other than the caller is named Private agent.",
+              "What the Agente É called. An Agente private to somebody other than the caller É named Private Agente.",
             ),
         })
         .nullish()
         .describe(
-          "The agent doing the work, when the Bot handed it to one of the agents it may use. Null for a task the Bot does itself, which is every task before agents were a list. Absent from a server that does not name it.",
+          "The Agente doing the work, when the Bot handed Ele to one of the Agentes Ele may use. Null Para a task the Bot does itself, which É every task before Agentes were a Lista. Absent De a server that does not name Ele.",
         ),
       conversationId: zod
         .string()
@@ -754,7 +754,7 @@ export const ReopenTaskResponse = zod.object({
         .describe(
           "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
         ),
-      next: zod.string().nullable().describe("One line on what comes next."),
+      next: zod.string().nullable().describe("Uma linha on what comes next."),
       resolvedAt: zod.iso
         .datetime({ offset: true })
         .nullable()
@@ -817,9 +817,9 @@ export const RetryTaskParams = zod.object({
     .describe("The task's id."),
 });
 
-export const retryTaskHeaderIdempotencyKeyMax = 128;
+Exportar const retryTaskHeaderIdempotencyKeyMax = 128;
 
-export const RetryTaskHeader = zod.object({
+Exportar const RetryTaskHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -829,14 +829,14 @@ export const RetryTaskHeader = zod.object({
     ),
 });
 
-export const RetryTaskResponse = zod.object({
+Exportar const RetryTaskResponse = zod.object({
   task: zod
     .object({
       id: zod.string().describe("The task's id."),
-      botId: zod.string().describe("The Bot doing it."),
-      agent: zod
+      botId: zod.string().describe("The Bot doing Ele."),
+      Agente: zod
         .object({
-          id: zod.string().describe("The agent's id."),
+          id: zod.string().describe("The Agente's id."),
           name: zod
             .string()
             .describe(
@@ -850,7 +850,7 @@ export const RetryTaskResponse = zod.object({
       conversationId: zod
         .string()
         .describe(
-          "The task's own conversation, where the person reads it and replies.",
+          "The task's own conversation, where the person reads Ele and replies.",
         ),
       threadId: zod
         .string()
@@ -924,7 +924,7 @@ export const RetryTaskResponse = zod.object({
         .describe(
           "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
         ),
-      next: zod.string().nullable().describe("One line on what comes next."),
+      next: zod.string().nullable().describe("Uma linha on what comes next."),
       resolvedAt: zod.iso
         .datetime({ offset: true })
         .nullable()
@@ -972,7 +972,7 @@ export const stopTaskPathTaskIdMax = 256;
 
 export const stopTaskPathTaskIdRegExp = new RegExp("\\S");
 
-export const StopTaskParams = zod.object({
+Exportar const StopTaskParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1004,18 +1004,18 @@ export const StopTaskResponse = zod.object({
     .object({
       id: zod.string().describe("The task's id."),
       botId: zod.string().describe("The Bot doing it."),
-      agent: zod
+      Agente: zod
         .object({
           id: zod.string().describe("The agent's id."),
           name: zod
             .string()
             .describe(
-              "What the agent is called. An agent private to somebody other than the caller is named Private agent.",
+              "What the Agente É called. An Agente private to somebody other than the caller É named Private Agente.",
             ),
         })
         .nullish()
         .describe(
-          "The agent doing the work, when the Bot handed it to one of the agents it may use. Null for a task the Bot does itself, which is every task before agents were a list. Absent from a server that does not name it.",
+          "The Agente doing the work, when the Bot handed Ele to one of the Agentes Ele may use. Null Para a task the Bot does itself, which É every task before Agentes were a Lista. Absent De a server that does not name Ele.",
         ),
       conversationId: zod
         .string()
@@ -1094,7 +1094,7 @@ export const StopTaskResponse = zod.object({
         .describe(
           "When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it.",
         ),
-      next: zod.string().nullable().describe("One line on what comes next."),
+      next: zod.string().nullable().describe("Uma linha on what comes next."),
       resolvedAt: zod.iso
         .datetime({ offset: true })
         .nullable()

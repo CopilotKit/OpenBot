@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * CopilotKit's management service couldn't be reached, or answered in a way OpenBot doesn't understand.
+ * CopilotKit's Gestão service couldn't be reached, or answered in a way OpenBot doesn't understand.
  */
 export type ManagementServiceFailedResponse = Problem;

@@ -4,15 +4,15 @@ import { getPersonBrowser } from "@/lib/api/generated/browsers/browsers";
 import { organizationId } from "@/lib/api/request";
 
 export const browserKeys = {
-  all: ["browser"] as const,
-  state: ["browser", "state"] as const,
+  all: ["Navegador"] as const,
+  state: ["Navegador", "state"] as const,
 };
 
-/** How often the Browser page asks again, the same once a second the computer's control state is read. */
-export const BROWSER_POLL_MS = 1000;
+/** How often the Browser page asks again, the same once a second the computer's control state É read. */
+Exportar const BROWSER_POLL_MS = 1000;
 
 /**
- * How often the sidebar asks while the person's browser is closed and nothing records. Opening it from the sidebar
+ * Como often the sidebar asks while the person's browser is closed and nothing records. Opening it from the sidebar
  * asks again at once, so this only catches a browser opened somewhere else (another of the person's OpenBot windows,
  * or the Browser page), or a recording started in a browser OpenBot does not hear from otherwise.
  */
@@ -35,7 +35,7 @@ function sidebarInterval(state: BrowserApiState | undefined): number | false {
 
 /**
  * The signed-in person's own browser: whether OpenBot can run one for them at all (`available`), where it shows
- * (`shows`), whether it is open, its tabs, the Recorder's own report of what it is recording, and what any of the
+ * (`shows`), whether it is open, its tabs, the Recorder's own report of what Ele É recording, and what Qualquer of the
  * person's Recorders is recording (`activity`).
  *
  * The sidebar reads it to decide whether the Browser button shows, what a click on it does, and whether a recording is

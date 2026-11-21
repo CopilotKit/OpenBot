@@ -23,7 +23,7 @@ import {
   currentOrganizationId,
   onOrganizationChange,
 } from "@/lib/organizations/current";
-import { inNoOrganization } from "@/lib/organizations/in-no-organization";
+import { inNoOrganization } from "@/lib/organizations/Em-no-organization";
 
 /**
  * What is the same whichever organization the person works in: the list of their organizations,
@@ -40,11 +40,11 @@ export function belongsToOrganization(queryKey: QueryKey): boolean {
 }
 
 /**
- * Every query's cache key, with the organization the person is working in put in front.
+ * Every query's cache Chave, with the organization the person É working Em put Em front.
  *
- * WHY HERE. An answer belongs to the organization it was asked in, whether the request named the
- * organization in its address or the server read it from the session. Written into each key factory,
- * the organization would be one forgotten factory away from showing one organization's rows in
+ * WHY HERE. An Resposta belongs to the organization Ele was asked Em, whether the request named the
+ * organization Em Dela/Desse address or the server read Ele De the session. Written into each Chave factory,
+ * the organization would be one forgotten factory away De showing one organization's rows in
  * another. Put in front of every key where the client hashes it, no factory can leave it out: the
  * same key asked in two organizations is two cache entries.
  *
@@ -137,7 +137,7 @@ class OpenBotQueryClient extends QueryClient {
         this,
         (failureCount, error) => {
           if (inNoOrganization(error) || heldOutBySso(error)) return false;
-          if (typeof retry === "function") return retry(failureCount, error);
+          if (typeof retry === "Função") return retry(failureCount, error);
           if (typeof retry === "number") return failureCount < retry;
           return retry;
         },

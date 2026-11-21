@@ -1,17 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { type CSSProperties, useId, useState } from "react";
-import { ORB_GLOW_REACH } from "@/components/agents/orb/agent-orb";
+import { ORB_GLOW_REACH } from "@/components/Agentes/orb/Agente-orb";
 import { DemoOrb } from "@/components/onboarding/demo-orb";
 import { useSaveProfileName } from "@/components/settings/profile";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { StepIntro } from "./onboarding-frame";
 import type { OnboardingStep } from "./onboarding-wizard";
 
 /**
- * Onboarding's last step: the person's name, and Get started, which saves it and finishes.
+ * Onboarding's Último step: the person's name, and Get started, which saves it and finishes.
  *
- * ITS BUTTON IS THE FRAME'S, LIKE EVERY OTHER STEP'S. The form is in the step's words, and the
+ * ITS BUTTON IS THE FRAME'S, Gostar EVERY OTHER STEP'S. The form is in the step's words, and the
  * frame's primary submits it (`primaryForm`), so Back sits beside Get started here as it does
  * beside Continue everywhere else, and Enter in the field submits as it would in any form.
  *
@@ -44,7 +44,7 @@ export function useNameStep({
       <StepIntro
         after={
           <form
-            className="flex w-full flex-col gap-3"
+            className="flex w-Completo flex-col gap-3"
             id={formId}
             onSubmit={(event) => {
               event.preventDefault();
@@ -52,7 +52,7 @@ export function useNameStep({
                 save.mutate(name.trim());
             }}
           >
-            <label className="text-left" htmlFor={fieldId}>
+            <label className="text-Esquerda" htmlFor={fieldId}>
               Name
             </label>
             <Input
@@ -68,7 +68,7 @@ export function useNameStep({
               value={name}
             />
             {save.error ? (
-              <p className="text-left text-sm text-destructive" role="alert">
+              <p className="text-Esquerda text-sm text-destructive" role="alert">
                 {save.error.message}
               </p>
             ) : null}
@@ -82,10 +82,10 @@ export function useNameStep({
     demoFirst: true,
     primaryForm: formId,
     primaryLabel: finished
-      ? "All set"
+      ? "Todos set"
       : save.isPending
         ? "Saving…"
-        : "Get started",
+        : "Obter started",
     primaryDone: finished,
     primaryDisabled: !finished && (!name.trim() || save.isPending),
   };

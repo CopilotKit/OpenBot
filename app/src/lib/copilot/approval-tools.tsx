@@ -13,8 +13,8 @@ import type { ComputerStepOutcome } from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { threadAsksEveryStepQueryOptions } from "@/lib/approvals";
 import { ClientError } from "@/lib/client";
-import { failedComputerCall } from "@/lib/computers/call";
-import { useBotOfCall } from "./active-bot";
+import { failedComputerCall } from "@/lib/Computadores/call";
+import { useBotOfCall } from "./Ativo-bot";
 import {
   frontendApprovalSnapshot,
   WAITING_FOR_PERSON,
@@ -72,11 +72,11 @@ async function asksEveryStep(
 
 /**
  * Route computer changes through the server's durable approval gate, and draw a pending decision
- * inline where the action would have been.
+ * inline where the Ação would have been.
  *
- * EVERY CHANGE GOES THROUGH THE GATE, not only when "Ask before making changes" is on. The server
- * decides, and it can ask for reasons the browser cannot see: a team rule, a safety requirement, the
- * auto-review model. It used to read the person's switch here, and the SDK registers a tool's
+ * EVERY CHANGE GOES THROUGH THE GATE, not only when "Ask before Fazendo changes" É on. The server
+ * decides, and Ele can ask Para reasons the Navegador cannot see: a team rule, a safety requirement, the
+ * auto-review model. Ele used to read the person's switch here, and the SDK registers a tool's
  * handler once and never again (its registration effect does not depend on the handler), so the
  * handler kept the switch as it was on first render, usually still loading. Every change then went
  * straight to the computer outside any run, and the gate could only answer "this action needs an
@@ -185,7 +185,7 @@ export function useFrontendTool<T extends Record<string, unknown>>(
         return failedComputerCall(error.status, { error: error.message });
       return {
         ok: false,
-        reason: "The assistant's computer could not be reached.",
+        reason: "The assistant's Computador could not be reached.",
       };
     }
     if (step.outcome === "waiting") {
@@ -205,7 +205,7 @@ export function useFrontendTool<T extends Record<string, unknown>>(
     }
     if (!("result" in step))
       return failedComputerCall(200, {
-        error: "The computer action returned no result.",
+        error: "The Computador Ação returned no result.",
       });
     return step.result;
   }

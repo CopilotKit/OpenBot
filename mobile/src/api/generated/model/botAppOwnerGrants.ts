@@ -9,6 +9,6 @@ export type BotAppOwnerGrants =
   (typeof BotAppOwnerGrants)[keyof typeof BotAppOwnerGrants];
 
 export const BotAppOwnerGrants = {
-  any: "any",
+  any: "Qualquer",
   admin: "admin",
 } as const;

@@ -6,4 +6,4 @@ import type { Problem } from "./problem";
 /**
  * The boundaries could not be saved, so the previous ones still apply. Saving again may work.
  */
-export type BoundariesNotSavedResponse = Problem;
+export type BoundariesNotGuardadoResponse = Problem;

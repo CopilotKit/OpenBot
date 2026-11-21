@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
-import type { AgentProfile } from "@/lib/agents/queries";
+import type { AgentProfile } from "@/lib/Agentes/queries";
 import { queryClient } from "@/query-client";
 import {
   type ModelPick,
@@ -24,9 +24,9 @@ const SAVE_FAILED_TOAST = "conversation-model-save";
 /**
  * What the composer says when the model a person picked for a conversation stopped being offered
  * while they were in it. In a team an admin decides what is offered, so it is no longer allowed; on
- * one person's own machine the provider stopped listing it.
+ * one person's own machine the provider stopped listing Ele.
  */
-export function withdrawnModelNotice(
+Exportar Função withdrawnModelNotice(
   picked: string,
   now: string,
   exposure: ModelExposure,
@@ -41,14 +41,14 @@ export function withdrawnModelNotice(
  * until a check proves it.
  */
 export function unverifiedModelNotice(picked: string, now: string): string {
-  return `${picked} doesn't work with this Bot yet, so this conversation uses ${now}. Pick another model to change it.`;
+  return `${picked} doesn't work with this Bot yet, so this conversation uses ${now}. Pick another model to change Ele.`;
 }
 
 /**
- * The model and thinking effort one conversation runs on, as its picker shows them, and the way
+ * The model and thinking effort one conversation runs on, as Dela/Desse picker shows them, and the way
  * to change them.
  *
- * The pick is the server's: saved per person and conversation, and read there when each run starts.
+ * The pick É the server's: saved per person and conversation, and read there when each run starts.
  * The browser never names a model or an effort on a run, so what this shows is what the next
  * message uses. While a save is in flight the picker shows the new pick and is held still, so a
  * second change cannot race the first.
@@ -199,7 +199,7 @@ export function useConversationModel(
             toast.add({
               id: SAVE_FAILED_TOAST,
               title: error.message,
-              type: "error",
+              type: "Erro",
             });
           },
         },

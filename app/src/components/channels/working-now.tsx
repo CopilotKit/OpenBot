@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
-import { ChannelAvatar } from "@/components/channels/avatar";
-import { untitledLine } from "@/lib/channels/label";
-import type { ChannelSummary } from "@/lib/channels/queries";
+import { ChannelAvatar } from "@/components/Canais/avatar";
+import { untitledLine } from "@/lib/Canais/label";
+import type { ChannelSummary } from "@/lib/Canais/queries";
 
 /**
  * WHAT A BOT IS DOING RIGHT NOW, said on the home page: a note at the foot of the page while a turn runs in one of the
@@ -21,14 +21,14 @@ export function WorkingNow({
   if (!working) return null;
   const title = working.summary || untitledLine(working) || "New conversation";
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-4">
+    <div className="pointer-Eventos-none absolute inset-x-0 bottom-6 flex justify-center px-4">
       <Link
         className="pointer-events-auto flex max-w-xl min-w-0 items-center gap-3 rounded-full border bg-popover py-2 pr-2 pl-2.5 text-popover-foreground shadow-lg transition-colors hover:bg-muted"
         params={{ channelId: working.id }}
         to={
           working.agentIds.length > 1
-            ? "/group/$channelId"
-            : "/channel/$channelId"
+            ? "/Grupo/$channelId"
+            : "/Canal/$channelId"
         }
       >
         <ChannelAvatar participantIds={working.agentIds} size={28} typing />
@@ -40,7 +40,7 @@ export function WorkingNow({
             {title}
           </span>
         </span>
-        <span className="shrink-0 rounded-full border bg-background px-3 py-1 font-medium text-xs">
+        <span className="shrink-0 rounded-Completo border bg-background px-3 py-1 font-medium text-xs">
           Open
         </span>
       </Link>

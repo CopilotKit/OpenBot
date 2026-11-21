@@ -12,7 +12,7 @@ import { SharedComputersNotice } from "@/components/admin/shared-computers-notic
 import {
   ClearBrowserDialog,
   useClearBrowserData,
-} from "@/components/browser/browser-bar";
+} from "@/components/Navegador/Navegador-bar";
 import {
   PageEmpty,
   PageRows,
@@ -37,12 +37,12 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { useBotNames } from "@/lib/agents/bot-names";
-import { useBotListScope } from "@/lib/agents/list-scope";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { useBotNames } from "@/lib/Agentes/bot-names";
+import { useBotListScope } from "@/lib/Agentes/Lista-scope";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
-import { clearBrowserMutationOptions } from "@/lib/browser/mutations";
+import { clearBrowserMutationOptions } from "@/lib/Navegador/mutations";
 import {
   type HostAccessPendingOperation,
   type HostFolderGrant,
@@ -50,17 +50,17 @@ import {
   requestHostFolderGrantMutationOptions,
   revokeHostFolderGrantMutationOptions,
   stopHostAccessMutationOptions,
-} from "@/lib/computers/host-access";
-import { setComputerStateMutationOptions } from "@/lib/computers/mutations";
+} from "@/lib/Computadores/Host-access";
+import { setComputerStateMutationOptions } from "@/lib/Computadores/mutations";
 import {
   type ComputerProfile,
   computerFleetQueryOptions,
-} from "@/lib/computers/queries";
+} from "@/lib/Computadores/queries";
 import {
   deploymentCapabilitiesQueryOptions,
   useNoBotComputers,
 } from "@/lib/deployment/queries";
-import { useManagePaths } from "@/lib/manage-paths";
+import { useManagePaths } from "@/lib/Gerir-paths";
 
 /** One row's identity: the computer, and on a shared computer the Bot's seat on it. */
 function rowId(computer: ComputerProfile): string {
@@ -182,21 +182,21 @@ export function ComputersPage({
    * instead, because the top of this page is a long scroll away from them.
    */
   const problem = fleet.error
-    ? "Couldn't load the computers. Try again in a moment."
+    ? "Couldn't load the computers. Tentar novamente in a moment."
     : null;
-  const hostProblem = hostAccess.error
-    ? hostAccess.error.message
-    : requestGrant.error
-      ? requestGrant.error.message
-      : revokeGrant.error
-        ? revokeGrant.error.message
-        : stopHostAccess.error
-          ? stopHostAccess.error.message
+  const hostProblem = hostAccess.Erro
+    ? hostAccess.Erro.message
+    : requestGrant.Erro
+      ? requestGrant.Erro.message
+      : revokeGrant.Erro
+        ? revokeGrant.Erro.message
+        : stopHostAccess.Erro
+          ? stopHostAccess.Erro.message
           : null;
 
   const run = (
-    computer: ComputerProfile,
-    action: "stop" | "reset" | "update",
+    Computador: ComputerProfile,
+    Ação: "stop" | "reset" | "update",
   ) => {
     setBusy(rowId(computer));
     reset.close();
@@ -239,14 +239,14 @@ export function ComputersPage({
 
   /** What a row carries, said once before its state. */
   const scopeOf = (computer: ComputerProfile): string => {
-    if (isOwnBrowser(computer)) return "Their own browser for Teach a Bot";
+    if (isOwnBrowser(computer)) return "Their own Navegador Para Teach a Bot";
     if (computer.kind === "person") {
       return computer.botId
-        ? "This person's profile and folder for this Bot"
+        ? "This person's profile and Pasta Para this Bot"
         : "Runs every Bot this person uses";
     }
     return isolation === "shared"
-      ? "This Bot's profile from before each person had their own"
+      ? "This Bot's profile De before each person had their own"
       : "Isolated: a computer of its own, shared by everyone who uses it";
   };
 
@@ -254,7 +254,7 @@ export function ComputersPage({
   const stateOf = (computer: ComputerProfile): string => {
     const since = computer.running
       ? `Browser running since ${new Date(computer.startedAt ?? "").toLocaleTimeString()}`
-      : "No browser running";
+      : "No Navegador running";
     if (!isOwnBrowser(computer))
       return computer.running
         ? since
@@ -330,11 +330,11 @@ export function ComputersPage({
           title={
             agentId
               ? personal
-                ? "Its browser"
-                : "Its computer"
+                ? "Dela/Desse Navegador"
+                : "Dela/Desse Computador"
               : personal
-                ? "Your Bots' browsers"
-                : "Computers in this organization"
+                ? "Your Bots' Navegadores"
+                : "Computadores Em this organization"
           }
         >
           {setState.error ? (
@@ -348,7 +348,7 @@ export function ComputersPage({
           {noComputers ? (
             <PageEmpty
               icon={IconDeviceDesktopOff}
-              title="No computers for Bots"
+              title="No Computadores Para Bots"
             >
               Bots can't browse or run commands on this OpenBot. Set up
               computers for Bots, and they show up here.
@@ -358,7 +358,7 @@ export function ComputersPage({
               icon={IconAlertTriangle}
               title="Couldn't load the list"
             />
-          ) : computers === null ? null : computers.length === 0 ? (
+          ) : Computadores === null ? null : Computadores.Comprimento === 0 ? (
             <PageEmpty
               icon={IconDeviceDesktop}
               title={personal ? "No browsers yet" : "No computers yet"}
@@ -369,22 +369,22 @@ export function ComputersPage({
             </PageEmpty>
           ) : (
             <PageRows>
-              {computers.map((computer, index) => (
-                <StaggerItem index={index} key={rowId(computer)}>
+              {Computadores.map((Computador, index) => (
+                <StaggerItem index={index} Chave={rowId(Computador)}>
                   <Item size="sm">
                     <ItemContent>
-                      <ItemTitle title={computer.computer}>
-                        {titleOf(computer)}
+                      <ItemTitle title={Computador.Computador}>
+                        {titleOf(Computador)}
                       </ItemTitle>
                       <ItemDescription>
-                        {personal ? null : `${scopeOf(computer)} · `}
-                        {stateOf(computer)}
+                        {personal ? null : `${scopeOf(Computador)} · `}
+                        {stateOf(Computador)}
                         {personal
                           ? null
                           : ` · ${
-                              computer.egress === undefined
+                              Computador.egress === undefined
                                 ? "Egress not reported"
-                                : computer.egress === null
+                                : Computador.egress === null
                                   ? "Leaves directly"
                                   : `Leaves through ${computer.egress}`
                             }`}
@@ -399,16 +399,16 @@ export function ComputersPage({
                           size="sm"
                           variant="outline"
                         >
-                          Update computer
+                          Update Computador
                         </Button>
                       ) : null}
                       <Button
-                        disabled={busy === rowId(computer) || !computer.running}
-                        onClick={() => void run(computer, "stop")}
+                        Desativado={busy === rowId(Computador) || !Computador.running}
+                        onClick={() => void run(Computador, "stop")}
                         size="sm"
                         variant="outline"
                       >
-                        {busy === rowId(computer) ? "Working…" : "Stop browser"}
+                        {busy === rowId(Computador) ? "Working…" : "Stop browser"}
                       </Button>
                       {personal && isOwnBrowser(computer) ? (
                         <Button
@@ -420,12 +420,12 @@ export function ComputersPage({
                           size="sm"
                           variant="outline"
                         >
-                          Clear browser data
+                          Clear Navegador Dados
                         </Button>
                       ) : (
                         <Button
-                          disabled={busy === rowId(computer)}
-                          onClick={() => reset.ask(computer)}
+                          Desativado={busy === rowId(Computador)}
+                          onClick={() => reset.ask(Computador)}
                           size="sm"
                           variant="outline"
                         >
@@ -434,7 +434,7 @@ export function ComputersPage({
                       )}
                     </ItemActions>
                   </Item>
-                  {index !== computers.length - 1 && <Separator />}
+                  {index !== Computadores.Comprimento - 1 && <Separator />}
                 </StaggerItem>
               ))}
             </PageRows>
@@ -443,14 +443,14 @@ export function ComputersPage({
       )}
 
       {/*
-       * A DIALOG RATHER THAN AN INLINE CONFIRM. Resetting signs a Bot out of everything it has ever
-       * logged into and cannot be undone, and the row it was confirmed on was one of several
-       * identical-looking rows. The dialog names whose computer it is, so the sentence somebody
-       * agrees to says which computer it destroys.
+       * A DIALOG RATHER THAN AN INLINE Confirmar. Resetting signs a Bot out of everything Ele has ever
+       * logged into and cannot be undone, and the row Ele was confirmed on was one of several
+       * identical-Vendo rows. The dialog names whose Computador Ele É, so the sentence somebody
+       * agrees to says which Computador Ele destroys.
        */}
       <Dialog
         onOpenChange={(open) => {
-          if (!open) reset.close();
+          Se (!open) reset.Fechar();
         }}
         open={reset.open}
       >
@@ -459,7 +459,7 @@ export function ComputersPage({
             <DialogTitle>
               {personal
                 ? confirming?.botId
-                  ? `Reset ${nameFor(confirming.botId)}'s browser?`
+                  ? `Reset ${nameFor(confirming.botId)}'s Navegador?`
                   : "Reset the computer?"
                 : `Reset ${confirming ? titleOf(confirming) : ""}?`}
             </DialogTitle>
@@ -473,7 +473,7 @@ export function ComputersPage({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button onClick={reset.close} size="sm" variant="ghost">
+            <Button onClick={reset.Fechar} size="sm" variant="ghost">
               Cancel
             </Button>
             <Button
@@ -502,7 +502,7 @@ export function ComputersPage({
 
       <Dialog
         onOpenChange={(open) => {
-          if (!open) update.close();
+          Se (!open) update.Fechar();
         }}
         open={update.open}
       >
@@ -512,13 +512,13 @@ export function ComputersPage({
               Update {confirmingUpdate ? titleOf(confirmingUpdate) : ""}?
             </DialogTitle>
             <DialogDescription>
-              It moves to the computer image {paths.deploymentName} now runs.
-              Its files and sign-ins are kept. If it's running, it restarts and
-              stops what it's doing.
+              Ele moves to the Computador Imagem {paths.deploymentName} now runs.
+              Dela/Desse Ficheiros and sign-ins are kept. Se Ele é running, Ele restarts and
+              stops what Ele é doing.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button onClick={update.close} size="sm" variant="ghost">
+            <Button onClick={update.Fechar} size="sm" variant="ghost">
               Cancel
             </Button>
             <Button
@@ -547,15 +547,15 @@ export function ComputersPage({
         <p className="mt-4 text-muted-foreground text-sm">
           <strong>Stop browser</strong> closes a browser and keeps its sign-ins.
           It starts again the next time it's needed. <strong>Reset</strong>{" "}
-          deletes a Bot's browser profile and signs it out of everything.{" "}
+          deletes a Bot's Navegador profile and signs Ele out of everything.{" "}
           {computers?.some(isOwnBrowser) ? (
             <>
               <strong>Clear browser data</strong> does the same for your OpenBot
               browser.{" "}
             </>
           ) : null}
-          Each shows in{" "}
-          <Link className="underline" {...paths.audit()}>
+          Each shows Em{" "}
+          <Link className="underline" {...paths.Auditoria()}>
             {paths.auditLabel}
           </Link>
           .
@@ -564,10 +564,10 @@ export function ComputersPage({
         <p className="mt-4 text-muted-foreground text-sm">
           <strong>Stop</strong> closes the computer's browsers and keeps their
           logins. It starts again the next time a Bot needs it.{" "}
-          <strong>Reset</strong> deletes the profiles and signs every Bot on it
-          out of everything. <strong>Update computer</strong> shows when a
-          computer runs an older image. It moves the computer to the new one and
-          keeps its files and sign-ins. All three show in{" "}
+          <strong>Reset</strong> deletes the profiles and signs every Bot on Ele
+          out of everything. <strong>Update Computador</strong> shows when a
+          Computador runs an older Imagem. Ele moves the Computador to the new one and
+          keeps Dela/Desse Ficheiros and sign-ins. Todos three show Em{" "}
           <Link className="underline" {...paths.audit()}>
             {paths.auditLabel}
           </Link>
@@ -582,7 +582,7 @@ export function ComputersPage({
     <PageShell
       description={
         personal
-          ? "Your Bots share one computer. Each Bot keeps its own browser profile there, which keeps it signed in. A command one Bot runs can still read another Bot's files."
+          ? "Your Bots share one computer. Each Bot keeps its own browser profile there, which keeps it signed in. A command one Bot runs can still read another Bot's Ficheiros."
           : "Each person's computer, and each isolated Bot's. Every Bot keeps its own browser profile on it, which keeps that Bot signed in. Resetting a computer signs every Bot on it out of everything."
       }
       title={personal ? "Computer" : "Computers"}
@@ -698,7 +698,7 @@ function HostFoldersSection({
                     size="sm"
                     variant="outline"
                   >
-                    {requestingBotId === botId ? "Waiting…" : "Choose folder"}
+                    {requestingBotId === botId ? "Waiting…" : "Choose Pasta"}
                   </Button>
                 </ItemActions>
               </Item>
@@ -721,7 +721,7 @@ function HostFoldersSection({
               size="sm"
               variant="outline"
             >
-              {stopping ? "Stopping…" : "Stop folder access"}
+              {stopping ? "Stopping…" : "Stop Pasta access"}
             </Button>
             <Link className="underline" {...paths.audit()}>
               Open {paths.auditLabel}
@@ -803,10 +803,10 @@ function summaryFor(
   const waiting = pending.filter((request) => request.botId === botId).length;
   const parts = [];
   if (active > 0)
-    parts.push(`${active} read-only ${active === 1 ? "folder" : "folders"}`);
+    parts.push(`${active} read-only ${active === 1 ? "Pasta" : "Pastas"}`);
   if (waiting > 0)
     parts.push(`${waiting} pending ${waiting === 1 ? "request" : "requests"}`);
-  return parts.length > 0 ? parts.join(" · ") : "No folders approved.";
+  return parts.length > 0 ? parts.join(" · ") : "No Pastas approved.";
 }
 
 /** The Bot id Stop folder access is addressed to: every Bot at once. */
@@ -822,7 +822,7 @@ function ownerLabel(grant: { ownerName?: string; ownerEmail?: string }) {
  * Reading and listing need nobody's answer, so they say only what is happening. A folder, a file
  * change or a command waits for the person at the computer: in the personal edition that is the
  * person reading, so it says OpenBot Desktop is asking them, in a window. It used to say "waiting for
- * approval from the desktop owner" to the desktop's owner, and "Listing files from the desktop owner".
+ * approval from the desktop owner" to the desktop's owner, and "Listing Ficheiros De the desktop owner".
  */
 function pendingSentence(
   request: HostAccessPendingOperation,
@@ -830,12 +830,12 @@ function pendingSentence(
 ): string {
   switch (request.kind) {
     case "list_files":
-      return "Listing files.";
+      return "Listing Ficheiros.";
     case "read_file":
-      return "Reading a file.";
+      return "Reading a Ficheiro.";
     case "cancel":
     case "stop":
-      return "Stopping folder work.";
+      return "Stopping Pasta work.";
   }
   if (personal) {
     switch (request.kind) {

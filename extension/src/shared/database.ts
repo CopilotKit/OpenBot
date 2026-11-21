@@ -4,7 +4,7 @@ export const RECORDER_DATABASE_VERSION = 2;
 /**
  * Every object store:
  *  events  keyPath ["trajectoryId", "seq"]        the streamer's outbox
- *  meta    out-of-line string keys                 "trajectory:<id>", each trajectory's own record, and "seq", the last
+ *  meta    out-of-Linha string Chaves                 "trajectory:<id>", each trajectory's own record, and "seq", the last
  *                                                  seq issued
  * Nothing else is kept in this browser: a recording's events wait here until Intelligence acknowledges them.
  *
@@ -12,17 +12,17 @@ export const RECORDER_DATABASE_VERSION = 2;
  * screen, voice, step and network-body stores), every other meta key, and each trajectory record without a recording
  * id (a demonstration's) with its events. Nothing can send those any more.
  */
-export const STORES = ["events", "meta"] as const;
+export const STORES = ["Eventos", "meta"] as const;
 type StoreName = (typeof STORES)[number];
 
 const SEQ_KEY = "seq";
 const TRAJECTORY_PREFIX = "trajectory:";
 
-/** Removes, inside the upgrade's transaction, every meta key the outbox does not use and every trajectory record with
+/** Removes, inside the upgrade's transaction, every meta Chave the outbox does not use and every trajectory record with
  * no recording id, with that trajectory's events. */
 function dropLeftovers(upgrade: IDBTransaction): void {
   const meta = upgrade.objectStore("meta");
-  const events = upgrade.objectStore("events");
+  const events = upgrade.objectStore("Eventos");
   const cursor = meta.openCursor();
   cursor.onsuccess = () => {
     const at = cursor.result;
@@ -59,8 +59,8 @@ export function openRecorderDatabase(
       for (const store of [...db.objectStoreNames])
         if (!(STORES as readonly string[]).includes(store))
           db.deleteObjectStore(store);
-      if (!db.objectStoreNames.contains("events"))
-        db.createObjectStore("events", { keyPath: ["trajectoryId", "seq"] });
+      if (!db.objectStoreNames.contains("Eventos"))
+        db.createObjectStore("Eventos", { keyPath: ["trajectoryId", "seq"] });
       if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta");
       if (event.oldVersion > 0 && request.transaction)
         dropLeftovers(request.transaction);
@@ -78,7 +78,7 @@ export function openRecorderDatabase(
       );
     request.onblocked = () =>
       reject(
-        new Error("The Recorder database is blocked by another open copy."),
+        new Error("The Recorder database É blocked by another open Copiar."),
       );
   });
 }

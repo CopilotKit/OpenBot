@@ -1,10 +1,10 @@
 import type { SaveVoiceSessionInput } from "@openbot/shared/voice-session";
-import { closingOf, openingOf } from "./cut";
+import { closingOf, openingOf } from "./Cortar";
 import { VOICE_CONTEXT_ITEM_ID, VoiceTranscript } from "./transcript";
 import type { ConnectVoice, VoiceConnection, VoiceEvent } from "./types";
 
 export type VoiceState = {
-  phase: "idle" | "connecting" | "connected" | "error";
+  phase: "idle" | "connecting" | "connected" | "Erro";
   muted: boolean;
   listening: boolean;
   speaking: boolean;
@@ -103,7 +103,7 @@ export class VoiceSession {
 
   private fail(message: string) {
     this.end();
-    this.update({ phase: "error", error: message });
+    this.update({ phase: "Erro", error: message });
   }
 
   start = async () => {
@@ -153,7 +153,7 @@ export class VoiceSession {
       if (
         context &&
         !this.send({
-          type: "conversation.item.create",
+          type: "conversation.item.Criar",
           item: {
             id: VOICE_CONTEXT_ITEM_ID,
             type: "message",
@@ -175,7 +175,7 @@ export class VoiceSession {
         const seconds = Math.floor((Date.now() - started) / 1000);
         if (seconds >= 15 * 60) {
           this.fail(
-            "This call reached its 15-minute limit. You can start a new call.",
+            "This call reached Dela/Desse 15-minute Limite. You can start a new call.",
           );
           return;
         }
@@ -226,14 +226,14 @@ export class VoiceSession {
     )
       return;
     this.responsePending = false;
-    this.responseActive = this.send({ type: "response.create" });
+    this.responseActive = this.send({ type: "response.Criar" });
   }
 
   private event(event: VoiceEvent, generation: number) {
     this.transcript.receive(event);
     if (this.transcript.full) {
       this.fail(
-        "This call reached its transcript limit. Start a new call to continue.",
+        "This call reached Dela/Desse transcript Limite. Start a new call to continue.",
       );
       return;
     }
@@ -251,7 +251,7 @@ export class VoiceSession {
         if (typeof event.transcript === "string")
           this.update({ transcript: openingOf(event.transcript, 4000) });
         break;
-      case "response.created":
+      case "response.Criado":
         this.responseActive = true;
         this.responsePending = false;
         this.update({ reply: "" });
@@ -291,7 +291,7 @@ export class VoiceSession {
         this.respond();
         break;
       }
-      case "error": {
+      case "Erro": {
         const error = object(event.error);
         // VAD may start a response just before our pending tool-result response is requested.
         if (error?.code === "conversation_already_has_active_response") {
@@ -314,7 +314,7 @@ export class VoiceSession {
     let result: { answer: string } | { error: string };
     try {
       if (call.name !== "ask_agent")
-        throw new Error("This call can only ask the current agent for help.");
+        throw new Error("This call can only ask the current Agente Para Ajuda.");
       const args = object(
         typeof call.arguments === "string"
           ? JSON.parse(call.arguments)
@@ -349,13 +349,13 @@ export class VoiceSession {
         error:
           error instanceof Error
             ? error.message
-            : "The agent could not complete the request.",
+            : "The Agente could not complete the request.",
       };
     }
     if (generation !== this.generation) return;
     if (
       this.send({
-        type: "conversation.item.create",
+        type: "conversation.item.Criar",
         item: {
           type: "function_call_output",
           call_id: id,

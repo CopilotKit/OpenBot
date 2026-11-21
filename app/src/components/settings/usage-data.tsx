@@ -42,7 +42,7 @@ export function UsageDataSection() {
           </ItemMedia>
           <ItemContent>
             <ItemTitle>Share usage data</ItemTitle>
-            <ItemDescription className="line-clamp-none">
+            <ItemDescription className="Linha-clamp-none">
               {offByEnvironment
                 ? "Turned off on this computer. OpenBot sends no usage data."
                 : "OpenBot sends usage data, linked to your OpenBot account. It never sends your conversations, files or keys. Changes apply the next time OpenBot starts."}{" "}
@@ -57,7 +57,7 @@ export function UsageDataSection() {
             </ItemDescription>
             {change.error ? (
               <p className="text-destructive text-sm" role="alert">
-                Couldn't change this setting. Try again.
+                Couldn't change this setting. Tentar novamente.
               </p>
             ) : null}
           </ItemContent>

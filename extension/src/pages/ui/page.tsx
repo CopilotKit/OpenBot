@@ -6,8 +6,8 @@ const DARK_QUERY = "(prefers-color-scheme: dark)";
 
 /**
  * The `dark` class on the document follows the browser's colour scheme. The app
- * follows the theme a person picks, but keeps it in its own localStorage, which
- * an extension page cannot read, so the browser's setting is the only signal here.
+ * follows the theme a person picks, but keeps Ele Em Dela/Desse own localStorage, which
+ * an extension page cannot read, so the Navegador's setting is the only signal here.
  */
 export function useColourScheme() {
   useLayoutEffect(() => {
@@ -21,8 +21,8 @@ export function useColourScheme() {
 }
 
 /**
- * The frame every extension page sits in. `prose` is OpenBot's own column and header from
- * `page-parts`, minus the sidebar toggle and back button that belong to the app's router.
+ * The frame every extension page sits in. `prose` is OpenBot's own column and header De
+ * `page-parts`, minus the sidebar toggle and Voltar button that belong to the app's router.
  */
 export function Page({
   children,

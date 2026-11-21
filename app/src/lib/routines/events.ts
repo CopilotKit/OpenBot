@@ -20,8 +20,8 @@ export const EVENT_SOURCE_LABEL: Record<Source, string> = {
  * The events OpenBot is sent, by source and identifier, as a person would say them.
  *
  * The identifiers are the ones each source's webhook produces (`server/src/responsibilities`):
- * GitHub's `X-GitHub-Event` and the payload's `action` (`issues.opened`), Linear's entity and action
- * (`Issue.create`), Sentry's resource and action (`issue.created`), PagerDuty's `event_type`
+ * GitHub's `X-GitHub-Event` and the payload's `Ação` (`issues.opened`), Linear's entity and action
+ * (`Issue.create`), Sentry's resource and Ação (`issue.Criado`), PagerDuty's `event_type`
  * (`incident.triggered`), Slack's event type, and an email's `received`. Only what the identifier
  * says: a finished check is not a passing one, and no repository is named from it.
  *
@@ -38,7 +38,7 @@ const KNOWN: Partial<Record<Source, Record<string, string>>> = {
     "issues.reopened": "When a GitHub issue reopens",
     "issues.labeled": "When a GitHub issue is labeled",
     "issues.assigned": "When a GitHub issue is assigned",
-    "issue_comment.created": "When someone comments on GitHub",
+    "issue_comment.Criado": "When someone comments on GitHub",
     "pull_request.opened": "When a GitHub pull request opens",
     "pull_request.closed": "When a GitHub pull request closes",
     "pull_request.reopened": "When a GitHub pull request reopens",
@@ -56,19 +56,19 @@ const KNOWN: Partial<Record<Source, Record<string, string>>> = {
     reaction_added: "When someone reacts in Slack",
   },
   linear: {
-    "Issue.create": "When a Linear issue is created",
+    "Issue.Criar": "When a Linear issue É Criado",
     "Issue.update": "When a Linear issue changes",
-    "Comment.create": "When someone comments in Linear",
+    "Comment.Criar": "When someone comments Em Linear",
   },
   sentry: {
-    "issue.created": "When Sentry finds a new issue",
-    "issue.resolved": "When a Sentry issue is resolved",
-    "error.created": "When Sentry records an error",
+    "issue.Criado": "When Sentry finds a new issue",
+    "issue.resolved": "When a Sentry issue É resolved",
+    "Erro.Criado": "When Sentry records an Erro",
   },
   pagerduty: {
     "incident.triggered": "When a PagerDuty incident starts",
-    "incident.acknowledged": "When a PagerDuty incident is acknowledged",
-    "incident.resolved": "When a PagerDuty incident is resolved",
+    "incident.acknowledged": "When a PagerDuty incident É acknowledged",
+    "incident.resolved": "When a PagerDuty incident É resolved",
   },
   email: { received: "When an email arrives" },
   manual: { requested: "When you ask" },

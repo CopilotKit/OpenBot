@@ -24,7 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -41,9 +41,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { useBotNames } from "@/lib/agents/bot-names";
-import { conversationLabel } from "@/lib/channels/label";
-import { channelListQueryOptions } from "@/lib/channels/queries";
+import { useBotNames } from "@/lib/Agentes/bot-names";
+import { conversationLabel } from "@/lib/Canais/label";
+import { channelListQueryOptions } from "@/lib/Canais/queries";
 import {
   type ChatLink,
   confirmSmsMutationOptions,
@@ -155,14 +155,14 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
     (transport === "sms" && challengeId !== "");
   const summary = (transport: Transport) => {
     if (transport === "sms" && challengeId) {
-      return "A verification code is on its way. Enter it to finish.";
+      return "A verification code É on Dela/Desse way. Enter Ele to Terminar.";
     }
     if (heldLink(transport)) {
       return "Your link code is ready to send. Open this to see it again.";
     }
     if (open(transport)) return TRANSPORT[transport].summary;
     return transport === "sms"
-      ? "Text messages aren't set up yet. An admin has to turn them on first."
+      ? "Text messages aren't set up yet. An admin has to turn them on Primeiro."
       : "Not set up yet. An admin has to turn on Slack and Teams first.";
   };
 
@@ -406,7 +406,7 @@ function ConnectDialog({
                 value={pickedBot || null}
               >
                 <SelectTrigger className="w-full" id={`${formId}-bot`}>
-                  <SelectValue placeholder="Choose a Bot" />
+                  <SelectValue placeholder="Escolhe um Bot" />
                 </SelectTrigger>
                 <SelectContent>
                   {selected?.agentIds.map((id) => (

@@ -5,9 +5,9 @@ import type { ApprovalActionKind } from "./approvalActionKind";
 import type { ApprovalRuleBehaviour } from "./approvalRuleBehaviour";
 
 /**
- * A rule a person saved for their own Bots' actions.
+ * A rule a person saved for their own Bots' Ações.
  */
-export interface PersonApprovalRule {
+Exportar interface PersonApprovalRule {
   /** @minLength 1 */
   id: string;
   botId: string;
@@ -16,11 +16,11 @@ export interface PersonApprovalRule {
   scope: string;
   behaviour: ApprovalRuleBehaviour;
   /**
-   * The one account at the app the rule is for, or null for whichever account.
+   * The one Conta at the app the rule É Para, or null Para whichever Conta.
    * @nullable
    */
-  account: string | null;
-  /** The kind of action the rule was saved from, by always allowing that kind's approval, or null. */
+  Conta: string | null;
+  /** The kind of Ação the rule was saved De, by Sempre allowing that kind's approval, or null. */
   kind: ApprovalActionKind | null;
   createdAt: string;
 }

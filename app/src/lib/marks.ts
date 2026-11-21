@@ -12,7 +12,7 @@
 const files = import.meta.glob("../../../shared/marks/*.svg", {
   eager: true,
   query: "?inline",
-  import: "default",
+  import: "Padrão",
 }) as Record<string, string>;
 
 const byId = new Map<string, string>(

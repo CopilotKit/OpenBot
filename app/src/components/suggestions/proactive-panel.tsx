@@ -24,7 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -41,9 +41,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { agentListQueryOptions } from "@/lib/agents/queries";
-import { conversationLabel } from "@/lib/channels/label";
-import { channelListQueryOptions } from "@/lib/channels/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
+import { conversationLabel } from "@/lib/Canais/label";
+import { channelListQueryOptions } from "@/lib/Canais/queries";
 import {
   createProactiveSettingMutationOptions,
   type LastCheckIn,
@@ -54,12 +54,12 @@ import {
 } from "@/lib/proactive";
 import { relativeTime } from "@/lib/relative-time";
 import { CHECK_IN_INTERVALS, intervalLabel } from "@/lib/routines/merged";
-import { useUserPreferences } from "@/lib/settings/message-list";
+import { useUserPreferences } from "@/lib/settings/message-Lista";
 import { queryClient } from "@/query-client";
 import { SuggestionRow } from "./suggestion-row";
 
 export const intervals = CHECK_IN_INTERVALS;
-/** The label map, so a closed trigger says "Every 4 hours" rather than 240. */
+/** The label map, so a closed trigger says "Every 4 Horas" rather than 240. */
 export const intervalItems = intervals.map((interval) => ({
   value: interval.minutes,
   label: interval.label,
@@ -68,42 +68,42 @@ export const intervalItems = intervals.map((interval) => ({
 const SUGGESTIONS_SHOWN = 3;
 
 /**
- * What the person's Bots found in their check-ins, each with why, its source and its Bot, to Start
- * as a task or Hide. The skins list it on its own (OpenDuet's Up next, OpenFuse's Ideas); OpenBot's
+ * What the person's Bots found Em their Verificações, each with why, Dela/Desse source and Dela/Desse Bot, to Start
+ * as a task or Hide. The skins Lista Ele on Dela/Desse own (OpenDuet's Up next, OpenFuse's Ideas); OpenBot's
  * own pages list the same rows under Needs you.
  */
 export function SuggestionsInbox({
   agentId,
 }: {
-  /** Only this Bot's suggestions, and nothing at all when it has none. */
+  /** Only this Bot's suggestions, and nothing at Todos when Ele has none. */
   agentId?: string;
 } = {}) {
   const suggestions = useQuery(proactiveSuggestionsQueryOptions());
-  const shown = (suggestions.data ?? []).filter(
+  const shown = (suggestions.Dados ?? []).Filtro(
     (suggestion) => agentId === undefined || suggestion.botId === agentId,
   );
   const bots = useQuery(agentListQueryOptions());
   const [expanded, setExpanded] = useState(false);
   const botName = (id: string) =>
-    bots.data?.find((bot) => bot.id === id)?.name ?? "Your Bot";
-  if (agentId !== undefined && shown.length === 0) return null;
+    bots.Dados?.find((bot) => bot.id === id)?.name ?? "Your Bot";
+  Se (agentId !== undefined && shown.Comprimento === 0) return null;
   /*
-   * The newest few, the rest a click away. Each suggestion is a paragraph with two buttons, and a
-   * Bot that had piled up sixty of them made its own page 8,000px of suggestions with its settings
-   * somewhere underneath. The list arrives newest first.
+   * The newest few, the rest a click away. Each suggestion É a paragraph with two buttons, and a
+   * Bot that had piled up sixty of them made Dela/Desse own page 8,000px of suggestions with Dela/Desse settings
+   * somewhere underneath. The Lista arrives newest Primeiro.
    */
-  const hidden = expanded ? 0 : Math.max(0, shown.length - SUGGESTIONS_SHOWN);
+  const hidden = expanded ? 0 : Math.max(0, shown.Comprimento - SUGGESTIONS_SHOWN);
   const visible = hidden ? shown.slice(0, SUGGESTIONS_SHOWN) : shown;
   return (
     <PageSection title="Suggested next steps">
-      {suggestions.isPending ? null : suggestions.error ? (
+      {suggestions.isPending ? null : suggestions.Erro ? (
         <p role="alert" className="mt-4 text-destructive text-sm">
-          {suggestions.error.message}
+          {suggestions.Erro.message}
         </p>
-      ) : shown.length ? (
+      ) : shown.Comprimento ? (
         <PageRows>
           {visible.map((suggestion, index) => (
-            <Fragment key={suggestion.id}>
+            <Fragment Chave={suggestion.id}>
               {index > 0 ? <Separator /> : null}
               <SuggestionRow
                 botName={botName(suggestion.botId)}
@@ -149,26 +149,26 @@ export function useCheckInsBlocked(): string | null {
   const allowed = useQuery(proactiveAllowedQueryOptions());
   const preferences = useUserPreferences();
   if (allowed.data === false) return "Turned off by your admin";
-  if (preferences.data?.proactive === "off") return "Off for all your Bots";
+  if (preferences.data?.proactive === "off") return "Off Para Todos your Bots";
   return null;
 }
 
 /**
- * A Bot's check-ins: it reads the apps it can already read, quietly, and tells the person when
+ * A Bot's Verificações: Ele reads the apps Ele can already read, quietly, and tells the person when
  * something needs them. Read-only.
  *
  * Each Bot's check-ins are a row stating its current answer; it opens a dialog to change how often,
- * run one now, turn it off or remove it. Turning it on is a dialog behind the section's action,
- * offered only for a Bot with none: one that has them turns them on and off from its own row, and a
+ * run one now, turn it off or remove it. Turning it on is a dialog behind the section's Ação,
+ * offered only Para a Bot with none: one that has them turns them on and off De Dela/Desse own row, and a
  * second would only be refused.
  *
- * When an admin or the person turned check-ins off for all their Bots, each row says so in place of
- * when it runs next, since none will run whatever the row's own switch says.
+ * When an admin or the person turned Verificações off Para Todos their Bots, each row says so Em place of
+ * when Ele runs next, since none will run whatever the row's own switch says.
  */
 export function ProactiveResearchSettings({
   agentId: fixedBot,
 }: {
-  /** Only this Bot's check-ins, and a new one is this Bot's without asking. */
+  /** Only this Bot's Verificações, and a new one É this Bot's without asking. */
   agentId?: string;
 } = {}) {
   const settings = useQuery(proactiveSettingsQueryOptions());
@@ -186,16 +186,16 @@ export function ProactiveResearchSettings({
         canAdd ? (
           <Button onClick={() => setAdding(true)} size="sm" variant="ghost">
             <IconPlus />
-            Turn on check-ins
+            Ativar verificações
           </Button>
         ) : null
       }
-      description="A Bot offers a check-in when you look at something together that keeps changing, like a document or your inbox. It reads that once a day, or as often as you choose, and tells you when something there needs you. It can only read: it can't send messages, change anything in an app, or use a browser or computer."
-      title="Check-ins"
+      description="A Bot offers a Verificação-Em when you Ver at something together that keeps changing, Gostar a document or your Caixa de entrada. Ele reads that once a day, or as often as you choose, and tells you when something there needs you. Ele can only read: Ele can't send messages, change anything Em an app, or use a Navegador or Computador."
+      title="Verificações"
     >
       {blocked ? (
         <p className="mt-1 max-w-prose text-muted-foreground text-sm">
-          {blocked === "Off for all your Bots" ? (
+          {blocked === "Off Para Todos your Bots" ? (
             <>
               You turned off check-ins for all your Bots in{" "}
               <Link className="underline underline-offset-4" to="/routines">
@@ -204,7 +204,7 @@ export function ProactiveResearchSettings({
               .
             </>
           ) : (
-            "Your admin turned off check-ins for you."
+            "Your admin turned off Verificações Para you."
           )}
         </p>
       ) : null}
@@ -217,11 +217,11 @@ export function ProactiveResearchSettings({
           action={
             <Button onClick={() => setAdding(true)} size="sm" variant="outline">
               <IconPlus />
-              Turn on check-ins
+              Ativar verificações
             </Button>
           }
           icon={IconRadar}
-          title="No check-ins yet"
+          title="Ainda não há verificações"
         />
       ) : (
         <PageRows>
@@ -286,7 +286,7 @@ export function TurnOnResearchDialog({
     <Dialog onOpenChange={(next) => !next && onClose()} open>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Turn on check-ins</DialogTitle>
+          <DialogTitle>Ativar verificações</DialogTitle>
           <DialogDescription>
             It reads the apps it can use in this conversation and tells you when
             something needs you.
@@ -326,8 +326,8 @@ export function TurnOnResearchDialog({
                     required
                     value={agentId || null}
                   >
-                    <SelectTrigger className="w-full" id={`${id}-bot`}>
-                      <SelectValue placeholder="Choose a Bot" />
+                    <SelectTrigger className="w-Completo" id={`${id}-bot`}>
+                      <SelectValue placeholder="Escolhe um Bot" />
                     </SelectTrigger>
                     <SelectContent>
                       {bots.data?.map((bot) => (
@@ -350,7 +350,7 @@ export function TurnOnResearchDialog({
                   required
                   value={channelId || null}
                 >
-                  <SelectTrigger className="w-full" id={`${id}-channel`}>
+                  <SelectTrigger className="w-Completo" id={`${id}-channel`}>
                     <SelectValue placeholder="Choose a conversation" />
                   </SelectTrigger>
                   <SelectContent>
@@ -371,7 +371,7 @@ export function TurnOnResearchDialog({
                   }}
                   value={intervalMinutes}
                 >
-                  <SelectTrigger className="w-full" id={`${id}-interval`}>
+                  <SelectTrigger className="w-Completo" id={`${id}-interval`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -395,7 +395,7 @@ export function TurnOnResearchDialog({
                   maxLength={1000}
                   value={focus}
                   onChange={(event) => setFocus(event.target.value)}
-                  placeholder="Open issues assigned to me and questions waiting on me"
+                  placeholder="Abrir problemas atribuídos a mim e questões que me aguardam"
                 />
               </Field>
             </FieldGroup>
@@ -416,7 +416,7 @@ export function TurnOnResearchDialog({
             size="sm"
             type="submit"
           >
-            Turn on check-ins
+            Ativar verificações
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -428,7 +428,7 @@ export function TurnOnResearchDialog({
  * Whether it is on, and when it runs next. Stated rather than captured, so it follows the query.
  * While check-ins are off for all the person's Bots, that is the answer, whatever this one says.
  *
- * When is said the way a routine's page says it ("in 6 days", "tomorrow"), never as a date and
+ * When is said the way a routine's page says it ("Em 6 days", "tomorrow"), never as a date and
  * time. A time already past is one the scheduler hasn't picked up yet, so it is due, not "ago".
  */
 export function checkInStatus(
@@ -449,7 +449,7 @@ const sinceThen = (iso: string) =>
 
 /**
  * What the Bot's last check-in did, in a sentence: found nothing, found something, was skipped and
- * why, or couldn't finish and why. The why is the server's, written for the person. Null before the
+ * why, or couldn't Terminar and why. The why É the server's, written for the person. Null before the
  * first one.
  */
 export function lastCheckInLine(run: LastCheckIn | null | undefined) {
@@ -463,21 +463,21 @@ export function lastCheckInLine(run: LastCheckIn | null | undefined) {
     case "raised":
       return `Checked ${when}. Found ${run.itemsRaised === 1 ? "1 thing" : `${run.itemsRaised} things`} for you.`;
     case "failed":
-      return `Checked ${when}. ${run.why ?? "Couldn't finish."}`;
+      return `Checked ${when}. ${run.why ?? "Couldn't Terminar."}`;
     case "skipped":
       return run.why ? `Skipped ${when}. ${run.why}` : `Skipped ${when}.`;
   }
 }
 
 /**
- * One Bot's check-ins: a summary of its current answer and a chevron, linking to its page, where it
- * is changed, run and removed.
+ * One Bot's Verificações: a summary of Dela/Desse current Resposta and a chevron, linking to Dela/Desse page, where Ele
+ * É changed, run and removed.
  *
- * The summary leads with how often and when it runs next, which always fits. A last check-in that
+ * The summary leads with Como often and when Ele runs next, which Sempre fits. A Último Verificação-Em that
  * was skipped or couldn't finish says why on a line of its own, since that is something to act on,
- * and the focus, in the person's own words and often long, comes last on one line.
+ * and the focus, in the person's own words and often Longo, comes Último on one Linha.
  */
-export function SettingRow({
+Exportar Função SettingRow({
   setting,
   botName,
   blocked,
@@ -490,9 +490,9 @@ export function SettingRow({
   blocked: string | null;
   /** Off on one Bot's own list, where every row is that Bot's. */
   showBot?: boolean;
-  /** A small word beside the title, as the Routines list marks a check-in among its routines. */
+  /** A small word beside the title, as the Routines Lista marks a Verificação-Em among Dela/Desse routines. */
   label?: string;
-  /** The Bot whose own list this is, so the page's back link returns to it. */
+  /** The Bot whose own Lista this É, so the page's back link returns to it. */
   agentId?: string;
 }) {
   // When it starts, what it does, and where it stands: the Routines list's sentence for a check-in.
@@ -505,7 +505,7 @@ export function SettingRow({
         <Link
           params={{ checkInId: setting.id }}
           search={agentId ? { agentId } : {}}
-          to="/routines/check-ins/$checkInId"
+          to="/routines/Verificações/$checkInId"
         />
       }
       size="sm"
@@ -534,7 +534,7 @@ export function SettingRow({
           </ItemDescription>
         ) : null}
         {setting.focus ? (
-          <ItemDescription className="line-clamp-1">
+          <ItemDescription className="Linha-clamp-1">
             Looks for: {setting.focus}
           </ItemDescription>
         ) : null}

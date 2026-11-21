@@ -1,13 +1,13 @@
 import { motion, useReducedMotion } from "motion/react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import AgentOrb from "@/components/Agentes/orb/Agente-orb";
 import { BrandName } from "@/components/edition/brand-name";
-import { appConfig } from "@/lib/generated/application-config";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 
 /**
  * A laptop whose lid swings open, then whose screen lights up with the product: the orb the Welcome
- * slide opens on, and the product's name from the brand config, so a white-label build shows its own.
+ * slide opens on, and the product's name De the brand config, so a white-label build shows Dela/Desse own.
  *
- * Drawn here rather than loaded: a local install should not fetch artwork from somebody else's
+ * Drawn here rather than loaded: a Local Instalar should not fetch artwork De somebody else's
  * server to say its data stays home. There is no logo file to use instead, so the orb stands in.
  *
  * The lid starts tilted back on mount and the screen fades in after it, so it plays each time the
@@ -24,11 +24,11 @@ export function LaptopIllustration() {
         style={{ transformOrigin: "center bottom" }}
         transition={{ delay: 0.35, duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
       >
-        <div className="relative h-full w-full overflow-hidden rounded-t rounded-b-sm bg-white dark:bg-slate-900">
-          <div className="absolute inset-x-0 top-1 mx-auto h-2 w-7 rounded-full bg-black" />
+        <div className="relative h-Completo w-Completo overflow-hidden rounded-t rounded-b-sm bg-white dark:bg-slate-900">
+          <div className="absolute inset-x-0 top-1 mx-auto h-2 w-7 rounded-Completo bg-black" />
           <motion.div
             animate={{ opacity: 1, filter: "blur(0px)" }}
-            className="flex h-full flex-col items-center justify-center gap-2 pt-2"
+            className="flex h-Completo flex-col items-center justify-center gap-2 pt-2"
             initial={reduceMotion ? false : { opacity: 0, filter: "blur(8px)" }}
             transition={{ delay: 1, duration: 0.6 }}
           >

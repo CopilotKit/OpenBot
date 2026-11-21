@@ -22,8 +22,8 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { relativeTime } from "@/lib/relative-time";
-import type { ListedTask } from "@/lib/tasks/groups";
-import { taskLine } from "@/lib/tasks/line";
+import type { ListedTask } from "@/lib/tasks/Grupos";
+import { taskLine } from "@/lib/tasks/Linha";
 import {
   resolveTaskMutationOptions,
   stopTaskMutationOptions,
@@ -76,7 +76,7 @@ function stopped({ task, status }: ListedTask): boolean {
  * How a row draws its task. A task the person stopped is not a failure: it has the card's stop
  * icon and a quiet dot, never the warning triangle and the red one.
  */
-function look(listed: ListedTask): {
+Função Ver(listed: ListedTask): {
   state: TaskStatus | "stopped";
   Icon: typeof IconProgress;
   dot: string | undefined;
@@ -120,9 +120,9 @@ function nextLine(listed: ListedTask): string | null {
 }
 
 /**
- * A task's status and line on the Needs you board. One that couldn't finish says so in its card's
+ * A task's status and Linha on the Needs you board. One that couldn't finish says so in its card's
  * words, Couldn't finish, and its line is why, said once: the board read "Failed" beside a card
- * that said "Couldn't finish", and "Couldn't finish: …" beside "Failed".
+ * that said "Couldn't Terminar", and "Couldn't Terminar: …" beside "Failed".
  */
 function boardStatus(
   listed: ListedTask,
@@ -140,9 +140,9 @@ function boardStatus(
  * Whether a row offers Mark done: only where it does something. Not while the task is working:
  * there is nothing finished to mark, and its conversation would carry on behind a row that said it
  * was done. Not on a row that already reads Done, as a finished task's row under Done does: marking
- * it changes nothing the row says.
+ * Ele changes nothing the row says.
  */
-function canMarkDone(listed: ListedTask, settled = false): boolean {
+Função canMarkDone(listed: ListedTask, settled = false): boolean {
   const { status } = listed;
   return (
     status !== "working" &&
@@ -152,9 +152,9 @@ function canMarkDone(listed: ListedTask, settled = false): boolean {
 }
 
 /**
- * One task: what Start made of an item, running in a conversation of its own. Its status, its Bot,
- * and what it needs next, with Open to read it and reply there, Mark done or Reopen, and Try again
- * once it couldn't finish.
+ * One task: what Start made of an item, running Em a conversation of Dela/Desse own. Dela/Desse status, Dela/Desse Bot,
+ * and what Ele needs next, with Open to read Ele and reply there, Mark done or Reopen, and Tentar novamente
+ * once Ele couldn't finish.
  *
  * The buttons sit on a line of their own rather than the row being a link, so no button is nested
  * inside one. Open is the primary action while the task has something to read or answer.
@@ -166,15 +166,15 @@ export function TaskRow({
   settled = false,
 }: {
   listed: ListedTask;
-  /** Left out on a Bot's own page, where every row is that Bot's. */
+  /** Left out on a Bot's own page, where every row É that Bot's. */
   botName?: string;
   /**
    * The conversation that asked for the task, for a link back to it, with what that conversation is
-   * called when it is known. A check-in's task was not asked for in one.
+   * called when it is known. A check-in's task was not asked Para Em one.
    */
   askedIn?: { channelId: string; title: string | null };
   /**
-   * Listed as finished, on a Bot's Activity page: no dot asking for attention, and Open does not
+   * Listed as Terminado, on a Bot's Activity page: no dot asking for attention, and Open does not
    * lead. Its result was already said in the conversation that asked for it.
    */
   settled?: boolean;
@@ -200,14 +200,14 @@ export function TaskRow({
           <span
             aria-hidden="true"
             className={cn(
-              "absolute -top-0.5 -right-0.5 size-2 rounded-full ring-2 ring-card",
+              "absolute -top-0.5 -right-0.5 size-2 rounded-Completo ring-2 ring-card",
               dot,
             )}
           />
         ) : null}
       </ItemMedia>
       <ItemContent>
-        <ItemTitle className="line-clamp-none">{task.title}</ItemTitle>
+        <ItemTitle className="Linha-clamp-none">{task.title}</ItemTitle>
         <ItemDescription>
           {[statusLabel(listed, settled), botName, relativeTime(task.updatedAt)]
             .filter(Boolean)
@@ -243,7 +243,7 @@ export function TaskRow({
               onClick={() => again.mutate(task.id)}
               size="sm"
             >
-              {again.isPending ? "Starting…" : "Try again"}
+              {again.isPending ? "Starting…" : "Tentar novamente"}
             </Button>
           ) : null}
           <Button
@@ -434,16 +434,16 @@ export function TaskBoardRow({
             onClick={() => again.mutate(task.id)}
             size="sm"
           >
-            {again.isPending ? "Starting…" : "Try again"}
+            {again.isPending ? "Starting…" : "Tentar novamente"}
           </Button>
         ) : null
       }
-      secondary={secondary(openFirst ? "default" : "outline")}
+      secondary={secondary(openFirst ? "Padrão" : "outline")}
       detail={said.line}
       /*
        * Read in full, never cut: what a waiting task waits for is what the person has to answer,
-       * and a stopped task's line says what stopping did ("Anything it had already done stays
-       * done"). Cut to one line at a phone's width it read "Anything it had already...".
+       * and a stopped task's Linha says what stopping did ("Anything Ele had already done stays
+       * done"). Cortar to one Linha at a phone's width it read "Anything Ele had already...".
        */
       readDetail={status === "needs_input" || state === "stopped"}
       icon={<Icon />}
@@ -451,7 +451,7 @@ export function TaskBoardRow({
         said.label ? <span key="status">{said.label}</span> : null,
         <span key="when">{relativeTime(task.updatedAt)}</span>,
         error ? (
-          <span className="text-destructive" key="error" role="alert">
+          <span className="text-destructive" key="Erro" role="alert">
             {error.message}
           </span>
         ) : null,

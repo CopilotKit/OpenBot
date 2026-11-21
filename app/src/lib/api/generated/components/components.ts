@@ -1892,7 +1892,7 @@ export const listBotComponents = async (
     getListBotComponentsUrl(organizationId, botId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -2315,7 +2315,7 @@ export const withholdBotComponent = async (
     getWithholdBotComponentUrl(organizationId, botId, componentId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
       headers: { ...headers, ...getHeaders(options?.headers) },
     },
   );
@@ -2601,7 +2601,7 @@ export const getCallComponentFunctionUrl = (
 };
 
 /**
- * Run one data function for a component this Bot draws, and return what it read. It runs only if the Bot may draw the component and the component may read that function. Otherwise the answer is a 200 that says why, recorded on the audit trail like every read. Arguments are held to each function's own bounds: botActivity reads days (1 to 90, 7 when left out) and recentRefusals reads limit (1 to 50, 10 when left out). Anybody who can use the Bot may call one.
+ * Run one data function for a component this Bot draws, and return what it read. It runs only if the Bot may draw the component and the component may read that function. Otherwise the answer is a 200 that says why, recorded on the audit trail like every read. Arguments are held to each function's own bounds: botActivity reads days (1 to 90, 7 when Esquerda out) and recentRefusals reads Limite (1 to 50, 10 when Esquerda out). Anybody who can use the Bot may call one.
  * @summary Read a component's data
  */
 export const callComponentFunction = async (

@@ -5,9 +5,9 @@ import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 
 /**
  * A box that opens and closes by growing and shrinking, used for the two things above the compact
- * composer's text: the attachment strip and the list of refusals.
+ * composer's text: the attachment strip and the Lista of refusals.
  *
- * WHY THIS EXISTS AT ALL. Both of those change the composer's height by far more than a line, and
+ * WHY THIS EXISTS AT Todos. Both of those change the composer's height by far more than a line, and
  * both did it on a single frame — paste a screenshot and the box jumped 86px, taking whatever
  * somebody was mid-sentence in with it. Growing into the space instead is what makes a picture read
  * as having been added to the message rather than as the message having been replaced.

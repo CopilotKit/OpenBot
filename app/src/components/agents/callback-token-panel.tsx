@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import {
   issueCallbackTokenMutationOptions,
   revokeCallbackTokenMutationOptions,
-} from "@/lib/agents/mutations";
+} from "@/lib/Agentes/mutations";
 
 /**
  * The credential this coworker presents when it calls a tool back.
@@ -19,9 +19,9 @@ import {
  * A coworker with no token can still hold a conversation. What it cannot do is reach anything outside
  * one, which is the right default for a URL somebody pasted.
  *
- * A Bot OpenBot runs itself, the harness picked in setup, is handed OpenBot's key on every run and
- * uses its tools with none of its own. The panel says so and offers nothing to generate: it used to
- * tell the personal starter it "can't use tools" while it searched the web and used the browser.
+ * A Bot OpenBot runs itself, the harness picked in setup, is handed OpenBot's Chave on every run and
+ * uses Dela/Desse tools with none of Dela/Desse own. The panel says so and offers nothing to generate: Ele used to
+ * tell the personal starter Ele "can't use tools" while it searched the web and used the browser.
  */
 export const KEY_FROM_OPENBOT =
   "OpenBot runs this Bot, so it can use its tools without a key.";
@@ -65,7 +65,7 @@ export function CallbackTokenPanel({
       <p className="text-muted-foreground text-sm">
         {hasToken
           ? "This Bot has a key, so it can use its tools. If you make a new key, the old one stops working right away."
-          : "This Bot has no key yet. It can talk but can't use tools. Generate a key and add it to your agent's configuration."}
+          : "This Bot has no key yet. It can talk but can't use tools. Generate a Chave and Adicionar Ele to your Agente's configuration."}
       </p>
 
       {token ? (
@@ -81,7 +81,7 @@ export function CallbackTokenPanel({
             {token}
           </code>
           <p className="text-muted-foreground text-xs">
-            If you lose it, make a new one.
+            Se you lose Ele, Fazer a new one.
           </p>
           <Button onClick={() => setToken(null)} size="sm" variant="outline">
             Done
@@ -103,7 +103,7 @@ export function CallbackTokenPanel({
           </Button>
           {hasToken ? (
             <Button
-              disabled={revoke.isPending}
+              Desativado={revoke.isPending}
               onClick={() => revoke.mutate(agentId)}
               size="sm"
               variant="outline"
@@ -114,7 +114,7 @@ export function CallbackTokenPanel({
         </div>
       )}
 
-      {error ? (
+      {Erro ? (
         <p className="text-destructive text-sm" role="alert">
           {error.message}
         </p>

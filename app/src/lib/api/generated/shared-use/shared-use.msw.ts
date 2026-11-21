@@ -78,7 +78,7 @@ export const getGetBotSharedUseResponseMock = (): BotSharedUse => ({
       needed: {
         audience: "people",
         outsideInput: false,
-        members: [{ kind: "group", value: "Support" }],
+        members: [{ kind: "Grupo", value: "Support" }],
       },
       covered: false,
     },
@@ -101,7 +101,7 @@ export const getListSharedUseRequestsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListSharedUseRequestsResponseMock(),
@@ -137,7 +137,7 @@ export const getCreateSharedUseRequestMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateSharedUseRequestResponseMock(),
@@ -173,7 +173,7 @@ export const getApproveSharedUseRequestMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getApproveSharedUseRequestResponseMock(),
@@ -209,7 +209,7 @@ export const getDeclineSharedUseRequestMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getDeclineSharedUseRequestResponseMock(),
@@ -239,7 +239,7 @@ export const getGetBotSharedUseMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetBotSharedUseResponseMock(),

@@ -4,14 +4,14 @@
 import type { ConnectionCheckState } from "./connectionCheckState";
 
 /**
- * A person's connection to an app: their own account there, which their Bots act as. Never the credential behind it.
+ * A person's connection to an app: their own Conta there, which their Bots act as. Never the credential behind Ele.
  */
-export interface Connection {
-  /** The app, as listApps answers it. */
+Exportar interface Connection {
+  /** The app, as listApps Respostas Ele. */
   appId: string;
-  /** When the person first connected it. */
+  /** When the person Primeiro connected Ele. */
   connectedAt: string;
-  /** Whether the access behind it was withdrawn. A revoked connection can't be used until the person connects again. */
+  /** Whether the access behind Ele was withdrawn. A revoked connection can't be used until the person connects again. */
   revoked: boolean;
   /**
    * What the app granted, in its own words, where OpenBot keeps the sign-in itself. Null where the app keeps it.

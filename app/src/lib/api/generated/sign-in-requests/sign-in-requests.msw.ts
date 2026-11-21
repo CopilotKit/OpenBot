@@ -10,7 +10,7 @@ import type {
   SignInRequestPage,
   SubmitSignInCodeRequest,
   SubmitSignInRequest,
-  UseSavedLoginRequest,
+  UseGuardadoLoginRequest,
 } from "../model";
 
 export const getListSignInRequestsResponseMock = (): SignInRequestPage => ({
@@ -147,7 +147,7 @@ export const getSubmitSignInCodeResponseMock = (): SignInRequestEnvelope => ({
   },
 });
 
-export const getUseSavedLoginResponseMock = (): SignInRequestEnvelope => ({
+export const getUseGuardadoLoginResponseMock = (): SignInRequestEnvelope => ({
   signInRequest: {
     id: "2c1e0a9b-8d7f-4e6a-b5c4-3d2e1f0a9b8c",
     botId: "research-bot",
@@ -270,7 +270,7 @@ export const getListSignInRequestsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListSignInRequestsResponseMock(),
@@ -309,7 +309,7 @@ export const getCreateSignInRequestMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateSignInRequestResponseMock(),
@@ -351,7 +351,7 @@ export const getGetSignInRequestMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetSignInRequestResponseMock(),
@@ -394,7 +394,7 @@ export const getSubmitSignInMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getSubmitSignInResponseMock(),
@@ -437,7 +437,7 @@ export const getSubmitSignInCodeMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getSubmitSignInCodeResponseMock(),
@@ -448,7 +448,7 @@ export const getSubmitSignInCodeMockHandler = (
   );
 };
 
-export const getUseSavedLoginMockHandler = (
+export const getUseGuardadoLoginMockHandler = (
   overrideResponse?:
     | SignInRequestEnvelope
     | ((
@@ -459,7 +459,7 @@ export const getUseSavedLoginMockHandler = (
               personId: string;
               signInRequestId: string;
             },
-            UseSavedLoginRequest
+            UseGuardadoLoginRequest
           >
         >[0],
       ) => Promise<SignInRequestEnvelope> | SignInRequestEnvelope),
@@ -467,23 +467,23 @@ export const getUseSavedLoginMockHandler = (
 ) => {
   return http.post<
     { organizationId: string; personId: string; signInRequestId: string },
-    UseSavedLoginRequest
+    UseGuardadoLoginRequest
   >(
     "*/api/v2/organizations/:organizationId/people/:personId/sign-in-requests/:signInRequestId/use-saved",
     async (
       info: Parameters<
         HttpResponseResolver<
           { organizationId: string; personId: string; signInRequestId: string },
-          UseSavedLoginRequest
+          UseGuardadoLoginRequest
         >
       >[0],
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
-          : getUseSavedLoginResponseMock(),
+          : getUseGuardadoLoginResponseMock(),
         { status: 200 },
       );
     },
@@ -522,7 +522,7 @@ export const getTakeOverSignInMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getTakeOverSignInResponseMock(),
@@ -564,7 +564,7 @@ export const getFinishSignInMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getFinishSignInResponseMock(),
@@ -606,7 +606,7 @@ export const getCancelSignInMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCancelSignInResponseMock(),
@@ -622,7 +622,7 @@ export const getSignInRequestsMock = () => [
   getGetSignInRequestMockHandler(),
   getSubmitSignInMockHandler(),
   getSubmitSignInCodeMockHandler(),
-  getUseSavedLoginMockHandler(),
+  getUseGuardadoLoginMockHandler(),
   getTakeOverSignInMockHandler(),
   getFinishSignInMockHandler(),
   getCancelSignInMockHandler(),

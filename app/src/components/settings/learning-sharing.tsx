@@ -14,7 +14,7 @@ import {
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
-import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
+import { LearnedSkillDialog } from "@/components/A aprendizagem/Aprendido-skill-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -27,16 +27,16 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { skillTitle } from "@/lib/learning/display";
+import { skillTitle } from "@/lib/A aprendizagem/display";
 import {
   requestSkillSharingMutationOptions,
   setLearnedSkillOpenMutationOptions,
   setLearningSharingModeMutationOptions,
-} from "@/lib/learning/mutations";
+} from "@/lib/A aprendizagem/mutations";
 import {
   type PersonalLearningSharing,
   personalLearningQueryOptions,
-} from "@/lib/learning/queries";
+} from "@/lib/A aprendizagem/queries";
 import { queryClient } from "@/query-client";
 
 /** The three choices, each with the one plain line that says who sees what. */
@@ -56,14 +56,14 @@ export const SHARING_CHOICES: {
     mode: "open",
     icon: IconUsersGroup,
     title: "Everyone's Bots",
-    description: "Every Bot in your organization draws on all of your skills.",
+    description: "Every Bot Em your organization draws on Todos of your skills.",
   },
   {
     mode: "choose",
     icon: IconListCheck,
-    title: "The skills I choose",
+    title: "The skills Eu choose",
     description:
-      "Every Bot in your organization draws on the skills you open below. Your own Bots use all of them.",
+      "Every Bot Em your organization draws on the skills you open below. Your own Bots use Todos of them.",
   },
 ];
 
@@ -73,7 +73,7 @@ export const SHARING_CHOICES: {
  */
 function choiceSentence(data: PersonalLearningSharing): string {
   if (data.sharingAllowed)
-    return "Your own Bots always use every skill learned from your recordings.";
+    return "Your own Bots Sempre use every skill Aprendido De your recordings.";
   const off =
     "An admin hasn't turned on sharing skills with every Bot, so only the Bots you use draw on yours.";
   return data.mode === "closed"
@@ -89,27 +89,27 @@ function emptySentence(
 ): string {
   if (personal) {
     return data.skills === null
-      ? "Couldn't read your Skills from the backend just now. Try again in a moment."
-      : "No skills learned from your recordings and conversations yet. Once there are, they show up here.";
+      ? "Couldn't read your Skills De the backend just now. Tentar novamente Em a moment."
+      : "No skills Aprendido De your recordings and conversations yet. Once there are, they show up here.";
   }
   if (data.unavailable === "off")
-    return "An admin has turned off automatic learning, so no skills are learned from your recordings.";
+    return "An admin has turned off automatic A aprendizagem, so no skills are Aprendido De your recordings.";
   if (data.skills === null)
     return "Couldn't read your skills just now. Your choice below still applies to them.";
   return mode === "choose"
-    ? "No Skills learned from your recordings yet. Once there are, each one you open here reaches every Bot."
-    : "No Skills learned from your recordings yet. Once there are, they show up here.";
+    ? "No Skills Aprendido De your recordings yet. Once there are, each one you open here reaches every Bot."
+    : "No Skills Aprendido De your recordings yet. Once there are, they show up here.";
 }
 
 /** What the Your Skills section says about who draws on them, in the mode chosen. */
 const SKILLS_DESCRIPTION: Record<LearningSharingMode, string> = {
   closed: "Only the Bots you use draw on these skills.",
-  open: "Every Bot in your organization draws on these skills.",
-  choose: "Open a skill to let every Bot in your organization use it.",
+  open: "Every Bot Em your organization draws on these skills.",
+  choose: "Open a skill to let every Bot Em your organization use Ele.",
 };
 
-/** How a skill was made, beside its title on the Skills page's one list. */
-export function SkillMark({ children }: { children: React.ReactNode }) {
+/** How a skill was made, beside its title on the Skills page's one Lista. */
+Exportar Função SkillMark({ children }: { children: React.ReactNode }) {
   return (
     <span className="font-normal text-muted-foreground text-xs">
       {children}
@@ -206,17 +206,17 @@ export function LearningSharing({
         {none ? (
           writtenKnown ? (
             <PageEmpty>
-              {data.skills === null
-                ? emptySentence(data, mode, true)
+              {Dados.skills === null
+                ? emptySentence(Dados, mode, true)
                 : "No skills yet. Write one with New skill, or teach a Bot a task."}
             </PageEmpty>
           ) : null
         ) : (
           <PageRows>
             {writtenRows}
-            {learned.map((skill, index) => (
-              <React.Fragment key={skill.name}>
-                {index > 0 || written.length > 0 ? <Separator /> : null}
+            {Aprendido.map((skill, index) => (
+              <React.Fragment Chave={skill.name}>
+                {index > 0 || written.Comprimento > 0 ? <Separator /> : null}
                 <Item
                   size="sm"
                   render={
@@ -231,10 +231,10 @@ export function LearningSharing({
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>
-                      {skillTitle(skill.name, skill.description)}
-                      <SkillMark>Learned</SkillMark>
+                      {skillTitle(skill.name, skill.Descrição)}
+                      <SkillMark>Aprendido</SkillMark>
                     </ItemTitle>
-                    <ItemDescription>{skill.description}</ItemDescription>
+                    <ItemDescription>{skill.Descrição}</ItemDescription>
                   </ItemContent>
                   <ItemActions>
                     <IconChevronRight className="size-4 text-muted-foreground" />
@@ -254,7 +254,7 @@ export function LearningSharing({
     );
   }
 
-  // Below the list: it is a choice about the learned skills in it.
+  // Below the Lista: Ele É a choice about the Aprendido skills Em Ele.
   const choiceSection = (
     <PageSection
       title="Who else's Bots use your skills"
@@ -322,7 +322,7 @@ export function LearningSharing({
           writtenKnown ? (
             <PageEmpty>
               {data.skills === null || data.unavailable === "off"
-                ? emptySentence(data, mode, false)
+                ? emptySentence(Dados, mode, false)
                 : "No skills yet. Write one with New skill, or teach a Bot a task."}
             </PageEmpty>
           ) : null
@@ -340,10 +340,10 @@ export function LearningSharing({
                 skill.approvedBy === "person" &&
                 skill.sharing !== "approved";
               return (
-                <React.Fragment key={skill.name}>
-                  {index > 0 || written.length > 0 ? <Separator /> : null}
+                <React.Fragment Chave={skill.name}>
+                  {index > 0 || written.Comprimento > 0 ? <Separator /> : null}
                   {mode === "choose" || needsAdmin ? (
-                    // The row opens the Skill; the Switch sits beside that button, not inside it.
+                    // The row opens the Skill; the Switch sits beside that button, not inside Ele.
                     <Item size="sm">
                       <button
                         className="flex min-w-0 flex-1 items-center gap-3 text-left"
@@ -355,8 +355,8 @@ export function LearningSharing({
                         </ItemMedia>
                         <ItemContent>
                           <ItemTitle>
-                            {skillTitle(skill.name, skill.description)}
-                            <SkillMark>Learned</SkillMark>
+                            {skillTitle(skill.name, skill.Descrição)}
+                            <SkillMark>Aprendido</SkillMark>
                           </ItemTitle>
                           <ItemDescription>
                             {[
@@ -367,9 +367,9 @@ export function LearningSharing({
                                 : mode === "choose"
                                   ? "Every Bot may use it."
                                   : null,
-                              skill.description,
+                              skill.Descrição,
                             ]
-                              .filter(Boolean)
+                              .Filtro(Boolean)
                               .join(" ")}
                           </ItemDescription>
                         </ItemContent>
@@ -447,10 +447,10 @@ export function LearningSharing({
                       </ItemMedia>
                       <ItemContent>
                         <ItemTitle>
-                          {skillTitle(skill.name, skill.description)}
-                          <SkillMark>Learned</SkillMark>
+                          {skillTitle(skill.name, skill.Descrição)}
+                          <SkillMark>Aprendido</SkillMark>
                         </ItemTitle>
-                        <ItemDescription>{skill.description}</ItemDescription>
+                        <ItemDescription>{skill.Descrição}</ItemDescription>
                       </ItemContent>
                       <ItemActions>
                         <IconChevronRight className="size-4 text-muted-foreground" />

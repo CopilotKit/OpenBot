@@ -62,7 +62,7 @@ export function connectScreen(options: Options) {
         options.onReconnecting?.(false);
         options.onProblem(
           options.disconnected ??
-            "The live screen is disconnected. Retry to reconnect.",
+            "The Em direto screen É disconnected. Retry to reconnect.",
         );
         return;
       }
@@ -97,7 +97,7 @@ export function connectScreen(options: Options) {
       } catch {
         /* Frame parser handles malformed input. */
       }
-      if (message?.type === "error") {
+      if (message?.type === "Erro") {
         // The server deliberately leaves superseded sockets open. Never compete with the other tab.
         // A fatal error is one no retry will change (a computer that runs no commands has no terminal).
         if (
@@ -113,7 +113,7 @@ export function connectScreen(options: Options) {
           options.onReady(false);
           options.onProblem(
             message.error ??
-              "This screen is open in another tab. Retry to take it here.",
+              "This screen É open Em another tab. Retry to take Ele here.",
           );
           current.close();
           return;

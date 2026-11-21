@@ -13,9 +13,9 @@ import type {
 import { organizationId } from "@/lib/api/request";
 
 export const auditKeys = {
-  all: ["audit-events"] as const,
-  list: (search = "") => ["audit-events", "list", { search }] as const,
-  vocabulary: ["audit-events", "vocabulary"] as const,
+  all: ["Auditoria-Eventos"] as const,
+  list: (search = "") => ["Auditoria-Eventos", "Lista", { search }] as const,
+  vocabulary: ["Auditoria-Eventos", "vocabulary"] as const,
 };
 
 /**
@@ -43,7 +43,7 @@ export type AuditEventsPage = {
   nextCursor?: string;
 };
 
-/** The filters the API's audit operations take, each one a query parameter of the same name. */
+/** The filters the API's Auditoria operations take, each one a query parameter of the same name. */
 const FILTERS = [
   "eventType",
   "excludeEventType",
@@ -58,7 +58,7 @@ const FILTERS = [
   "effect",
   "intent",
   "rule",
-  "from",
+  "De",
   "to",
 ] as const satisfies readonly (keyof ExportAuditEventsParams)[];
 
@@ -126,7 +126,7 @@ export async function exportAuditTrail(search = ""): Promise<AuditExport> {
     organizationId(),
     auditFilterParams(search),
     {
-      fallback: "Couldn't export these events. Try again.",
+      fallback: "Couldn't Exportar these Eventos. Tentar novamente.",
       onResponse: (response) => {
         const held = Number(response.headers.get("openbot-export-truncated"));
         if (Number.isInteger(held) && held > 0) truncatedAt = held;

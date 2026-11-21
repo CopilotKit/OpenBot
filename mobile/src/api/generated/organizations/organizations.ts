@@ -40,7 +40,7 @@ export const getListOrganizationsUrl = (params?: ListOrganizationsParams) => {
 };
 
 /**
- * Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller's role in it. active marks the one the caller's session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app's token has no session either: for it, active marks the organization its OpenBot-Organization header names, or the caller's own when it sends none. The header is checked against the caller's membership, as on every address that names no organization, so one they are not in answers not found. A session and an API key ignore it. To work in another one, set it as the session's active organization (POST /api/auth/organization/set-active). Made with an app's token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller's role Em Ele. Ativo marks the one the caller's session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app's token has no session either: for it, active marks the organization its OpenBot-Organization header names, or the caller's own when it sends none. The header is checked against the caller's membership, as on every address that names no organization, so one they are not in answers not found. A session and an API key ignore it. To work in another one, set it as the session's active organization (POST /api/auth/organization/set-active). Made with an app's token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the caller's organizations
  */
 export const listOrganizations = async (
@@ -49,7 +49,7 @@ export const listOrganizations = async (
 ): Promise<OrganizationPage> => {
   return apiRequest<OrganizationPage>(getListOrganizationsUrl(params), {
     ...options,
-    method: "GET",
+    method: "Obter",
   });
 };
 
@@ -139,7 +139,7 @@ export const getUpdateOrganizationUrl = (organizationId: string) => {
 };
 
 /**
- * Give the organization a new name. Its id and its slug stay as they are, so every address that names it keeps working. An organization OpenBot named after its person stops following what that person is called once it has been renamed. Only an owner or an admin of this organization can. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Give the organization a new name. Its id and its slug stay as they are, so every address that names it keeps working. An organization OpenNome do Botd after its person stops following what that person is called once it has been renamed. Only an owner or an admin of this organization can. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Rename an organization
  */
 export const updateOrganization = async (
@@ -272,7 +272,7 @@ export const removeOrganizationMember = async (
     getRemoveOrganizationMemberUrl(organizationId, personId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
     },
   );
 };
@@ -403,7 +403,7 @@ export const getOrganizationPlan = async (
     getGetOrganizationPlanUrl(organizationId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -434,7 +434,7 @@ export const listInvitations = async (
 ): Promise<InvitationPage> => {
   return apiRequest<InvitationPage>(getListInvitationsUrl(params), {
     ...options,
-    method: "GET",
+    method: "Obter",
   });
 };
 
@@ -452,7 +452,7 @@ export const getInvitation = async (
 ): Promise<InvitationResponse> => {
   return apiRequest<InvitationResponse>(getGetInvitationUrl(invitationId), {
     ...options,
-    method: "GET",
+    method: "Obter",
   });
 };
 

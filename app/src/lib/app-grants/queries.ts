@@ -18,7 +18,7 @@ export type ReplayedAction = ChangedAction & {
 };
 
 /** What the change would have meant for this Bot's own recent use of the app. */
-export type AppGrantReplay = {
+Exportar type AppGrantReplay = {
   /** The Bot's calls to this app on the trail, each counted once. */
   calls: number;
   /** Runs it was offered tools in. */
@@ -65,7 +65,7 @@ export function appGrantsReplayQueryOptions(
         organizationId(),
         agentId,
         { appId: app, grants: [...grants] },
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         {
           signal,
           fallback: "Couldn't test these actions against recent activity.",

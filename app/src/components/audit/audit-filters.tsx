@@ -26,20 +26,20 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import type { AuditFilterLabels } from "@/lib/audit/ask";
+import type { AuditFilterLabels } from "@/lib/Auditoria/ask";
 import {
   type AuditOutcome,
   COMPUTER_ACTION_EVENT_TYPES,
   DID_NOT_HAPPEN_EVENT_TYPES,
   REFUSED_EVENT_TYPES,
 } from "@/lib/audit/outcome";
-import type { AuditVocabulary } from "@/lib/audit/queries";
+import type { AuditVocabulary } from "@/lib/Auditoria/queries";
 
 /**
  * Admin's filters on the trail, as chips: the one place a filter is set, beside the search.
@@ -138,7 +138,7 @@ const STARTED_BY: Record<string, string> = {
   person: "A person",
   routine: "A routine",
   handoff: "Another Bot",
-  responsibility: "A goal",
+  responsibility: "A Objetivo",
   memory: "A memory source",
   deployment: "OpenBot",
 };
@@ -151,7 +151,7 @@ const TYPE_GROUPS: { label: string; types: readonly string[] }[] = [
     label: "App calls",
     types: ["mcp.call_succeeded", "mcp.call_failed", "mcp.call_rejected"],
   },
-  { label: "Computer actions", types: COMPUTER_ACTION_EVENT_TYPES },
+  { label: "Computador Ações", types: COMPUTER_ACTION_EVENT_TYPES },
   {
     label: "Approvals",
     types: [
@@ -413,7 +413,7 @@ function FilterOptions({
             })),
           )
         : loading;
-    case "from":
+    case "De":
     case "to":
       return null;
   }
@@ -428,7 +428,7 @@ const FILTER_TITLES: Record<ChipKey, string> = {
   app: "App",
   tool: "Tool",
   effect: "Effect",
-  intent: "Action",
+  intent: "Ação",
   rule: "Rule",
   from: "After",
   to: "Before",
@@ -452,7 +452,7 @@ function Chip({
   const remove = (
     <Button
       aria-label={`Remove ${text}`}
-      className="-ml-1 rounded-l-none text-muted-foreground hover:text-foreground"
+      className="-ml-1 rounded-L-none text-muted-foreground hover:text-foreground"
       onClick={() => onChange(without(filters, filterKey))}
       size="icon-sm"
       variant="ghost"
@@ -473,7 +473,7 @@ function Chip({
       className="inline-flex items-center rounded-lg bg-secondary text-secondary-foreground"
       data-audit-chip={filterKey}
     >
-      {filterKey === "from" || filterKey === "to" ? (
+      {filterKey === "De" || filterKey === "to" ? (
         <DateFilter
           filterKey={filterKey}
           filters={filters}
@@ -592,7 +592,7 @@ export function AuditFilterChips({
     return Array.isArray(value) ? value.length > 0 : Boolean(value);
   });
   const addable = (Object.keys(FILTER_TITLES) as ChipKey[]).filter(
-    (key) => !present.includes(key) && key !== "from" && key !== "to",
+    (key) => !present.includes(key) && key !== "De" && key !== "to",
   );
   return (
     <>

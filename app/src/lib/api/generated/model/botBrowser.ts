@@ -5,7 +5,7 @@ import type { BrowserRecorderReport } from "./browserRecorderReport";
 import type { BrowserTab } from "./browserTab";
 
 /**
- * The browser on a Bot's computer, as the caller sees it. Of somebody else's recording it says only that one is running.
+ * The browser on a Bot's Computador, as the caller sees Ele. Of somebody else's recording it says only that one is running.
  */
 export interface BotBrowser {
   /** Whether the browser is running. A closed one has no tabs. */
@@ -16,9 +16,9 @@ export interface BotBrowser {
   recordingBy?: string;
   /** The id of the person the last stopped recording belonged to. Shown only to that person. */
   lastStoppedBy?: string;
-  /** Whether the caller holds control of the Bot's computer. */
+  /** Whether the caller holds control of the Bot's Computador. */
   mine: boolean;
-  /** Whether the running recording, if any, is the caller's. */
+  /** Whether the running recording, Se Qualquer, É the caller's. */
   recordingIsMine: boolean;
   /** Why nothing can be recorded in this Bot's browser here, in one sentence. Absent where recording can run. */
   recordRefused?: string;

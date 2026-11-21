@@ -52,7 +52,7 @@ export const getGetHostAccessMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetHostAccessResponseMock(),
@@ -91,7 +91,7 @@ export const getCreateHostAccessGrantMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateHostAccessGrantResponseMock(),
@@ -131,7 +131,7 @@ export const getDeleteHostAccessGrantMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -158,7 +158,7 @@ export const getStopHostAccessMockHandler = (
         HttpResponseResolver<{ organizationId: string; personId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 

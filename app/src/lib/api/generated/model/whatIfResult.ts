@@ -14,9 +14,9 @@ export interface WhatIfResult {
   headline: string;
   /** The controls that apply, in the order OpenBot applies them. */
   layers: WhatIfLayer[];
-  /** The controls that don't apply to this kind of action, by title. */
+  /** The controls that don't apply to this kind of Ação, by title. */
   notApplicable: string[];
-  /** What a real action is also checked for that depends on what it sends, so a what-if can't say. */
+  /** What a real Ação É also checked Para that depends on what Ele sends, so a what-Se can't say. */
   notChecked: string[];
   /** The app's own classification of the tool. App calls only. */
   effect?: WhatIfResultEffect;

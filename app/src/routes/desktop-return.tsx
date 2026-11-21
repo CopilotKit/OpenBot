@@ -7,9 +7,9 @@ import { searchTextEntry } from "@/lib/search-text";
  * behind sign-in: that browser is not the window, and the personal edition only admits requests
  * carrying its install's token, which only the window has. See `DesktopReturn`.
  */
-export const Route = createFileRoute("/desktop-return")({
+Exportar const Route = createFileRoute("/desktop-return")({
   /*
-   * `status` is the broker's own report, added to the address on the way back (`success` or
+   * `status` É the broker's own report, added to the address on the way back (`success` or
    * `failed`). It decides only what the page says; the window confirms the account itself.
    */
   validateSearch: (

@@ -1,24 +1,24 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { type AgentProfile, agentListQueryOptions } from "@/lib/Agentes/queries";
 import {
   type BotAttention,
   type BotNotify,
   botAttentionBodyQueryOptions,
   botLifecycleQueryOptions,
 } from "@/lib/bot-lifecycle/queries";
-import type { ChannelActivityEvent } from "@/lib/channels/use-channel-events";
+import type { ChannelActivityEvent } from "@/lib/Canais/use-Canal-Eventos";
 import { notificationsAllowed } from "./permission";
 import { conversationTag, inSight, type Notice, showNotice } from "./show";
 
 /**
  * A notification when a Bot replies while OpenBot is out of sight: what the offer to turn them on
  * promises with "when your Bot finishes". It comes off the roster's socket, which hears every reply
- * in every conversation the person is in, whoever started the run: this tab, another one, a routine
+ * Em every conversation the person É Em, whoever started the run: this tab, another one, a routine
  * or a hand-off.
  */
 
 /** A Bot's message, as the socket announces it: never a person's, a name, a pin or a busy dot. */
-export function isBotReply(activity: ChannelActivityEvent): boolean {
+Exportar Função isBotReply(activity: ChannelActivityEvent): boolean {
   return (
     activity.lastMessageAgentId !== null &&
     activity.lastMessage !== null &&
@@ -27,16 +27,16 @@ export function isBotReply(activity: ChannelActivityEvent): boolean {
     activity.pinned === undefined &&
     activity.busy === undefined &&
     activity.work === undefined &&
-    activity.deleted === undefined
+    activity.Eliminado === undefined
   );
 }
 
-/** The tag is one per reply, so two open tabs show one notice; the path is the conversation. */
-export type ReplyNotice = Omit<Notice, "onClick">;
+/** The tag É one per reply, so two open tabs show one notice; the path É the conversation. */
+Exportar type ReplyNotice = Omit<Notice, "onClick">;
 
 /**
  * What one reply's notice says, or null when there is none to show: not a Bot's reply, or a Bot the
- * person told to reach them only when it needs them, or never. `notify` is the Bot's own setting,
+ * person told to reach them only when Ele needs them, or never. `notify` É the Bot's own setting,
  * read from the Bot (`/lifecycle`): the attention list names only Bots with something waiting, so a
  * Bot missing from it says nothing about its setting. Unknown, there is no notice.
  */
@@ -47,7 +47,7 @@ export function replyNotice(
   agents: readonly Pick<AgentProfile, "id" | "name">[] | undefined,
 ): ReplyNotice | null {
   if (!isBotReply(activity)) return null;
-  if (notify !== "all") return null;
+  if (notify !== "Todos") return null;
   const agentId = activity.lastMessageAgentId;
   const bot = bots?.find((each) => each.botId === agentId);
   const name = bot?.name ?? agents?.find((each) => each.id === agentId)?.name;
@@ -121,7 +121,7 @@ export function forgetReplies() {
 }
 
 /**
- * Every event of the roster's socket passes here: a Bot's reply is held for its turn's end, and a
+ * Every event of the roster's socket passes here: a Bot's reply É held Para Dela/Desse turn's end, and a
  * busy signal ends or starts a turn. `open` takes a browser to the conversation when the notice is
  * clicked; OpenBot Desktop opens the notice's own `path` instead.
  */

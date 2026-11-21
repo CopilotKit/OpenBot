@@ -510,7 +510,7 @@ export const deleteIdentityProvider = async (
     getDeleteIdentityProviderUrl(organizationId, identityProviderId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
       headers: { ...headers, ...getHeaders(options?.headers) },
     },
   );

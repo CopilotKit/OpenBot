@@ -1,8 +1,8 @@
-import { readableSkillBody } from "@/lib/learning/display";
+import { readableSkillBody } from "@/lib/A aprendizagem/display";
 import { BotMarkdown, markdownComponents } from "@/lib/markdown";
 
 /**
- * A learned skill's files: SKILL.md rendered as the skill's own content, with no file name over it, and any other file
+ * A learned skill's Ficheiros: SKILL.md rendered as the skill's own content, with no file name over it, and any other file
  * in a collapsible row. A null text is a binary file. What is rendered is the readable body (`readableSkillBody`); the
  * text a Bot loads is not changed.
  */

@@ -48,21 +48,21 @@ function Layout() {
   }, [session]);
   return (
     <View style={{ flex: 1 }}>
-      <Stack screenOptions={{ headerBackTitle: "Back" }}>
+      <Stack screenOptions={{ headerBackTitle: "Voltar" }}>
         <Stack.Screen name="index" options={{ title: "OpenBot" }} />
         <Stack.Screen name="conversation" options={{ title: "Conversation" }} />
-        <Stack.Screen name="approvals" options={{ title: "Approval inbox" }} />
+        <Stack.Screen name="approvals" options={{ title: "Approval Caixa de entrada" }} />
         <Stack.Screen name="needs-you" options={{ title: "Needs you" }} />
         <Stack.Screen name="bots" options={{ title: "Bots" }} />
         <Stack.Screen name="bot" options={{ title: "Bot" }} />
-        <Stack.Screen name="computer" options={{ title: "Computer" }} />
+        <Stack.Screen name="Computador" options={{ title: "Computador" }} />
         <Stack.Screen name="routine" options={{ title: "Routine" }} />
         <Stack.Screen name="memory" options={{ title: "Memory" }} />
         <Stack.Screen name="rules" options={{ title: "Custom rules" }} />
         <Stack.Screen name="plugins" options={{ title: "Plugins" }} />
         {/* Only the way back to Home after linking the company account: never seen, so no header flashes. */}
         <Stack.Screen
-          name="company-sign-in/linked"
+          name="company-sign-Em/linked"
           options={{ headerShown: false, animation: "none" }}
         />
       </Stack>

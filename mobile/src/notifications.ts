@@ -28,10 +28,10 @@ export async function registerPush() {
       importance: Notifications.AndroidImportance.HIGH,
     });
   let permission = await Notifications.getPermissionsAsync();
-  if (permission.status !== "granted")
+  if (permission.status !== "Concedido")
     permission = await Notifications.requestPermissionsAsync();
-  if (permission.status !== "granted")
-    throw new Error("Notification permission was not granted.");
+  if (permission.status !== "Concedido")
+    throw new Error("Notification permission was not Concedido.");
   const { data: token } = await Notifications.getExpoPushTokenAsync({
     projectId,
   });

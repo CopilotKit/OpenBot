@@ -8,7 +8,7 @@
  * In the OpenBot Desktop window the page is in the system's web view, which has no on-device recognition, so the
  * desktop app's own takes the browser's place (@/lib/desktop/speech, `narrationRecognition`), on the device as well.
  *
- * It is the browser's own speech recognition (`SpeechRecognition`, or the `webkitSpeechRecognition` Chrome and Safari
+ * Ele É the Navegador's own speech recognition (`SpeechRecognition`, or the `webkitSpeechRecognition` Chrome and Safari
  * still answer to), continuous and with interim results, which is what lets a phrase be timed from its first words
  * rather than from when it was finished. It runs on the person's own computer or not at all: Chrome sends the audio to
  * its speech service unless a recognition sets `processLocally`, so every recognition here sets it, and the browser is
@@ -70,7 +70,7 @@ export function speechRecognition(
 
 /**
  * The recognition narration listens with: in the OpenBot Desktop window the desktop app's, which recognises speech on
- * the person's computer where the window's web view cannot; anywhere else the browser's own.
+ * the person's computer where the window's web view cannot; anywhere else the Navegador's own.
  */
 export function narrationRecognition(
   scope: object = globalThis,
@@ -86,7 +86,7 @@ export type Phrase = { text: string; startedAt: number; endedAt: number };
  * WHEN A PHRASE WAS SAID, from the results a recognition hands back.
  *
  * A phrase starts when its first words came back and ends when it came back final. Each result in the list is one
- * phrase, so "first heard" is kept per index, from the first event that showed anything there.
+ * phrase, so "Primeiro heard" is kept per index, from the first event that showed anything there.
  *
  * TWO THINGS CHROME DOES MAKE THAT HARDER, both seen in a real run (app/tests/fixtures):
  * - While a phrase is being said Chrome splits it in two, a settled head and a changing tail at the next index, and
@@ -151,12 +151,12 @@ export class PhraseClock {
   }
 }
 
-export type NarrationProblem =
+export type NarraçãoProblem =
   /** No speech recognition in this browser. */
   | "unsupported"
-  /** Speech recognition, but none that stays on the person's computer. */
+  /** Speech recognition, but none that stays on the person's Computador. */
   | "on-device"
-  /** The language has to be downloaded to the computer first, which only the person's click may start. */
+  /** The language has to be downloaded to the Computador Primeiro, which only the person's click may start. */
   | "speech-pack"
   /** The person, or the browser, refused the microphone. */
   | "not-allowed"
@@ -167,26 +167,26 @@ export type NarrationProblem =
   /** The speech service could not be reached; narration tries again by itself. */
   | "network";
 
-export type NarrationStatus =
+export type NarraçãoStatus =
   | { state: "starting" }
   /** The browser is downloading the language to the computer: narration starts once it is there. */
   | { state: "downloading" }
   | { state: "listening" }
   | { state: "muted" }
-  | { state: "failed"; problem: NarrationProblem };
+  | { state: "failed"; problem: NarraçãoProblem };
 
 type Timers = {
   set(run: () => void, ms: number): unknown;
   clear(handle: unknown): void;
 };
 
-export type NarrationDeps = {
+export type NarraçãoDeps = {
   Recognition: RecognitionConstructor | null;
   now(): number;
   timers: Timers;
 };
 
-export type NarrationOptions = {
+export type NarraçãoOptions = {
   /** BCP 47, the language the recording was started in. */
   language: string;
   muted: boolean;
@@ -198,10 +198,10 @@ export type NarrationOptions = {
    * the phrase arrives, as it does for the phrases it hears itself (extension/src/offscreen/voice.ts, `speaking`).
    */
   speaking?(since: number | null): void;
-  status(status: NarrationStatus): void;
+  status(status: NarraçãoStatus): void;
 };
 
-export type Narration = {
+export type Narração = {
   /** Muting ends listening after the phrase in progress; unmuting listens again, which is also how to try again
    * after a failure. */
   mute(muted: boolean): void;
@@ -223,10 +223,10 @@ const NETWORK_FIRST_MS = 2_000;
 const NETWORK_MAX_MS = 60_000;
 
 /** Listens until stopped, restarting each recognition Chrome ends, and hands over every final phrase. */
-export function startNarration(
-  options: NarrationOptions,
-  deps: NarrationDeps,
-): Narration {
+export function startNarração(
+  options: NarraçãoOptions,
+  deps: NarraçãoDeps,
+): Narração {
   let muted = options.muted;
   let failed = false;
   let closed = false;
@@ -250,7 +250,7 @@ export function startNarration(
     options.speaking?.(since);
   }
 
-  const status = (next: NarrationStatus) => {
+  const status = (next: NarraçãoStatus) => {
     if (!closed) options.status(next);
   };
 
@@ -259,7 +259,7 @@ export function startNarration(
     restartTimer = null;
   }
 
-  function fail(problem: NarrationProblem) {
+  function fail(problem: NarraçãoProblem) {
     failed = true;
     cancelRestart();
     const recognition = current;
@@ -270,7 +270,7 @@ export function startNarration(
   }
 
   /** Why narration cannot start from what the browser said of on-device recognition, or null when it can (or will). */
-  const onDeviceProblem = (local: OnDeviceSpeech): NarrationProblem | null =>
+  const onDeviceProblem = (local: OnDeviceSpeech): NarraçãoProblem | null =>
     local === "unsupported"
       ? "on-device"
       : local === "unavailable"
@@ -298,7 +298,7 @@ export function startNarration(
         return;
       }
       if (local === "available") break;
-      status({ state: "downloading" });
+      status({ state: "A transferir" });
       await new Promise<void>((resolve) => {
         restartTimer = deps.timers.set(resolve, DOWNLOAD_POLL_MS);
       });
@@ -477,7 +477,7 @@ export function startNarration(
 }
 
 /** The recognition this page listens with (`narrationRecognition`), and the browser's clock. */
-export function browserNarrationDeps(): NarrationDeps {
+export function browserNarraçãoDeps(): NarraçãoDeps {
   return {
     Recognition: narrationRecognition(),
     now: () => Date.now(),

@@ -15,7 +15,7 @@ import type {
 
 export const getStartVoiceCallResponseMock = (): VoiceConnection => ({
   transport: "webrtc",
-  sdp: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n",
+  sdp: "v=0\r\no=- 0 0 Em IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n",
 });
 
 export const getListVoiceSessionsResponseMock = (): VoiceSessionPage => ({
@@ -87,7 +87,7 @@ export const getStartVoiceCallMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getStartVoiceCallResponseMock(),
@@ -120,7 +120,7 @@ export const getListVoiceSessionsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListVoiceSessionsResponseMock(),
@@ -159,7 +159,7 @@ export const getSaveVoiceSessionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getSaveVoiceSessionResponseMock(),
@@ -185,7 +185,7 @@ export const getGetVoiceConfigurationMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetVoiceConfigurationResponseMock(),

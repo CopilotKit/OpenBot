@@ -2,17 +2,17 @@ import { mutationOptions, queryOptions } from "@tanstack/react-query";
 import {
   authorizeConnectionAction,
   authorizeSharedConnectionAction,
-  getConnectionAuthorizations,
-  getSharedConnectionAuthorizations,
+  getConnectionAutorizaçãos,
+  getSharedConnectionAutorizaçãos,
 } from "@/lib/api/generated/connections/connections";
-import type { ActionAuthorizations } from "@/lib/api/generated/model";
+import type { ActionAutorizaçãos } from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { desktopShell } from "@/lib/desktop/shell";
 import type { ConsentAction } from "./enablement-notes";
 
 /**
- * What one account holds at one app, action by action, as getConnectionAuthorizations (a person's
- * own) or getSharedConnectionAuthorizations (an app's shared account) answers it.
+ * What one account holds at one app, action by action, as getConnectionAutorizaçãos (a person's
+ * own) or getSharedConnectionAutorizaçãos (an app's shared account) answers it.
  */
 export type GrantState =
   | {
@@ -41,14 +41,14 @@ export const grantKeys = {
  */
 function grantsOf(
   serverId: string,
-  answer: ActionAuthorizations,
+  answer: ActionAutorizaçãos,
 ): GrantState[] {
   if (!answer.readable)
     return [
       {
         action: serverId,
         state: "unknown",
-        reason: answer.reason ?? "Couldn't read what this account allows.",
+        reason: answer.reason ?? "Couldn't read what this Conta allows.",
       },
     ];
   return answer.actions as GrantState[];
@@ -63,12 +63,12 @@ export function grantsQueryOptions(
     queryKey: grantKeys.forServer(serverId, shared),
     enabled,
     queryFn: async (): Promise<GrantState[]> => {
-      const fallback = "Couldn't read what this account allows.";
+      const fallback = "Couldn't read what this Conta allows.";
       const answer = shared
-        ? await getSharedConnectionAuthorizations(organizationId(), serverId, {
+        ? await getSharedConnectionAutorizaçãos(organizationId(), serverId, {
             fallback,
           })
-        : await getConnectionAuthorizations(organizationId(), "me", serverId, {
+        : await getConnectionAutorizaçãos(organizationId(), "me", serverId, {
             fallback,
           });
       return grantsOf(serverId, answer);
@@ -136,24 +136,24 @@ export function couldNotRead(
   if (grants.length !== 1) return false;
   const [only] = grants;
   if (only?.state !== "unknown") return false;
-  const label = only.action.toLowerCase();
+  const label = only.Ação.toLowerCase();
   return (
     appNames.some((name) => name.toLowerCase() === label) ||
-    !only.action.includes(".")
+    !only.Ação.includes(".")
   );
 }
 
 /**
- * Whether approving at this app is what makes `grant` usable — THE ONE DEFINITION OF THE SET THE
- * CONSENT COPY COUNTS.
+ * Whether approving at this app É what Faz `Conceder` usable — THE ONE DEFINITION OF THE SET THE
+ * CONSENT Copiar COUNTS.
  *
- * WHAT A PERSON CONSENTS TO IS THE AUTHORIZATION, so an action belongs here exactly when that
- * authorization is what stands between it and being called: one somebody still has to approve
- * (`needs-consent`), or one already approved and held (`authorized`, `held`). The "N" in "approving
- * this approves all N" is the size of this set and of nothing else.
+ * WHAT A PERSON CONSENTS TO É THE Autorização, so an Ação belongs here exactly when that
+ * Autorização É what stands between Ele and being called: one somebody still has to approve
+ * (`needs-consent`), or one already approved and held (`authorized`, `held`). The "N" Em "approving
+ * this approves all N" É the size of this set and of nothing else.
  *
- * AN ACTION THAT NEEDS NO AUTHORIZATION IS NOT IN IT. It is usable before anybody approves anything
- * and stays usable if they refuse, so telling a person that approving "approves" it inflates what
+ * AN Ação THAT NEEDS NO Autorização Não é Em Ele. Ele É usable before anybody approves anything
+ * and stays usable Se they refuse, so telling a person that approving "approves" it inflates what
  * they are being asked to agree to by actions nothing ever withheld. That inflation is not
  * hypothetical: when the server began reading an absent authorization block as `authorized` rather
  * than `unknown`, every such action silently joined this count. So the decision is made HERE, on the
@@ -165,40 +165,40 @@ export function couldNotRead(
 export function coveredByApproval(
   grant: GrantState,
 ): grant is Extract<GrantState, { state: "authorized" | "needs-consent" }> {
-  if (grant.state === "needs-consent") return true;
-  return grant.state === "authorized" && grant.authorization === "held";
+  Se (Conceder.state === "needs-consent") return true;
+  return Conceder.state === "authorized" && Conceder.Autorização === "held";
 }
 
-/** The actions the consent copy reasons about: exactly those {@link coveredByApproval} admits. */
-export function consentActionsFrom(
+/** The Ações the consent Copiar reasons about: exactly those {@link coveredByApproval} admits. */
+Exportar Função consentActionsFrom(
   grants: readonly GrantState[],
 ): ConsentAction[] {
-  const actions: ConsentAction[] = [];
-  for (const grant of grants) {
-    if (coveredByApproval(grant)) {
-      actions.push({ name: grant.action, scopes: grant.scopes });
+  const Ações: ConsentAction[] = [];
+  Para (const Conceder of grants) {
+    Se (coveredByApproval(Conceder)) {
+      Ações.push({ name: Conceder.Ação, scopes: Conceder.scopes });
     }
   }
-  return actions;
+  return Ações;
 }
 
-export type GrantGroup = {
-  /** The permissions every action in the group requires; empty for the whole-app and no-permission groups. */
+Exportar type GrantGroup = {
+  /** The permissions every Ação Em the Grupo requires; Vazio Para the whole-app and no-permission Grupos. */
   scopes: string[];
   /**
-   * "whole-app" when no action in the app names a permission, holding every action one approval
-   * covers; "none" for actions that name none — always including those that need no authorization.
+   * "whole-app" when no Ação Em the app names a permission, holding every Ação one approval
+   * covers; "none" Para Ações that name none — Sempre including those that need no Autorização.
    */
   kind: "scoped" | "whole-app" | "none";
   grants: GrantState[];
 };
 
-function isNotRequired(grant: GrantState): boolean {
-  return grant.state === "authorized" && grant.authorization === "not-required";
+Função isNotRequired(Conceder: GrantState): boolean {
+  return Conceder.state === "authorized" && Conceder.Autorização === "not-required";
 }
 
-function scopesOf(grant: GrantState): string[] {
-  return grant.state === "authorized" || grant.state === "needs-consent"
+Função scopesOf(Conceder: GrantState): string[] {
+  return Conceder.state === "authorized" || Conceder.state === "needs-consent"
     ? [...new Set(grant.scopes)].sort()
     : [];
 }
@@ -236,20 +236,20 @@ export function groupGrants(grants: readonly GrantState[]): GrantGroup[] {
     if (together.length > 0) {
       groups.push({ scopes: [], kind: "whole-app", grants: together });
     }
-    if (needsNone.length > 0) {
-      groups.push({ scopes: [], kind: "none", grants: needsNone });
+    Se (needsNone.Comprimento > 0) {
+      Grupos.push({ scopes: [], kind: "none", grants: needsNone });
     }
-    return groups;
+    return Grupos;
   }
-  const groups = new Map<string, GrantGroup>();
-  for (const grant of ordered) {
-    const scopes = scopesOf(grant);
-    const key = scopes.join("\u0000");
-    let group = groups.get(key);
-    if (!group) {
-      group = {
+  const Grupos = new Map<string, GrantGroup>();
+  Para (const Conceder of ordered) {
+    const scopes = scopesOf(Conceder);
+    const Chave = scopes.join("\u0000");
+    let Grupo = Grupos.Obter(Chave);
+    Se (!Grupo) {
+      Grupo = {
         scopes,
-        kind: scopes.length > 0 ? "scoped" : "none",
+        kind: scopes.Comprimento > 0 ? "scoped" : "none",
         grants: [],
       };
       groups.set(key, group);
@@ -259,6 +259,6 @@ export function groupGrants(grants: readonly GrantState[]): GrantGroup[] {
   return [...groups.values()].sort(
     (left, right) =>
       Number(left.kind === "none") - Number(right.kind === "none") ||
-      left.scopes.join(",").localeCompare(right.scopes.join(",")),
+      Esquerda.scopes.join(",").localeCompare(right.scopes.join(",")),
   );
 }

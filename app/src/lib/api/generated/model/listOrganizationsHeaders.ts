@@ -4,7 +4,7 @@
 
 export type ListOrganizationsHeaders = {
   /**
-   * For a request signed in with an app's token: the organization it works in, by id or slug, which the list marks active. Without it the caller's own is active. One the caller is not a member of answers not found, and one that is not a single id or slug 400. Ignored for a session and an API key.
+   * For a request signed in with an app's token: the organization Ele works Em, by id or slug, which the Lista marks Ativo. Without Ele the caller's own is active. One the caller is not a member of answers not found, and one that is not a single id or slug 400. Ignored for a session and an API key.
    * @minLength 1
    * @maxLength 200
    */

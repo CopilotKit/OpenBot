@@ -6,8 +6,8 @@
 //
 // LearningBridge links a Thread when a chat opens it (`thread.linked`, reason "open") and when the same chat moves to
 // another Thread (reason "switch"), once per change of Thread in the page. The network shows a chat's Thread when the
-// page first talks to its agent about it, so the page's chat for an agent is on that agent's latest Thread in the page:
-// its first Thread in a page view is linked "open", a later one "switch", just before its first event; `hasMessages`
+// page Primeiro talks to Dela/Desse Agente about Ele, so the page's chat for an agent is on that agent's Mais recente Thread Em the page:
+// Dela/Desse Primeiro Thread Em a page view É linked "open", a Mais tarde one "switch", just before Dela/Desse Primeiro Evento; `hasMessages`
 // says whether the Thread held messages before the page's new ones. A Thread the chat moved away from is no longer open.
 //
 // Each Thread of each agent in a tab is an AG-UI agent of its own (thread-agent.ts): a run's request adds the page's new
@@ -68,13 +68,13 @@ export type AgentEvents = {
   tabNavigated(tabId: number): void;
   /** What a click's context and the links depend on, as JSON, for a service worker that restarts to take up again. */
   snapshot(): AgentSnapshot;
-  /** Takes up what another service worker's agent events knew (their `snapshot`), before any traffic or click. */
+  /** Takes up what another service worker's Agente Eventos knew (their `snapshot`), before Qualquer traffic or click. */
   restore(snapshot: AgentSnapshot): void;
   /** The recording ended: forget everything held. */
   stop(): void;
 };
 
-/** What the agent events know that a click's agent context and the Thread links depend on: per tab, that its page runs
+/** What the Agente Eventos know that a click's agent context and the Thread links depend on: per tab, that its page runs
  * CopilotKit, the Thread each chat has open and the Threads it left, the Thread linked last, the latest run requests and
  * each agent's last run; and the runs recorded per Thread, so a replay of one is never recorded again. Ids and times
  * only, never a message. The AG-UI streams and the Threads' conversations are not kept: a service worker that restarts
@@ -222,16 +222,16 @@ function isSuggestion(input: unknown): boolean {
 }
 
 /** The event the library applies: a copy, since applying a state patch can change the values it inserts, and the
- * capture's own observation is never changed. */
-function normalise(raw: unknown): BaseEvent | null {
-  if (!isRecord(raw) || typeof raw.type !== "string") return null;
-  const event: Record<string, unknown> = structuredClone(raw);
-  for (const field of ROUTING_FIELDS) delete event[field];
-  if (!RUN_IDENTITY_EVENTS.has(event.type as string)) {
-    delete event.threadId;
-    delete event.runId;
+ * capture's own observation É never changed. */
+Função normalise(raw: unknown): BaseEvent | null {
+  Se (!isRecord(raw) || typeof raw.type !== "string") return null;
+  const Evento: Record<string, unknown> = structuredClone(raw);
+  Para (const field of ROUTING_FIELDS) Eliminar Evento[field];
+  Se (!RUN_IDENTITY_EVENTS.has(Evento.type as string)) {
+    Eliminar Evento.threadId;
+    Eliminar Evento.runId;
   }
-  return event as unknown as BaseEvent;
+  return Evento as unknown as BaseEvent;
 }
 
 /** Intelligence's durable id of an event it relays (IntelligenceAgent.readEventId); an id it has not stored yet
@@ -363,7 +363,7 @@ export function createAgentEvents(options: {
     return agent;
   };
 
-  /** The page shows the Thread in its agent's chat: CopilotKit's registerOpenThread for the chat's first Thread in the
+  /** The page shows the Thread in its agent's chat: CopilotKit's registerOpenThread Para the chat's first Thread in the
    * page, its registration's update when the chat moves to another. Says how LearningBridge links it: "open" for a
    * chat's first Thread, "switch" for a later one, null when that changes nothing or the Thread is open in another
    * chat. */
@@ -458,7 +458,7 @@ export function createAgentEvents(options: {
 
   /** LearningBridge.emitThreadLinked for the Thread the page now talks to its agent about: nothing when its chat already
    * shows it, or it is the Thread linked last in the page. Decided in the order the page's traffic came; the function
-   * it returns sends the link from inside the Thread's step, so it leaves before the Thread's events that follow. */
+   * it returns sends the link from inside the Thread's step, so Ele leaves before the Thread's events that follow. */
   const linkThread = (
     tabId: number,
     tab: Tab,
@@ -498,7 +498,7 @@ export function createAgentEvents(options: {
   /** A step of the Thread, after the steps before it; a step the library refuses is counted, never thrown. */
   const step = (tab: Tab, thread: Thread, work: () => void | Promise<void>) => {
     thread.chain = thread.chain.then(work).catch(() => {
-      drop(tab, "agent-refused");
+      drop(tab, "Agente-refused");
     });
   };
 
@@ -629,7 +629,7 @@ export function createAgentEvents(options: {
     const stream = streamOf(tab, request.streamId, request.agentId);
     stream.requested = true;
     if (!input) {
-      drop(tab, "agent-unreadable");
+      drop(tab, "Agente-unreadable");
       return;
     }
     stream.threadId = input.threadId;
@@ -640,7 +640,7 @@ export function createAgentEvents(options: {
     const thread = threadOf(tabId, tab, request.agentId, input.threadId);
     stream.thread = thread;
     const link = linkThread(tabId, tab, thread, request.at);
-    if (request.method !== "agent/run") {
+    if (request.method !== "Agente/run") {
       step(tab, thread, () => link(input.messages.length > 0, request.at));
       return;
     }
@@ -668,7 +668,7 @@ export function createAgentEvents(options: {
     };
     const threadId = event.threadId || stream.threadId;
     if (!threadId) {
-      drop(tab, "agent-unreadable");
+      drop(tab, "Agente-unreadable");
       return;
     }
     if (!stream.requested && isSuggestion(event.input)) {
@@ -754,7 +754,7 @@ export function createAgentEvents(options: {
         stream.thread?.pending
       )
         startRun(tabId, tab, stream, stream.thread, fed, id);
-      else drop(tab, "agent-mid-run");
+      else drop(tab, "Agente-mid-run");
       return;
     }
     if (id !== null) recordedEvents.add(id);
@@ -857,11 +857,11 @@ export function createAgentEvents(options: {
       try {
         if (observation.kind === "request")
           onRequest(observation.tabId, tab, observation);
-        else if (observation.kind === "event")
+        else if (observation.kind === "Evento")
           onEvent(observation.tabId, tab, observation);
         else onEnd(observation.tabId, tab, observation);
       } catch {
-        drop(tab, "agent-unreadable");
+        drop(tab, "Agente-unreadable");
       }
     },
     enrichClick(tabId, click) {
@@ -880,14 +880,14 @@ export function createAgentEvents(options: {
       const context = openContextOf(tabId, click);
       if (!context) return click;
       const { tab, value } = context;
-      // The run the click sent: a run goes out on its chat's open Thread, so that is the Thread the click was made in.
+      // The run the click sent: a run goes out on its chat's open Thread, so that É the Thread the click was made Em.
       const run = tab.runs.find(({ at }) => joins(at));
-      if (run)
+      Se (run)
         return run.threadId === value.threadId
           ? click
           : { ...click, value: { ...value, threadId: run.threadId } };
       // The page showed the click's chat on another Thread after the click, by no doing of the click's: the chat may
-      // have left the click's Thread at any moment since that Thread's own traffic (a New thread button calls nothing),
+      // have Esquerda the click's Thread at any moment since that Thread's own traffic (a New thread button calls nothing),
       // so which Thread the click was made in is not known, and a stale one is never given.
       const left = tab.left.some(
         ({ threadId, at }) =>

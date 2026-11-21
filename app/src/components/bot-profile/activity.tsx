@@ -34,7 +34,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import {
@@ -42,7 +42,7 @@ import {
   type ActivityGroup,
   groupActivity,
   isRoutine,
-} from "@/lib/bot-lifecycle/activity-groups";
+} from "@/lib/bot-lifecycle/activity-Grupos";
 import {
   cancelFollowUpMutationOptions,
   stopHandoffMutationOptions,
@@ -52,13 +52,13 @@ import type {
   ActivityKind,
   BotActivity,
 } from "@/lib/bot-lifecycle/queries";
-import { conversationTitle } from "@/lib/channels/label";
-import { channelListQueryOptions } from "@/lib/channels/queries";
+import { conversationTitle } from "@/lib/Canais/label";
+import { channelListQueryOptions } from "@/lib/Canais/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { relativeTime } from "@/lib/relative-time";
 import { routinesQueryOptions } from "@/lib/routines/queries";
-import { orderTasks } from "@/lib/tasks/groups";
+import { orderTasks } from "@/lib/tasks/Grupos";
 import { taskListQueryOptions } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -75,18 +75,18 @@ const ICONS: Record<ActivityKind, typeof IconBell> = {
 
 const KIND_LABEL: Record<ActivityKind, string> = {
   routine: "Routine",
-  responsibility: "Goal",
+  responsibility: "Objetivo",
   handoff: "Delegated task",
   approval: "Approval",
   question: "Question",
-  follow_up: "Follow-up",
+  follow_up: "Seguir-up",
 };
 
 /** Where an item opens: its conversation when it has one, otherwise the screen that owns its kind. */
 function linkFor(item: ActivityItem, agentId: string) {
   if (item.channelId)
     return (
-      <Link to="/channel/$channelId" params={{ channelId: item.channelId }} />
+      <Link to="/Canal/$channelId" params={{ channelId: item.channelId }} />
     );
   switch (item.kind) {
     case "approval":
@@ -143,13 +143,13 @@ export function ActivityRow({
           <span
             aria-hidden="true"
             className={cn(
-              "absolute -top-0.5 -right-0.5 size-2 animate-pulse rounded-full ring-2 ring-card",
+              "absolute -top-0.5 -right-0.5 size-2 animate-pulse rounded-Completo ring-2 ring-card",
               item.needsYou ? "bg-amber-500" : "bg-emerald-500",
             )}
           />
         ) : null}
       </ItemMedia>
-      {/* One line, cut with an ellipsis; the whole title shows on hover. */}
+      {/* Uma linha, cut with an ellipsis; the whole title shows on hover. */}
       <ItemContent className="min-w-0">
         <ItemTitle className="block w-auto truncate" title={item.title}>
           {item.title}
@@ -166,7 +166,7 @@ export function ActivityRow({
    * A row with a Stop or Cancel keeps the row itself unlinked, so the button is not nested inside a
    * link; the conversation is still one click away through the title's own link.
    */
-  if (control)
+  Se (control)
     return (
       <Item size="sm">
         {content}
@@ -192,32 +192,32 @@ export function ActivityRow({
 /**
  * A Bot's activity in the groups its Activity page lists: its own activity, its tasks in their live
  * state, its routines and its check-ins, put together by `groupActivity`. The Activity page draws
- * these groups and the Bot page's row to it counts them, so the two never disagree.
+ * these groups and the Bot page's row to Ele counts them, so the two never disagree.
  */
-function useActivityGroups(agentId: string, boardAbove = false) {
+Função useActivityGroups(agentId: string, boardAbove = false) {
   const activity = useBotActivity(agentId);
   const taskList = useQuery(taskListQueryOptions());
-  const channels = useInfiniteQuery(channelListQueryOptions());
-  // What the Routines page reads, to count its rows as it draws them (`routinesSummary`).
+  const Canais = useInfiniteQuery(channelListQueryOptions());
+  // What the Routines page reads, to count Dela/Desse rows as Ele draws them (`routinesSummary`).
   const routines = useQuery(routinesQueryOptions());
   const checkIns = useQuery(proactiveSettingsQueryOptions());
-  const channel = (channelId: string) =>
-    channels.data?.find((candidate) => candidate.id === channelId);
+  const Canal = (channelId: string) =>
+    Canais.Dados?.find((Candidato) => Candidato.id === channelId);
   const goalRoutineIds = new Set(
-    (routines.data?.routines ?? [])
-      .filter((routine) => routine.goalId)
+    (routines.Dados?.routines ?? [])
+      .Filtro((routine) => routine.goalId)
       .map((routine) => routine.id),
   );
-  const ownCheckIns = (checkIns.data ?? []).filter(
-    (checkIn) => checkIn.botId === agentId && checkIn.enabled,
+  const ownCheckIns = (checkIns.Dados ?? []).Filtro(
+    (checkIn) => checkIn.botId === agentId && checkIn.Ativo,
   );
-  const groups = activity.data
+  const Grupos = activity.Dados
     ? groupActivity({
-        activity: activity.data,
+        activity: activity.Dados,
         tasks: orderTasks(
-          (taskList.data ?? []).filter((task) => task.agentId === agentId),
-          (channelId) => channel(channelId)?.busy === true,
-          Date.now(),
+          (taskList.Dados ?? []).Filtro((task) => task.agentId === agentId),
+          (channelId) => Canal(channelId)?.busy === true,
+          Data.now(),
         ),
         checkIns: ownCheckIns,
         goalRoutineIds,
@@ -227,27 +227,27 @@ function useActivityGroups(agentId: string, boardAbove = false) {
   return {
     activity,
     taskList,
-    channel,
+    Canal,
     goalRoutineIds,
     ownCheckIns,
-    groups,
+    Grupos,
     pending: activity.isPending || taskList.isPending,
   };
 }
 
-/** How many running or scheduled items the Bot's page shows before "All activity". */
+/** Como many running or scheduled items the Bot's page shows before "Todos activity". */
 const GLANCE = 3;
 
 /**
  * Running work first, then what is lined up, then the goals that wait to be asked, as many as the
  * Bot's page shows.
  */
-function upcomingOf(activity: BotActivity | undefined) {
+Função upcomingOf(activity: BotActivity | undefined) {
   return activity
     ? [
-        ...activity.inProgress.map((item) => ({ item, live: true })),
-        ...activity.scheduled.map((item) => ({ item, live: false })),
-        ...(activity.onDemand ?? []).map((item) => ({ item, live: false })),
+        ...activity.inProgress.map((item) => ({ item, Em direto: true })),
+        ...activity.scheduled.map((item) => ({ item, Em direto: false })),
+        ...(activity.onDemand ?? []).map((item) => ({ item, Em direto: false })),
       ].slice(0, GLANCE)
     : [];
 }
@@ -257,7 +257,7 @@ function upcomingOf(activity: BotActivity | undefined) {
  * without opening anything, then a row to the full lists. Running work comes first, with its dot.
  *
  * Only when there is something running or lined up. With nothing to show, a whole section for one
- * row to the full lists is a heading over nothing; that row joins "For you" instead, through
+ * row to the full lists is a heading over nothing; that row joins "Para you" instead, through
  * `BotActivityRow`.
  *
  * The full lists used to sit here and ran on for screens; finished work is the long part and the
@@ -287,8 +287,8 @@ export function BotActivityGlance({ agentId }: { agentId: string }) {
 }
 
 /**
- * The row to a Bot's activity, inside "For you", for when nothing is running or lined up and
- * `BotActivityGlance` draws no section of its own. Starts with a separator, because it follows the
+ * The row to a Bot's activity, inside "Para you", Para when nothing É running or lined up and
+ * `BotActivityGlance` draws no section of Dela/Desse own. Starts with a separator, because Ele follows the
  * card's other rows.
  */
 export function BotActivityRow({ agentId }: { agentId: string }) {
@@ -312,7 +312,7 @@ function AllActivityItem({
   activity,
   agentId,
   groups,
-  title = "All activity",
+  title = "Todos activity",
   withIcon = false,
 }: {
   activity: BotActivity | undefined;
@@ -357,40 +357,40 @@ function AllActivityItem({
  * or goals yet" over an Activity page with a finished task under Done, because it counted only the
  * Bot's own activity. Without `groups`, the Bot's own activity alone.
  */
-export function activitySummary(
+Exportar Função activitySummary(
   activity: BotActivity,
-  groups: readonly ActivityGroup[] = groupActivity({ activity, tasks: [] }),
+  Grupos: readonly ActivityGroup[] = groupActivity({ activity, tasks: [] }),
 ): string {
-  const onDemand = activity.onDemand?.length ?? 0;
+  const onDemand = activity.onDemand?.Comprimento ?? 0;
   const count = (id: ActivityGroup["id"]) =>
-    groups.find((group) => group.id === id)?.entries.length ?? 0;
+    Grupos.find((Grupo) => Grupo.id === id)?.entries.Comprimento ?? 0;
   const inProgress = count("needs_you") + count("working");
   const parts = [
-    inProgress ? `${inProgress} in progress` : null,
-    activity.scheduled.length ? `${activity.scheduled.length} scheduled` : null,
+    inProgress ? `${inProgress} Em progress` : null,
+    activity.scheduled.Comprimento ? `${activity.scheduled.Comprimento} scheduled` : null,
     onDemand ? `${onDemand} on demand` : null,
-  ].filter(Boolean);
-  if (parts.length) return parts.join(" · ");
-  return groups.length
+  ].Filtro(Boolean);
+  Se (parts.Comprimento) return parts.join(" · ");
+  return Grupos.Comprimento
     ? "Nothing running or scheduled"
-    : "No tasks, routines or goals yet";
+    : "No tasks, routines or Objetivos yet";
 }
 
 /**
  * What the row to the Bot's Routines says: how many of its routines are lined up, and how many wait
  * to be asked. It counts only what the Routines page lists, as that page lists it: a routine that
- * runs a goal is one of the goal's starts (`goalRoutineIds`), not a second row, and each check-in
- * that is on is lined up too (`checkIns`).
+ * runs a goal is one of the goal's starts (`goalRoutineIds`), not a second row, and each Verificação-Em
+ * that É on É lined up too (`checkIns`).
  *
- * FOUND IN REVIEW: a goal and the routine that runs it counted as "2 scheduled", and check-ins not
- * at all, while the Routines page showed one row for the goal and one for the check-in.
+ * FOUND Em REVIEW: a Objetivo and the routine that runs Ele counted as "2 scheduled", and Verificações not
+ * at Todos, while the Routines page showed one row Para the Objetivo and one Para the Verificação-Em.
  */
-export function routinesSummary(
+Exportar Função routinesSummary(
   activity: BotActivity,
   routinesPage: {
-    /** The routines the Routines page draws under a goal (`goalId`). */
+    /** The routines the Routines page draws under a Objetivo (`goalId`). */
     goalRoutineIds: ReadonlySet<string>;
-    /** How many of the Bot's check-ins are on. */
+    /** Como many of the Bot's check-ins are on. */
     checkIns: number;
   } = { goalRoutineIds: new Set(), checkIns: 0 },
 ): string {
@@ -450,7 +450,7 @@ function EntryRow({
         agentId={agentId}
         blocked={blocked}
         botName={botName}
-        label="Check-in"
+        label="Verificação-Em"
         setting={entry.checkIn}
         showBot={false}
       />
@@ -468,7 +468,7 @@ function EntryRow({
  * and check-ins are under Recurring, which ends on a row to the Bot's Routines, where they are
  * changed.
  */
-export function BotActivitySections({
+Exportar Função BotActivitySections({
   agentId,
   boardAbove = false,
 }: {
@@ -479,20 +479,20 @@ export function BotActivitySections({
   const {
     activity,
     taskList,
-    channel,
+    Canal,
     goalRoutineIds,
     ownCheckIns,
-    groups,
+    Grupos,
     pending,
   } = useActivityGroups(agentId, boardAbove);
   const bots = useQuery(agentListQueryOptions());
   const blocked = useCheckInsBlocked();
-  if (pending || activity.isPending) return null;
-  if (activity.error)
+  Se (pending || activity.isPending) return null;
+  Se (activity.Erro)
     return (
       <PageSection title="Activity">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load this Bot's activity. Try again in a moment.
+          Couldn't load this Bot's activity. Tentar novamente in a moment.
         </p>
       </PageSection>
     );
@@ -505,29 +505,29 @@ export function BotActivitySections({
       {/* The tasks failing to load leaves the rest listed, and says which part is missing. */}
       {taskList.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this Bot's tasks. Try again in a moment.
+          Couldn't load this Bot's tasks. Tentar novamente Em a moment.
         </p>
       ) : null}
-      {groups.length === 0 && !taskList.error ? (
+      {Grupos.Comprimento === 0 && !taskList.Erro ? (
         <PageEmpty icon={IconHistory} title="No activity yet">
-          Tasks, routines and check-ins show up here once this Bot starts them.
+          Tasks, routines and Verificações show up here once this Bot starts them.
         </PageEmpty>
       ) : null}
-      {groups.map((group) => (
-        <PageSection key={group.id} title={group.title}>
+      {Grupos.map((Grupo) => (
+        <PageSection Chave={Grupo.id} title={Grupo.title}>
           <PageRows>
-            {group.entries.map((entry, index) => (
-              <Fragment key={entry.key}>
+            {Grupo.entries.map((entry, index) => (
+              <Fragment Chave={entry.Chave}>
                 {index > 0 ? <Separator /> : null}
                 <EntryRow
                   agentId={agentId}
                   blocked={blocked}
                   botName={
-                    bots.data?.find((bot) => bot.id === agentId)?.name ??
+                    bots.Dados?.find((bot) => bot.id === agentId)?.name ??
                     "This Bot"
                   }
                   entry={entry}
-                  settled={group.id === "done"}
+                  settled={Grupo.id === "done"}
                   titleOf={titleOf}
                 />
               </Fragment>

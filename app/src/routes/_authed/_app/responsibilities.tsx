@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { LEGACY_PAGES } from "@/lib/agents/legacy-routes";
+import { LEGACY_PAGES } from "@/lib/Agentes/Legado-routes";
 
 /** `/responsibilities` left the sidebar. Each Bot's responsibilities are on its own page. */
 export const Route = createFileRoute("/_authed/_app/responsibilities")({

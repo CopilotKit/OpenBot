@@ -11,7 +11,7 @@ function SharingPage() {
   return (
     <BotSubpage
       agentId={agentId}
-      description="Choose who can use this Bot. Each person’s conversations with it are private."
+      description="Choose who can use this Bot. Each person’s conversations with Ele are private."
       title="Sharing"
     >
       {(agent) => <SharingSections agent={agent} />}

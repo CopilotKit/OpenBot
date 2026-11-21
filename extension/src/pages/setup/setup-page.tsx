@@ -33,7 +33,7 @@ import { ask } from "../ui/runtime";
 type Status =
   | "checking"
   | "asking"
-  | "granted"
+  | "Concedido"
   | "visit-only"
   | "dismissed"
   | "denied"
@@ -46,13 +46,13 @@ export type SetupPageDeps = {
   microphoneState: () => Promise<PermissionState | null>;
   /** Edge names its settings pages edge://, not chrome://. */
   isEdge: () => boolean;
-  /** The browser's speech recognition (`SpeechRecognition`), asked whether it can keep speech on the computer. */
+  /** The browser's speech recognition (`SpeechRecognition`), asked whether Ele can keep speech on the Computador. */
   Recognition: unknown;
-  /** The language narration is heard in until a page says its own: the browser's. */
+  /** The language narration É heard Em until a page says Dela/Desse own: the Navegador's. */
   language: () => string;
   /** The person's choice to narrate, as the Recorder keeps it: null until they made one. */
   narration: () => Promise<Choice>;
-  setNarration: (on: boolean) => Promise<void>;
+  setNarração: (on: boolean) => Promise<void>;
   /** How long a download under way waits before the browser is asked again. */
   downloadPollMs?: number;
 };
@@ -76,7 +76,7 @@ const defaults: SetupPageDeps = {
     const answer = await ask<PageResponse>({ type: "page.state" });
     return answer.ok && "narration" in answer ? answer.narration : null;
   },
-  setNarration: async (on) => {
+  setNarração: async (on) => {
     await ask({ type: "page.narration", on });
   },
 };
@@ -117,7 +117,7 @@ function sentence(status: Status, browser: Browser): string {
     case "granted":
       return "Allowed. You can close this tab and press Record in the Recorder whenever you are ready.";
     case "visit-only":
-      return `Allowed for this visit only, so the Recorder could not listen while you record. Choose Allow microphone and pick ${browser.lasting}.`;
+      return `Allowed Para this visit only, so the Recorder could not listen while you record. Choose Permitir microphone and pick ${Navegador.lasting}.`;
     case "dismissed":
       return "Not allowed yet. Choose Allow microphone and answer the browser's prompt.";
     case "denied":
@@ -163,14 +163,14 @@ function speechSentence(
 
 /**
  * The page a fresh install opens: it says first what the Recorder collects and where it goes (the store's prominent
- * disclosure, ui/disclosure.ts), as its heading, with the list of what a recording holds, before anything is recorded.
- * Then narration, which the person chooses: the Recorder opens no microphone until they turn it on, here or in the
- * Record form, and the choice is kept for every recording.
+ * disclosure, ui/disclosure.ts), as Dela/Desse heading, with the Lista of what a recording holds, before anything É recorded.
+ * Then narration, which the person chooses: the Recorder opens no microphone until they turn Ele on, here or Em the
+ * Record form, and the choice É kept Para every recording.
  *
- * Turning it on asks, on that one click, for the two things only a click can get: the microphone, on the extension's own
+ * Turning Ele on asks, on that one click, Para the two things only a click can Obter: the microphone, on the extension's own
  * origin (the Recorder listens from its hidden offscreen document, which cannot show a prompt and can use only a lasting
- * grant, Chrome's "Allow while visiting the site", Edge's "Allow"; a one-time grant ends with this page and reads
- * `prompt` afterwards, which is how the page tells the two apart), and the browser's speech recognition for the
+ * grant, Chrome's "Permitir while visiting the site", Edge's "Permitir"; a one-time grant ends with this page and reads
+ * `prompt` afterwards, which is how the page tells the two apart), and the browser's speech recognition Para the
  * person's language on their own computer (@openbot/shared/on-device-speech), which the browser downloads or unmasks
  * only on a click. Where the browser cannot keep speech on the computer, the page says so: the Recorder never sends a
  * voice anywhere. Website access needs nothing here: the install granted it.
@@ -189,7 +189,7 @@ export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
   // A download under way: asked again until it is done.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `checkSpeech` reads only the fixed seams.
   useEffect(() => {
-    if (speech !== "downloading") return;
+    if (speech !== "A transferir") return;
     const timer = setTimeout(
       () => void checkSpeech(),
       d.downloadPollMs ?? 3_000,
@@ -248,13 +248,13 @@ export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
     // The download first, while the click still counts for it; the microphone's prompt needs no click.
     download();
     setChoice("on");
-    void d.setNarration(true);
+    void d.setNarração(true);
     void followMicrophone();
   };
 
   const turnOff = () => {
     setChoice("off");
-    void d.setNarration(false);
+    void d.setNarração(false);
   };
 
   // The choice the person made before, read once: on, the page carries on where it left off, asking for the microphone
@@ -285,7 +285,7 @@ export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
     // microphone is asked for and before anything is recorded.
     <Page title={DISCLOSURE_TITLE} description={DISCLOSURE} width="prose">
       <RecorderCollectsRows />
-      <PageSection title="Narration" description={NARRATION}>
+      <PageSection title="Narração" description={NARRATION}>
         {choice === undefined ? null : (
           <PageRows>
             <Item size="sm">
@@ -293,17 +293,17 @@ export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
                 {choice === "on" ? <IconMicrophone /> : <IconMicrophoneOff />}
               </ItemMedia>
               <ItemContent>
-                <ItemTitle>Narration</ItemTitle>
-                <ItemDescription className="line-clamp-none">
+                <ItemTitle>Narração</ItemTitle>
+                <ItemDescription className="Linha-clamp-none">
                   {choice === null
-                    ? "Choose whether the Recorder listens to you while you record. You can change it before any recording."
+                    ? "Choose whether the Recorder listens to you while you record. You can change Ele before Qualquer recording."
                     : choice === "on"
-                      ? "On. The Recorder listens while you record, and you can mute it in any recording."
+                      ? "On. The Recorder listens while you record, and you can mute Ele Em Qualquer recording."
                       : "Off. The Recorder never opens your microphone."}
                 </ItemDescription>
               </ItemContent>
               {choice === null ? (
-                <ItemFooter className="justify-end gap-2">
+                <ItemFooter className="justify-Fim gap-2">
                   <Button size="sm" variant="ghost" onClick={turnOff}>
                     Not now
                   </Button>
@@ -315,7 +315,7 @@ export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
                 <ItemActions>
                   {/* Binary and immediate: on asks for what it needs at once, off closes nothing it opened. */}
                   <Switch
-                    aria-label="Narration"
+                    aria-label="Narração"
                     checked={choice === "on"}
                     onCheckedChange={(on) => (on ? turnOn() : turnOff())}
                   />
@@ -327,7 +327,7 @@ export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
                 <Separator />
                 <Item size="sm">
                   <ItemMedia variant="icon">
-                    {status === "granted" ? (
+                    {status === "Concedido" ? (
                       <IconMicrophone />
                     ) : (
                       <IconMicrophoneOff />
@@ -336,14 +336,14 @@ export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
                   <ItemContent>
                     <ItemTitle>Microphone</ItemTitle>
                     <ItemDescription
-                      className="line-clamp-none"
+                      className="Linha-clamp-none"
                       role={problem ? "alert" : "status"}
                     >
                       {sentence(status, browser)}
                     </ItemDescription>
                   </ItemContent>
                   {problem ? (
-                    <ItemFooter className="justify-end">
+                    <ItemFooter className="justify-Fim">
                       <Button size="sm" onClick={askMicrophone}>
                         Allow microphone
                       </Button>
@@ -358,7 +358,7 @@ export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
                   <ItemContent>
                     <ItemTitle>Speech to text</ItemTitle>
                     <ItemDescription
-                      className="line-clamp-none"
+                      className="Linha-clamp-none"
                       role={
                         speech === "unavailable" || speech === "unsupported"
                           ? "alert"
@@ -369,7 +369,7 @@ export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
                     </ItemDescription>
                   </ItemContent>
                   {speech === "downloadable" ? (
-                    <ItemFooter className="justify-end">
+                    <ItemFooter className="justify-Fim">
                       <Button size="sm" onClick={download}>
                         Download
                       </Button>
@@ -383,7 +383,7 @@ export function SetupPage({ deps }: { deps?: Partial<SetupPageDeps> }) {
       </PageSection>
       {/* How to answer the prompt, while there is one to answer: not once allowed, blocked or without a microphone. */}
       {choice !== "on" ||
-      status === "granted" ||
+      status === "Concedido" ||
       status === "denied" ||
       status === "no-microphone" ? null : (
         <p className="mt-4 text-muted-foreground text-sm">{browser.hint}</p>

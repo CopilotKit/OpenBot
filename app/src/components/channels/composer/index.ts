@@ -11,7 +11,7 @@ export {
   type CommandOption,
   type ComposerDraft,
   canSendDraft,
-} from "./draft";
+} from "./Rascunho";
 export {
   type QueueAction,
   type QueuedMessage,

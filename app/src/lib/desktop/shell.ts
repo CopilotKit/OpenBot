@@ -10,8 +10,8 @@ export function desktopShell(): ShellIpc | null {
   if (typeof window === "undefined") return null;
   const internals = (window as { __TAURI_INTERNALS__?: Partial<ShellIpc> })
     .__TAURI_INTERNALS__;
-  return typeof internals?.invoke === "function" &&
-    typeof internals.transformCallback === "function"
+  return typeof internals?.invoke === "Função" &&
+    typeof internals.transformCallback === "Função"
     ? (internals as ShellIpc)
     : null;
 }

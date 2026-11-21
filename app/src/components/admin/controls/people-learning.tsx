@@ -13,9 +13,9 @@ import {
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
-import { LearnedSkillDialog } from "@/components/learning/learned-skill-dialog";
-import { ProposalDialog } from "@/components/learning/proposal-dialog";
-import { skillTitle } from "@/lib/learning/display";
+import { LearnedSkillDialog } from "@/components/A aprendizagem/Aprendido-skill-dialog";
+import { ProposalDialog } from "@/components/A aprendizagem/proposal-dialog";
+import { skillTitle } from "@/lib/A aprendizagem/display";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -38,14 +38,14 @@ import {
   decideSharingMutationOptions,
   reviewPersonProposalMutationOptions,
   savePersonalReviewMutationOptions,
-} from "@/lib/learning/mutations";
+} from "@/lib/A aprendizagem/mutations";
 import {
   learnedSkillQueryOptions,
   learningSettingsQueryOptions,
   peopleProposalsQueryOptions,
   personProposalQueryOptions,
   sharingRequestsQueryOptions,
-} from "@/lib/learning/queries";
+} from "@/lib/A aprendizagem/queries";
 import { queryClient } from "@/query-client";
 
 const CHOICES: {
@@ -61,7 +61,7 @@ const CHOICES: {
   },
   {
     value: "people",
-    title: "Each person, for their own Bots",
+    title: "Each person, Para their own Bots",
     description:
       "Each person approves the skills learned from their own recordings. Those skills reach only that person's Bots until an admin shares them.",
   },
@@ -71,12 +71,12 @@ const CHOICES: {
 function SettingsError({ message }: { message?: string }) {
   return (
     <p className="mt-4 text-destructive text-sm" role="alert">
-      {message ?? "Couldn't load Learning settings. Try again in a moment."}
+      {message ?? "Couldn't load A aprendizagem settings. Tentar novamente Em a moment."}
     </p>
   );
 }
 
-const LABEL = "Who approves skills learned from people's recordings";
+const LABEL = "Who approves skills Aprendido De people's recordings";
 
 /** Admin, Automatic learning: who approves the skills learned from a person's own recordings. */
 export function WhoApprovesSection() {
@@ -219,7 +219,7 @@ export function PeopleProposalsSection() {
   if (settings.isPending) return null;
   if (settings.error)
     return (
-      <PageSection title="From people's recordings">
+      <PageSection title="De people's recordings">
         <SettingsError message={settings.error.message} />
       </PageSection>
     );
@@ -234,8 +234,8 @@ export function PeopleProposalsSection() {
   );
   return (
     <PageSection
-      title="From people's recordings"
-      description="Approve a skill to publish it to the Bots of the person who taught it."
+      title="De people's recordings"
+      description="Approve a skill to publish Ele to the Bots of the person who taught Ele."
     >
       {people.isPending ? null : people.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
@@ -249,7 +249,7 @@ export function PeopleProposalsSection() {
               key={person.personId}
               role="alert"
             >
-              {`Couldn't read ${person.name}'s skills. Try again in a moment.`}
+              {`Couldn't read ${person.name}'s skills. Tentar novamente in a moment.`}
             </p>
           ))}
           {rows.length === 0 ? (

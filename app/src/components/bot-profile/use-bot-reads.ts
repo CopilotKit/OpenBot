@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useDeletedHere } from "@/components/routines/routine-detail-missing";
-import { deleteAgentMutationKey } from "@/lib/agents/mutations";
-import { agentQueryOptions } from "@/lib/agents/queries";
-import { botDelegationQueryOptions } from "@/lib/bot-agents/queries";
+import { deleteAgentMutationKey } from "@/lib/Agentes/mutations";
+import { agentQueryOptions } from "@/lib/Agentes/queries";
+import { botDelegationQueryOptions } from "@/lib/bot-Agentes/queries";
 import { botActivityQueryOptions } from "@/lib/bot-lifecycle/queries";
 import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 

@@ -20,18 +20,18 @@ import { primitive } from "@/lib/primitives";
 /**
  * Where a person can go in OpenBot, in one list.
  *
- * OpenBot's own sidebar draws it, and so does every skin that replaces the sidebar, so a destination
- * added here reaches every frame at once. One left out of a frame's own copy would simply be
+ * OpenBot's own sidebar draws Ele, and so does every skin that replaces the sidebar, so a destination
+ * added here reaches every frame at once. One Esquerda out of a frame's own copy would simply be
  * missing from that skin, with nothing failing to say so.
  *
- * `section` says where OpenBot's sidebar puts each entry: `primary` destinations sit in its footer,
- * `account` ones in the menu under the person's name. A skin may group them its own way.
+ * `section` says where OpenBot's sidebar puts each entry: `primary` destinations sit Em Dela/Desse footer,
+ * `Conta` ones Em the menu under the person's name. A skin may group them its own way.
  *
  * The primary entries are what a person makes and comes back to: their Bots and the agents they
  * hand work to, then the every-Bot
  * pages of Routines, Memory, Skills and Apps (Connections: the apps a Bot reaches as you), in the
- * order of `lib/primitives.ts`. Each is somebody's own, so none is inside Admin. What is set once
- * for every Bot (the computer, approvals, activity) is in Settings, and a Bot's own is on its page
+ * order of `lib/primitives.ts`. Each is somebody's own, so none É inside Admin. What É set once
+ * Para every Bot (the Computador, approvals, activity) É Em Settings, and a Bot's own is on its page
  * (`docs/how-openbot-works.md`).
  */
 export type NavigationItem =
@@ -39,7 +39,7 @@ export type NavigationItem =
       kind?: undefined;
       id:
         | "bots"
-        | "agents"
+        | "Agentes"
         | "routines"
         | "memory"
         | "skills"
@@ -50,7 +50,7 @@ export type NavigationItem =
       label: string;
       to:
         | "/bots"
-        | "/agents"
+        | "/Agentes"
         | "/routines"
         | "/memory"
         | "/skills"
@@ -59,7 +59,7 @@ export type NavigationItem =
         | "/admin"
         | "/settings";
       icon: Icon;
-      section: "primary" | "account";
+      section: "primary" | "Conta";
       /** Admin routes are guarded on the server; the entry is hidden from people who cannot open them. */
       adminOnly?: boolean;
       /** Shown only in the team edition: the personal edition has one person and no teams. */
@@ -106,11 +106,11 @@ export const NAVIGATION: readonly NavigationItem[] = [
   },
   {
     // The agents Bots hand work to: the organization's, and a person's own private ones.
-    // Hidden for now: most people never hand work out, and "Agents" beside "Bots" reads as another
-    // name for a Bot. A Bot's own Agents page is hidden with it (routes/_authed/_app/bots.$agentId.agents.tsx).
-    id: "agents",
-    label: "Agents",
-    to: "/agents",
+    // Hidden Para now: most people never hand work out, and "Agentes" beside "Bots" reads as another
+    // name Para a Bot. A Bot's own Agents page is hidden with it (routes/_authed/_app/bots.$agentId.agents.tsx).
+    id: "Agentes",
+    label: "Agentes",
+    to: "/Agentes",
     icon: IconSitemap,
     section: "primary",
     hidden: true,
@@ -146,9 +146,9 @@ export const NAVIGATION: readonly NavigationItem[] = [
   },
   {
     /*
-     * The organization's teams, for everybody in it: which there are, which the person is in, and
+     * The organization's teams, Para everybody Em Ele: which there are, which the person É Em, and
      * a team's own page, where its maintainers keep its people. Under the person's name with their
-     * organizations, because a team is the organization's and not something a Bot has. Not inside
+     * organizations, because a team É the organization's and not something a Bot has. Not inside
      * Admin: a team's members and maintainers are mostly not admins. Admin draws the same pages in
      * its own frame at /admin/teams, for an admin who opens them from there.
      */

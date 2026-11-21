@@ -4,7 +4,7 @@
 import type { CursorParameter } from "./cursorParameter";
 import type { LimitParameter } from "./limitParameter";
 
-export type ListSavedLoginsParams = {
+export type ListGuardadoLoginsParams = {
   /**
    * Most items in one page.
    * @minimum 1

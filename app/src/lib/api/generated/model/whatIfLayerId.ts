@@ -8,7 +8,7 @@
 export type WhatIfLayerId = (typeof WhatIfLayerId)[keyof typeof WhatIfLayerId];
 
 export const WhatIfLayerId = {
-  grant: "grant",
+  grant: "Conceder",
   app_allowlist: "app_allowlist",
   capabilities: "capabilities",
   network: "network",

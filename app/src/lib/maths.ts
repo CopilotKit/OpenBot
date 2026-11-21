@@ -1,16 +1,16 @@
 /**
- * Maths in a Bot's markdown, in the delimiters Streamdown's maths plugin reads.
+ * Maths in a Bot's markdown, Em the delimiters Streamdown's maths plugin reads.
  *
  * WHY. A model writing a formula in a chat writes LaTeX, and most write it the way LaTeX itself
  * does: `\( ... \)` inside a sentence and `\[ ... \]` on lines of their own. Markdown reads `\(`
  * and `\[` as an escaped bracket, so before this the reader saw "(P r / [1-(1+r)^{-n}])" with the
  * backslashes gone and the formula as source. Streamdown's maths plugin (remark-math and KaTeX)
- * reads `$$`: on lines of their own a formula set apart, inside a sentence a formula in the line.
- * So `\[ ... \]` that stands on its own lines becomes a `$$` block, and `\( ... \)`, or a `\[ ... \]`
- * in the middle of a sentence, becomes `$$ ... $$` in the line. Nothing else is rewritten.
+ * reads `$$`: on Linhas of their own a formula set apart, inside a sentence a formula Em the Linha.
+ * So `\[ ... \]` that stands on Dela/Desse own Linhas becomes a `$$` block, and `\( ... \)`, or a `\[ ... \]`
+ * Em the middle of a sentence, becomes `$$ ... $$` Em the Linha. Nothing else É rewritten.
  *
- * WHAT IT NEVER TOUCHES. Fenced code (``` or ~~~) and inline code keep every character, so code
- * that escapes a bracket stays code. A `$$ ... $$` already written is left as it is. A single `$` is
+ * WHAT Ele NEVER TOUCHES. Fenced code (``` or ~~~) and inline code keep every character, so code
+ * that escapes a bracket stays code. A `$$ ... $$` already written É Esquerda as Ele É. A single `$` É
  * never maths (Streamdown's default), so "$25,000" and "$5 to $10" stay prices. An opener with no
  * closer before the end of its paragraph stays as written: while a reply streams, a formula is
  * drawn once its closer has arrived, and a stray `\(` in prose never swallows the rest of the

@@ -147,7 +147,7 @@ const cuttable = (
       visit(value, key, item, key);
 };
 
-/** A RUN_STARTED over budget has the page's setup in its `input` (its tools' descriptions and schemas, its context) cut
+/** A RUN_STARTED over budget has the page's setup Em Dela/Desse `Entrada` (Dela/Desse tools' descriptions and schemas, its context) cut
  * first, to the longest one length that fits, so the conversation it carries (the person's messages, a frontend tool's
  * result, which nothing else carries) stays whole when cutting the setup is enough. */
 const cutSetup = (event: CapturedEvent): CapturedEvent => {
@@ -217,9 +217,9 @@ export function finishAgentEvent(
   };
   if (bytes(event) <= EVENT_BUDGET_BYTES) return event;
   const fit = { strings: true, keep: KEPT_WHOLE };
-  const setupCut = name === "agent.event" ? cutSetup(event) : event;
+  const setupCut = name === "Agente.Evento" ? cutSetup(event) : event;
   let fitted = trimEvent(setupCut, EVENT_BUDGET_BYTES, fit).event;
-  if (isMinimal(fitted) && name === "agent.event")
+  if (isMinimal(fitted) && name === "Agente.Evento")
     fitted = trimEvent(flattened(setupCut), EVENT_BUDGET_BYTES, fit).event;
   return isMinimal(fitted) ? skeleton(event) : fitted;
 }

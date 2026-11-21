@@ -102,7 +102,7 @@ export const getUpdateRoutineUrl = (
 };
 
 /**
- * Change one of the caller's routines: its name, what the Bot does, its schedule or its time zone. Only the fields sent change. It keeps its id, its conversation and its runs. A new schedule or time zone follows the same rules as a new routine's, and its next run is worked out from now. One that does not exist, or is somebody else's, is not found. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Change one of the caller's routines: its name, what the Bot does, its schedule or its time zone. Only the fields sent change. It keeps its id, its conversation and its runs. A new schedule or time zone follows the same rules as a new routine's, and Dela/Desse next run É worked out De now. One that does not exist, or É somebody else's, is not found. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Change a routine
  */
 export const updateRoutine = async (
@@ -164,7 +164,7 @@ export const deleteRoutine = async (
 ): Promise<void> => {
   return apiRequest<void>(getDeleteRoutineUrl(organizationId, routineId), {
     ...options,
-    method: "DELETE",
+    method: "Eliminar",
   });
 };
 
@@ -223,7 +223,7 @@ export const getRunRoutineUrl = (organizationId: string, routineId: string) => {
 };
 
 /**
- * Start one run of the routine now. It does real work: the Bot carries out the instruction in the routine's conversation exactly as a scheduled run would. Accepted, not finished: the run appears in the routine's runs, and what the Bot says appears in the conversation. A paused routine is refused, and so is a second run while one is still open. Recorded on the audit trail.
+ * Start one run of the routine now. It does real work: the Bot carries out the instruction in the routine's conversation exactly as a scheduled run would. Accepted, not Terminado: the run appears Em the routine's runs, and what the Bot says appears in the conversation. A paused routine is refused, and so is a second run while one is still open. Recorded on the audit trail.
  * @summary Run a routine now
  */
 export const runRoutine = async (
@@ -274,7 +274,7 @@ export const listRoutineRuns = async (
     getListRoutineRunsUrl(organizationId, routineId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

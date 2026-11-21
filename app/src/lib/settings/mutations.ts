@@ -19,7 +19,7 @@ export function saveInstructionsMutationOptions(queryClient: QueryClient) {
           organizationId(),
           "me",
           { instructions },
-          { "Idempotency-Key": idempotencyKey() },
+          { "Idempotency-Chave": idempotencyKey() },
           { fallback: "Your standing instructions could not be saved" },
         )
       ).instructions,

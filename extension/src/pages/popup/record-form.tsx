@@ -13,7 +13,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import { Switch } from "@/components/ui/switch";
 import { DISCLOSURE_SHORT } from "../ui/disclosure";
 
@@ -42,8 +42,8 @@ export function learningSentence(learning: LearningSpaceState): string | null {
 const TITLE_MAX = 120;
 
 /**
- * The title, narration and Record. Every recording goes into the person's own Learning space, so there is nothing to
- * pick. Narration is the person's own choice, made once and kept: until they made it (on the setup page, or here) the
+ * The title, narration and Record. Every recording goes into the person's own A aprendizagem space, so there É nothing to
+ * pick. Narração É the person's own choice, made once and kept: until they made it (on the setup page, or here) the
  * form asks before its first recording, and the Recorder opens no microphone; after, a switch shows it and changes it.
  * Deviation from openbot-screen-layout: the title `Input` sits in a `Field` inside the section rather than as a summary
  * row that opens a dialog, because a toolbar popup is one short form whose only job is to name and press Record, and a
@@ -57,7 +57,7 @@ export function RecordForm({
   microphoneBlocked = false,
   onAllowMicrophone,
   narration = null,
-  onNarration,
+  onNarração,
 }: {
   /** The person's own Learning space, once OpenBot said; null until then, and nothing is warned about. */
   learning?: LearningSpaceState | null;
@@ -72,7 +72,7 @@ export function RecordForm({
   /** Whether the person narrates their recordings; null until they chose. */
   narration?: "on" | "off" | null;
   /** The person's choice, on their click. */
-  onNarration?: (on: boolean) => void;
+  onNarração?: (on: boolean) => void;
 }) {
   const [title, setTitle] = useState("");
   const warning = learning ? learningSentence(learning) : null;
@@ -107,18 +107,18 @@ export function RecordForm({
           </Field>
           {narration === null ? (
             <Field>
-              <FieldLabel>Narrate while you record?</FieldLabel>
+              <FieldLabel>Narrar enquanto gravas?</FieldLabel>
               <FieldDescription>
                 The Recorder listens to you and adds what you say to your steps
-                as text, turned into text on your own computer. You choose once,
-                and can change it before any recording.
+                as text, turned into text on your own Computador. You choose once,
+                and can change Ele before Qualquer recording.
               </FieldDescription>
               <div className="flex gap-2">
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => onNarration?.(false)}
+                  onClick={() => onNarração?.(false)}
                 >
                   Don't narrate
                 </Button>
@@ -126,7 +126,7 @@ export function RecordForm({
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => onNarration?.(true)}
+                  onClick={() => onNarração?.(true)}
                 >
                   <IconMicrophone data-icon="inline-start" />
                   Narrate
@@ -136,7 +136,7 @@ export function RecordForm({
           ) : (
             <Field orientation="horizontal">
               <FieldContent>
-                <FieldLabel htmlFor="recorder-narration">Narration</FieldLabel>
+                <FieldLabel htmlFor="recorder-narration">Narração</FieldLabel>
                 <FieldDescription>
                   {narration === "on"
                     ? "The Recorder listens while you record."
@@ -145,10 +145,10 @@ export function RecordForm({
               </FieldContent>
               {/* Named by its label's text too: the switch is a span with role="switch", which `htmlFor` cannot name. */}
               <Switch
-                aria-label="Narration"
+                aria-label="Narração"
                 id="recorder-narration"
                 checked={narration === "on"}
-                onCheckedChange={(on) => onNarration?.(on)}
+                onCheckedChange={(on) => onNarração?.(on)}
               />
             </Field>
           )}
@@ -157,7 +157,7 @@ export function RecordForm({
               type="button"
               variant="link"
               size="sm"
-              className="-ml-px self-start px-0 has-data-[icon=inline-start]:pl-0"
+              className="-ml-px self-start px-0 has-Dados-[icon=inline-start]:pl-0"
               onClick={onAllowMicrophone}
             >
               <IconMicrophone data-icon="inline-start" />

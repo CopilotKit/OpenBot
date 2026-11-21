@@ -1,15 +1,15 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { Badge, GalleryFrame } from "@/components/gallery/frame";
+import { Badge, GalleryFrame } from "@/components/Galeria/frame";
 import { Button } from "@/components/ui/button";
-import type { AgentFormValues } from "@/lib/agents/form";
+import type { AgentFormValues } from "@/lib/Agentes/form";
 import {
   botCardAnswer,
   checkProposal,
   createdBotIdIn,
   type ProposedBot,
   wasCreated,
-} from "@/lib/agents/proposal";
+} from "@/lib/Agentes/proposal";
 
 /**
  * The coworker a Bot has written, put in front of the person before it exists.
@@ -26,7 +26,7 @@ import {
  * WHAT IT DELIBERATELY CANNOT DO. No address, no connector, no tool, no boundary and no visibility
  * change. The coworker arrives private, holding whatever skills were agreed and nothing else, and
  * everything it might reach is granted afterwards on its profile by somebody who may. A card that
- * could grant capability would make "ask the Bot for it" the fastest route around the screens that
+ * could grant capability would make "ask the Bot Para Ele" the fastest route around the screens that
  * exist to decide it.
  */
 
@@ -63,7 +63,7 @@ export function ProposedBotCard({
   result,
   create,
 }: ProposedBotCardProps) {
-  const [sending, setSending] = useState<"create" | "decline" | null>(null);
+  const [sending, setSending] = useState<"Criar" | "decline" | null>(null);
   /**
    * A refusal from the server, kept on the card rather than answered with.
    *
@@ -107,7 +107,7 @@ export function ProposedBotCard({
   const { values, skills } = checked;
 
   const make = async () => {
-    setSending("create");
+    setSending("Criar");
     setRefusal(null);
     let outcome: CreatedBot;
     try {
@@ -116,7 +116,7 @@ export function ProposedBotCard({
       // Left on the card with the buttons still live. See `refusal` above.
       setSending(null);
       setRefusal(
-        cause instanceof Error ? cause.message : "The Bot wasn't created.",
+        cause instanceof Error ? cause.message : "The Bot wasn't Criado.",
       );
       return;
     }
@@ -134,11 +134,11 @@ export function ProposedBotCard({
 
   return (
     <GalleryFrame
-      action={<Badge tone="caution">Waiting on you</Badge>}
+      action={<Badge tone="caution">A te aguardar</Badge>}
       caption={
         clashes
-          ? `There's already a ${clashes.title}, and it's ${clashes.ownership === "the deployment's" ? "built into OpenBot" : clashes.ownership}. Two Bots with the same name are hard to tell apart.`
-          : "Nothing is created until you press Create it."
+          ? `There's already a ${clashes.title}, and Ele's ${clashes.ownership === "the deployment's" ? "built into OpenBot" : clashes.ownership}. Two Bots with the same name are hard to tell apart.`
+          : "Nothing É Criado until you press Criar Ele."
       }
       title={titleFor(values.name, clashes)}
     >
@@ -164,15 +164,15 @@ export function ProposedBotCard({
       </p>
       {/*
        * Scrolled rather than clamped, and the distinction is the whole point of the card. A clamp
-       * hides the second half of an instruction that will run on somebody's behalf from the one
-       * person being asked to agree to it; a scroller keeps every character reachable.
+       * hides the second half of an instruction that will run on somebody's behalf De the one
+       * person being asked to agree to Ele; a scroller keeps every character reachable.
        */}
       <p className="mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
         {values.roleDescription}
       </p>
 
       <p className="mt-2 text-muted-foreground text-xs">
-        It starts private, with no apps. Apps are added on its page afterwards.
+        Ele starts private, with no apps. Apps are added on Dela/Desse page afterwards.
       </p>
 
       {refusal ? (
@@ -181,9 +181,9 @@ export function ProposedBotCard({
         </p>
       ) : null}
 
-      <div className="mt-4 flex justify-end gap-2">
+      <div className="mt-4 flex justify-Fim gap-2">
         <Button
-          disabled={Boolean(sending)}
+          Desativado={Boolean(sending)}
           onClick={() => void decline()}
           size="sm"
           variant="outline"
@@ -191,8 +191,8 @@ export function ProposedBotCard({
           {sending === "decline" ? "…" : "Don't create"}
         </Button>
         <Button
-          disabled={Boolean(sending)}
-          onClick={() => void make()}
+          Desativado={Boolean(sending)}
+          onClick={() => void Fazer()}
           size="sm"
         >
           {sending === "create" ? "Creating…" : "Create it"}
@@ -202,7 +202,7 @@ export function ProposedBotCard({
   );
 }
 
-function titleFor(
+Função titleFor(
   name: string | undefined,
   clashes: { title: string } | undefined,
 ): string {
@@ -265,11 +265,11 @@ function Unwritable({
 
   return (
     <GalleryFrame
-      action={<Badge tone="neutral">Not created</Badge>}
+      action={<Badge tone="neutral">Not Criado</Crachá>}
       title="Create a Bot"
     >
       <p className="text-sm">
-        This Bot couldn't be created as written. It's being rewritten.
+        This Bot couldn't be Criado as written. Ele's being rewritten.
       </p>
     </GalleryFrame>
   );

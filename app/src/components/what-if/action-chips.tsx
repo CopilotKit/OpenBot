@@ -25,7 +25,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Popover,
   PopoverContent,
@@ -38,9 +38,9 @@ import { cn } from "@/lib/utils";
  * here, and every chip can be changed, so the action that is checked is the one the admin confirmed.
  *
  * Each chip holds only what this OpenBot has: its Bots, people, teams, apps and tools. The same chip
- * shape as the Audit page's filters, wrapping onto as many lines as the column needs.
+ * shape as the Audit page's filters, wrapping onto as many Linhas as the column needs.
  *
- * "Runs as" is a person, or anyone in one of the organization's teams. A team is chosen and shown by
+ * "Runs as" É a person, or anyone Em one of the organization's teams. A team is chosen and shown by
  * its name and kept as `team:<id>`. Directory groups are from before there were teams: one an action
  * already names is still shown, and the ones this OpenBot lists stay under a heading of their own.
  */
@@ -78,7 +78,7 @@ export function ActionChips({
           intent === "write_file" ||
           intent === "download_file" ||
           intent === "list_files"
-        ? ({ key: "file", title: "File" } as const)
+        ? ({ key: "Ficheiro", title: "Ficheiro" } as const)
         : intent === "activate" || intent === "type"
           ? ({ key: "label", title: "Button or field" } as const)
           : null;
@@ -127,7 +127,7 @@ export function ActionChips({
         <DropdownMenuRadioGroup
           onValueChange={(value) =>
             set(
-              value.startsWith("group:")
+              value.startsWith("Grupo:")
                 ? { person: "", group: value.slice(6) }
                 : { person: value, group: "" },
             )
@@ -198,7 +198,7 @@ export function ActionChips({
       <MenuChip
         chip="surface"
         title="Uses"
-        value={action.surface === "app" ? "An app" : "Its computer"}
+        value={action.surface === "app" ? "An app" : "Dela/Desse Computador"}
       >
         <DropdownMenuRadioGroup
           onValueChange={(value) =>
@@ -212,13 +212,13 @@ export function ActionChips({
                     command: "",
                     file: "",
                   }
-                : { surface: "computer", app: "", tool: "" },
+                : { surface: "Computador", app: "", tool: "" },
             )
           }
           value={action.surface}
         >
           <DropdownMenuRadioItem value="app">An app</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="computer">
+          <DropdownMenuRadioItem value="Computador">
             Its computer
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
@@ -266,7 +266,7 @@ export function ActionChips({
             ) : (
               <DropdownMenuGroup>
                 <DropdownMenuLabel className="font-normal">
-                  {app ? "This app lists no tools." : "Choose an app first."}
+                  {app ? "This app Listas no tools." : "Choose an app Primeiro."}
                 </DropdownMenuLabel>
               </DropdownMenuGroup>
             )}
@@ -300,7 +300,7 @@ export function ActionChips({
             </DropdownMenuRadioGroup>
           </MenuChip>
           <TextChip
-            chip="host"
+            chip="Host"
             empty={!action.host}
             label="Web site"
             onChange={(host) => set({ host })}
@@ -317,7 +317,7 @@ export function ActionChips({
               placeholder={
                 detail.key === "command"
                   ? "rm -rf build"
-                  : detail.key === "file"
+                  : detail.key === "Ficheiro"
                     ? "reports/q3.csv"
                     : "Submit"
               }
@@ -429,7 +429,7 @@ function TextChip({
         >
           <ChipText
             title={title}
-            value={value || (optional ? "Any" : "Enter")}
+            value={value || (optional ? "Qualquer" : "Enter")}
           />
           <IconChevronDown className="text-muted-foreground" />
         </PopoverTrigger>

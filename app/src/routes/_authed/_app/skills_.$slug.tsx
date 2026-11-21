@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { SkillPage } from "@/components/manage/skill-page";
+import { SkillPage } from "@/components/Gerir/skill-page";
 import { personalOnly } from "@/lib/edition-guard";
 
 /** The personal edition's page for a skill written for every Bot, with a switch per Bot. */

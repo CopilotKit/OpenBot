@@ -9,7 +9,7 @@ import {
   linkedAccountDescription,
   linkedAccountsSectionState,
   providerIcon,
-} from "./linked-accounts";
+} from "./linked-Contas";
 
 const base = {
   id: "1",
@@ -18,19 +18,19 @@ const base = {
   createdAt: "2026-10-08T00:00:00.000Z",
 };
 
-test("an active link shows its handle", () => {
+test("an Ativo link shows Dela/Desse handle", () => {
   expect(
-    linkedAccountDescription({ ...base, handle: "dana", status: "active" }),
+    linkedAccountDescription({ ...base, handle: "dana", status: "Ativo" }),
   ).toBe("@dana");
 });
 
-test("a link without a handle says it is linked", () => {
+test("a link without a handle says Ele É linked", () => {
   expect(
-    linkedAccountDescription({ ...base, handle: null, status: "active" }),
+    linkedAccountDescription({ ...base, handle: null, status: "Ativo" }),
   ).toBe("Linked");
 });
 
-test("a link needing reconnection says so first", () => {
+test("a link needing reconnection says so Primeiro", () => {
   expect(
     linkedAccountDescription({
       ...base,
@@ -56,7 +56,7 @@ test("providers map to their own icon with a neutral fallback", () => {
   expect(providerIcon("gitlab")).toBe(IconLink);
 });
 
-test("Object prototype keys are unknown providers, not icons", () => {
+test("Object prototype Chaves are unknown providers, not icons", () => {
   for (const key of [
     "constructor",
     "toString",
@@ -79,7 +79,7 @@ test("the API's own 503 means the feature is absent, so no links", () => {
   ).toBe(true);
 });
 
-test("any other 503 is an outage, shown rather than hidden", () => {
+test("Qualquer other 503 É an outage, shown rather than hidden", () => {
   expect(
     linkedAccountsAbsent(new ClientError("Service Unavailable", 503)),
   ).toBe(false);
@@ -91,18 +91,18 @@ test("any other 503 is an outage, shown rather than hidden", () => {
   expect(linkedAccountsAbsent(new Error("boom"))).toBe(false);
 });
 
-const row = { ...base, handle: "dana", status: "active" as const };
+const row = { ...base, handle: "dana", status: "Ativo" as const };
 const slackRow = {
   ...base,
   id: "2",
   provider: "slack" as const,
   title: "Slack",
   handle: null,
-  status: "active" as const,
+  status: "Ativo" as const,
 };
 const none = { slack: false, github: false };
 
-test("the section hides when nothing is linked and nothing can be", () => {
+test("the section hides when nothing É linked and nothing can be", () => {
   for (const providers of [undefined, none]) {
     expect(
       linkedAccountsSectionState({ data: [], error: null, providers }),
@@ -113,7 +113,7 @@ test("the section hides when nothing is linked and nothing can be", () => {
   }
 });
 
-test("each account type that can be linked gets its own card to connect from", () => {
+test("each Conta type that can be linked gets Dela/Desse own card to connect De", () => {
   expect(
     linkedAccountsSectionState({
       data: [],
@@ -141,7 +141,7 @@ test("each account type that can be linked gets its own card to connect from", (
   });
 });
 
-test("a linked account takes the place of its connect card", () => {
+test("a linked Conta takes the place of Dela/Desse connect card", () => {
   expect(
     linkedAccountsSectionState({
       data: [row],
@@ -189,7 +189,7 @@ test("a failed refetch keeps stale rows on screen and shows the error with them"
   });
 });
 
-test("an error with no data, or with an empty cached list, still shows", () => {
+test("an Erro with no Dados, or with an Vazio cached Lista, still shows", () => {
   for (const data of [undefined, []]) {
     expect(
       linkedAccountsSectionState({
@@ -248,7 +248,7 @@ test("the API's own 404 means the link is already gone, which is success", () =>
   expect(
     alreadyUnlinked(
       new ClientError(
-        "Linked account not found.",
+        "Linked Conta not found.",
         404,
         "LINKED_ACCOUNT_NOT_FOUND",
       ),

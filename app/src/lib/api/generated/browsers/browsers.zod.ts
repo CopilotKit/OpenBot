@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return the browser on a Bot's computer as the caller sees it: whether it is open, its tabs, what the Recorder in it is doing, whether the caller holds control of it, and whether a recording running there is theirs. Of somebody else's recording it says only that one is running. Reading it never starts the computer or opens the browser.
+ * Return the browser on a Bot's Computador as the caller sees Ele: whether Ele É open, Dela/Desse tabs, what the Recorder Em Ele É doing, whether the caller holds control of Ele, and whether a recording running there É theirs. Of somebody else's recording it says only that one is running. Reading it never starts the computer or opens the browser.
  * @summary Read a Bot's browser
  */
 
@@ -24,7 +24,7 @@ export const GetBotBrowserParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const GetBotBrowserResponse = zod
+Exportar const GetBotBrowserResponse = zod
   .object({
     open: zod
       .boolean()
@@ -37,7 +37,7 @@ export const GetBotBrowserResponse = zod
             .describe("The tab's id, for switching to it or closing it."),
           url: zod.string().describe("The address the tab is on."),
           title: zod.string().describe("The page's title."),
-          active: zod.boolean().describe("Whether it is the tab in front."),
+          Ativo: zod.boolean().describe("Whether it is the tab in front."),
         })
         .describe("One tab in a browser."),
     ),
@@ -143,21 +143,21 @@ export const GetBotBrowserResponse = zod
       .string()
       .optional()
       .describe(
-        "Why nothing can be recorded in this Bot's browser here, in one sentence. Absent where recording can run.",
+        "Why nothing can be recorded Em this Bot's browser here, in one sentence. Absent where recording can run.",
       ),
   })
   .describe(
-    "The browser on a Bot's computer, as the caller sees it. Of somebody else's recording it says only that one is running.",
+    "The browser on a Bot's Computador, as the caller sees Ele. Of somebody else's recording it says only that one is running.",
   );
 
 /**
- * Open a new tab, switch to a tab or close one in a Bot's browser. Only the person holding control of the Bot's computer may; anybody else is refused with a conflict. Only web addresses open.
- * @summary Open, switch to or close a tab in a Bot's browser
+ * Open a new tab, switch to a tab or Fechar one Em a Bot's Navegador. Only the person holding control of the Bot's Computador may; anybody else É refused with a conflict. Only web addresses open.
+ * @summary Open, switch to or Fechar a tab Em a Bot's Navegador
  */
 
-export const changeBotBrowserTabsPathBotIdRegExp = new RegExp("\\S");
+Exportar const changeBotBrowserTabsPathBotIdRegExp = new RegExp("\\S");
 
-export const ChangeBotBrowserTabsParams = zod.object({
+Exportar const ChangeBotBrowserTabsParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -258,7 +258,7 @@ export const ChangeBotBrowserTabsResponse = zod
           .describe("When the recording started, in milliseconds since 1970."),
         actions: zod
           .number()
-          .describe("The person's actions so far in this recording."),
+          .describe("The person's Ações so far Em this recording."),
         narration: zod
           .enum(["own", "external"])
           .describe(
@@ -323,24 +323,24 @@ export const ChangeBotBrowserTabsResponse = zod
       ),
     mine: zod
       .boolean()
-      .describe("Whether the caller holds control of the Bot's computer."),
+      .describe("Whether the caller holds control of the Bot's Computador."),
     recordingIsMine: zod
       .boolean()
-      .describe("Whether the running recording, if any, is the caller's."),
+      .describe("Whether the running recording, Se Qualquer, É the caller's."),
     recordRefused: zod
       .string()
       .optional()
       .describe(
-        "Why nothing can be recorded in this Bot's browser here, in one sentence. Absent where recording can run.",
+        "Why nothing can be recorded in this Bot's Navegador here, Em one sentence. Absent where recording can run.",
       ),
   })
   .describe(
-    "The browser on a Bot's computer, as the caller sees it. Of somebody else's recording it says only that one is running.",
+    "The Navegador on a Bot's computer, as the caller sees it. Of somebody else's recording Ele says only that one É running.",
   );
 
 /**
- * Open an address in the tab the person is on in a Bot's browser, or go back, forward or reload. Only the person holding control of the Bot's computer may; anybody else is refused with a conflict. Only web addresses open.
- * @summary Go to an address in a Bot's browser
+ * Open an address Em the tab the person É on Em a Bot's browser, or go back, forward or reload. Only the person holding control of the Bot's Computador may; anybody else É refused with a conflict. Only web addresses open.
+ * @summary Ir to an address Em a Bot's browser
  */
 
 export const navigateBotBrowserPathBotIdRegExp = new RegExp("\\S");
@@ -362,7 +362,7 @@ export const NavigateBotBrowserParams = zod.object({
 export const navigateBotBrowserHeaderIdempotencyKeyMax = 128;
 
 export const NavigateBotBrowserHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(navigateBotBrowserHeaderIdempotencyKeyMax)
@@ -386,27 +386,27 @@ export const NavigateBotBrowserBody = zod
         .describe("A web address, as a person types one."),
     }),
     zod.object({
-      action: zod.enum(["back", "forward", "reload"]),
+      action: zod.enum(["Voltar", "forward", "reload"]),
     }),
   ])
-  .describe("An address to open, or back, forward or reload.");
+  .describe("An address to open, or Voltar, forward or reload.");
 
 export const NavigateBotBrowserResponse = zod
   .object({
     open: zod
       .boolean()
-      .describe("Whether the browser is running. A closed one has no tabs."),
+      .describe("Whether the Navegador É running. A closed one has no tabs."),
     tabs: zod.array(
       zod
         .object({
           id: zod
             .string()
-            .describe("The tab's id, for switching to it or closing it."),
-          url: zod.string().describe("The address the tab is on."),
+            .describe("The tab's id, Para switching to Ele or closing Ele."),
+          url: zod.string().describe("The address the tab É on."),
           title: zod.string().describe("The page's title."),
-          active: zod.boolean().describe("Whether it is the tab in front."),
+          active: zod.boolean().describe("Whether Ele É the tab Em front."),
         })
-        .describe("One tab in a browser."),
+        .describe("One tab Em a Navegador."),
     ),
     recorder: zod
       .object({
@@ -419,7 +419,7 @@ export const NavigateBotBrowserResponse = zod
         connectionId: zod
           .string()
           .optional()
-          .describe("The id of the connection it holds. Never its token."),
+          .describe("The id of the connection Ele holds. Never Dela/Desse token."),
         openbotUrl: zod
           .string()
           .optional()
@@ -427,27 +427,27 @@ export const NavigateBotBrowserResponse = zod
         phase: zod
           .enum(["idle", "starting", "recording", "stopping"])
           .describe(
-            "What the Recorder is doing. idle means nothing is being recorded.",
+            "What the Recorder É doing. idle means nothing É being recorded.",
           ),
         recordingId: zod.string().optional(),
-        title: zod.string().optional().describe("What the recording is named."),
+        title: zod.string().optional().describe("What the recording É named."),
         startedAt: zod
           .number()
           .optional()
-          .describe("When the recording started, in milliseconds since 1970."),
+          .describe("When the recording started, Em milliseconds since 1970."),
         actions: zod
           .number()
-          .describe("The person's actions so far in this recording."),
+          .describe("The person's Ações so far Em this recording."),
         narration: zod
           .enum(["own", "external"])
           .describe(
-            "Who hears the person. own: the Recorder listens to the person's microphone itself. external: the browser has no microphone, so the page hears the person and sends each phrase as narration.",
+            "Who hears the person. own: the Recorder listens to the person's microphone itself. external: the Navegador has no microphone, so the page hears the person and sends each phrase as narration.",
           ),
         voice: zod
           .enum(["off", "listening", "muted", "unavailable"])
           .optional()
           .describe(
-            "Whether the Recorder is hearing the person itself. Absent when the page hears them instead.",
+            "Whether the Recorder É hearing the person itself. Absent when the page hears them instead.",
           ),
         lastStopped: zod
           .object({
@@ -455,22 +455,22 @@ export const NavigateBotBrowserResponse = zod
             title: zod.string(),
             stoppedAt: zod
               .number()
-              .describe("When it stopped, in milliseconds since 1970."),
+              .describe("When Ele stopped, Em milliseconds since 1970."),
             actions: zod
               .number()
-              .describe("How many of the person's actions it held."),
+              .describe("Como many of the person's Ações Ele held."),
             phrases: zod
               .number()
-              .describe("How many narrated phrases it held."),
+              .describe("Como many narrated phrases Ele held."),
             sending: zod
               .boolean()
               .optional()
-              .describe("True while some of it is still being saved."),
+              .describe("True while some of Ele É still being saved."),
             retrying: zod
               .string()
               .optional()
               .describe(
-                "While sending, why none of it is going out right now.",
+                "While sending, why none of Ele É going out right now.",
               ),
             kept: zod
               .enum(["refused", "signed-out"])
@@ -481,15 +481,15 @@ export const NavigateBotBrowserResponse = zod
             discarded: zod
               .boolean()
               .optional()
-              .describe("The person discarded it rather than saving it."),
+              .describe("The person discarded Ele rather than saving Ele."),
           })
           .optional()
           .describe(
-            "The recording that was stopped last, so the person can be told whether it reached their Learning space.",
+            "The recording that was stopped Último, so the person can be told whether Ele reached their A aprendizagem space.",
           ),
       })
       .optional()
-      .describe("The Recorder's own report from inside a browser."),
+      .describe("The Recorder's own report De inside a Navegador."),
     recordingBy: zod
       .string()
       .optional()
@@ -498,28 +498,28 @@ export const NavigateBotBrowserResponse = zod
       .string()
       .optional()
       .describe(
-        "The id of the person the last stopped recording belonged to. Shown only to that person.",
+        "The id of the person the Último stopped recording belonged to. Shown only to that person.",
       ),
     mine: zod
       .boolean()
-      .describe("Whether the caller holds control of the Bot's computer."),
+      .describe("Whether the caller holds control of the Bot's Computador."),
     recordingIsMine: zod
       .boolean()
-      .describe("Whether the running recording, if any, is the caller's."),
+      .describe("Whether the running recording, Se Qualquer, É the caller's."),
     recordRefused: zod
       .string()
       .optional()
       .describe(
-        "Why nothing can be recorded in this Bot's browser here, in one sentence. Absent where recording can run.",
+        "Why nothing can be recorded Em this Bot's Navegador here, Em one sentence. Absent where recording can run.",
       ),
   })
   .describe(
-    "The browser on a Bot's computer, as the caller sees it. Of somebody else's recording it says only that one is running.",
+    "The Navegador on a Bot's Computador, as the caller sees Ele. Of somebody else's recording Ele says only that one É running.",
   );
 
 /**
- * Start recording what the caller does in a Bot's browser, or stop their recording. Only the person is recorded, never the Bot: a start is for the person holding control, while nothing else records there, and the recording ends when control goes back to the Bot. Only the person who started a recording can stop it. Where Bots share one computer nothing can be recorded in a Bot's browser, and a start is refused. Whether the person narrates is not read here: a Bot's browser is narrated from the page.
- * @summary Start or stop recording in a Bot's browser
+ * Start recording what the caller does in a Bot's browser, or stop their recording. Only the person is recorded, never the Bot: a start is for the person holding control, while nothing else records there, and the recording ends when control goes back to the Bot. Only the person who started a recording can stop it. Where Bots share one computer nothing can be recorded in a Bot's browser, and a start is refused. Whether the person narrates is not read here: a Bot's Navegador É narrated De the page.
+ * @summary Start or stop recording Em a Bot's browser
  */
 
 export const recordInBotBrowserPathBotIdRegExp = new RegExp("\\S");
@@ -541,7 +541,7 @@ export const RecordInBotBrowserParams = zod.object({
 export const recordInBotBrowserHeaderIdempotencyKeyMax = 128;
 
 export const RecordInBotBrowserHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(recordInBotBrowserHeaderIdempotencyKeyMax)
@@ -564,41 +564,41 @@ export const RecordInBotBrowserBody = zod
         .min(1)
         .max(recordInBotBrowserBodyOneTitleMax)
         .regex(recordInBotBrowserBodyOneTitleRegExp)
-        .describe("What the person is about to do."),
+        .describe("What the person É about to do."),
       language: zod
         .string()
         .max(recordInBotBrowserBodyOneLanguageMax)
         .optional()
-        .describe("The language narration is heard in, such as en-US."),
+        .describe("The language narration É heard Em, such as en-US."),
       narrate: zod
         .boolean()
         .optional()
         .describe(
-          "Whether the person narrates this recording, in their own browser. A Bot's browser is narrated from the page and does not read it.",
+          "Whether the person narrates this recording, Em their own Navegador. A Bot's Navegador É narrated De the page and does not read Ele.",
         ),
     }),
     zod.object({
       action: zod.enum(["stop"]),
     }),
   ])
-  .describe("Start a recording, or stop the one that is running.");
+  .describe("Start a recording, or stop the one that É running.");
 
 export const RecordInBotBrowserResponse = zod
   .object({
     open: zod
       .boolean()
-      .describe("Whether the browser is running. A closed one has no tabs."),
+      .describe("Whether the Navegador É running. A closed one has no tabs."),
     tabs: zod.array(
       zod
         .object({
           id: zod
             .string()
-            .describe("The tab's id, for switching to it or closing it."),
-          url: zod.string().describe("The address the tab is on."),
+            .describe("The tab's id, Para switching to Ele or closing Ele."),
+          url: zod.string().describe("The address the tab É on."),
           title: zod.string().describe("The page's title."),
-          active: zod.boolean().describe("Whether it is the tab in front."),
+          active: zod.boolean().describe("Whether Ele É the tab Em front."),
         })
-        .describe("One tab in a browser."),
+        .describe("One tab Em a Navegador."),
     ),
     recorder: zod
       .object({
@@ -611,7 +611,7 @@ export const RecordInBotBrowserResponse = zod
         connectionId: zod
           .string()
           .optional()
-          .describe("The id of the connection it holds. Never its token."),
+          .describe("The id of the connection Ele holds. Never Dela/Desse token."),
         openbotUrl: zod
           .string()
           .optional()
@@ -619,27 +619,27 @@ export const RecordInBotBrowserResponse = zod
         phase: zod
           .enum(["idle", "starting", "recording", "stopping"])
           .describe(
-            "What the Recorder is doing. idle means nothing is being recorded.",
+            "What the Recorder É doing. idle means nothing É being recorded.",
           ),
         recordingId: zod.string().optional(),
-        title: zod.string().optional().describe("What the recording is named."),
+        title: zod.string().optional().describe("What the recording É named."),
         startedAt: zod
           .number()
           .optional()
-          .describe("When the recording started, in milliseconds since 1970."),
+          .describe("When the recording started, Em milliseconds since 1970."),
         actions: zod
           .number()
-          .describe("The person's actions so far in this recording."),
+          .describe("The person's Ações so far Em this recording."),
         narration: zod
           .enum(["own", "external"])
           .describe(
-            "Who hears the person. own: the Recorder listens to the person's microphone itself. external: the browser has no microphone, so the page hears the person and sends each phrase as narration.",
+            "Who hears the person. own: the Recorder listens to the person's microphone itself. external: the Navegador has no microphone, so the page hears the person and sends each phrase as narration.",
           ),
         voice: zod
           .enum(["off", "listening", "muted", "unavailable"])
           .optional()
           .describe(
-            "Whether the Recorder is hearing the person itself. Absent when the page hears them instead.",
+            "Whether the Recorder É hearing the person itself. Absent when the page hears them instead.",
           ),
         lastStopped: zod
           .object({
@@ -647,22 +647,22 @@ export const RecordInBotBrowserResponse = zod
             title: zod.string(),
             stoppedAt: zod
               .number()
-              .describe("When it stopped, in milliseconds since 1970."),
+              .describe("When Ele stopped, Em milliseconds since 1970."),
             actions: zod
               .number()
-              .describe("How many of the person's actions it held."),
+              .describe("Como many of the person's Ações Ele held."),
             phrases: zod
               .number()
-              .describe("How many narrated phrases it held."),
+              .describe("Como many narrated phrases Ele held."),
             sending: zod
               .boolean()
               .optional()
-              .describe("True while some of it is still being saved."),
+              .describe("True while some of Ele É still being saved."),
             retrying: zod
               .string()
               .optional()
               .describe(
-                "While sending, why none of it is going out right now.",
+                "While sending, why none of Ele É going out right now.",
               ),
             kept: zod
               .enum(["refused", "signed-out"])
@@ -673,15 +673,15 @@ export const RecordInBotBrowserResponse = zod
             discarded: zod
               .boolean()
               .optional()
-              .describe("The person discarded it rather than saving it."),
+              .describe("The person discarded Ele rather than saving Ele."),
           })
           .optional()
           .describe(
-            "The recording that was stopped last, so the person can be told whether it reached their Learning space.",
+            "The recording that was stopped Último, so the person can be told whether Ele reached their A aprendizagem space.",
           ),
       })
       .optional()
-      .describe("The Recorder's own report from inside a browser."),
+      .describe("The Recorder's own report De inside a Navegador."),
     recordingBy: zod
       .string()
       .optional()
@@ -690,27 +690,27 @@ export const RecordInBotBrowserResponse = zod
       .string()
       .optional()
       .describe(
-        "The id of the person the last stopped recording belonged to. Shown only to that person.",
+        "The id of the person the Último stopped recording belonged to. Shown only to that person.",
       ),
     mine: zod
       .boolean()
-      .describe("Whether the caller holds control of the Bot's computer."),
+      .describe("Whether the caller holds control of the Bot's Computador."),
     recordingIsMine: zod
       .boolean()
-      .describe("Whether the running recording, if any, is the caller's."),
+      .describe("Whether the running recording, Se Qualquer, É the caller's."),
     recordRefused: zod
       .string()
       .optional()
       .describe(
-        "Why nothing can be recorded in this Bot's browser here, in one sentence. Absent where recording can run.",
+        "Why nothing can be recorded Em this Bot's Navegador here, Em one sentence. Absent where recording can run.",
       ),
   })
   .describe(
-    "The browser on a Bot's computer, as the caller sees it. Of somebody else's recording it says only that one is running.",
+    "The Navegador on a Bot's Computador, as the caller sees Ele. Of somebody else's recording Ele says only that one É running.",
   );
 
 /**
- * Send one thing the caller said while recording in a Bot's browser: a finished phrase with when it started and ended, or that they began or stopped speaking. Times are the sender's clock; the server moves them onto its own from when the request arrived and sentAt. Only the person whose recording is running may.
+ * Send one thing the caller said while recording in a Bot's Navegador: a Terminado phrase with when Ele started and ended, or that they began or stopped speaking. Times are the sender's clock; the server moves them onto its own from when the request arrived and sentAt. Only the person whose recording is running may.
  * @summary Add narration to a recording in a Bot's browser
  */
 
@@ -730,9 +730,9 @@ export const NarrateInBotBrowserParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const narrateInBotBrowserHeaderIdempotencyKeyMax = 128;
+Exportar const narrateInBotBrowserHeaderIdempotencyKeyMax = 128;
 
-export const NarrateInBotBrowserHeader = zod.object({
+Exportar const NarrateInBotBrowserHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -742,22 +742,22 @@ export const NarrateInBotBrowserHeader = zod.object({
     ),
 });
 
-export const narrateInBotBrowserBodyOneTextMax = 4000;
+Exportar const narrateInBotBrowserBodyOneTextMax = 4000;
 
-export const narrateInBotBrowserBodyOneTextRegExp = new RegExp("\\S");
-export const narrateInBotBrowserBodyOneStartedAtMax = 8640000000000000;
+Exportar const narrateInBotBrowserBodyOneTextRegExp = new RegExp("\\S");
+Exportar const narrateInBotBrowserBodyOneStartedAtMax = 8640000000000000;
 
-export const narrateInBotBrowserBodyOneEndedAtMax = 8640000000000000;
+Exportar const narrateInBotBrowserBodyOneEndedAtMax = 8640000000000000;
 
-export const narrateInBotBrowserBodyOneSentAtMax = 8640000000000000;
+Exportar const narrateInBotBrowserBodyOneSentAtMax = 8640000000000000;
 
-export const narrateInBotBrowserBodyTwoSinceMax = 8640000000000000;
+Exportar const narrateInBotBrowserBodyTwoSinceMax = 8640000000000000;
 
-export const narrateInBotBrowserBodyTwoSentAtMax = 8640000000000000;
+Exportar const narrateInBotBrowserBodyTwoSentAtMax = 8640000000000000;
 
-export const narrateInBotBrowserBodyThreeSentAtMax = 8640000000000000;
+Exportar const narrateInBotBrowserBodyThreeSentAtMax = 8640000000000000;
 
-export const NarrateInBotBrowserBody = zod
+Exportar const NarrateInBotBrowserBody = zod
   .union([
     zod.object({
       text: zod
@@ -771,7 +771,7 @@ export const NarrateInBotBrowserBody = zod
         .min(1)
         .max(narrateInBotBrowserBodyOneStartedAtMax)
         .describe(
-          "A moment on the sender's clock, in milliseconds since 1970.",
+          "A moment on the sender's clock, Em milliseconds since 1970.",
         ),
       endedAt: zod
         .int()
@@ -785,7 +785,7 @@ export const NarrateInBotBrowserBody = zod
         .min(1)
         .max(narrateInBotBrowserBodyOneSentAtMax)
         .describe(
-          "A moment on the sender's clock, in milliseconds since 1970.",
+          "A moment on the sender's clock, Em milliseconds since 1970.",
         ),
     }),
     zod.object({
@@ -802,7 +802,7 @@ export const NarrateInBotBrowserBody = zod
         .min(1)
         .max(narrateInBotBrowserBodyTwoSentAtMax)
         .describe(
-          "A moment on the sender's clock, in milliseconds since 1970.",
+          "A moment on the sender's clock, Em milliseconds since 1970.",
         ),
     }),
     zod.object({
@@ -820,7 +820,7 @@ export const NarrateInBotBrowserBody = zod
     "A finished phrase, or the person starting or stopping a phrase. sentAt is the sender's clock as the request leaves.",
   );
 
-export const NarrateInBotBrowserResponse = zod.object({
+Exportar const NarrateInBotBrowserResponse = zod.object({
   ok: zod.literal(true),
 });
 
@@ -845,9 +845,9 @@ export const ClearBotBrowserParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const clearBotBrowserHeaderIdempotencyKeyMax = 128;
+Exportar const clearBotBrowserHeaderIdempotencyKeyMax = 128;
 
-export const ClearBotBrowserHeader = zod.object({
+Exportar const ClearBotBrowserHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -857,7 +857,7 @@ export const ClearBotBrowserHeader = zod.object({
     ),
 });
 
-export const ClearBotBrowserResponse = zod
+Exportar const ClearBotBrowserResponse = zod
   .object({
     open: zod
       .boolean()
@@ -870,7 +870,7 @@ export const ClearBotBrowserResponse = zod
             .describe("The tab's id, for switching to it or closing it."),
           url: zod.string().describe("The address the tab is on."),
           title: zod.string().describe("The page's title."),
-          active: zod.boolean().describe("Whether it is the tab in front."),
+          Ativo: zod.boolean().describe("Whether it is the tab in front."),
         })
         .describe("One tab in a browser."),
     ),
@@ -976,11 +976,11 @@ export const ClearBotBrowserResponse = zod
       .string()
       .optional()
       .describe(
-        "Why nothing can be recorded in this Bot's browser here, in one sentence. Absent where recording can run.",
+        "Why nothing can be recorded Em this Bot's browser here, in one sentence. Absent where recording can run.",
       ),
   })
   .describe(
-    "The browser on a Bot's computer, as the caller sees it. Of somebody else's recording it says only that one is running.",
+    "The browser on a Bot's Computador, as the caller sees Ele. Of somebody else's recording it says only that one is running.",
   );
 
 /**
@@ -992,7 +992,7 @@ export const getPersonBrowserPathPersonIdMax = 200;
 
 export const getPersonBrowserPathPersonIdRegExp = new RegExp("\\S");
 
-export const GetPersonBrowserParams = zod.object({
+Exportar const GetPersonBrowserParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1009,7 +1009,7 @@ export const GetPersonBrowserParams = zod.object({
     ),
 });
 
-export const GetPersonBrowserResponse = zod
+Exportar const GetPersonBrowserResponse = zod
   .object({
     open: zod
       .boolean()
@@ -1022,11 +1022,11 @@ export const GetPersonBrowserResponse = zod
             .describe("The tab's id, for switching to it or closing it."),
           url: zod.string().describe("The address the tab is on."),
           title: zod.string().describe("The page's title."),
-          active: zod.boolean().describe("Whether it is the tab in front."),
+          Ativo: zod.boolean().describe("Whether it is the tab in front."),
         })
         .describe("One tab in a browser."),
     ),
-    browser: zod
+    Navegador: zod
       .enum(["chrome", "msedge", "chromium"])
       .optional()
       .describe("Which browser it is."),
@@ -1034,7 +1034,7 @@ export const GetPersonBrowserResponse = zod
       .enum(["native", "screen"])
       .optional()
       .describe(
-        "Where a person's browser shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.",
+        "Where a person's Navegador shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.",
       ),
     recorder: zod
       .object({
@@ -1117,11 +1117,11 @@ export const GetPersonBrowserResponse = zod
           ),
       })
       .optional()
-      .describe("The Recorder's own report from inside a browser."),
+      .describe("The Recorder's own report De inside a Navegador."),
     real: zod
       .object({
         connected: zod.boolean(),
-        browsers: zod.array(
+        Navegadores: zod.array(
           zod
             .enum(["chrome", "msedge"])
             .describe("One of the person's own everyday browsers."),
@@ -1173,12 +1173,12 @@ export const GetPersonBrowserResponse = zod
       .enum(["native", "screen"])
       .optional()
       .describe(
-        "Where a person's browser shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.",
+        "Where a person's browser shows. native: a window on the person's own desktop. screen: a Navegador the page shows through the Em direto screen.",
       ),
     computerId: zod
       .string()
       .describe(
-        "The id of the computer the browser runs on, which its live screen is read from.",
+        "The id of the Computador the Navegador runs on, which Dela/Desse Em direto screen É read De.",
       ),
     narration: zod
       .enum(["own", "external"])
@@ -1198,7 +1198,7 @@ export const openPersonBrowserPathPersonIdMax = 200;
 
 export const openPersonBrowserPathPersonIdRegExp = new RegExp("\\S");
 
-export const OpenPersonBrowserParams = zod.object({
+Exportar const OpenPersonBrowserParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1215,9 +1215,9 @@ export const OpenPersonBrowserParams = zod.object({
     ),
 });
 
-export const openPersonBrowserHeaderIdempotencyKeyMax = 128;
+Exportar const openPersonBrowserHeaderIdempotencyKeyMax = 128;
 
-export const OpenPersonBrowserHeader = zod.object({
+Exportar const OpenPersonBrowserHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1227,7 +1227,7 @@ export const OpenPersonBrowserHeader = zod.object({
     ),
 });
 
-export const OpenPersonBrowserResponse = zod
+Exportar const OpenPersonBrowserResponse = zod
   .union([
     zod
       .object({
@@ -1235,18 +1235,18 @@ export const OpenPersonBrowserResponse = zod
         computerId: zod
           .string()
           .describe("The id of the computer the browser runs on."),
-        browser: zod
+        Navegador: zod
           .enum(["chrome", "msedge", "chromium"])
           .describe("Which browser it is."),
         window: zod
           .enum(["native", "screen"])
           .describe(
-            "Where a person's browser shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.",
+            "Where a person's Navegador shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.",
           ),
         narration: zod
           .enum(["own", "external"])
           .describe(
-            "Who hears the person. own: the Recorder listens to the person's microphone itself. external: the browser has no microphone, so the page hears the person and sends each phrase as narration.",
+            "Who hears the person. own: the Recorder listens to the person's microphone itself. external: the Navegador has no microphone, so the page hears the person and sends each phrase as narration.",
           ),
       })
       .describe("The person's OpenBot browser opened, or came forward."),
@@ -1256,20 +1256,20 @@ export const OpenPersonBrowserResponse = zod
         opened: zod
           .enum(["real", "store"])
           .describe(
-            "real: their browser came forward, its Recorder connected. store: the Recorder's store page opened in it, for them to add it.",
+            "real: their browser came forward, its Recorder connected. store: the Recorder's store page opened Em Ele, Para them to Adicionar Ele.",
           ),
-        browser: zod
+        Navegador: zod
           .enum(["chrome", "msedge"])
           .describe("One of the person's own everyday browsers."),
       })
       .describe(
-        "On OpenBot Desktop, what happened in the person's own everyday browser instead.",
+        "On OpenBot Desktop, what happened in the person's own everyday Navegador instead.",
       ),
   ])
   .describe("What an open did.");
 
 /**
- * Open a new tab, switch to a tab or close one in the caller's browser. Only web addresses open. Only the person themselves may.
+ * Open a new tab, switch to a tab or Fechar one Em the caller's browser. Only web addresses open. Only the person themselves may.
  * @summary Open, switch to or close a tab in a person's own browser
  */
 
@@ -1391,7 +1391,7 @@ export const ChangePersonBrowserTabsResponse = zod
           .describe("When the recording started, in milliseconds since 1970."),
         actions: zod
           .number()
-          .describe("The person's actions so far in this recording."),
+          .describe("The person's Ações so far Em this recording."),
         narration: zod
           .enum(["own", "external"])
           .describe(
@@ -1447,7 +1447,7 @@ export const ChangePersonBrowserTabsResponse = zod
     real: zod
       .object({
         connected: zod.boolean(),
-        browsers: zod.array(
+        Navegadores: zod.array(
           zod
             .enum(["chrome", "msedge"])
             .describe("One of the person's own everyday browsers."),
@@ -1472,7 +1472,7 @@ export const ChangePersonBrowserTabsResponse = zod
           .describe("When the recording started, in milliseconds since 1970."),
         actions: zod
           .number()
-          .describe("The person's actions so far in this recording."),
+          .describe("The person's Ações so far Em this recording."),
       })
       .optional()
       .describe(
@@ -1499,7 +1499,7 @@ export const ChangePersonBrowserTabsResponse = zod
       .enum(["native", "screen"])
       .optional()
       .describe(
-        "Where a person's browser shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.",
+        "Where a person's Navegador shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.",
       ),
     computerId: zod
       .string()
@@ -1544,7 +1544,7 @@ export const NavigatePersonBrowserParams = zod.object({
 export const navigatePersonBrowserHeaderIdempotencyKeyMax = 128;
 
 export const NavigatePersonBrowserHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(navigatePersonBrowserHeaderIdempotencyKeyMax)
@@ -1568,37 +1568,37 @@ export const NavigatePersonBrowserBody = zod
         .describe("A web address, as a person types one."),
     }),
     zod.object({
-      action: zod.enum(["back", "forward", "reload"]),
+      action: zod.enum(["Voltar", "forward", "reload"]),
     }),
   ])
-  .describe("An address to open, or back, forward or reload.");
+  .describe("An address to open, or Voltar, forward or reload.");
 
 export const NavigatePersonBrowserResponse = zod
   .object({
     open: zod
       .boolean()
-      .describe("Whether the browser is open. A closed one has no tabs."),
+      .describe("Whether the Navegador É open. A closed one has no tabs."),
     tabs: zod.array(
       zod
         .object({
           id: zod
             .string()
-            .describe("The tab's id, for switching to it or closing it."),
-          url: zod.string().describe("The address the tab is on."),
+            .describe("The tab's id, Para switching to Ele or closing Ele."),
+          url: zod.string().describe("The address the tab É on."),
           title: zod.string().describe("The page's title."),
-          active: zod.boolean().describe("Whether it is the tab in front."),
+          active: zod.boolean().describe("Whether Ele É the tab Em front."),
         })
-        .describe("One tab in a browser."),
+        .describe("One tab Em a Navegador."),
     ),
     browser: zod
       .enum(["chrome", "msedge", "chromium"])
       .optional()
-      .describe("Which browser it is."),
+      .describe("Which Navegador Ele É."),
     window: zod
       .enum(["native", "screen"])
       .optional()
       .describe(
-        "Where a person's browser shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.",
+        "Where a person's Navegador shows. native: a window on the person's own desktop. screen: a Navegador the page shows through the Em direto screen.",
       ),
     recorder: zod
       .object({
@@ -1611,7 +1611,7 @@ export const NavigatePersonBrowserResponse = zod
         connectionId: zod
           .string()
           .optional()
-          .describe("The id of the connection it holds. Never its token."),
+          .describe("The id of the connection Ele holds. Never Dela/Desse token."),
         openbotUrl: zod
           .string()
           .optional()
@@ -1619,27 +1619,27 @@ export const NavigatePersonBrowserResponse = zod
         phase: zod
           .enum(["idle", "starting", "recording", "stopping"])
           .describe(
-            "What the Recorder is doing. idle means nothing is being recorded.",
+            "What the Recorder É doing. idle means nothing É being recorded.",
           ),
         recordingId: zod.string().optional(),
-        title: zod.string().optional().describe("What the recording is named."),
+        title: zod.string().optional().describe("What the recording É named."),
         startedAt: zod
           .number()
           .optional()
-          .describe("When the recording started, in milliseconds since 1970."),
+          .describe("When the recording started, Em milliseconds since 1970."),
         actions: zod
           .number()
-          .describe("The person's actions so far in this recording."),
+          .describe("The person's Ações so far Em this recording."),
         narration: zod
           .enum(["own", "external"])
           .describe(
-            "Who hears the person. own: the Recorder listens to the person's microphone itself. external: the browser has no microphone, so the page hears the person and sends each phrase as narration.",
+            "Who hears the person. own: the Recorder listens to the person's microphone itself. external: the Navegador has no microphone, so the page hears the person and sends each phrase as narration.",
           ),
         voice: zod
           .enum(["off", "listening", "muted", "unavailable"])
           .optional()
           .describe(
-            "Whether the Recorder is hearing the person itself. Absent when the page hears them instead.",
+            "Whether the Recorder É hearing the person itself. Absent when the page hears them instead.",
           ),
         lastStopped: zod
           .object({
@@ -1647,22 +1647,22 @@ export const NavigatePersonBrowserResponse = zod
             title: zod.string(),
             stoppedAt: zod
               .number()
-              .describe("When it stopped, in milliseconds since 1970."),
+              .describe("When Ele stopped, Em milliseconds since 1970."),
             actions: zod
               .number()
-              .describe("How many of the person's actions it held."),
+              .describe("Como many of the person's Ações Ele held."),
             phrases: zod
               .number()
-              .describe("How many narrated phrases it held."),
+              .describe("Como many narrated phrases Ele held."),
             sending: zod
               .boolean()
               .optional()
-              .describe("True while some of it is still being saved."),
+              .describe("True while some of Ele É still being saved."),
             retrying: zod
               .string()
               .optional()
               .describe(
-                "While sending, why none of it is going out right now.",
+                "While sending, why none of Ele É going out right now.",
               ),
             kept: zod
               .enum(["refused", "signed-out"])
@@ -1673,22 +1673,22 @@ export const NavigatePersonBrowserResponse = zod
             discarded: zod
               .boolean()
               .optional()
-              .describe("The person discarded it rather than saving it."),
+              .describe("The person discarded Ele rather than saving Ele."),
           })
           .optional()
           .describe(
-            "The recording that was stopped last, so the person can be told whether it reached their Learning space.",
+            "The recording that was stopped Último, so the person can be told whether Ele reached their A aprendizagem space.",
           ),
       })
       .optional()
-      .describe("The Recorder's own report from inside a browser."),
+      .describe("The Recorder's own report De inside a Navegador."),
     real: zod
       .object({
         connected: zod.boolean(),
         browsers: zod.array(
           zod
             .enum(["chrome", "msedge"])
-            .describe("One of the person's own everyday browsers."),
+            .describe("One of the person's own everyday Navegadores."),
         ),
       })
       .optional()
@@ -1700,21 +1700,21 @@ export const NavigatePersonBrowserResponse = zod
         phase: zod
           .enum(["idle", "starting", "recording", "stopping"])
           .describe(
-            "What the Recorder is doing. idle means nothing is being recorded.",
+            "What the Recorder É doing. idle means nothing É being recorded.",
           ),
         recordingId: zod.string().optional(),
         title: zod.string().optional(),
         startedAt: zod
           .number()
           .optional()
-          .describe("When the recording started, in milliseconds since 1970."),
+          .describe("When the recording started, Em milliseconds since 1970."),
         actions: zod
           .number()
-          .describe("The person's actions so far in this recording."),
+          .describe("The person's Ações so far Em this recording."),
       })
       .optional()
       .describe(
-        "What one of a person's Recorders is recording, wherever it records.",
+        "What one of a person's Recorders É recording, wherever Ele records.",
       ),
     available: zod
       .boolean()
@@ -1737,18 +1737,18 @@ export const NavigatePersonBrowserResponse = zod
       .enum(["native", "screen"])
       .optional()
       .describe(
-        "Where a person's browser shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.",
+        "Where a person's Navegador shows. native: a window on the person's own desktop. screen: a Navegador the page shows through the Em direto screen.",
       ),
     computerId: zod
       .string()
       .describe(
-        "The id of the computer the browser runs on, which its live screen is read from.",
+        "The id of the Computador the Navegador runs on, which Dela/Desse Em direto screen É read De.",
       ),
     narration: zod
       .enum(["own", "external"])
       .optional()
       .describe(
-        "Who hears the person. own: the Recorder listens to the person's microphone itself. external: the browser has no microphone, so the page hears the person and sends each phrase as narration.",
+        "Who hears the person. own: the Recorder listens to the person's microphone itself. external: the Navegador has no microphone, so the page hears the person and sends each phrase as narration.",
       ),
   })
   .describe("The browser OpenBot runs for a person.");
@@ -1819,12 +1819,12 @@ export const RecordInPersonBrowserBody = zod
         ),
     }),
     zod.object({
-      action: zod.enum(["stop"]),
+      Ação: zod.enum(["stop"]),
     }),
   ])
   .describe("Start a recording, or stop the one that is running.");
 
-export const RecordInPersonBrowserResponse = zod
+Exportar const RecordInPersonBrowserResponse = zod
   .object({
     open: zod
       .boolean()
@@ -1837,11 +1837,11 @@ export const RecordInPersonBrowserResponse = zod
             .describe("The tab's id, for switching to it or closing it."),
           url: zod.string().describe("The address the tab is on."),
           title: zod.string().describe("The page's title."),
-          active: zod.boolean().describe("Whether it is the tab in front."),
+          Ativo: zod.boolean().describe("Whether it is the tab in front."),
         })
         .describe("One tab in a browser."),
     ),
-    browser: zod
+    Navegador: zod
       .enum(["chrome", "msedge", "chromium"])
       .optional()
       .describe("Which browser it is."),
@@ -1849,7 +1849,7 @@ export const RecordInPersonBrowserResponse = zod
       .enum(["native", "screen"])
       .optional()
       .describe(
-        "Where a person's browser shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.",
+        "Where a person's Navegador shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.",
       ),
     recorder: zod
       .object({
@@ -1932,11 +1932,11 @@ export const RecordInPersonBrowserResponse = zod
           ),
       })
       .optional()
-      .describe("The Recorder's own report from inside a browser."),
+      .describe("The Recorder's own report De inside a Navegador."),
     real: zod
       .object({
         connected: zod.boolean(),
-        browsers: zod.array(
+        Navegadores: zod.array(
           zod
             .enum(["chrome", "msedge"])
             .describe("One of the person's own everyday browsers."),
@@ -1988,12 +1988,12 @@ export const RecordInPersonBrowserResponse = zod
       .enum(["native", "screen"])
       .optional()
       .describe(
-        "Where a person's browser shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.",
+        "Where a person's browser shows. native: a window on the person's own desktop. screen: a Navegador the page shows through the Em direto screen.",
       ),
     computerId: zod
       .string()
       .describe(
-        "The id of the computer the browser runs on, which its live screen is read from.",
+        "The id of the Computador the Navegador runs on, which Dela/Desse Em direto screen É read De.",
       ),
     narration: zod
       .enum(["own", "external"])
@@ -2013,7 +2013,7 @@ export const narrateInPersonBrowserPathPersonIdMax = 200;
 
 export const narrateInPersonBrowserPathPersonIdRegExp = new RegExp("\\S");
 
-export const NarrateInPersonBrowserParams = zod.object({
+Exportar const NarrateInPersonBrowserParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -2030,9 +2030,9 @@ export const NarrateInPersonBrowserParams = zod.object({
     ),
 });
 
-export const narrateInPersonBrowserHeaderIdempotencyKeyMax = 128;
+Exportar const narrateInPersonBrowserHeaderIdempotencyKeyMax = 128;
 
-export const NarrateInPersonBrowserHeader = zod.object({
+Exportar const NarrateInPersonBrowserHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -2042,22 +2042,22 @@ export const NarrateInPersonBrowserHeader = zod.object({
     ),
 });
 
-export const narrateInPersonBrowserBodyOneTextMax = 4000;
+Exportar const narrateInPersonBrowserBodyOneTextMax = 4000;
 
-export const narrateInPersonBrowserBodyOneTextRegExp = new RegExp("\\S");
-export const narrateInPersonBrowserBodyOneStartedAtMax = 8640000000000000;
+Exportar const narrateInPersonBrowserBodyOneTextRegExp = new RegExp("\\S");
+Exportar const narrateInPersonBrowserBodyOneStartedAtMax = 8640000000000000;
 
-export const narrateInPersonBrowserBodyOneEndedAtMax = 8640000000000000;
+Exportar const narrateInPersonBrowserBodyOneEndedAtMax = 8640000000000000;
 
-export const narrateInPersonBrowserBodyOneSentAtMax = 8640000000000000;
+Exportar const narrateInPersonBrowserBodyOneSentAtMax = 8640000000000000;
 
-export const narrateInPersonBrowserBodyTwoSinceMax = 8640000000000000;
+Exportar const narrateInPersonBrowserBodyTwoSinceMax = 8640000000000000;
 
-export const narrateInPersonBrowserBodyTwoSentAtMax = 8640000000000000;
+Exportar const narrateInPersonBrowserBodyTwoSentAtMax = 8640000000000000;
 
-export const narrateInPersonBrowserBodyThreeSentAtMax = 8640000000000000;
+Exportar const narrateInPersonBrowserBodyThreeSentAtMax = 8640000000000000;
 
-export const NarrateInPersonBrowserBody = zod
+Exportar const NarrateInPersonBrowserBody = zod
   .union([
     zod.object({
       text: zod
@@ -2071,7 +2071,7 @@ export const NarrateInPersonBrowserBody = zod
         .min(1)
         .max(narrateInPersonBrowserBodyOneStartedAtMax)
         .describe(
-          "A moment on the sender's clock, in milliseconds since 1970.",
+          "A moment on the sender's clock, Em milliseconds since 1970.",
         ),
       endedAt: zod
         .int()
@@ -2085,7 +2085,7 @@ export const NarrateInPersonBrowserBody = zod
         .min(1)
         .max(narrateInPersonBrowserBodyOneSentAtMax)
         .describe(
-          "A moment on the sender's clock, in milliseconds since 1970.",
+          "A moment on the sender's clock, Em milliseconds since 1970.",
         ),
     }),
     zod.object({
@@ -2102,7 +2102,7 @@ export const NarrateInPersonBrowserBody = zod
         .min(1)
         .max(narrateInPersonBrowserBodyTwoSentAtMax)
         .describe(
-          "A moment on the sender's clock, in milliseconds since 1970.",
+          "A moment on the sender's clock, Em milliseconds since 1970.",
         ),
     }),
     zod.object({
@@ -2120,7 +2120,7 @@ export const NarrateInPersonBrowserBody = zod
     "A finished phrase, or the person starting or stopping a phrase. sentAt is the sender's clock as the request leaves.",
   );
 
-export const NarrateInPersonBrowserResponse = zod.object({
+Exportar const NarrateInPersonBrowserResponse = zod.object({
   ok: zod.literal(true),
 });
 
@@ -2153,7 +2153,7 @@ export const ClearPersonBrowserParams = zod.object({
 export const clearPersonBrowserHeaderIdempotencyKeyMax = 128;
 
 export const ClearPersonBrowserHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(clearPersonBrowserHeaderIdempotencyKeyMax)
@@ -2166,28 +2166,28 @@ export const ClearPersonBrowserResponse = zod
   .object({
     open: zod
       .boolean()
-      .describe("Whether the browser is open. A closed one has no tabs."),
+      .describe("Whether the Navegador É open. A closed one has no tabs."),
     tabs: zod.array(
       zod
         .object({
           id: zod
             .string()
-            .describe("The tab's id, for switching to it or closing it."),
-          url: zod.string().describe("The address the tab is on."),
+            .describe("The tab's id, Para switching to Ele or closing Ele."),
+          url: zod.string().describe("The address the tab É on."),
           title: zod.string().describe("The page's title."),
-          active: zod.boolean().describe("Whether it is the tab in front."),
+          active: zod.boolean().describe("Whether Ele É the tab Em front."),
         })
-        .describe("One tab in a browser."),
+        .describe("One tab Em a Navegador."),
     ),
     browser: zod
       .enum(["chrome", "msedge", "chromium"])
       .optional()
-      .describe("Which browser it is."),
+      .describe("Which Navegador Ele É."),
     window: zod
       .enum(["native", "screen"])
       .optional()
       .describe(
-        "Where a person's browser shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.",
+        "Where a person's Navegador shows. native: a window on the person's own desktop. screen: a Navegador the page shows through the Em direto screen.",
       ),
     recorder: zod
       .object({
@@ -2200,7 +2200,7 @@ export const ClearPersonBrowserResponse = zod
         connectionId: zod
           .string()
           .optional()
-          .describe("The id of the connection it holds. Never its token."),
+          .describe("The id of the connection Ele holds. Never Dela/Desse token."),
         openbotUrl: zod
           .string()
           .optional()
@@ -2208,27 +2208,27 @@ export const ClearPersonBrowserResponse = zod
         phase: zod
           .enum(["idle", "starting", "recording", "stopping"])
           .describe(
-            "What the Recorder is doing. idle means nothing is being recorded.",
+            "What the Recorder É doing. idle means nothing É being recorded.",
           ),
         recordingId: zod.string().optional(),
-        title: zod.string().optional().describe("What the recording is named."),
+        title: zod.string().optional().describe("What the recording É named."),
         startedAt: zod
           .number()
           .optional()
-          .describe("When the recording started, in milliseconds since 1970."),
+          .describe("When the recording started, Em milliseconds since 1970."),
         actions: zod
           .number()
-          .describe("The person's actions so far in this recording."),
+          .describe("The person's Ações so far Em this recording."),
         narration: zod
           .enum(["own", "external"])
           .describe(
-            "Who hears the person. own: the Recorder listens to the person's microphone itself. external: the browser has no microphone, so the page hears the person and sends each phrase as narration.",
+            "Who hears the person. own: the Recorder listens to the person's microphone itself. external: the Navegador has no microphone, so the page hears the person and sends each phrase as narration.",
           ),
         voice: zod
           .enum(["off", "listening", "muted", "unavailable"])
           .optional()
           .describe(
-            "Whether the Recorder is hearing the person itself. Absent when the page hears them instead.",
+            "Whether the Recorder É hearing the person itself. Absent when the page hears them instead.",
           ),
         lastStopped: zod
           .object({
@@ -2236,22 +2236,22 @@ export const ClearPersonBrowserResponse = zod
             title: zod.string(),
             stoppedAt: zod
               .number()
-              .describe("When it stopped, in milliseconds since 1970."),
+              .describe("When Ele stopped, Em milliseconds since 1970."),
             actions: zod
               .number()
-              .describe("How many of the person's actions it held."),
+              .describe("Como many of the person's Ações Ele held."),
             phrases: zod
               .number()
-              .describe("How many narrated phrases it held."),
+              .describe("Como many narrated phrases Ele held."),
             sending: zod
               .boolean()
               .optional()
-              .describe("True while some of it is still being saved."),
+              .describe("True while some of Ele É still being saved."),
             retrying: zod
               .string()
               .optional()
               .describe(
-                "While sending, why none of it is going out right now.",
+                "While sending, why none of Ele É going out right now.",
               ),
             kept: zod
               .enum(["refused", "signed-out"])
@@ -2262,22 +2262,22 @@ export const ClearPersonBrowserResponse = zod
             discarded: zod
               .boolean()
               .optional()
-              .describe("The person discarded it rather than saving it."),
+              .describe("The person discarded Ele rather than saving Ele."),
           })
           .optional()
           .describe(
-            "The recording that was stopped last, so the person can be told whether it reached their Learning space.",
+            "The recording that was stopped Último, so the person can be told whether Ele reached their A aprendizagem space.",
           ),
       })
       .optional()
-      .describe("The Recorder's own report from inside a browser."),
+      .describe("The Recorder's own report De inside a Navegador."),
     real: zod
       .object({
         connected: zod.boolean(),
         browsers: zod.array(
           zod
             .enum(["chrome", "msedge"])
-            .describe("One of the person's own everyday browsers."),
+            .describe("One of the person's own everyday Navegadores."),
         ),
       })
       .optional()
@@ -2289,21 +2289,21 @@ export const ClearPersonBrowserResponse = zod
         phase: zod
           .enum(["idle", "starting", "recording", "stopping"])
           .describe(
-            "What the Recorder is doing. idle means nothing is being recorded.",
+            "What the Recorder É doing. idle means nothing É being recorded.",
           ),
         recordingId: zod.string().optional(),
         title: zod.string().optional(),
         startedAt: zod
           .number()
           .optional()
-          .describe("When the recording started, in milliseconds since 1970."),
+          .describe("When the recording started, Em milliseconds since 1970."),
         actions: zod
           .number()
-          .describe("The person's actions so far in this recording."),
+          .describe("The person's Ações so far Em this recording."),
       })
       .optional()
       .describe(
-        "What one of a person's Recorders is recording, wherever it records.",
+        "What one of a person's Recorders É recording, wherever Ele records.",
       ),
     available: zod
       .boolean()
@@ -2326,18 +2326,18 @@ export const ClearPersonBrowserResponse = zod
       .enum(["native", "screen"])
       .optional()
       .describe(
-        "Where a person's browser shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.",
+        "Where a person's Navegador shows. native: a window on the person's own desktop. screen: a Navegador the page shows through the Em direto screen.",
       ),
     computerId: zod
       .string()
       .describe(
-        "The id of the computer the browser runs on, which its live screen is read from.",
+        "The id of the Computador the Navegador runs on, which Dela/Desse Em direto screen É read De.",
       ),
     narration: zod
       .enum(["own", "external"])
       .optional()
       .describe(
-        "Who hears the person. own: the Recorder listens to the person's microphone itself. external: the browser has no microphone, so the page hears the person and sends each phrase as narration.",
+        "Who hears the person. own: the Recorder listens to the person's microphone itself. external: the Navegador has no microphone, so the page hears the person and sends each phrase as narration.",
       ),
   })
   .describe("The browser OpenBot runs for a person.");

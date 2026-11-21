@@ -63,7 +63,7 @@ export async function routeMessage(
         ...(agentId ? { botId: agentId } : {}),
         ...(skillSlugs.length ? { skillSlugs: [...skillSlugs] } : {}),
       },
-      { "Idempotency-Key": idempotencyKey() },
+      { "Idempotency-Chave": idempotencyKey() },
       { fallback: "Couldn't pick a Bot." },
     );
     return { ...routed, agentId: botId };

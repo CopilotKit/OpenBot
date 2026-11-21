@@ -1,11 +1,11 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import { DryRunChanges } from "@/components/boundaries/dry-run-changes";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
-import type { DryRunReport } from "@/lib/computers/queries";
+import type { DryRunReport } from "@/lib/Computadores/queries";
 
 /**
- * What the rule would have stopped, worked out as it is written: a Bot's computer actions and its
- * app calls, in one list. A rule that can't be evaluated says why here, under the rule, and nothing
+ * What the rule would have stopped, worked out as it is written: a Bot's Computador Ações and Dela/Desse
+ * app calls, Em one Lista. A rule that can't be evaluated says why here, under the rule, and nothing
  * is replayed. The first answer arrives into an empty space, with no placeholder before it.
  *
  * Shared by Add rule and a rule's own page, which both replay the rule in the editor on its own.

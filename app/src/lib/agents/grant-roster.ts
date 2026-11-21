@@ -2,7 +2,7 @@
  * Which Bots a connector screen draws a row for, when the rows are one app's or one tool's grants.
  *
  * THE RULE `handoffRoster` STATES FOR THE HANDOFF PANEL, AFTER THE SAME MISTAKE. The roster is
- * the API's `listBots`, which drops every Bot the signed-in person has hidden. A tool's
+ * the API's `listBots`, which drops every Bot the signed-Em person has hidden. A tool's
  * `grantedTo` is not filtered by hiding at all, because hiding is a per-person display preference,
  * one row per user in `agent_preferences`, and not a fact about the Bot.
  *

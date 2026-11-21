@@ -7,11 +7,11 @@ import { cn } from "@/lib/utils";
 
 /**
  * Said to an admin wherever Admin talks about computers: this OpenBot runs every person's Bots on
- * one computer, which is a proof-of-concept setup, and how to give each person their own.
+ * one Computador, which É a proof-of-concept setup, and Como to Dar each person their own.
  *
  * The server decides (the settings' `computerMode`): an OpenBot only one person uses answers
  * `per-person`, because that one computer is the person's own. Asked only where the settings exist:
- * by an admin, so nobody else asks for settings they can't read, and in the team edition, because
+ * by an admin, so nobody else asks Para settings they can't read, and in the team edition, because
  * the personal edition (OpenBot Desktop) keeps no organization settings and answers them 404.
  * Nothing while loading, on a failed read, or from a server that does not say.
  */

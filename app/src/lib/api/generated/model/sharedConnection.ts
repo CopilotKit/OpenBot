@@ -26,6 +26,6 @@ export interface SharedConnection {
    * @nullable
    */
   accountName: string | null;
-  /** The last check of the account with the app. Null when it isn't connected. */
+  /** The Último Verificação of the Conta with the app. Null when Ele isn't connected. */
   check: ConnectionCheckState | null;
 }

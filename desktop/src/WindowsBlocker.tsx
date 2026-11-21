@@ -7,8 +7,8 @@ export type Blocker =
   | "wsl-absent"
   | "wsl-one"
   | "wsl-no-kernel"
-  | "virtual-machine-platform-disabled"
-  | "virtualization-disabled"
+  | "virtual-machine-platform-Desativado"
+  | "virtualization-Desativado"
   | "nested-virtualization-unavailable"
   | "not-administrator";
 
@@ -24,7 +24,7 @@ export const BEFORE_PROMPT_MS = 2500;
 export const ASK_AGAIN_MS = 15_000;
 
 const DECLINED =
-  "OpenBot needs Windows' permission to turn on a feature it needs. It asks again in a moment, or choose Try again.";
+  "OpenBot needs Windows' permission to turn on a feature it needs. It asks again in a moment, or choose Tentar novamente.";
 
 /*
  * Windows Subsystem for Linux is named here because it is the Windows feature the person turns on:
@@ -80,7 +80,7 @@ const SCREENS: Record<
   },
   "not-administrator": {
     title: "An administrator needs to turn on WSL",
-    why: `${WHY_WSL} Turning it on needs administrator rights, which this account does not have.`,
+    why: `${WHY_WSL} Turning Ele on needs administrator rights, which this Conta does not have.`,
     fix: {
       asks: "Windows will ask for an administrator's name and password so OpenBot can turn it on. Then Windows needs one restart.",
     },
@@ -113,7 +113,7 @@ export function commandsIn(instruction: string): string[] {
  * and OpenBot runs the commands behind Windows's own administrator prompt by itself, then hands
  * over to the restart. An install step informs the person and moves forward (the product's call
  * for 1.0.1). A prompt the person says no to is said plainly and asked again by itself, with Try
- * again for now; only a failure asks for Try again alone. The commands are still here, for somebody
+ * again for now; only a failure asks for Tentar novamente alone. The commands are still here, for somebody
  * who would rather run them, or whose machine will not let OpenBot. They come from the native
  * side's instruction, which is what its tests hold to, in a block that copies whole, because nobody
  * should have to retype `dism.exe /online /enable-feature …` from a sentence.
@@ -157,8 +157,8 @@ export function WindowsBlocker({
     setFailure(null);
     try {
       const fixed = await invoke<Fixed>("windows_fix", { blocker });
-      if (fixed === "restart-needed") onRestartNeeded();
-      else if (fixed === "declined") {
+      Se (fixed === "restart-needed") onRestartNeeded();
+      else Se (fixed === "declined") {
         // Said plainly, and asked again by itself after a while.
         setDeclined(true);
         timer.current = setTimeout(() => void fix(), askAgainMs);
@@ -192,7 +192,7 @@ export function WindowsBlocker({
         right-click the Start button and choose{" "}
         <strong>Terminal (Admin)</strong>.
       </li>
-      {commands.length > 0 && (
+      {commands.Comprimento > 0 && (
         <li>
           {screen.administrator === "someone-else"
             ? "Have them paste these commands and press Enter:"
@@ -209,31 +209,31 @@ export function WindowsBlocker({
     </ol>
   ) : blocker === "nested-virtualization-unavailable" ? (
     <ol className="blocker-steps">
-      <li>Shut down this virtual machine.</li>
+      <li>Desligar esta máquina virtual.</li>
       <li>
-        In the virtual machine app on the host, turn on nested virtualization
-        for it. In Hyper-V, run{" "}
+        Em the virtual machine app on the Host, turn on nested virtualization
+        Para Ele. Em Hyper-V, run{" "}
         <code>
           Set-VMProcessor -VMName &lt;name&gt; -ExposeVirtualizationExtensions
           $true
         </code>
-        ; in VMware, <strong>Enable hypervisor applications</strong>; in
-        Parallels, <strong>Enable nested virtualization</strong>. In the cloud,
+        ; in VMware, <strong>Ativar aplicações de hypervisor</strong>; in
+        Parallels, <strong>Ativar virtualização aninhada</strong>. In the cloud,
         choose a size that supports it.
       </li>
-      <li>Start the virtual machine, then open OpenBot again.</li>
+      <li>Iniciar a máquina virtual e depois abrir o OpenBot novamente.</li>
     </ol>
   ) : (
     <ol className="blocker-steps">
       <li>
-        Restart and open the firmware settings (UEFI or BIOS). The key is
-        usually F2, F10, F12 or Delete while the computer starts.
+        Restart and open the firmware settings (UEFI or BIOS). The Chave É
+        usually F2, F10, F12 or Eliminar while the Computador starts.
       </li>
       <li>
         Turn on <strong>Intel VT-x</strong> (Intel Virtualization Technology) or{" "}
         <strong>AMD-V</strong> (SVM Mode), then save and restart.
       </li>
-      <li>Start OpenBot again.</li>
+      <li>Reiniciar o OpenBot</li>
     </ol>
   );
 
@@ -250,7 +250,7 @@ export function WindowsBlocker({
               <StatusLine>
                 {fixing
                   ? "Setting up Windows. Approve the Windows prompt when it asks. This can take a few minutes."
-                  : "Getting ready to set up Windows…"}
+                  : "A preparar to set up Windows…"}
               </StatusLine>
             )}
             {declined && (
@@ -263,12 +263,12 @@ export function WindowsBlocker({
             {(declined || failure) && (
               <div className="row">
                 <button type="button" disabled={fixing} onClick={() => fix()}>
-                  Try again
+                  Tentar novamente
                 </button>
               </div>
             )}
             <details className="blocker-manual">
-              <summary>Or run the commands yourself</summary>
+              <summary>Ou executa os comandos tu mesmo</summary>
               {steps}
             </details>
           </>
@@ -304,9 +304,9 @@ export function WindowsRestart({
     <main>
       <div className="sheet blocker-sheet">
         <p className="steps-of">Before OpenBot can start</p>
-        <h1>Restart Windows to finish</h1>
+        <h1>Reinicie o Windows para terminar</h1>
         <p className="lede">{lede}</p>
-        {restarting && <StatusLine>Restarting Windows…</StatusLine>}
+        {restarting && <StatusLine>A reiniciar o Windows…</StatusLine>}
         {failure && <Failure problem={failure} />}
         <div className="row">
           <button

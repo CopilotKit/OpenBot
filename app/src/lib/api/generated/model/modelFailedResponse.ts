@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The model didn't answer, or didn't answer usefully. Asking again may work.
+ * The model didn't Resposta, or didn't answer usefully. Asking again may work.
  */
 export type ModelFailedResponse = Problem;

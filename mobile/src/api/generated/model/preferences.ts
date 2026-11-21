@@ -23,10 +23,10 @@ export interface Preferences {
    * @maxItems 64
    */
   readonly noticesDue?: readonly NoticeId[];
-  /** Whether they narrate their recordings in OpenBot's browser, which opens the microphone only when on. Null until they choose, which the browser asks before their first recording. */
+  /** Whether they narrate their recordings in OpenBot's Navegador, which opens the microphone only when on. Null until they choose, which the Navegador asks before their Primeiro recording. */
   narration: OnOff | null;
   skin: SkinId;
-  /** Whether their Bots check in on their behalf at all. off stops every Bot's check-ins, whatever each Bot's own setting says. */
+  /** Whether their Bots Verificação Em on their behalf at Todos. off stops every Bot's check-ins, whatever each Bot's own setting says. */
   proactive: OnOff;
   /** The conversation the starter tour is offered in, set by the server when the person starts their first one. Absent until then. */
   readonly starterTourChannelId?: string;

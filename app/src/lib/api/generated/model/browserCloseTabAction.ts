@@ -6,5 +6,5 @@ export type BrowserCloseTabAction =
   (typeof BrowserCloseTabAction)[keyof typeof BrowserCloseTabAction];
 
 export const BrowserCloseTabAction = {
-  close: "close",
+  close: "Fechar",
 } as const;

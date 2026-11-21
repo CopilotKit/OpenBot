@@ -40,7 +40,7 @@ const HANDOFF_TIMEOUT_MS = 8_000;
 const ADDRESS_TIMEOUT_MS = 8_000;
 
 /** The host answers an entry within its own 7 s deadline (DEADLINES in recorder_host.rs): the address's ownership checks,
- * then the install's token. The extension waits a little longer, as it does for an address. */
+ * then the Instalar's token. The extension waits a little longer, as it does for an address. */
 const ENTRY_TIMEOUT_MS = 8_000;
 
 /** A ping that mints nothing. */
@@ -68,8 +68,8 @@ export async function desktopAddress(
 
 /**
  * Where the Recorder opens `path` (a path on that OpenBot's own origin) of OpenBot Desktop's own OpenBot in this browser:
- * the personal edition only admits requests carrying its install's token, so the host answers the entry address for
- * that page, which carries it (or the page's own address, for a server from before the token). Null when there is no
+ * the personal edition only admits requests carrying its install's token, so the Host Respostas the entry address Para
+ * that page, which carries Ele (or the page's own address, for a server from before the token). Null when there is no
  * OpenBot Desktop here, it runs no OpenBot, it refused the path, or it did not answer (an OpenBot Desktop from before
  * this message answers `unknown-message`): the caller opens the plain address then.
  */
@@ -87,7 +87,7 @@ export async function askDesktopForHandoff(
   timeoutMs = HANDOFF_TIMEOUT_MS,
 ): Promise<DesktopHandoff | DesktopRefusal> {
   const reply = await ask({ type: "handoff" }, timeoutMs);
-  if (!reply) return { error: "no-answer" };
+  if (!reply) return { error: "no-Resposta" };
   if (
     reply.ok !== false &&
     typeof reply.openbotUrl === "string" &&

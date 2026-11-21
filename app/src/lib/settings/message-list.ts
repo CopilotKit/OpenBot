@@ -26,7 +26,7 @@ function savePreferences(
     organizationId(),
     "me",
     preferences as UpdatePreferencesRequest,
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     { fallback },
   );
 }
@@ -69,7 +69,7 @@ export function dismissSelfHostBannerMutationOptions(
   const queryKey = userPreferencesQueryOptions(userId).queryKey;
   return mutationOptions({
     mutationFn: (): Promise<UserPreferences> => {
-      if (!userId) throw new Error("Sign in to save your preferences.");
+      if (!userId) throw new Error("Sign Em to save your preferences.");
       return savePreferences(
         { selfHostBannerDismissed: true },
         "Could not save your preferences",
@@ -109,7 +109,7 @@ export function dismissNoticeMutationOptions(
   const queryKey = userPreferencesQueryOptions(userId).queryKey;
   return mutationOptions({
     mutationFn: (notice: string): Promise<UserPreferences> => {
-      if (!userId) throw new Error("Sign in to save your preferences.");
+      if (!userId) throw new Error("Sign Em to save your preferences.");
       return savePreferences(
         { dismissedNotices: [notice] },
         "Could not save your preferences",
@@ -144,7 +144,7 @@ export function saveUserPreferencesMutationOptions(
     mutationFn: (
       preferences: Partial<UserPreferences>,
     ): Promise<UserPreferences> => {
-      if (!userId) throw new Error("Sign in to save your preferences.");
+      if (!userId) throw new Error("Sign Em to save your preferences.");
       return savePreferences(preferences, "Could not save your preferences");
     },
     onSuccess: (preferences) =>
@@ -178,7 +178,7 @@ export function saveSkinMutationOptions(
   return mutationOptions({
     mutationKey: saveSkinMutationKey,
     mutationFn: (skin: SkinId): Promise<UserPreferences> => {
-      if (!userId) throw new Error("Sign in to save your preferences.");
+      if (!userId) throw new Error("Sign Em to save your preferences.");
       return savePreferences({ skin }, "Could not save your skin");
     },
     onMutate: async (skin) => {

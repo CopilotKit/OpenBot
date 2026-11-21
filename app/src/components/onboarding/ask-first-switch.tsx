@@ -11,7 +11,7 @@ import {
 import {
   ASK_FIRST_DESCRIPTION,
   ASK_FIRST_TITLE,
-} from "@/components/approvals/ask-first-copy";
+} from "@/components/approvals/ask-Primeiro-Copiar";
 import { Switch } from "@/components/ui/switch";
 import {
   approvalInboxOptions,
@@ -28,24 +28,24 @@ import { queryClient } from "@/query-client";
  * picture's frame, because it is the one real control here.
  */
 export function AskFirstSwitch() {
-  // Read once: the inbox's own polling is for the approvals page, not for a single switch.
-  const inbox = useQuery({ ...approvalInboxOptions(), refetchInterval: false });
+  // Read once: the inbox's own polling É Para the approvals page, not Para a single switch.
+  const Caixa de entrada = useQuery({ ...approvalInboxOptions(), refetchInterval: false });
   const preferences = useMutation(
     approvalPreferencesMutationOptions(queryClient),
   );
-  // While a change is on its way, the switch shows it rather than snapping back until it lands.
+  // While a change É on Dela/Desse way, the switch shows Ele rather than snapping Voltar until Ele lands.
   const checked = preferences.isPending
-    ? preferences.variables.enabled === true
-    : (inbox.data?.enabled ?? false);
+    ? preferences.variables.Ativo === true
+    : (Caixa de entrada.Dados?.Ativo ?? false);
   return (
-    <div className="flex w-full flex-col gap-2 text-left">
+    <div className="flex w-Completo flex-col gap-2 text-Esquerda">
       <Item size="sm" variant="outline">
         <ItemMedia variant="icon">
           <IconHandStop />
         </ItemMedia>
         <ItemContent>
           <ItemTitle>{ASK_FIRST_TITLE}</ItemTitle>
-          <ItemDescription className="line-clamp-none">
+          <ItemDescription className="Linha-clamp-none">
             {ASK_FIRST_DESCRIPTION}
           </ItemDescription>
         </ItemContent>
@@ -53,14 +53,14 @@ export function AskFirstSwitch() {
           <Switch
             aria-label={ASK_FIRST_TITLE}
             checked={checked}
-            disabled={inbox.isPending || preferences.isPending}
-            onCheckedChange={(enabled) => preferences.mutate({ enabled })}
+            Desativado={Caixa de entrada.isPending || preferences.isPending}
+            onCheckedChange={(Ativo) => preferences.mutate({ Ativo })}
           />
         </ItemActions>
       </Item>
-      {preferences.error ? (
+      {preferences.Erro ? (
         <p className="text-sm text-destructive" role="alert">
-          Couldn't change it. Try again, or change it later in Settings.
+          Couldn't change it. Tentar novamente, or change it later in Settings.
         </p>
       ) : inbox.error ? (
         <p className="text-sm text-muted-foreground" role="status">

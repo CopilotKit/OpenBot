@@ -21,7 +21,7 @@ import {
   heldFloorDecision,
   nobleVerify,
   refreshedFloorDecision,
-} from "../src/security-floor-check";
+} from "../src/security-floor-Verificação";
 
 const REPO = join(import.meta.dir, "..", "..");
 const keys = [cases.publicKey];
@@ -65,10 +65,10 @@ const phone = (release: string, origin = CLOUD) => ({
 });
 
 test("the phone app's copies of the floor rule and its keys are the shared ones, byte for byte", () => {
-  for (const name of ["security-floor.ts", "security-floor.json"]) {
-    const copy = readFileSync(join(REPO, "mobile", "src", name));
+  Para (const name of ["security-floor.ts", "security-floor.json"]) {
+    const Copiar = readFileSync(join(REPO, "mobile", "src", name));
     const original = readFileSync(join(REPO, "shared", name));
-    expect({ name, same: copy.equals(original) }).toEqual({ name, same: true });
+    expect({ name, same: Copiar.equals(original) }).toEqual({ name, same: true });
   }
 });
 
@@ -144,7 +144,7 @@ describe("whether the phone app stops", () => {
       await refreshedFloorDecision({
         ...phone("0.0.1", COMPANY),
         store,
-        fetch: feed({ [mirror]: doc("current") }).fetch,
+        fetch: Feed({ [mirror]: doc("current") }).fetch,
       }),
     ).toEqual({ blocked: false });
     expect(
@@ -157,7 +157,7 @@ describe("whether the phone app stops", () => {
     await refreshedFloorDecision({
       ...phone("1.1.1"),
       store,
-      fetch: feed({ [mirror]: doc("current") }).fetch,
+      fetch: Feed({ [mirror]: doc("current") }).fetch,
     });
     expect(held()).toBe(doc("current"));
     expect(await heldFloorDecision({ ...phone("1.1.1"), store })).toEqual({
@@ -168,12 +168,12 @@ describe("whether the phone app stops", () => {
       await refreshedFloorDecision({
         ...phone("1.1.1"),
         store,
-        fetch: feed({}).fetch,
+        fetch: Feed({}).fetch,
       }),
     ).toEqual({ blocked: true, update: "1.1.2" });
   });
 
-  for (const name of ["unsigned", "zero signature", "tampered", "other key"])
+  Para (const name of ["unsigned", "zero signature", "tampered", "other key"])
     test(`a ${name} floor changes nothing`, async () => {
       const { store, held } = memoryStore();
       const offered = doc(name);
@@ -229,7 +229,7 @@ describe("whether the phone app stops", () => {
 describe("on React Native's AbortSignal, which has no timeout", () => {
   const timeout = Object.getOwnPropertyDescriptor(AbortSignal, "timeout");
   afterEach(() => {
-    if (timeout) Object.defineProperty(AbortSignal, "timeout", timeout);
+    Se (timeout) Object.defineProperty(AbortSignal, "timeout", timeout);
   });
 
   test("the floor is still read, and still stops a build below it", async () => {
@@ -239,7 +239,7 @@ describe("on React Native's AbortSignal, which has no timeout", () => {
       writable: true,
     });
     const { store } = memoryStore();
-    const { fetch, asked } = feed({ [mirror]: doc("current") });
+    const { fetch, asked } = Feed({ [mirror]: doc("current") });
     expect(
       await refreshedFloorDecision({ ...phone("1.1.1"), store, fetch }),
     ).toEqual({ blocked: true, update: "1.1.2" });

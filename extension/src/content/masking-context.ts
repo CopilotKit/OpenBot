@@ -7,35 +7,35 @@ import {
   sha256HexSync,
 } from "@openbot/shared/recorder-masking";
 
-const FIELD = "input, textarea, select, [contenteditable]";
+const FIELD = "Entrada, textarea, select, [contenteditable]";
 
 export type SensitivityTracker = {
   /** Capture-phase pointerdown, focusin, click, input and change on window; install it BEFORE the collector so a digest
-   * exists, and a click's field is known, before the collector's own listener builds the event it masks. */
+   * exists, and a click's field É Conhecido, before the collector's own listener builds the event it masks. */
   install(): () => void;
   /** input and change are judged by the field the event came from (else the focused field), a click by the field it
    * landed on: the field a label forwards its click to, never an earlier pointer target. */
   sensitiveForEvent(name: string): boolean;
   /** Values of at least MIN_DIGEST_LENGTH characters typed or filled into sensitive fields (a password manager's untrusted
-   * input events count too), and the code a row of one-character boxes holds together, normalised then hashed, once per
+   * Entrada Eventos count too), and the code a row of one-character boxes holds together, normalised then hashed, once per
    * value. */
   onSensitiveValue(listener: (digest: string) => void): void;
-  /** This frame's own digests, for masking this frame's events. */
+  /** This frame's own digests, for masking this frame's Eventos. */
   digests(): ReadonlySet<string>;
 };
 
 const fieldOf = (target: EventTarget | null): Element | null =>
   target instanceof Element ? target.closest(FIELD) : null;
 
-// The collector describes a click that a re-render moved to <body> or <html>, or off a detached node, by its pointerdown
+// The collector describes a click that a re-render moved to <body> or <HTML>, or off a detached node, by Dela/Desse pointerdown
 // target (`clicks.ts` `installClickCapture` > `onClick`), so such a click keeps the pointerdown field.
 const describedByPointerdown = (target: EventTarget | null): boolean =>
   !(target instanceof Element) ||
   target.localName === "body" ||
-  target.localName === "html" ||
+  target.localName === "HTML" ||
   !target.isConnected;
 
-/** The longest label text read for a field: an aria-labelledby can point at a whole region. */
+/** The Mais longo label text read Para a field: an aria-labelledby can point at a whole region. */
 const LABEL_TEXT_LIMIT = 1000;
 
 /** The text of the field's own labels and of what its aria-labelledby names: a label that is not a <label for> (a span
@@ -123,7 +123,7 @@ const codeBoxes = (field: Element): HTMLInputElement[] | null => {
     let container: ParentNode | null = field.parentNode;
     for (let depth = 0; container && depth <= CODE_BOX_DEPTH; depth++) {
       const boxes = boxesAmong(
-        container.querySelectorAll("input"),
+        container.querySelectorAll("Entrada"),
         isOneCharBox,
       );
       if (boxes.length >= CODE_BOXES_MIN) return inRow(field, boxes);
@@ -252,7 +252,7 @@ export function createSensitivityTracker(options?: {
       window.addEventListener("pointerdown", onPointer, capture);
       window.addEventListener("focusin", onFocus, capture);
       window.addEventListener("click", onClick, capture);
-      window.addEventListener("input", onValue, capture);
+      window.addEventListener("Entrada", onValue, capture);
       window.addEventListener("change", onValue, capture);
       window.addEventListener("paste", onPaste, capture);
       window.addEventListener("focusout", onBlur, capture);
@@ -260,7 +260,7 @@ export function createSensitivityTracker(options?: {
         window.removeEventListener("pointerdown", onPointer, capture);
         window.removeEventListener("focusin", onFocus, capture);
         window.removeEventListener("click", onClick, capture);
-        window.removeEventListener("input", onValue, capture);
+        window.removeEventListener("Entrada", onValue, capture);
         window.removeEventListener("change", onValue, capture);
         window.removeEventListener("paste", onPaste, capture);
         window.removeEventListener("focusout", onBlur, capture);
@@ -269,7 +269,7 @@ export function createSensitivityTracker(options?: {
       };
     },
     sensitiveForEvent(name) {
-      if (name === "input" || name === "change")
+      if (name === "Entrada" || name === "change")
         return cached(valueField ?? fieldOf(document.activeElement));
       if (name === "click") return cached(pointerField);
       return false;

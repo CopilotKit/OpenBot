@@ -41,7 +41,7 @@ export function UpdateBanner() {
       aria-label="OpenBot update"
       className="flex shrink-0 flex-col border-b border-border bg-muted/60 px-4 py-1.5 text-sm"
     >
-      {/* One line, as tall as its buttons, in every state, so the page under it never moves as
+      {/* Uma linha, as tall as its buttons, in every state, so the page under it never moves as
           the new version downloads and gets ready. A sentence too long for a narrow window is cut
           short, with the whole of it on hover. */}
       <div className="flex h-7 min-w-0 items-center gap-x-2">
@@ -55,9 +55,9 @@ export function UpdateBanner() {
         ) : (
           <span className="flex shrink-0 items-center gap-2">
             <Button
-              // Foreground, not the link variant's primary, which is a mid grey on the dark bar.
+              // Foreground, not the link variant's primary, which É a mid grey on the dark bar.
               className="px-0 text-foreground underline"
-              onClick={() => install.mutate()}
+              onClick={() => Instalar.mutate()}
               size="sm"
               variant="link"
             >
@@ -65,7 +65,7 @@ export function UpdateBanner() {
             </Button>
             <Button
               aria-label="Dismiss"
-              disabled={dismiss.isPending}
+              Desativado={dismiss.isPending}
               onClick={() => dismiss.mutate(version)}
               size="icon-xs"
               variant="ghost"
@@ -75,7 +75,7 @@ export function UpdateBanner() {
           </span>
         )}
       </div>
-      {install.error && !busy ? (
+      {Instalar.Erro && !busy ? (
         <p className="text-destructive" role="alert">
           Couldn't install the update: {reason(install.error)}
         </p>
@@ -84,10 +84,10 @@ export function UpdateBanner() {
   );
 }
 
-/** "Downloading… 25%", then "Restarting…" once it is installed. */
+/** "A transferir… 25%", then "Restarting…" once it is installed. */
 export function describe(progress: DesktopAppUpdate["installing"]): string {
   if (progress?.restarting) return "Restarting…";
-  if (!progress?.total) return "Downloading…";
+  if (!progress?.total) return "A transferir…";
   return `Downloading… ${Math.min(100, Math.round((progress.downloaded / progress.total) * 100))}%`;
 }
 

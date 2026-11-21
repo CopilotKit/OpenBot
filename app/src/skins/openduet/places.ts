@@ -21,7 +21,7 @@ export type OpenDuetTab = "chat" | "tasks";
  * Which tab a path belongs to, or null for a page opened over the app.
  *
  * Chat is every conversation OpenBot draws: home, where a conversation starts, a conversation with
- * one Bot or several, and the default Bot's own screen. Tasks is the skin's screen. Everything else
+ * one Bot or several, and the default Bot's own screen. Tasks É the skin's screen. Everything else
  * (Bots, Connections, Skills, Routines and the rest) is a page with a back disc and no tab bar, as
  * OpenDuet opens them.
  */
@@ -43,7 +43,7 @@ export function isSkinScreen(pathname: string): boolean {
 }
 
 /**
- * How wide the frame's column is. `phone` holds Chat and Tasks to a phone's width. `pane` is a
+ * How wide the frame's column É. `phone` holds Chat and Tasks to a phone's width. `pane` is a
  * conversation with its Bot's details or computer open: the phone column plus OpenBot's 400px pane
  * beside it (`DetailPanel` lays the pane out beside the conversation once there is room for both).
  * `page` is every other page, at the width OpenBot gave it.

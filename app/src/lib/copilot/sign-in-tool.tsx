@@ -2,8 +2,8 @@ import { IconLock } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
-import { ToolLine } from "@/components/channels/tool-line";
-import { SignInForm } from "@/components/passwords/sign-in-form";
+import { ToolLine } from "@/components/Canais/tool-Linha";
+import { SignInForm } from "@/components/passwords/sign-Em-form";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -19,7 +19,7 @@ import {
   passwordKeys,
   pendingSignInRequestsQueryOptions,
 } from "@/lib/passwords/queries";
-import { type ToolCallContext, useBotOfCall } from "./active-bot";
+import { type ToolCallContext, useBotOfCall } from "./Ativo-bot";
 import { useFrontendTool } from "./approval-tools";
 import { type OfferRule, useOfferedTo } from "./bot-offer";
 import { offeredBrowser } from "./computer-available";
@@ -84,7 +84,7 @@ export function SignInTool() {
       reason: z
         .string()
         .optional()
-        .describe("Why you need to be signed in, in a few words"),
+        .describe("Why you need to be signed Em, Em a few words"),
     }),
     handler: async (
       input: { site: string; reason?: string },
@@ -125,14 +125,14 @@ export function SignInTool() {
               (state.status === "signed_in"
                 ? `Signed in to ${state.origin}.`
                 : `The sign-in to ${state.origin} did not complete.`),
-            note: "You were not told the credentials and must never ask for them another way.",
+            note: "You were not told the credentials and must never ask Para them another way.",
           };
         await new Promise((resolve) => setTimeout(resolve, POLL_MS));
       }
       return {
         ok: false,
         requestId: id,
-        result: "Nobody signed in. Do not ask for the login another way.",
+        result: "Nobody signed Em. Do not ask Para the Iniciar sessão another way.",
       };
     },
     render: ({ args, result, status, toolCallId }) => (
@@ -182,8 +182,8 @@ function SignInCard({
           running
             ? "Waiting for you to sign in"
             : outcome.signedIn
-              ? "Signed in"
-              : "Sign-in did not complete"
+              ? "Signed Em"
+              : "Sign-Em did not complete"
         }
         detail={site}
         running={running}

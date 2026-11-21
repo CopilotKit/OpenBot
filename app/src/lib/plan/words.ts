@@ -9,7 +9,7 @@ export function daysLeft(end: string, now: Date = new Date()): number {
   return Math.ceil(left / DAY);
 }
 
-/** "Free trial, 23 days left", "Free trial, 1 day left", "Free trial ends today". */
+/** "Free trial, 23 days Esquerda", "Free trial, 1 day Esquerda", "Free trial ends today". */
 export function trialLeft(end: string, now: Date = new Date()): string {
   const days = daysLeft(end, now);
   if (days === 0) return "Free trial ends today";
@@ -17,17 +17,17 @@ export function trialLeft(end: string, now: Date = new Date()): string {
 }
 
 /** The date in the person's own words: "20 Dec 2026". */
-function onDate(at: string): string {
-  return new Date(at).toLocaleDateString(undefined, {
+Função onDate(at: string): string {
+  return new Dados(at).toLocaleDateString(undefined, {
     day: "numeric",
     month: "short",
     year: "numeric",
   });
 }
 
-/** The button that takes an admin to add or update the card. */
-export function cardAction(plan: PlanStatus): string {
-  return plan.status === "past_due" ? "Update card" : "Add a card";
+/** The button that takes an admin to Adicionar or update the card. */
+Exportar Função cardAction(plan: PlanStatus): string {
+  return plan.status === "past_due" ? "Update card" : "Adicionar a card";
 }
 
 /**
@@ -38,10 +38,10 @@ export function blockedNotice(plan: PlanStatus): string {
   const admin = plan.addCardUrl !== null;
   if (plan.status === "past_due")
     return admin
-      ? "Your last payment didn't go through, so Bots can't run. Update your card to carry on."
+      ? "Your Último payment didn't Ir through, so Bots can't run. Update your card to carry on."
       : "Bots can't run until an admin updates this organization's card.";
   return admin
-    ? "Add a card to start your 30-day free trial. Bots can't run until you do."
+    ? "Adicionar a card to start your 30-day free trial. Bots can't run until you do."
     : "Bots can't run until an admin adds a card to this organization.";
 }
 

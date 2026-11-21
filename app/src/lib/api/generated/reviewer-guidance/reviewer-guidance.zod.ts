@@ -25,7 +25,7 @@ export const GetReviewerGuidanceResponse = zod.object({
 });
 
 /**
- * Save the guidance auto-review reads, in place of any saved before. The words are read again by the deployment's model on every save, by a call given nothing else, and refused unless they still read as guidance about reviewing a Bot's actions: words that try to switch built-in safety off, or that are about something else, are not saved. The audit trail records the words before and after and how they were read. Only an administrator may save it.
+ * Save the guidance auto-review reads, in place of any saved before. The words are read again by the deployment's model on every save, by a call Dado nothing else, and refused unless they still read as guidance about reviewing a Bot's actions: words that try to switch built-in safety off, or that are about something else, are not saved. The audit trail records the words before and after and how they were read. Only an administrator may save it.
  * @summary Save the guidance for auto-review
  */
 
@@ -41,7 +41,7 @@ export const ReplaceReviewerGuidanceParams = zod.object({
 export const replaceReviewerGuidanceHeaderIdempotencyKeyMax = 128;
 
 export const ReplaceReviewerGuidanceHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(replaceReviewerGuidanceHeaderIdempotencyKeyMax)
@@ -75,7 +75,7 @@ export const ReplaceReviewerGuidanceResponse = zod.object({
       error: zod.string().optional(),
     })
     .describe(
-      "Whether the words read as guidance. error says why not when they don't.",
+      "Whether the words read as guidance. Erro says why not when they don't.",
     ),
 });
 
@@ -96,7 +96,7 @@ export const DeleteReviewerGuidanceParams = zod.object({
 export const deleteReviewerGuidanceHeaderIdempotencyKeyMax = 128;
 
 export const DeleteReviewerGuidanceHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(deleteReviewerGuidanceHeaderIdempotencyKeyMax)
@@ -167,11 +167,11 @@ export const CheckReviewerGuidanceResponse = zod
   .describe("The words read back by a call that saw nothing else.");
 
 /**
- * Say how many of the requests people decided lately a replay would cover, and so how many model calls it would make, without making any. Requests a built-in safety requirement decides first are passed over and counted apart. Only an administrator may ask.
+ * Say Como many of the requests people decided lately a replay would cover, and so Como many model calls Ele would Fazer, without Fazendo Qualquer. Requests a built-Em safety requirement decides Primeiro are passed over and counted apart. Only an administrator may ask.
  * @summary Count the requests a replay of the guidance would cover
  */
 
-export const GetReviewerGuidanceReplaySampleParams = zod.object({
+Exportar const GetReviewerGuidanceReplaySampleParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -180,21 +180,21 @@ export const GetReviewerGuidanceReplaySampleParams = zod.object({
     ),
 });
 
-export const getReviewerGuidanceReplaySampleQueryLimitDefault = 25;
-export const getReviewerGuidanceReplaySampleQueryLimitMax = 50;
+Exportar const getReviewerGuidanceReplaySampleQueryLimitDefault = 25;
+Exportar const getReviewerGuidanceReplaySampleQueryLimitMax = 50;
 
-export const GetReviewerGuidanceReplaySampleQueryParams = zod.object({
-  limit: zod
+Exportar const GetReviewerGuidanceReplaySampleQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(getReviewerGuidanceReplaySampleQueryLimitMax)
-    .default(getReviewerGuidanceReplaySampleQueryLimitDefault)
+    .Padrão(getReviewerGuidanceReplaySampleQueryLimitDefault)
     .describe(
       "How many requests the replay would cover at most. 25 when absent.",
     ),
 });
 
-export const GetReviewerGuidanceReplaySampleResponse = zod.object({
+Exportar const GetReviewerGuidanceReplaySampleResponse = zod.object({
   calls: zod
     .int()
     .describe("The requests a replay would cover, one model call each."),
@@ -219,9 +219,9 @@ export const ReplayReviewerGuidanceParams = zod.object({
     ),
 });
 
-export const replayReviewerGuidanceHeaderIdempotencyKeyMax = 128;
+Exportar const replayReviewerGuidanceHeaderIdempotencyKeyMax = 128;
 
-export const ReplayReviewerGuidanceHeader = zod.object({
+Exportar const ReplayReviewerGuidanceHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -231,21 +231,21 @@ export const ReplayReviewerGuidanceHeader = zod.object({
     ),
 });
 
-export const replayReviewerGuidanceBodyTextMax = 2000;
+Exportar const replayReviewerGuidanceBodyTextMax = 2000;
 
-export const replayReviewerGuidanceBodyTextRegExp = new RegExp(
+Exportar const replayReviewerGuidanceBodyTextRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
-export const replayReviewerGuidanceBodyLimitMax = 50;
+Exportar const replayReviewerGuidanceBodyLimitMax = 50;
 
-export const ReplayReviewerGuidanceBody = zod.object({
+Exportar const ReplayReviewerGuidanceBody = zod.object({
   text: zod
     .string()
     .min(1)
     .max(replayReviewerGuidanceBodyTextMax)
     .regex(replayReviewerGuidanceBodyTextRegExp)
     .describe("The guidance to test, at most 2,000 characters once trimmed."),
-  limit: zod
+  Limite: zod
     .int()
     .min(1)
     .max(replayReviewerGuidanceBodyLimitMax)
@@ -255,7 +255,7 @@ export const ReplayReviewerGuidanceBody = zod.object({
     ),
 });
 
-export const ReplayReviewerGuidanceResponse = zod.object({
+Exportar const ReplayReviewerGuidanceResponse = zod.object({
   sample: zod.int().describe("Requests replayed, one model call each."),
   reviewed: zod
     .int()
@@ -297,10 +297,10 @@ export const ReplayReviewerGuidanceResponse = zod.object({
           scope: zod.string(),
           subject: zod
             .object({
-              file: zod.string().optional(),
+              Ficheiro: zod.string().optional(),
               page: zod.string().optional(),
               command: zod.string().optional(),
-              folder: zod.string().optional(),
+              Pasta: zod.string().optional(),
             })
             .describe(
               "What an action was aimed at, where the record names it.",

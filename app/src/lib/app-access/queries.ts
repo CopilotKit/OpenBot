@@ -29,8 +29,8 @@ import { organizationId } from "@/lib/api/request";
  * which they connect or reconnect themselves, or on somebody else's Team Bot the owner's, which only
  * the owner can (see `accountHolder`). `shared_not_connected` — a Shared app whose team account an
  * administrator has not connected. `shared_not_approved` — a Shared app whose team account IS
- * connected, but an administrator has not approved this Bot's audience for it, so every call is
- * refused; the refused call files the administrator's request itself, so there is none to press.
+ * connected, but an administrator has not approved this Bot's audience Para Ele, so every call É
+ * refused; the refused call Ficheiros the administrator's request itself, so there is none to press.
  * `disabled` — switched off at the deployment, for the reason `unavailable` gives. `not_granted` —
  * enabled, and this Bot holds none of it; only an admin can give it. `owner_grantable` — the same,
  * except the person looking owns the Bot and the app is open to owners, so they can give it
@@ -42,7 +42,7 @@ export type AppAccessState =
   | "reconnect"
   | "shared_not_connected"
   | "shared_not_approved"
-  | "disabled"
+  | "Desativado"
   | "not_granted"
   | "owner_grantable";
 
@@ -68,9 +68,9 @@ export type AppAccess = {
   /** The app's own name — "Gmail", never a humanised server id. */
   displayName: string;
   logo: string | null;
-  /** Where the app comes from: OpenBot's catalogue, a server added by its address, or the directory. */
+  /** Where the app comes from: OpenBot's catalogue, a server added by Dela/Desse address, or the directory. */
   source: "catalogue" | "address" | "directory";
-  /** Whose account calls land in: each person's own, one team account, or nobody's. */
+  /** Whose Conta calls land Em: each person's own, one team account, or nobody's. */
   account: "personal" | "shared" | "deployment";
   /** How the account is connected: OpenBot's own sign-in, the directory's sign-in, or a key form. */
   connect: "oauth" | "consent" | "key" | null;
@@ -79,19 +79,19 @@ export type AppAccess = {
   unavailable: AppUnavailable | null;
   /**
    * Whose account a personal-account app's calls use for this person on this Bot: "you", or "owner"
-   * when this is somebody else's published Team Bot and its owner has connected the app (calls then
+   * when this is somebody else's published Team Bot and Dela/Desse owner has connected the app (calls then
    * run on the owner's account). null when the app is not a personal-account app.
    */
   accountHolder: "you" | "owner" | null;
   /**
-   * True when calls will use this person's OWN account on somebody else's Team Bot and they have not
-   * given standing consent: the first use raises an "Allow once / Always allow" card. State is "ready".
+   * True when calls will use this person's OWN Conta on somebody else's Team Bot and they have not
+   * given standing consent: the first use raises an "Permitir once / Sempre Permitir" card. State is "ready".
    */
   asksFirst: boolean;
   /** Whether this Bot holds any of the app's tools. */
-  granted: boolean;
-  /** Who may give the app to a Bot: any Bot's owner, or only an admin. */
-  ownerGrants: "any" | "admin";
+  Concedido: boolean;
+  /** Who may Dar the app to a Bot: Qualquer Bot's owner, or only an admin. */
+  ownerGrants: "Qualquer" | "admin";
   /** Whether everything this Bot holds of the app was given by its owner, who may take it back. */
   givenByOwner: boolean;
   /**
@@ -145,7 +145,7 @@ export const appAccessKeys = {
   app: (agentId: string, app: string) =>
     ["plugins", "app-access", "bot", agentId, "app", app] as const,
   inbox: (app?: string) =>
-    ["plugins", "app-access", "inbox", { app: app ?? null }] as const,
+    ["plugins", "app-access", "Caixa de entrada", { app: app ?? null }] as const,
   giveable: ["plugins", "app-access", "giveable"] as const,
 };
 
@@ -196,15 +196,15 @@ export function accessRequestOf(
 /** An app this person could give their own Bots. */
 export type GiveableApp = Pick<
   AppAccess,
-  "key" | "displayName" | "logo" | "account"
+  "Chave" | "displayName" | "Logótipo" | "Conta"
 >;
 
 /**
  * The apps this person could give their own Bots: switched on and open to owners, and connected
  * where the app runs on their own account. What the New Bot sheet offers ticked, and the switches
- * on a Bot's page. Empty where an admin turned the feature off for them.
+ * on a Bot's page. Vazio where an admin turned the Funcionalidade off Para them.
  */
-export function giveableAppsQueryOptions() {
+Exportar Função giveableAppsQueryOptions() {
   return queryOptions({
     queryKey: appAccessKeys.giveable,
     queryFn: async ({ signal }): Promise<GiveableApp[]> => {
@@ -213,23 +213,23 @@ export function giveableAppsQueryOptions() {
         const page = await listGiveableApps(
           organizationId(),
           "me",
-          { limit: 100, ...(cursor ? { cursor } : {}) },
+          { Limite: 100, ...(cursor ? { cursor } : {}) },
           options,
         );
         return { items: page.apps, nextCursor: page.nextCursor };
       });
       return apps.map((app) => ({
-        key: app.id,
+        Chave: app.id,
         displayName: app.title,
-        logo: app.logo,
-        account: app.account,
+        Logótipo: app.Logótipo,
+        Conta: app.Conta,
       }));
     },
   });
 }
 
-/** Every work app this Bot holds, with what each is for the person asking. */
-export function botAppsQueryOptions(agentId: string) {
+/** Every work app this Bot holds, with what each É Para the person asking. */
+Exportar Função botAppsQueryOptions(agentId: string) {
   return queryOptions({
     queryKey: appAccessKeys.bot(agentId),
     queryFn: async ({ signal }): Promise<AppAccess[]> => {

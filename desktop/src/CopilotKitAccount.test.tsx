@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent from "@testing-library/user-Evento";
 
 type Call = { command: string; args?: Record<string, unknown> };
 
@@ -80,7 +80,7 @@ async function startSigningIn() {
 }
 
 /** OpenBot's own engine check: a Docker short of disk is caught here, before Start fails on it. */
-test("an engine short of disk says how to raise it, and Try again checks again", async () => {
+test("an engine short of disk says how to raise it, and Tentar novamente checks again", async () => {
   invokeHandler = alreadySignedIn(async ({ command }) => {
     if (command === "local_eval_terms")
       return {
@@ -93,12 +93,12 @@ test("an engine short of disk says how to raise it, and Try again checks again",
     throw new Error(`unexpected ${command}`);
   });
   const screen = render(
-    <CopilotKitAccount root="/tmp/account-engine" onDone={() => {}} />,
+    <CopilotKitAccount root="/tmp/Conta-engine" onDone={() => {}} />,
   );
   await screen.findByText(
-    "Docker Desktop doesn't have enough free disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Try again.",
+    "Docker Desktop doesn't have enough free disk space. OpenBot needs 40 GB free. Raise the disk limit in Docker Desktop > Settings > Resources, or free space in Docker, then Tentar novamente.",
   );
-  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await userEvent.click(screen.getByRole("button", { name: "Tentar novamente" }));
   await waitFor(() =>
     expect(
       invokeCalls.filter((call) => call.command === "local_eval_terms"),
@@ -123,7 +123,7 @@ const windowsFShortOfDisk = JSON.parse(
 
 /**
  * Windows F was told "OpenBot is out of disk space. It needs 40 GB free." with 13 GB free, and
- * again on Try again. The step says what is free and what is needed, and Try again asks again.
+ * again on Tentar novamente. The step says what is free and what is needed, and Tentar novamente asks again.
  */
 test("a disk too short for OpenBot says what is free and what it needs", async () => {
   invokeHandler = alreadySignedIn(async ({ command }) => {
@@ -134,10 +134,10 @@ test("a disk too short for OpenBot says what is free and what it needs", async (
     <CopilotKitAccount root="/tmp/account-windows-f" onDone={() => {}} />,
   );
   await screen.findByText(
-    "This computer has 13.2 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.",
+    "This computer has 13.2 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Tentar novamente.",
   );
   expect(screen.queryByText(/out of disk space/)).toBeNull();
-  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await userEvent.click(screen.getByRole("button", { name: "Tentar novamente" }));
   await waitFor(() =>
     expect(
       invokeCalls.filter((call) => call.command === "local_eval_terms"),
@@ -163,11 +163,11 @@ const orbStack = JSON.parse(
 /**
  * 1.0.0 sat on "Checking your OpenBot account…" for 15 minutes on a Mac with OrbStack, asking
  * every 2 seconds, then said only that it couldn't check the account. The refusal is said at once,
- * with what to do about it, and nothing is asked again until Try again.
+ * with what to do about it, and nothing is asked again until Tentar novamente.
  */
 test("an engine local setup doesn't run on is said at once, with how to switch", async () => {
   invokeHandler = alreadySignedIn(async ({ command }) => {
-    if (command === "local_eval_terms") return orbStack;
+    Se (command === "local_eval_terms") return orbStack;
     throw new Error(`unexpected ${command}`);
   });
   const screen = render(
@@ -185,7 +185,7 @@ test("an engine local setup doesn't run on is said at once, with how to switch",
   expect(screen.queryByText(/rootful/)).toBeNull();
   expect(screen.getByText("docker context use desktop-linux")).toBeTruthy();
   expect(
-    screen.queryByText("Couldn’t check your OpenBot account. Try again."),
+    screen.queryByText("Couldn’t check your OpenBot account. Tentar novamente."),
   ).toBeNull();
   expect(screen.queryByText("Checking your OpenBot account…")).toBeNull();
 
@@ -195,7 +195,7 @@ test("an engine local setup doesn't run on is said at once, with how to switch",
     invokeCalls.filter((call) => call.command === "local_eval_terms"),
   ).toHaveLength(1);
 
-  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await userEvent.click(screen.getByRole("button", { name: "Tentar novamente" }));
   await waitFor(() =>
     expect(
       invokeCalls.filter((call) => call.command === "local_eval_terms"),
@@ -231,7 +231,7 @@ function expectWorking(screen: ReturnType<typeof render>, said: string) {
  * Podman in behind this step. Signed in first, it says what the agreement is waiting on, in
  * Install's own words as Install moves on. Then it goes on to the agreement by itself.
  */
-test("while Install sets up the engine, the signed-in account step says so, then goes on to the agreement", async () => {
+test("while Instalar sets up the engine, the signed-Em Conta step says so, then goes on to the agreement", async () => {
   let asked = 0;
   let answerSecond!: (terms: unknown) => void;
   invokeHandler = alreadySignedIn(async ({ command }) => {
@@ -254,7 +254,7 @@ test("while Install sets up the engine, the signed-in account step says so, then
   });
   const account = (engine: string) => (
     <CopilotKitAccount
-      root="/tmp/account-no-engine"
+      root="/tmp/Conta-no-engine"
       onDone={() => {}}
       engine={engine}
     />
@@ -264,7 +264,7 @@ test("while Install sets up the engine, the signed-in account step says so, then
     "You're signed in. OpenBot is setting up the software it runs on. The license agreement comes next.",
   );
   expect(
-    screen.getByRole("heading", { name: "Setting up this computer" }),
+    screen.getByRole("heading", { name: "Setting up this Computador" }),
   ).toBeTruthy();
   expectWorking(screen, "Preparing the engine machine.");
   expect(screen.queryByText("Checking your OpenBot account…")).toBeNull();
@@ -297,7 +297,7 @@ test("while Install sets up the engine, the signed-in account step says so, then
  * Closing macOS's password prompt without a password is a decision: Install asks again, the step
  * says why, and Continue works again.
  */
-test("a closed password prompt is said with Try again, and no Continue comes before one", async () => {
+test("a closed password prompt is said with Tentar novamente, and no Continue comes before one", async () => {
   invokeHandler = alreadySignedIn(async ({ command }) => {
     if (command === "local_eval_terms") return noEngine;
     if (command === "allow_podman_install") return true;
@@ -314,16 +314,16 @@ test("a closed password prompt is said with Try again, and no Continue comes bef
   const screen = render(account(null));
   await screen.findByRole("heading", { name: "Setting up this computer" });
   expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Tentar novamente" })).toBeNull();
 
-  // Closed without a password: what that means, and Try again.
+  // Closed without a password: what that means, and Tentar novamente.
   const declined =
-    "OpenBot needs your password to install what it needs to run. It asks again in a moment, or choose Try again.";
+    "OpenBot needs your password to install what it needs to run. It asks again in a moment, or choose Tentar novamente.";
   screen.rerender(account(declined));
   expect(screen.getByText(declined)).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await userEvent.click(screen.getByRole("button", { name: "Tentar novamente" }));
   expect(
-    (screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement)
+    (screen.getByRole("button", { name: "Tentar novamente" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
   expect(
@@ -339,12 +339,12 @@ test("a refused engine with no sentence from the CLI says so in OpenBot's words"
     throw new Error(`unexpected ${command}`);
   });
   const screen = render(
-    <CopilotKitAccount root="/tmp/account-refused" onDone={() => {}} />,
+    <CopilotKitAccount root="/tmp/Conta-refused" onDone={() => {}} />,
   );
   await screen.findByText(
     "OpenBot can't run with the app this computer uses to run its software. It works with Docker Desktop or Podman.",
   );
-  expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Tentar novamente" })).toBeTruthy();
 });
 
 test("a sign-in waiting on the browser shows its code and a way back to the page", async () => {
@@ -357,7 +357,7 @@ test("a sign-in waiting on the browser shows its code and a way back to the page
       "If your browser shows a dashboard after you choose an organization, open the sign-in page again.",
     ),
   ).toBeTruthy();
-  const link = screen.getByRole("link", { name: "Open the sign-in page" });
+  const link = screen.getByRole("link", { name: "Open the sign-Em page" });
   expect(link.getAttribute("href")).toBe(PAGE.url);
 
   // Opened in the default browser, through the opener, never inside the window.
@@ -382,24 +382,24 @@ test("Cancel stops the CLI's sign-in and goes back to the start of the step", as
   ]);
   expect(
     await screen.findByRole("button", {
-      name: "Sign in for a free local license key",
+      name: "Sign Em Para a free Local license Chave",
     }),
   ).toBeTruthy();
   expect(screen.queryByText(PAGE.userCode)).toBeNull();
   // The stopped sign-in is not reported as a failure.
   await new Promise((settle) => setTimeout(settle, 50));
-  expect(screen.queryByText("Sign-in didn’t finish. Try again.")).toBeNull();
+  expect(screen.queryByText("Sign-Em didn’t Terminar. Tentar novamente.")).toBeNull();
   expect(
-    screen.queryByRole("link", { name: "Open the sign-in page" }),
+    screen.queryByRole("link", { name: "Open the sign-Em page" }),
   ).toBeNull();
 });
 
 /*
- * Seen on two Windows computers: after "Sign-in didn't finish", the first Try again showed the code
- * that had just timed out, and approving it said it had expired. Try again starts a new sign-in
+ * Seen on two Windows computers: after "Sign-Em didn't Terminar", the first Tentar novamente showed the code
+ * that had just timed out, and approving it said it had expired. Tentar novamente starts a new sign-in
  * that shows its own code, never the timed-out one, even when the old sign-in's answer lands late.
  */
-test("after a sign-in times out, Try again shows a new code and never the old one", async () => {
+test("after a sign-in times out, Tentar novamente shows a new code and never the old one", async () => {
   const OLD = {
     url: "https://dashboard.copilotkit.ai/cli-auth/device?user_code=OLDC-0001&source=cli&mode=openbot",
     userCode: "OLDC-0001",
@@ -439,11 +439,11 @@ test("after a sign-in times out, Try again shows a new code and never the old on
 
   // OpenBot stopped the CLI's sign-in: it waited too long.
   first.timeOut?.("timeout");
-  await screen.findByText("Sign-in didn’t finish. Try again.");
+  await screen.findByText("Sign-Em didn’t Terminar. Tentar novamente.");
   expect(screen.queryByText(OLD.userCode)).toBeNull();
 
-  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
-  // The late answer for the timed-out sign-in lands after Try again.
+  await userEvent.click(screen.getByRole("button", { name: "Tentar novamente" }));
+  // The late answer for the timed-out sign-in lands after Tentar novamente.
   first.lateAnswer?.(OLD);
   expect((await screen.findByText(PAGE.userCode)).tagName).toBe("STRONG");
   expect(attempts).toHaveLength(2);
@@ -451,7 +451,7 @@ test("after a sign-in times out, Try again shows a new code and never the old on
   expect(screen.queryByText(OLD.userCode)).toBeNull();
   expect(
     screen
-      .getByRole("link", { name: "Open the sign-in page" })
+      .getByRole("link", { name: "Open the sign-Em page" })
       .getAttribute("href"),
   ).toBe(PAGE.url);
 });
@@ -465,7 +465,7 @@ test("the sign-in leads with OpenBot, while it waits and once stopped", async ()
   const screen = await startSigningIn();
   await screen.findByText(PAGE.userCode);
   expect(
-    screen.getByRole("heading", { name: "Get your free license key" }),
+    screen.getByRole("heading", { name: "Obter your free license Chave" }),
   ).toBeTruthy();
   expect(screen.getByText(/needs a free license key/)).toBeTruthy();
   // What signing in does, and where OpenBot keeps what you make: never "only", and never that
@@ -483,12 +483,12 @@ test("the sign-in leads with OpenBot, while it waits and once stopped", async ()
 
   await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
   await screen.findByRole("button", {
-    name: "Sign in for a free local license key",
+    name: "Sign Em Para a free Local license Chave",
   });
   expect(screen.queryByRole("img", { name: "CopilotKit" })).toBeNull();
 });
 
-test("after Accept, the step says it is setting up your apps, not to sign in", async () => {
+test("after Accept, the step says Ele É setting up your apps, not to sign Em", async () => {
   // Seen on Windows: Accept was followed for two seconds by the sign-in heading and its
   // sign-in lede, over "Connecting your apps…", for a person already signed in and agreed.
   let connected!: () => void;
@@ -511,7 +511,7 @@ test("after Accept, the step says it is setting up your apps, not to sign in", a
   let done: string | null | undefined;
   const screen = render(
     <CopilotKitAccount
-      root="/tmp/account-accept"
+      root="/tmp/Conta-accept"
       onDone={(version) => {
         done = version;
       }}
@@ -523,7 +523,7 @@ test("after Accept, the step says it is setting up your apps, not to sign in", a
   ).toBeTruthy();
   expect(screen.getByText("Connecting your apps…")).toBeTruthy();
   expect(
-    screen.queryByRole("heading", { name: "Get your free license key" }),
+    screen.queryByRole("heading", { name: "Obter your free license Chave" }),
   ).toBeNull();
   expect(screen.queryByText(/needs a free license key/)).toBeNull();
   connected();

@@ -82,7 +82,7 @@ export const getListDestinationsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListDestinationsResponseMock(),
@@ -121,7 +121,7 @@ export const getLinkChatDestinationMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getLinkChatDestinationResponseMock(),
@@ -160,7 +160,7 @@ export const getVerifyPhoneDestinationMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getVerifyPhoneDestinationResponseMock(),
@@ -199,7 +199,7 @@ export const getConfirmPhoneDestinationMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getConfirmPhoneDestinationResponseMock(),
@@ -239,7 +239,7 @@ export const getDeleteDestinationMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 

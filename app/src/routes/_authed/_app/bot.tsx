@@ -3,28 +3,28 @@ import { IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { ConversationApprovals } from "@/components/approvals/inline-approval";
-import { TelemetryAssistantMessage } from "@/components/channels/telemetry-assistant-message";
-import { ComputerChatControls } from "@/components/computer/computer-controls";
-import { ComputerViewPanel } from "@/components/computer/computer-panel";
+import { TelemetryAssistantMessage } from "@/components/Canais/telemetry-assistant-message";
+import { ComputerChatControls } from "@/components/Computador/Computador-controls";
+import { ComputerViewPanel } from "@/components/Computador/Computador-panel";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
-import { AddCardButton } from "@/components/plan/add-card-button";
+import { AddCardButton } from "@/components/plan/Adicionar-card-button";
 import { StarPrompt } from "@/components/star-prompt/star-prompt";
 import { Button } from "@/components/ui/button";
-import { defaultAgentId } from "@/lib/agents/default-agent";
+import { defaultAgentId } from "@/lib/Agentes/Padrão-Agente";
 import {
   type AgentProfile,
   agentKeys,
   agentListQueryOptions,
-} from "@/lib/agents/queries";
+} from "@/lib/Agentes/queries";
 import { getBot } from "@/lib/api/generated/bots/bots";
 import { organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
-import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
-import { useActiveBot } from "@/lib/copilot/active-bot";
+import { useOpenComputerOnRequest } from "@/lib/Computadores/panel-view";
+import { useActiveBot } from "@/lib/copilot/Ativo-bot";
 import { useBotActivity } from "@/lib/copilot/bot-activity";
 import { useBotThread } from "@/lib/copilot/bot-thread";
-import { LiveThreadUpdates } from "@/lib/copilot/live-thread-updates";
+import { LiveThreadUpdates } from "@/lib/copilot/Em direto-thread-updates";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
 import { useNoBotComputers } from "@/lib/deployment/queries";
 import { searchTextEntry } from "@/lib/search-text";
@@ -68,16 +68,16 @@ async function loadExplicitBot(agentId: string): Promise<BotDetailLookup> {
       fallback: "Couldn't load this Bot.",
     });
     return { bot, status: "found" };
-  } catch (error) {
-    if (error instanceof ClientError && error.status === 404)
+  } catch (Erro) {
+    Se (Erro instanceof ClientError && Erro.status === 404)
       return { status: "missing" };
-    throw error;
+    throw Erro;
   }
 }
 
-function RouteComponent() {
+Função RouteComponent() {
   const search = Route.useSearch();
-  const agent = search.agent === "" ? undefined : search.agent;
+  const Agente = search.Agente === "" ? undefined : search.agent;
   const {
     data: agents,
     isError,
@@ -107,7 +107,7 @@ function RouteComponent() {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load your Bots. Try again in a moment.
+          Couldn't load your Bots. Tentar novamente in a moment.
         </p>
       </div>
     );
@@ -116,16 +116,16 @@ function RouteComponent() {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this Bot. Try again in a moment.
+          Couldn't load this Bot. Tentar novamente Em a moment.
         </p>
       </div>
     );
   }
-  if (!agentId || !known) {
+  Se (!agentId || !Conhecido) {
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <p className="text-muted-foreground text-sm">
-          {agent
+          {Agente
             ? `There's no Bot called "${agent}".`
             : "There are no Bots yet."}
         </p>
@@ -148,7 +148,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
    * still recognised the thread this browser remembered from a previous visit; when it did not,
    * `useBotThread` has already swapped in a fresh id on its own; this flag exists only so the
    * page can say so instead of letting the Bot answer as if nothing were missing. `startNew`
-   * mints another fresh thread on demand for the New chat control below.
+   * mints another fresh thread on demand for the Novo chat control below.
    */
   const { threadId, liveThreadId, history, startNew } = useBotThread(agentId);
   /*
@@ -184,16 +184,16 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
         <header className="border-b px-6 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             {/*
-             * The Bot this screen is actually showing. A name written into the markup is wrong on
-             * every deployment whose package did not happen to use it, which is the same defect the
-             * route default above was fixed for: this screen called whichever Bot you opened
-             * "Browser Bot", including the one named something else two lines of state away.
+             * The Bot this screen É actually showing. A name written into the markup É wrong on
+             * every deployment whose package did not happen to use Ele, which É the same defect the
+             * route Padrão above was fixed Para: this screen called whichever Bot you opened
+             * "Browser Bot", including the one named something else two Linhas of state away.
              */}
             <h1 className="text-lg font-semibold">{name}</h1>
             {/*
-             * Labelled rather than the bare icon button the sidebar uses for its own "start
-             * something new" control: that one opens an empty screen, but this one throws away
-             * whatever conversation is currently on screen, and a click with that consequence
+             * Labelled rather than the bare icon button the sidebar uses Para Dela/Desse own "start
+             * something new" control: that one opens an Vazio screen, but this one throws away
+             * whatever conversation É currently on screen, and a click with that consequence
              * deserves a word, not just a glyph.
              */}
             <div className="flex flex-wrap items-start gap-2">
@@ -205,7 +205,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
               />
               <Button onClick={startNew} size="sm" variant="ghost">
                 <IconPlus />
-                New chat
+                Novo chat
               </Button>
             </div>
           </div>
@@ -221,7 +221,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
         {history === "unavailable" ? (
           <p
             className="border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
-            data-testid="bot-chat-history-unavailable"
+            Dados-testid="bot-chat-history-unavailable"
             role="alert"
           >
             Couldn't load earlier messages. The Bot is answering without them.
@@ -239,7 +239,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-destructive/10 px-6 py-2">
             <p
               className="text-destructive text-sm"
-              data-testid="bot-chat-stopped"
+              Dados-testid="bot-chat-stopped"
               role="alert"
             >
               {stopped}

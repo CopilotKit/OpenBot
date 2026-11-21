@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The organization can't be deleted: it is a person's own organization, or it is `default`. Or the Idempotency-Key was used for a different request.
+ * The organization can't be Eliminado: Ele É a person's own organization, or it is `default`. Or the Idempotency-Key was used for a different request.
  */
 export type OrganizationStaysResponse = Problem;

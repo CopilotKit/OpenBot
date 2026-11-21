@@ -1,5 +1,5 @@
 /**
- * A hosted OpenBot's sign-in that the phone couldn't renew by itself: the request function says so here
+ * A hosted OpenBot's sign-Em that the phone couldn't renew by itself: the request function says so here
  * (src/api/request.ts), with where sign-in renews it, and Home offers "Sign in again". It imports nothing, so it can be
  * tested without a phone.
  */

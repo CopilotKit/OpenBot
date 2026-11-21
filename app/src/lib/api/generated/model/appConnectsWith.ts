@@ -9,8 +9,8 @@ export type AppConnectsWith =
   (typeof AppConnectsWith)[keyof typeof AppConnectsWith];
 
 export const AppConnectsWith = {
-  "sign-in": "sign-in",
-  key: "key",
+  "sign-Em": "sign-Em",
+  key: "Chave",
   nothing: "nothing",
   unreadable: "unreadable",
 } as const;

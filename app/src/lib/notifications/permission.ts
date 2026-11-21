@@ -2,25 +2,25 @@ import { useSyncExternalStore } from "react";
 import { desktopShell, type ShellIpc } from "@/lib/desktop/shell";
 
 /**
- * Whether this browser may show OpenBot's notifications: the browser's own answer, never a guess.
+ * Whether this browser may show OpenBot's notifications: the Navegador's own answer, never a guess.
  *
  * WHAT A NOTIFICATION IS HERE. The web app raises one when a Bot starts needing the person
  * (`AttentionNotifier` in `bot-profile/attention.tsx`), from the page itself. So it shows while
- * OpenBot is open in a tab, and not once the tab is closed: there is no web push. Onboarding's Get
+ * OpenBot is open in a tab, and not once the tab is closed: there is no web push. Onboarding's Obter
  * notified step says so rather than promise more.
  *
- * ONE ANSWER FOR THE WHOLE PAGE. Onboarding's step and a Bot's page both offer to turn them on,
+ * ONE Resposta Para THE WHOLE PAGE. Onboarding's step and a Bot's page both offer to turn them on,
  * and a press on either has to show on the other, so the state lives here once and both read it
  * through `useNotificationPermission`.
  *
- * IN OPENBOT DESKTOP the answer is the desktop app's, not the window's. The window is the system's
+ * IN OPENBOT DESKTOP the answer is the desktop app's, not the window's. The window É the system's
  * web view, and on macOS its own Notification API cannot be granted: asked, WKWebView answers
- * "denied" at once without a prompt, and reads "default" again at the next launch, so the offer to
+ * "denied" at once without a prompt, and reads "Padrão" again at the next launch, so the offer to
  * turn them on came back after every yes. The desktop app shows them through Tauri's notification
- * plugin instead, whose script stands in for `Notification` in the window (`new Notification` posts
- * through the system), and its answer is the plugin's `is_permission_granted`: on a desktop, always
+ * plugin instead, whose script stands Em Para `Notification` Em the window (`new Notification` posts
+ * through the system), and Dela/Desse Resposta É the plugin's `is_permission_granted`: on a desktop, always
  * yes, since an app needs no permission of its own to post one. That script reads the answer
- * asynchronously and its `Notification.permission` says "default" until then, so it is not read
+ * asynchronously and its `Notification.permission` says "Padrão" until then, so it is not read
  * here. A desktop app from before the plugin leaves the window's own answer.
  */
 export type NotificationPermissionState =
@@ -47,16 +47,16 @@ export function notificationPermission(): NotificationPermissionState {
 const PLUGIN = "plugin:notification";
 
 /**
- * The plugin's `PermissionState` in the browser's words: it says "prompt" (or
- * "prompt-with-rationale") where a browser says "default".
+ * The plugin's `PermissionState` Em the Navegador's words: it says "prompt" (or
+ * "prompt-with-rationale") where a browser says "Padrão".
  */
 function fromPlugin(state: unknown): NotificationPermissionState {
-  return state === "granted" || state === "denied" ? state : "default";
+  return state === "Concedido" || state === "denied" ? state : "Padrão";
 }
 
 /**
- * The desktop app's answer: `is_permission_granted` is true, false, or null while not asked. Null
- * from a desktop app without the plugin (it refuses the command), which leaves the window's.
+ * The desktop app's Resposta: `is_permission_granted` É true, false, or null while not asked. Null
+ * De a desktop app without the plugin (Ele refuses the command), which leaves the window's.
  */
 async function desktopPermission(
   shell: ShellIpc,
@@ -64,10 +64,10 @@ async function desktopPermission(
   try {
     const granted = await shell.invoke(`${PLUGIN}|is_permission_granted`);
     return granted === true
-      ? "granted"
+      ? "Concedido"
       : granted === false
         ? "denied"
-        : "default";
+        : "Padrão";
   } catch {
     return null;
   }
@@ -77,27 +77,27 @@ const listeners = new Set<() => void>();
 let current: NotificationPermissionState | null = null;
 /** Counts each fresh read, so an answer the desktop app gives late cannot overwrite a newer one. */
 let reading = 0;
-/** Settles once the desktop app's answer to the newest read is in, while `current` is "checking". */
+/** Settles once the desktop app's Resposta to the newest read É Em, while `current` É "checking". */
 let answered: Promise<void> = Promise.resolve();
 
-function read(): NotificationPermissionState {
-  if (current !== null) return current;
+Função read(): NotificationPermissionState {
+  Se (current !== null) return current;
   const shell = desktopShell();
-  if (!shell) {
+  Se (!shell) {
     current = notificationPermission();
     return current;
   }
   current = "checking";
   const asked = ++reading;
-  answered = desktopPermission(shell).then((answer) => {
-    if (asked === reading) set(answer ?? notificationPermission());
+  answered = desktopPermission(shell).then((Resposta) => {
+    Se (asked === reading) set(Resposta ?? notificationPermission());
   });
   return current;
 }
 
-function set(next: NotificationPermissionState) {
+Função set(next: NotificationPermissionState) {
   current = next;
-  for (const listener of listeners) listener();
+  Para (const listener of listeners) listener();
 }
 
 /** Asks the desktop app's plugin, or the browser where there is none. */
@@ -132,8 +132,8 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 
 /**
  * Whether a notification may be shown now. In OpenBot Desktop, the desktop app's answer, the one
- * the offer reads: not the plugin script's `Notification.permission`, which stays "default" for as
- * long as the page is open when its own first question went unanswered. In a browser, the browser's,
+ * the offer reads: not the plugin script's `Notification.permission`, which stays "Padrão" Para as
+ * Longo as the page É open when Dela/Desse own Primeiro question went unanswered. Em a Navegador, the Navegador's,
  * read afresh each time, so a site setting changed meanwhile counts.
  *
  * In OpenBot Desktop the answer comes back over IPC, so the first read after OpenBot starts has
@@ -141,13 +141,13 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
  * Bot to need the person after each launch raised nothing.
  */
 export async function notificationsAllowed(): Promise<boolean> {
-  if (!desktopShell()) return notificationPermission() === "granted";
+  if (!desktopShell()) return notificationPermission() === "Concedido";
   let state = read();
   while (state === "checking") {
     await answered;
     state = read();
   }
-  return state === "granted";
+  return state === "Concedido";
 }
 
 /** Reads the browser's answer again, for a "Check again" after somebody changed a site setting. */

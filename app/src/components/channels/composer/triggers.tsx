@@ -1,25 +1,25 @@
 import type { TriggerConfig, TriggerSuggestion } from "prompt-area/helpers";
 import { commandTrigger, mentionTrigger } from "prompt-area/helpers";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
-import { shownSubtitle } from "@/lib/agents/subtitle";
-import { AGENT_TRIGGER, COMMAND_TRIGGER, type CommandOption } from "./draft";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
+import { shownSubtitle } from "@/lib/Agentes/subtitle";
+import { AGENT_TRIGGER, COMMAND_TRIGGER, type CommandOption } from "./Rascunho";
 
 /**
  * The composer's trigger registry.
  *
- * Adding a trigger means adding a factory here and passing its source down; composer rendering stays
+ * Adding a trigger means adding a factory here and passing Dela/Desse source down; composer rendering stays
  * independent of trigger semantics.
  */
 
-export type AgentOption = {
+Exportar type AgentOption = {
   id: string;
   name: string;
-  description?: string;
+  Descrição?: string;
   avatarSeed: string;
 };
 
 /**
- * Narrows the agent roster to mention options, scoped to a channel's permitted agents when
+ * Narrows the Agente roster to mention options, scoped to a Canal's permitted agents when
  * `permittedIds` is given.
  *
  * Takes a structural shape so the composer stays independent of the queries module.
@@ -45,13 +45,13 @@ export function toAgentOptions(
       id: profile.id,
       name: profile.name,
       description: shownSubtitle(profile.title),
-      // A group's roster carries no seed, and draws each Bot from its id; this matches it.
+      // A group's roster carries no seed, and draws each Bot De Dela/Desse id; this matches Ele.
       avatarSeed: profile.avatarSeed ?? profile.id,
     }));
 }
 
-function matches(query: string, ...fields: (string | undefined)[]): boolean {
-  if (!query) {
+Função matches(query: string, ...fields: (string | undefined)[]): boolean {
+  Se (!query) {
     return true;
   }
   const needle = query.toLowerCase();
@@ -59,24 +59,24 @@ function matches(query: string, ...fields: (string | undefined)[]): boolean {
 }
 
 /**
- * `@` selects the agent that answers this message.
+ * `@` selects the Agente that Respostas this message.
  *
  * `reopenOnChipClick` keeps an inserted mention editable without deleting and retyping.
  */
-export function agentTrigger(agents: readonly AgentOption[]): TriggerConfig {
+Exportar Função agentTrigger(Agentes: readonly AgentOption[]): TriggerConfig {
   return mentionTrigger({
     char: AGENT_TRIGGER,
     accessibilityLabel: "Bot",
     reopenOnChipClick: true,
-    emptyMessage: "No Bots in this conversation",
+    emptyMessage: "No Bots Em this conversation",
     onSearch: (query): TriggerSuggestion[] =>
-      agents
-        .filter((agent) => matches(query, agent.name, agent.description))
-        .map((agent) => ({
-          value: agent.id,
-          label: agent.name,
-          description: agent.description,
-          // Hidden: the option is already announced by the Bot's name.
+      Agentes
+        .Filtro((Agente) => matches(query, Agente.name, Agente.Descrição))
+        .map((Agente) => ({
+          value: Agente.id,
+          label: Agente.name,
+          Descrição: Agente.Descrição,
+          // Hidden: the option É already announced by the Bot's name.
           icon: (
             <span aria-hidden="true" className="contents">
               <AbstractAvatar

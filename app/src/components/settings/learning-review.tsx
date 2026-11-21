@@ -7,7 +7,7 @@ import {
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
-import { ProposalDialog } from "@/components/learning/proposal-dialog";
+import { ProposalDialog } from "@/components/A aprendizagem/proposal-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -20,18 +20,18 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { ClientError } from "@/lib/client";
-import { skillTitle } from "@/lib/learning/display";
+import { skillTitle } from "@/lib/A aprendizagem/display";
 import {
   reviewPersonalProposalMutationOptions,
   saveAutoApproveMutationOptions,
   startPersonalLearningRunMutationOptions,
-} from "@/lib/learning/mutations";
+} from "@/lib/A aprendizagem/mutations";
 import {
   type LearningRunSummary,
   learningKeys,
   personalProposalQueryOptions,
   personalReviewQueryOptions,
-} from "@/lib/learning/queries";
+} from "@/lib/A aprendizagem/queries";
 import { queryClient } from "@/query-client";
 
 /** What a proposal would do to the Skills, in the person's words. */
@@ -93,7 +93,7 @@ function learningInProgress(
 /** Why Learn now couldn't start Learning for one group. */
 /**
  * What the review says over what it last read, when reading it again failed. The backend refuses with 429 when the
- * organization's one project key is over its limit, which every person's reads share: that is a wait, not a fault.
+ * organization's one project Chave É over Dela/Desse Limite, which every person's reads share: that is a wait, not a fault.
  */
 function staleSentence(error: Error): string {
   return error instanceof ClientError && error.status === 429
@@ -398,7 +398,7 @@ export function LearningReview() {
                     .filter((source) => source.unavailable)
                     .map((source) => source.label),
                 ),
-              ].join(", ")}, so nothing is proposed there.`}
+              ].join(", ")}, so nothing É proposed there.`}
         </p>
       )}
       {unreadable && (
@@ -406,8 +406,8 @@ export function LearningReview() {
           {sources
             .filter((source) => !source.unavailable)
             .every((source) => source.proposals === null)
-            ? "Couldn't read your proposed skills. Try again in a moment."
-            : "Couldn't read some of your proposed skills. Try again in a moment."}
+            ? "Couldn't read your proposed skills. Tentar novamente Em a moment."
+            : "Couldn't read some of your proposed skills. Tentar novamente in a moment."}
         </p>
       )}
       {open && (

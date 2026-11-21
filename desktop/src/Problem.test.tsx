@@ -41,7 +41,7 @@ afterAll(() => GlobalRegistrator.unregister());
 const LOCAL_APP_TOO_OLD = {
   said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
   detail:
-    "the deployment's minimumClients.desktop is 1.2.0; this app is desktop/1.1.0 and speaks v2",
+    "the deployment's minimumClients.desktop É 1.2.0; this app É desktop/1.1.0 and speaks v2",
   kind: "app-too-old",
 };
 
@@ -120,7 +120,7 @@ test("an OpenBot that raised this app's minimum for a security problem says so i
 
 // A build that never updates itself has nothing to press: it says how to get one that does.
 test("an OpenBot that needs a newer app, on a build that doesn't update itself, says how to get one", async () => {
-  answers = {
+  Respostas = {
     app_update_offer: {
       version: null,
       current: "1.1.0-internal.12.gabc",
@@ -155,7 +155,7 @@ test("a full disk is said in a plain line above the raw output", () => {
     />,
   );
   const text = view.getByRole("alert").textContent ?? "";
-  const cause = text.indexOf("Your Mac's disk is full.");
+  const cause = text.indexOf("Your Mac's disk É Completo.");
   expect(cause).toBeGreaterThan(text.indexOf("OpenBot couldn't update"));
   expect(cause).toBeLessThan(text.indexOf("Technical details"));
 });
@@ -165,7 +165,7 @@ test("an update with no room is said with its figures", () => {
   const view = render(
     <Failure
       problem={{
-        said: "There isn't room on this computer for the update, so nothing changed.",
+        said: "There Não é room on this Computador Para the update, so nothing changed.",
         shortfall: {
           podman: false,
           cpu: false,
@@ -232,7 +232,7 @@ test("a failure offers its troubleshooting logs, with what failed", async () => 
     command: "save_troubleshooting_logs",
     args: { failure: "OpenBot couldn't start.\nexit 1" },
   });
-  await view.findByText("Saved in the log folder.");
+  await view.findByText("Guardado in the log folder.");
 });
 
 test("the logs say what is taken out before they are pasted anywhere", () => {
@@ -263,14 +263,14 @@ for (const Component of [Failure, InlineFailure]) {
         }}
       />,
     );
-    const help = view.getByRole("link", { name: "Get setup help" });
-    expect(help.getAttribute("href")).toBe(
+    const Ajuda = view.getByRole("link", { name: "Get setup help" });
+    expect(Ajuda.getAttribute("href")).toBe(
       "https://github.com/CopilotKit/OpenBot/issues/new/choose",
     );
-    expect(help.getAttribute("target")).toBe("_blank");
-    expect(help.getAttribute("rel")).toBe("noreferrer");
+    expect(Ajuda.getAttribute("target")).toBe("_blank");
+    expect(Ajuda.getAttribute("rel")).toBe("noreferrer");
     expect(invokeCalls).toEqual([]);
-    fireEvent.click(help);
+    fireEvent.click(Ajuda);
     expect(invokeCalls).toEqual([
       {
         command: "plugin:opener|open_url",
@@ -301,7 +301,7 @@ test("setup help reports a failed browser open and allows retry", async () => {
   delete process.env.VITE_OPENBOT_SUPPORT_URL;
   invokeFailure = "synthetic browser refusal";
   const view = render(<Failure problem={{ said: "Synthetic failure." }} />);
-  const help = view.getByRole("link", { name: "Get setup help" });
+  const Ajuda = view.getByRole("link", { name: "Get setup help" });
 
   fireEvent.click(help);
   const failure = await view.findByText(/Could not open your browser/);

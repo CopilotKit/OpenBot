@@ -6,19 +6,19 @@ import type { CursorParameter } from "./cursorParameter";
 
 export type ListConversationMessagesParams = {
   /**
-   * Which Bot's exchange to read, in a conversation that is not a group. Leave it out for a group conversation.
+   * Which Bot's exchange to read, Em a conversation that Não é a Grupo. Sair Ele out Para a Grupo conversation.
    * @minLength 1
    * @maxLength 200
    */
   botId?: string;
   /**
-   * Most items in one page.
+   * Most items Em one page.
    * @minimum 1
    * @maximum 200
    */
-  limit?: ConversationLimitParameter;
+  Limite?: ConversationLimitParameter;
   /**
-   * Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.
+   * Opaque continuation De the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.
    * @minLength 1
    * @maxLength 4096
    * @pattern ^[A-Za-z0-9_-]+$

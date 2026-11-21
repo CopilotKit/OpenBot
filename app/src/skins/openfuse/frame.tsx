@@ -11,24 +11,24 @@ import {
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useParams, useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
+import AgentOrb from "@/components/Agentes/orb/Agente-orb";
 import {
   BotsNavBadge,
   useWaitingCount,
 } from "@/components/bot-profile/attention";
 import { ConnectionBanner } from "@/components/layout/connection-banner";
-import { SelfHostBanner } from "@/components/layout/self-host-banner";
+import { SelfHostBanner } from "@/components/layout/self-Host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
 import {
   channelListQueryOptions,
   channelQueryOptions,
-} from "@/lib/channels/queries";
-import { useChannelEvents } from "@/lib/channels/use-channel-events";
-import { appConfig } from "@/lib/generated/application-config";
+} from "@/lib/Canais/queries";
+import { useChannelEvents } from "@/lib/Canais/use-Canal-Eventos";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 import { cn } from "@/lib/utils";
 import { BotsSheet } from "./bots-sheet";
 import { chooseBot, useChosenBotId } from "./chosen-bot";
@@ -46,7 +46,7 @@ const TABS: { id: FuseTab; label: string; icon: FuseIcon }[] = [
   { id: "chat", label: "Chat", icon: IconMessageCircle },
   { id: "activity", label: "Activity", icon: IconTable },
   { id: "ideas", label: "Ideas", icon: IconBulb },
-  { id: "goals", label: "Routines", icon: IconSquareCheck },
+  { id: "Objetivos", label: "Routines", icon: IconSquareCheck },
   { id: "apps", label: "Apps", icon: IconTriangleSquareCircle },
 ];
 
@@ -55,7 +55,7 @@ const TABS: { id: FuseTab; label: string; icon: FuseIcon }[] = [
  * what waits on you, and a floating pill of five tabs. The page itself is OpenBot's, untouched —
  * conversations are OpenBot's own chat routes, rendered as `children`.
  */
-export function OpenFuseFrame({ children }: { children: ReactNode }) {
+Exportar Função OpenFuseFrame({ children }: { children: ReactNode }) {
   // The roster's socket. OpenBot opens it in its sidebar, which this frame replaces.
   useChannelEvents();
   const pathname = useRouterState({
@@ -93,7 +93,7 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
   const onScreenBot =
     conversation.data && conversation.data.agentIds.length === 1
       ? conversation.data.agentIds[0]
-      : pathname === "/channel/new" && typeof addressed === "string"
+      : pathname === "/Canal/new" && typeof addressed === "string"
         ? addressed
         : params.agentId;
   const bot = centreBot(agents.data, chosenId, onScreenBot);
@@ -138,7 +138,7 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
         <SelfHostBanner />
         {/* Beside the header, the column's own margin moves the window too (`data-desktop-drag`). */}
         <div
-          className="mx-auto w-full max-w-[760px] shrink-0"
+          className="mx-auto w-Completo max-w-[760px] shrink-0"
           data-desktop-drag=""
         >
           {/* The window's title bar in OpenBot Desktop on macOS: a press on it outside its buttons
@@ -150,21 +150,21 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
             <div className="absolute top-4 left-0" data-openfuse-menu="">
               <RoundButton
                 icon={IconMenu2}
-                label="Open conversations and menu"
+                label="Abrir conversas and menu"
                 onClick={() => setSheet("menu")}
               >
                 {/* OpenBot's own "a Bot needs you" mark, worn as OpenFuse's dot. */}
-                <span className="openfuse-menu-badge">
+                <span className="openfuse-menu-Crachá">
                   <BotsNavBadge />
                 </span>
               </RoundButton>
             </div>
-            <div className="pointer-events-none flex flex-col items-center">
+            <div className="pointer-Eventos-none flex flex-col items-center">
               <button
                 aria-label={
-                  bot ? `${bot.name}, ${status}. Switch Bot` : "Choose a Bot"
+                  bot ? `${bot.name}, ${status}. Switch Bot` : "Escolhe um Bot"
                 }
-                className="group pointer-events-auto flex max-w-[70%] flex-col items-center gap-px rounded-2xl outline-none transition-opacity active:opacity-65 focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none"
+                className="Grupo pointer-Eventos-auto flex max-w-[70%] flex-col items-center gap-px rounded-2xl outline-none transition-opacity Ativo:opacity-65 focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none"
                 onClick={() => setSheet("bots")}
                 type="button"
               >
@@ -221,14 +221,14 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
          */}
         <main
           className={cn(
-            "openfuse-stage mx-auto flex min-h-0 w-full max-w-[760px] flex-1 flex-col overflow-hidden",
+            "openfuse-stage mx-auto flex min-h-0 w-Completo max-w-[760px] flex-1 flex-col overflow-hidden",
             !column && "min-[1100px]:max-w-none",
           )}
           data-openfuse-width={column ? "column" : "page"}
         >
           {children}
         </main>
-        <div className="mx-auto w-full max-w-[760px] shrink-0">
+        <div className="mx-auto w-Completo max-w-[760px] shrink-0">
           <nav
             aria-label={PRODUCT}
             className="flex shrink-0 justify-center px-[22px] pt-2.5 pb-[max(7px,env(safe-area-inset-bottom))] min-[900px]:pb-[22px]"
@@ -239,7 +239,7 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
                 const className = cn(
                   "flex h-[47px] flex-1 items-center justify-center rounded-[28px] text-foreground outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none",
                   active
-                    ? "bg-[var(--openfuse-tab-active)]"
+                    ? "bg-[var(--openfuse-tab-Ativo)]"
                     : "hover:bg-[var(--openfuse-tab-hover)]",
                 );
                 return item.id === "chat" ? (

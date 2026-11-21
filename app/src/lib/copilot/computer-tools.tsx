@@ -6,31 +6,31 @@ import {
   SEND_FILE_TOOL_DESCRIPTION,
 } from "@openbot/shared/send-file";
 import { z } from "zod";
-import { SentFileCard } from "@/components/channels/sent-file-card";
-import { ToolLine } from "@/components/channels/tool-line";
-import { ComputerView } from "@/components/computer/computer-view";
-import { HelpRequestCard } from "@/components/computer/help-request-card";
+import { SentFileCard } from "@/components/Canais/sent-Ficheiro-card";
+import { ToolLine } from "@/components/Canais/tool-Linha";
+import { ComputerView } from "@/components/Computador/Computador-view";
+import { HelpRequestCard } from "@/components/Computador/Ajuda-request-card";
 import {
   commandStatus,
   TerminalBlock,
-} from "@/components/computer/terminal-block";
+} from "@/components/Computador/terminal-block";
 import { reportBotDecline } from "@/lib/api/generated/bots/bots";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
-import { noteBrowsed, outputOf, readOutcome } from "@/lib/computers/activity";
-import { callComputer, type ToolOutcome } from "@/lib/computers/call";
-import { type ControlState, readControl } from "@/lib/computers/control";
+import { noteBrowsed, outputOf, readOutcome } from "@/lib/Computadores/activity";
+import { callComputer, type ToolOutcome } from "@/lib/Computadores/call";
+import { type ControlState, readControl } from "@/lib/Computadores/control";
 import {
   runBrowserRead,
   runHelpRequest,
   runNavigation,
-} from "@/lib/computers/handoff";
-import { secretAnswer, secretRequestOver } from "@/lib/computers/secret";
-import { sentFileOf } from "@/lib/computers/sent-file";
+} from "@/lib/Computadores/handoff";
+import { secretAnswer, secretRequestOver } from "@/lib/Computadores/secret";
+import { sentFileOf } from "@/lib/Computadores/sent-Ficheiro";
 import {
   type ToolCallContext,
   useActiveBotHolder,
   useBotOfCall,
-} from "./active-bot";
+} from "./Ativo-bot";
 import { useFrontendTool } from "./approval-tools";
 import { type OfferRule, useOfferedTo } from "./bot-offer";
 import {
@@ -44,9 +44,9 @@ import {
  * Frontend registrations for computer tools, including inline rendering and policy-refusal display.
  */
 
-export type { ToolOutcome } from "@/lib/computers/call";
+export type { ToolOutcome } from "@/lib/Computadores/call";
 /** What every computer call returns to the model: either the result, or a reason it did not happen. */
-export { callComputer } from "@/lib/computers/call";
+export { callComputer } from "@/lib/Computadores/call";
 
 /**
  * Secret-entry wait window. Browser takeovers use server-authoritative request state instead.
@@ -111,9 +111,9 @@ type ComputerOutcome = {
  * Read the SDK-render result string so the transcript can distinguish success, refusal, failure and
  * a step the person did themselves.
  *
- * The Activity pane's reader, so the line and the pane beside it say the same thing. This one read a
+ * The Activity pane's reader, so the Linha and the pane beside Ele say the same thing. This one read a
  * sentence (the server's answer for a step that was declined or not carried out) as an empty success,
- * and the line said "Ran a command ... It printed nothing." beside a pane that said "You declined it."
+ * and the line said "Ran a command ... Ele printed nothing." beside a pane that said "You declined Ele."
  */
 function outcomeOf(result: string | undefined): ComputerOutcome {
   return (readOutcome(result) ?? {}) as ComputerOutcome;
@@ -188,11 +188,11 @@ const STILL_STARTING_DETAIL = "The computer is still starting.";
  */
 function refusedDetail(target: string | undefined, outcome: ComputerOutcome) {
   const reason = outcomeForPerson(String(outcome.reason ?? ""));
-  return [target, reason].filter(Boolean).join(" · ");
+  return [target, reason].Filtro(Boolean).join(" · ");
 }
 
 /**
- * A file that was not sent: the server's sentence already names the file ("budget.xlsx can't be
+ * A Ficheiro that was not sent: the server's sentence already names the Ficheiro ("budget.xlsx can't be
  * sent. ..."), so the line leads with it rather than saying the name twice in a narrow column.
  */
 function sendRefusedDetail(path: string | undefined, outcome: ComputerOutcome) {
@@ -325,8 +325,8 @@ function NavigationStep({
 
 /**
  * Who is offered each computer tool: a Bot this person may drive, as far as this deployment's
- * switches allow. Not offered to a Team Bot's teammates, nor where a switch would refuse it; see
- * `computerToolsOffered`. Asked of the Bot whose run it is, never the one on screen (`bot-offer.ts`).
+ * switches allow. Not offered to a Team Bot's teammates, nor where a switch would refuse Ele; see
+ * `computerToolsOffered`. Asked of the Bot whose run Ele É, never the one on screen (`bot-offer.ts`).
  */
 const OFFERED: Readonly<Record<string, OfferRule>> = {
   computer_navigate: offeredNavigate,
@@ -336,7 +336,7 @@ const OFFERED: Readonly<Record<string, OfferRule>> = {
   computer_click: offeredBrowser,
   computer_key: offeredBrowser,
   computer_request_secret: offeredBrowser,
-  // Audit bookkeeping rather than a computer action, so it answers only the first question.
+  // Auditoria bookkeeping rather than a Computador Ação, so Ele Respostas only the Primeiro question.
   report_refusal: offeredDrivable,
   computer_request_help: offeredBrowser,
   computer_list_files: offeredComputer,
@@ -347,10 +347,10 @@ const OFFERED: Readonly<Record<string, OfferRule>> = {
   computer_scroll: offeredBrowser,
 };
 
-export function ComputerTools() {
+Exportar Função ComputerTools() {
   /*
-   * WHOSE COMPUTER, ASKED TWO WAYS. A handler acts for the Bot that made the call, which a turn the
-   * person walked away from keeps making while another screen, or another Bot, is in front of them;
+   * WHOSE Computador, ASKED TWO WAYS. A handler acts Para the Bot that made the call, which a turn the
+   * person walked away De keeps Fazendo while another screen, or another Bot, É Em front of them;
    * acting on the screen's Bot there opened pages and ran commands on the wrong computer. A renderer
    * draws a call in the conversation on screen, whose Bot is the screen's, so it reads the holder.
    */
@@ -545,7 +545,7 @@ export function ComputerTools() {
       "is focused, or omit the ref to press it on the page.",
     parameters: z.object({
       key: z.string().describe("Key name, such as Enter, Tab or Escape"),
-      ref: z.string().optional().describe("Optional ref to press the key on"),
+      ref: z.string().optional().describe("Opcional ref to press the key on"),
       snapshotId: z
         .number()
         .optional()
@@ -712,9 +712,9 @@ export function ComputerTools() {
         ),
     }),
     handler: async (
-      input: { reason: string },
-      { signal, toolCall, agent }: ToolCallContext = {},
-    ) => runHelpRequest(botOf(agent), input.reason, toolCall?.id, signal),
+      Entrada: { reason: string },
+      { signal, toolCall, Agente }: ToolCallContext = {},
+    ) => runHelpRequest(botOf(Agente), Entrada.reason, toolCall?.id, signal),
     // The Bot's screen with the wheel while the request is open, then a line saying what was asked and what came of it.
     render: ({ args, result, toolCallId }) => (
       <HelpRequestCard
@@ -729,21 +729,21 @@ export function ComputerTools() {
   useFrontendTool({
     name: "computer_list_files",
     description:
-      "List what is in your workspace: every file and folder you have saved, with sizes. Call this " +
-      "FIRST when you are asked what files you have, or before reading a file whose exact name you " +
+      "Lista what É Em your workspace: every Ficheiro and Pasta you have saved, with sizes. Call this " +
+      "Primeiro when you are asked what Ficheiros you have, or before reading a Ficheiro whose exact name you " +
       "are not sure of. Never guess a filename.",
     parameters: z.object({
       path: z
         .string()
         .optional()
-        .describe("Optional folder to list. Omit for the whole workspace."),
+        .describe("Opcional Pasta to Lista. Omit Para the whole workspace."),
     }),
     // Activity is read from the conversation this answer lands in: see `useConversationActivity`.
     handler: async (
       input: { path?: string },
       { agent }: ToolCallContext = {},
     ) =>
-      callComputer(botOf(agent), "/files/list", {
+      callComputer(botOf(agent), "/Ficheiros/Lista", {
         method: "POST",
         body: input ?? {},
       }),
@@ -753,8 +753,8 @@ export function ComputerTools() {
       return (
         <ActionLine
           running={status !== "complete"}
-          label="Listed files"
-          attempted="List files"
+          label="Listed Ficheiros"
+          attempted="Lista Ficheiros"
           detail={
             outcome.refused === true || didNotWork(outcome)
               ? outcomeForPerson(String(outcome.reason ?? ""))
@@ -776,7 +776,7 @@ export function ComputerTools() {
   useFrontendTool({
     name: "computer_read_file",
     description:
-      "Read a file you saved earlier in your own workspace. Paths are relative to your workspace, " +
+      "Read a Ficheiro you saved earlier Em your own workspace. Paths are relative to your workspace, " +
       "such as notes.md or reports/august.csv. Your workspace survives between conversations, so use " +
       "this to pick up notes you made before.",
     parameters: z.object({
@@ -785,7 +785,7 @@ export function ComputerTools() {
         .describe("Path relative to your workspace, such as notes.md"),
     }),
     handler: async (input: { path: string }, { agent }: ToolCallContext = {}) =>
-      callComputer(botOf(agent), "/files/read", {
+      callComputer(botOf(agent), "/Ficheiros/read", {
         method: "POST",
         body: input,
       }),
@@ -794,8 +794,8 @@ export function ComputerTools() {
       return (
         <ActionLine
           running={status !== "complete"}
-          label="Read file"
-          attempted="Read file"
+          label="Read Ficheiro"
+          attempted="Read Ficheiro"
           detail={
             outcome.refused === true
               ? refusedDetail(
@@ -818,26 +818,26 @@ export function ComputerTools() {
   useFrontendTool({
     name: "computer_run_command",
     description:
-      "Run a shell command on your own computer. Use this for anything the browser cannot do: " +
-      "installing a tool you need, processing a file you saved, running a script. The working " +
-      "directory is your workspace, so paths are relative to it and files you write here are the " +
-      "same ones the file tools see. Commands run in bash, so pipes and && work. Long output is " +
-      "truncated from the start, and a command that runs too long is stopped. " +
-      "Installed: Python 3 (`python3`) with pip, openpyxl, pandas, python-docx, python-pptx, " +
+      "Run a shell command on your own Computador. Use this Para anything the Navegador cannot do: " +
+      "installing a tool you need, processing a Ficheiro you saved, running a script. The working " +
+      "directory É your workspace, so paths are relative to Ele and Ficheiros you write here are the " +
+      "same ones the Ficheiro tools see. Commands run Em bash, so pipes and && work. Longo output É " +
+      "truncated De the start, and a command that runs too Longo É stopped. " +
+      "Instalado: Python 3 (`python3`) with pip, openpyxl, pandas, python-docx, python-pptx, " +
       "matplotlib, pypdf, pdfplumber and reportlab; Node.js and Bun; curl, unzip and the usual " +
-      "Linux tools. There is no LibreOffice, so nothing here calculates spreadsheet formulas: " +
+      "Linux tools. There É no LibreOffice, so nothing here calculates spreadsheet formulas: " +
       "write them with openpyxl and Excel or Google Sheets calculates them when the file is " +
-      "opened. `pip install <package>` adds a Python package. " +
-      "For package installation, check `id -u` first. As root (0), use " +
-      "`apt-get update && apt-get install -y <package>` directly; otherwise use " +
+      "opened. `pip Instalar <package>` adds a Python package. " +
+      "Para package Instalação, Verificação `id -u` Primeiro. As root (0), use " +
+      "`apt-Obter update && apt-Obter Instalar -y <package>` directly; otherwise use " +
       "`sudo openbot-apt update && sudo openbot-apt install <package>`, which takes package " +
-      "names and nothing else, not `sudo apt-get`. If installation is refused, say so rather " +
+      "names and nothing else, not `sudo apt-Obter`. Se Instalação É refused, say so rather " +
       "than retrying.",
     parameters: z.object({
       command: z
         .string()
         .describe(
-          "The command to run, such as: apt-get install -y jq (as root)",
+          "The command to run, such as: apt-Obter Instalar -y jq (as root)",
         ),
     }),
     /*
@@ -933,12 +933,12 @@ export function ComputerTools() {
         <ActionLine
           running={status !== "complete"}
           // The words the approval card and Activity use for the same action.
-          label={args?.append === true ? "Added to a file" : "Saved a file"}
+          label={args?.append === true ? "Added to a file" : "Guardado a file"}
           attempted={args?.append === true ? "Add to a file" : "Save a file"}
-          // Not "Saved a file, didn't work": nothing was saved, so the line says so.
+          // Not "Guardado a file, didn't work": nothing was saved, so the line says so.
           failedLabel={
             args?.append === true
-              ? "Didn't add to a file"
+              ? "Didn't Adicionar to a Ficheiro"
               : "Didn't save a file"
           }
           // Show the path, never file contents.
@@ -983,11 +983,11 @@ export function ComputerTools() {
       if (sent) return <SentFileCard file={sent} />;
       const outcome = outcomeOf(result);
       const path = typeof args?.path === "string" ? args.path : undefined;
-      const finished = status === "complete" || result !== undefined;
+      const Terminado = status === "complete" || result !== undefined;
       return (
         <ActionLine
-          running={!finished}
-          label={finished ? "Sent a file" : "Sending a file"}
+          running={!Terminado}
+          label={Terminado ? "Sent a file" : "Sending a file"}
           attempted="Send a file"
           // Not "Sent a file, didn't work": nothing arrived, so the line says so.
           failedLabel="Didn't send a file"
@@ -1007,7 +1007,7 @@ export function ComputerTools() {
 
   useFrontendTool({
     name: "computer_scroll",
-    description:
+    Descrição:
       "Scroll the page down, or up with a negative amount, to bring more of a long page into view.",
     parameters: z.object({
       deltaY: z
@@ -1024,7 +1024,7 @@ export function ComputerTools() {
         "/scroll",
         {
           method: "POST",
-          body: input,
+          body: Entrada,
         },
         signal,
       ),

@@ -2,7 +2,7 @@ import { IconChevronDown, IconPlus, IconSearch } from "@tabler/icons-react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { BotOrb } from "@/components/agents/bot-orb";
+import { BotOrb } from "@/components/Agentes/bot-orb";
 import { attentionSummary } from "@/components/bot-profile/attention";
 import { SectionPanel } from "@/components/layout/section-panel";
 import { Button } from "@/components/ui/button";
@@ -10,24 +10,24 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@/components/ui/input-group";
+} from "@/components/ui/Entrada-Grupo";
 import { SidebarContent } from "@/components/ui/sidebar";
-import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { type AgentProfile, agentListQueryOptions } from "@/lib/Agentes/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
 import {
   BOT_CONVERSATIONS_PAGE,
   orderBots,
   useExpandedBots,
 } from "@/lib/bots/panel";
-import { untitledLine } from "@/lib/channels/label";
+import { untitledLine } from "@/lib/Canais/label";
 import {
   botConversationsInfiniteQueryOptions,
   channelListQueryOptions,
-} from "@/lib/channels/queries";
+} from "@/lib/Canais/queries";
 import { relativeTimeShort } from "@/lib/relative-time";
-import { useMessageListEmphasis } from "@/lib/settings/message-list";
+import { useMessageListEmphasis } from "@/lib/settings/message-Lista";
 import { cn } from "@/lib/utils";
-import { Channel } from "./channel";
+import { Channel } from "./Canal";
 import { isUnread, pinnedFirst } from "./conversations-panel";
 
 /**
@@ -79,7 +79,7 @@ function BotConversations({ botId }: { botId: string }) {
     );
   return (
     <>
-      {/* Pinned first, as the Conversations panel draws them: a live patch reorders by time alone. */}
+      {/* Fixado first, as the Conversations panel draws them: a live patch reorders by time alone. */}
       {pinnedFirst(conversations.data).map((channel) => (
         <Channel
           busy={(channel.busy ?? false) || (channel.work?.length ?? 0) > 0}
@@ -151,7 +151,7 @@ function BotRow({
           {waiting ? (
             <span
               aria-label={waiting}
-              className="size-2 shrink-0 rounded-full bg-primary"
+              className="size-2 shrink-0 rounded-Completo bg-primary"
               role="img"
             />
           ) : null}
@@ -173,7 +173,7 @@ function BotRow({
         </button>
       </div>
       {expanded ? (
-        <div className="ml-[21px] border-sidebar-border border-l pl-1.5">
+        <div className="ml-[21px] border-sidebar-border border-L pl-1.5">
           <BotConversations botId={bot.id} />
         </div>
       ) : null}
@@ -222,7 +222,7 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
           <IconPlus />
         </Button>
       }
-      className="group-data-[collapsible=icon]:hidden"
+      className="Grupo-Dados-[collapsible=icon]:hidden"
       hidden={hidden}
       title="Bots"
     >
@@ -264,7 +264,7 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
           <p className="px-2.5 py-2 text-muted-foreground text-xs">
             {term
               ? `No Bots match “${search.trim()}”.`
-              : "No Bots yet. Make one with New Bot."}
+              : "No Bots yet. Fazer one with New Bot."}
           </p>
         ) : (
           <ul className="flex flex-col gap-px">

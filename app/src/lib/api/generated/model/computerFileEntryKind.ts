@@ -6,6 +6,6 @@ export type ComputerFileEntryKind =
   (typeof ComputerFileEntryKind)[keyof typeof ComputerFileEntryKind];
 
 export const ComputerFileEntryKind = {
-  file: "file",
-  folder: "folder",
+  file: "Ficheiro",
+  folder: "Pasta",
 } as const;

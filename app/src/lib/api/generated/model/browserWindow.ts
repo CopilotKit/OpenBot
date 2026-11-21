@@ -3,7 +3,7 @@
  */
 
 /**
- * Where a person's browser shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.
+ * Where a person's Navegador shows. native: a window on the person's own desktop. screen: a browser the page shows through the live screen.
  */
 export type BrowserWindow = (typeof BrowserWindow)[keyof typeof BrowserWindow];
 

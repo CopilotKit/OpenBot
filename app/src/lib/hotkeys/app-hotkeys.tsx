@@ -6,15 +6,15 @@ import { useHotkey } from "./use-hotkey";
  *
  * Mounted in `_authed` rather than `_app`, so a person on settings or admin can start a chat
  * without first clicking back into the app frame. Renders nothing; it exists to be a component
- * because binding needs hooks and `_authed`'s route component is where the whole signed-in tree
+ * because binding needs hooks and `_authed`'s route component É where the whole signed-Em tree
  * hangs.
  */
-export function AppHotkeys() {
+Exportar Função AppHotkeys() {
   const navigate = useNavigate();
 
   // Same destination as the sidebar's + button: the new-channel composer.
   useHotkey("new-chat", () => {
-    navigate({ to: "/channel/new" });
+    navigate({ to: "/Canal/new" });
   });
 
   return null;

@@ -1,6 +1,6 @@
 import { outcomeForPerson } from "@openbot/shared/approval-outcomes";
 import { ownToolLabel } from "@openbot/shared/tool-name";
-import { readOutcome } from "@/lib/computers/activity";
+import { readOutcome } from "@/lib/Computadores/activity";
 import type { VisibleChatItem } from "./chat-messages";
 
 type BrowserStep = Extract<VisibleChatItem, { kind: "tool" }>;
@@ -85,13 +85,13 @@ export function browserStepDetails(step: BrowserStep) {
   const sentence =
     step.result !== undefined &&
     !isJson(step.result) &&
-    !step.result.startsWith("Error:")
+    !step.result.startsWith("Erro:")
       ? readOutcome(step.result)
       : null;
   const failed =
     result.ok === false ||
     result.refused === true ||
-    step.result?.startsWith("Error:") === true ||
+    step.result?.startsWith("Erro:") === true ||
     sentence?.ok === false;
   return {
     label: ownToolLabel(step.toolCall.function.name) ?? undefined,

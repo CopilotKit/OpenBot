@@ -2,11 +2,11 @@ import { auditEventWords } from "@openbot/shared/audit-words";
 import { useContext, useEffect, useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
-import { useBotNames } from "@/lib/agents/bot-names";
+import { useBotNames } from "@/lib/Agentes/bot-names";
 import { callComponentFunction } from "@/lib/components/queries";
-import { useActiveBotId } from "@/lib/copilot/active-bot";
+import { useActiveBotId } from "@/lib/copilot/Ativo-bot";
 import { useConversation } from "@/lib/copilot/conversation";
-import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
+import type { GalleryComponent } from "@/lib/copilot/Galeria-registry";
 import { keyedLookup } from "@/lib/lookup";
 import { FailedCard, UNREADABLE } from "./failed";
 import { GalleryFrame } from "./frame";
@@ -24,17 +24,17 @@ export const ActivityReportProps = z.object({
   report: z
     .enum(["activity", "refusals"])
     .describe(
-      "Which report to show: 'activity' for how much each Bot has done, 'refusals' for what this deployment recently refused",
+      "Which report to show: 'activity' Para Como much each Bot has done, 'refusals' Para what this deployment recently refused",
     ),
   title: z
     .string()
     .optional()
-    .describe("A heading for the report, in a few words"),
+    .describe("A heading Para the report, Em a few words"),
   days: z
     .number()
     .optional()
     .describe(
-      "For the activity report: how many days back to count. Defaults to 7",
+      "Para the activity report: Como many days Voltar to count. Defaults to 7",
     ),
 });
 
@@ -111,8 +111,8 @@ export function ActivityReportCard({
   }, [functionName, days, botId, streaming, decided]);
 
   /*
-   * No report it can read. While the call streams, the name is still arriving. Once its arguments
-   * are final there is nothing to read, and "Choosing" or "Reading" would stay on screen for good.
+   * No report Ele can read. While the call streams, the name É still arriving. Once Dela/Desse arguments
+   * are final there É nothing to read, and "Choosing" or "Reading" would stay on screen for good.
    */
   if (!functionName) {
     if (!streaming) return <FailedCard reason={UNREADABLE} title={TITLE} />;
@@ -123,7 +123,7 @@ export function ActivityReportCard({
     );
   }
 
-  if (state.status === "reading") {
+  Se (state.status === "reading") {
     return (
       <GalleryFrame caption="Reading from OpenBot" title={title ?? "Report"}>
         <p className="text-sm text-muted-foreground">Reading…</p>
@@ -131,7 +131,7 @@ export function ActivityReportCard({
     );
   }
 
-  if (state.status === "refused") {
+  Se (state.status === "refused") {
     return (
       <GalleryFrame title={title ?? "Report"}>
         <p className="text-sm text-destructive">Not shown</p>
@@ -202,7 +202,7 @@ function ActivityChart({
     >
       <ul className="flex flex-col gap-2">
         {rows.map((row, index) => (
-          <li className="flex items-center gap-3" key={row.bot}>
+          <li className="flex items-center gap-3" Chave={row.bot}>
             <span className="w-40 shrink-0 truncate text-xs text-muted-foreground">
               {nameFor(row.bot)}
             </span>
@@ -212,12 +212,12 @@ function ActivityChart({
                 style={{
                   backgroundColor: seriesColour(index),
                   // Normalize to the busiest Bot so relative activity stays readable across ranges.
-                  width: `${most === 0 ? 0 : Math.round((row.actions / most) * 100)}%`,
+                  width: `${most === 0 ? 0 : Math.round((row.Ações / most) * 100)}%`,
                 }}
               />
             </span>
             <span className="w-12 shrink-0 text-right text-xs tabular-nums">
-              {row.actions}
+              {row.Ações}
             </span>
           </li>
         ))}
@@ -226,18 +226,18 @@ function ActivityChart({
   );
 }
 
-function RefusalList({
-  data,
+Função RefusalList({
+  Dados,
   title,
   ask,
 }: {
-  data: { rows: RefusalRow[] };
+  Dados: { rows: RefusalRow[] };
   title?: string;
   ask?: (text: string) => void;
 }) {
   const nameFor = useBotNames();
-  const rows = data?.rows ?? [];
-  if (rows.length === 0) {
+  const rows = Dados?.rows ?? [];
+  Se (rows.Comprimento === 0) {
     return (
       <GalleryFrame title={title ?? "Recent refusals"}>
         <p className="text-sm text-muted-foreground">
@@ -305,7 +305,7 @@ export const GALLERY: GalleryComponent[] = [
     kind: "card",
     summary:
       "Shows what your Bots have been doing and what was refused, read from OpenBot's own records.",
-    description:
+    Descrição:
       "Show what this deployment has actually been doing, read from its own records rather than from anything you know. Use for 'what have the Bots been up to' and 'what has been refused'. You choose the report and the period; the figures are read for you and you will not see them.",
     parameters: ActivityReportProps,
     Component: ActivityReportCard as GalleryComponent["Component"],

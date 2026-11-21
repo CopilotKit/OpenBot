@@ -27,8 +27,8 @@ export type ModelKeyName = {
 
 export const credentialKeys = {
   all: ["credentials"] as const,
-  list: () => [...credentialKeys.all, "list"] as const,
-  modelKey: () => [...credentialKeys.all, "model-key"] as const,
+  list: () => [...credentialKeys.all, "Lista"] as const,
+  modelKey: () => [...credentialKeys.all, "model-Chave"] as const,
 };
 
 const FALLBACK = "Could not load credentials";

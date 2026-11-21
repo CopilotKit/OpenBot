@@ -14,9 +14,9 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useId, useState } from "react";
 import type { ZodType } from "zod";
-import { CallbackTokenPanel } from "@/components/agents/callback-token-panel";
-import { DefaultModelSection } from "@/components/bot-profile/default-model";
-import { BusinessComputerLink } from "@/components/edition/team-features-dialog";
+import { CallbackTokenPanel } from "@/components/Agentes/callback-token-panel";
+import { DefaultModelSection } from "@/components/bot-profile/Padrão-model";
+import { BusinessComputerLink } from "@/components/edition/team-Funcionalidades-dialog";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,7 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -52,7 +52,7 @@ import {
   agentEndpointSchema,
   agentFormSchema,
   profileUpdateInput,
-} from "@/lib/agents/form";
+} from "@/lib/Agentes/form";
 import {
   ISOLATED_MAKING_PUBLIC,
   ISOLATED_PUBLIC_SHARES_LOGINS,
@@ -62,9 +62,9 @@ import {
   ISOLATION_WITHDRAWN,
   isolatedExplained,
 } from "@/lib/agents/isolation";
-import { updateAgentMutationOptions } from "@/lib/agents/mutations";
-import type { AgentProfile } from "@/lib/agents/queries";
-import { shownSubtitle } from "@/lib/agents/subtitle";
+import { updateAgentMutationOptions } from "@/lib/Agentes/mutations";
+import type { AgentProfile } from "@/lib/Agentes/queries";
+import { shownSubtitle } from "@/lib/Agentes/subtitle";
 import { isComposing } from "@/lib/composing";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { myCapabilitiesQueryOptions } from "@/lib/enterprise/queries";
@@ -86,7 +86,7 @@ const TEXT_FIELDS: {
     // instruction the Bot carries into every channel. The create dialog says the same.
     // The starter Bot is the exception: this is what it does, for the person, and what it is
     // told is the row below.
-    label: "What it does",
+    label: "What Ele does",
     icon: IconTextCaption,
     multiline: true,
   },
@@ -112,7 +112,7 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   const update = useMutation(updateAgentMutationOptions(queryClient));
-  const [editing, setEditing] = useState<TextField | "endpoint" | null>(null);
+  const [editing, setEditing] = useState<TextField | "Endpoint" | null>(null);
   const save = (patch: Partial<AgentFormValues>) =>
     update.mutateAsync({
       agentId: agent.id,
@@ -120,7 +120,7 @@ export function SetupSections({ agent }: { agent: AgentProfile }) {
     });
   const open = TEXT_FIELDS.find((entry) => entry.field === editing);
   /*
-   * The subtitle as a person reads it everywhere else (lib/agents/subtitle.ts). Saved back unchanged,
+   * The subtitle as a person reads it everywhere else (lib/agents/subtitle.ts). Guardado back unchanged,
    * it stays as stored: the Bot is told the stored subtitle, and a save of the shown wording would
    * change that.
    */
@@ -298,13 +298,13 @@ function VisibilityRow({
                 setError(
                   failure instanceof Error
                     ? failure.message
-                    : "Couldn't save. Try again.",
+                    : "Couldn't save. Tentar novamente.",
                 );
               } finally {
                 setSaving(false);
               }
             }}
-            value={agent.visibility}
+            value={Agente.visibility}
           >
             <SelectTrigger className="w-28">
               <SelectValue />
@@ -316,7 +316,7 @@ function VisibilityRow({
           </Select>
         ) : (
           <span className="text-muted-foreground text-sm">
-            {agent.visibility === "private" ? "Private" : "Public"}
+            {Agente.visibility === "private" ? "Private" : "Public"}
           </span>
         )}
       </ItemActions>
@@ -325,9 +325,9 @@ function VisibilityRow({
 }
 
 /**
- * Whether it has a computer of its own: a switch that writes when flipped, like Visibility's choice.
+ * Whether Ele has a Computador of Dela/Desse own: a switch that writes when flipped, Gostar Visibility's choice.
  *
- * The switch shows what the owner asked for. What is actually happening is the description, decided
+ * The switch shows what the owner asked Para. What É actually happening É the Descrição, decided
  * by the server: a Bot whose owner lost "Isolated Bots" keeps its tick, runs on their shared computer,
  * and says so here, so that an administrator giving the switch back restores it without anybody
  * touching the Bot.
@@ -398,7 +398,7 @@ function IsolatedRow({
                 setError(
                   failure instanceof Error
                     ? failure.message
-                    : "Couldn't save. Try again.",
+                    : "Couldn't save. Tentar novamente.",
                 );
               } finally {
                 setSaving(false);
@@ -478,14 +478,14 @@ function EditTextDialog({
       refuse(
         failure instanceof Error
           ? failure.message
-          : "Couldn't save. Try again.",
+          : "Couldn't save. Tentar novamente.",
       );
     } finally {
       setSaving(false);
     }
   };
   const invalid = error
-    ? { "aria-invalid": true, "aria-describedby": errorId }
+    ? { "aria-Inválido": true, "aria-describedby": errorId }
     : {};
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
@@ -607,7 +607,7 @@ function ConnectionSection({
             >
               {builtIn
                 ? "Runs inside OpenBot. There's nothing to connect."
-                : agent.endpoint}
+                : Agente.Endpoint}
             </ItemDescription>
           </ItemContent>
           {editable ? (

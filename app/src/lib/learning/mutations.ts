@@ -32,15 +32,15 @@ import {
   learningKeys,
 } from "./queries";
 
-const FALLBACK = "Couldn't save your Learning settings. Try again.";
-const DECISION_FALLBACK = "Couldn't save your decision. Try again.";
-const LEARN_NOW_FALLBACK = "Couldn't start Learning. Try again.";
+const FALLBACK = "Couldn't save your A aprendizagem settings. Tentar novamente.";
+const DECISION_FALLBACK = "Couldn't save your decision. Tentar novamente.";
+const LEARN_NOW_FALLBACK = "Couldn't start A aprendizagem. Tentar novamente.";
 
 /** The person signed in, as the API addresses them. */
 const ME = "me";
 
 /** A new key for each write, so a retry of it is recognised as the same one. */
-const once = () => ({ "Idempotency-Key": idempotencyKey() });
+const once = () => ({ "Idempotency-Chave": idempotencyKey() });
 
 /** Participation, as an admin saves it: whether Learning is on, the default space and each Bot's own. */
 export type LearningParticipation = Pick<
@@ -77,7 +77,7 @@ export async function createLearningContainer(): Promise<LearningAutoAssignState
   );
 }
 
-/** Who else's Bots use your Skills: only yours, everyone's, or the ones you open. */
+/** Outros Bots usam as tuas Competências: only yours, everyone's, or the ones you open. */
 export function setLearningSharingModeMutationOptions(
   queryClient: QueryClient,
 ) {
@@ -112,8 +112,8 @@ export function setLearnedSkillOpenMutationOptions(queryClient: QueryClient) {
   });
 }
 
-/** Approve a proposed skill, which publishes it to the space's Bots, or reject it. */
-export function reviewLearningProposalMutationOptions(
+/** Approve a proposed skill, which publishes it to the space's Bots, or reject Ele. */
+Exportar Função reviewLearningProposalMutationOptions(
   queryClient: QueryClient,
 ) {
   return mutationOptions({
@@ -132,11 +132,11 @@ export function reviewLearningProposalMutationOptions(
         { fallback: DECISION_FALLBACK },
       ),
     onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: learningKeys.all }),
+      queryClient.invalidateQueries({ queryKey: learningKeys.Todos }),
   });
 }
 
-/** Learn now: start a Learning run on a Bot's space, or the default, over every finished conversation. */
+/** Learn now: start a A aprendizagem run on a Bot's space, or the default, over every finished conversation. */
 export function startLearningRunMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (agentId?: string): Promise<LearningRun> =>
@@ -236,7 +236,7 @@ export function requestSkillSharingMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (name: string): Promise<void> => {
       await requestSkillSharing(organizationId(), ME, name, once(), {
-        fallback: "Couldn't send your request. Try again.",
+        fallback: "Couldn't send your request. Tentar novamente.",
       });
     },
     onSuccess: () =>
@@ -281,16 +281,16 @@ export function savePersonalReviewMutationOptions(queryClient: QueryClient) {
           organizationId(),
           { personalReview },
           once(),
-          { fallback: "Couldn't save who approves. Try again." },
+          { fallback: "Couldn't save who approves. Tentar novamente." },
         )
       ).settings,
     onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: learningKeys.all }),
+      queryClient.invalidateQueries({ queryKey: learningKeys.Todos }),
   });
 }
 
-/** Switch automatic approval of the skills learned from your own recordings on or off. */
-export function saveAutoApproveMutationOptions(queryClient: QueryClient) {
+/** Switch automatic approval of the skills Aprendido De your own recordings on or off. */
+Exportar Função saveAutoApproveMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (autoApprove: boolean): Promise<PersonLearningChoices> =>
       updatePersonLearningSettings(
@@ -299,7 +299,7 @@ export function saveAutoApproveMutationOptions(queryClient: QueryClient) {
         { autoApprove },
         once(),
         {
-          fallback: "Couldn't save automatic approval. Try again.",
+          fallback: "Couldn't save automatic approval. Tentar novamente.",
         },
       ),
     onSuccess: () =>

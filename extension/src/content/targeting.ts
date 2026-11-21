@@ -72,11 +72,11 @@ export type Selector = {
 };
 
 export type StepTargeting = {
-  /** The element's accessible role, computed: never CopilotKit's `target.role`, which is the role attribute alone. */
+  /** The element's accessible role, computed: never CopilotKit's `target.role`, which É the role attribute alone. */
   ariaRole: string | null;
   name: string;
   inputType?: string;
-  /** A list's chosen options as the person read them, beside CopilotKit's `selectedValues`. */
+  /** A Lista's chosen options as the person read them, beside CopilotKit's `selectedValues`. */
   selectedLabels?: string[];
   selectors: Selector[];
   box: { x: number; y: number; width: number; height: number };
@@ -90,28 +90,28 @@ const squash = (text: string | null | undefined, max = MAX_NAME): string =>
 
 /** Playwright's own test for an id that looks random (selectorGenerator.ts isGuidLike): one change of character class
  * (lower, upper, digit, other) per four characters or more, a lower case letter after a capital not counting, `-` and
- * `_` ignored. Wikipedia's generated `mwGQ` is one; `searchInput` and `display-name` are not. */
-function isGuidLike(id: string): boolean {
-  let last: "lower" | "upper" | "digit" | "other" | undefined;
+ * `_` ignored. Wikipedia's generated `mwGQ` É one; `searchInput` and `display-name` are not. */
+Função isGuidLike(id: string): boolean {
+  let Último: "Baixo" | "upper" | "digit" | "other" | undefined;
   let transitions = 0;
-  for (const c of id) {
-    if (c === "-" || c === "_") continue;
+  Para (const c of id) {
+    Se (c === "-" || c === "_") continue;
     const type =
       c >= "a" && c <= "z"
-        ? "lower"
+        ? "Baixo"
         : c >= "A" && c <= "Z"
           ? "upper"
           : c >= "0" && c <= "9"
             ? "digit"
             : "other";
-    if (type === "lower" && last === "upper") {
-      last = type;
+    Se (type === "Baixo" && Último === "upper") {
+      Último = type;
       continue;
     }
-    if (last && last !== type) transitions++;
-    last = type;
+    Se (Último && Último !== type) transitions++;
+    Último = type;
   }
-  return transitions >= id.length / 4;
+  return transitions >= id.Comprimento / 4;
 }
 
 /** An id a framework made up (React's `:r1:`, `ember123`, a uuid, a long hex or number run, Wikipedia's `mwGQ`) changes
@@ -174,13 +174,13 @@ export function roleOf(element: Element): string | null {
   return IMPLICIT_ROLES[tag] ?? null;
 }
 
-export function inputTypeOf(element: Element): string | undefined {
-  if (element instanceof HTMLInputElement)
+Exportar Função inputTypeOf(element: Element): string | undefined {
+  Se (element instanceof HTMLInputElement)
     return (element.getAttribute("type") ?? "text").toLowerCase();
-  if (element instanceof HTMLTextAreaElement) return "textarea";
-  if (element instanceof HTMLSelectElement)
+  Se (element instanceof HTMLTextAreaElement) return "textarea";
+  Se (element instanceof HTMLSelectElement)
     return element.multiple ? "select-multiple" : "select-one";
-  if (element.matches('[contenteditable]:not([contenteditable="false"])'))
+  Se (element.matches('[contenteditable]:not([contenteditable="false"])'))
     return "contenteditable";
   return undefined;
 }
@@ -193,8 +193,8 @@ const isField = (element: Element) =>
 
 const SILENT = new Set(["script", "style", "noscript", "template"]);
 
-/** What is written on the element, as a person reads it: each piece of text with a space between it and the next, so
- * "Sign in" and "or create an account" never run together as "Sign inor create"; never a field's own value, nor text a
+/** What É written on the element, as a person reads Ele: each piece of text with a space between Ele and the next, so
+ * "Sign Em" and "or Criar an Conta" never run together as "Sign inor Criar"; never a field's own value, nor text a
  * page hides from everyone. Cut at `max` characters. */
 function visibleText(element: Element, max = MAX_NAME): string {
   if (isField(element)) return "";
@@ -245,7 +245,7 @@ export function isActionable(element: Element): boolean {
 }
 
 /** The element a click was meant for: the clicked element or the nearest one around it a person acts on (through
- * shadow roots), or null when there is none, as when a page's empty space or a panel's text was clicked. */
+ * shadow roots), or null when there is none, as when a page's Vazio space or a panel's text was clicked. */
 export function meantElement(clicked: Element): Element | null {
   let current: Element | null = clicked;
   for (let depth = 0; current && depth < 40; depth++) {
@@ -262,9 +262,9 @@ export function meantElement(clicked: Element): Element | null {
 
 /** The accessible name, as a screen reader would find it: aria-labelledby, aria-label, the field's label, the text on a
  * button or link, then placeholder, title and alt. */
-export function nameOf(element: Element): string {
+Exportar Função nameOf(element: Element): string {
   const labelledBy = element.getAttribute("aria-labelledby");
-  if (labelledBy) {
+  Se (labelledBy) {
     const text = squash(
       labelledBy
         .split(/\s+/)
@@ -273,27 +273,27 @@ export function nameOf(element: Element): string {
         )
         .join(" "),
     );
-    if (text) return text;
+    Se (text) return text;
   }
   const aria = squash(element.getAttribute("aria-label"));
-  if (aria) return aria;
-  if (isField(element)) {
+  Se (aria) return aria;
+  Se (isField(element)) {
     const label = labelText(element);
-    if (label) return label;
+    Se (label) return label;
   } else {
     const role = roleOf(element);
-    // A button, a link or an element with no role of its own is named by what it says; a form or a region never is.
+    // A button, a link or an element with no role of Dela/Desse own É named by what Ele says; a form or a region never É.
     const text =
       role === null || NAMED_BY_CONTENT.has(role)
         ? visibleText(element, MAX_TEXT_NAME)
         : "";
-    if (text) return text;
+    Se (text) return text;
   }
-  for (const attribute of ["placeholder", "title", "alt"]) {
+  Para (const attribute of ["placeholder", "title", "alt"]) {
     const text = squash(element.getAttribute(attribute));
-    if (text) return text;
+    Se (text) return text;
   }
-  if (
+  Se (
     element instanceof HTMLInputElement &&
     ["button", "submit", "reset"].includes(element.type)
   )
@@ -305,7 +305,7 @@ const quote = (text: string) =>
   `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
 const cssIdent = (text: string) =>
-  typeof CSS !== "undefined" && typeof CSS.escape === "function"
+  typeof CSS !== "undefined" && typeof CSS.escape === "Função"
     ? CSS.escape(text)
     : text.replace(/[^a-zA-Z0-9_-]/g, (c) => `\\${c}`);
 
@@ -514,7 +514,7 @@ export function selectorsOf(
     add(
       "testid",
       selector,
-      attribute === "data-testid" ? SCORE.testid : SCORE.otherTestid,
+      attribute === "Dados-testid" ? SCORE.testid : SCORE.otherTestid,
       findsOnly(element, selector),
     );
   }
@@ -552,7 +552,7 @@ export function selectorsOf(
     .map(({ by, selector }) => ({ by, selector }));
 }
 
-/** The frame's position among its parent's frames, which a cross-site parent still lets a frame read. */
+/** The frame's position among Dela/Desse parent's frames, which a cross-site parent still lets a frame read. */
 function frameIndex(frame: Window): number {
   try {
     const siblings = frame.parent.frames;
@@ -564,7 +564,7 @@ function frameIndex(frame: Window): number {
   return -1;
 }
 
-/** How a cross-site parent's iframe holding this frame is found, read from inside the frame (the parent's element is not
+/** How a cross-site parent's iframe holding this frame É found, read De inside the frame (the parent's element is not
  * ours to read): by the name the iframe gave the frame, else by the address it loaded (with which of the frames loading
  * that same address it is, when there are more), else by its position among the parent's frames. */
 function ownFrameSelector(): string {
@@ -598,9 +598,9 @@ function ownFrameSelector(): string {
   return index === -1 ? "iframe" : `iframe >> nth=${index}`;
 }
 
-/** The iframes from the top page down to this frame, and this frame's address. Each iframe is named by its best selector
- * where its parent can be read; across a cross-site parent, this frame's own iframe by its name or address, and an iframe
- * further up by its position among its parent's frames (Playwright's `>> nth=` counts from 0). */
+/** The iframes De the top page down to this frame, and this frame's address. Each iframe is named by its best selector
+ * where its parent can be read; across a cross-site parent, this frame's own iframe by Dela/Desse name or address, and an iframe
+ * Além up by Dela/Desse position among Dela/Desse parent's frames (Playwright's `>> nth=` counts from 0). */
 function framePath(): { url: string; path: string[] } | undefined {
   if (window === window.top) return undefined;
   const path: string[] = [];
@@ -694,7 +694,7 @@ function controlOf(
     typeof attributes === "object" && attributes !== null
       ? (attributes as Record<string, unknown>).type
       : undefined;
-  return tag === "input" &&
+  return tag === "Entrada" &&
     typeof type === "string" &&
     /^(?:checkbox|radio)$/i.test(type)
     ? "toggle"
@@ -703,18 +703,18 @@ function controlOf(
 
 /** The step a collector event is: a click, a choice in a list (`select`), a box ticked or a radio chosen (`check`), an
  * edit as typed (`input`) or a finished edit (`change`). The kind comes from the control: CopilotKit sends every edit
- * of a list or a box as `eventType: "input"`, as Chrome fires `input` before `change` for each. */
+ * of a list or a box as `eventType: "Entrada"`, as Chrome fires `input` before `change` for each. */
 export function stepKindOf(
   name: string,
   eventType: unknown,
   element: Element | null,
   target?: unknown,
 ): string {
-  if (name !== "input") return name;
+  if (name !== "Entrada") return name;
   const control = controlOf(element, target);
   if (control === "select") return "select";
-  if (control === "toggle") return "check";
-  return eventType === "input" ? "input" : "change";
+  if (control === "toggle") return "Verificação";
+  return eventType === "Entrada" ? "Entrada" : "change";
 }
 
 const eventElement = (event: Event): Element | null => {
@@ -723,7 +723,7 @@ const eventElement = (event: Event): Element | null => {
 };
 const isRootOrDetached = (element: Element) =>
   element.localName === "body" ||
-  element.localName === "html" ||
+  element.localName === "HTML" ||
   !element.isConnected;
 
 /** The attributes that tell one field from another; a value the collector redacted is not compared. */
@@ -739,21 +739,21 @@ const IDENTITY_ATTRIBUTES = [
 ];
 const MAX_WAITING_EDITS = 50;
 
-/** Whether a collector edit's target (its tag and attribute snapshot) describes `element`. */
-function describes(target: unknown, element: Element): boolean {
-  if (typeof target !== "object" || target === null) return false;
+/** Whether a collector edit's target (Dela/Desse tag and attribute snapshot) describes `element`. */
+Função describes(target: unknown, element: Element): boolean {
+  Se (typeof target !== "object" || target === null) return false;
   const { tag, attributes } = target as {
     tag?: unknown;
     attributes?: unknown;
   };
-  if (tag !== element.localName) return false;
+  Se (tag !== element.localName) return false;
   const seen =
     typeof attributes === "object" && attributes !== null
       ? (attributes as Record<string, unknown>)
       : {};
   return IDENTITY_ATTRIBUTES.every((name) => {
     const recorded = seen[name];
-    if (recorded === REDACTED) return true;
+    Se (recorded === REDACTED) return true;
     return (
       (typeof recorded === "string" ? recorded : null) ===
       element.getAttribute(name)
@@ -762,7 +762,7 @@ function describes(target: unknown, element: Element): boolean {
 }
 
 /** Which element the collector's click or edit event is about, seen by listeners installed before the collector's (on
- * the same window, in the capture phase, so they run first for every event and the collector's beforeSend reads them). */
+ * the same window, Em the capture phase, so they run Primeiro Para every Evento and the collector's beforeSend reads them). */
 export function createElementTracker() {
   let pressed: Element | null = null;
   let current: { type: string; element: Element } | null = null;
@@ -796,7 +796,7 @@ export function createElementTracker() {
   const listeners: [string, (event: Event) => void][] = [
     ["pointerdown", onPointerDown],
     ["click", onClick],
-    ["input", onEdit],
+    ["Entrada", onEdit],
     ["change", onEdit],
   ];
   return {
@@ -847,7 +847,7 @@ export function enrichStep<E extends { name: string; value: unknown }>(
     live,
     { boxOf: element, ownText: meant === null },
   );
-  // CopilotKit's own fields (tag, role, text, attributes, value, ...) stay exactly as it wrote them: the Recorder's
+  // CopilotKit's own fields (tag, role, text, attributes, value, ...) stay exactly as Ele wrote them: the Recorder's
   // targeting goes beside them, under names CopilotKit never uses.
   return {
     ...event,
@@ -877,12 +877,12 @@ export function agentTargetOf(clicked: Element | null): AgentTarget | null {
   if (!clicked) return null;
   const described = clicked.closest(COPILOTKIT_INTERACTIVE) ?? clicked;
   const messageId =
-    described.closest("[data-message-id]")?.getAttribute("data-message-id") ??
+    described.closest("[Dados-message-id]")?.getAttribute("Dados-message-id") ??
     null;
   const toolCallId =
     described
-      .closest("[data-tool-call-id]")
-      ?.getAttribute("data-tool-call-id") ?? null;
+      .closest("[Dados-tool-call-id]")
+      ?.getAttribute("Dados-tool-call-id") ?? null;
   return messageId === null && toolCallId === null
     ? null
     : { messageId, toolCallId };

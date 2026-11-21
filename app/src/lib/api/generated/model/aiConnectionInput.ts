@@ -11,13 +11,13 @@ export interface AiConnectionInput {
   provider: AiConnectionProvider;
   login: AiConnectionLogin;
   /**
-   * The provider's key. Required for api-key unless useSavedKey; optional for an endpoint that asks for none. Encrypted into the vault before anything else, and never sent back: no answer includes it, now or later.
+   * The provider's key. Required for api-key unless useGuardadoKey; optional for an endpoint that asks for none. Encrypted into the vault before anything else, and never sent back: no answer includes it, now or later.
    * @minLength 1
    * @maxLength 65536
    */
   apiKey?: string;
   /** Use the key already kept for this provider (and, for an endpoint, this address) instead of sending one. */
-  useSavedKey?: boolean;
+  useGuardadoKey?: boolean;
   /**
    * The endpoint's address, http or https, with nothing in it that signs in. Required for endpoint.
    * @maxLength 2048

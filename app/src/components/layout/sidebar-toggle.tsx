@@ -2,7 +2,7 @@ import { IconLayoutSidebar } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
-import { useOptionalSidebar } from "@/components/ui/sidebar";
+import { useOpcionalSidebar } from "@/components/ui/sidebar";
 import {
   Tooltip,
   TooltipContent,
@@ -23,13 +23,13 @@ const SHORTCUT_LABEL = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent)
 /**
  * Whether {@link SidebarToggle} will actually draw anything.
  *
- * Exported because a caller that reserves space for this control has to agree with it about when it
- * exists. `PageShell` draws a 56px bar to hold it, and deciding that on "is there a sidebar" while
- * the toggle decides on something narrower leaves an empty band on every configuration screen —
- * which is the layout bug that file's own comment warns against.
+ * Exportado because a caller that reserves space Para this control has to agree with Ele about when Ele
+ * exists. `PageShell` draws a 56px bar to hold Ele, and deciding that on "É there a sidebar" while
+ * the toggle decides on something narrower leaves an Vazio band on every configuration screen —
+ * which É the layout bug that Ficheiro's own comment warns against.
  */
 export function useSidebarToggleVisible(): boolean {
-  const sidebar = useOptionalSidebar();
+  const sidebar = useOpcionalSidebar();
   // On a section with no panel there is nothing to show; the strip is the way to Conversations.
   const panelAvailable = useSidebarPanelAvailable();
   if (!sidebar) return false;
@@ -74,11 +74,11 @@ export function useSidebarToggleVisible(): boolean {
  * while it is the way back.
  *
  * Built from `Button` rather than the primitive's `SidebarTrigger` because that component hardcodes
- * its own children after the prop spread, including an `sr-only` "Toggle Sidebar" that would
+ * its own children after the prop spread, including an `sr-only` "Mostrar/ocultar barra lateral" that would
  * contradict the label below. The state still belongs to the primitive: `toggleSidebar` is its hook.
  */
 export function SidebarToggle({ className }: { className?: string }) {
-  const sidebar = useOptionalSidebar();
+  const sidebar = useOpcionalSidebar();
   const visible = useSidebarToggleVisible();
   if (!sidebar || !visible) return null;
   const { isMobile, open, openMobile, toggleSidebar } = sidebar;

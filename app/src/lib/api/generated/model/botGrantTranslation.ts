@@ -11,7 +11,7 @@ export interface BotGrantTranslation {
   /** Other apps the description names, which this set doesn't touch. */
   otherApps: string[];
   /**
-   * What the set lets the Bot do, in one sentence. Null when it doesn't check.
+   * What the set lets the Bot do, Em one sentence. Null when Ele doesn't check.
    * @nullable
    */
   summary: string | null;

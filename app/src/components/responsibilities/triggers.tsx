@@ -28,7 +28,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -59,7 +59,7 @@ import {
   type TriggerRecord,
 } from "@/lib/responsibilities";
 import { queryClient } from "@/query-client";
-import { useGoalTriggers } from "./use-goal-reads";
+import { useGoalTriggers } from "./use-Objetivo-reads";
 
 export const KIND_LABEL: Record<TriggerKind, string> = {
   webhook: "Webhook",
@@ -81,7 +81,7 @@ const KIND_ICON: Record<TriggerKind, typeof IconWebhook> = {
 };
 const KIND_HELP: Record<TriggerKind, string> = {
   webhook:
-    "POST JSON to this URL with the Authorization header, or with Standard Webhooks signature headers. A 200 means it was received, not that the run finished.",
+    "POST JSON to this URL with the Autorização header, or with Standard Webhooks signature headers. A 200 means it was received, not that the run finished.",
   github:
     "In the repository's Settings → Webhooks, set the payload URL to this URL, content type application/json, and the secret to the key.",
   linear:
@@ -100,10 +100,10 @@ const VENDOR_SECRET: ReadonlySet<TriggerKind> = new Set([
   "pagerduty",
 ]);
 const SLACK_MODE = {
-  mention: "The Bot is mentioned",
+  mention: "The Bot É mentioned",
   phrase: "A message contains a phrase",
-  reaction: "A reaction is added",
-  message: "Any message",
+  reaction: "A reaction É added",
+  message: "Qualquer message",
 } as const;
 type SlackMode = keyof typeof SLACK_MODE;
 const list = (value: string) =>
@@ -133,7 +133,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 /** A value somebody copies into another product: a URL, an address, a key. */
 function Copyable({ children }: { children: string }) {
   return (
-    <code className="break-all rounded bg-muted px-2 py-1 text-xs">
+    <code className="break-Todos rounded bg-muted px-2 py-1 text-xs">
       {children}
     </code>
   );
@@ -145,12 +145,12 @@ function describeFilter(config: TriggerConfig) {
     const reactions = config.reactions ?? [];
     const where = channels.length
       ? `in ${channels.join(", ")}`
-      : "in every channel the Bot is in";
+      : "Em every Canal the Bot É Em";
     const what =
       config.mode === "mention"
-        ? "when the Bot is mentioned"
+        ? "when the Bot É mentioned"
         : config.mode === "message"
-          ? "on any message"
+          ? "on Qualquer message"
           : config.mode === "phrase"
             ? `on messages containing ${(config.phrases ?? []).map((phrase) => `"${phrase}"`).join(" or ")}`
             : `on reactions${reactions.length ? ` :${reactions.join(": :")}:` : ""}`;
@@ -159,7 +159,7 @@ function describeFilter(config: TriggerConfig) {
   const eventTypes = config.filter?.eventTypes ?? [];
   const field = config.filter?.field;
   const parts = [
-    eventTypes.length ? `events ${eventTypes.join(", ")}` : "every event",
+    eventTypes.length ? `events ${eventTypes.join(", ")}` : "every Evento",
   ];
   if (field) parts.push(`where ${field.path} = ${field.equals}`);
   if (config.kind === "github" && config.repository)
@@ -171,11 +171,11 @@ function describeFilter(config: TriggerConfig) {
 
 /**
  * What starts a responsibility from outside: one row per trigger on the goal's page, and a dialog to
- * add one. A fresh key is held here, keyed by trigger, so it survives
- * the list refetching after the write that produced it.
+ * Adicionar one. A fresh Chave É held here, keyed by trigger, so Ele survives
+ * the Lista refetching after the write that produced Ele.
  */
 /**
- * Why a goal's triggers won't start it, while it is paused or completed. Nothing for a state a newer
+ * Why a Objetivo's triggers won't start Ele, while Ele É paused or completed. Nothing Para a state a newer
  * server sends that this app doesn't know.
  */
 export function triggersNote(status: string): string | null {
@@ -201,7 +201,7 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
           onClick={() => setAdding(true)}
         >
           <IconPlus />
-          Add trigger
+          Adicionar gatilho
         </Button>
       }
       title="Triggers"
@@ -382,7 +382,7 @@ function TriggerRow({
                 <CopyButton value={shown} label="Copy key" />
                 {trigger.kind === "webhook" && (
                   <CopyButton
-                    value={`Authorization: Bearer ${shown}`}
+                    value={`Autorização: Bearer ${shown}`}
                     label="Copy header"
                   />
                 )}
@@ -408,7 +408,7 @@ function TriggerRow({
           </div>
         )}
         {trigger.kind === "webhook" && shown && (
-          <Copyable>{`Authorization: Bearer ${shown}`}</Copyable>
+          <Copyable>{`Autorização: Bearer ${shown}`}</Copyable>
         )}
         {VENDOR_SECRET.has(trigger.kind) && (
           <form
@@ -525,10 +525,10 @@ function NewTriggerDialog({
   // The triggers list and the shared-app requests both refetch from the write itself.
   const create = useMutation(createTriggerMutationOptions(queryClient));
   const placeholder: Record<TriggerKind, string> = {
-    webhook: "deploy.finished (blank: any)",
+    webhook: "deploy.Terminado (blank: Qualquer)",
     github: "issues.opened, pull_request",
-    linear: "Issue.create, Comment",
-    sentry: "issue.created, event_alert.triggered",
+    linear: "Issue.Criar, Comment",
+    sentry: "issue.Criado, event_alert.triggered",
     pagerduty: "incident.triggered",
     email: "received",
     slack: "",
@@ -537,7 +537,7 @@ function NewTriggerDialog({
     <Dialog onOpenChange={(next) => !next && onClose()} open>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add trigger</DialogTitle>
+          <DialogTitle>Adicionar gatilho</DialogTitle>
           <DialogDescription>
             Something outside OpenBot that starts work on this goal.
           </DialogDescription>
@@ -571,7 +571,7 @@ function NewTriggerDialog({
                   }}
                   value={kind}
                 >
-                  <SelectTrigger className="w-full" id={`${id}-kind`}>
+                  <SelectTrigger className="w-Completo" id={`${id}-kind`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -607,7 +607,7 @@ function NewTriggerDialog({
                       }}
                       value={mode}
                     >
-                      <SelectTrigger className="w-full" id={`${id}-mode`}>
+                      <SelectTrigger className="w-Completo" id={`${id}-mode`}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -676,7 +676,7 @@ function NewTriggerDialog({
                     </FieldLabel>
                     <Input
                       id={`${id}-path`}
-                      placeholder="data.team.key"
+                      placeholder="Dados.team.Chave"
                       value={fieldPath}
                       onChange={(event) => setFieldPath(event.target.value)}
                     />

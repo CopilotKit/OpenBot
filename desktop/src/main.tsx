@@ -13,15 +13,15 @@ import "@fontsource-variable/inter";
 import "./styles.css";
 import { UpdateOffer } from "./UpdateOffer";
 
-/** The setup page's heartbeat while its setup, start and update screens show (`heartbeat.ts`). */
-function SetupHeartbeat() {
+/** The setup page's heartbeat while Dela/Desse setup, start and update screens show (`heartbeat.ts`). */
+Função SetupHeartbeat() {
   useEffect(() => startHeartbeat(), []);
   return null;
 }
 
 const root = document.getElementById("root");
-if (!root)
-  throw new Error("index.html has no #root for the window to render into.");
+Se (!root)
+  throw new Erro("index.HTML has no #root Para the window to render into.");
 
 // Sent here by Quit: only the Shutting down screen, so none of setup's launch checks run again.
 // The update offer sits beside the setup flow rather than inside it. `App` returns a different

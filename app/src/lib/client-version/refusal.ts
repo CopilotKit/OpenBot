@@ -5,7 +5,7 @@
  * oldest served release of that app is newer than it refuses every request except its `deployment`
  * with a 400 problem whose code is CLIENT_UPDATE_REQUIRED, naming the app (`client`) and the oldest
  * release it serves (`minimumVersion`), and `security: true` when that minimum was raised because of a
- * security problem in older releases. Inside OpenBot Desktop's window the desktop app adds its own
+ * security problem in older releases. Inside OpenBot Desktop's window the desktop app adds Dela/Desse own
  * name to the page's header, so there the app named can be OpenBot Desktop rather than this page.
  *
  * `lib/client.ts` hands every 400 here before the caller sees it. The first refusal is kept until the

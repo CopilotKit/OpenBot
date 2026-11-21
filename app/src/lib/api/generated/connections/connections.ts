@@ -19,11 +19,11 @@ import type {
 
 import type {
   AccountDisconnection,
-  ActionAuthorizations,
+  ActionAutorizaçãos,
   AdminOnlyResponse,
   AppNotFoundResponse,
   AppServiceFailedResponse,
-  AuthorizationStart,
+  AutorizaçãoStart,
   AuthorizeActionRequest,
   AuthorizeConnectionActionHeaders,
   AuthorizeSharedConnectionActionHeaders,
@@ -127,7 +127,7 @@ export const listConnections = async (
     getListConnectionsUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -373,7 +373,7 @@ export const getConnection = async (
     getGetConnectionUrl(organizationId, personId, appId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -916,7 +916,7 @@ export const getRecheckConnectionUrl = (
 };
 
 /**
- * Try the key a person connected an app with, by one safe, read-only call in their account, and record whether it worked and when. For apps that take a key. The call counts against the person's own limits at the app, so make it when the person asks, never on page load. A key the app refuses is answered 400 with the app's reason, and the record keeps that the check failed. checkedAction null means the app offers nothing safe to try. Only the person themselves may check their connections.
+ * Try the key a person connected an app with, by one safe, read-only call in their account, and record whether it worked and when. For apps that take a key. The call counts against the person's own Limites at the app, so Fazer Ele when the person asks, never on page load. A Chave the app refuses É answered 400 with the app's reason, and the record keeps that the check failed. checkedAction null means the app offers nothing safe to try. Only the person themselves may check their connections.
  * @summary Check that a person's key still works
  */
 export const recheckConnection = async (
@@ -1493,7 +1493,7 @@ export function useGetConnectionDisconnectPreview<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
-export const getGetConnectionAuthorizationsUrl = (
+export const getGetConnectionAutorizaçãosUrl = (
   organizationId: string,
   personId: string,
   appId: string,
@@ -1505,14 +1505,14 @@ export const getGetConnectionAuthorizationsUrl = (
  * Return what a person's account at an app allows, action by action: authorized, waiting for the person's consent (authorizeConnectionAction), waiting for an administrator to set something up, or unknown. Every action at once, in one answer. readable is false when the app couldn't be asked; actions is then empty and reason says why. Only the person themselves may read it.
  * @summary Read what a person's account at an app allows
  */
-export const getConnectionAuthorizations = async (
+export const getConnectionAutorizaçãos = async (
   organizationId: string,
   personId: string,
   appId: string,
   options?: Parameters<typeof apiRequest>[1],
-): Promise<ActionAuthorizations> => {
-  return apiRequest<ActionAuthorizations>(
-    getGetConnectionAuthorizationsUrl(organizationId, personId, appId),
+): Promise<ActionAutorizaçãos> => {
+  return apiRequest<ActionAutorizaçãos>(
+    getGetConnectionAutorizaçãosUrl(organizationId, personId, appId),
     {
       ...options,
       method: "GET",
@@ -1520,7 +1520,7 @@ export const getConnectionAuthorizations = async (
   );
 };
 
-export const getGetConnectionAuthorizationsQueryKey = (
+export const getGetConnectionAutorizaçãosQueryKey = (
   organizationId: string,
   personId: string,
   appId: string,
@@ -1530,8 +1530,8 @@ export const getGetConnectionAuthorizationsQueryKey = (
   ] as const;
 };
 
-export const getGetConnectionAuthorizationsQueryOptions = <
-  TData = Awaited<ReturnType<typeof getConnectionAuthorizations>>,
+export const getGetConnectionAutorizaçãosQueryOptions = <
+  TData = Awaited<ReturnType<typeof getConnectionAutorizaçãos>>,
   TError =
     | ConnectionRefusedResponse
     | UnauthenticatedResponse
@@ -1548,7 +1548,7 @@ export const getGetConnectionAuthorizationsQueryOptions = <
   options?: {
     query?: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof getConnectionAuthorizations>>,
+        Awaited<ReturnType<typeof getConnectionAutorizaçãos>>,
         TError,
         TData
       >
@@ -1560,12 +1560,12 @@ export const getGetConnectionAuthorizationsQueryOptions = <
 
   const queryKey =
     queryOptions?.queryKey ??
-    getGetConnectionAuthorizationsQueryKey(organizationId, personId, appId);
+    getGetConnectionAutorizaçãosQueryKey(organizationId, personId, appId);
 
   const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof getConnectionAuthorizations>>
+    Awaited<ReturnType<typeof getConnectionAutorizaçãos>>
   > = ({ signal }) =>
-    getConnectionAuthorizations(organizationId, personId, appId, {
+    getConnectionAutorizaçãos(organizationId, personId, appId, {
       signal,
       ...requestOptions,
     });
@@ -1582,16 +1582,16 @@ export const getGetConnectionAuthorizationsQueryOptions = <
       appId !== undefined,
     ...queryOptions,
   } as UseQueryOptions<
-    Awaited<ReturnType<typeof getConnectionAuthorizations>>,
+    Awaited<ReturnType<typeof getConnectionAutorizaçãos>>,
     TError,
     TData
   > & { queryKey: DataTag<QueryKey, TData, TError> };
 };
 
-export type GetConnectionAuthorizationsQueryResult = NonNullable<
-  Awaited<ReturnType<typeof getConnectionAuthorizations>>
+export type GetConnectionAutorizaçãosQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getConnectionAutorizaçãos>>
 >;
-export type GetConnectionAuthorizationsQueryError =
+export type GetConnectionAutorizaçãosQueryError =
   | ConnectionRefusedResponse
   | UnauthenticatedResponse
   | OwnOnlyResponse
@@ -1601,8 +1601,8 @@ export type GetConnectionAuthorizationsQueryError =
   | ConnectionsUnavailableResponse
   | UnexpectedErrorResponse;
 
-export function useGetConnectionAuthorizations<
-  TData = Awaited<ReturnType<typeof getConnectionAuthorizations>>,
+export function useGetConnectionAutorizaçãos<
+  TData = Awaited<ReturnType<typeof getConnectionAutorizaçãos>>,
   TError =
     | ConnectionRefusedResponse
     | UnauthenticatedResponse
@@ -1619,16 +1619,16 @@ export function useGetConnectionAuthorizations<
   options: {
     query: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof getConnectionAuthorizations>>,
+        Awaited<ReturnType<typeof getConnectionAutorizaçãos>>,
         TError,
         TData
       >
     > &
       Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getConnectionAuthorizations>>,
+          Awaited<ReturnType<typeof getConnectionAutorizaçãos>>,
           TError,
-          Awaited<ReturnType<typeof getConnectionAuthorizations>>
+          Awaited<ReturnType<typeof getConnectionAutorizaçãos>>
         >,
         "initialData"
       >;
@@ -1638,8 +1638,8 @@ export function useGetConnectionAuthorizations<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useGetConnectionAuthorizations<
-  TData = Awaited<ReturnType<typeof getConnectionAuthorizations>>,
+export function useGetConnectionAutorizaçãos<
+  TData = Awaited<ReturnType<typeof getConnectionAutorizaçãos>>,
   TError =
     | ConnectionRefusedResponse
     | UnauthenticatedResponse
@@ -1656,16 +1656,16 @@ export function useGetConnectionAuthorizations<
   options?: {
     query?: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof getConnectionAuthorizations>>,
+        Awaited<ReturnType<typeof getConnectionAutorizaçãos>>,
         TError,
         TData
       >
     > &
       Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getConnectionAuthorizations>>,
+          Awaited<ReturnType<typeof getConnectionAutorizaçãos>>,
           TError,
-          Awaited<ReturnType<typeof getConnectionAuthorizations>>
+          Awaited<ReturnType<typeof getConnectionAutorizaçãos>>
         >,
         "initialData"
       >;
@@ -1675,8 +1675,8 @@ export function useGetConnectionAuthorizations<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useGetConnectionAuthorizations<
-  TData = Awaited<ReturnType<typeof getConnectionAuthorizations>>,
+export function useGetConnectionAutorizaçãos<
+  TData = Awaited<ReturnType<typeof getConnectionAutorizaçãos>>,
   TError =
     | ConnectionRefusedResponse
     | UnauthenticatedResponse
@@ -1693,7 +1693,7 @@ export function useGetConnectionAuthorizations<
   options?: {
     query?: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof getConnectionAuthorizations>>,
+        Awaited<ReturnType<typeof getConnectionAutorizaçãos>>,
         TError,
         TData
       >
@@ -1708,8 +1708,8 @@ export function useGetConnectionAuthorizations<
  * @summary Read what a person's account at an app allows
  */
 
-export function useGetConnectionAuthorizations<
-  TData = Awaited<ReturnType<typeof getConnectionAuthorizations>>,
+export function useGetConnectionAutorizaçãos<
+  TData = Awaited<ReturnType<typeof getConnectionAutorizaçãos>>,
   TError =
     | ConnectionRefusedResponse
     | UnauthenticatedResponse
@@ -1726,7 +1726,7 @@ export function useGetConnectionAuthorizations<
   options?: {
     query?: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof getConnectionAuthorizations>>,
+        Awaited<ReturnType<typeof getConnectionAutorizaçãos>>,
         TError,
         TData
       >
@@ -1737,7 +1737,7 @@ export function useGetConnectionAuthorizations<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 } {
-  const queryOptions = getGetConnectionAuthorizationsQueryOptions(
+  const queryOptions = getGetConnectionAutorizaçãosQueryOptions(
     organizationId,
     personId,
     appId,
@@ -1761,7 +1761,7 @@ export const getAuthorizeConnectionActionUrl = (
 };
 
 /**
- * Start a person's consent for one action of an app that grants access action by action, and answer the address of the app's consent page. The client opens it; the app sends the person back to the page returnTo names, where getConnectionAuthorizations shows the result. A person has one consent in progress at a time, and one left unfinished expires after fifteen minutes. The address is never logged. Only the person themselves may authorize for their accounts.
+ * Start a person's consent Para one Ação of an app that grants access Ação by Ação, and Resposta the address of the app's consent page. The client opens it; the app sends the person back to the page returnTo names, where getConnectionAutorizaçãos shows the result. A person has one consent in progress at a time, and one left unfinished expires after fifteen minutes. The address is never logged. Only the person themselves may authorize for their accounts.
  * @summary Start a person's consent for one action
  */
 export const authorizeConnectionAction = async (
@@ -1771,7 +1771,7 @@ export const authorizeConnectionAction = async (
   authorizeActionRequest: AuthorizeActionRequest,
   headers: AuthorizeConnectionActionHeaders,
   options?: Parameters<typeof apiRequest>[1],
-): Promise<AuthorizationStart> => {
+): Promise<AutorizaçãoStart> => {
   const getHeaders = (
     h?: NonNullable<RequestInit["headers"]>,
   ): Record<string, string | readonly string[]> => {
@@ -1793,7 +1793,7 @@ export const authorizeConnectionAction = async (
     }
     return headers;
   };
-  return apiRequest<AuthorizationStart>(
+  return apiRequest<AutorizaçãoStart>(
     getAuthorizeConnectionActionUrl(organizationId, personId, appId),
     {
       ...options,
@@ -2221,8 +2221,8 @@ export const getMakeConnectedAccountDefaultUrl = (
 };
 
 /**
- * Make one of a person's accounts at an app the one their Bots use when they name none. Only the person themselves may choose.
- * @summary Choose the account a person's Bots use at an app
+ * Make one of a person's Contas at an app the one their Bots use when they name none. Only the person themselves may choose.
+ * @summary Choose the Conta a person's Bots use at an app
  */
 export const makeConnectedAccountDefault = async (
   organizationId: string,
@@ -2391,7 +2391,7 @@ export const getDisconnectConnectedAccountUrl = (
 };
 
 /**
- * End one of a person's accounts at an app and keep the others. The app is asked to end that account's access first. Ending the last account ends the connection, as disconnectApp does, and connectionEnded says so. Only the person themselves may disconnect their accounts.
+ * End one of a person's accounts at an app and keep the others. The app is asked to end that account's access Primeiro. Ending the Último Conta ends the connection, as disconnectApp does, and connectionEnded says so. Only the person themselves may disconnect their Contas.
  * @summary Disconnect one of a person's accounts at an app
  */
 export const disconnectConnectedAccount = async (
@@ -2574,7 +2574,7 @@ export const getSharedConnection = async (
     getGetSharedConnectionUrl(organizationId, appId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -3120,8 +3120,8 @@ export const getRecheckSharedConnectionUrl = (
 };
 
 /**
- * Try the key an app's shared account was connected with, by one safe, read-only call, and record whether it worked and when, as recheckConnection does for a person's own. Make it when an administrator asks, never on page load. Only an administrator may check it.
- * @summary Check that an app's shared key still works
+ * Try the key an app's shared account was connected with, by one safe, read-only call, and record whether it worked and when, as recheckConnection does for a person's own. Fazer Ele when an administrator asks, never on page load. Only an administrator may Verificação Ele.
+ * @summary Verificação that an app's shared key still works
  */
 export const recheckSharedConnection = async (
   organizationId: string,
@@ -3427,7 +3427,7 @@ export const useDisconnectSharedApp = <
     queryClient,
   );
 };
-export const getGetSharedConnectionAuthorizationsUrl = (
+export const getGetSharedConnectionAutorizaçãosUrl = (
   organizationId: string,
   appId: string,
 ) => {
@@ -3435,16 +3435,16 @@ export const getGetSharedConnectionAuthorizationsUrl = (
 };
 
 /**
- * Return what an app's shared account allows, action by action, as getConnectionAuthorizations does for a person's own. Anybody signed in may read it, since every Bot using the app acts as this account. Every action at once, in one answer.
+ * Return what an app's shared account allows, action by action, as getConnectionAutorizaçãos does for a person's own. Anybody signed in may read it, since every Bot using the app acts as this account. Every action at once, in one answer.
  * @summary Read what an app's shared account allows
  */
-export const getSharedConnectionAuthorizations = async (
+export const getSharedConnectionAutorizaçãos = async (
   organizationId: string,
   appId: string,
   options?: Parameters<typeof apiRequest>[1],
-): Promise<ActionAuthorizations> => {
-  return apiRequest<ActionAuthorizations>(
-    getGetSharedConnectionAuthorizationsUrl(organizationId, appId),
+): Promise<ActionAutorizaçãos> => {
+  return apiRequest<ActionAutorizaçãos>(
+    getGetSharedConnectionAutorizaçãosUrl(organizationId, appId),
     {
       ...options,
       method: "GET",
@@ -3452,7 +3452,7 @@ export const getSharedConnectionAuthorizations = async (
   );
 };
 
-export const getGetSharedConnectionAuthorizationsQueryKey = (
+export const getGetSharedConnectionAutorizaçãosQueryKey = (
   organizationId: string,
   appId: string,
 ) => {
@@ -3461,8 +3461,8 @@ export const getGetSharedConnectionAuthorizationsQueryKey = (
   ] as const;
 };
 
-export const getGetSharedConnectionAuthorizationsQueryOptions = <
-  TData = Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>,
+export const getGetSharedConnectionAutorizaçãosQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>,
   TError =
     | ConnectionRefusedResponse
     | UnauthenticatedResponse
@@ -3478,7 +3478,7 @@ export const getGetSharedConnectionAuthorizationsQueryOptions = <
   options?: {
     query?: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>,
+        Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>,
         TError,
         TData
       >
@@ -3490,12 +3490,12 @@ export const getGetSharedConnectionAuthorizationsQueryOptions = <
 
   const queryKey =
     queryOptions?.queryKey ??
-    getGetSharedConnectionAuthorizationsQueryKey(organizationId, appId);
+    getGetSharedConnectionAutorizaçãosQueryKey(organizationId, appId);
 
   const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>
+    Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>
   > = ({ signal }) =>
-    getSharedConnectionAuthorizations(organizationId, appId, {
+    getSharedConnectionAutorizaçãos(organizationId, appId, {
       signal,
       ...requestOptions,
     });
@@ -3510,16 +3510,16 @@ export const getGetSharedConnectionAuthorizationsQueryOptions = <
       appId !== undefined,
     ...queryOptions,
   } as UseQueryOptions<
-    Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>,
+    Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>,
     TError,
     TData
   > & { queryKey: DataTag<QueryKey, TData, TError> };
 };
 
-export type GetSharedConnectionAuthorizationsQueryResult = NonNullable<
-  Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>
+export type GetSharedConnectionAutorizaçãosQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>
 >;
-export type GetSharedConnectionAuthorizationsQueryError =
+export type GetSharedConnectionAutorizaçãosQueryError =
   | ConnectionRefusedResponse
   | UnauthenticatedResponse
   | ForbiddenResponse
@@ -3529,8 +3529,8 @@ export type GetSharedConnectionAuthorizationsQueryError =
   | ConnectionsUnavailableResponse
   | UnexpectedErrorResponse;
 
-export function useGetSharedConnectionAuthorizations<
-  TData = Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>,
+export function useGetSharedConnectionAutorizaçãos<
+  TData = Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>,
   TError =
     | ConnectionRefusedResponse
     | UnauthenticatedResponse
@@ -3546,16 +3546,16 @@ export function useGetSharedConnectionAuthorizations<
   options: {
     query: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>,
+        Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>,
         TError,
         TData
       >
     > &
       Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>,
+          Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>,
           TError,
-          Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>
+          Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>
         >,
         "initialData"
       >;
@@ -3565,8 +3565,8 @@ export function useGetSharedConnectionAuthorizations<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useGetSharedConnectionAuthorizations<
-  TData = Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>,
+export function useGetSharedConnectionAutorizaçãos<
+  TData = Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>,
   TError =
     | ConnectionRefusedResponse
     | UnauthenticatedResponse
@@ -3582,16 +3582,16 @@ export function useGetSharedConnectionAuthorizations<
   options?: {
     query?: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>,
+        Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>,
         TError,
         TData
       >
     > &
       Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>,
+          Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>,
           TError,
-          Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>
+          Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>
         >,
         "initialData"
       >;
@@ -3601,8 +3601,8 @@ export function useGetSharedConnectionAuthorizations<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useGetSharedConnectionAuthorizations<
-  TData = Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>,
+export function useGetSharedConnectionAutorizaçãos<
+  TData = Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>,
   TError =
     | ConnectionRefusedResponse
     | UnauthenticatedResponse
@@ -3618,7 +3618,7 @@ export function useGetSharedConnectionAuthorizations<
   options?: {
     query?: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>,
+        Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>,
         TError,
         TData
       >
@@ -3633,8 +3633,8 @@ export function useGetSharedConnectionAuthorizations<
  * @summary Read what an app's shared account allows
  */
 
-export function useGetSharedConnectionAuthorizations<
-  TData = Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>,
+export function useGetSharedConnectionAutorizaçãos<
+  TData = Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>,
   TError =
     | ConnectionRefusedResponse
     | UnauthenticatedResponse
@@ -3650,7 +3650,7 @@ export function useGetSharedConnectionAuthorizations<
   options?: {
     query?: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof getSharedConnectionAuthorizations>>,
+        Awaited<ReturnType<typeof getSharedConnectionAutorizaçãos>>,
         TError,
         TData
       >
@@ -3661,7 +3661,7 @@ export function useGetSharedConnectionAuthorizations<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 } {
-  const queryOptions = getGetSharedConnectionAuthorizationsQueryOptions(
+  const queryOptions = getGetSharedConnectionAutorizaçãosQueryOptions(
     organizationId,
     appId,
     options,
@@ -3692,7 +3692,7 @@ export const authorizeSharedConnectionAction = async (
   authorizeActionRequest: AuthorizeActionRequest,
   headers: AuthorizeSharedConnectionActionHeaders,
   options?: Parameters<typeof apiRequest>[1],
-): Promise<AuthorizationStart> => {
+): Promise<AutorizaçãoStart> => {
   const getHeaders = (
     h?: NonNullable<RequestInit["headers"]>,
   ): Record<string, string | readonly string[]> => {
@@ -3714,7 +3714,7 @@ export const authorizeSharedConnectionAction = async (
     }
     return headers;
   };
-  return apiRequest<AuthorizationStart>(
+  return apiRequest<AutorizaçãoStart>(
     getAuthorizeSharedConnectionActionUrl(organizationId, appId),
     {
       ...options,

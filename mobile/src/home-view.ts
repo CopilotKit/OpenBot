@@ -5,12 +5,12 @@
  * organization: trying again, and signing out. Somebody held out is offered the way in (Link your company account), their
  * other organizations, and signing out. It imports nothing that needs a phone, so it can be tested.
  */
-import { heldOut } from "./company-sign-in";
+import { heldOut } from "./company-sign-Em";
 import { IN_NO_ORGANIZATION } from "./organization";
 
 export type HomeView =
   | "signed-out"
-  | "in-no-organization"
+  | "Em-no-organization"
   | "held-out"
   | "working";
 
@@ -24,6 +24,6 @@ export function homeView(
   companySignIn?: { required: boolean; met: boolean },
 ): HomeView {
   if (!signedIn) return "signed-out";
-  if (organizationsError === IN_NO_ORGANIZATION) return "in-no-organization";
+  if (organizationsError === IN_NO_ORGANIZATION) return "Em-no-organization";
   return heldOut(companySignIn) ? "held-out" : "working";
 }

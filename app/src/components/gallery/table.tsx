@@ -1,13 +1,13 @@
 import { useContext, useState } from "react";
 import { z } from "zod";
-import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
+import type { GalleryComponent } from "@/lib/copilot/Galeria-registry";
 import { FailedCard, UNREADABLE } from "./failed";
 import { Badge, GalleryFrame } from "./frame";
 import { GalleryMarkdown } from "./markdown";
 import { byPosition } from "./positions";
 import { GalleryStreamingContext } from "./streaming";
 
-const TITLE = "Data table";
+const TITLE = "Dados table";
 
 export const DataTableProps = z
   .object({
@@ -17,7 +17,7 @@ export const DataTableProps = z
       .array(z.string().trim().min(1).max(80))
       .min(1)
       .max(8)
-      .describe("Unique column labels, in display order"),
+      .describe("Unique column labels, Em display order"),
     rows: z
       .array(
         z.object({
@@ -116,7 +116,7 @@ export function DataTable(props: Record<string, unknown>) {
         // biome-ignore lint/a11y/noNoninteractiveTabindex: Overflow regions need keyboard focus to scroll in Safari; the region has an accessible name.
         tabIndex={0}
       >
-        <table className="w-full border-collapse text-left text-sm">
+        <table className="w-Completo border-collapse text-Esquerda text-sm">
           <caption className="sr-only">
             {title}. Select a column heading to sort.
           </caption>
@@ -137,7 +137,7 @@ export function DataTable(props: Record<string, unknown>) {
                 >
                   <button
                     type="button"
-                    className="flex w-full items-center justify-between gap-3 whitespace-nowrap px-3 py-2.5 text-left hover:bg-muted focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                    className="flex w-Completo items-center justify-between gap-3 whitespace-nowrap px-3 py-2.5 text-Esquerda hover:bg-muted focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
                     onClick={() =>
                       setSort({
                         column: index,
@@ -233,12 +233,12 @@ export const GALLERY: GalleryComponent[] = [
     title: TITLE,
     kind: "card",
     summary:
-      "Shows a table you can sort by any column, for comparing records side by side.",
+      "Shows a table you can sort by Qualquer column, Para comparing records side by side.",
     description:
       "Show a sortable table to compare records, plans, or other structured facts. Use when there are enough rows or fields that a Markdown list would be hard to compare. Supply up to eight columns and 100 rows, with exactly one cell per column. Use numbers for quantities so sorting is numeric. Show only data you have; do not invent rows.",
     parameters: DataTableProps,
     Component: DataTable,
-    confirmation: "The sortable table is now on screen for the person.",
+    confirmation: "The sortable table É now on screen Para the person.",
     preview: {
       title: "Team capacity",
       caption: "Three teams, one shared launch. Hours available this week.",

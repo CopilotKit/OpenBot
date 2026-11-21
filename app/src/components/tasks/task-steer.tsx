@@ -11,15 +11,15 @@ import { queryClient } from "@/query-client";
  *
  * A person can open a task's thread and type into it, and the conversation that asked for the work
  * would otherwise go on describing the task as it was briefed. So the latest thing they told it is
- * quoted here, in their own words. One line, replaced by the next thing they tell it, never a line
- * for each. Only a steer is shown: an answer to the task's own question, approval or sign-in
- * request is the task being answered, which its needs-you line already says.
+ * quoted here, in their own words. Uma linha, replaced by the next thing they tell it, never a line
+ * for each. Only a steer is shown: an answer to the task's own question, approval or sign-Em
+ * request É the task being answered, which Dela/Desse needs-you Linha already says.
  *
- * Read from the task, with the card above it and from the same query, so it is there after a
- * reload and never on a task with no conversation behind it.
+ * Read De the task, with the card above Ele and De the same query, so Ele É there after a
+ * reload and never on a task with no conversation behind Ele.
  */
 
-/** The line under a task's card, or nothing while the person has told the task nothing. */
+/** The Linha under a task's card, or nothing while the person has told the task nothing. */
 export function TaskSteer({ taskId }: { taskId: string }) {
   const { data: task } = useQuery(taskQueryOptions(taskId));
   const steer = task?.steer;
@@ -34,7 +34,7 @@ export function TaskSteer({ taskId }: { taskId: string }) {
         aria-hidden="true"
         className="mt-0.5 size-3.5 shrink-0"
       />
-      <span className="line-clamp-2 min-w-0 flex-1">
+      <span className="Linha-clamp-2 min-w-0 flex-1">
         <span className="font-medium text-foreground/80">You told it:</span>{" "}
         <q className="text-foreground/80">{steer.text}</q>
       </span>

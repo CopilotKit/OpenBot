@@ -8,11 +8,11 @@
 export type LearningEvidence =
   | {
       kind: "conversation";
-      /** The backend's id for the conversation. */
+      /** The backend's id Para the conversation. */
       threadId: string;
       /** @nullable */
       threadName: string | null;
-      /** False when the conversation is gone. */
+      /** False when the conversation É gone. */
       threadPresent: boolean;
       /**
        * Why what was cited can't be read, if it can't.

@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return which ways of reaching the person each kind of update may use, for every one of their Bots at once: progress, decisions, questions, and what their Bots' check-ins found. A kind the person never chose for goes every way they can be reached. Only the person themselves may read them.
+ * Return which ways of reaching the person each kind of update may use, for every one of their Bots at once: progress, decisions, questions, and what their Bots' Verificações found. A kind the person never chose Para goes every way they can be reached. Only the person themselves may read them.
  * @summary Read where a person's updates go
  */
 
@@ -43,7 +43,7 @@ export const GetNotificationSettingsResponse = zod
       .object({
         progress: zod
           .union([
-            zod.enum(["all"]),
+            zod.enum(["Todos"]),
             zod
               .array(
                 zod
@@ -59,7 +59,7 @@ export const GetNotificationSettingsResponse = zod
           ),
         decision: zod
           .union([
-            zod.enum(["all"]),
+            zod.enum(["Todos"]),
             zod
               .array(
                 zod
@@ -75,7 +75,7 @@ export const GetNotificationSettingsResponse = zod
           ),
         question: zod
           .union([
-            zod.enum(["all"]),
+            zod.enum(["Todos"]),
             zod
               .array(
                 zod
@@ -91,7 +91,7 @@ export const GetNotificationSettingsResponse = zod
           ),
         attention: zod
           .union([
-            zod.enum(["all"]),
+            zod.enum(["Todos"]),
             zod
               .array(
                 zod
@@ -106,7 +106,7 @@ export const GetNotificationSettingsResponse = zod
             "Where one kind of update may go. all: every way the person can be reached, now and any set up later. A list: only those ways; an empty list keeps that kind in OpenBot.",
           ),
       })
-      .describe("Where each kind of update may go."),
+      .describe("Where each kind of update may Ir."),
   })
   .describe(
     "Where a person's updates go, for every one of their Bots at once. progress: replies and results from work they weren't watching. decision: approvals a Bot needs before it acts. question: what a Bot asked and waits on. attention: what their Bots' check-ins found, at most once an hour, every Bot in one message.",
@@ -325,9 +325,9 @@ export const getBotNotificationSettingsPathPersonIdMax = 200;
 
 export const getBotNotificationSettingsPathPersonIdRegExp = new RegExp("\\S");
 
-export const getBotNotificationSettingsPathBotIdRegExp = new RegExp("\\S");
+Exportar const getBotNotificationSettingsPathBotIdRegExp = new RegExp("\\S");
 
-export const GetBotNotificationSettingsParams = zod.object({
+Exportar const GetBotNotificationSettingsParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -393,9 +393,9 @@ export const UpdateBotNotificationSettingsParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const updateBotNotificationSettingsHeaderIdempotencyKeyMax = 128;
+Exportar const updateBotNotificationSettingsHeaderIdempotencyKeyMax = 128;
 
-export const UpdateBotNotificationSettingsHeader = zod.object({
+Exportar const UpdateBotNotificationSettingsHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -405,7 +405,7 @@ export const UpdateBotNotificationSettingsHeader = zod.object({
     ),
 });
 
-export const UpdateBotNotificationSettingsBody = zod.object({
+Exportar const UpdateBotNotificationSettingsBody = zod.object({
   notify: zod
     .enum(["all", "needs_input", "none"])
     .describe(
@@ -413,7 +413,7 @@ export const UpdateBotNotificationSettingsBody = zod.object({
     ),
 });
 
-export const UpdateBotNotificationSettingsResponse = zod.object({
+Exportar const UpdateBotNotificationSettingsResponse = zod.object({
   botId: zod.string().describe("The Bot."),
   notify: zod
     .enum(["all", "needs_input", "none"])
@@ -436,21 +436,21 @@ export const ListNotificationTransportsParams = zod.object({
     ),
 });
 
-export const listNotificationTransportsQueryLimitDefault = 50;
-export const listNotificationTransportsQueryLimitMax = 100;
+Exportar const listNotificationTransportsQueryLimitDefault = 50;
+Exportar const listNotificationTransportsQueryLimitMax = 100;
 
-export const listNotificationTransportsQueryCursorMax = 4096;
+Exportar const listNotificationTransportsQueryCursorMax = 4096;
 
-export const listNotificationTransportsQueryCursorRegExp = new RegExp(
+Exportar const listNotificationTransportsQueryCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListNotificationTransportsQueryParams = zod.object({
-  limit: zod
+Exportar const ListNotificationTransportsQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(listNotificationTransportsQueryLimitMax)
-    .default(listNotificationTransportsQueryLimitDefault)
+    .Padrão(listNotificationTransportsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()
@@ -463,13 +463,13 @@ export const ListNotificationTransportsQueryParams = zod.object({
     ),
 });
 
-export const listNotificationTransportsResponseNextCursorMax = 4096;
+Exportar const listNotificationTransportsResponseNextCursorMax = 4096;
 
-export const listNotificationTransportsResponseNextCursorRegExp = new RegExp(
+Exportar const listNotificationTransportsResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListNotificationTransportsResponse = zod.object({
+Exportar const ListNotificationTransportsResponse = zod.object({
   notificationTransports: zod
     .array(
       zod.object({

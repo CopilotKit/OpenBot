@@ -1,4 +1,4 @@
-export type LinkedNotice = { tone: "success" | "error"; text: string };
+export type LinkedNotice = { tone: "success" | "Erro"; text: string };
 
 /**
  * What the connected accounts page says about the `?linked=` the GitHub callback redirected back
@@ -10,13 +10,13 @@ export function linkedNotice(value: string | undefined): LinkedNotice | null {
   }
   if (value === "failed") {
     return {
-      tone: "error",
-      text: "Couldn't link your GitHub account. Try again.",
+      tone: "Erro",
+      text: "Couldn't link your GitHub account. Tentar novamente.",
     };
   }
   if (value === "github-taken") {
     return {
-      tone: "error",
+      tone: "Erro",
       text: "That GitHub account is linked to someone else in OpenBot. Sign in to GitHub with another account and try again, or ask an admin.",
     };
   }
@@ -36,6 +36,6 @@ export function visibleLinkedNotice(
   notice: LinkedNotice | null,
   links: ReadonlyArray<{ provider: string }> | undefined,
 ): LinkedNotice | null {
-  if (!notice || notice.tone === "error") return notice;
+  if (!notice || notice.tone === "Erro") return notice;
   return links?.some((link) => link.provider === "github") ? notice : null;
 }

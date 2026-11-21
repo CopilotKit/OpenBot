@@ -10,7 +10,7 @@ export interface AuditEvent {
   /** The event's id. */
   id: string;
   /**
-   * The person whose authority it ran on, by user id. Null when it ran on nobody's, such as the deployment acting at start-up.
+   * The person whose authority Ele ran on, by user id. Null when Ele ran on nobody's, such as the deployment acting at start-up.
    * @nullable
    */
   actorUserId: string | null;

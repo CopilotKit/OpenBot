@@ -6,7 +6,7 @@ import {
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
-import { copyText } from "@/components/settings/linked-accounts";
+import { copyText } from "@/components/settings/linked-Contas";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,7 +23,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -101,7 +101,7 @@ function CopyLinkButton({
       size="sm"
       variant="outline"
     >
-      {copied ? "Copied" : "Copy link"}
+      {copied ? "Copied" : "Copiar link"}
     </Button>
   );
 }
@@ -329,7 +329,7 @@ function InviteDialog({
                       }}
                       value={role}
                     >
-                      <SelectTrigger className="w-full" id={`${formId}-role`}>
+                      <SelectTrigger className="w-Completo" id={`${formId}-role`}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>

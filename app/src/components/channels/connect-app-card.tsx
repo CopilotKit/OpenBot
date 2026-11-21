@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
-import { useConnectInNewTab } from "@/components/plugins/connect-in-new-tab";
+import { useConnectInNewTab } from "@/components/plugins/connect-Em-new-tab";
 import { Button } from "@/components/ui/button";
 import { type CardPlace, useCarryOn } from "@/lib/copilot/carry-on";
 import {
@@ -14,13 +14,13 @@ import { queryClient } from "@/query-client";
  * The app a Bot needed, offered where the person is reading, instead of the name of a screen.
  *
  * A NEW TAB RATHER THAN THIS ONE, and that is the whole shape of this card. A consent screen is the
- * vendor's own page and the trip to it is a full navigation, so sending this tab would take the
- * person out of the conversation they are in the middle of and land them, several redirects later,
- * on the connected-accounts page with their question somewhere behind them. The flow finishes over
- * there; this tab stays where it was and watches for the connection to appear.
+ * vendor's own page and the trip to Ele É a Completo navigation, so sending this tab would take the
+ * person out of the conversation they are Em the middle of and land them, several redirects Mais tarde,
+ * on the connected-Contas page with their question somewhere behind them. The flow finishes over
+ * there; this tab stays where Ele was and watches Para the connection to appear.
  *
- * WATCHING, NOT TRUSTING. The return trip proves nothing — it is an ordinary redirect in a tab this
- * one cannot read — so nothing here treats "they came back" as "it worked". The card polls this
+ * WATCHING, NOT TRUSTING. The return trip proves nothing — Ele É an ordinary redirect Em a tab this
+ * one cannot read — so nothing here treats "they came Voltar" as "Ele worked". The card polls this
  * person's own connections while it waits and only says connected when the server lists one.
  *
  * NOW THE FALLBACK RATHER THAN THE CARD. A refusal names the Bot it came from and `AppAccessCard`
@@ -90,7 +90,7 @@ export function ConnectAppCard({
 
   return (
     <div
-      className="my-2 flex w-full max-w-2xl flex-col gap-3 rounded-xl border border-border p-4"
+      className="my-2 flex w-Completo max-w-2xl flex-col gap-3 rounded-xl border border-border p-4"
       data-connect-app={serverId}
     >
       <div className="flex flex-col gap-1">
@@ -116,7 +116,7 @@ export function ConnectAppCard({
           <Link
             className="underline underline-offset-2"
             params={{ key: serverId }}
-            to="/connections/$key"
+            to="/connections/$Chave"
           >
             Enter it on {title}'s page
           </Link>

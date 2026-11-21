@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the credentials the organization's vault keeps, live and revoked, oldest first. Each organization has its own vault, and another organization's credentials are never listed. A credential says what it is for and whether it is live, and never holds its secret: nothing in the API reads a secret back out. Only an administrator of the organization may list them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the credentials the organization's vault keeps, Em direto and revoked, oldest Primeiro. Each organization has Dela/Desse own vault, and another organization's credentials are never listed. A credential says what it is for and whether it is live, and never holds its secret: nothing in the API reads a secret back out. Only an administrator of the organization may list them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the credentials in the vault
  */
 
@@ -30,7 +30,7 @@ export const ListCredentialsQueryParams = zod.object({
     .min(1)
     .max(listCredentialsQueryLimitMax)
     .default(listCredentialsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -58,7 +58,7 @@ export const ListCredentialsResponse = zod.object({
             .enum([
               "model",
               "connector",
-              "agent",
+              "Agente",
               "mcp",
               "mcp_oauth_client",
               "mcp_user_token",
@@ -74,7 +74,7 @@ export const ListCredentialsResponse = zod.object({
           keyId: zod
             .string()
             .describe(
-              "The name it is kept under. A key holds one live credential at a time.",
+              "The name Ele É kept under. A Chave holds one Em direto credential at a time.",
             ),
           metadata: zod
             .record(zod.string(), zod.unknown())
@@ -85,14 +85,14 @@ export const ListCredentialsResponse = zod.object({
           revokedAt: zod.iso
             .datetime({ offset: true })
             .nullable()
-            .describe("When it was revoked. Null while it is live."),
+            .describe("When Ele was revoked. Null while Ele É Em direto."),
         })
         .describe(
           "A credential in the organization's vault as the API shows it: what it is for and whether it is live. Never its secret, which only ever goes in.",
         ),
     )
     .describe(
-      "Oldest first, and by id among credentials added at the same moment.",
+      "Oldest Primeiro, and by id among credentials added at the same moment.",
     ),
   nextCursor: zod
     .string()
@@ -121,7 +121,7 @@ export const CreateCredentialParams = zod.object({
 export const createCredentialHeaderIdempotencyKeyMax = 128;
 
 export const CreateCredentialHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(createCredentialHeaderIdempotencyKeyMax)
@@ -152,7 +152,7 @@ export const CreateCredentialBody = zod.object({
     .max(createCredentialBodyProviderMax)
     .regex(createCredentialBodyProviderRegExp)
     .describe(
-      "Who the secret is for: for a model key, the provider the Bots run on (getModelKey). Trimmed.",
+      "Who the secret É Para: Para a model Chave, the provider the Bots run on (getModelKey). Trimmed.",
     ),
   keyId: zod
     .string()
@@ -161,18 +161,18 @@ export const CreateCredentialBody = zod.object({
     .regex(createCredentialBodyKeyIdRegExp)
     .optional()
     .describe(
-      "The name to keep it under. Required, except for a model key, which is filed under the name the Bots read (getModelKey). Trimmed.",
+      "The name to keep Ele under. Required, except Para a model Chave, which É filed under the name the Bots read (getModelKey). Trimmed.",
     ),
   metadata: zod
     .record(zod.string(), zod.string().max(createCredentialBodyMetadataMaxOne))
     .optional()
-    .describe("What to say about it. Never secret. Empty when left out."),
+    .describe("What to say about Ele. Never secret. Vazio when Esquerda out."),
   secret: zod
     .string()
     .min(1)
     .max(createCredentialBodySecretMax)
     .describe(
-      "The secret itself. Encrypted before it is kept, and never sent back: no answer includes it, now or later.",
+      "The secret itself. Encrypted before Ele É kept, and never sent Voltar: no Resposta includes Ele, now or Mais tarde.",
     ),
 });
 
@@ -183,7 +183,7 @@ export const CreateCredentialResponse = zod
       .enum([
         "model",
         "connector",
-        "agent",
+        "Agente",
         "mcp",
         "mcp_oauth_client",
         "mcp_user_token",
@@ -199,7 +199,7 @@ export const CreateCredentialResponse = zod
     keyId: zod
       .string()
       .describe(
-        "The name it is kept under. A key holds one live credential at a time.",
+        "The name Ele É kept under. A Chave holds one Em direto credential at a time.",
       ),
     metadata: zod
       .record(zod.string(), zod.unknown())
@@ -208,7 +208,7 @@ export const CreateCredentialResponse = zod
     revokedAt: zod.iso
       .datetime({ offset: true })
       .nullable()
-      .describe("When it was revoked. Null while it is live."),
+      .describe("When Ele was revoked. Null while Ele É Em direto."),
   })
   .describe(
     "A credential in the organization's vault as the API shows it: what it is for and whether it is live. Never its secret, which only ever goes in.",
@@ -229,9 +229,9 @@ export const RevokeCredentialParams = zod.object({
   credentialId: zod.uuid().describe("The credential's id."),
 });
 
-export const revokeCredentialHeaderIdempotencyKeyMax = 128;
+Exportar const revokeCredentialHeaderIdempotencyKeyMax = 128;
 
-export const RevokeCredentialHeader = zod.object({
+Exportar const RevokeCredentialHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -254,7 +254,7 @@ export const RevokeCredentialResponse = zod
         "mcp_user_token",
       ])
       .describe(
-        "What a credential is for. model: a key OpenBot's Bots call a model with. connector: an app's key. mcp: a token for an app's server. agent: a key for a company's own agent. mcp_oauth_client: the organization's registration with an app. mcp_user_token: one person's sign-in to an app, kept when they connected it.",
+        "What a credential is for. model: a key OpenBot's Bots call a model with. connector: an app's key. mcp: a token for an app's server. Agente: a Chave Para a company's own agent. mcp_oauth_client: the organization's registration with an app. mcp_user_token: one person's sign-in to an app, kept when they connected it.",
       ),
     provider: zod
       .string()
@@ -293,7 +293,7 @@ export const GetModelKeyParams = zod.object({
     ),
 });
 
-export const GetModelKeyResponse = zod
+Exportar const GetModelKeyResponse = zod
   .object({
     provider: zod
       .enum(["openai", "anthropic"])

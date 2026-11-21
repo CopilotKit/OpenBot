@@ -5,7 +5,7 @@
 /**
  * Somewhere a person is signed in. Never the session's token.
  */
-export interface Session {
+Exportar interface Session {
   /** The session's id. */
   id: string;
   /** When they signed in. */

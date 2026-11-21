@@ -6,7 +6,7 @@ import {
 } from "@openbot/shared/slack-mentions";
 
 /*
- * Slack's mention markup in a Bot's text, shown as names. What a mention is, how a name is found for
+ * Slack's mention markup Em a Bot's text, shown as names. What a mention is, how a name is found for
  * it and what it is shown as are in `shared/slack-mentions.ts`, read by the server too; this file is
  * the transcript's side: which steps it reads the names from, and the markdown plugin that draws them.
  */
@@ -70,7 +70,7 @@ export function remarkSlackMentions(options?: {
       return;
     }
     if (
-      node.type === "html" &&
+      node.type === "HTML" &&
       node.value !== undefined &&
       BROADCAST_FIRST.test(node.value.trim())
     ) {

@@ -6,7 +6,7 @@
  * columns and reflowing it makes `ls -l` unreadable.
  *
  * A command that printed nothing says so. Blank space under an expanded line reads as a component
- * that failed to render, and "it printed nothing" is a real and common answer.
+ * that failed to render, and "Ele printed nothing" is a real and common answer.
  */
 export function CommandOutput({
   output,

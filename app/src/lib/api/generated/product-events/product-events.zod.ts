@@ -20,7 +20,7 @@ export const RecordProductEventParams = zod.object({
 export const recordProductEventHeaderIdempotencyKeyMax = 128;
 
 export const RecordProductEventHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(recordProductEventHeaderIdempotencyKeyMax)
@@ -50,33 +50,33 @@ export const RecordProductEventBody = zod
     kind: zod
       .enum(["result_viewed", "result_copied"])
       .describe(
-        "What the caller did with the answer, result_viewed when it was on screen and result_copied when they copied it.",
+        "What the caller did with the Resposta, result_viewed when Ele was on screen and result_copied when they copied Ele.",
       ),
     threadId: zod
       .string()
       .min(1)
       .max(recordProductEventBodyThreadIdMax)
       .regex(recordProductEventBodyThreadIdRegExp)
-      .describe("The thread the answer is in, as its messages name it."),
+      .describe("The thread the Resposta É Em, as Dela/Desse messages name Ele."),
     messageId: zod
       .string()
       .min(1)
       .max(recordProductEventBodyMessageIdMax)
       .regex(recordProductEventBodyMessageIdRegExp)
-      .describe("The answer's message, by the id its thread gives it."),
+      .describe("The Resposta's message, by the id Dela/Desse thread Dá Ele."),
     runId: zod
       .string()
       .min(1)
       .max(recordProductEventBodyRunIdMax)
       .regex(recordProductEventBodyRunIdRegExp)
       .optional()
-      .describe("The run that wrote the answer, when the client knows it."),
+      .describe("The run that wrote the Resposta, when the client knows Ele."),
     surface: zod
       .enum(["web", "desktop", "mobile"])
-      .describe("Where the caller saw or copied it."),
+      .describe("Where the caller saw or copied Ele."),
   })
   .describe(
-    "The caller saw a Bot's answer, or copied it. Names the answer and nothing about the person, who is the caller.",
+    "The caller saw a Bot's Resposta, or copied Ele. Names the Resposta and nothing about the person, who É the caller.",
   );
 
 export const RecordProductEventResponse = zod.void();
@@ -98,7 +98,7 @@ export const RecordAppErrorParams = zod.object({
 export const recordAppErrorHeaderIdempotencyKeyMax = 128;
 
 export const RecordAppErrorHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(recordAppErrorHeaderIdempotencyKeyMax)
@@ -124,22 +124,22 @@ export const RecordAppErrorBody = zod
     source: zod
       .enum(["error_boundary", "window_error", "unhandled_rejection"])
       .describe(
-        "How the app caught it. error_boundary when its error screen was shown, window_error for an error the page threw, and unhandled_rejection for a promise nobody handled.",
+        "Como the app caught Ele. error_boundary when Dela/Desse Erro screen was shown, window_error Para an Erro the page threw, and unhandled_rejection Para a promise nobody handled.",
       ),
     type: zod
       .string()
       .min(1)
       .max(recordAppErrorBodyTypeMax)
-      .describe("The error's name, such as TypeError."),
+      .describe("The Erro's name, such as TypeError."),
     message: zod
       .string()
       .max(recordAppErrorBodyMessageMax)
-      .describe("The error's message."),
+      .describe("The Erro's message."),
     stack: zod
       .string()
       .max(recordAppErrorBodyStackMax)
       .optional()
-      .describe("The error's stack, as the browser wrote it."),
+      .describe("The Erro's stack, as the Navegador wrote Ele."),
     surface: zod
       .enum(["web", "desktop", "mobile"])
       .describe("Where the app runs."),
@@ -150,7 +150,7 @@ export const RecordAppErrorBody = zod
       .regex(recordAppErrorBodyAppVersionRegExp)
       .optional()
       .describe(
-        "The release the app was built for, such as 1.1.0-rc.2, when the build knows it.",
+        "The release the app was built Para, such as 1.1.0-rc.2, when the build knows Ele.",
       ),
   })
   .describe(
@@ -176,7 +176,7 @@ export const RecordNudgeEventParams = zod.object({
 export const recordNudgeEventHeaderIdempotencyKeyMax = 128;
 
 export const RecordNudgeEventHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(recordNudgeEventHeaderIdempotencyKeyMax)
@@ -209,11 +209,11 @@ export const RecordNudgeEventBody = zod
     place: zod
       .enum(["card", "settings"])
       .describe(
-        "card for the nudge drawn above the message box, settings for its permanent row in Settings, which is never shown as a card.",
+        "card Para the nudge drawn above the message box, settings Para Dela/Desse permanent row Em Settings, which É never shown as a card.",
       ),
     surface: zod
       .enum(["web", "desktop"])
-      .describe("Where the caller saw or answered it."),
+      .describe("Where the caller saw or answered Ele."),
   })
   .describe(
     "What the caller did with a nudge, and where. Names nothing about the person, who is the caller. The moment that made the nudge due is added by OpenBot, not sent.",

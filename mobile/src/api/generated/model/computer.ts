@@ -5,9 +5,9 @@ import type { ComputerKind } from "./computerKind";
 import type { ComputerPerson } from "./computerPerson";
 
 /**
- * One of the organization's computers as its administrator sees it: a person's, or an isolated Bot's. Where every person's Bots share one computer, one person's seat on one Bot there.
+ * One of the organization's Computadores as Dela/Desse administrator sees Ele: a person's, or an isolated Bot's. Where every person's Bots share one computer, one person's seat on one Bot there.
  */
-export interface Computer {
+Exportar interface Computador {
   /** The entry's id in this list. */
   id: string;
   /** Whose computer, as person:<id> or bot:<id>. What stop, reset and update name. */

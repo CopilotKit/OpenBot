@@ -4,7 +4,7 @@ import {
   IconMessageCircle,
   IconPin,
   IconPinFilled,
-  IconPinnedOff,
+  IconFixadoOff,
   IconPlus,
   IconSearch,
   IconTrash,
@@ -18,23 +18,23 @@ import {
   matchingChannels,
   pinnedFirst,
 } from "@/components/app-sidebar/app-sidebar";
-import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
-import { ChannelAvatar } from "@/components/channels/avatar";
-import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { ChannelPagination } from "@/components/app-sidebar/Canal-pagination";
+import { ChannelAvatar } from "@/components/Canais/avatar";
+import { DeleteConversationDialog } from "@/components/Canais/Eliminar-conversation-dialog";
 import { BrandName } from "@/components/edition/brand-name";
-import { navigationRender } from "@/components/edition/team-features-dialog";
+import { navigationRender } from "@/components/edition/team-Funcionalidades-dialog";
 import { Item, ItemContent, ItemTitle } from "@/components/ui/item";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
-import { conversationTitle, untitledLine } from "@/lib/channels/label";
-import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
+import { conversationTitle, untitledLine } from "@/lib/Canais/label";
+import { setChannelFixadoMutationOptions } from "@/lib/Canais/mutations";
 import {
   type ChannelSummary,
   channelListQueryOptions,
-} from "@/lib/channels/queries";
-import { appConfig } from "@/lib/generated/application-config";
+} from "@/lib/Canais/queries";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 import {
   COMMAND_MENU_KEYS,
   openCommandMenu,
@@ -88,17 +88,17 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
           detail={`Your ongoing conversation with ${botName}`}
           icon={IconMessageCircle}
           render={<MainChatLink agentId={bot?.id} onClick={onClose} />}
-          title="Main chat"
+          title="Conversa principal"
         />
         <FuseLinkButton
           icon={IconPlus}
           primary
           render={<NewChatLink agentId={bot?.id} onClick={onClose} />}
         >
-          New chat
+          Novo chat
         </FuseLinkButton>
         <LinkRow
-          detail="Open any page, Bot or conversation"
+          detail="Open Qualquer page, Bot or conversation"
           icon={IconSearch}
           render={
             <button
@@ -116,7 +116,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
           <h2 className={fuseText.heading}>Conversations</h2>
           <FuseLinkButton
             icon={IconUsersGroup}
-            render={<Link onClick={onClose} to="/channel/new" />}
+            render={<Link onClick={onClose} to="/Canal/new" />}
             small
           >
             New group
@@ -125,11 +125,11 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
         <label className="relative block">
           <IconSearch
             aria-hidden="true"
-            className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-4 size-4 text-muted-foreground"
+            className="-translate-y-1/2 pointer-Eventos-none absolute top-1/2 Esquerda-4 size-4 text-muted-foreground"
           />
           <input
             aria-label="Search conversations"
-            className="min-h-[45px] w-full rounded-[19px] border border-border bg-card py-3 pr-4 pl-10 text-[16px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-[var(--openfuse-focus)]"
+            className="min-h-[45px] w-Completo rounded-[19px] border border-border bg-card py-3 pr-4 pl-10 text-[16px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-[var(--openfuse-focus)]"
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search conversations"
             value={search}
@@ -168,7 +168,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
           <LinkRow
             icon={IconHome}
             render={<Link onClick={onClose} to="/" />}
-            title="Home"
+            title="Início"
           />
           {/* OpenBot's own destinations, from the one list its sidebar draws. */}
           {navigation.map((item) => (
@@ -221,7 +221,7 @@ function ConversationRow({
     strict: false,
     select: (params) => (params as { channelId?: string }).channelId,
   });
-  const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
+  const setFixado = useMutation(setChannelFixadoMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
   const group = channel.agentIds.length > 1;
   const unread = isUnread(channel, openId);
@@ -241,17 +241,17 @@ function ConversationRow({
       <Item
         className={cn(
           "flex-nowrap items-start gap-2.5 border-0 p-0 [a]:hover:bg-transparent",
-          channel.id === openId && "[&_[data-slot=item-title]]:underline",
+          channel.id === openId && "[&_[Dados-slot=item-title]]:underline",
         )}
         render={
           <Link
             onClick={onOpen}
             params={{ channelId: channel.id }}
-            to={group ? "/group/$channelId" : "/channel/$channelId"}
+            to={group ? "/Grupo/$channelId" : "/Canal/$channelId"}
           />
         }
       >
-        {/* The same faces OpenBot's own conversation list draws: the Bot, or the group's Bots. */}
+        {/* The same faces OpenBot's own conversation Lista draws: the Bot, or the Grupo's Bots. */}
         <span className="mt-0.5 shrink-0">
           <ChannelAvatar
             participantIds={channel.agentIds}
@@ -263,7 +263,7 @@ function ConversationRow({
           <ItemTitle
             className={cn(
               fuseText.body,
-              "line-clamp-1 block",
+              "Linha-clamp-1 block",
               unread && "font-semibold",
             )}
           >
@@ -283,24 +283,24 @@ function ConversationRow({
         </ItemContent>
         {unread ? (
           <span
-            className="mt-2 size-2 shrink-0 rounded-full bg-[var(--openfuse-accent)]"
+            className="mt-2 size-2 shrink-0 rounded-Completo bg-[var(--openfuse-accent)]"
             role="img"
             aria-label="Unread"
           />
         ) : null}
         {channel.pinned ? (
           <IconPinFilled
-            aria-label="Pinned"
+            aria-label="Fixado"
             className="mt-1 size-3.5 shrink-0 text-muted-foreground"
           />
         ) : null}
       </Item>
       <div className="flex gap-2">
         <FuseButton
-          disabled={setPinned.isPending}
-          icon={channel.pinned ? IconPinnedOff : IconPin}
+          disabled={setFixado.isPending}
+          icon={channel.pinned ? IconFixadoOff : IconPin}
           onClick={() =>
-            setPinned.mutate({ channelId: channel.id, pinned: !channel.pinned })
+            setFixado.mutate({ channelId: channel.id, pinned: !channel.pinned })
           }
           small
         >
@@ -310,7 +310,7 @@ function ConversationRow({
           Delete
         </FuseButton>
       </div>
-      <ErrorNotice error={setPinned.error?.message} />
+      <ErrorNotice error={setFixado.error?.message} />
       <DeleteConversationDialog
         channelId={channel.id}
         leave={channel.id === openId ? () => navigate({ to: "/" }) : undefined}

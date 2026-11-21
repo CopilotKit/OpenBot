@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import AgentOrb from "@/components/Agentes/orb/Agente-orb";
 import { orbPalette } from "@/lib/orb-palette";
 
 /** At this size and smaller, an idle orb is drawn still. */

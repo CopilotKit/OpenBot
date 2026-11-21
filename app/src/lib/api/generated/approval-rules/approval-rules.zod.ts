@@ -21,17 +21,17 @@ export const GetApprovalSettingsResponse = zod
   .object({
     enforceAutoReview: zod
       .boolean()
-      .describe("The reviewer reads every action, whatever a person chose."),
+      .describe("The reviewer reads every Ação, whatever a person chose."),
     customRulesEnabled: zod
       .boolean()
       .describe("People may save rules of their own."),
     hostCommandsCap: zod
-      .enum(["ask", "allow", "never"])
+      .enum(["ask", "Permitir", "never"])
       .describe(
-        "Commands on a person's own computer: ask each time, allow them, or never run them.",
+        "Commands on a person's own Computador: ask each time, Permitir them, or never run them.",
       )
       .describe(
-        "The most a person may allow for commands on their own computer.",
+        "The most a person may Permitir Para commands on their own Computador.",
       ),
     actionKinds: zod
       .object({
@@ -39,50 +39,50 @@ export const GetApprovalSettingsResponse = zod
           .enum(["open", "ask", "hand_off"])
           .optional()
           .describe(
-            "What the organization lets people do about one kind of action. open, the default, asks, and the person can allow it once, for the conversation, or always. ask asks every time, with allow once and deny only. hand_off leaves it to the person to do themselves.",
+            "What the organization lets people do about one kind of Ação. open, the Padrão, asks, and the person can Permitir Ele once, Para the conversation, or Sempre. ask asks every time, with Permitir once and deny only. hand_off leaves Ele to the person to do themselves.",
           ),
         sending: zod
           .enum(["open", "ask", "hand_off"])
           .optional()
           .describe(
-            "What the organization lets people do about one kind of action. open, the default, asks, and the person can allow it once, for the conversation, or always. ask asks every time, with allow once and deny only. hand_off leaves it to the person to do themselves.",
+            "What the organization lets people do about one kind of Ação. open, the Padrão, asks, and the person can Permitir Ele once, Para the conversation, or Sempre. ask asks every time, with Permitir once and deny only. hand_off leaves Ele to the person to do themselves.",
           ),
         sharing: zod
           .enum(["open", "ask", "hand_off"])
           .optional()
           .describe(
-            "What the organization lets people do about one kind of action. open, the default, asks, and the person can allow it once, for the conversation, or always. ask asks every time, with allow once and deny only. hand_off leaves it to the person to do themselves.",
+            "What the organization lets people do about one kind of Ação. open, the Padrão, asks, and the person can Permitir Ele once, Para the conversation, or Sempre. ask asks every time, with Permitir once and deny only. hand_off leaves Ele to the person to do themselves.",
           ),
         publishing: zod
           .enum(["open", "ask", "hand_off"])
           .optional()
           .describe(
-            "What the organization lets people do about one kind of action. open, the default, asks, and the person can allow it once, for the conversation, or always. ask asks every time, with allow once and deny only. hand_off leaves it to the person to do themselves.",
+            "What the organization lets people do about one kind of Ação. open, the Padrão, asks, and the person can Permitir Ele once, Para the conversation, or Sempre. ask asks every time, with Permitir once and deny only. hand_off leaves Ele to the person to do themselves.",
           ),
         payments: zod
           .enum(["open", "ask", "hand_off"])
           .optional()
           .describe(
-            "What the organization lets people do about one kind of action. open, the default, asks, and the person can allow it once, for the conversation, or always. ask asks every time, with allow once and deny only. hand_off leaves it to the person to do themselves.",
+            "What the organization lets people do about one kind of Ação. open, the Padrão, asks, and the person can Permitir Ele once, Para the conversation, or Sempre. ask asks every time, with Permitir once and deny only. hand_off leaves Ele to the person to do themselves.",
           ),
         credentials: zod
           .enum(["open", "ask", "hand_off"])
           .optional()
           .describe(
-            "What the organization lets people do about one kind of action. open, the default, asks, and the person can allow it once, for the conversation, or always. ask asks every time, with allow once and deny only. hand_off leaves it to the person to do themselves.",
+            "What the organization lets people do about one kind of Ação. open, the Padrão, asks, and the person can Permitir Ele once, Para the conversation, or Sempre. ask asks every time, with Permitir once and deny only. hand_off leaves Ele to the person to do themselves.",
           ),
         security_settings: zod
           .enum(["open", "ask", "hand_off"])
           .optional()
           .describe(
-            "What the organization lets people do about one kind of action. open, the default, asks, and the person can allow it once, for the conversation, or always. ask asks every time, with allow once and deny only. hand_off leaves it to the person to do themselves.",
+            "What the organization lets people do about one kind of Ação. open, the Padrão, asks, and the person can Permitir Ele once, Para the conversation, or Sempre. ask asks every time, with Permitir once and deny only. hand_off leaves Ele to the person to do themselves.",
           ),
       })
       .describe(
-        "What the organization lets people do about each kind of action. A kind not named is open.",
+        "What the organization lets people do about each kind of Ação. A kind not named É open.",
       ),
   })
-  .describe("What the organization decides about asking, for everybody.");
+  .describe("What the organization decides about asking, Para everybody.");
 
 /**
  * Change the settings sent and keep the rest, one kind of action at a time. At least one is required. Setting a kind to ask leaves allow once and deny as its only answers, for everybody; hand_off leaves it to the person. Recorded on the audit trail. Only an administrator may change them.
@@ -171,7 +171,7 @@ export const UpdateApprovalSettingsBody = zod.object({
     .describe("The kinds to change. A kind left out stays as it was set."),
 });
 
-export const UpdateApprovalSettingsResponse = zod
+Exportar const UpdateApprovalSettingsResponse = zod
   .object({
     enforceAutoReview: zod
       .boolean()
@@ -239,7 +239,7 @@ export const UpdateApprovalSettingsResponse = zod
   .describe("What the organization decides about asking, for everybody.");
 
 /**
- * Return one page of the rules the organization set for everybody's Bots' actions, newest first. They come ahead of a person's own rules. Everybody in the organization may read them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the rules the organization set for everybody's Bots' Ações, newest Primeiro. They come ahead of a person's own rules. Everybody in the organization may read them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the organization's approval rules
  */
 
@@ -279,13 +279,13 @@ export const ListApprovalRulesQueryParams = zod.object({
     ),
 });
 
-export const listApprovalRulesResponseNextCursorMax = 4096;
+Exportar const listApprovalRulesResponseNextCursorMax = 4096;
 
-export const listApprovalRulesResponseNextCursorRegExp = new RegExp(
+Exportar const listApprovalRulesResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListApprovalRulesResponse = zod.object({
+Exportar const ListApprovalRulesResponse = zod.object({
   approvalRules: zod
     .array(
       zod
@@ -335,9 +335,9 @@ export const CreateApprovalRuleParams = zod.object({
     ),
 });
 
-export const createApprovalRuleHeaderIdempotencyKeyMax = 128;
+Exportar const createApprovalRuleHeaderIdempotencyKeyMax = 128;
 
-export const CreateApprovalRuleHeader = zod.object({
+Exportar const CreateApprovalRuleHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -347,31 +347,31 @@ export const CreateApprovalRuleHeader = zod.object({
     ),
 });
 
-export const createApprovalRuleBodyBotIdOneMax = 300;
+Exportar const createApprovalRuleBodyBotIdOneMax = 300;
 
-export const createApprovalRuleBodyBotIdOneRegExp = new RegExp(
+Exportar const createApprovalRuleBodyBotIdOneRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
-export const createApprovalRuleBodyBotIdDefault = `*`;
-export const createApprovalRuleBodyToolRefOneMax = 300;
+Exportar const createApprovalRuleBodyBotIdDefault = `*`;
+Exportar const createApprovalRuleBodyToolRefOneMax = 300;
 
-export const createApprovalRuleBodyToolRefOneRegExp = new RegExp(
+Exportar const createApprovalRuleBodyToolRefOneRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
-export const createApprovalRuleBodyEffectOneMax = 300;
+Exportar const createApprovalRuleBodyEffectOneMax = 300;
 
-export const createApprovalRuleBodyEffectOneRegExp = new RegExp(
+Exportar const createApprovalRuleBodyEffectOneRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
-export const createApprovalRuleBodyEffectDefault = `*`;
-export const createApprovalRuleBodyScopeOneMax = 300;
+Exportar const createApprovalRuleBodyEffectDefault = `*`;
+Exportar const createApprovalRuleBodyScopeOneMax = 300;
 
-export const createApprovalRuleBodyScopeOneRegExp = new RegExp(
+Exportar const createApprovalRuleBodyScopeOneRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
-export const createApprovalRuleBodyScopeDefault = `*`;
+Exportar const createApprovalRuleBodyScopeDefault = `*`;
 
-export const CreateApprovalRuleBody = zod.object({
+Exportar const CreateApprovalRuleBody = zod.object({
   botId: zod
     .string()
     .min(1)
@@ -380,7 +380,7 @@ export const CreateApprovalRuleBody = zod.object({
     .describe(
       "An exact value, or a pattern where * matches anything, so mcp/gmail/* names every Gmail tool. Trimmed.",
     )
-    .default(createApprovalRuleBodyBotIdDefault)
+    .Padrão(createApprovalRuleBodyBotIdDefault)
     .describe("Which Bot. Every Bot when left out."),
   toolRef: zod
     .string()
@@ -399,7 +399,7 @@ export const CreateApprovalRuleBody = zod.object({
     .describe(
       "An exact value, or a pattern where * matches anything, so mcp/gmail/* names every Gmail tool. Trimmed.",
     )
-    .default(createApprovalRuleBodyEffectDefault)
+    .Padrão(createApprovalRuleBodyEffectDefault)
     .describe("Which kind of effect. Every kind when left out."),
   scope: zod
     .string()
@@ -409,7 +409,7 @@ export const CreateApprovalRuleBody = zod.object({
     .describe(
       "An exact value, or a pattern where * matches anything, so mcp/gmail/* names every Gmail tool. Trimmed.",
     )
-    .default(createApprovalRuleBodyScopeDefault)
+    .Padrão(createApprovalRuleBodyScopeDefault)
     .describe("Which target. Every target when left out."),
   behaviour: zod
     .enum(["allow", "pre_approved", "ask", "hand_off"])
@@ -418,7 +418,7 @@ export const CreateApprovalRuleBody = zod.object({
     ),
 });
 
-export const CreateApprovalRuleResponse = zod
+Exportar const CreateApprovalRuleResponse = zod
   .object({
     id: zod.string().min(1),
     botId: zod.string(),
@@ -449,7 +449,7 @@ export const updateApprovalRulePathApprovalRuleIdMax = 200;
 
 export const updateApprovalRulePathApprovalRuleIdRegExp = new RegExp("\\S");
 
-export const UpdateApprovalRuleParams = zod.object({
+Exportar const UpdateApprovalRuleParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -562,7 +562,7 @@ export const UpdateApprovalRuleResponse = zod
       ),
     createdAt: zod.iso.datetime({ offset: true }),
   })
-  .describe("A rule the organization set for everybody's Bots' actions.");
+  .describe("A rule the organization set for everybody's Bots' Ações.");
 
 /**
  * Remove one of the organization's rules, so the actions it covered are decided without it. The audit trail records the removal, and the organization's rules before and after. Only an administrator may remove one.
@@ -591,7 +591,7 @@ export const DeleteApprovalRuleParams = zod.object({
 export const deleteApprovalRuleHeaderIdempotencyKeyMax = 128;
 
 export const DeleteApprovalRuleHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(deleteApprovalRuleHeaderIdempotencyKeyMax)
@@ -669,17 +669,17 @@ export const TranslateApprovalRulesResponse = zod.object({
     .string()
     .nullable()
     .describe(
-      "What the rules do, read from the rules alone. Null when they don't check.",
+      "What the rules do, read from the rules alone. Null when they don't Verificação.",
     ),
-  check: zod
+  Verificação: zod
     .object({
       ok: zod.boolean(),
-      error: zod.string().optional(),
+      Erro: zod.string().optional(),
       problems: zod
         .array(
           zod
             .object({
-              row: zod.int().min(1).describe("Which rule, counted from 1."),
+              row: zod.int().min(1).describe("Which rule, counted De 1."),
               field: zod.enum([
                 "botId",
                 "toolRef",
@@ -689,12 +689,12 @@ export const TranslateApprovalRulesResponse = zod.object({
               ]),
               message: zod.string(),
             })
-            .describe("What is wrong with one field of one rule."),
+            .describe("What É wrong with one field of one rule."),
         )
         .optional(),
     })
     .describe(
-      "Whether every rule matches real tools, kinds of action and Bots, by the approval gate's own matcher. error and problems say what is wrong when one does not.",
+      "Whether every rule matches real tools, kinds of Ação and Bots, by the approval gate's own matcher. error and problems say what is wrong when one does not.",
     ),
   warning: zod
     .string()
@@ -716,9 +716,9 @@ export const ReplayApprovalRulesParams = zod.object({
     ),
 });
 
-export const replayApprovalRulesHeaderIdempotencyKeyMax = 128;
+Exportar const replayApprovalRulesHeaderIdempotencyKeyMax = 128;
 
-export const ReplayApprovalRulesHeader = zod.object({
+Exportar const ReplayApprovalRulesHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -733,19 +733,19 @@ export const replayApprovalRulesBodyRulesItemBotIdMax = 300;
 export const replayApprovalRulesBodyRulesItemBotIdRegExp = new RegExp(
   "^[^\\x00]*$",
 );
-export const replayApprovalRulesBodyRulesItemToolRefMax = 300;
+Exportar const replayApprovalRulesBodyRulesItemToolRefMax = 300;
 
-export const replayApprovalRulesBodyRulesItemToolRefRegExp = new RegExp(
+Exportar const replayApprovalRulesBodyRulesItemToolRefRegExp = new RegExp(
   "^[^\\x00]*$",
 );
-export const replayApprovalRulesBodyRulesItemEffectMax = 300;
+Exportar const replayApprovalRulesBodyRulesItemEffectMax = 300;
 
-export const replayApprovalRulesBodyRulesItemEffectRegExp = new RegExp(
+Exportar const replayApprovalRulesBodyRulesItemEffectRegExp = new RegExp(
   "^[^\\x00]*$",
 );
-export const replayApprovalRulesBodyRulesItemScopeMax = 300;
+Exportar const replayApprovalRulesBodyRulesItemScopeMax = 300;
 
-export const replayApprovalRulesBodyRulesItemScopeRegExp = new RegExp(
+Exportar const replayApprovalRulesBodyRulesItemScopeRegExp = new RegExp(
   "^[^\\x00]*$",
 );
 export const replayApprovalRulesBodyRulesMax = 8;
@@ -780,7 +780,7 @@ export const ReplayApprovalRulesBody = zod.object({
             .string()
             .max(replayApprovalRulesBodyRulesItemScopeMax)
             .regex(replayApprovalRulesBodyRulesItemScopeRegExp)
-            .describe("The target. For an app's tool it is the app's id."),
+            .describe("The target. For an app's tool Ele É the app's id."),
           behaviour: zod
             .enum(["allow", "pre_approved", "ask", "hand_off"])
             .describe(
@@ -793,7 +793,7 @@ export const ReplayApprovalRulesBody = zod.object({
     )
     .min(1)
     .max(replayApprovalRulesBodyRulesMax),
-  limit: zod
+  Limite: zod
     .int()
     .min(1)
     .max(replayApprovalRulesBodyLimitMax)
@@ -803,11 +803,11 @@ export const ReplayApprovalRulesBody = zod.object({
     ),
 });
 
-export const ReplayApprovalRulesResponse = zod.object({
-  check: zod
+Exportar const ReplayApprovalRulesResponse = zod.object({
+  Verificação: zod
     .object({
       ok: zod.boolean(),
-      error: zod.string().optional(),
+      Erro: zod.string().optional(),
       problems: zod
         .array(
           zod

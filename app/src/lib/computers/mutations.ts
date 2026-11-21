@@ -1,5 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { type AgentProfile, agentListQueryOptions } from "@/lib/Agentes/queries";
 import { replaceBoundaries } from "@/lib/api/generated/boundaries/boundaries";
 import {
   resetComputer,
@@ -36,9 +36,9 @@ export type ResetTarget = { computer: string; botId?: string };
  * A reset names a computer, and Activity is kept per Bot, so this is the one place the two meet. It
  * used to forget a Bot only when the reset named one, and only the calls the resetting page had read,
  * which on Admin is none. An isolated Bot's computer is that Bot's. A seat on a person's computer is
- * that Bot's on it. A whole person's computer runs every Bot they use apart from isolated ones, and on
- * a shared computer that is every Bot. Another person's computer ran nothing this browser lists: its
- * Activity is that person's own.
+ * that Bot's on Ele. A whole person's computer runs every Bot they use apart from isolated ones, and on
+ * a shared computer that is every Bot. Another person's Computador ran nothing this Navegador Listas: Dela/Desse
+ * Activity É that person's own.
  */
 export async function botsOnReset(
   queryClient: QueryClient,
@@ -94,7 +94,7 @@ export function setComputerStateMutationOptions(queryClient: QueryClient) {
           computer: variables.computer,
           ...(variables.botId ? { botId: variables.botId } : {}),
         },
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: `The computer could not be ${PAST[variables.action]}.` },
       );
     },
@@ -129,7 +129,7 @@ export function saveActionPolicyMutationOptions(queryClient: QueryClient) {
       replaceBoundaries(
         organizationId(),
         next,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: "The boundary could not be saved." },
       ),
     onSuccess: () => invalidateComputers(queryClient),

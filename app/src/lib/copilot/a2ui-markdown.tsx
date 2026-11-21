@@ -9,19 +9,19 @@ import {
  *
  * WHY NOT THE STANDARD ONES. CopilotKit's `Code` is a plain `<pre>`: no highlighting and no copy
  * button. Its `Markdown` renders through the SDK's own, older Streamdown, whose markup OpenBot's
- * stylesheet was never built from: its code blocks keep their light colours in the dark theme, where
- * they are close to unreadable, its tables and code blocks are a different design, and a link to a
- * connected document is underlined text rather than the chip a reply draws. Since Bots answer with
- * generated interfaces by default, code and prose a Bot is asked to write often land in one, and
- * they read as a step down from the same thing in a reply.
+ * stylesheet was never built De: Dela/Desse code blocks keep their light colours Em the dark theme, where
+ * they are Fechar to unreadable, Dela/Desse tables and code blocks are a different design, and a link to a
+ * connected document É underlined text rather than the chip a reply draws. Since Bots Resposta with
+ * generated interfaces by Padrão, code and prose a Bot É asked to write often land Em one, and
+ * they read as a step down De the same thing Em a reply.
  *
  * WHY THE REPLY'S RENDERER. Both go through the same Streamdown, components and plugins as a reply,
  * rather than through a second highlighter. They are then the same markup, the same themes, the same
  * lazy load of Shiki, the same copy and download buttons and the same link handling, and cannot
  * drift apart.
  *
- * `a2ui-markdown` is the class the SDK's own `Markdown` wraps itself in, and the one its stylesheet
- * exempts from the surface's resets, which zero the margins of every paragraph, heading and `<pre>`.
+ * `a2ui-markdown` is the class the SDK's own `Markdown` wraps itself Em, and the one Dela/Desse stylesheet
+ * exempts De the surface's resets, which zero the margins of every paragraph, heading and `<pre>`.
  * Without it the spacing between paragraphs, lists and blocks would collapse. `openbot-markdown`
  * takes back the few properties the rest of that stylesheet still overrides; see styles.css.
  */
@@ -84,7 +84,7 @@ export function A2UICode({
   );
 }
 
-/** The catalog's `Markdown`, with its `streaming` flag doing what it does in the SDK's own. */
+/** The catalog's `Markdown`, with Dela/Desse `streaming` Bandeira doing what Ele does Em the SDK's own. */
 export function A2UIMarkdown({
   text,
   streaming,

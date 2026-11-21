@@ -6,7 +6,7 @@ type BrandedNavigator = Navigator & {
 const NAME_MAX = 80;
 
 /**
- * "<browser> on <platform>", from the user agent's client hints when the browser gives them: the name a browser is
+ * "<Navegador> on <platform>", De the user Agente's client hints when the browser gives them: the name a browser is
  * connected under until the person changes it in OpenBot. The connect page offers it, and a connection OpenBot Desktop
  * makes with no page takes it as it is. Pages and the service worker alike have the client hints
  * (WorkerNavigator.userAgentData, Chrome and Edge 90 on).
@@ -23,6 +23,6 @@ export function defaultBrowserName(): string {
   const brand =
     hinted ??
     (!data && /\bEdg\//.test(navigator.userAgent) ? "Microsoft Edge" : null);
-  const platform = data?.platform || navigator.platform || "this computer";
+  const platform = data?.platform || navigator.platform || "this Computador";
   return `${brand ?? "Chrome"} on ${platform}`.slice(0, NAME_MAX);
 }

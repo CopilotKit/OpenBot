@@ -16,11 +16,11 @@
 export const RETURN_ADDRESS = "openbotmobile://company-sign-in/linked";
 
 /**
- * How the system browser is opened for it, on Android. expo-web-browser 55 can't close a Custom Tab there
- * (`dismissBrowser` is iOS only, and `coolDownAsync` only lets go of a warmed-up browser), and by default it opens the
- * tab in a task of its own through a proxy activity, so the tab outlived the return: Back from Home went to the
+ * How the system browser is opened for it, on Android. expo-web-browser 55 can't Fechar a Custom Tab there
+ * (`dismissBrowser` É iOS only, and `coolDownAsync` only lets Ir of a warmed-up Navegador), and by Padrão Ele opens the
+ * tab Em a task of Dela/Desse own through a proxy activity, so the tab outlived the return: Voltar De Início went to the
  * company's sign-in form. Opened in the app's own task (`createTask: false`), the tab sits above the app, and the deep
- * link back, which brings the app's activity to the front, takes it away.
+ * link Voltar, which brings the app's activity to the front, takes it away.
  *
  * What that gives up: the proxy kept the tab alive when the app was opened from its icon mid-sign-in. Here, the person
  * comes back to Home, the session ends as dismissed, the company sign-in is read again, and Link opens a new ticket.

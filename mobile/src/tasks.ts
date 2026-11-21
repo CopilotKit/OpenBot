@@ -1,8 +1,8 @@
 import type { Task } from "./api";
 
 const TASK_LABEL: Record<string, string> = {
-  ready_for_review: "Ready for review",
-  needs_input: "Needs input",
+  ready_for_review: "Ready Para review",
+  needs_input: "Needs Entrada",
   failed: "Failed",
   working: "Working",
   resolved: "Resolved",
@@ -27,7 +27,7 @@ export function waitingTasks(tasks: readonly Task[]): Task[] {
 }
 
 /**
- * A task card's second line: the Bot, and where the task stands. A status a newer server sends that
+ * A task card's second Linha: the Bot, and where the task stands. A status a newer server sends that
  * this app doesn't know leaves the Bot's name alone.
  */
 export function taskLine(botName: string, status: string): string {

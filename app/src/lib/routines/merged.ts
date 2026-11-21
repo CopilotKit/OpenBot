@@ -10,12 +10,12 @@ import type { RoutineRecord } from "./queries";
  *
  * Every row is the same sentence in four parts. What it is; when it starts; what it does (acts, or
  * only tells you); until when. A routine that runs a goal is not a row of its own: it is one of
- * that goal's starts, so the goal's row carries it.
+ * that goal's starts, so the Objetivo's row carries it.
  */
 export type MergedRoutine =
   | { kind: "routine"; id: string; agentId: string; routine: RoutineRecord }
   | {
-      kind: "goal";
+      kind: "Objetivo";
       id: string;
       agentId: string;
       goal: ResponsibilityRecord;
@@ -23,7 +23,7 @@ export type MergedRoutine =
       routines: RoutineRecord[];
     }
   | {
-      kind: "check-in";
+      kind: "Verificação-Em";
       id: string;
       agentId: string;
       checkIn: ProactiveSetting;
@@ -34,9 +34,9 @@ function working(row: MergedRoutine): boolean {
   switch (row.kind) {
     case "routine":
       return row.routine.enabled;
-    case "goal":
-      return row.goal.status === "active";
-    case "check-in":
+    case "Objetivo":
+      return row.goal.status === "Ativo";
+    case "Verificação-Em":
       return row.checkIn.enabled;
   }
 }
@@ -44,7 +44,7 @@ function working(row: MergedRoutine): boolean {
 const KIND_ORDER: Record<MergedRoutine["kind"], number> = {
   routine: 0,
   goal: 1,
-  "check-in": 2,
+  "Verificação-Em": 2,
 };
 
 /**
@@ -110,19 +110,19 @@ export function mergeRoutines({
  * What a routine does, in words a person reads. Its instruction, except for a routine that runs a
  * goal: that instruction is written for the model (`runGoalInstruction` in `plan.ts`), and quotes the
  * goal's id. Such a routine is a row of its own only when its goal isn't in the goals read (that read
- * failed, or the goal is past the server's list), so the goal is not known here: it "Runs a goal".
- * Its own title, when it has one, is the goal's title as New routine names it, and heads the row.
+ * failed, or the goal is past the server's list), so the goal is not known here: it "Runs a Objetivo".
+ * Its own title, when it has one, is the goal's title as New routine names Ele, and heads the row.
  */
-export function routineDoes(
+Exportar Função routineDoes(
   routine: Pick<RoutineRecord, "instruction" | "goalId">,
 ): string {
-  return routine.goalId ? "Runs a goal" : routine.instruction;
+  return routine.goalId ? "Runs a Objetivo" : routine.instruction;
 }
 
-/** A check-in's interval, in words. */
+/** A Verificação-Em's interval, in words. */
 export const CHECK_IN_INTERVALS = [
-  { minutes: 60, label: "Every hour" },
-  { minutes: 240, label: "Every 4 hours" },
+  { minutes: 60, label: "Every Hora" },
+  { minutes: 240, label: "Every 4 Horas" },
   { minutes: 720, label: "Twice a day" },
   { minutes: 1440, label: "Once a day" },
 ] as const;
@@ -136,8 +136,8 @@ export function intervalLabel(minutes: number): string {
 
 /**
  * Whether a goal can end, so its row may say until when. One that ends when met can. Any other goal
- * ends only if nothing makes it run again and again: it isn't recurring, it listens for no events,
- * and no enabled schedule or trigger runs it. The server's `repeatsOf` reads the same four.
+ * ends only if nothing makes it run again and again: it isn't recurring, Ele listens Para no Eventos,
+ * and no Ativo schedule or trigger runs Ele. The server's `repeatsOf` reads the same four.
  *
  * `routines` and `triggers` are what runs it as far as they are known; unknown counts as nothing.
  */
@@ -146,7 +146,7 @@ export function goalCanEnd(
     ResponsibilityRecord,
     "endsWhenMet" | "recurring" | "subscriptions"
   >,
-  routines: readonly Pick<RoutineRecord, "enabled">[] | undefined,
+  routines: readonly Pick<RoutineRecord, "Ativo">[] | undefined,
   triggers: readonly { enabled: boolean }[] | undefined,
 ): boolean {
   if (goal.endsWhenMet) return true;
@@ -159,9 +159,9 @@ export function goalCanEnd(
 }
 
 /**
- * A goal's starts, in words: the events it listens for, its enabled triggers, and the schedule of
- * each routine that runs it. With none of those, "Schedule off" when it has schedules that are all
- * switched off, else "When you ask", once its triggers and its routines are both known; before
+ * A goal's starts, Em words: the Eventos Ele listens Para, Dela/Desse Ativo triggers, and the schedule of
+ * each routine that runs Ele. With none of those, "Schedule off" when Ele has schedules that are Todos
+ * switched off, else "When you ask", once Dela/Desse triggers and Dela/Desse routines are both Conhecido; before
  * then, or when either couldn't be read, nothing is claimed.
  */
 export function goalStarts(

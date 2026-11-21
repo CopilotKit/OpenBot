@@ -75,7 +75,7 @@ export function SkillTools() {
   useFrontendTool({
     name: "list_skills",
     description:
-      "The skills that already exist in this deployment, one line each, with whose each one is. Read this before writing a skill: a slug is an identity, so reusing one replaces that skill, and a slug that is not the person's own cannot be replaced at all.",
+      "The skills that already exist Em this deployment, one Linha each, with whose each one É. Read this before writing a skill: a slug É an identity, so reusing one replaces that skill, and a slug that Não é the person's own cannot be replaced at Todos.",
     parameters: z.object({}),
     handler: async () => {
       const [all, me] = await Promise.all([
@@ -89,12 +89,12 @@ export function SkillTools() {
   useFrontendTool({
     name: "read_skill",
     description:
-      "One existing skill in full, including its instructions. Use this when improving a skill rather than writing a new one — never rewrite an instruction you have not read.",
+      "One existing skill Em Completo, including Dela/Desse instructions. Use this when improving a skill rather than writing a new one — never rewrite an instruction you have not read.",
     parameters: z.object({
       slug: z
         .string()
         .describe(
-          "The skill's `/` command, without the slash, as list_skills spells it.",
+          "The skill's `/` command, without the slash, as list_skills spells Ele.",
         ),
     }),
     handler: async ({ slug }) => {
@@ -112,7 +112,7 @@ export function SkillTools() {
   useFrontendTool({
     name: "list_skill_tools",
     description:
-      "The `serverId/toolName` refs a skill here can declare, grouped by connector. Declaring a tool grants nothing — the offer a run gets is always the intersection of what the skill names with what the Bot was granted — so a skill may name tools for a connector this Bot does not hold yet.",
+      "The `serverId/toolName` refs a skill here can declare, grouped by connector. Declaring a tool grants nothing — the offer a run gets É Sempre the intersection of what the skill names with what the Bot was Concedido — so a skill may name tools Para a connector this Bot does not hold yet.",
     parameters: z.object({}),
     handler: async () =>
       describeToolRefs(await queryClient.ensureQueryData(appsQueryOptions())),
@@ -121,7 +121,7 @@ export function SkillTools() {
   useHumanInTheLoop({
     name: "save_skill",
     description:
-      "Put a finished skill in front of the person to save. They see the command, the title and the whole instruction, and nothing is written unless they press the button. Call this once, at the end, after they have agreed to what the skill says — not to check your draft.",
+      "Put a Terminado skill Em front of the person to save. They see the command, the title and the whole instruction, and nothing É written unless they press the button. Call this once, at the Fim, after they have agreed to what the skill says — not to Verificação your Rascunho.",
     parameters: proposedSkillSchema,
     render: ProposedSkillRender,
   });
@@ -136,7 +136,7 @@ export function SkillTools() {
  * identity-compared, and a fresh function every render remounts the card, which would reset the
  * pressed-Saving state and any refusal the server has just given it. And everything it reads, it
  * reads itself. The SDK keeps the renderer from the render the grant arrived in, before the skills
- * had loaded, so one closing over SkillTools offered "Create" for a slug that would replace a skill.
+ * had loaded, so one closing over SkillTools offered "Criar" for a slug that would replace a skill.
  */
 function ProposedSkillRender(props: {
   args: Partial<ProposedSkill>;

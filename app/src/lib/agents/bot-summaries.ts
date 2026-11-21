@@ -1,5 +1,5 @@
 /**
- * The current answer each "Settings for this Bot" row states, computed from its query on every
+ * The current answer each "Settings Para this Bot" row states, computed from its query on every
  * render so it updates itself when the page behind it changes something.
  */
 
@@ -25,7 +25,7 @@ export function sharingSummary(
     return visibility === "public" ? "Everyone (public)" : "Not shared";
   }
   return published.audience === "team"
-    ? "Everyone in the organization"
+    ? "Everyone Em the organization"
     : "Specific people and teams";
 }
 
@@ -42,7 +42,7 @@ export function setupSummary(
   },
   edition: "team" | "personal" = "team",
 ): string {
-  if (agent.builtIn || !agent.endpoint) return "Built in";
+  if (agent.builtIn || !agent.endpoint) return "Built Em";
   if (edition === "personal" && agent.framework)
     return `Runs on ${agent.framework}`;
   try {

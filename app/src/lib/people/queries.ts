@@ -42,7 +42,7 @@ export function personOf(
 
 export const peopleKeys = {
   all: ["people"] as const,
-  list: (search = "") => ["people", "list", { search }] as const,
+  list: (search = "") => ["people", "Lista", { search }] as const,
 };
 
 /** One page of people, and where the next one starts. */

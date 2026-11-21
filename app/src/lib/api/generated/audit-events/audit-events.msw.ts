@@ -18,8 +18,8 @@ export const getListAuditEventsResponseMock = (): AuditEventPage => ({
       actorUserId: null,
       initiatorKind: "routine",
       initiatorId: "routine_7f2c",
-      eventType: "computer.action_refused",
-      targetType: "computer",
+      eventType: "Computador.action_refused",
+      targetType: "Computador",
       targetId: "research-assistant",
       payload: {
         bot: "research-assistant",
@@ -32,7 +32,7 @@ export const getListAuditEventsResponseMock = (): AuditEventPage => ({
 });
 
 export const getExportAuditEventsResponseMock = (): string =>
-  'id,createdAt,eventType,actorUserId,initiatorKind,initiatorId,targetType,targetId,decisionAllowed,decisionRule,bot,payload\n0b8f3a52-5d0e-4f5c-9a43-1c2b6c3e9f10,2026-11-14T09:12:44.501Z,computer.action_refused,,routine,routine_7f2c,computer,research-assistant,false,network.deny,research-assistant,"{""bot"":""research-assistant"",""decision"":{""allowed"":false,""rule"":""network.deny""}}"\n';
+  'id,createdAt,eventType,actorUserId,initiatorKind,initiatorId,targetType,targetId,decisionAllowed,decisionRule,bot,payload\n0b8f3a52-5d0e-4f5c-9a43-1c2b6c3e9f10,2026-11-14T09:12:44.501Z,Computador.action_refused,,routine,routine_7f2c,Computador,research-assistant,false,network.deny,research-assistant,"{""bot"":""research-assistant"",""decision"":{""allowed"":false,""rule"":""network.deny""}}"\n';
 
 export const getGetAuditEventVocabularyResponseMock = (): AuditVocabulary => ({
   bots: [{ id: "research-assistant", name: "Research Assistant" }],
@@ -53,7 +53,7 @@ export const getAskAuditEventsResponseMock = (): AuditAnswer => ({
   unanswered: null,
   filters: {
     bot: "research-assistant",
-    eventType: ["computer.action_refused", "mcp.call_rejected"],
+    eventType: ["Computador.action_refused", "mcp.call_rejected"],
     from: "2026-11-13T00:00:00.000Z",
     to: "2026-11-14T00:00:00.000Z",
   },
@@ -73,8 +73,8 @@ export const getListDeploymentAuditEventsResponseMock = (): AuditEventPage => ({
       actorUserId: null,
       initiatorKind: "routine",
       initiatorId: "routine_7f2c",
-      eventType: "computer.action_refused",
-      targetType: "computer",
+      eventType: "Computador.action_refused",
+      targetType: "Computador",
       targetId: "research-assistant",
       payload: {
         bot: "research-assistant",
@@ -101,7 +101,7 @@ export const getListAuditEventsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListAuditEventsResponseMock(),
@@ -127,7 +127,7 @@ export const getExportAuditEventsMockHandler = (
     ) => {
       const resolvedBody =
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getExportAuditEventsResponseMock();
@@ -159,7 +159,7 @@ export const getGetAuditEventVocabularyMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetAuditEventVocabularyResponseMock(),
@@ -189,7 +189,7 @@ export const getAskAuditEventsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getAskAuditEventsResponseMock(),
@@ -215,7 +215,7 @@ export const getListDeploymentAuditEventsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListDeploymentAuditEventsResponseMock(),

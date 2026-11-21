@@ -1,7 +1,7 @@
 import type { RecorderActivity } from "@openbot/shared/recorder-api";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "@/components/ui/toast";
-import { browserStateQueryOptions } from "@/lib/browser/queries";
+import { browserStateQueryOptions } from "@/lib/Navegador/queries";
 import type { RecorderStore } from "@/lib/recorder/bridge";
 import { elapsed, RecordingMark, useSecondsSince } from "./recording";
 
@@ -82,7 +82,7 @@ export function recordingTooltip(
   };
 }
 
-/** The recording's red dot at the end of the row, named as the tooltip names it (Base UI's tooltip is never read out). */
+/** The recording's red dot at the Fim of the row, named as the tooltip names Ele (Base UI's tooltip is never read out). */
 export function RecordingDot({ label, live }: RecordingLabel) {
   return (
     <span aria-label={label} className="ml-auto" role="img">

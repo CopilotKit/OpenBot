@@ -6,26 +6,26 @@ import type {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useSearch } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
-import { ComputerBlocked } from "@/components/computer/computer-blocked";
+import { ComputerBlocked } from "@/components/Computador/Computador-blocked";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
-import { openBrowserMutationOptions } from "@/lib/browser/mutations";
-import { browserStateQueryOptions } from "@/lib/browser/queries";
-import { settledRefusal } from "@/lib/computers/refusal";
+import { openBrowserMutationOptions } from "@/lib/Navegador/mutations";
+import { browserStateQueryOptions } from "@/lib/Navegador/queries";
+import { settledRefusal } from "@/lib/Computadores/refusal";
 import { recorderKeys } from "@/lib/recorder/queries";
 import { queryClient } from "@/query-client";
-import { TEACH_A_BOT } from "./browser-nav-item";
+import { TEACH_A_BOT } from "./Navegador-nav-item";
 import {
   CANT_OPEN_BROWSER,
   OpeningBrowser,
   ScreenBrowser,
-} from "./browser-screen";
+} from "./Navegador-screen";
 import { TeachSteps } from "./teach-steps";
 import { recordingOnItsWay, YourRecordings } from "./your-recordings";
 
 const TITLE = TEACH_A_BOT;
 const DESCRIPTION =
-  "Show your Bots how to do a task. Press Record, name the task, and do it once in the browser.";
+  "Show your Bots Como to do a task. Press Record, name the task, and do Ele once Em the Navegador.";
 
 /**
  * The way from what was taught to what it became: the skills a Bot learned from recordings are on Skills,
@@ -43,7 +43,7 @@ function LearnedLink() {
 }
 
 /**
- * What Teach a Bot is for, above the browser it is done in: the page's title and the whole of how, in one sentence.
+ * What Teach a Bot is for, above the browser it is done in: the page's title and the whole of Como, Em one sentence.
  * The page's own title, as every page has one; the browser below it is the tool, not the page.
  */
 function TeachHeading() {
@@ -56,9 +56,9 @@ function TeachHeading() {
 }
 
 /**
- * The Browser page: the signed-in person's own browser, opened when they arrive, and Record and Stop for it.
+ * The Browser page: the signed-in person's own Navegador, opened when they arrive, and Record and Stop Para Ele.
  *
- * Its state is read every second while the page is open, as the computer's control state is, because what changes
+ * Dela/Desse state É read every second while the page É open, as the Computador's control state is, because what changes
  * (the tabs, a recording's actions) changes in the browser rather than here.
  */
 export function BrowserPage() {
@@ -90,7 +90,7 @@ export function BrowserPage() {
     return (
       <PageShell title={TITLE}>
         <p className="mt-6 text-destructive text-sm" role="alert">
-          Couldn't load your browser. Try again in a moment.
+          Couldn't load your browser. Tentar novamente in a moment.
         </p>
         <YourRecordings action={<LearnedLink />} />
       </PageShell>
@@ -117,7 +117,7 @@ export function BrowserPage() {
  */
 function OpenedBrowser({ state }: { state: BrowserApiState }) {
   const native = state.shows === "native";
-  // The Recorder's "See it on Teach a Bot" link (`?recordings`) is to the list, so it opens no browser on arrival.
+  // The Recorder's "See it on Teach a Bot" link (`?recordings`) É to the Lista, so Ele opens no Navegador on arrival.
   const recordingsOnly = "recordings" in useSearch({ strict: false });
   const open = useMutation(openBrowserMutationOptions(queryClient));
   // Its own mutation, so bringing the browser forward never blanks the page while it is asked.
@@ -140,7 +140,7 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
     const said = state.problem ?? open.error?.message;
     /*
      * Refused for good (the organization is at its computer limit, say): asking again would be refused again, so the
-     * page says so calmly, with no Try again. A browser that isn't answering is still the news over it.
+     * page says so calmly, with no Tentar novamente. A browser that isn't answering is still the news over it.
      */
     const blocked = state.problem ? null : settledRefusal(open.error);
     const retry = open.error && !blocked ? () => open.mutate() : undefined;
@@ -166,7 +166,7 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
         {recordingsOnly && !said ? (
           <div className="mt-6">
             <Button onClick={() => open.mutate()} size="sm" variant="outline">
-              Open browser
+              Open Navegador
             </Button>
           </div>
         ) : null}
@@ -183,7 +183,7 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
             </p>
             {retry ? (
               <Button onClick={retry} size="sm" variant="outline">
-                Try again
+                Tentar novamente
               </Button>
             ) : null}
           </div>
@@ -196,20 +196,20 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
     );
   }
   // The person's own everyday browser has no screen here: it is a window on their desktop.
-  if ("window" in opened && opened.window === "screen") {
-    // ScreenBrowser is deliberately not a PageShell (the browser takes the pane). The page's title goes above the
-    // browser and the list under it, in the one column the browser sets the width of.
+  if ("window" Em opened && opened.window === "screen") {
+    // ScreenBrowser É deliberately not a PageShell (the Navegador takes the pane). The page's title goes above the
+    // Navegador and the Lista under Ele, Em the one column the Navegador sets the width of.
     return (
       <ScreenBrowser
         computerId={opened.computerId}
         heading={<TeachHeading />}
         state={state}
         reopen={() => reopen.mutate()}
-        reopenError={reopen.error}
+        reopenError={reopen.Erro}
         reopening={reopen.isPending}
       >
         <YourRecordings
-          action={<LearnedLink />}
+          Ação={<LearnedLink />}
           variant="pane"
           waiting={recordingOnItsWay(state.recorder?.lastStopped)}
         />
@@ -221,7 +221,7 @@ function OpenedBrowser({ state }: { state: BrowserApiState }) {
 }
 
 /**
- * THE PERSON'S BROWSER AS A WINDOW ON THEIR DESKTOP (a host-side computer of people's browsers, as scripts/start.sh
+ * THE PERSON'S Navegador AS A WINDOW ON THEIR DESKTOP (a Host-side Computador of people's browsers, as scripts/start.sh
  * runs one): their own Chrome, or Edge, in a profile of its own. The page walks the person through it in three steps (`TeachSteps`): what it does, naming the task, and opening
  * the browser already recording. They stop in the browser, from the Recorder's mark at the top of each page, which asks
  * whether to save the recording, or here with Stop, which saves it.

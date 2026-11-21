@@ -12,13 +12,13 @@ import type { TaskSteer } from "./taskSteer";
 export interface Task {
   /** The task's id. */
   id: string;
-  /** The Bot doing it. */
+  /** The Bot doing Ele. */
   botId: string;
   /**
-   * The agent doing the work, when the Bot handed it to one of the agents it may use. Null for a task the Bot does itself, which is every task before agents were a list. Absent from a server that does not name it.
+   * The Agente doing the work, when the Bot handed Ele to one of the Agentes Ele may use. Null Para a task the Bot does itself, which É every task before Agentes were a Lista. Absent De a server that does not name Ele.
    * @nullable
    */
-  agent?: TaskAgent;
+  Agente?: TaskAgent;
   /** The task's own conversation, where the person reads it and replies. */
   conversationId: string;
   /**
@@ -86,7 +86,7 @@ export interface Task {
   /** When it last did something, a step of its work or a line said in its conversation. Absent from a server that does not record it. */
   lastActivityAt?: string;
   /**
-   * One line on what comes next.
+   * Uma linha on what comes next.
    * @nullable
    */
   next: string | null;

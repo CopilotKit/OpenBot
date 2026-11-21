@@ -561,7 +561,7 @@ export const getAuditEventVocabulary = async (
     getGetAuditEventVocabularyUrl(organizationId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -940,7 +940,7 @@ export const listDeploymentAuditEvents = async (
     getListDeploymentAuditEventsUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

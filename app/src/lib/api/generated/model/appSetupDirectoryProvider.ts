@@ -3,7 +3,7 @@
  */
 
 /**
- * The service the app directory comes from. The screens read it to open their own page for the directory and to name the setting an administrator sets to turn it on. Null when this OpenBot names none.
+ * The service the app directory comes from. The screens read it to open their own page for the directory and to name the setting an administrator sets to turn it on. Null when this OpenNome do Bots none.
  * @nullable
  */
 export type AppSetupDirectoryProvider =

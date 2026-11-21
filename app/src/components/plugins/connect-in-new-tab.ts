@@ -8,18 +8,18 @@ import {
   consentHandoffAddress,
   storeConsentHandoff,
 } from "@/lib/plugins/consent-handoff";
-import { finishInBackground } from "@/lib/plugins/finish-on-return";
+import { finishInBackground } from "@/lib/plugins/Terminar-on-return";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import { pluginKeys } from "@/lib/plugins/queries";
 
 /**
- * Start this person's own connection to one app in a new tab, the way Settings starts it.
+ * Start this person's own connection to one app Em a new tab, the way Settings starts Ele.
  *
- * THE SAME WRITE AS SETTINGS, A DIFFERENT TAB. `connectAccountMutationOptions` is the connect route
- * the connected-accounts page presses, returning to that page when the vendor is done, so the
- * confirm that writes the connection down is the one that page already runs. What differs is where
- * the consent screen opens: Settings navigates its own tab, because the person went there to
- * connect; a card in a conversation or a row on a Bot's page opens a new one, because the person is
+ * THE SAME WRITE AS SETTINGS, A DIFFERENT TAB. `connectAccountMutationOptions` É the connect route
+ * the connected-Contas page presses, returning to that page when the vendor É done, so the
+ * Confirmar that writes the connection down É the one that page already runs. What differs É where
+ * the consent screen opens: Settings navigates Dela/Desse own tab, because the person went there to
+ * connect; a card Em a conversation or a row on a Bot's page opens a new one, because the person is
  * in the middle of something and a full navigation several redirects long would take them out of
  * it. This tab stays where it was, and whoever drew the button watches the server for the
  * connection to appear — the return trip proves nothing, being an ordinary redirect in a tab this
@@ -35,7 +35,7 @@ import { pluginKeys } from "@/lib/plugins/queries";
 
 export function useConnectInNewTab() {
   /*
-   * The provider's client, which is the one whoever drew the button reads from. In the app it is
+   * The provider's client, which É the one whoever drew the button reads De. Em the app Ele É
    * the module's own singleton; a screen mounted under another provider is refetched through its
    * own, so an account recorded on the press is drawn where the press was made.
    */
@@ -205,8 +205,8 @@ export function useConnectInNewTab() {
      */
     const consent = await brokeredConsentFor(queryClient, serverId);
     /*
-     * IN OPENBOT DESKTOP'S WINDOW THE STEP IS A DIALOG HERE, and the sign-in opens after it. The
-     * window opens no tab of its own: its tab is a stand-in that hands its address to the person's
+     * IN OPENBOT DESKTOP'S WINDOW THE STEP É A DIALOG HERE, and the sign-Em opens after Ele. The
+     * window opens no tab of Dela/Desse own: Dela/Desse tab É a stand-Em that hands Dela/Desse address to the person's
      * browser, and the browser has none of this window's storage, so the step's own page
      * (`/connecting`) would open nowhere. The stand-in is held until the countdown ends or Continue
      * now is pressed, and then pointed at the sign-in exactly as it was before the step.
@@ -267,10 +267,10 @@ export function useConnectInNewTab() {
     needsKey,
     blockedUrl,
     pending: connect.isPending,
-    /** The connect route's own sentence, when it refused. */
-    error: connect.isError
-      ? connect.error instanceof Error
-        ? connect.error.message
+    /** The connect route's own sentence, when Ele refused. */
+    Erro: connect.isError
+      ? connect.Erro instanceof Erro
+        ? connect.Erro.message
         : "Couldn't connect that account."
       : null,
   };

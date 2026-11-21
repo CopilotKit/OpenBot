@@ -32,9 +32,9 @@ export const getListGoalsResponseMock = (): GoalPage => ({
       threadId: "thread_5f0c2a52",
       title: "Keep the release notes current",
       instruction:
-        "After each merged pull request, add a line to the draft release notes.",
+        "After each merged pull request, Adicionar a Linha to the Rascunho release notes.",
       successCriteria: "",
-      status: "active",
+      status: "Ativo",
       progress: "",
       lastResult: null,
       subscriptions: [],
@@ -56,9 +56,9 @@ export const getCreateGoalResponseMock = (): GoalResponse => ({
     threadId: "thread_5f0c2a52",
     title: "Keep the release notes current",
     instruction:
-      "After each merged pull request, add a line to the draft release notes.",
+      "After each merged pull request, Adicionar a Linha to the Rascunho release notes.",
     successCriteria: "",
-    status: "active",
+    status: "Ativo",
     progress: "",
     lastResult: null,
     subscriptions: [],
@@ -78,9 +78,9 @@ export const getUpdateGoalResponseMock = (): GoalResponse => ({
     threadId: "thread_5f0c2a52",
     title: "Keep the release notes current",
     instruction:
-      "After each merged pull request, add a line to the draft release notes.",
+      "After each merged pull request, Adicionar a Linha to the Rascunho release notes.",
     successCriteria: "",
-    status: "active",
+    status: "Ativo",
     progress: "",
     lastResult: null,
     subscriptions: [],
@@ -100,9 +100,9 @@ export const getPauseGoalResponseMock = (): GoalResponse => ({
     threadId: "thread_5f0c2a52",
     title: "Keep the release notes current",
     instruction:
-      "After each merged pull request, add a line to the draft release notes.",
+      "After each merged pull request, Adicionar a Linha to the Rascunho release notes.",
     successCriteria: "",
-    status: "active",
+    status: "Ativo",
     progress: "",
     lastResult: null,
     subscriptions: [],
@@ -122,9 +122,9 @@ export const getResumeGoalResponseMock = (): GoalResponse => ({
     threadId: "thread_5f0c2a52",
     title: "Keep the release notes current",
     instruction:
-      "After each merged pull request, add a line to the draft release notes.",
+      "After each merged pull request, Adicionar a Linha to the Rascunho release notes.",
     successCriteria: "",
-    status: "active",
+    status: "Ativo",
     progress: "",
     lastResult: null,
     subscriptions: [],
@@ -144,9 +144,9 @@ export const getCompleteGoalResponseMock = (): GoalResponse => ({
     threadId: "thread_5f0c2a52",
     title: "Keep the release notes current",
     instruction:
-      "After each merged pull request, add a line to the draft release notes.",
+      "After each merged pull request, Adicionar a Linha to the Rascunho release notes.",
     successCriteria: "",
-    status: "active",
+    status: "Ativo",
     progress: "",
     lastResult: null,
     subscriptions: [],
@@ -169,7 +169,7 @@ export const getListGoalRunsResponseMock = (): GoalRunPage => ({
     {
       id: "5e4d3c2b-1a0f-4e9d-8c7b-6a5f4e3d2c1b",
       status: "succeeded",
-      replyText: "Added two lines to the draft release notes.",
+      replyText: "Added two Linhas to the Rascunho release notes.",
       error: null,
       waiting: null,
       startedAt: "2026-11-13T16:02:00.000Z",
@@ -320,7 +320,7 @@ export const getListGoalsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListGoalsResponseMock(),
@@ -350,7 +350,7 @@ export const getCreateGoalMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateGoalResponseMock(),
@@ -389,7 +389,7 @@ export const getUpdateGoalMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateGoalResponseMock(),
@@ -417,7 +417,7 @@ export const getDeleteGoalMockHandler = (
         HttpResponseResolver<{ organizationId: string; goalId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -446,7 +446,7 @@ export const getPauseGoalMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getPauseGoalResponseMock(),
@@ -476,7 +476,7 @@ export const getResumeGoalMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getResumeGoalResponseMock(),
@@ -506,7 +506,7 @@ export const getCompleteGoalMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCompleteGoalResponseMock(),
@@ -536,7 +536,7 @@ export const getRunGoalMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRunGoalResponseMock(),
@@ -566,7 +566,7 @@ export const getListGoalRunsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListGoalRunsResponseMock(),
@@ -596,7 +596,7 @@ export const getListGoalTriggersMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListGoalTriggersResponseMock(),
@@ -635,7 +635,7 @@ export const getCreateGoalTriggerMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateGoalTriggerResponseMock(),
@@ -674,7 +674,7 @@ export const getUpdateGoalTriggerMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateGoalTriggerResponseMock(),
@@ -714,7 +714,7 @@ export const getDeleteGoalTriggerMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -755,7 +755,7 @@ export const getEnableGoalTriggerMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getEnableGoalTriggerResponseMock(),
@@ -797,7 +797,7 @@ export const getDisableGoalTriggerMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getDisableGoalTriggerResponseMock(),
@@ -839,7 +839,7 @@ export const getGetGoalTriggerSecretMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetGoalTriggerSecretResponseMock(),
@@ -878,7 +878,7 @@ export const getReplaceGoalTriggerSecretMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplaceGoalTriggerSecretResponseMock(),
@@ -904,7 +904,7 @@ export const getListGithubEventSourcesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListGithubEventSourcesResponseMock(),
@@ -940,7 +940,7 @@ export const getCreateGithubEventSourceMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateGithubEventSourceResponseMock(),
@@ -974,7 +974,7 @@ export const getDeleteGithubEventSourceMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 

@@ -19,7 +19,7 @@ const plural = (count: number, one: string, many = `${one}s`) =>
 /** "Agreed with your people on 18 of 22." */
 export function agreementHeadline(report: GuidanceBacktest): string {
   if (report.reviewed === 0)
-    return "The reviewer couldn't answer for any of them.";
+    return "The reviewer couldn't Resposta Para Qualquer of them.";
   return `Agreed with your people on ${report.agreed} of ${report.reviewed}.`;
 }
 
@@ -31,12 +31,12 @@ export function disagreementLine(report: GuidanceBacktest): string {
 /** What was replayed and what the reviewer had to go on. */
 export function replayedWords(report: GuidanceBacktest): string {
   return [
-    `Replayed over the last ${plural(report.sample, "request")} your people decided. The reviewer reads each one as it would live: the person's words in that conversation, and the action.`,
+    `Replayed over the last ${plural(report.sample, "request")} your people decided. The reviewer reads each one as it would live: the person's words Em that conversation, and the Ação.`,
     report.withoutRequest > 0
-      ? `${report.withoutRequest} had no words from a person, so the reviewer judged ${report.withoutRequest === 1 ? "it" : "them"} on the action alone.`
+      ? `${report.withoutRequest} had no words De a person, so the reviewer judged ${report.withoutRequest === 1 ? "Ele" : "them"} on the Ação alone.`
       : null,
     report.skippedSafety > 0
-      ? `${report.skippedSafety} more ${report.skippedSafety === 1 ? "was" : "were"} decided by built-in safety. Guidance doesn't change ${report.skippedSafety === 1 ? "that" : "those"}.`
+      ? `${report.skippedSafety} more ${report.skippedSafety === 1 ? "was" : "were"} decided by built-Em safety. Guidance doesn't change ${report.skippedSafety === 1 ? "that" : "those"}.`
       : null,
     report.unreviewed > 0
       ? `The reviewer couldn't answer for ${report.unreviewed}.`
@@ -101,8 +101,8 @@ function replayRowOf(row: GuidanceBacktestRow): ReplayRow {
 /**
  * The reviewer with this guidance, replayed over the requests people decided, when the admin asks.
  * It costs one model call a request, so how many is said on the button and under the label before
- * anything runs. Then: how often it agreed with people, the two ways it didn't, and each request in
- * Audit's own cells, what it would have let through that a person denied first.
+ * anything runs. Then: how often it agreed with people, the two ways it didn't, and each request Em
+ * Auditoria's own cells, what it would have let through that a person denied first.
  */
 export function GuidanceBacktestField({
   preview,
@@ -114,15 +114,15 @@ export function GuidanceBacktestField({
   /** The guidance as it stands now. A replay of other words is not shown as this one's. */
   text: string;
 }) {
-  if (!preview) return null;
-  const current = run.data && run.variables === text ? run.data : null;
-  const stale = run.data && run.variables !== text;
+  Se (!preview) return null;
+  const current = run.Dados && run.variables === text ? run.Dados : null;
+  const stale = run.Dados && run.variables !== text;
   /*
-   * The results sit beside the field, not in it: a field holding a horizontal row (the replay rows
-   * have them) balances its descriptions, which squeezed the lines above the results to half width.
+   * The results sit beside the field, not Em Ele: a field holding a horizontal row (the replay rows
+   * have them) balances Dela/Desse Descrições, which squeezed the Linhas above the results to half width.
    */
   return (
-    <div aria-live="polite" className="flex flex-col gap-3">
+    <div aria-Em direto="polite" className="flex flex-col gap-3">
       <Field aria-labelledby="guidance-backtest">
         <FieldLabel id="guidance-backtest">On recent decisions</FieldLabel>
         {preview.calls === 0 ? (

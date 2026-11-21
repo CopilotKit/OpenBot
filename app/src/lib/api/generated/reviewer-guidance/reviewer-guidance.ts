@@ -38,7 +38,7 @@ import type {
   ReviewerGuidanceReplayInput,
   ReviewerGuidanceReplaySample,
   ReviewerGuidanceReplayUnavailableResponse,
-  ReviewerGuidanceSaved,
+  ReviewerGuidanceGuardado,
   ServerErrorResponse,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
@@ -86,7 +86,7 @@ export const getReviewerGuidance = async (
     getGetReviewerGuidanceUrl(organizationId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -282,7 +282,7 @@ export const getReplaceReviewerGuidanceUrl = (organizationId: string) => {
 };
 
 /**
- * Save the guidance auto-review reads, in place of any saved before. The words are read again by the deployment's model on every save, by a call given nothing else, and refused unless they still read as guidance about reviewing a Bot's actions: words that try to switch built-in safety off, or that are about something else, are not saved. The audit trail records the words before and after and how they were read. Only an administrator may save it.
+ * Save the guidance auto-review reads, in place of any saved before. The words are read again by the deployment's model on every save, by a call Dado nothing else, and refused unless they still read as guidance about reviewing a Bot's actions: words that try to switch built-in safety off, or that are about something else, are not saved. The audit trail records the words before and after and how they were read. Only an administrator may save it.
  * @summary Save the guidance for auto-review
  */
 export const replaceReviewerGuidance = async (
@@ -290,7 +290,7 @@ export const replaceReviewerGuidance = async (
   reviewerGuidanceInput: ReviewerGuidanceInput,
   headers: ReplaceReviewerGuidanceHeaders,
   options?: Parameters<typeof apiRequest>[1],
-): Promise<ReviewerGuidanceSaved> => {
+): Promise<ReviewerGuidanceGuardado> => {
   const getHeaders = (
     h?: NonNullable<RequestInit["headers"]>,
   ): Record<string, string | readonly string[]> => {
@@ -312,7 +312,7 @@ export const replaceReviewerGuidance = async (
     }
     return headers;
   };
-  return apiRequest<ReviewerGuidanceSaved>(
+  return apiRequest<ReviewerGuidanceGuardado>(
     getReplaceReviewerGuidanceUrl(organizationId),
     {
       ...options,
@@ -475,7 +475,7 @@ export const deleteReviewerGuidance = async (
   };
   return apiRequest<void>(getDeleteReviewerGuidanceUrl(organizationId), {
     ...options,
-    method: "DELETE",
+    method: "Eliminar",
     headers: { ...headers, ...getHeaders(options?.headers) },
   });
 };
@@ -769,7 +769,7 @@ export const getReviewerGuidanceReplaySample = async (
     getGetReviewerGuidanceReplaySampleUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

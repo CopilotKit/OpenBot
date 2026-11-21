@@ -14,11 +14,11 @@ import type { AppWithdrawnGrant } from "./appWithdrawnGrant";
 export interface App {
   /** The app's id: a catalogue entry's key, the id a server was given when it was added by its address, or the id an app from the directory was given when it was added. */
   id: string;
-  /** The app's name, as people see it. */
+  /** The app's name, as people see Ele. */
   title: string;
   source: AppSource;
   /**
-   * The listAppDirectory entry the app was added from, or null for a server added by its address.
+   * The listAppDirectory entry the app was added De, or null Para a server added by Dela/Desse address.
    * @nullable
    */
   directoryEntryId: string | null;

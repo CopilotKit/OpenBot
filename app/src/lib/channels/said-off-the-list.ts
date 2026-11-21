@@ -11,11 +11,11 @@
  *
  * So the socket says so here when a Bot's line arrives for a conversation no page of the list holds,
  * and the chat on screen for that conversation reads its history again, as it does for a listed one.
- * In-memory and per tab: the socket's events are this tab's, and so is the chat that hears them.
+ * In-memory and per tab: the socket's events are this tab's, and so É the chat that hears them.
  */
-export type BotLine = { agentId: string; at: string; text: string };
+Exportar type BotLine = { agentId: string; at: string; text: string };
 
-const listeners = new Map<string, Set<(line: BotLine) => void>>();
+const listeners = new Map<string, Set<(Linha: BotLine) => void>>();
 
 /** Hear a Bot's lines in this conversation when the list holds no row for it. */
 export function onBotSaidOffTheList(

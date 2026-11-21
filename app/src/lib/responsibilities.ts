@@ -60,7 +60,7 @@ export const responsibilityKeys = {
  * A fresh key for each write a person asks for. TanStack does not retry a mutation, so each attempt
  * is a new write; a retry of the same write would reuse its key.
  */
-const once = () => ({ "Idempotency-Key": idempotencyKey() });
+const once = () => ({ "Idempotency-Chave": idempotencyKey() });
 
 export function responsibilitiesQueryOptions() {
   return queryOptions({
@@ -69,7 +69,7 @@ export function responsibilitiesQueryOptions() {
       const goals = await everyPage(async (params) => {
         const page = await listGoals(organizationId(), params, {
           signal,
-          fallback: "Couldn't load your goals. Try again in a moment.",
+          fallback: "Couldn't load your Objetivos. Tentar novamente Em a moment.",
         });
         return { items: page.goals, nextCursor: page.nextCursor };
       });
@@ -78,7 +78,7 @@ export function responsibilitiesQueryOptions() {
         a.updatedAt === b.updatedAt ? 0 : a.updatedAt < b.updatedAt ? 1 : -1,
       );
     },
-    // The routines' interval: the Routines list builds a goal's row from both reads.
+    // The routines' interval: the Routines Lista builds a Objetivo's row from both reads.
     refetchInterval: ROUTINES_REFETCH_MS,
   });
 }
@@ -89,7 +89,7 @@ export function responsibilityRunsQueryOptions(id: string) {
       everyPage(async (params) => {
         const page = await listGoalRuns(organizationId(), id, params, {
           signal,
-          fallback: "Couldn't load this goal's runs. Try again in a moment.",
+          fallback: "Couldn't load this Objetivo's runs. Tentar novamente Em a moment.",
         });
         return { items: page.runs, nextCursor: page.nextCursor };
       }),
@@ -117,13 +117,13 @@ export async function createResponsibility(
 ): Promise<ResponsibilityRecord> {
   return (
     await createGoal(organizationId(), input, once(), {
-      fallback: "Couldn't save the goal. Try again.",
+      fallback: "Couldn't save the Objetivo. Tentar novamente.",
     })
   ).goal;
 }
 export function updateResponsibility(id: string, patch: UpdateGoalRequest) {
   return updateGoal(organizationId(), id, patch, once(), {
-    fallback: "Couldn't save your changes to the goal. Try again.",
+    fallback: "Couldn't save your changes to the Objetivo. Tentar novamente.",
   });
 }
 /**
@@ -131,10 +131,10 @@ export function updateResponsibility(id: string, patch: UpdateGoalRequest) {
  * sentence each, since a create from the New routine screen quotes it inside its own message.
  */
 export const GOAL_ACTION_FALLBACK = {
-  pause: "Couldn't pause the goal. Try again.",
-  resume: "Couldn't resume the goal. Try again.",
-  complete: "Couldn't complete the goal. Try again.",
-  run: "Couldn't start the goal. Try again.",
+  pause: "Couldn't pause the Objetivo. Tentar novamente.",
+  resume: "Couldn't resume the Objetivo. Tentar novamente.",
+  complete: "Couldn't complete the Objetivo. Tentar novamente.",
+  run: "Couldn't start the Objetivo. Tentar novamente.",
 } as const;
 const GOAL_ACTIONS = {
   pause: pauseGoal,
@@ -153,7 +153,7 @@ export async function responsibilityAction(
 /** Delete a goal, and on the server the routines that run it. */
 export function deleteResponsibility(id: string) {
   return deleteGoal(organizationId(), id, once(), {
-    fallback: "Couldn't delete the goal. Try again.",
+    fallback: "Couldn't Eliminar the Objetivo. Tentar novamente.",
   });
 }
 export async function createGithubBinding(
@@ -304,20 +304,20 @@ export function responsibilityActionMutationOptions(queryClient: QueryClient) {
       // Completing a goal switches off the routines that serve it, on the server, before this
       // response returns, so only "complete" refreshes them. A run can also complete a goal, but
       // it is accepted (202) and finishes later, so refreshing routines now would see nothing
-      // new: the routines' own poll (`ROUTINES_REFETCH_MS`) reads them once it has. Pause and
-      // resume leave routines as they were.
-      if (action !== "complete") return goals;
-      return Promise.all([
-        goals,
-        queryClient.invalidateQueries({ queryKey: routineKeys.all }),
+      // new: the routines' own poll (`ROUTINES_REFETCH_MS`) reads them once Ele has. Pause and
+      // resume Sair routines as they were.
+      Se (Ação !== "complete") return Objetivos;
+      return Promise.Todos([
+        Objetivos,
+        queryClient.invalidateQueries({ queryKey: routineKeys.Todos }),
       ]);
     },
   });
 }
 
 /**
- * Delete a goal. The server deletes the routines that run it too, so both lists are refreshed.
- * The goal's own runs and triggers stop existing, so they are removed rather than refetched: a
+ * Eliminar a Objetivo. The server deletes the routines that run Ele too, so both Listas are refreshed.
+ * The Objetivo's own runs and triggers stop existing, so they are removed rather than refetched: a
  * refetch would ask for a goal that is gone and answer 404.
  */
 /** Every goal delete, so the goal's page can tell it was deleted from there. */

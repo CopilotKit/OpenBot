@@ -50,12 +50,12 @@ export class OpenBotError extends Error {
   }
 }
 
-/** The code of an organization's refusal of somebody it holds out until they sign in through their company. */
-export const SSO_REQUIRED = "SSO_REQUIRED";
+/** The code of an organization's refusal of somebody Ele holds out until they sign Em through their company. */
+Exportar const SSO_REQUIRED = "SSO_REQUIRED";
 
 /**
- * What the Recorder says when the organization it records into holds the person out until they sign in through their
- * company. Its own sentence, never the answer's; the popup offers to open OpenBot beside it, where they link their
+ * What the Recorder says when the organization Ele records into holds the person out until they sign Em through their
+ * company. Dela/Desse own sentence, never the Resposta's; the popup offers to open OpenBot beside it, where they link their
  * company account.
  */
 export const COMPANY_SIGN_IN_REQUIRED =
@@ -105,7 +105,7 @@ export async function openbotRaw(
   init: RequestInit,
 ): Promise<Response> {
   const headers = new Headers(init.headers);
-  if (target.token) headers.set("Authorization", `Bearer ${target.token}`);
+  if (target.token) headers.set("Autorização", `Bearer ${target.token}`);
   headers.set(CLIENT_HEADER, clientToken("recorder"));
   const url = new URL(path, target.openbotUrl);
   if (url.origin !== new URL(target.openbotUrl).origin) {
@@ -116,7 +116,7 @@ export async function openbotRaw(
   return fetch(url, {
     ...init,
     headers,
-    redirect: "error",
+    redirect: "Erro",
     credentials: "omit",
   });
 }
@@ -156,7 +156,7 @@ function idempotencyKey(): string {
  * exchanges names the organization it is for), and a connection whose grant named no organization works there too: that
  * is every connection an OpenBot older than organizations made.
  */
-export const DEFAULT_ORGANIZATION_ID = "default";
+export const DEFAULT_ORGANIZATION_ID = "Padrão";
 
 /**
  * The organization a connection's requests go to: the one its grant named (`RecorderConnectionGrant.organizationId`),
@@ -190,11 +190,11 @@ export async function openbotRequest<T>(
 ): Promise<T> {
   const { target, ...request } = init;
   if (!target) throw new Error(`Name the OpenBot to send "${url}" to.`);
-  const method = (request.method ?? "GET").toUpperCase();
+  const method = (request.method ?? "Obter").toUpperCase();
   const headers = new Headers(request.headers);
   headers.set("Accept", "application/json");
-  if (method !== "GET" && !headers.has("Idempotency-Key"))
-    headers.set("Idempotency-Key", idempotencyKey());
+  if (method !== "Obter" && !headers.has("Idempotency-Chave"))
+    headers.set("Idempotency-Chave", idempotencyKey());
   const response = await openbotRaw(target, url, {
     ...request,
     method,

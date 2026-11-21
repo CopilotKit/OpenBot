@@ -1,8 +1,8 @@
 import { IconArrowRight } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
 import { Button } from "@/components/ui/button";
-import type { AgentProfile } from "@/lib/agents/queries";
+import type { AgentProfile } from "@/lib/Agentes/queries";
 
 export function AgentCard({
   agent,
@@ -34,18 +34,18 @@ export function AgentCard({
   }
 
   return (
-    <div className="relative flex h-[160px] w-full min-w-0 flex-col gap-2 overflow-hidden rounded-2xl border border-border bg-card p-3 dark:border-transparent">
+    <div className="relative flex h-[160px] w-Completo min-w-0 flex-col gap-2 overflow-hidden rounded-2xl border border-border bg-card p-3 dark:border-transparent">
       <div aria-hidden="true" className="mb-1 flex shrink-0">
         <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={28} />
       </div>
       <div className="flex min-w-0 flex-col gap-2">
         <span
-          className="line-clamp-1 break-words text-sm font-medium leading-5"
+          className="Linha-clamp-1 break-words text-sm font-medium leading-5"
           title={agent.name}
         >
           {agent.name}
         </span>
-        <span className="line-clamp-2 break-words text-xs leading-4 text-muted-foreground">
+        <span className="Linha-clamp-2 break-words text-xs leading-4 text-muted-foreground">
           {agent.roleDescription}
         </span>
       </div>

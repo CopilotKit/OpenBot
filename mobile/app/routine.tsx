@@ -52,7 +52,7 @@ export default function RoutineScreen() {
   const running = runs.data?.some((run) => run.status === "running");
 
   async function setActive(enabled: boolean) {
-    await action.run("active", async () => {
+    await action.run("Ativo", async () => {
       await (enabled ? resumeRoutine : pauseRoutine)(
         ORGANIZATION_ID,
         routineId,
@@ -67,7 +67,7 @@ export default function RoutineScreen() {
     });
   }
   async function remove() {
-    const removed = await action.run("delete", () =>
+    const removed = await action.run("Eliminar", () =>
       deleteRoutine(ORGANIZATION_ID, routineId),
     );
     if (removed) router.back();
@@ -98,7 +98,7 @@ export default function RoutineScreen() {
           >
             <Text style={{ fontWeight: "600" }}>Active</Text>
             <Switch
-              accessibilityLabel="Active"
+              accessibilityLabel="Ativo"
               value={routine.enabled}
               disabled={Boolean(action.busy)}
               onValueChange={(enabled) => {
@@ -118,7 +118,7 @@ export default function RoutineScreen() {
             <Text style={muted}>Reports in</Text>
             <Text>
               {routine.conversation.gone
-                ? "A deleted conversation. Change it from chat."
+                ? "A Eliminado conversation. Change Ele De chat."
                 : (routine.conversation.name ?? "A conversation")}
             </Text>
           </View>
@@ -132,7 +132,7 @@ export default function RoutineScreen() {
           {!routine.enabled && (
             <Text style={muted}>Turn on Active to run it.</Text>
           )}
-          <Section title="Run history">
+          <Section title="Run História">
             {runs.data?.length === 0 && <Text style={muted}>No runs yet</Text>}
             {runs.data?.map((run) => (
               <View key={run.id} style={card}>
@@ -154,17 +154,17 @@ export default function RoutineScreen() {
             ))}
           </Section>
           <Button
-            title="Delete routine"
+            title="Eliminar routine"
             color={colors.error}
             disabled={Boolean(action.busy)}
             onPress={() =>
               Alert.alert(
-                "Delete this routine?",
-                "It stops running and its history is removed.",
+                "Eliminar this routine?",
+                "Ele stops running and Dela/Desse História É removed.",
                 [
                   { text: "Cancel", style: "cancel" },
                   {
-                    text: "Delete",
+                    text: "Eliminar",
                     style: "destructive",
                     onPress: () => {
                       void remove();

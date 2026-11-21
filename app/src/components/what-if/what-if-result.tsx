@@ -35,19 +35,19 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 /**
- * What each of OpenBot's controls says about one action, in the order it asks them.
+ * What each of OpenBot's controls says about one Ação, Em the order Ele asks them.
  *
- * One row per control, stacked, so it reads down a narrow column: the control, what it says and why,
- * and its verdict as a pill. The control that settles the action is tinted; the ones a real action
- * would never reach are faded and say so. Each row links to the Admin page its setting lives on.
+ * One row per control, stacked, so Ele reads down a narrow column: the control, what Ele says and why,
+ * and Dela/Desse verdict as a pill. The control that settles the Ação É tinted; the ones a real Ação
+ * would never reach are faded and say so. Each row links to the Admin page Dela/Desse setting lives on.
  */
 
-/** The same icons the Admin sidebar gives the pages these controls are set on. */
+/** The same icons the Admin sidebar Dá the pages these controls are set on. */
 const ICONS: Record<
   WhatIfLayerId,
   React.ComponentType<{ className?: string }>
 > = {
-  grant: IconPuzzle,
+  Conceder: IconPuzzle,
   app_allowlist: IconPlug,
   capabilities: IconLockAccess,
   network: IconWorld,
@@ -58,7 +58,7 @@ const ICONS: Record<
 
 /** What the row's detail line is about, by control. */
 const BASIS_WORDS: Record<WhatIfLayerId, string> = {
-  grant: "Not given",
+  grant: "Not Dado",
   app_allowlist: "Setting",
   capabilities: "Permission",
   network: "Allowlist",
@@ -278,7 +278,7 @@ export function WhatIfResultView({
         {result.notChecked.length > 0 ? (
           <div>
             <p>Not checked here, because only a real action shows it:</p>
-            <ul className="mt-1 list-disc ps-4">
+            <ul className="mt-1 Lista-disc ps-4">
               {result.notChecked.map((line) => (
                 <li key={line}>{line}</li>
               ))}

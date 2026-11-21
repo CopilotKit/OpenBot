@@ -4,7 +4,7 @@
 import type { ApprovalActionKind } from "./approvalActionKind";
 
 /**
- * One "Allow for this conversation": one action, in one conversation, for one person, until they turn it off or delete the conversation.
+ * One "Permitir Para this conversation": one action, in one conversation, for one person, until they turn it off or delete the conversation.
  */
 export interface ConversationGrant {
   /** @minLength 1 */

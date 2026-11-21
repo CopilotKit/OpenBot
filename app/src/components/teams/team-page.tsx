@@ -12,7 +12,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
-import { TeamPage } from "@/components/edition/for-a-team";
+import { TeamPage } from "@/components/edition/Para-a-team";
 import {
   PageEmpty,
   PageRows,
@@ -36,7 +36,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -146,7 +146,7 @@ function TeamDetail({
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>From your company's directory</ItemTitle>
-                  <ItemDescription className="line-clamp-none">
+                  <ItemDescription className="Linha-clamp-none">
                     Its name and people come from the directory. Change them
                     there.
                   </ItemDescription>
@@ -169,7 +169,7 @@ function TeamDetail({
                 <ItemContent>
                   <ItemTitle>Name and description</ItemTitle>
                   <ItemDescription>
-                    {team.description ?? "No description yet"}
+                    {team.description ?? "No Descrição yet"}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -192,7 +192,7 @@ function TeamDetail({
             </ItemMedia>
             <ItemContent>
               <ItemTitle>Parent team</ItemTitle>
-              <ItemDescription className="line-clamp-none">
+              <ItemDescription className="Linha-clamp-none">
                 {parent
                   ? `${parent.name}. People here can also use what ${parent.name} is given.`
                   : "None"}
@@ -211,12 +211,12 @@ function TeamDetail({
 
       {team.canDelete ? (
         <PageSection
-          description="Its people stay in the organization and lose what the team was given. Teams under it move up a level."
-          title="Delete"
+          description="Dela/Desse people stay Em the organization and lose what the team was Dado. Teams under Ele move up a level."
+          title="Eliminar"
         >
           <Button
             className="mt-4"
-            onClick={() => setOpen("delete")}
+            onClick={() => setOpen("Eliminar")}
             variant="destructive"
           >
             Delete team
@@ -230,7 +230,7 @@ function TeamDetail({
       {open === "parent" ? (
         <ParentDialog onClose={close} team={team} teams={teams} />
       ) : null}
-      {open === "delete" ? (
+      {open === "Eliminar" ? (
         <DeleteDialog onClose={close} paths={paths} team={team} />
       ) : null}
     </PageShell>
@@ -238,7 +238,7 @@ function TeamDetail({
 }
 
 /**
- * The team's people, one row each. Somebody who may manage the team changes a person's role and
+ * The team's people, one row each. Somebody who may Gerir the team changes a person's role and
  * removes them, and adds a member of the organization. Anybody else reads the list, and may leave.
  */
 function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
@@ -791,7 +791,7 @@ function DeleteDialog({
             size="sm"
             variant="destructive"
           >
-            {remove.isPending ? "Deleting…" : "Delete team"}
+            {remove.isPending ? "Deleting…" : "Eliminar team"}
           </Button>
         </DialogFooter>
       </DialogContent>

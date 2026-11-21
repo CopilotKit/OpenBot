@@ -10,18 +10,18 @@ import {
   ReadLine,
   TaskLine,
   TodoCard,
-} from "@/components/channels/coding-tool-cards";
-import { ArgumentsArrivingContext } from "@/components/gallery/streaming";
+} from "@/components/Canais/coding-tool-Cartões";
+import { ArgumentsArrivingContext } from "@/components/Galeria/streaming";
 
 /**
- * How a coding harness Bot's own tools read in the transcript.
+ * How a coding harness Bot's own tools read Em the transcript.
  *
  * RENDER ONLY. These are Claude Code's built-in tools, run inside the Claude Agent SDK harness
  * (`agent-claude-sdk/`) on the Bot's own machine; OpenBot never runs them and offers none of them to
  * a model. `ag-ui-claude-sdk` streams each call under Claude Code's own name (`Bash`, `Edit`), with
- * Claude Code's arguments, and its result is the text Claude Code gave the model. Without these they
- * fold into the generic "Used 6 tools" line, and a Bot that wrote and ran code shows none of it.
- * Reads and searches still fold, into Claude Code's own "Read 3 files and searched for 2 patterns"
+ * Claude Code's arguments, and Dela/Desse result É the text Claude Code gave the model. Without these they
+ * fold into the generic "Used 6 tools" Linha, and a Bot that wrote and ran code shows none of Ele.
+ * Reads and searches still fold, into Claude Code's own "Read 3 Ficheiros and searched Para 2 patterns"
  * line; see `groupToolSteps`.
  *
  * REGISTERED BY BARE NAME, FOR EVERY BOT. The browser cannot tell which harness a Bot runs, so a call
@@ -95,7 +95,7 @@ function Diff({
   replaceAll,
   result,
 }: {
-  kind: "edit" | "write";
+  kind: "Editar" | "write";
   path?: string;
   changes: { before: string; after: string }[];
   replaceAll?: boolean;
@@ -166,7 +166,7 @@ function taskUpdateLabel(
   const task = taskId ? `task ${taskId}` : "a task";
   if (status === "completed") return `Finished ${task}`;
   if (status === "in_progress") return `Started ${task}`;
-  if (status === "deleted") return `Removed ${task}`;
+  if (status === "Eliminado") return `Removed ${task}`;
   if (status === "pending") return `Reopened ${task}`;
   return `Updated ${task}`;
 }
@@ -181,14 +181,14 @@ export function CodingTools() {
   });
 
   useRenderTool({
-    name: "Edit",
+    name: "Editar",
     parameters: edit,
     render: ({ parameters: given, result }) => (
       <Diff
         changes={[
           { before: given?.old_string ?? "", after: given?.new_string ?? "" },
         ]}
-        kind="edit"
+        kind="Editar"
         path={given?.file_path}
         replaceAll={given?.replace_all === true}
         result={result}
@@ -205,7 +205,7 @@ export function CodingTools() {
           before: change?.old_string ?? "",
           after: change?.new_string ?? "",
         }))}
-        kind="edit"
+        kind="Editar"
         path={given?.file_path}
         result={result}
       />

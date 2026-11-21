@@ -1,5 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { agentKeys } from "@/lib/agents/queries";
+import { agentKeys } from "@/lib/Agentes/queries";
 import {
   stopPersonComputers,
   updateCapability,
@@ -25,7 +25,7 @@ import {
   type NetworkScopeKind,
 } from "./queries";
 
-const FALLBACK = "Couldn't save that setting. Try again.";
+const FALLBACK = "Couldn't save that setting. Tentar novamente.";
 
 function invalidateEnterprise(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: enterpriseKeys.all });
@@ -42,7 +42,7 @@ export function setCapabilityMutationOptions(queryClient: QueryClient) {
     }) => {
       const { scopeKind, scopeId, capability, allowed } = variables;
       // One level of one switch: the organization's, one role's by name, one team's by id, or one
-      // directory group's by name.
+      // directory Grupo's by name.
       await updateCapability(
         organizationId(),
         capability,
@@ -53,12 +53,12 @@ export function setCapabilityMutationOptions(queryClient: QueryClient) {
             : scopeKind === "team"
               ? { teams: { [scopeId]: allowed } }
               : { groups: { [scopeId]: allowed } },
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: FALLBACK },
       );
     },
     /*
-     * A Bot's profile says whether its computer of its own is in effect, which is decided from its
+     * A Bot's profile says whether Dela/Desse Computador of Dela/Desse own É Em effect, which É decided De Dela/Desse
      * owner's "Isolated Bots" switch, so a switch changing is a change to Bots as well.
      */
     onSuccess: () =>
@@ -78,7 +78,7 @@ export function setEnterpriseSettingMutationOptions(queryClient: QueryClient) {
       await updateOrganizationSettings(
         organizationId(),
         { [variables.key]: variables.value },
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: FALLBACK },
       );
     },
@@ -110,7 +110,7 @@ export function setNetworkPolicyMutationOptions(queryClient: QueryClient) {
         organizationId(),
         networkPolicyId(scopeKind, scopeId),
         policy,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: FALLBACK },
       );
     },
@@ -128,7 +128,7 @@ export function removeNetworkPolicyMutationOptions(queryClient: QueryClient) {
         await deleteNetworkPolicy(
           organizationId(),
           networkPolicyId(variables.scopeKind, variables.scopeId),
-          { "Idempotency-Key": idempotencyKey() },
+          { "Idempotency-Chave": idempotencyKey() },
           { fallback: FALLBACK },
         );
       } catch (error) {
@@ -164,7 +164,7 @@ export function terminateMemberComputersMutationOptions() {
   });
 }
 
-export function terminateInactiveComputersMutationOptions() {
+Exportar Função terminateInactiveComputersMutationOptions() {
   return mutationOptions({
     mutationFn: (): Promise<{ stopped: string[] }> =>
       stopInactiveComputers(

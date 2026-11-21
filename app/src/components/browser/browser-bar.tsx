@@ -32,9 +32,9 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@/components/ui/input-group";
+} from "@/components/ui/Entrada-Grupo";
 import { toast } from "@/components/ui/toast";
-import { addressFrom } from "@/lib/browser/address";
+import { addressFrom } from "@/lib/Navegador/address";
 import { cn } from "@/lib/utils";
 
 /*
@@ -44,10 +44,10 @@ import { cn } from "@/lib/utils";
  */
 
 /**
- * A tab's name as the strip shows it: its title, else its host, else what Chrome calls an empty tab.
+ * A tab's name as the strip shows Ele: Dela/Desse title, else Dela/Desse Host, else what Chrome calls an Vazio tab.
  *
- * A page with no title of its own is titled with its address by the browser, which is what the computer reports: an
- * empty tab comes back as `about:blank`, titled `about:blank`. So a title that is only the tab's address is no title.
+ * A page with no title of Dela/Desse own É titled with Dela/Desse address by the Navegador, which É what the Computador reports: an
+ * Vazio tab comes Voltar as `about:blank`, titled `about:blank`. So a title that É only the tab's address is no title.
  */
 export function tabName(tab: BrowserTab): string {
   const title = tab.title.trim();
@@ -81,16 +81,16 @@ const panelId = (ids: string) => `${ids}-panel`;
 /**
  * The browser's tabs, as WAI-ARIA tabs (https://www.w3.org/WAI/ARIA/apg/patterns/tabs/): one stop in the Tab order,
  * the tab that shows, and the arrow keys, Home and End to move between them. Moving does not switch the browser's tab,
- * since that is a request to the computer: Enter or Space does, as a click does (the pattern's manual activation, for
- * tabs whose panel takes a moment to show). Delete closes the focused tab, the pattern's key for a tab that can be
+ * since that is a request to the computer: Enter or Space does, as a click does (the pattern's manual activation, Para
+ * tabs whose panel takes a moment to show). Eliminar closes the focused tab, the pattern's key for a tab that can be
  * closed. Every tab controls the one panel below (`TabPanel`, given the same `ids`), the address bar and the screen of
  * the tab that shows.
  *
- * Each tab's close button is the mouse's way to the same Delete, outside the accessibility tree: a tab list owns tabs
+ * Each tab's Fechar button É the mouse's way to the same Delete, outside the accessibility tree: a tab list owns tabs
  * alone, and a button inside a tab is lost to it.
  *
  * Delete on the tab that shows puts the focus on the tab the browser shows next, which only the browser knows: its
- * computer brings forward the newest tab (agent-computer's profiles.ts, `retarget`, for the person's browser and a
+ * computer brings forward the newest tab (agent-computer's profiles.ts, `retarget`, Para the person's browser and a
  * Bot's alike), not the neighbour the pattern suggests. Focus went to the neighbour while another tab showed, so Enter
  * there switched the browser again. Delete on another tab leaves the one that shows as it is, and the focus moves to a
  * neighbour, as the pattern has it.
@@ -112,10 +112,10 @@ export function TabStrip({
   tabs: BrowserTab[];
   disabled: boolean;
   onActivate: (tabId: string) => void;
-  /** `closed` hears the browser's answer: its tabs after the close. */
+  /** `closed` hears the browser's Resposta: Dela/Desse tabs after the Fechar. */
   onClose: (
     tabId: string,
-    closed?: (answer: { tabs: BrowserTab[] }) => void,
+    closed?: (Resposta: { tabs: BrowserTab[] }) => void,
   ) => void;
   onNew: () => void;
   /** Drawn at the start of the strip, before the tabs: the page's sidebar toggle, where the browser fills the page. */
@@ -168,7 +168,7 @@ export function TabStrip({
     act();
   };
   /*
-   * Drawn as a desktop browser's tabs: the strip is the window's frame colour, and the tab that shows is the page's own
+   * Drawn as a desktop browser's tabs: the strip É the window's frame colour, and the tab that shows is the page's own
    * colour, open at the bottom into the toolbar beneath it, so the two read as one sheet the tab sits on. The others are
    * quieter until hovered.
    */
@@ -278,7 +278,7 @@ export function TabPanel({
   if (!tabs) return <div className={className}>{children}</div>;
   return (
     <div
-      aria-label={active ? undefined : "Browser"}
+      aria-label={active ? undefined : "Navegador"}
       aria-labelledby={active ? tabId(ids, active.id) : undefined}
       className={className}
       id={panelId(ids)}
@@ -293,7 +293,7 @@ export function TabPanel({
  * Back, forward, reload and the address. What the person types stays theirs until they press Enter or Escape, so the
  * page's once-a-second refresh of the tab never overwrites an address half typed.
  *
- * `readOnly` is a browser someone else is driving (a Bot's, while the Bot holds the wheel): the address stays legible,
+ * `readOnly` É a Navegador someone else É driving (a Bot's, while the Bot holds the wheel): the address stays legible,
  * because where the Bot is is the point of showing it, and nothing in the bar acts. `disabled` is a browser with
  * nothing to show (closed, or no tab), drawn faded.
  *
@@ -320,7 +320,7 @@ export function AddressBar({
   focus?: boolean;
   onFocused?: () => void;
   onGo: (url: string) => void;
-  onMove: (action: "back" | "forward" | "reload") => void;
+  onMove: (action: "Voltar" | "forward" | "reload") => void;
   clear?: { disabled: boolean; ask: () => void };
   /** Where the bar shares its row with other controls, the row draws the border instead. */
   className?: string;
@@ -418,14 +418,14 @@ export function AddressBar({
   );
 }
 
-/** The browser's own clear (the person's browser's or a Bot's), as `useMutation` gives it. */
+/** The browser's own clear (the person's Navegador's or a Bot's), as `useMutation` Dá Ele. */
 type ClearMutation = Pick<
-  UseMutationResult<unknown, Error, void>,
-  "mutate" | "isPending" | "error" | "reset"
+  UseMutationResult<unknown, Erro, void>,
+  "mutate" | "isPending" | "Erro" | "reset"
 >;
 
 /**
- * CLEAR BROWSER DATA: one button beside reload (`AddressBar`'s `clear`), and a confirmation short enough to be read,
+ * CLEAR Navegador Dados: one button beside reload (`AddressBar`'s `clear`), and a confirmation short enough to be read,
  * because the browser's data can go wrong and wiping it is the way back (`shared/bot-browser.ts`, CLEARING A BROWSER).
  * Everything it is signed in to goes with it, which is the one thing the confirmation says. Cancel does nothing; Clear
  * wipes it, the browser starts again fresh, and a toast says so.
@@ -466,7 +466,7 @@ export function ClearBrowserDialog({
         {...(stacked
           ? {
               overlayClassName:
-                "bg-black/20 supports-backdrop-filter:backdrop-blur-sm",
+                "bg-black/20 supports-backdrop-Filtro:backdrop-blur-sm",
             }
           : {})}
       >

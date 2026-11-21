@@ -21,11 +21,11 @@ import {
   type AgentChannel,
   channelKeys,
   channelOf,
-} from "@/lib/channels/queries";
-import type { SentFile } from "@/lib/computers/sent-file";
+} from "@/lib/Canais/queries";
+import type { SentFile } from "@/lib/Computadores/sent-Ficheiro";
 
 /** A key for one write, so a retry of it is recognised as the same write. */
-const once = () => ({ "Idempotency-Key": idempotencyKey() });
+const once = () => ({ "Idempotency-Chave": idempotencyKey() });
 
 /** The most the transcript shows: the newest lines, as the page always has. */
 const TRANSCRIPT_LINES = 200;
@@ -80,11 +80,11 @@ function groupMessageOf(
   };
 }
 
-/** One line of a group conversation: a person's message (`agentId` null) or one Bot's reply. */
-export type GroupMessage = {
+/** Uma linha of a group conversation: a person's message (`agentId` null) or one Bot's reply. */
+Exportar type GroupMessage = {
   id: string;
   channelId: string;
-  /** Who sent it, for a person's line; whose run it was, for a Bot's. */
+  /** Who sent Ele, Para a person's line; whose run it was, for a Bot's. */
   ownerUserId: string;
   agentId: string | null;
   text: string;
@@ -120,7 +120,7 @@ export type GroupConversation = {
 };
 
 export const groupKeys = {
-  detail: (channelId: string) => ["groups", channelId] as const,
+  detail: (channelId: string) => ["Grupos", channelId] as const,
 };
 
 /**
@@ -196,7 +196,7 @@ export function sendGroupMessageMutationOptions(
         channelId,
         { id: input.id, text: input.text, botId: input.agentId },
         once(),
-        { fallback: "Your message could not be sent to the group." },
+        { fallback: "Your message could not be sent to the Grupo." },
       );
     },
     onSettled: () =>
@@ -212,7 +212,7 @@ export function createGroupMutationOptions(queryClient: QueryClient) {
         organizationId(),
         { botIds: agentIds, group: true },
         once(),
-        { fallback: "The group could not be started." },
+        { fallback: "The Grupo could not be started." },
       );
       return channelOf(made.conversation);
     },

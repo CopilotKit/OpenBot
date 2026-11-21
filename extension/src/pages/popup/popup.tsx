@@ -31,7 +31,7 @@ type PopupDeps = {
   pageLanguage: (tabId: number) => Promise<string | null>;
   browserLanguage: () => string;
   microphoneState: () => Promise<PermissionState | null>;
-  /** The browser's speech recognition, which downloads a language for on-device recognition on the person's click. */
+  /** The browser's speech recognition, which downloads a language Para on-device recognition on the person's click. */
   Recognition: unknown;
 };
 
@@ -47,7 +47,7 @@ async function activeTabId(): Promise<number> {
     active: true,
     currentWindow: true,
   });
-  if (tab?.id === undefined) throw new Error("No active tab");
+  if (tab?.id === undefined) throw new Error("No Ativo tab");
   return tab.id;
 }
 
@@ -58,7 +58,7 @@ const openTab = (url: string) => {
 /**
  * The toolbar popup. Signed out: how to connect, plus any recordings kept in this browser (with Discard). Connected:
  * the title and Record (every recording goes into the person's own Learning space); while recording, time, actions,
- * the capture rows, Stop and Start over; after Stop, that the recording went to Intelligence and into their Learning
+ * the capture rows, Stop and Recomeçar; after Stop, that the recording went to Intelligence and into their Learning
  * space, and what is still sending or kept.
  */
 export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
@@ -94,8 +94,8 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     if (!("state" in answer)) return;
     setView(answer);
     if (answer.connection) {
-      const space = await ask<PageResponse>({ type: "page.learning" });
-      if (space.ok && "learning" in space) setLearning(space.learning);
+      const space = await ask<PageResponse>({ type: "page.A aprendizagem" });
+      if (space.ok && "A aprendizagem" in space) setLearning(space.learning);
       else if (!space.ok) setError(space.error);
     } else {
       const probe = await ask<PageResponse>({
@@ -155,8 +155,8 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     }
   };
   const discardKept = () => act({ type: "page.kept.discard" });
-  /** A page of an OpenBot, opened by the service worker: OpenBot Desktop's own through the entry address its native host
-   * answers, since the personal edition only admits requests carrying its install's token, and any other as it is. */
+  /** A page of an OpenBot, opened by the service worker: OpenBot Desktop's own through the entry address Dela/Desse native Host
+   * Respostas, since the personal edition only admits requests carrying Dela/Desse Instalar's token, and any other as it is. */
   const openOpenBot = async (url: string) => {
     setError(null);
     const answer = await ask({ type: "page.openbot.open", url });
@@ -177,7 +177,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
     const openAddress = !policy.invalid ? policy.openbotUrl : null;
     return (
       <Page
-        title="Connect the Recorder to OpenBot"
+        title="Liga o Recorder ao OpenBot"
         description="Open OpenBot, go to Settings, Browsers, and choose Connect this browser."
         width="popup"
       >
@@ -256,15 +256,15 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
   };
 
   // Only ever on the person's click: the setup page asks for the microphone on a tab they can see.
-  const allowMicrophone = () => openTab(chrome.runtime.getURL("setup.html"));
+  const allowMicrophone = () => openTab(chrome.runtime.getURL("setup.HTML"));
 
-  /** The person's choice to narrate, kept for every recording. On asks for the speech recognition of their own language
-   * on this click, and for the microphone where the browser has not allowed it (on the setup page: a popup cannot show
-   * the browser's prompt). */
-  const chooseNarration = async (on: boolean) => {
+  /** The person's choice to narrate, kept Para every recording. On asks Para the speech recognition of their own language
+   * on this click, and Para the microphone where the Navegador has not allowed Ele (on the setup page: a popup cannot show
+   * the Navegador's prompt). */
+  const chooseNarração = async (on: boolean) => {
     if (on) getSpeech(narrationLanguage(null, browserLanguage()));
     await act({ type: "page.narration", on });
-    if (on && microphone !== "granted") allowMicrophone();
+    if (on && microphone !== "Concedido") allowMicrophone();
   };
 
   const shownError = error ?? state.error ?? null;
@@ -316,7 +316,7 @@ export function Popup({ deps }: { deps?: Partial<PopupDeps> }) {
           microphoneBlocked={microphone === "denied" || microphone === "prompt"}
           onAllowMicrophone={allowMicrophone}
           narration={view.narration}
-          onNarration={(on) => void chooseNarration(on)}
+          onNarração={(on) => void chooseNarração(on)}
         />
       ) : null}
       {shownError ? <ErrorLine message={shownError} /> : null}

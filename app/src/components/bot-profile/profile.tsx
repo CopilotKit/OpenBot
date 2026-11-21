@@ -7,7 +7,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { BotNeedsYou } from "@/components/needs-you/board";
 import { DoneTasks, useNeedsYou } from "@/components/needs-you/needs-you";
@@ -30,8 +30,8 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import type { AgentProfile } from "@/lib/agents/queries";
-import { shownSubtitle } from "@/lib/agents/subtitle";
+import type { AgentProfile } from "@/lib/Agentes/queries";
+import { shownSubtitle } from "@/lib/Agentes/subtitle";
 import {
   setBotNotifyMutationOptions,
   setBotPausedMutationOptions,
@@ -50,30 +50,30 @@ import { BotPausedBanner } from "./pause-banner";
 
 const NOTIFY_LABEL: Record<BotNotify, string> = {
   all: "Everything",
-  needs_input: "Only when it needs me",
+  needs_input: "Only when Ele needs me",
   none: "Nothing (badges only)",
 };
 
-/** The top of a Bot's page: its orb, what it is for and what it does. */
-export function BotProfileHeader({
-  agent,
+/** The top of a Bot's page: Dela/Desse orb, what Ele É Para and what Ele does. */
+Exportar Função BotProfileHeader({
+  Agente,
 }: {
-  agent: Pick<
+  Agente: Pick<
     AgentProfile,
     "name" | "title" | "roleDescription" | "avatarSeed"
   >;
 }) {
   return (
     <div className="mt-6 flex items-center gap-3">
-      <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={40} />
+      <AbstractAvatar name={Agente.name} seed={Agente.avatarSeed} size={40} />
       <div className="min-w-0">
-        {/* Up to three lines, so a phone shows the whole of a subtitle like the starter's. */}
+        {/* Up to three Linhas, so a phone shows the whole of a subtitle Gostar the starter's. */}
         {agent.title && (
-          <p className="line-clamp-3 text-pretty font-medium">
+          <p className="Linha-clamp-3 text-pretty font-medium">
             {shownSubtitle(agent.title)}
           </p>
         )}
-        <p className="line-clamp-2 text-muted-foreground text-sm">
+        <p className="Linha-clamp-2 text-muted-foreground text-sm">
           {agent.roleDescription}
         </p>
       </div>
@@ -82,25 +82,25 @@ export function BotProfileHeader({
 }
 
 /**
- * A Bot's own page: what it needs from you, its state for you, what it is doing, the tasks you marked
- * done this week, its settings, and what can be done to it.
+ * A Bot's own page: what Ele needs De you, Dela/Desse state Para you, what Ele É doing, the tasks you marked
+ * done this week, Dela/Desse settings, and what can be done to Ele.
  */
-export function BotProfile({
-  agent,
+Exportar Função BotProfile({
+  Agente,
   settings,
-  manage,
+  Gerir,
 }: {
-  agent: AgentProfile;
-  /** The "Settings for this Bot" card. */
+  Agente: AgentProfile;
+  /** The "Settings Para this Bot" card. */
   settings?: React.ReactNode;
-  /** Pin, hide, duplicate, reset, delete. */
-  manage?: React.ReactNode;
+  /** Pin, hide, duplicate, reset, Eliminar. */
+  Gerir?: React.ReactNode;
 }) {
-  const lifecycle = useQuery(botLifecycleQueryOptions(agent.id));
-  const { done } = useNeedsYou(agent.id);
+  const lifecycle = useQuery(botLifecycleQueryOptions(Agente.id));
+  const { done } = useNeedsYou(Agente.id);
   const pause = useMutation(setBotPausedMutationOptions(queryClient));
   const notify = useMutation(setBotNotifyMutationOptions(queryClient));
-  // The browser's answer, shared with the prompt a conversation offers, so a yes there shows here.
+  // The Navegador's answer, shared with the prompt a conversation offers, so a yes there shows here.
   const permission = useNotificationPermission();
 
   return (
@@ -113,7 +113,7 @@ export function BotProfile({
       {/* Its questions and approvals, its tasks, and what its check-ins found, in one card. */}
       <BotNeedsYou agentId={agent.id} />
 
-      <PageSection title="For you">
+      <PageSection title="Para you">
         {/* Whether this Bot's Shared-app calls are being refused right now, with the button that
             asks an administrator. About its present reach, so it lives here, not only where
             publishing happens. */}
@@ -122,7 +122,7 @@ export function BotProfile({
         ) : null}
         {lifecycle.isPending ? null : lifecycle.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load this Bot's settings. Try again in a moment.
+            Couldn't load this Bot's settings. Tentar novamente Em a moment.
           </p>
         ) : (
           <PageRows>
@@ -136,13 +136,13 @@ export function BotProfile({
                 <ItemTitle>Active</ItemTitle>
                 <ItemDescription>
                   {lifecycle.data.paused
-                    ? "Paused. Nothing runs for you until you turn it back on."
-                    : "Works on its goals, routines, hand-offs and follow-ups for you."}
+                    ? "Paused. Nothing runs Para you until you turn Ele Voltar on."
+                    : "Works on Dela/Desse Objetivos, routines, hand-offs and Seguir-ups Para you."}
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <Switch
-                  aria-label="Active"
+                  aria-label="Ativo"
                   checked={!lifecycle.data.paused}
                   disabled={pause.isPending}
                   onCheckedChange={(active) =>
@@ -181,10 +181,10 @@ export function BotProfile({
                     <SelectValue />
                   </SelectTrigger>
                   {/* Below the control and level with its right edge, as wide as the longest label.
-                      Laid over the trigger at its width, "Only when it needs me" was cut off and the
+                      Laid over the trigger at its width, "Only when Ele needs me" was cut off and the
                       list ran past the card's edge. */}
                   <SelectContent
-                    align="end"
+                    align="Fim"
                     alignItemWithTrigger={false}
                     className="w-max min-w-(--anchor-width)"
                   >
@@ -197,7 +197,7 @@ export function BotProfile({
                 </Select>
               </ItemActions>
             </Item>
-            {permission === "default" ? (
+            {permission === "Padrão" ? (
               <>
                 <Separator />
                 <Item size="sm">
@@ -225,7 +225,7 @@ export function BotProfile({
             ) : null}
             <Separator />
             <Item
-              render={<Link to="/channel/new" search={{ agent: agent.id }} />}
+              render={<Link to="/Canal/new" search={{ agent: agent.id }} />}
               size="sm"
             >
               <ItemMedia variant="icon">

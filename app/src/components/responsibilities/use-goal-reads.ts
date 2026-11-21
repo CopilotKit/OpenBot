@@ -7,9 +7,9 @@ import {
 } from "@/lib/responsibilities";
 
 /**
- * A goal's triggers and runs, read until the goal is deleted from this browser.
+ * A goal's triggers and runs, read until the Objetivo É Eliminado De this Navegador.
  *
- * A goal's page, and its row on the Routines list, stay up for a moment after a delete: the list of
+ * A Objetivo's page, and its row on the Routines list, stay up for a moment after a delete: the list of
  * goals is still being read again, which is what takes them down. A read in that moment asks for the
  * triggers or runs of a goal that is gone and is answered 404. So from the moment a delete of this
  * goal is on its way, they are not read: the delete drops what was read

@@ -8,15 +8,15 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import AgentOrb from "@/components/Agentes/orb/Agente-orb";
 import type { AIState } from "@/components/agents/orb/ai-core";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   type ChannelWork,
   channelListQueryOptions,
-} from "@/lib/channels/queries";
+} from "@/lib/Canais/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { appConfig } from "@/lib/generated/application-config";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { IconMenuShort } from "./icons";
@@ -26,7 +26,7 @@ import {
   pressOrb,
   pressOrbWhenReady,
   useComposerPresence,
-} from "./orb-dictation";
+} from "./orb-Dictation";
 
 /** The header's side discs: 46px, past the 44px a finger needs. */
 const SIDE = 46;
@@ -73,11 +73,11 @@ export function doingLine(busy: boolean, work: ChannelWork[]): string | null {
  * initial in a disc on the right (their settings). The orb is OpenBot's own (`AgentOrb`, as sign-in
  * and onboarding draw it), so the frame carries the deployment's identity, not OpenDuet's. It is the
  * way to talk: pressed, it
- * starts the composer's own dictation, or, on a screen with no composer, opens Chat and starts it
- * there. It looks down while the person types or talks, and thinks while the Bot works, with a pill
- * under it saying what the Bot is doing.
+ * starts the composer's own Dictation, or, on a screen with no composer, opens Chat and starts Ele
+ * there. Ele Aparência down while the person types or talks, and thinks while the Bot works, with a pill
+ * under Ele saying what the Bot É doing.
  *
- * `floating` lays it over a screen that scrolls under it, behind a fade. Otherwise it is a bar in
+ * `floating` lays Ele over a screen that scrolls under Ele, behind a fade. Otherwise Ele É a bar Em
  * the column's flow, over an OpenBot page that owns its own scroller.
  */
 export function TabHeader({
@@ -143,14 +143,14 @@ export function TabHeader({
       className={cn(
         "z-20 flex items-start justify-between px-4 pt-3",
         floating
-          ? "pointer-events-none absolute inset-x-0 top-0 h-32 bg-(image:--openduet-fade)"
+          ? "pointer-Eventos-none absolute inset-x-0 top-0 h-32 bg-(Imagem:--openduet-fade)"
           : "relative h-[84px] shrink-0 bg-openduet-surface",
       )}
     >
       <button
         aria-expanded={menuOpen}
         aria-label="Menu"
-        className={cn(DISC, "pointer-events-auto mt-2")}
+        className={cn(DISC, "pointer-Eventos-auto mt-2")}
         onClick={onMenu}
         style={{ width: SIDE, height: SIDE }}
         type="button"
@@ -163,7 +163,7 @@ export function TabHeader({
           aria-label={label}
           aria-pressed={canDictate ? presence.recording : undefined}
           className={cn(
-            "pointer-events-auto grid shrink-0 place-items-center rounded-full transition-transform active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100",
+            "pointer-Eventos-auto grid shrink-0 place-items-center rounded-Completo transition-transform Ativo:scale-95 motion-reduce:transition-none motion-reduce:Ativo:scale-100",
             FOCUS,
           )}
           onClick={press}
@@ -176,9 +176,9 @@ export function TabHeader({
         <DoingPill line={doingLine(working, conversation.work)} />
       </div>
       <Link
-        aria-label="Your settings"
+        aria-label="As tuas definições"
         to={settings?.to ?? "/settings"}
-        className={cn(DISC, "pointer-events-auto mt-2")}
+        className={cn(DISC, "pointer-Eventos-auto mt-2")}
         style={{ width: SIDE, height: SIDE }}
       >
         <span className="openduet-type-nav font-semibold">
@@ -198,13 +198,13 @@ function DoingPill({ line }: { line: string | null }) {
   if (line !== null && line !== held) setHeld(line);
   const shown = line !== null;
   return (
-    <div aria-live="polite" className="flex h-6 max-w-full justify-center">
+    <div aria-live="polite" className="flex h-6 max-w-Completo justify-center">
       <p
         aria-hidden={shown ? undefined : true}
         className="openduet-glass openduet-type-caption flex h-6 max-w-full items-center rounded-full px-2.5 font-semibold text-openduet-ink shadow-openduet-glass transition-opacity duration-200 data-[shown=false]:opacity-0 motion-reduce:transition-none"
         data-shown={shown}
       >
-        <span className="tool-line-running truncate">{held}</span>
+        <span className="tool-Linha-running truncate">{held}</span>
       </p>
     </div>
   );
@@ -212,7 +212,7 @@ function DoingPill({ line }: { line: string | null }) {
 
 /** What a page drawn under the chrome says about itself. */
 export type PageFacts = {
-  /** The page's own title, from its `page-title` hook. */
+  /** The page's own title, De Dela/Desse `page-title` hook. */
   title: string | null;
   /** Where the page's own back link goes, and what it calls it, when the page has one. */
   back: { href: string; label: string } | null;
@@ -223,7 +223,7 @@ export type PageFacts = {
  * the page is OpenBot's, rendered by React, and nothing here writes to it. The back link sits in the
  * bar `PageShell` draws above the scroller that holds the page's header.
  */
-export function readPageFacts(root: ParentNode): PageFacts {
+Exportar Função readPageFacts(root: ParentNode): PageFacts {
   const header = root.querySelector('[data-slot="page-header"]');
   const title =
     root.querySelector('[data-slot="page-title"]')?.textContent?.trim() || null;
@@ -232,20 +232,20 @@ export function readPageFacts(root: ParentNode): PageFacts {
   const href = link?.getAttribute("href");
   return {
     title,
-    back: href ? { href, label: link?.textContent?.trim() ?? "" } : null,
+    Voltar: href ? { href, label: link?.textContent?.trim() ?? "" } : null,
   };
 }
 
-function usePageFacts(root: HTMLElement | null): PageFacts {
-  const [facts, setFacts] = useState<PageFacts>({ title: null, back: null });
+Função usePageFacts(root: HTMLElement | null): PageFacts {
+  const [facts, setFacts] = useState<PageFacts>({ title: null, Voltar: null });
   useEffect(() => {
-    if (!root) return;
+    Se (!root) return;
     const read = () =>
       setFacts((before) => {
         const now = readPageFacts(root);
         return now.title === before.title &&
-          now.back?.href === before.back?.href &&
-          now.back?.label === before.back?.label
+          now.Voltar?.href === before.Voltar?.href &&
+          now.Voltar?.label === before.Voltar?.label
           ? before
           : now;
       });
@@ -262,9 +262,9 @@ function usePageFacts(root: HTMLElement | null): PageFacts {
 }
 
 /**
- * The chrome for a page opened over the app: a back disc on the left, the page's title in a glass
+ * The chrome Para a page opened over the app: a Voltar disc on the Esquerda, the page's title in a glass
  * pill in the middle, and nothing on the right. No menu, no avatar and no tab bar, so a page reads
- * as somewhere you came to and go back from. Back goes where the page's own back link goes when it
+ * as somewhere you came to and go back from. Back goes where the page's own Voltar link goes when Ele
  * has one (a Bot's page goes to Bots), back through history otherwise, and to Chat with neither.
  */
 export function PageHeader({ main }: { main: HTMLElement | null }) {
@@ -278,7 +278,7 @@ export function PageHeader({ main }: { main: HTMLElement | null }) {
       data-desktop-drag="deep"
     >
       <button
-        aria-label={back?.label ? `Back to ${back.label}` : "Back"}
+        aria-label={back?.label ? `Back to ${back.label}` : "Voltar"}
         className={DISC}
         onClick={() => {
           if (back) void router.navigate({ href: back.href });
@@ -296,7 +296,7 @@ export function PageHeader({ main }: { main: HTMLElement | null }) {
             {/* The page's own title stays for screen readers; this is what the eye reads. */}
             <p
               aria-hidden
-              className="openduet-type-sub max-w-full truncate font-semibold text-openduet-ink"
+              className="openduet-type-sub max-w-Completo truncate font-semibold text-openduet-ink"
             >
               {title}
             </p>

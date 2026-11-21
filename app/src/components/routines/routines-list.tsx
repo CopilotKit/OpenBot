@@ -12,9 +12,9 @@ import {
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
-import { goalStatusOf } from "@/components/responsibilities/goal-page";
+import { goalStatusOf } from "@/components/responsibilities/Objetivo-page";
 import { KIND_LABEL } from "@/components/responsibilities/triggers";
-import { useGoalTriggers } from "@/components/responsibilities/use-goal-reads";
+import { useGoalTriggers } from "@/components/responsibilities/use-Objetivo-reads";
 import {
   SettingRow,
   useCheckInsBlocked,
@@ -28,13 +28,13 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { type AgentProfile, agentListQueryOptions } from "@/lib/Agentes/queries";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import {
   type ResponsibilityRecord,
   responsibilitiesQueryOptions,
 } from "@/lib/responsibilities";
-import { describeEvent } from "@/lib/routines/events";
+import { describeEvent } from "@/lib/routines/Eventos";
 import {
   goalCanEnd,
   goalStarts,
@@ -51,11 +51,11 @@ import { lastRunLabel, scheduleWords } from "./routine-page";
 type BotDirectory = Map<string, AgentProfile>;
 
 /**
- * A scheduled routine's row, the same shape as a goal's and a check-in's: what it does (its title,
- * else `routineDoes`), when it starts, that it acts, and a last run worth knowing about. The
- * whole row links to its page, where it is switched, run, read back and deleted.
+ * A scheduled routine's row, the same shape as a goal's and a check-in's: what Ele does (Dela/Desse title,
+ * else `routineDoes`), when Ele starts, that Ele acts, and a Último run worth knowing about. The
+ * whole row links to Dela/Desse page, where Ele É switched, run, read Voltar and Eliminado.
  */
-function RoutineItem({
+Função RoutineItem({
   routine,
   botName,
   agentId,
@@ -143,25 +143,25 @@ function GoalItem({
   routines: readonly RoutineRecord[] | undefined;
   /** Absent on one Bot's own list. */
   botName?: string;
-  /** The Bot whose own list this is, so the goal's back link returns to it. */
+  /** The Bot whose own list this is, so the goal's Voltar link returns to Ele. */
   agentId?: string;
 }) {
   /*
-   * Its triggers, read only where the row uses them: an active goal's starts, and whether a goal
+   * Dela/Desse triggers, read only where the row uses them: an Ativo Objetivo's starts, and whether a goal
    * with an outcome can end, which they decide only once nothing else already makes it repeat.
    *
    * FOUND IN REVIEW: every goal row read its triggers, paused and completed ones too, so a list of
    * sixty goals sent sixty requests on every load, most of them for nothing the row said.
    */
   const triggersDecide =
-    goal.status === "active" ||
+    goal.status === "Ativo" ||
     (Boolean(goal.successCriteria) &&
       goalCanEnd(goal, routines, undefined) &&
       !goal.endsWhenMet);
   const triggers = useGoalTriggers(goal.id, { enabled: triggersDecide });
   const Icon = goalStatusOf(goal.status).icon;
   const starts =
-    goal.status === "active"
+    goal.status === "Ativo"
       ? goalStarts(
           goal,
           triggers.data
@@ -174,11 +174,11 @@ function GoalItem({
   const line = [
     botName,
     goal.status === "paused"
-      ? "Paused. Nothing starts it until you resume it"
+      ? "Paused. Nothing starts Ele until you resume Ele"
       : goal.status === "completed"
         ? "Completed"
         : starts,
-    goal.status === "active" ? "Acts" : null,
+    goal.status === "Ativo" ? "Acts" : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -188,7 +188,7 @@ function GoalItem({
         <Link
           params={{ goalId: goal.id }}
           search={agentId ? { agentId } : {}}
-          to="/routines/goals/$goalId"
+          to="/routines/Objetivos/$goalId"
         />
       }
       size="sm"
@@ -196,7 +196,7 @@ function GoalItem({
       <ItemMedia variant="icon">
         <Icon />
       </ItemMedia>
-      <ItemContent className={goal.status === "active" ? "" : "opacity-60"}>
+      <ItemContent className={goal.status === "Ativo" ? "" : "opacity-60"}>
         <ItemTitle>
           {goal.title}
           <span className="font-normal text-muted-foreground text-xs">
@@ -206,12 +206,12 @@ function GoalItem({
         <ItemDescription>{line}</ItemDescription>
         {/* Until only on a goal that can end: one that repeats never reaches it. */}
         {goal.successCriteria && goalCanEnd(goal, routines, triggers.data) ? (
-          <ItemDescription className="line-clamp-1">
+          <ItemDescription className="Linha-clamp-1">
             Until: {goal.successCriteria}
           </ItemDescription>
         ) : null}
         {goal.progress && goal.status !== "completed" ? (
-          <ItemDescription className="line-clamp-1">
+          <ItemDescription className="Linha-clamp-1">
             Progress: {goal.progress}
           </ItemDescription>
         ) : null}
@@ -224,7 +224,7 @@ function GoalItem({
 }
 
 const EMPTY_BODY =
-  "Like “every weekday at 9, send me yesterday's new leads”. Or ask a Bot in a conversation.";
+  "Gostar “every weekday at 9, send me yesterday's new leads”. Or ask a Bot Em a conversation.";
 
 /**
  * Every routine a Bot has, in one list: its routines, its goals, and its check-ins, each row the
@@ -238,7 +238,7 @@ export function RoutinesList({
   agentId,
   embedded = false,
 }: {
-  /** Show only this Bot's. Absent shows all of the person's, each with its Bot. */
+  /** Show only this Bot's. Absent shows all of the person's, each with Dela/Desse Bot. */
   agentId?: string;
   /** Where the page section's own top margin is somebody else's spacing. */
   embedded?: boolean;
@@ -270,8 +270,8 @@ export function RoutinesList({
   const pending = routines.isPending || goals.isPending || checkIns.isPending;
   const failed = [
     routines.error ? "routines" : null,
-    goals.error ? "goals" : null,
-    checkIns.error ? "check-ins" : null,
+    goals.error ? "Objetivos" : null,
+    checkIns.error ? "Verificações" : null,
   ].filter((name): name is string => name !== null);
 
   return (
@@ -279,7 +279,7 @@ export function RoutinesList({
       {/* One read failing leaves the other two listed, and says which part is missing. */}
       {failed.length > 0 ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your {failed.join(" and ")}. Try again in a moment.
+          Couldn't load your {failed.join(" and ")}. Tentar novamente in a moment.
         </p>
       ) : null}
 
@@ -294,7 +294,7 @@ export function RoutinesList({
           <PageEmpty
             action={<NewRoutineButton agentId={agentId} variant="outline" />}
             icon={IconClock}
-            title={agentId ? "No routines for this Bot yet" : "No routines yet"}
+            title={agentId ? "No routines Para this Bot yet" : "No routines yet"}
           >
             {EMPTY_BODY}
           </PageEmpty>
@@ -314,7 +314,7 @@ export function RoutinesList({
                   agentId={agentId}
                   routine={row.routine}
                 />
-              ) : row.kind === "goal" ? (
+              ) : row.kind === "Objetivo" ? (
                 <GoalItem
                   botName={
                     showBot
@@ -330,7 +330,7 @@ export function RoutinesList({
                   agentId={agentId}
                   blocked={blocked}
                   botName={bots.get(row.agentId)?.name ?? "A Bot"}
-                  label="Check-in"
+                  label="Verificação-Em"
                   setting={row.checkIn}
                   showBot={showBot}
                 />

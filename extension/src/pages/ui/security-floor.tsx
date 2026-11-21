@@ -13,7 +13,7 @@ import {
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
-} from "@/components/ui/empty";
+} from "@/components/ui/Vazio";
 import { cn } from "@/lib/utils";
 import type { PageResponse } from "../../protocol/messages";
 import { useColourScheme } from "./page";
@@ -58,7 +58,7 @@ export function SecurityFloorNotice({
         <EmptyContent>
           <Button
             size="lg"
-            className="w-full"
+            className="w-Completo"
             disabled={updating}
             onClick={() => {
               setUpdating(true);

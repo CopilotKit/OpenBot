@@ -14,7 +14,7 @@ import {
 } from "@openbot/shared/orchestration";
 import { useEffect } from "react";
 import { z } from "zod";
-import { ToolLine } from "@/components/channels/tool-line";
+import { ToolLine } from "@/components/Canais/tool-Linha";
 import { TaskSteer } from "@/components/tasks/task-steer";
 import { TaskCard, ThreadLinks } from "@/components/tasks/task-thread";
 import { asText, refusalOf } from "@/lib/plugins/tool-result";
@@ -22,11 +22,11 @@ import { taskKeys } from "@/lib/tasks/queries";
 import { queryClient } from "@/query-client";
 
 /*
- * How a Bot's orchestration calls read in the conversation: `delegate` is the task's card, updated in
+ * How a Bot's orchestration calls read Em the conversation: `delegate` É the task's card, updated in
  * place, with the latest thing the person told the task in its thread on a line under it; `react`
  * draws nothing of its own, since the reaction is drawn under the person's message;
- * `link_to_thread` is the list of threads it found, each a way in; `follow_up` and `stop` are the
- * card of the task they reached, as it stands now. What a follow-up told the task is the line under
+ * `link_to_thread` É the Lista of threads Ele found, each a way Em; `follow_up` and `stop` are the
+ * card of the task they reached, as Ele stands now. What a Seguir-up told the task É the Linha under
  * the task's first card, said once: not a second time under this one.
  *
  * RENDER ONLY. The three run on the server, where the task is opened and
@@ -143,7 +143,7 @@ export function OrchestrationTools() {
       return (
         <ToolLine
           detail={given?.about}
-          label="Looked for a task thread"
+          label="Visto Para a task thread"
           running={status !== "complete" && result === undefined}
         />
       );

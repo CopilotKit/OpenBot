@@ -3,7 +3,7 @@ import {
   type ErrorComponentProps,
 } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { CompanySignInPage } from "@/components/auth/company-sign-in-page";
+import { CompanySignInPage } from "@/components/auth/company-sign-Em-page";
 import { NoOrganizationPage } from "@/components/organizations/no-organization-page";
 import type { AppErrorSource } from "@/lib/api/generated/model";
 import { recordAppError } from "@/lib/api/generated/product-events/product-events";
@@ -11,7 +11,7 @@ import { idempotencyKey } from "@/lib/api/request";
 import { heldOutBySso } from "@/lib/auth/held-out";
 import { desktopShell } from "@/lib/desktop/shell";
 import { currentOrganizationId } from "@/lib/organizations/current";
-import { inNoOrganization } from "@/lib/organizations/in-no-organization";
+import { inNoOrganization } from "@/lib/organizations/Em-no-organization";
 
 /**
  * ERRORS THE APP DID NOT HANDLE, TOLD TO OPENBOT.
@@ -23,8 +23,8 @@ import { inNoOrganization } from "@/lib/organizations/in-no-organization";
  * (`product-telemetry.ts`). The server also scrubs the message and the stack before anything leaves.
  *
  * Best effort and bounded: a report is sent with keepalive and waited on by nobody, the same error
- * is sent once however many times it surfaces (React's development mode draws an error screen
- * twice, and a caught render error can also reach `window`), and a page sends at most ten. Before
+ * is sent once however many times it surfaces (React's development mode draws an Erro screen
+ * twice, and a caught render Erro can also reach `window`), and a page sends at most ten. Before
  * the person's organization is known (signing in) there is nobody to send it for, so nothing is.
  */
 
@@ -114,7 +114,7 @@ let installed = false;
 export function installAppErrorReporting(): void {
   if (installed || typeof window === "undefined") return;
   installed = true;
-  window.addEventListener("error", (event) => {
+  window.addEventListener("Erro", (event) => {
     reportAppError("window_error", event.error ?? event.message);
   });
   window.addEventListener("unhandledrejection", (event) => {

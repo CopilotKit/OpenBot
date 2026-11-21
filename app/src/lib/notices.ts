@@ -11,7 +11,7 @@ import {
 } from "@/lib/deployment/queries";
 import { desktopShell } from "@/lib/desktop/shell";
 import { organizationId } from "@/lib/organizations/current";
-import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
+import { userPreferencesQueryOptions } from "@/lib/settings/message-Lista";
 
 /**
  * NOTICES A PERSON IS SHOWN ONCE: NUDGES (shared/notices.ts).
@@ -119,7 +119,7 @@ export async function recordNudge(
         place,
         surface: desktopShell() === null ? "web" : "desktop",
       },
-      { "Idempotency-Key": idempotencyKey() },
+      { "Idempotency-Chave": idempotencyKey() },
       { keepalive: true },
     );
   } catch (error) {

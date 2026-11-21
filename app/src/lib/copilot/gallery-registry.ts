@@ -13,7 +13,7 @@ export type ToolParameters = Parameters<
 >[0]["parameters"];
 
 /** Grouping for the Admin page only. Never read by the model. */
-export type GalleryKind = "chart" | "card" | "decision";
+export type GalleryKind = "Gráfico" | "card" | "decision";
 
 export type GalleryComponent = {
   /**
@@ -79,7 +79,7 @@ let modules: Record<string, { GALLERY?: GalleryComponent[] }> = {};
 try {
   // Keep this call inline: Vite replaces `import.meta.glob` at build time.
   modules = import.meta.glob<{ GALLERY?: GalleryComponent[] }>(
-    "../../components/gallery/*.tsx",
+    "../../components/Galeria/*.tsx",
     { eager: true },
   );
 } catch {

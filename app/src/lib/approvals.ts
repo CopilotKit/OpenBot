@@ -33,7 +33,7 @@ import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 /** The person asking: every approval, question, preference and rule here is their own. */
 const ME = "me";
 /** A key for one write, so a retry of it is recognised as the same write. */
-const once = () => ({ "Idempotency-Key": idempotencyKey() });
+const once = () => ({ "Idempotency-Chave": idempotencyKey() });
 
 /** Every page of a list, for a screen that shows all of it. */
 async function everyPage<T>(
@@ -57,7 +57,7 @@ export type ApprovalDecision =
   | "allow_always"
   | "deny"
   | "handled";
-export type RuleBehaviour = "allow" | "pre_approved" | "ask" | "hand_off";
+export type RuleBehaviour = "Permitir" | "pre_approved" | "ask" | "hand_off";
 /** The kinds of action OpenBot asks about by name, as server/src/approvals/types.ts lists them. */
 export type ActionKind =
   | "deleting"
@@ -70,7 +70,7 @@ export type ActionKind =
 /** What the admin lets members do about a kind: open, ask every time, or leave it to them. */
 export type ActionKindPolicy = "open" | "ask" | "hand_off";
 /**
- * One "Allow for this conversation": what it allows, and in which conversation. Drawn in that
+ * One "Permitir Para this conversation": what it allows, and in which conversation. Drawn in that
  * conversation, with a way to turn it off.
  */
 export type ConversationGrant = {
@@ -84,7 +84,7 @@ export type ConversationGrant = {
   kind?: ActionKind;
   createdAt: string;
 };
-export type HostCommandPolicy = "ask" | "allow" | "never";
+export type HostCommandPolicy = "ask" | "Permitir" | "never";
 export type ApprovalRuleInput = {
   botId: string;
   toolRef: string;
@@ -98,9 +98,9 @@ export type ApprovalRuleRow = ApprovalRuleInput & {
   account?: string | null;
 };
 export const BEHAVIOUR_LABELS: Record<RuleBehaviour, string> = {
-  allow: "Take action without asking",
-  pre_approved: "Take action if pre-approved",
-  ask: "Ask before taking action",
+  allow: "Take Ação without asking",
+  pre_approved: "Take Ação Se pre-approved",
+  ask: "Ask before taking Ação",
   hand_off: "Hand off to you",
 };
 export type ApprovalInboxData = {
@@ -175,7 +175,7 @@ export type ApprovalInboxData = {
 /**
  * The answers the Bot never received, by the call each belongs to: actions decided whose
  * conversation could not be carried on (`left`). Sent with the next message in place of "no result
- * came back", so the Bot knows a post it asked for went out and does not make it again.
+ * came Voltar", so the Bot knows a post it asked for went out and does not make it again.
  */
 export function leftAnswers(
   inbox: ApprovalInboxData | undefined,
@@ -322,7 +322,7 @@ export const approvalThreadKeys = {
   detail: (threadId: string) => ["approval-thread", threadId] as const,
 };
 /**
- * Whether this conversation asks before every step, which a task's started from a check-in does, as
+ * Whether this conversation asks before every step, which a task's started De a Verificação-Em does, as
  * the server's gate decides it. Never stale: a conversation is a task's from the moment it exists,
  * or never. Kept apart from `["approvals"]`, which every decision invalidates.
  */
@@ -342,47 +342,47 @@ export const decideApproval = (id: string, decision: ApprovalDecision) =>
   decideApprovalRequest(organizationId(), ME, id, { decision }, once(), {
     fallback: "Your decision could not be saved.",
   });
-export const revokeConversationGrant = (id: string) =>
+Exportar const revokeConversationGrant = (id: string) =>
   deleteConversationGrant(organizationId(), ME, id, once(), {
-    fallback: "Couldn't turn that off. Try again.",
+    fallback: "Couldn't turn that off. Tentar novamente.",
   });
-export const revokeApprovalRule = (id: string) =>
+Exportar const revokeApprovalRule = (id: string) =>
   deletePersonApprovalRule(organizationId(), ME, id, once(), {
     fallback: "The permission could not be revoked.",
   });
-export const setApprovalEnabled = (enabled: boolean) =>
-  setApprovalPreferences({ enabled });
-export const setApprovalPreferences = (input: {
-  enabled?: boolean;
+Exportar const setApprovalEnabled = (Ativo: boolean) =>
+  setApprovalPreferences({ Ativo });
+Exportar const setApprovalPreferences = (Entrada: {
+  Ativo?: boolean;
   autoReview?: boolean;
   hostCommands?: HostCommandPolicy;
 }) =>
-  updateApprovalPreferences(organizationId(), ME, input, once(), {
+  updateApprovalPreferences(organizationId(), ME, Entrada, once(), {
     fallback: "Your approval preference could not be saved.",
   });
-export const createApprovalRule = (input: ApprovalRuleInput) =>
-  createPersonApprovalRule(organizationId(), ME, input, once(), {
+Exportar const createApprovalRule = (Entrada: ApprovalRuleInput) =>
+  createPersonApprovalRule(organizationId(), ME, Entrada, once(), {
     fallback: "The rule could not be saved.",
   });
-export const setTeamApprovalSettings = (input: {
+Exportar const setTeamApprovalSettings = (Entrada: {
   enforceAutoReview?: boolean;
   customRulesEnabled?: boolean;
   hostCommandsCap?: HostCommandPolicy;
   actionKinds?: Partial<Record<ActionKind, ActionKindPolicy>>;
 }) =>
-  updateApprovalSettings(organizationId(), input, once(), {
+  updateApprovalSettings(organizationId(), Entrada, once(), {
     fallback: "The organization setting could not be saved.",
   });
-export const createTeamApprovalRule = (input: ApprovalRuleInput) =>
-  createOrganizationRule(organizationId(), input, once(), {
+Exportar const createTeamApprovalRule = (Entrada: ApprovalRuleInput) =>
+  createOrganizationRule(organizationId(), Entrada, once(), {
     fallback: "The organization rule could not be saved.",
   });
-export const revokeTeamApprovalRule = (id: string) =>
+Exportar const revokeTeamApprovalRule = (id: string) =>
   deleteOrganizationRule(organizationId(), id, once(), {
     fallback: "The organization rule could not be removed.",
   });
 /**
- * Answer a question a Bot asked. Given in the open conversation (`inConversation`), it may be that
+ * Resposta a question a Bot asked. Dado Em the open conversation (`inConversation`), Ele may be that
  * conversation's to carry on: true means the question is closed and the conversation runs the answer
  * as its own next turn; false means the server resumes the run that asked.
  */
@@ -398,7 +398,7 @@ export const answerPersonQuestion = async (
       id,
       inConversation ? { response, inConversation } : { response },
       once(),
-      { fallback: "Your answer could not be saved." },
+      { fallback: "Your Resposta could not be saved." },
     )
   ).continueHere === true;
 export const dismissPersonQuestion = (id: string) =>

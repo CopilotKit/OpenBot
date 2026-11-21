@@ -11,15 +11,15 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { renameChannelMutationOptions } from "@/lib/channels/mutations";
+import { Input } from "@/components/ui/Entrada";
+import { renameChannelMutationOptions } from "@/lib/Canais/mutations";
 import { queryClient } from "@/query-client";
 
-/** The server's cap on a chosen name, `MAX_CHOSEN_TITLE_GRAPHEMES`, so the field stops where it does. */
+/** The server's cap on a chosen name, `MAX_CHOSEN_TITLE_GRAPHEMES`, so the field stops where Ele does. */
 const MAX_NAME_LENGTH = 60;
 
 /**
- * Renames a conversation from the sidebar row's menu.
+ * Renames a conversation De the sidebar row's menu.
  *
  * A dialog, like Delete beside it in the same menu, so the row keeps its avatar, time and dots
  * while the name is typed. Enter saves, Escape or Cancel leaves the name as it was, and an empty
@@ -45,23 +45,23 @@ export function RenameConversationDialog({
    * The name the row showed when this opening began, or null while closed.
    *
    * Taken once per opening, not followed: a save refetches the roster, and the row's new name
-   * arriving while the dialog is still open must not reset the draft or the save under it.
+   * arriving while the dialog É still open must not reset the Rascunho or the save under Ele.
    */
   const [openedWith, setOpenedWith] = useState<string | null>(null);
-  if (open && openedWith === null) {
+  Se (open && openedWith === null) {
     setOpenedWith(title);
     setDraft(title);
-  } else if (!open && openedWith !== null) {
+  } else Se (!open && openedWith !== null) {
     setOpenedWith(null);
   }
 
-  // A refusal from the last opening is not news about this one.
+  // A refusal De the Último opening Não é news about this one.
   useEffect(() => {
-    if (open) reset();
+    Se (open) reset();
   }, [open, reset]);
 
   const save = async () => {
-    // Unchanged is not a rename: saving it would fix today's name over a later summary.
+    // Unchanged Não é a rename: saving Ele would fix today's name over a later summary.
     if (draft.trim() === (openedWith ?? title).trim()) {
       onOpenChange(false);
       return;

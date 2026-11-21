@@ -21,7 +21,7 @@ import type {
   AdminOnlyResponse,
   Boundaries,
   BoundariesInput,
-  BoundariesNotSavedResponse,
+  BoundariesNotGuardadoResponse,
   BoundaryReplayReport,
   BoundaryReplayRequest,
   BoundaryTranslation,
@@ -304,7 +304,7 @@ export const getReplaceBoundariesMutationOptions = <
     | OrganizationNotFoundResponse
     | IdempotencyConflictResponse
     | ServerErrorResponse
-    | BoundariesNotSavedResponse
+    | BoundariesNotGuardadoResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
 >(options?: {
@@ -353,7 +353,7 @@ export type ReplaceBoundariesMutationError =
   | OrganizationNotFoundResponse
   | IdempotencyConflictResponse
   | ServerErrorResponse
-  | BoundariesNotSavedResponse
+  | BoundariesNotGuardadoResponse
   | UnexpectedErrorResponse;
 export type ReplaceBoundariesMutationVariables = {
   organizationId: string;
@@ -372,7 +372,7 @@ export const useReplaceBoundaries = <
     | OrganizationNotFoundResponse
     | IdempotencyConflictResponse
     | ServerErrorResponse
-    | BoundariesNotSavedResponse
+    | BoundariesNotGuardadoResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
 >(

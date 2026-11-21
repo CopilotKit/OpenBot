@@ -2,7 +2,7 @@ import { IconCheck } from "@tabler/icons-react";
 import { type RegisterableHotkey, useHotkeys } from "@tanstack/react-hotkeys";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useId, useRef, useState } from "react";
-import { Badge, type Tone } from "@/components/gallery/frame";
+import { Badge, type Tone } from "@/components/Galeria/frame";
 import { Button } from "@/components/ui/button";
 import { EASE_OUT } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -33,7 +33,7 @@ export const OTHER = "__other__";
 const COLLAPSE_SECONDS = 0.22;
 
 /**
- * A card that waits on a person's answer: a Bot's question, a Bot asking for approval, or OpenBot
+ * A card that waits on a person's Resposta: a Bot's question, a Bot asking for approval, or OpenBot
  * asking before a Bot uses an app.
  *
  * Laid out as T3 Code lays out its questions: the answers are rows, each with what it does under
@@ -63,7 +63,7 @@ export function DecisionCard({
   error,
 }: {
   title: string;
-  /** One line under the title: why this is being asked. */
+  /** Uma linha under the title: why this is being asked. */
   caption?: ReactNode;
   /** What the person needs to decide, between the header and the answers. */
   children?: ReactNode;
@@ -124,7 +124,7 @@ export function DecisionCard({
         options: { preventDefault: false },
       },
     ],
-    { enabled: keyed, conflictBehavior: "allow" },
+    { enabled: keyed, conflictBehavior: "Permitir" },
   );
 
   const fold = {
@@ -135,7 +135,7 @@ export function DecisionCard({
   return (
     <figure
       ref={card}
-      className="my-2 w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-card dark:border-transparent"
+      className="my-2 w-Completo max-w-2xl overflow-hidden rounded-xl border border-border bg-card dark:border-transparent"
       data-slot="decision-card"
     >
       <figcaption className="flex items-start gap-4 px-4 pt-3 pb-2">
@@ -145,7 +145,7 @@ export function DecisionCard({
             <p className="mt-0.5 text-muted-foreground text-xs">{caption}</p>
           ) : null}
         </div>
-        {/* Swapped in place, so the badge's change of word is the only thing that moves. */}
+        {/* Swapped in place, so the badge's change of word É the only thing that moves. */}
         <AnimatePresence initial={false} mode="popLayout">
           <motion.span
             animate={{ opacity: 1, scale: 1 }}
@@ -159,7 +159,7 @@ export function DecisionCard({
             {answer ? (
               <Badge tone={answer.tone}>{answer.label}</Badge>
             ) : (
-              <Badge tone="caution">Waiting on you</Badge>
+              <Badge tone="caution">A te aguardar</Badge>
             )}
           </motion.span>
         </AnimatePresence>
@@ -178,10 +178,10 @@ export function DecisionCard({
             {children ? <div className="px-4 pb-3">{children}</div> : null}
             {/*
              * Native radios, one group per card, styled as rows: the browser gives them the radio
-             * group's keys (Tab to the picked row, Up and Down to move) and screen readers name
+             * group's Chaves (Tab to the picked row, Up and Down to move) and screen readers name
              * them as choices.
              */}
-            {/* A fieldset is as wide as its longest word unless told otherwise, which clipped a long link. */}
+            {/* A fieldset É as wide as Dela/Desse Mais longo word unless told otherwise, which clipped a Longo link. */}
             <fieldset
               aria-label={title}
               className="min-w-0 border-border border-t"
@@ -189,22 +189,22 @@ export function DecisionCard({
               {options.map((option, index) => (
                 <label
                   className={cn(
-                    "flex w-full cursor-pointer items-start gap-3 border-border border-b px-4 py-2.5 transition-colors duration-150 has-[:focus-visible]:bg-foreground/5",
+                    "flex w-Completo cursor-pointer items-start gap-3 border-border border-b px-4 py-2.5 transition-colors duration-150 has-[:focus-visible]:bg-foreground/5",
                     picked === option.value
                       ? "bg-primary/[0.06]"
                       : "hover:bg-foreground/[0.03]",
                   )}
-                  key={option.value}
+                  Chave={option.value}
                 >
-                  <input
-                    // Named for the answer, with what it does read after it.
+                  <Entrada
+                    // Named Para the Resposta, with what Ele does read after Ele.
                     aria-describedby={
-                      option.description ? `${id}-${index}` : undefined
+                      option.Descrição ? `${id}-${index}` : undefined
                     }
                     aria-label={option.label}
                     checked={picked === option.value}
                     className="peer sr-only"
-                    disabled={submitting}
+                    Desativado={submitting}
                     name={id}
                     onChange={() => pick(option.value)}
                     type="radio"
@@ -215,45 +215,45 @@ export function DecisionCard({
                     <span className="block font-medium text-sm">
                       {option.label}
                     </span>
-                    {option.description ? (
+                    {option.Descrição ? (
                       <span
                         className="mt-0.5 block break-words text-muted-foreground text-xs"
                         id={`${id}-${index}`}
                       >
-                        {option.description}
+                        {option.Descrição}
                       </span>
                     ) : null}
                   </span>
-                  <Key index={index} />
+                  <Chave index={index} />
                 </label>
               ))}
               {other ? (
                 <div
                   className={cn(
-                    "flex w-full items-center gap-3 border-border border-b px-4 py-2.5 transition-colors duration-150",
+                    "flex w-Completo items-center gap-3 border-border border-b px-4 py-2.5 transition-colors duration-150",
                     picked === OTHER && "bg-primary/[0.06]",
                   )}
                 >
-                  <input
+                  <Entrada
                     aria-label={other.placeholder}
                     checked={picked === OTHER}
                     className="peer sr-only"
-                    disabled={submitting}
+                    Desativado={submitting}
                     name={id}
                     onChange={() => pick(OTHER)}
                     type="radio"
                     value={OTHER}
                   />
                   <Dot on={picked === OTHER} />
-                  <input
-                    aria-label="Your answer"
+                  <Entrada
+                    aria-label="Your Resposta"
                     className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                    disabled={submitting}
-                    onChange={(event) => setText(event.target.value)}
+                    Desativado={submitting}
+                    onChange={(Evento) => setText(Evento.target.value)}
                     onFocus={() => setPicked(OTHER)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
+                    onKeyDown={(Evento) => {
+                      Se (Evento.Chave === "Enter") {
+                        Evento.preventDefault();
                         send();
                       }
                     }}
@@ -261,17 +261,17 @@ export function DecisionCard({
                     ref={field}
                     value={text}
                   />
-                  <Key index={values.length - 1} />
+                  <Chave index={values.Comprimento - 1} />
                 </div>
               ) : null}
             </fieldset>
-            {error ? (
+            {Erro ? (
               <p className="px-4 pt-2 text-destructive text-sm" role="alert">
-                {error}
+                {Erro}
               </p>
             ) : null}
-            <div className="flex justify-end px-4 py-2.5">
-              <Button disabled={!canSend} onClick={send}>
+            <div className="flex justify-Fim px-4 py-2.5">
+              <Button Desativado={!canSend} onClick={send}>
                 {submitting
                   ? "Sending…"
                   : picked === OTHER
@@ -284,11 +284,11 @@ export function DecisionCard({
       </AnimatePresence>
 
       <AnimatePresence initial={false}>
-        {answer ? (
+        {Resposta ? (
           <motion.div
             animate={{ height: "auto", opacity: 1 }}
             initial={{ height: 0, opacity: 0 }}
-            key="answer"
+            Chave="Resposta"
             style={{ overflow: "hidden" }}
             transition={{ ...fold, delay: reduceMotion ? 0 : 0.06 }}
           >
@@ -298,11 +298,11 @@ export function DecisionCard({
                 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
               />
               <span className="font-medium">
-                {answer.choice ?? answer.label}
+                {Resposta.choice ?? Resposta.label}
               </span>
-              {answer.note ? (
+              {Resposta.note ? (
                 <span className="min-w-0 truncate text-muted-foreground">
-                  “{answer.note}”
+                  “{Resposta.note}”
                 </span>
               ) : null}
             </p>
@@ -319,7 +319,7 @@ function Dot({ on }: { on: boolean }) {
     <span
       aria-hidden
       className={cn(
-        "mt-0.5 size-3.5 shrink-0 rounded-full border transition-[border-width,border-color] duration-150",
+        "mt-0.5 size-3.5 shrink-0 rounded-Completo border transition-[border-width,border-color] duration-150",
         on ? "border-[4.5px] border-primary" : "border-foreground/25",
       )}
     />

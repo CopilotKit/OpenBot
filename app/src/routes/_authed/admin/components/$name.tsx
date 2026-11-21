@@ -34,7 +34,7 @@ import {
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
-} from "@/components/ui/empty";
+} from "@/components/ui/Vazio";
 import {
   Item,
   ItemActions,
@@ -46,8 +46,8 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { useBotListScope } from "@/lib/agents/list-scope";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { useBotListScope } from "@/lib/Agentes/Lista-scope";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import {
   saveComponentDraftMutationOptions,
   setComponentFunctionMutationOptions,
@@ -61,7 +61,7 @@ import {
   type DataFunctionSummary,
   PLAYGROUND_KIND,
 } from "@/lib/components/queries";
-import { RENDERABLE_NAMES } from "@/lib/copilot/gallery-registry";
+import { RENDERABLE_NAMES } from "@/lib/copilot/Galeria-registry";
 import { queryClient } from "@/query-client";
 
 /**
@@ -109,7 +109,7 @@ function RouteComponent() {
     return (
       <PageShell backButton={BACK} title="Components">
         <p className="mt-8 text-destructive text-sm" role="alert">
-          Couldn't load components. Try again in a moment.
+          Couldn't load components. Tentar novamente in a moment.
         </p>
       </PageShell>
     );
@@ -286,16 +286,16 @@ function ComponentDetail({
 
   const functionSummary =
     dataFunctions.length === 0
-      ? "This deployment has no data functions"
+      ? "This deployment has no Dados Funções"
       : held.length === 0
-        ? "Nothing. It shows only what the Bot passes it."
+        ? "Nothing. Ele shows only what the Bot passes Ele."
         : held.map((fn) => fn.name).join(", ");
 
   return (
     <PageShell
       backButton={BACK}
       description={
-        component.publishedDescription ?? "Not published. No Bot can see it."
+        component.publishedDescription ?? "Not published. No Bot can see Ele."
       }
       title={component.title}
     >
@@ -305,7 +305,7 @@ function ComponentDetail({
        */}
       <div className="relative mt-8 aspect-[2/1] overflow-hidden rounded-lg border border-border bg-card">
         <div className="absolute inset-0">
-          <SettingsItemBackground className="h-full w-full" />
+          <SettingsItemBackground className="h-Completo w-Completo" />
         </div>
         <div className="absolute inset-0 z-10">
           <AdminComponentPreview kind={component.kind} name={component.name} />
@@ -313,7 +313,7 @@ function ComponentDetail({
       </div>
 
       <PageSection
-        description="Describe this component and choose which Bots can display it."
+        description="Describe this component and choose which Bots can display Ele."
         title="Configuration"
       >
         <PageRows>
@@ -346,10 +346,10 @@ function ComponentDetail({
               <ItemTitle>Published</ItemTitle>
               <ItemDescription>
                 {component.published
-                  ? "Bots can answer with it."
-                  : "No Bot can use it."}
+                  ? "Bots can Resposta with Ele."
+                  : "No Bot can use Ele."}
                 {component.hasUnpublishedChanges
-                  ? " The description has unpublished changes."
+                  ? " The Descrição has unpublished changes."
                   : null}
               </ItemDescription>
             </ItemContent>
@@ -367,8 +367,8 @@ function ComponentDetail({
 
           <SheetRow
             icon={<IconFileText />}
-            label="Description"
-            onOpen={() => setSheet("description")}
+            label="Descrição"
+            onOpen={() => setSheet("Descrição")}
             summary={component.draftDescription || "Nothing yet"}
             testId={`description-${component.name}`}
           />
@@ -388,7 +388,7 @@ function ComponentDetail({
           <SheetRow
             icon={<IconDatabase />}
             label="Can read"
-            onOpen={() => setSheet("functions")}
+            onOpen={() => setSheet("Funções")}
             summary={functionSummary}
             testId={`functions-${component.name}`}
           />
@@ -407,7 +407,7 @@ function ComponentDetail({
             </code>
           </FactRow>
           <Separator />
-          <FactRow icon={<IconClock />} label="Last changed">
+          <FactRow icon={<IconClock />} label="Último changed">
             {new Date(component.updatedAt).toLocaleString()}
             {component.updatedBy ? ` by ${component.updatedBy}` : null}
           </FactRow>
@@ -426,7 +426,7 @@ function ComponentDetail({
             setDraft(component.draftDescription);
           }
         }}
-        open={sheet === "description"}
+        open={sheet === "Descrição"}
       >
         <DialogContent>
           <DialogHeader>
@@ -438,7 +438,7 @@ function ComponentDetail({
           </DialogHeader>
           <DialogBody className="mt-4">
             <Textarea
-              aria-label="Description"
+              aria-label="Descrição"
               onChange={(event) => setDraft(event.target.value)}
               rows={6}
               value={draft}
@@ -520,7 +520,7 @@ function ComponentDetail({
 
       <Dialog
         onOpenChange={(open) => !open && setSheet(null)}
-        open={sheet === "functions"}
+        open={sheet === "Funções"}
       >
         <DialogContent>
           <DialogHeader>

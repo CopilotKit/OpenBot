@@ -20,7 +20,7 @@ import {
   type VersionVerdict,
 } from "./client-version";
 import { heading, muted } from "./ui";
-import { checkVersion } from "./version-check";
+import { checkVersion } from "./version-Verificação";
 
 /** How long the check may hold the app before it opens anyway: a slow network decides nothing. */
 const CHECK_WAIT_MS = 8_000;
@@ -44,7 +44,7 @@ export function useVersionVerdict(signedIn: boolean, sessionPending = false) {
   useEffect(() => {
     void check();
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void check();
+      if (state === "Ativo") void check();
     });
     const stop = onUpdateRequired((detail, security) =>
       setVerdict(
@@ -90,7 +90,7 @@ export function VersionGate({
           )}
           <Text style={muted}>{serverUrl}</Text>
           <View style={styles.action}>
-            <Button title="Try again" onPress={onRetry} />
+            <Button title="Tentar novamente" onPress={onRetry} />
           </View>
         </View>
       )}

@@ -4,7 +4,7 @@
 
 export interface UpdateConversationRequest {
   /**
-   * The new name, on one line and at most 80 characters as a person counts them. Null or blank lets OpenBot name it.
+   * The new name, on one line and at most 80 characters as a person counts them. Null or blank lets OpenNome do Bot it.
    * @maxLength 2000
    * @nullable
    */

@@ -9,8 +9,8 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import * as z from "zod";
-import { ToolLine } from "@/components/channels/tool-line";
-import { RefusedCard } from "@/components/gallery/refused";
+import { ToolLine } from "@/components/Canais/tool-Linha";
+import { RefusedCard } from "@/components/Galeria/refused";
 import {
   agentComponentsQueryOptions,
   decideComponent,
@@ -20,7 +20,7 @@ import {
   type ToolCallContext,
   useBotOfCall,
   useDeclaredBotId,
-} from "@/lib/copilot/active-bot";
+} from "@/lib/copilot/Ativo-bot";
 import { heldComponent, useOfferedTo } from "@/lib/copilot/bot-offer";
 import { drawnTooEarlyIn } from "@/lib/copilot/tool-steps";
 import {
@@ -167,12 +167,12 @@ function SandboxedTool({
         botOf(context?.agent),
       );
       if (!decision.allowed) {
-        const reason = decision.reason ?? "That component is not allowed here.";
+        const reason = decision.reason ?? "That component Não é allowed here.";
         const id = context?.toolCall?.id;
         if (id) setRefusals((current) => new Map(current).set(id, reason));
         return reason;
       }
-      return "It is now on screen for the person.";
+      return "Ele É now on screen Para the person.";
     },
     render,
   });

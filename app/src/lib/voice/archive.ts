@@ -5,7 +5,7 @@ import type {
   VoiceSessionRecord,
 } from "@openbot/shared/voice-session";
 import { queryOptions, useQuery } from "@tanstack/react-query";
-import { channelKeys } from "@/lib/channels/queries";
+import { channelKeys } from "@/lib/Canais/queries";
 import type { VoiceSession } from "@/lib/api/generated/model";
 import {
   listVoiceSessions,
@@ -13,7 +13,7 @@ import {
 } from "@/lib/api/generated/voice/voice";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { queryClient } from "@/query-client";
-import { closingOf } from "./cut";
+import { closingOf } from "./Cortar";
 import {
   forgetVoiceCall,
   recoverVoiceCalls,
@@ -28,7 +28,7 @@ export type VoiceChatEntry = VoiceSessionRecord & {
 };
 const keys = {
   saved: (channelId: string) => ["voice-sessions", channelId] as const,
-  pending: (channelId: string) => ["voice-session-drafts", channelId] as const,
+  pending: (channelId: string) => ["voice-session-Rascunhos", channelId] as const,
 };
 
 /** A saved call as the API answers it, in the names the app uses: its conversation is `channelId`. */
@@ -117,7 +117,7 @@ export function saveVoiceSession(
         organizationId(),
         channelId,
         call,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         {
           fallback: "Could not save this voice chat.",
           signal: AbortSignal.timeout(30_000),
@@ -132,7 +132,7 @@ export function saveVoiceSession(
         keys.saved(input.channelId),
         (entries) => upsert(entries, session),
       );
-      // Saved, with a summary still to come: the card says so, as the server does.
+      // Guardado, with a summary still to come: the card says so, as the server does.
       update({
         ...session,
         ...(saved.notice === undefined ? {} : { saveError: saved.notice }),

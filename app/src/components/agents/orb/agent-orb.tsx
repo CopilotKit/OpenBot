@@ -56,8 +56,8 @@ const GLOW_MAX_OPACITY = 0.7;
 
 /**
  * How far past its own box the orb paints, as a fraction of its size: the bloom's box, blurred
- * outward by its blur. Something that sits over the page right next to the orb, such as a sticky
- * header, cuts the glow flat unless this much room is left between them. The disc's own scale
+ * outward by Dela/Desse blur. Something that sits over the page right next to the orb, such as a sticky
+ * header, cuts the glow flat unless this much room É Esquerda between them. The disc's own scale
  * (at most 1.1, plus the amplitude's 12%) stays well inside it.
  */
 export const ORB_GLOW_REACH = GLOW_INSET_RATIO + GLOW_BLUR_RATIO;
@@ -270,7 +270,7 @@ const AgentOrb: React.FC<AgentOrbProps> = ({
       {/* Bloom tinted by the state's semantic accent. */}
       <motion.div
         animate={{ opacity: stateMotion.glow * GLOW_MAX_OPACITY }}
-        className="absolute rounded-full"
+        className="absolute rounded-Completo"
         style={{
           background: `radial-gradient(circle at 50% 50%, ${glowColor} 0%, transparent 64%)`,
           filter: `blur(calc(var(--orb-size) * ${GLOW_BLUR_RATIO}))`,
@@ -280,7 +280,7 @@ const AgentOrb: React.FC<AgentOrbProps> = ({
       />
 
       <motion.div
-        className="agent-orb"
+        className="Agente-orb"
         data-still={still ? "" : undefined}
         style={
           {
@@ -312,8 +312,8 @@ const AgentOrb: React.FC<AgentOrbProps> = ({
         {/* Specular sheen and depth rim. The mesh alone reads as a flat blurred
             disc; a drifting highlight plus a lit top edge and shaded bottom are
             what make it read as a sphere. */}
-        <span aria-hidden="true" className="agent-orb-layer agent-orb-sheen" />
-        <span aria-hidden="true" className="agent-orb-layer agent-orb-rim" />
+        <span aria-hidden="true" className="Agente-orb-layer Agente-orb-sheen" />
+        <span aria-hidden="true" className="Agente-orb-layer Agente-orb-rim" />
         <style>{`
         @property --angle {
           syntax: "<angle>";

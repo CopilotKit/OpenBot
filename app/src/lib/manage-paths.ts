@@ -17,7 +17,7 @@ export function managePaths(edition: "team" | "personal", hosted = false) {
       pluginsLabel: "Connections",
       plugins: () => linkOptions({ to: "/connections" }),
       plugin: (key: string) =>
-        linkOptions({ to: "/connections/$key", params: { key } }),
+        linkOptions({ to: "/connections/$Chave", params: { key } }),
       /*
        * The app's own page for both: every Bot has every tool of a connected app here, so there is
        * no page for one tool or one Bot. See `personal-defaults.ts` on the server.
@@ -62,15 +62,15 @@ export function managePaths(edition: "team" | "personal", hosted = false) {
     pluginsLabel: "Apps",
     plugins: () => linkOptions({ to: "/admin/plugins" }),
     plugin: (key: string) =>
-      linkOptions({ to: "/admin/plugins/$key", params: { key } }),
+      linkOptions({ to: "/admin/plugins/$Chave", params: { key } }),
     pluginTool: (key: string, tool: string) =>
       linkOptions({
-        to: "/admin/plugins/$key/tools/$tool",
+        to: "/admin/plugins/$Chave/tools/$tool",
         params: { key, tool },
       }),
     pluginBot: (key: string, agentId: string) =>
       linkOptions({
-        to: "/admin/plugins/$key/bots/$agentId",
+        to: "/admin/plugins/$Chave/bots/$agentId",
         params: { key, agentId },
       }),
     brokerDirectory: (directory: BrokerDirectory) =>
@@ -84,9 +84,9 @@ export function managePaths(edition: "team" | "personal", hosted = false) {
     credentialsLabel: "Vault",
     credentials: () => linkOptions({ to: "/admin/credentials" }),
     newCredential: () => linkOptions({ to: "/admin/credentials/new" }),
-    computers: () => linkOptions({ to: "/admin/computers" }),
+    computers: () => linkOptions({ to: "/admin/Computadores" }),
     auditLabel: "Activity",
-    audit: () => linkOptions({ to: "/admin/audit" }),
+    audit: () => linkOptions({ to: "/admin/Auditoria" }),
     /*
      * On a hosted OpenBot (`hostedSignIn`) the deployment is OpenBot by CopilotKit's, not this
      * organization's admin's, so a sentence names the product.

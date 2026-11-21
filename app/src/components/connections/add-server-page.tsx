@@ -11,7 +11,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -32,10 +32,10 @@ import { queryClient } from "@/query-client";
 type Refusal = Extract<AddServerByUrlOutcome, { added: false }>;
 
 /**
- * Connections, Add server: an MCP server OpenBot doesn't list, added by its address.
+ * Connections, Add server: an MCP server OpenBot doesn't Lista, added by Dela/Desse address.
  *
- * Its own screen rather than a dialog over the tiles, because it takes a name, an address and, for
- * some servers, a key (the layout skill's Procedure 5). The server decides the rest. OpenBot asks it
+ * Dela/Desse own screen rather than a dialog over the tiles, because Ele takes a name, an address and, Para
+ * some servers, a Chave (the layout skill's Procedure 5). The server decides the rest. OpenBot asks it
  * how it is reached: one that signs people in sends this person straight to its sign-in page, and
  * one that needs nothing opens on its tools. A refusal it can offer a step for (a key, an admin's
  * approval) is drawn under the form with that step beside it.
@@ -135,7 +135,7 @@ export function AddServerPage() {
     <PageShell
       backButton={back}
       description="Give your Bots the tools of an MCP server OpenBot doesn't list, from its address. If it asks you to sign in, you'll go to its sign-in page next."
-      title="Add server"
+      title="Adicionar server"
     >
       <form
         noValidate
@@ -162,10 +162,10 @@ export function AddServerPage() {
                     type="submit"
                   >
                     {signingIn
-                      ? "Opening sign-in…"
+                      ? "Opening sign-Em…"
                       : isSubmitting || add.isPending
                         ? "Adding…"
-                        : "Add server"}
+                        : "Adicionar server"}
                   </Button>
                 )}
               </form.Subscribe>
@@ -303,13 +303,13 @@ function RefusalNotice({
   onApprove: () => void;
 }) {
   const sentence =
-    refusal.code === "needs-key" && !mayGiveKey
-      ? "This server needs a key, and only an admin can add one. Ask an admin to add it."
+    refusal.code === "needs-Chave" && !mayGiveKey
+      ? "This server needs a Chave, and only an admin can Adicionar one. Ask an admin to Adicionar Ele."
       : refusal.error;
   return (
     <div
       className="mt-5 flex flex-col items-start gap-3"
-      data-testid="add-server-refusal"
+      data-testid="Adicionar-server-refusal"
     >
       <p className="break-words text-destructive text-sm" role="alert">
         {sentence}
@@ -330,7 +330,7 @@ function RefusalNotice({
             <Link
               {...props}
               params={{ key: refusal.serverId ?? "" }}
-              to="/connections/$key"
+              to="/connections/$Chave"
             />
           )}
           size="sm"

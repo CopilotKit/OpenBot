@@ -10,7 +10,7 @@ export type ApiKey = ApiKeyRecord;
 
 export const apiKeyKeys = {
   all: ["api-keys"] as const,
-  list: () => ["api-keys", "list"] as const,
+  list: () => ["api-keys", "Lista"] as const,
 };
 
 const LOAD_FALLBACK = "Couldn't load your API keys.";
@@ -77,7 +77,7 @@ export function apiKeyListQueryOptions() {
         return { state: "ready", apiKeys };
       } catch (error) {
         if (apiKeysAbsent(error)) return { state: "unavailable" };
-        if (apiKeysNeedBrowser(error)) return { state: "browser-only" };
+        if (apiKeysNeedBrowser(error)) return { state: "Navegador-only" };
         throw error;
       }
     },
@@ -86,7 +86,7 @@ export function apiKeyListQueryOptions() {
      * their terminal. Coming back to the window, or to the screen, asks again, so "Never used" is
      * not drawn from the list read before.
      */
-    refetchOnWindowFocus: "always",
-    refetchOnMount: "always",
+    refetchOnWindowFocus: "Sempre",
+    refetchOnMount: "Sempre",
   });
 }

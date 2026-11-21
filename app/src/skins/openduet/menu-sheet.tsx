@@ -3,7 +3,7 @@ import {
   IconLogout,
   IconPin,
   IconPinFilled,
-  IconPinnedOff,
+  IconFixadoOff,
   IconPlus,
   IconSearch,
   IconStack2,
@@ -13,12 +13,12 @@ import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { type ReactNode, useId, useRef, useState } from "react";
 import { isUnread, pinnedFirst } from "@/components/app-sidebar/app-sidebar";
-import { ChannelPagination } from "@/components/app-sidebar/channel-pagination";
+import { ChannelPagination } from "@/components/app-sidebar/Canal-pagination";
 import { waitingAcross } from "@/components/bot-profile/attention";
-import { ChannelAvatar } from "@/components/channels/avatar";
-import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
+import { ChannelAvatar } from "@/components/Canais/avatar";
+import { DeleteConversationDialog } from "@/components/Canais/Eliminar-conversation-dialog";
 import { BrandName } from "@/components/edition/brand-name";
-import { NavigationTarget } from "@/components/edition/team-features-dialog";
+import { NavigationTarget } from "@/components/edition/team-Funcionalidades-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -32,18 +32,18 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
-import { conversationTitle, untitledLine } from "@/lib/channels/label";
-import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
+import { conversationTitle, untitledLine } from "@/lib/Canais/label";
+import { setChannelFixadoMutationOptions } from "@/lib/Canais/mutations";
 import {
   type ChannelSummary,
   channelListQueryOptions,
-} from "@/lib/channels/queries";
-import { appConfig } from "@/lib/generated/application-config";
+} from "@/lib/Canais/queries";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 import {
   COMMAND_MENU_KEYS,
   CommandMenuKeys,
@@ -52,13 +52,13 @@ import {
 } from "@/components/navigation/command-menu";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { relativeTime } from "@/lib/relative-time";
-import { useMessageListEmphasis } from "@/lib/settings/message-list";
+import { useMessageListEmphasis } from "@/lib/settings/message-Lista";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { FOCUS } from "./kit";
 
 /** Whether Manage was left open, kept in this browser between visits. */
-export const MANAGE_STORAGE_KEY = "openduet.menu-manage";
+export const MANAGE_STORAGE_KEY = "openduet.menu-Gerir";
 
 function rememberedOpen(key: string): boolean {
   try {
@@ -78,12 +78,12 @@ function rememberOpen(key: string, open: boolean) {
 
 /** A row in the menu: a line glyph and the place's name, at least 48px tall. */
 const ROW = cn(
-  "openduet-type-nav flex min-h-12 w-full items-center gap-3 rounded-[22px] px-3 font-medium text-openduet-ink transition-colors duration-[120ms] motion-reduce:transition-none hover:bg-openduet-tile active:bg-openduet-tile [&_svg]:shrink-0 [&>svg]:text-openduet-ink-2",
+  "openduet-type-nav flex min-h-12 w-Completo items-center gap-3 rounded-[22px] px-3 font-medium text-openduet-ink transition-colors duration-[120ms] motion-reduce:transition-none hover:bg-openduet-tile Ativo:bg-openduet-tile [&_svg]:shrink-0 [&>svg]:text-openduet-ink-2",
   FOCUS,
 );
-/** A row with a disc, a name and a line under it: Chat and each conversation. */
+/** A row with a disc, a name and a Linha under Ele: Chat and each conversation. */
 const TALL_ROW = cn(
-  "flex min-h-[52px] w-full items-center gap-3 rounded-[24px] px-2.5 py-1.5 text-left hover:bg-openduet-tile",
+  "flex min-h-[52px] w-Completo items-center gap-3 rounded-[24px] px-2.5 py-1.5 text-Esquerda hover:bg-openduet-tile",
   FOCUS,
 );
 const HERE = { className: "bg-openduet-tile" };
@@ -140,7 +140,7 @@ export function MenuSheet({
          * down, below them, as onboarding's does, and it moves the window (`data-desktop-drag`).
          */}
         <SheetHeader
-          className="px-5 pt-5 pb-3 in-data-[desktop-titlebar=overlay]:pt-12"
+          className="px-5 pt-5 pb-3 Em-Dados-[desktop-titlebar=overlay]:pt-12"
           data-desktop-drag="deep"
         >
           <SheetTitle className="openduet-type-display font-semibold text-openduet-ink">
@@ -167,7 +167,7 @@ export function MenuSheet({
             >
               <IconStack2 size={24} stroke={1.9} />
             </span>
-            <RowText line="Start a conversation with any Bot" name="Chat" />
+            <RowText line="Start a conversation with Qualquer Bot" name="Chat" />
           </Link>
           <button
             aria-keyshortcuts={COMMAND_MENU_KEYS}
@@ -185,7 +185,7 @@ export function MenuSheet({
               <IconSearch size={22} stroke={1.9} />
             </span>
             <RowText
-              line="Open any page, Bot or conversation"
+              line="Open Qualquer page, Bot or conversation"
               name="Command palette"
             />
             <CommandMenuKeys className="ml-auto max-md:hidden" />
@@ -200,7 +200,7 @@ export function MenuSheet({
                   className="openduet-type-sub px-3 py-2 text-openduet-problem"
                   role="alert"
                 >
-                  Couldn't load your conversations. Try again in a moment.
+                  Couldn't load your conversations. Tentar novamente in a moment.
                 </p>
               ) : conversations.length > 0 ? (
                 /*
@@ -209,7 +209,7 @@ export function MenuSheet({
                  */
                 <ul
                   aria-label="Conversations"
-                  className="ml-[21px] flex flex-col border-openduet-ink-3/40 border-l pl-1.5"
+                  className="ml-[21px] flex flex-col border-openduet-ink-3/40 border-L pl-1.5"
                 >
                   {conversations.map((channel) => (
                     <li key={channel.id}>
@@ -228,7 +228,7 @@ export function MenuSheet({
               activeProps={HERE}
               className={cn(ROW, "mt-1 shrink-0")}
               onClick={close}
-              to="/channel/new"
+              to="/Canal/new"
             >
               <IconPlus size={22} stroke={1.8} />
               New conversation
@@ -376,11 +376,11 @@ function RowText({
  * type while a Bot works there. Held down or right-clicked, it pins or deletes, as OpenBot's roster
  * does.
  */
-function ConversationRow({
-  channel,
+Função ConversationRow({
+  Canal,
   onOpen,
 }: {
-  channel: ChannelSummary;
+  Canal: ChannelSummary;
   onOpen: () => void;
 }) {
   const emphasis = useMessageListEmphasis();
@@ -396,7 +396,7 @@ function ConversationRow({
       (params as { channelId?: string }).channelId === channel.id,
   });
   const unread = isUnread(channel, isOpen ? channel.id : undefined);
-  const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
+  const setFixado = useMutation(setChannelFixadoMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const title = channel.summary || untitledLine(channel) || "New conversation";
@@ -405,7 +405,7 @@ function ConversationRow({
     : null;
   const busy = (channel.busy ?? false) || (channel.work?.length ?? 0) > 0;
   const [name, line] =
-    emphasis === "agent"
+    emphasis === "Agente"
       ? [channel.name, title]
       : [title, when ? `${channel.name} · ${when}` : channel.name];
   const group = channel.agentIds.length > 1;
@@ -419,7 +419,7 @@ function ConversationRow({
             className={TALL_ROW}
             onClick={onOpen}
             params={{ channelId: channel.id }}
-            to={group ? "/group/$channelId" : "/channel/$channelId"}
+            to={group ? "/Grupo/$channelId" : "/Canal/$channelId"}
           >
             <span className="shrink-0">
               <ChannelAvatar participantIds={seeds} size={28} typing={busy} />
@@ -427,7 +427,7 @@ function ConversationRow({
             <RowText line={line} name={name} strong={unread} />
             {channel.pinned ? (
               <IconPinFilled
-                aria-label="Pinned"
+                aria-label="Fixado"
                 className="shrink-0 text-openduet-ink-3"
                 size={14}
               />
@@ -435,7 +435,7 @@ function ConversationRow({
             {unread ? (
               <span
                 aria-label="Unread"
-                className="size-2 shrink-0 rounded-full bg-openduet-accent"
+                className="size-2 shrink-0 rounded-Completo bg-openduet-accent"
                 role="img"
               />
             ) : null}
@@ -445,13 +445,13 @@ function ConversationRow({
           <ContextMenuItem
             onClick={() => {
               setProblem(null);
-              setPinned.mutate(
+              setFixado.mutate(
                 { channelId: channel.id, pinned: !channel.pinned },
                 { onError: (thrown) => setProblem(thrown.message) },
               );
             }}
           >
-            {channel.pinned ? <IconPinnedOff /> : <IconPin />}
+            {channel.pinned ? <IconFixadoOff /> : <IconPin />}
             {channel.pinned ? "Unpin conversation" : "Pin conversation"}
           </ContextMenuItem>
           <ContextMenuItem

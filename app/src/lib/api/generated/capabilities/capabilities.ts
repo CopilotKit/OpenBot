@@ -40,7 +40,7 @@ import type {
   PersonForbiddenResponse,
   PersonNotFoundResponse,
   PreviewCapabilityChangesHeaders,
-  SavedCapabilityChanges,
+  GuardadoCapabilityChanges,
   ServerErrorResponse,
   StopPersonComputersHeaders,
   TranslateCapabilityChangesHeaders,
@@ -96,7 +96,7 @@ export const getListCapabilitiesUrl = (
 };
 
 /**
- * Return one page of the switches that decide what people may do, each with its default and what the organization, each role and each directory group set it to. A person's own answer is the most specific one set: their group's, then their role's, then the organization's, then the default. Only an administrator may read them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the switches that decide what people may do, each with its default and what the organization, each role and each directory group set it to. A person's own Resposta É the most specific one set: their Grupo's, then their role's, then the organization's, then the default. Only an administrator may read them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the permission switches
  */
 export const listCapabilities = async (
@@ -108,7 +108,7 @@ export const listCapabilities = async (
     getListCapabilitiesUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -526,7 +526,7 @@ export const batchUpdateCapabilities = async (
   capabilityChanges: CapabilityChanges,
   headers: BatchUpdateCapabilitiesHeaders,
   options?: Parameters<typeof apiRequest>[1],
-): Promise<SavedCapabilityChanges> => {
+): Promise<GuardadoCapabilityChanges> => {
   const getHeaders = (
     h?: NonNullable<RequestInit["headers"]>,
   ): Record<string, string | readonly string[]> => {
@@ -548,7 +548,7 @@ export const batchUpdateCapabilities = async (
     }
     return headers;
   };
-  return apiRequest<SavedCapabilityChanges>(
+  return apiRequest<GuardadoCapabilityChanges>(
     getBatchUpdateCapabilitiesUrl(organizationId),
     {
       ...options,
@@ -1007,7 +1007,7 @@ export const getPersonCapabilities = async (
     getGetPersonCapabilitiesUrl(organizationId, personId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

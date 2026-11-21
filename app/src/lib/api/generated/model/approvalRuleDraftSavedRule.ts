@@ -6,7 +6,7 @@ import type { ApprovalRuleDraftBehaviour } from "./approvalRuleDraftBehaviour";
 /**
  * One of the organization's approval rules, as saved.
  */
-export interface ApprovalRuleDraftSavedRule {
+export interface ApprovalRuleDraftGuardadoRule {
   id: string;
   botId: string;
   toolRef: string;

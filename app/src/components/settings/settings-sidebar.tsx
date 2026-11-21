@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/sidebar";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { managePaths } from "@/lib/manage-paths";
+import { managePaths } from "@/lib/Gerir-paths";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { primitive, VAULT } from "@/lib/primitives";
 import { mayOpenSetup, setupChecklistQueryOptions } from "@/lib/setup/queries";
@@ -84,7 +84,7 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     linkOptions: { to: "/settings" },
   },
   {
-    /* Where updates go for every Bot at once; how much each Bot sends is on that Bot's page. */
+    /* Para onde vão as atualizações for every Bot at once; how much each Bot sends is on that Bot's page. */
     group: "you",
     title: "Notifications",
     icon: IconBell,

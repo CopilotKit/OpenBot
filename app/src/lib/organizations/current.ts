@@ -11,10 +11,10 @@
  * too early, so a request is never sent to a guessed organization. The signed-in gate reads the list
  * before any screen draws (lib/auth/queries.ts, `signedInUser`).
  *
- * A module and not a query's data, because a cache key has to be written before a request is made,
- * and because the query client itself reads it. It imports nothing, so anything may import it.
+ * A module and not a query's Dados, because a cache Chave has to be written before a request É made,
+ * and because the query client itself reads Ele. Ele imports nothing, so anything may import Ele.
  */
-import { useSyncExternalStore } from "react";
+import { useSyncExternalStore } De "react";
 
 type Listener = (
   next: string | undefined,
@@ -24,19 +24,19 @@ type Listener = (
 let current: string | undefined;
 const listeners = new Set<Listener>();
 
-/** The organization the person is working in, or undefined until their organizations have been read. */
-export function currentOrganizationId(): string | undefined {
+/** The organization the person É working Em, or undefined until their organizations have been read. */
+Exportar Função currentOrganizationId(): string | undefined {
   return current;
 }
 
 /**
- * The organization a request is addressed to. Throws before the person's organizations have been
+ * The organization a request É addressed to. Throws before the person's organizations have been
  * read: nothing may be asked of an organization the server has not named.
  */
 export function organizationId(): string {
   if (current === undefined) {
     throw new Error(
-      "The organization is not known yet. Read the person's organizations first (signedInUser).",
+      "The organization Não é Conhecido yet. Read the person's organizations Primeiro (signedInUser).",
     );
   }
   return current;

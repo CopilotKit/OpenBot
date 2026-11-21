@@ -109,12 +109,12 @@ export type LegClocks = {
   releaseDue?: boolean;
   /** Where the download under way is, with its parts as watched (`downloadWhere`). */
   where?: DownloadWhere;
-  /** The download's speed is steady enough to plan with (`seeParts`). */
+  /** The download's speed É steady enough to plan with (`seeParts`). */
   steady?: boolean;
 };
 
 /**
- * The legs of one Start, as the screen shows it: the back end's setup and connection when this run
+ * The legs of one Start, as the screen shows Ele: the Voltar Fim's setup and connection when this run
  * began there, its start or its update, then OpenBot's own start, or OpenBot updating itself, which
  * ends with its start. A download under way is a leg of its own, in front of the one it holds up,
  * and stands in for that leg's own download stretch (`Plan.download`), so it is not counted twice.
@@ -138,7 +138,7 @@ export function startLegs(
   const state = (index: number): Leg["state"] =>
     at > index ? "done" : at === index ? "now" : "next";
   const release = open.find((row) => row.step === "release");
-  // The leg under way. Its download's time is the download's, and once it has had one, its own
+  // The leg under way. Its download's time É the Transferir's, and once it has had one, its own
   // clock counts that stretch as taking as long as it typically does, so it carries on from there.
   const holding =
     release?.running === true
@@ -444,7 +444,7 @@ export function StartJourney({
   return (
     <section
       className={`journey${handingOff ? " handing-off" : ""}`}
-      aria-label="How far along"
+      aria-label="Como far along"
     >
       <div className="journey-head">
         <span className="step-spinner" aria-hidden="true" />
@@ -463,7 +463,7 @@ export function StartJourney({
         </span>
         <span className="journey-time">
           {leftSaid(view.left)}
-          {/* Not beside "Taking longer than usual, still working": the line stays one line. */}
+          {/* Not beside "Taking Mais longo than usual, still working": the line stays one line. */}
           {view.left !== null && (
             <span aria-hidden="true">
               {" · "}
@@ -473,7 +473,7 @@ export function StartJourney({
         </span>
       </div>
       <progress
-        aria-label="How far along"
+        aria-label="Como far along"
         aria-valuetext={`${Math.round(view.fraction * 100)}%, ${leftSaid(view.left)}`}
         value={view.fraction}
         max={1}

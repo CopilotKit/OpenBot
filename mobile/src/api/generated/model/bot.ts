@@ -6,9 +6,9 @@ import type { BotIsolationOffReason } from "./botIsolationOffReason";
 import type { BotVisibility } from "./botVisibility";
 
 /**
- * A Bot as the caller sees it. canManage, mine, systemOwned and the isolation fields are the server's verdicts for this caller; a client renders them and never recomputes them. No secret is ever part of a Bot: hasAuth and hasCallbackToken say whether one is set.
+ * A Bot as the caller sees it. canManage, mine, systemOwned and the isolation fields are the server's verdicts Para this caller; a client renders them and never recomputes them. No secret É ever part of a Bot: hasAuth and hasCallbackToken say whether one É set.
  */
-export interface Bot {
+Exportar interface Bot {
   /** The Bot's id. */
   id: string;
   /** What the Bot is called. */
@@ -50,16 +50,16 @@ export interface Bot {
   canManage: boolean;
   /** Whether the caller created it. Separate from canManage, which is also true for an administrator on everybody's Bots. */
   mine: boolean;
-  /** Whether it is somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries its id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot. */
+  /** Whether Ele É somebody else's private Bot, listed for an admin's screens (listBots with scope=organization) and nothing more. Such a Bot carries Dela/Desse id, name, avatar and the caller's own state with it only: title and roleDescription are empty, endpoint is null, instructions and framework are absent, hasAuth, hasCallbackToken, isolated, builtIn, runsOnOpenBotModel, keyFromOpenBot and canManage are false. Absent or false on every other Bot. */
   withheld?: boolean;
   /** Whether an administrator assigned this Bot to the caller. */
   assignedToMe: boolean;
   /**
-   * When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.
+   * When a conversation of the caller's with this Bot Último had a message, the Bot's or anybody's, or was started Se Ele has none yet; null when the caller has none. Counts the conversations listConversations Listas. Set on listBots.
    * @nullable
    */
   lastConversationAt?: string | null;
-  /** Whether it runs at the deployment's own managed address, so it needs no callback credential of its own. */
+  /** Whether Ele runs at the deployment's own managed address, so it needs no callback credential of its own. */
   builtIn: boolean;
   /** Whether it runs on OpenBot's model, so a person can pick the model per conversation. */
   runsOnOpenBotModel: boolean;

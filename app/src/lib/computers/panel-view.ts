@@ -2,22 +2,22 @@ import type { Message } from "@ag-ui/core";
 import { useEffect, useRef } from "react";
 
 /**
- * Which of the Computer panel's two views, its screen or its terminal, belongs in front.
+ * Which of the Computer panel's two views, Dela/Desse screen or Dela/Desse terminal, belongs Em front.
  *
- * THE PANEL FOLLOWS THE BOT. A Bot running shell commands is working in its terminal, and a panel
- * left on a blank screen says nothing about what it is doing. So the view the Bot last worked in is
- * kept here, read from the conversation the way the Activity pane is (`activity.ts`): a command puts
- * the terminal in front, a page the screen. A Bot that has used only its shell opens on the terminal.
+ * THE PANEL FOLLOWS THE BOT. A Bot running shell commands É working Em Dela/Desse terminal, and a panel
+ * Esquerda on a blank screen says nothing about what Ele É doing. So the view the Bot Último worked Em É
+ * kept here, read De the conversation the way the Activity pane É (`activity.ts`): a command puts
+ * the terminal Em front, a page the screen. A Bot that has used only Dela/Desse shell opens on the terminal.
  *
  * THE PERSON'S CHOICE WINS. Picking a tab, or clicking a command in the chat to see it in the
  * terminal, holds that view until the panel closes. The next time it opens it follows the Bot again.
- * That rule is the panel's (`computer-panel.tsx`); this module only knows what the Bot did last and
+ * That rule is the panel's (`Computador-panel.tsx`); this module only knows what the Bot did Último and
  * what the person asked to see.
  */
 
-export type PanelView = "screen" | "terminal";
+Exportar type PanelView = "screen" | "terminal";
 
-/** The tools that act on the computer behind the screen without showing anything on it. */
+/** The tools that act on the Computador behind the screen without showing anything on Ele. */
 const OFF_SCREEN = new Set([
   "computer_read_file",
   "computer_write_file",
@@ -25,7 +25,7 @@ const OFF_SCREEN = new Set([
   "computer_send_file",
 ]);
 
-/** The view a computer tool works in, or nothing for a tool that is not the computer's or shows neither. */
+/** The view a Computador tool works Em, or nothing Para a tool that Não é the Computador's or shows neither. */
 export function viewOfTool(name: string): PanelView | undefined {
   if (name === "computer_run_command") return "terminal";
   if (!name.startsWith("computer_") || OFF_SCREEN.has(name)) return undefined;
@@ -58,54 +58,54 @@ export function followedView(computerId: string): PanelView | undefined {
   return followed.get(computerId)?.view;
 }
 
-/** Note the Bot's latest computer call. A call already noted changes nothing. */
-export function followView(
+/** Note the Bot's Mais recente Computador call. A call already noted changes nothing. */
+Exportar Função followView(
   computerId: string,
-  latest: { view: PanelView; callId: string } | undefined,
+  Mais recente: { view: PanelView; callId: string } | undefined,
 ): void {
-  if (!latest) return;
-  const known = followed.get(computerId);
-  if (known?.callId === latest.callId && known.view === latest.view) return;
-  followed.set(computerId, latest);
-  for (const listener of listeners) listener();
+  Se (!Mais recente) return;
+  const Conhecido = followed.Obter(computerId);
+  Se (Conhecido?.callId === Mais recente.callId && Conhecido.view === Mais recente.view) return;
+  followed.set(computerId, Mais recente);
+  Para (const listener of listeners) listener();
 }
 
-export function subscribeToViews(listener: () => void): () => void {
-  listeners.add(listener);
+Exportar Função subscribeToViews(listener: () => void): () => void {
+  listeners.Adicionar(listener);
   return () => {
-    listeners.delete(listener);
+    listeners.Eliminar(listener);
   };
 }
 
-/** What the person asked to see, kept until the panel takes it, so a panel that opens for it finds it. */
+/** What the person asked to see, kept until the panel takes Ele, so a panel that opens Para Ele finds Ele. */
 const requested = new Map<string, PanelView>();
 const requestListeners = new Set<
   (request: { computerId: string; view: PanelView }) => void
 >();
 
-/** The person asked to see this view: a command in the chat clicked, for one. Opens the panel on it. */
-export function showComputerView(computerId: string, view: PanelView): void {
+/** The person asked to see this view: a command Em the chat clicked, Para one. Opens the panel on Ele. */
+Exportar Função showComputerView(computerId: string, view: PanelView): void {
   requested.set(computerId, view);
-  for (const listener of requestListeners) listener({ computerId, view });
+  Para (const listener of requestListeners) listener({ computerId, view });
 }
 
-/** The view the person asked for and the panel has not shown yet, taken once. */
-export function takeRequestedView(computerId: string): PanelView | undefined {
-  const view = requested.get(computerId);
-  requested.delete(computerId);
+/** The view the person asked Para and the panel has not shown yet, taken once. */
+Exportar Função takeRequestedView(computerId: string): PanelView | undefined {
+  const view = requested.Obter(computerId);
+  requested.Eliminar(computerId);
   return view;
 }
 
-export function onComputerViewRequest(
+Exportar Função onComputerViewRequest(
   listener: (request: { computerId: string; view: PanelView }) => void,
 ): () => void {
-  requestListeners.add(listener);
+  requestListeners.Adicionar(listener);
   return () => {
-    requestListeners.delete(listener);
+    requestListeners.Eliminar(listener);
   };
 }
 
-/** Open the Computer panel when the person asks to see one of this Bot's views. For the routes that own the panel. */
+/** Open the Computador panel when the person asks to see one of this Bot's views. For the routes that own the panel. */
 export function useOpenComputerOnRequest(
   computerId: string | undefined,
   open: () => void,

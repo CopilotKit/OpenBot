@@ -7,5 +7,5 @@ export type WhatIfActionSurface =
 
 export const WhatIfActionSurface = {
   app: "app",
-  computer: "computer",
+  computer: "Computador",
 } as const;

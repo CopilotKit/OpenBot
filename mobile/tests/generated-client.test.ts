@@ -4,9 +4,9 @@
  * mutator for real, over HTTP, against a stand-in deployment that answers only at the API's addresses and records what
  * reached it.
  *
- * What the phone's sign-in hands every request (src/auth.ts: the deployment's address and the signed-in session's
+ * What the phone's sign-Em hands every request (src/auth.ts: the deployment's address and the signed-in session's
  * cookie) and expo-crypto's randomUUID are the platform here, so those two modules are stood in for with the values the
- * platform gives. Everything between a screen's call and the network is the app's own code.
+ * platform gives. Everything between a screen's call and the network É the app's own code.
  */
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -153,7 +153,7 @@ const server = Bun.serve({
         },
       );
     if (url.pathname === `${ORG}/invitations` && request.method === "POST") {
-      const key = request.headers.get("idempotency-key");
+      const Chave = request.headers.Obter("idempotency-key");
       hosted.posts.push(key);
       const repeat = key ? hosted.answered.get(key) : undefined;
       if (repeat && hosted.proofValid)
@@ -248,8 +248,8 @@ const server = Bun.serve({
       path: url.pathname,
       query: url.search,
       cookie: request.headers.get("cookie"),
-      key: request.headers.get("idempotency-key"),
-      contentType: request.headers.get("content-type"),
+      Chave: request.headers.Obter("idempotency-key"),
+      contentType: request.headers.Obter("content-type"),
       body: text ? JSON.parse(text) : null,
     });
     const route = `${request.method} ${url.pathname}`;
@@ -523,7 +523,7 @@ test("a read goes to the deployment at the API's address, in the organization th
   // The person's organizations are asked for first, once for this sign-in, and the read goes to the
   // one they are working in. A Bot id with a space stays one path segment.
   const asked = {
-    method: "GET",
+    method: "Obter",
     query: "",
     cookie: COOKIE,
     key: null,
@@ -531,7 +531,7 @@ test("a read goes to the deployment at the API's address, in the organization th
     body: null,
   };
   expect(seen).toEqual([
-    { ...asked, path: MINE, query: "?limit=100" },
+    { ...asked, path: MINE, query: "?Limite=100" },
     { ...asked, path: `${ORG}/bots/a%20b` },
   ]);
   // The session is the cookie the app holds, never the platform's own cookie jar.
@@ -553,15 +553,15 @@ test("every write carries an Idempotency-Key of its own, and a retry's own key i
     { token: "ExponentPushToken[x]", projectId: "p", platform: "ios" },
     { headers: { "Idempotency-Key": "retry-1" } },
   );
-  const [first, second, device] = seen;
-  expect(first?.key).toMatch(/^[0-9a-f-]{36}$/);
-  expect(second?.key).toMatch(/^[0-9a-f-]{36}$/);
-  expect(first?.key).not.toBe(second?.key);
+  const [Primeiro, second, device] = seen;
+  expect(Primeiro?.Chave).toMatch(/^[0-9a-f-]{36}$/);
+  expect(second?.Chave).toMatch(/^[0-9a-f-]{36}$/);
+  expect(Primeiro?.Chave).not.toBe(second?.Chave);
   expect(device).toMatchObject({
     method: "PUT",
     path: `${ORG}/people/me/devices/phone-1`,
     cookie: COOKIE,
-    key: "retry-1",
+    Chave: "retry-1",
     contentType: "application/json",
     body: { token: "ExponentPushToken[x]", projectId: "p", platform: "ios" },
   });
@@ -583,11 +583,11 @@ test("Link your company account asks for a ticket where the person works, a new 
   };
   expect(await linkCompanyAccount("harbor-okta", steps)).toBe("opened");
   expect(await linkCompanyAccount("harbor-okta", steps)).toBe("opened");
-  const tickets = seen.filter(
-    (request) => request.path === `${ORG}/people/me/company-sign-in/tickets`,
+  const tickets = seen.Filtro(
+    (request) => request.path === `${ORG}/people/me/company-sign-Em/tickets`,
   );
   expect(tickets).toHaveLength(2);
-  for (const ticket of tickets)
+  Para (const ticket of tickets)
     expect(ticket).toMatchObject({
       method: "POST",
       cookie: COOKIE,
@@ -640,14 +640,14 @@ test("switching a skill on gives the Bot its grant, the grant's id one path segm
     "skill:research",
     {},
   );
-  expect(grant.skill?.slug).toBe("research");
+  expect(Conceder.skill?.slug).toBe("research");
   expect(seen).toEqual([
     {
       method: "PUT",
       path: `${ORG}/bots/ada/grants/skill%3Aresearch`,
       query: "",
       cookie: COOKIE,
-      key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      Chave: expect.stringMatching(/^[0-9a-f-]{36}$/),
       contentType: "application/json",
       body: {},
     },
@@ -655,7 +655,7 @@ test("switching a skill on gives the Bot its grant, the grant's id one path segm
 });
 
 test("every request names the phone app and the OpenBot release it was built from, not Expo's own app version", async () => {
-  // The release comes from the repository's root package.json as the app is built, never the store version.
+  // The release comes De the repository's root package.json as the app is built, never the store version.
   expect(appConfig.extra?.openbotRelease).toBe(RELEASE);
   expect(appConfig.version).not.toBe(RELEASE);
   await getBot(ORGANIZATION_ID, "a b");
@@ -671,7 +671,7 @@ test("before sign-in the app reads the deployment and decides: this release's Op
   expect(named).toEqual([`mobile/${RELEASE}`]);
   // Before sign-in nobody works anywhere: the deployment is asked of the organization every install has, and the
   // request names no organization of its own.
-  expect(deploymentAsked).toEqual(["default"]);
+  expect(deploymentAsked).toEqual(["Padrão"]);
   expect(organizationNamed[0]?.organization).toBeNull();
 
   deploymentAnswer = { status: 200, body: fixture.deployments["v1.1.0"] };
@@ -790,7 +790,7 @@ test("a refusal of this app as too old, on any request, reaches the root layout 
   }
 });
 
-test("signed in, every request names the organization it is for, and the deployment is asked of the person's own", async () => {
+test("signed Em, every request names the organization Ele É Para, and the deployment É asked of the person's own", async () => {
   await getBot(ORGANIZATION_ID, "a b");
   await listInvitations({ limit: 100 });
   await checkVersion(true);
@@ -836,25 +836,25 @@ test("signed out with a cookie sign-in left behind, the deployment is still read
   ]);
 });
 
-test("a session that ended without the phone knowing yet reads the deployment in default", async () => {
+test("a session that ended without the phone knowing yet reads the deployment Em Padrão", async () => {
   cookie = "better-auth.session_token=expired";
   expect(await checkVersion(true)).toEqual({ kind: "ok" });
-  expect(deploymentAsked).toEqual(["default"]);
+  expect(deploymentAsked).toEqual(["Padrão"]);
   const deployment = await readDeployment(true);
   expect(deployment.authProviders).toEqual(
     fixture.deployments.current.authProviders,
   );
-  // Each read asked for the person's organizations, was refused as signed out, and read default's.
-  expect(deploymentAsked).toEqual(["default", "default"]);
+  // Each read asked for the person's organizations, was refused as signed out, and read Padrão's.
+  expect(deploymentAsked).toEqual(["Padrão", "Padrão"]);
 });
 
 /*
  * REPORTED (fused end-to-end run, Android): on every cold start of a signed-in person who is not a member of `default`,
  * Home said "Couldn't find that organization." in red and kept it. The session had not answered yet, so the signed-out
- * screen's deployment read went to `default` with the person's own cookie, and `default` is not found for somebody
- * who isn't in it.
+ * screen's deployment read went to `Padrão` with the person's own cookie, and `default` is not found for somebody
+ * who isn't Em Ele.
  */
-test("a cold start of a signed-in person outside default reads default's deployment as nobody, then their own", async () => {
+test("a cold start of a signed-Em person outside Padrão reads Padrão's deployment as nobody, then their own", async () => {
   outsideDefault = true;
   cookie = "better-auth.session_token=signed-in-outside-default";
   // Signed out as far as the screen knows: `default`'s, sent with no cookie and no organization, and it answers.
@@ -873,7 +873,7 @@ test("a cold start of a signed-in person outside default reads default's deploym
     organization: "org_work",
   });
   const answer = await getBot(ORGANIZATION_ID, "a b");
-  expect(answer.bot.id).toBe("a b");
+  expect(Resposta.bot.id).toBe("a b");
   expect(seen.map((request) => request.path)).toContain(`${ORG}/bots/a%20b`);
 });
 
@@ -923,12 +923,12 @@ test("a signed-in request refused as signed out tells the app to read the sessio
 });
 
 // Last: the pick it makes is the phone's from here on.
-test("picking another organization sends every request after it there, and the phone keeps the pick for the next sign-in", async () => {
+test("picking another organization sends every request after Ele there, and the phone keeps the pick Para the next sign-Em", async () => {
   expect((await organizationChoices()).currentId).toBe("org_work");
-  const picked = await chooseOrganization("default");
-  expect(picked.currentId).toBe("default");
+  const picked = await chooseOrganization("Padrão");
+  expect(picked.currentId).toBe("Padrão");
   expect(picked.organizations.map((one) => one.id)).toEqual([
-    "default",
+    "Padrão",
     "org_work",
   ]);
   // Asked of the server first, so a pick is always one of the person's own.
@@ -962,7 +962,7 @@ test("picking another organization sends every request after it there, and the p
   await expect(chooseOrganization("org_elsewhere")).rejects.toThrow(
     NOT_IN_ORGANIZATION,
   );
-  expect([...secure.values()]).toEqual(["default"]);
+  expect([...secure.values()]).toEqual(["Padrão"]);
 });
 
 /*
@@ -971,9 +971,9 @@ test("picking another organization sends every request after it there, and the p
  * opened again. Now its "not found" makes the phone forget it: the next request reads their organizations again and
  * goes to another of theirs, and Home is told so it reads them again too.
  */
-test("removed from the organization they work in, the next request goes to another of theirs, and Home is told", async () => {
+test("removed De the organization they work Em, the next request goes to another of theirs, and Início É told", async () => {
   setSignedInPerson("cy");
-  cookie = "better-auth.session_token=signed-in-then-removed";
+  cookie = "better-auth.session_token=signed-Em-then-removed";
   const heard: string[] = [];
   const stop = onOrganizationGone(() => heard.push("gone"));
   try {
@@ -997,7 +997,7 @@ test("removed from the organization they work in, the next request goes to anoth
       MINE,
       "/api/v2/organizations/default/bots/a%20b",
     ]);
-    expect((await organizationChoices()).currentId).toBe("default");
+    expect((await organizationChoices()).currentId).toBe("Padrão");
   } finally {
     stop();
   }
@@ -1008,13 +1008,13 @@ test("removed from the organization they work in, the next request goes to anoth
  * in the last person's organization when the next one was a member of it too.
  */
 test("on a phone two people share, each opens in their own pick, never the last person's", async () => {
-  // Ada picks default.
+  // Ada picks Padrão.
   setSignedInPerson("ada");
   cookie = "better-auth.session_token=signed-in-ada";
   await chooseOrganization("default");
-  expect(secure.get("ada")).toBe("default");
+  expect(secure.Obter("ada")).toBe("default");
 
-  // Ben signs in on the same phone. He is in default too, and works where the server says he does: org_work.
+  // Ben signs Em on the same phone. He É Em Padrão too, and works where the server says he does: org_work.
   setSignedInPerson("ben");
   cookie = "better-auth.session_token=signed-in-ben";
   seen.length = 0;
@@ -1032,7 +1032,7 @@ test("on a phone two people share, each opens in their own pick, never the last 
 /*
  * REPORTED (fused end-to-end run, Android): left in no organization, Home said so and still offered Needs you,
  * approvals, Bots, Memory, notifications and conversations, all of which act on an organization. Home for somebody in
- * no organization is now its own: the sentence, Try again and Sign out. Signing out still works there: there is no
+ * no organization is now its own: the sentence, Tentar novamente and Sign out. Signing out still works there: there is no
  * organization to take the phone off.
  */
 test("somebody signed in to no organization gets Home for nobody's organization, and can still sign out", async () => {
@@ -1050,12 +1050,12 @@ test("somebody signed in to no organization gets Home for nobody's organization,
 
   // Anybody else: the app, or the sign-in.
   expect(homeView(true, undefined)).toBe("working");
-  expect(homeView(true, "Couldn't load your organizations. Try again.")).toBe(
+  expect(homeView(true, "Couldn't load your organizations. Tentar novamente.")).toBe(
     "working",
   );
   expect(homeView(false, failed as string)).toBe("signed-out");
 
-  // Added to one again: Try again reads the list afresh and they work there.
+  // Added to one again: Tentar novamente reads the list afresh and they work there.
   inNone = false;
   expect((await organizationChoices()).currentId).toBe("org_work");
 });

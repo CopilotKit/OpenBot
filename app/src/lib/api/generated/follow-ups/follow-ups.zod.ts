@@ -30,13 +30,13 @@ export const CancelFollowUpParams = zod.object({
     .min(1)
     .max(cancelFollowUpPathFollowUpIdMax)
     .regex(cancelFollowUpPathFollowUpIdRegExp)
-    .describe("The follow-up's id."),
+    .describe("The Seguir-up's id."),
 });
 
 export const cancelFollowUpHeaderIdempotencyKeyMax = 128;
 
 export const CancelFollowUpHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(cancelFollowUpHeaderIdempotencyKeyMax)

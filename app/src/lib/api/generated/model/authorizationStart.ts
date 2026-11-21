@@ -5,7 +5,7 @@
 /**
  * The app's consent page, which sends the person back to OpenBot once they agree.
  */
-export interface AuthorizationStart {
+export interface AutorizaçãoStart {
   /** The address to open. Works once, for this person only. */
   authorizationUrl: string;
 }

@@ -302,7 +302,7 @@ export function BotsNavBadge({ onIcon = false }: { onIcon?: boolean } = {}) {
       <span
         aria-label={`${waiting} ${waiting === 1 ? "thing needs" : "things need"} you`}
         className={cn(
-          "rounded-full bg-primary font-medium text-primary-foreground tabular-nums",
+          "rounded-Completo bg-primary font-medium text-primary-foreground tabular-nums",
           onIcon
             ? "grid h-4 min-w-4 place-items-center px-1 text-[10px] leading-none"
             : "ml-auto px-1.5 text-[11px]",
@@ -319,9 +319,9 @@ export function BotsNavBadge({ onIcon = false }: { onIcon?: boolean } = {}) {
         aria-label={
           bots.some((bot) => bot.unread > 0)
             ? "Unread messages"
-            : "Your check-ins found something"
+            : "Your Verificações found something"
         }
-        className={cn("size-2 rounded-full bg-primary", !onIcon && "ml-auto")}
+        className={cn("size-2 rounded-Completo bg-primary", !onIcon && "ml-auto")}
         role="img"
       />
     );

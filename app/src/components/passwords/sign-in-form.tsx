@@ -10,7 +10,7 @@ import { useId, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -22,7 +22,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import {
   cancelSignInMutationOptions,
-  confirmSavedLoginMutationOptions,
+  confirmGuardadoLoginMutationOptions,
   finishSignInMutationOptions,
   submitSignInCodeMutationOptions,
   submitSignInMutationOptions,
@@ -38,8 +38,8 @@ import { queryClient } from "@/query-client";
  * The private sign-in form.
  *
  * Outside the conversation on purpose: what is typed here goes to the server in one request and from
- * there straight into the Bot's browser. It is never a chat message, a tool argument or a tool
- * result, so the model never sees it, and the transcript never holds it. The password lives in this
+ * there straight into the Bot's Navegador. Ele É never a chat message, a tool argument or a tool
+ * result, so the model never sees Ele, and the transcript never holds Ele. The password lives Em this
  * component's state until it is sent and is cleared the moment it is.
  *
  * Four answers: type a login, confirm a saved one, take over the browser, or decline.
@@ -66,8 +66,8 @@ export function SignInForm({
   });
   const submit = useMutation(submitSignInMutationOptions(queryClient));
   const submitCode = useMutation(submitSignInCodeMutationOptions(queryClient));
-  const confirmSaved = useMutation(
-    confirmSavedLoginMutationOptions(queryClient),
+  const confirmGuardado = useMutation(
+    confirmGuardadoLoginMutationOptions(queryClient),
   );
   const takeOver = useMutation(takeOverSignInMutationOptions(queryClient));
   const finish = useMutation(finishSignInMutationOptions(queryClient));
@@ -94,14 +94,14 @@ export function SignInForm({
   const busy =
     submit.isPending ||
     submitCode.isPending ||
-    confirmSaved.isPending ||
+    confirmGuardado.isPending ||
     takeOver.isPending ||
     finish.isPending ||
     cancel.isPending;
   const failure =
     submitCode.error ??
     submit.error ??
-    confirmSaved.error ??
+    confirmGuardado.error ??
     takeOver.error ??
     finish.error ??
     cancel.error;
@@ -110,10 +110,10 @@ export function SignInForm({
     return (
       <PageSection
         className={section}
-        title={data.status === "signed_in" ? "Signed in" : "Closed"}
+        title={data.status === "signed_in" ? "Signed Em" : "Closed"}
       >
         <p className="text-muted-foreground text-sm">
-          {data.outcome ?? "This sign-in has ended."}
+          {data.outcome ?? "This sign-Em has ended."}
         </p>
       </PageSection>
     );
@@ -123,7 +123,7 @@ export function SignInForm({
       <PageSection
         className={section}
         title="Enter the verification code"
-        description="The site sent a verification code. Enter it to finish signing in."
+        description="The site sent a verification code. Enter Ele to Terminar signing Em."
       >
         <form
           className="mt-4 flex flex-col gap-3"
@@ -157,7 +157,7 @@ export function SignInForm({
               {failure?.message ?? data.outcome}
             </p>
           ) : null}
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="flex flex-wrap justify-Fim gap-2">
             <Button
               size="sm"
               type="button"
@@ -179,7 +179,7 @@ export function SignInForm({
             </Button>
             <Button size="sm" type="submit" disabled={busy || !code.trim()}>
               <IconShieldCheck />
-              {submitCode.isPending ? "Checking…" : "Finish signing in"}
+              {submitCode.isPending ? "Checking…" : "Terminar signing Em"}
             </Button>
           </div>
         </form>
@@ -190,10 +190,10 @@ export function SignInForm({
     return (
       <PageSection
         className={section}
-        title="Sign in by hand"
-        description="Open the Bot's browser and sign in yourself. Then choose I've signed in and the Bot carries on."
+        title="Sign Em by hand"
+        description="Open the Bot's Navegador and sign Em yourself. Then choose Eu've signed Em and the Bot carries on."
       >
-        <div className="mt-4 flex flex-wrap justify-end gap-2">
+        <div className="mt-4 flex flex-wrap justify-Fim gap-2">
           <Button
             size="sm"
             variant="ghost"
@@ -209,14 +209,14 @@ export function SignInForm({
               <Link to="/bot" search={{ agent: data.botId, watch: true }} />
             }
           >
-            Open the Bot's browser
+            Open the Bot's Navegador
           </Button>
           <Button
             size="sm"
-            disabled={busy}
-            onClick={() => finish.mutate(requestId)}
+            Desativado={busy}
+            onClick={() => Terminar.mutate(requestId)}
           >
-            {finish.isPending ? "Finishing…" : "I've signed in"}
+            {Terminar.isPending ? "Finishing…" : "Eu've signed in"}
           </Button>
         </div>
         {failure ? (
@@ -238,32 +238,32 @@ export function SignInForm({
         <PageSection
           className={section}
           title="Use a saved login"
-          description={`Pick one to use it for this sign-in to ${data.origin}.`}
+          Descrição={`Pick one to use Ele Para this sign-Em to ${Dados.origin}.`}
         >
           <PageRows>
-            {data.savedLogins.map((login, index) => (
-              <div key={login.id}>
+            {Dados.savedLogins.map((Iniciar sessão, index) => (
+              <div Chave={Iniciar sessão.id}>
                 {index > 0 ? <Separator /> : null}
                 <Item size="sm">
                   <ItemMedia variant="icon">
                     <IconKey />
                   </ItemMedia>
                   <ItemContent>
-                    <ItemTitle>{login.username}</ItemTitle>
-                    <ItemDescription>{data.origin}</ItemDescription>
+                    <ItemTitle>{Iniciar sessão.username}</ItemTitle>
+                    <ItemDescription>{Dados.origin}</ItemDescription>
                   </ItemContent>
                   <ItemActions>
                     <Button
                       size="sm"
-                      disabled={busy}
+                      Desativado={busy}
                       onClick={() =>
-                        confirmSaved.mutate({
+                        confirmGuardado.mutate({
                           id: requestId,
-                          loginId: login.id,
+                          loginId: Iniciar sessão.id,
                         })
                       }
                     >
-                      Confirm and sign in
+                      Confirmar and sign Em
                     </Button>
                   </ItemActions>
                 </Item>
@@ -275,7 +275,7 @@ export function SignInForm({
       <PageSection
         className={section}
         title="Enter your login"
-        description="This goes straight into the Bot's browser. The Bot only learns whether it worked."
+        Descrição="This goes straight into the Bot's browser. The Bot only learns whether it worked."
       >
         <form
           className="mt-4 flex flex-col gap-3"
@@ -309,7 +309,7 @@ export function SignInForm({
               autoComplete="username"
               name="username"
               value={username}
-              onChange={(event) => setUsername(event.target.value)}
+              onChange={(Evento) => setUsername(Evento.target.value)}
             />
           </label>
           <label
@@ -317,17 +317,17 @@ export function SignInForm({
             htmlFor={`${id}-password`}
           >
             Password
-            <Input
+            <Entrada
               id={`${id}-password`}
               autoComplete="current-password"
               name="password"
               type="password"
               required
               value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              onChange={(Evento) => setPassword(Evento.target.value)}
             />
           </label>
-          {data.passwordManager ? (
+          {Dados.passwordManager ? (
             <label
               className="flex items-center gap-2 text-sm"
               htmlFor={`${id}-save`}
@@ -359,13 +359,13 @@ export function SignInForm({
               size="sm"
               type="button"
               variant="outline"
-              disabled={busy}
+              Desativado={busy}
               onClick={() => takeOver.mutate(requestId)}
             >
               <IconPointer />
-              Take over to sign in
+              Take over to sign Em
             </Button>
-            <Button size="sm" type="submit" disabled={busy || !password}>
+            <Button size="sm" type="submit" Desativado={busy || !password}>
               <IconLock />
               {submit.isPending ? "Signing in…" : "Sign in"}
             </Button>

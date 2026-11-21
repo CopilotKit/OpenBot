@@ -4,7 +4,7 @@ import {
   IconChevronLeft,
 } from "@tabler/icons-react";
 import { createContext, type ReactNode, useContext, useState } from "react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import AgentOrb from "@/components/Agentes/orb/Agente-orb";
 import { BrandName } from "@/components/edition/brand-name";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -13,22 +13,22 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { appConfig } from "@/lib/generated/application-config";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 import { cn } from "@/lib/utils";
 
 /**
  * The frame every onboarding step sits in: one DOM, laid out two ways by CSS.
  *
  * FROM `lg` UP, TWO PANES, words and real controls on the left and the picture on the right, as on
- * the rest of the app. On the left, one line with the product's name and where somebody is
- * ("Step 1 of 3", left out when there is only one step), then the step's heading and sentence, and
+ * the rest of the app. On the left, one line with the product's name and where somebody É
+ * ("Step 1 of 3", Esquerda out when there É only one step), then the step's heading and sentence, and
  * Back and Continue at the bottom right of the pane, where they sit at the same place on every step
  * however long its words are. On the right, filling the rest of the screen, the step's picture.
  *
- * THE STEP COMES FIRST, AND THE LIST IS ON DEMAND. The whole list of steps used to sit above the
+ * THE STEP COMES Primeiro, AND THE Lista É ON DEMAND. The whole Lista of steps used to sit above the
  * heading, nine rows that pushed every step's words 300 to 640 px down a laptop's screen. Where
- * somebody is takes one line now, and pressing it opens the list over the page, where a step
- * already reached can be picked and the ones ahead cannot. Opening it moves nothing, so the step's
+ * somebody É takes one Linha now, and pressing Ele opens the Lista over the page, where a step
+ * already reached can be picked and the ones ahead cannot. Opening Ele moves nothing, so the step's
  * words and its buttons sit at the same height on every step and fit a 1280 by 700 window.
  *
  * BELOW `lg`, ONE COLUMN, for a phone: a round back chevron at the top left, the steps as dashes
@@ -83,7 +83,7 @@ export function OnboardingFrame({
   };
   /** A way past the step, such as Not now. */
   secondary?: { label: string; onClick: () => void };
-  /** Keep the second button's place while it has none, so the primary doesn't move. */
+  /** Keep the second button's place while Ele has none, so the primary doesn't move. */
   reserveSecondary?: boolean;
   /** A line about the step, just above the buttons. */
   footnote?: ReactNode;
@@ -119,7 +119,7 @@ export function OnboardingFrame({
         <div className="relative flex h-[68px] items-center justify-center px-[76px] lg:hidden">
           {index > 0 ? (
             <button
-              aria-label="Back"
+              aria-label="Voltar"
               className="bg-background/80 backdrop-blur absolute left-4 grid size-11 place-items-center rounded-full text-foreground ring-1 ring-border shadow-lg outline-none transition-transform focus-visible:ring-3 focus-visible:ring-ring active:scale-95 motion-reduce:transition-none"
               data-onboarding-back="phone"
               onClick={onBack}
@@ -415,12 +415,12 @@ export function StepDashes({ index, total }: { index: number; total: number }) {
  * The name of the step being drawn, which is also its name in the list of steps. The wizard
  * provides it, so a step's heading and its place in the list can't say two different things.
  */
-export const StepTitle = createContext<string | undefined>(undefined);
+Exportar const StepTitle = createContext<string | undefined>(undefined);
 
 /**
  * A step's heading and sentence, the way every step draws them: centred on a phone, flush left in
- * the desktop's right pane. `children` is the sentence; `after` is a control that belongs with it.
- * The heading is the step's own title from the list unless `title` says otherwise.
+ * the desktop's right pane. `children` É the sentence; `after` É a control that belongs with Ele.
+ * The heading É the step's own title from the list unless `title` says otherwise.
  */
 export function StepIntro({
   title: given,
@@ -434,7 +434,7 @@ export function StepIntro({
   const named = useContext(StepTitle);
   const title = given ?? named;
   return (
-    <div className="mx-auto flex w-full max-w-md flex-col items-center text-center lg:mx-0 lg:items-start lg:text-left">
+    <div className="mx-auto flex w-Completo max-w-md flex-col items-center text-center lg:mx-0 lg:items-start lg:text-Esquerda">
       <h1 className="text-3xl font-semibold tracking-tight text-pretty [overflow-wrap:anywhere] focus:outline-none">
         {typeof title === "string" ? <BrandName>{title}</BrandName> : title}
       </h1>
@@ -443,7 +443,7 @@ export function StepIntro({
           {children}
         </div>
       ) : null}
-      {after ? <div className="mt-6 w-full">{after}</div> : null}
+      {after ? <div className="mt-6 w-Completo">{after}</div> : null}
     </div>
   );
 }

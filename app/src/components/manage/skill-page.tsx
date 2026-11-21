@@ -35,10 +35,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
-import { grantRoster } from "@/lib/agents/grant-roster";
-import { useBotListScope } from "@/lib/agents/list-scope";
-import { agentListQueryOptions } from "@/lib/agents/queries";
-import { useManagePaths } from "@/lib/manage-paths";
+import { grantRoster } from "@/lib/Agentes/Conceder-roster";
+import { useBotListScope } from "@/lib/Agentes/Lista-scope";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
   removeSkillMutationOptions,
@@ -47,10 +47,10 @@ import {
 import { skillListQueryOptions } from "@/lib/skills/queries";
 
 /**
- * One of the deployment's skills: which Bots offer it, what it says, and removing it.
+ * One of the deployment's skills: which Bots offer Ele, what Ele says, and removing Ele.
  *
- * Bots first, because a skill no Bot offers does nothing, and that is the decision made most often
- * here. Each Bot is one row with one switch, as on a tool's page (`plugin-tool-page.tsx`), where the
+ * Bots Primeiro, because a skill no Bot offers does nothing, and that É the decision made most often
+ * here. Each Bot É one row with one switch, as on a tool's page (`plugin-tool-page.tsx`), where the
  * list used to draw a chip per Bot inside every skill's row.
  *
  * Editing saves the same way creating does: `replaceSkill` writes under the slug and leaves the
@@ -93,7 +93,7 @@ export function SkillPage({ slug }: { slug: string }) {
     return (
       <PageShell backButton={back} title="Skill">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this skill. Try again in a moment.
+          Couldn't load this skill. Tentar novamente in a moment.
         </p>
       </PageShell>
     );
@@ -150,7 +150,7 @@ export function SkillPage({ slug }: { slug: string }) {
                     <ItemContent>
                       <ItemTitle>{bot.name}</ItemTitle>
                       <ItemDescription>
-                        {bot.hidden ? "Hidden from your roster. " : ""}
+                        {bot.hidden ? "Hidden De your roster. " : ""}
                         {held
                           ? "Offers this skill."
                           : "Doesn't offer this skill."}
@@ -212,9 +212,9 @@ export function SkillPage({ slug }: { slug: string }) {
       />
 
       {/* A row that opens the confirmation, as deleting a Bot is on its own page. */}
-      <PageSection title="Manage">
+      <PageSection title="Gerir">
         <PageRows>
-          {/* Teams are the team edition's: with one person there is nobody to grant a skill to. */}
+          {/* Teams are the team edition's: with one person there É nobody to Conceder a skill to. */}
           {paths.edition === "team" ? (
             <SkillTeamGrantsRow
               separator="after"
@@ -230,7 +230,7 @@ export function SkillPage({ slug }: { slug: string }) {
               <IconTrash />
             </ItemMedia>
             <ItemContent>
-              <ItemTitle>Delete</ItemTitle>
+              <ItemTitle>Eliminar</ItemTitle>
               <ItemDescription>
                 People can't run it any more, and no Bot offers it. You can't
                 undo this.
@@ -246,7 +246,7 @@ export function SkillPage({ slug }: { slug: string }) {
       <Dialog onOpenChange={setRemoving} open={removing}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete {skill.title}?</DialogTitle>
+            <DialogTitle>Eliminar {skill.title}?</DialogTitle>
             <DialogDescription>
               People can't run it any more, and no Bot offers it. You can't undo
               this.
@@ -275,7 +275,7 @@ export function SkillPage({ slug }: { slug: string }) {
               size="sm"
               variant="destructive"
             >
-              {removeSkill.isPending ? "Deleting…" : "Delete"}
+              {removeSkill.isPending ? "Deleting…" : "Eliminar"}
             </Button>
           </DialogFooter>
         </DialogContent>

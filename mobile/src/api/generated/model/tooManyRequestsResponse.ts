@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The caller already has one of these running, or asked too often. Try again after the time Retry-After gives.
+ * The caller already has one of these running, or asked too often. Tentar novamente after the time Retry-After gives.
  */
 export type TooManyRequestsResponse = Problem;

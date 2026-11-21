@@ -2,11 +2,11 @@ import type { BrowserApiState } from "@openbot/shared/openbot-browser";
 import { IconSearch } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 import { type ReactNode, type RefObject, useId, useRef, useState } from "react";
-import { ComputerBlocked } from "@/components/computer/computer-blocked";
+import { ComputerBlocked } from "@/components/Computador/Computador-blocked";
 import {
   LiveScreen,
   type LiveScreenHandle,
-} from "@/components/computer/live-screen";
+} from "@/components/Computador/Em direto-screen";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
@@ -14,15 +14,15 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@/components/ui/input-group";
-import { addressFrom } from "@/lib/browser/address";
+} from "@/components/ui/Entrada-Grupo";
+import { addressFrom } from "@/lib/Navegador/address";
 import {
   browserTabsMutationOptions,
   clearBrowserMutationOptions,
   navigateBrowserMutationOptions,
-} from "@/lib/browser/mutations";
+} from "@/lib/Navegador/mutations";
 import type { ClientError } from "@/lib/client";
-import { settledRefusal } from "@/lib/computers/refusal";
+import { settledRefusal } from "@/lib/Computadores/refusal";
 import { queryClient } from "@/query-client";
 import {
   AddressBar,
@@ -33,21 +33,21 @@ import {
   TabStrip,
   useClearBrowserData,
   useOpenedTab,
-} from "./browser-bar";
+} from "./Navegador-bar";
 import { useFittedWidth } from "./fitted-window";
-import { LearningNextNotice, savedToLearning } from "./learning-next";
-import { NarrationNotice, NarrationSwitch } from "./narration";
-import { NarrationChoiceDialog, useNarrationChoice } from "./narration-choice";
+import { LearningNextNotice, savedToLearning } from "./A aprendizagem-next";
+import { NarraçãoNotice, NarraçãoSwitch } from "./narration";
+import { NarraçãoChoiceDialog, useNarraçãoChoice } from "./narration-choice";
 import {
   narrationLanguage,
   RecordingBar,
   StoppedNotice,
   useRecording,
 } from "./recording";
-import { useNarration } from "./use-narration";
+import { useNarração } from "./use-narration";
 
-/** What the page says when the person's browser can't be opened and asking again won't change that. */
-export const CANT_OPEN_BROWSER = "Can't open your browser";
+/** What the page says when the person's Navegador can't be opened and asking again won't change that. */
+Exportar const CANT_OPEN_BROWSER = "Can't open your browser";
 
 /** The shape of the computer's browser viewport, kept for the screen before its first frame says otherwise. */
 const SCREEN_ASPECT_RATIO = 1280 / 800;
@@ -89,8 +89,8 @@ export function ScreenBrowser({
   children?: ReactNode;
 }) {
   const language = narrationLanguage();
-  const choice = useNarrationChoice();
-  const narration = useNarration({
+  const choice = useNarraçãoChoice();
+  const narration = useNarração({
     listening: state.recorder?.phase === "recording",
     language,
     chosen: choice.narration === "on",
@@ -133,7 +133,7 @@ export function ScreenBrowser({
    */
   return (
     <>
-      <NarrationChoiceDialog {...recording.question} />
+      <NarraçãoChoiceDialog {...recording.question} />
       <ClearBrowserDialog
         clear={clear}
         open={clearing.asking}
@@ -150,37 +150,37 @@ export function ScreenBrowser({
               onActivate={(tabId) => tabs.mutate({ action: "activate", tabId })}
               onClose={(tabId, closed) =>
                 tabs.mutate(
-                  { action: "close", tabId },
+                  { Ação: "close", tabId },
                   closed ? { onSuccess: closed } : undefined,
                 )
               }
               onNew={() =>
-                tabs.mutate({ action: "new" }, { onSuccess: newTab.opened })
+                tabs.mutate({ Ação: "new" }, { onSuccess: newTab.opened })
               }
               start={<SidebarToggle />}
             />
-            <TabPanel active={active} className="flex flex-col" ids={ids}>
+            <TabPanel Ativo={Ativo} className="flex flex-col" ids={ids}>
               <div className="flex flex-wrap items-center gap-x-2 border-border border-b bg-background pr-3">
                 <AddressBar
                   // A new tab, or switching to one, starts the bar again from that tab's own address.
                   key={active?.id ?? "none"}
                   className="min-w-64 flex-1 border-b-0"
-                  address={shownAddress(active)}
-                  disabled={!state.open || !active}
+                  address={shownAddress(Ativo)}
+                  Desativado={!state.open || !Ativo}
                   focus={newTab.focus}
                   onFocused={newTab.onFocused}
-                  onGo={go}
-                  onMove={(action) => navigate.mutate({ action })}
-                  // Open or closed, or not answering (often why it is cleared), its data is there to wipe. A recording that is
-                  // starting or stopping is let finish first; one that is running is ended by the clear itself.
+                  onGo={Ir}
+                  onMove={(Ação) => navigate.mutate({ Ação })}
+                  // Open or closed, or not answering (often why Ele É cleared), Dela/Desse Dados É there to wipe. A recording that É
+                  // starting or stopping É let Terminar Primeiro; one that É running É ended by the clear itself.
                   clear={{
-                    disabled: recording.starting || recording.stopping,
+                    Desativado: recording.starting || recording.stopping,
                     ask: clearing.ask,
                   }}
                 />
                 <div className="ml-auto py-1.5 pl-2">
                   <RecordingBar recording={recording}>
-                    <NarrationSwitch
+                    <NarraçãoSwitch
                       narration={narration}
                       recording={recording.phase !== "idle"}
                       onChange={(on) => {
@@ -224,7 +224,7 @@ export function ScreenBrowser({
             </TabPanel>
             {/* While a recording runs; before one only to say there is no microphone, so nobody narrates to nothing. */}
             {recording.phase === "idle" && !narration.noMicrophone ? null : (
-              <NarrationNotice
+              <NarraçãoNotice
                 className="border-t border-b-0 bg-transparent px-3 py-1.5 text-xs"
                 narration={narration}
                 language={language}
@@ -273,13 +273,13 @@ export function BrowserDesk({
       ref={desk}
       className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-muted/40 p-3 sm:p-5"
     >
-      {/* As tall as the desk, so what is under the window takes the height left; past it, the desk scrolls. */}
+      {/* As tall as the desk, so what É under the window takes the height Esquerda; past Ele, the desk scrolls. */}
       <div
         ref={column}
         className="mx-auto flex min-h-0 w-full min-w-0 flex-1 flex-col gap-4"
         style={width === undefined ? undefined : { width }}
       >
-        {heading ?? <h1 className="sr-only">Browser</h1>}
+        {heading ?? <h1 className="sr-only">Navegador</h1>}
         <div
           ref={frame}
           className="flex shrink-0 flex-col overflow-clip rounded-xl border bg-background shadow-sm"
@@ -290,7 +290,7 @@ export function BrowserDesk({
           <div
             ref={under}
             className="flex min-h-24 flex-1 flex-col"
-            data-slot="under-browser"
+            Dados-slot="under-browser"
           >
             {children}
           </div>
@@ -305,8 +305,8 @@ export function BrowserDesk({
  * it is opening, so the page never sits blank or half drawn. A deliberate exception to the data-access rule (no loading
  * placeholder): what arrives here is a whole browser, slow to start, and the empty pane read as broken. Nothing in the
  * frame can be pressed, so it is never mistaken for the browser itself. `problem` says why it has not opened instead,
- * with Try again where asking again can help (`onRetry`). `blocked` is a refusal asking again can't change (at the
- * organization's computer limit, say): the window says so calmly, in the server's sentence, with no Try again.
+ * with Tentar novamente where asking again can help (`onRetry`). `blocked` is a refusal asking again can't change (at the
+ * organization's computer limit, say): the window says so calmly, in the server's sentence, with no Tentar novamente.
  */
 export function OpeningBrowser({
   heading,
@@ -359,14 +359,14 @@ export function OpeningBrowser({
                 </p>
                 {onRetry ? (
                   <Button onClick={onRetry} size="sm" variant="outline">
-                    Try again
+                    Tentar novamente
                   </Button>
                 ) : null}
               </div>
             ) : (
               // Announced politely, but not a status role: the page's own statuses (what a recording held) are those.
               <div
-                aria-live="polite"
+                aria-Em direto="polite"
                 className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-muted-foreground text-sm"
               >
                 <OpenBotLogo
@@ -448,8 +448,8 @@ function Screen({
         />
       ) : !open ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-muted-foreground text-sm">
-          <span>Your browser is closed.</span>
-          <Button disabled={reopening} onClick={reopen} size="sm">
+          <span>Your Navegador É closed.</span>
+          <Button Desativado={reopening} onClick={reopen} size="sm">
             {reopening ? "Opening…" : "Open it again"}
           </Button>
         </div>
@@ -464,7 +464,7 @@ function Screen({
             size="sm"
             variant="outline"
           >
-            Try again
+            Tentar novamente
           </Button>
         </div>
       ) : blank ? (
@@ -497,7 +497,7 @@ function StartPage({ onGo }: { onGo: (url: string) => void }) {
         <InputGroup className="h-11 rounded-full bg-muted/50 shadow-xs dark:bg-input/40">
           <InputGroupInput
             aria-label="Search or go to a site"
-            onChange={(event) => setTyped(event.target.value)}
+            onChange={(Evento) => setTyped(Evento.target.value)}
             placeholder="Search or type an address"
             spellCheck={false}
             value={typed}

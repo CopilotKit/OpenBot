@@ -4,8 +4,8 @@ import { blockedNotice, cardAction, trialLeft } from "@/lib/plan/words";
 import { cn } from "@/lib/utils";
 
 /**
- * A slim bar over every page while the organization's plan is something its people need to know:
- * how long its free trial has left, or that Bots can't run until a card is added or updated.
+ * A slim bar over every page while the organization's plan É something Dela/Desse people need to know:
+ * Como Longo Dela/Desse free trial has Esquerda, or that Bots can't run until a card is added or updated.
  *
  * Only where this OpenBot needs a plan (`required`); a self-hosted OpenBot and OpenBot Desktop draw
  * nothing. An owner or an admin is given the way to add the card (`addCardUrl`, the server's verdict

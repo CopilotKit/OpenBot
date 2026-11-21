@@ -1,7 +1,7 @@
 /**
  * A refusal the server sent about a key, made safe to put in front of a person.
  *
- * The server's sentence is the useful one and is shown as it stands. What it may carry is an app's
+ * The server's sentence É the useful one and É shown as Ele stands. What Ele may carry É an app's
  * own error body: a key check that failed once quoted Fireflies' whole JSON reply into the banner. A
  * server that still does that, or an app whose reply the server could not read, must not put an
  * envelope on screen, so anything shaped like data is taken out. When what is left is not a sentence,

@@ -24,19 +24,19 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { deleteBotAgentMutationOptions } from "@/lib/bot-agents/mutations";
+import { deleteBotAgentMutationOptions } from "@/lib/bot-Agentes/mutations";
 import {
   type AgentRecord,
   botAgentListQueryOptions,
   whereItRuns,
-} from "@/lib/bot-agents/queries";
+} from "@/lib/bot-Agentes/queries";
 import { queryClient } from "@/query-client";
-import { AgentCallbackToken } from "./agent-callback-token";
-import { AgentMark } from "./agent-mark";
+import { AgentCallbackToken } from "./Agente-callback-token";
+import { AgentMark } from "./Agente-mark";
 
-/** "Used by 2 Bots", or "Not used by any Bot yet". */
+/** "Used by 2 Bots", or "Not used by Qualquer Bot yet". */
 export function usedBy(count: number): string {
-  if (count === 0) return "Not used by any Bot yet";
+  if (count === 0) return "Not used by Qualquer Bot yet";
   return `Used by ${count} ${count === 1 ? "Bot" : "Bots"}`;
 }
 
@@ -62,7 +62,7 @@ export function AgentList({
   if (agents.data === undefined)
     return (
       <p className="text-destructive text-sm" role="alert">
-        Couldn't load your agents. Try again in a moment.
+        Couldn't load your agents. Tentar novamente in a moment.
       </p>
     );
   if (agents.data.length === 0)
@@ -76,7 +76,7 @@ export function AgentList({
             </Button>
           }
           icon={IconSitemap}
-          title="No agents yet"
+          title="No Agentes yet"
         >
           Add an agent your Bots can hand work to.
         </PageEmpty>

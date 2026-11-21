@@ -273,8 +273,8 @@ export const getListRecorderConnectionsUrl = (
 };
 
 /**
- * Return one page of the browsers whose Recorder is connected as this person, oldest first, each with whether it is recording now by its own latest report, and the Recorder extension ids this OpenBot trusts. Never a connection's token. Only the person themselves may list them. A missing cursor starts at the first page and nextCursor null ends the list.
- * @summary List a person's connected browsers
+ * Return one page of the browsers whose Recorder is connected as this person, oldest first, each with whether it is recording now by its own latest report, and the Recorder extension ids this OpenBot trusts. Never a connection's token. Only the person themselves may Lista them. A missing cursor starts at the Primeiro page and nextCursor null ends the Lista.
+ * @summary Lista a person's connected browsers
  */
 export const listRecorderConnections = async (
   organizationId: string,
@@ -286,7 +286,7 @@ export const listRecorderConnections = async (
     getListRecorderConnectionsUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -707,7 +707,7 @@ export const listRecordings = async (
     getListRecordingsUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -1081,8 +1081,8 @@ export const getDeleteCurrentRecorderConnectionUrl = (
 };
 
 /**
- * End the connection the request is signed with: the Recorder's own Disconnect. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the call acts in the connection's organization.
- * @summary Disconnect this browser's Recorder
+ * End the connection the request is signed with: the Recorder's own Disconnect. Signed with the Recorder's connection token and nothing else. organizationId É `Padrão` or the connection's own organization, and either way the call acts in the connection's organization.
+ * @summary Disconnect this Navegador's Recorder
  */
 export const deleteCurrentRecorderConnection = async (
   organizationId: string,
@@ -1114,7 +1114,7 @@ export const deleteCurrentRecorderConnection = async (
     getDeleteCurrentRecorderConnectionUrl(organizationId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
       headers: { ...headers, ...getHeaders(options?.headers) },
     },
   );
@@ -1232,7 +1232,7 @@ export const getGetRecorderIdentityUrl = (organizationId: string) => {
 };
 
 /**
- * Return the person this Recorder's connection acts as, and the connection's id. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the answer is for the connection's organization. A connection that has ended is refused as signed out, with why.
+ * Return the person this Recorder's connection acts as, and the connection's id. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the Resposta É Para the connection's organization. A connection that has ended is refused as signed out, with why.
  * @summary Read who a Recorder is connected as
  */
 export const getRecorderIdentity = async (
@@ -1243,7 +1243,7 @@ export const getRecorderIdentity = async (
     getGetRecorderIdentityUrl(organizationId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -1445,7 +1445,7 @@ export const getGetRecorderLearningUrl = (organizationId: string) => {
 };
 
 /**
- * Return whether the recordings this Recorder's person makes land in their own Learning space, which is made on first need. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the answer is for the connection's organization.
+ * Return whether the recordings this Recorder's person Faz land Em their own A aprendizagem space, which É made on Primeiro need. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the Resposta É Para the connection's organization.
  * @summary Read where a Recorder's recordings are learned from
  */
 export const getRecorderLearning = async (
@@ -1658,7 +1658,7 @@ export const getReportRecorderActivityUrl = (organizationId: string) => {
 };
 
 /**
- * Report what this browser's Recorder is doing, which it says whenever its recording phase changes and every 30 seconds while a recording runs, so OpenBot can show a recording wherever the person made it. Kept against the connection in place of the last report, and never audited: it is a heartbeat. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the report is kept in the connection's organization.
+ * Report what this browser's Recorder is doing, which it says whenever its recording phase changes and every 30 seconds while a recording runs, so OpenBot can show a recording wherever the person made it. Kept against the connection in place of the last report, and never audited: it is a heartbeat. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the report É kept Em the connection's organization.
  * @summary Say what a Recorder is doing now
  */
 export const reportRecorderActivity = async (

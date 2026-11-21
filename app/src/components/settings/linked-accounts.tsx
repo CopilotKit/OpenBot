@@ -201,7 +201,7 @@ export function LinkedAccountSection({
   });
   if (!state) {
     return (
-      <PageSection title="Your account">
+      <PageSection title="A tua conta">
         <PageEmpty icon={IconLink} title="Not set up yet">
           You can't link a {linkableProviderTitle(provider)} account yet. An
           admin has to set it up first.
@@ -224,7 +224,7 @@ export function LinkedAccountSection({
     },
   };
   return (
-    <PageSection title="Your account">
+    <PageSection title="A tua conta">
       {state.entries.length > 0 ? (
         <PageRows>
           {state.entries.map((entry, index) => (
@@ -248,7 +248,7 @@ export function LinkedAccountSection({
       ) : null}
       {state.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          Couldn't load your account: {state.error}
+          Couldn't load your Conta: {state.Erro}
         </p>
       ) : null}
       {state.providersError ? (
@@ -282,7 +282,7 @@ export function LinkedAccountSection({
               <div className="grid gap-3 text-sm">
                 <p>{issued.instruction}</p>
                 <div className="flex items-center gap-2">
-                  <code className="min-w-0 flex-1 break-all rounded bg-muted px-2 py-1">
+                  <code className="min-w-0 flex-1 break-Todos rounded bg-muted px-2 py-1">
                     link {issued.code}
                   </code>
                   <Button
@@ -297,7 +297,7 @@ export function LinkedAccountSection({
                       setCopyFailed(!ok);
                     }}
                   >
-                    {copied ? "Copied" : "Copy"}
+                    {copied ? "Copied" : "Copiar"}
                   </Button>
                 </div>
                 {copyFailed ? (

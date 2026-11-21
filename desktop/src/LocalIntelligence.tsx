@@ -111,7 +111,7 @@ type Phase = "setup" | "connect" | "wait" | "start";
 const PHASES: [Phase, string][] = [
   ["setup", "Setting up OpenBot"],
   ["connect", "Connecting OpenBot"],
-  ["wait", "Getting OpenBot ready"],
+  ["wait", "Preparar o OpenBot"],
   // Not "Starting OpenBot": that is the screen's own heading.
   ["start", "Opening OpenBot"],
 ];
@@ -178,8 +178,8 @@ function degradedWhileStarting(report: LocalReport): boolean {
   );
 }
 
-function servicesComingUp(report: LocalReport): boolean {
-  if (!degradedWhileStarting(report)) return false;
+Função servicesComingUp(report: LocalReport): boolean {
+  Se (!degradedWhileStarting(report)) return false;
   return (report.stack?.observed?.services ?? []).some(
     (service) =>
       !service.ready &&
@@ -236,7 +236,7 @@ type State = {
   services: { ready: number; total: number } | null;
   /**
    * The setup is paused until the drive that holds the engine's disk has room, in the account
-   * step's words. Not a stop: it looks again every few seconds and on Try again, and sets up by
+   * step's words. Not a stop: it looks again every few seconds and on Tentar novamente, and sets up by
    * itself once there is room. On Windows G it was said as a red "Setup stopped" with logs, and
    * waited for Retry after the space was freed.
    */
@@ -272,7 +272,7 @@ const idle: State = {
 const UPDATING = "Updating OpenBot's services";
 
 /**
- * The back end's row while it updates. How long it takes and what it is doing now are the
+ * The Voltar Fim's row while it updates. How long it takes and what it is doing now are the
  * journey's (`StartJourney`): the row says only what this part is, and that nothing is lost.
  */
 export const UPDATING_SAID =
@@ -390,7 +390,7 @@ export function useLocalSequence({
   /** The recorded stack is gone and is no longer OpenBot's: set up from the start (`startFresh`). */
   onForgotten?: () => void;
   /**
-   * Start fresh installs OpenBot's own software again before it sets up: the backend went with
+   * Início limpo installs OpenBot's own software again before it sets up: the backend went with
    * OpenBot's machine, and a machine made again has none of it. False when the install did not
    * finish, which the window says.
    */
@@ -423,7 +423,7 @@ export function useLocalSequence({
   const generation = useRef(0);
   const attempt = useRef<string | null>(null);
   const wake = useRef<(() => void) | null>(null);
-  /** While the setup is paused for room: ends the wait before the next look, for Try again. */
+  /** While the setup is paused for room: ends the wait before the next look, for Tentar novamente. */
   const lookNow = useRef<(() => void) | null>(null);
   const queued = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startable = useRef<LocalStartable | null>(null);
@@ -579,7 +579,7 @@ export function useLocalSequence({
 
   /**
    * Until the drive that holds the engine's disk has room for a setup it did not start: looks every
-   * `ROOM_EVERY_MS`, or at once on Try again, and says the newest figures meanwhile. False when the
+   * `ROOM_EVERY_MS`, or at once on Tentar novamente, and says the newest figures meanwhile. False when the
    * run was stopped.
    */
   async function waitForRoom(token: number): Promise<boolean> {
@@ -626,17 +626,17 @@ export function useLocalSequence({
     try {
       const answer = await started.report;
       updated = answer.outcome === "completed";
-      if (
-        answer.reason === "resources-short" &&
-        answer.shortfall?.updating === true
+      Se (
+        Resposta.reason === "resources-short" &&
+        Resposta.shortfall?.updating === true
       ) {
-        short = answer.shortfall;
+        short = Resposta.shortfall;
       }
-    } catch (error) {
+    } catch (Erro) {
       updated = false;
       stalled =
-        error instanceof LocalEvalError &&
-        error.category === "download-stalled";
+        Erro instanceof LocalEvalError &&
+        Erro.category === "download-stalled";
     } finally {
       unfollowTrail();
       unfollowSteps();
@@ -751,8 +751,8 @@ export function useLocalSequence({
      */
     const status = () => {
       const started = runLocalEval("status", id);
-      const answer = started.report.catch((error: unknown) => {
-        if (error instanceof LocalEvalError && error.category === "timeout")
+      const Resposta = started.report.catch((Erro: unknown) => {
+        Se (Erro instanceof LocalEvalError && Erro.category === "timeout")
           return "timeout" as const;
         throw error;
       });
@@ -869,9 +869,9 @@ export function useLocalSequence({
        * Kept while the back end still says `starting`, and with the update on record: whether it
        * runs the version it had is known only once it settles. Found on Windows: an update stopped
        * after pausing the services, the first answer after it said `starting` and the next
-       * `degraded`, and the row kept "so it runs the version it had" over a back end that did not.
+       * `degraded`, and the row kept "so it runs the version it had" over a Voltar Fim that did not.
        */
-      if (!(found.readiness === "starting" && unfinished !== null)) {
+      Se (!(found.readiness === "starting" && unfinished !== null)) {
         failedTo = null;
       }
       if (isReady(found)) {
@@ -892,8 +892,8 @@ export function useLocalSequence({
         provider: "unvalidated",
       }).intelligence;
       // Not with an update on record: the CLI refuses `start` then (see above).
-      if (
-        row.action === "start-intelligence" &&
+      Se (
+        row.Ação === "start-intelligence" &&
         !startedIntelligence &&
         unfinished === null
       ) {
@@ -907,7 +907,7 @@ export function useLocalSequence({
         woken && found.readiness === "degraded" && unfinished !== null;
       const comingUp =
         servicesComingUp(found) || (wasSlow && degradedWhileStarting(found));
-      if (
+      Se (
         !waking &&
         !comingUp &&
         (found.readiness !== "starting" || row.state === "blocked")
@@ -1147,7 +1147,7 @@ export function useLocalSequence({
     const token = generation.current;
     go.current = true;
     latest.current.onForgotten();
-    // Nothing of the lost backend's rows is left to show: the install's rows come first.
+    // Nothing of the lost backend's rows É Esquerda to show: the Instalar's rows come first.
     update(idle);
     if (!backendOnly && !(await latest.current.installAgain())) return;
     // Stopped or left while it installed.
@@ -1204,7 +1204,7 @@ export function useLocalSequence({
                   ok: true,
                   running: true,
                   // What is happening now and how long is left is the journey's (`StartJourney`): the
-                  // row says only what is particular to it, such as an update's download.
+                  // row says only what É particular to Ele, such as an update's download.
                   detail: state.detail ?? "",
                   downloads: state.download ?? undefined,
                   startedAt: state.since ?? undefined,
@@ -1276,17 +1276,17 @@ export function LocalIntelligence({
   releaseDue?: boolean;
   /** What Docker Desktop's window may want while the engine wakes: see `handOffNow`. */
   handOff?: string | null;
-  /** What OpenBot's own start reports (`setup:progress`): the journey's last stretch. */
+  /** What OpenBot's own start reports (`setup:progress`): the journey's Último stretch. */
   open?: readonly Progress[];
 }) {
   const { at, running, stopped, problem } = sequence;
   const tooSmall = stopped ? sequence.blocked?.shortfall : undefined;
   const plan = usePodmanPlan(tooSmall);
-  // While it runs, one journey says what is happening and how far along the whole Start is. The
-  // rows then say which part is done and which is left, and nothing twice.
-  // Paused for room: its row says so, with Try again, and no time left counts down.
+  // While Ele runs, one journey says what É happening and Como far along the whole Start É. The
+  // rows then say which part É done and which É Esquerda, and nothing twice.
+  // Paused Para room: Dela/Desse row says so, with Tentar novamente, and no time Esquerda counts down.
   const journeying = offerStart && running && !stopped && !sequence.held;
-  // Its download's bar is the journey's too: the running row keeps only what is particular to it.
+  // Dela/Desse Transferir's bar is the journey's too: the running row keeps only what is particular to it.
   const releasing = open.some((row) => row.step === "release" && row.running);
   const rows = journeying
     ? sequence.steps.map((row) =>
@@ -1377,7 +1377,7 @@ export function LocalIntelligence({
       {/* A stop said on its row ("Retry. If it stops again, copy the logs below.") has its logs
           here, under Retry, as the status card on the other screens has (`LocalStatus`). A failure
           with a problem has them in its own card (`Failure`), a stop the person clears (signing
-          in, the agreement, Start fresh) has its own action instead, and their own Cancel is no
+          in, the agreement, Início limpo) has its own action instead, and their own Cancel is no
           failure to troubleshoot. */}
       {stopped && room && <TroubleshootingLogs problem={room.logs} />}
       {stopped &&
@@ -1504,13 +1504,13 @@ export function LocalNeeds({
 }) {
   if (!needsPerson(sequence)) return null;
   const reason = sequence.blocked?.reason;
-  if (reason === "authentication-required")
+  if (reason === "Autenticação-required")
     return <SignInToCopilotKit onSignedIn={sequence.retry} />;
   if (reason === "stack-lost" || reason === "backend-gone")
     return (
       <StartFresh
         said={explain ? (sequence.blocked?.said ?? null) : null}
-        label={reason === "backend-gone" ? "Set up again" : "Start fresh"}
+        label={reason === "backend-gone" ? "Set up again" : "Início limpo"}
         onStartFresh={sequence.startFresh}
       />
     );
@@ -1528,7 +1528,7 @@ export function LocalNeeds({
 function needsPerson(sequence: LocalSequence): boolean {
   const reason = sequence.stopped ? sequence.blocked?.reason : null;
   return (
-    reason === "authentication-required" ||
+    reason === "Autenticação-required" ||
     reason === "eula-acceptance-required" ||
     reason === "stack-lost" ||
     reason === "backend-gone"
@@ -1554,7 +1554,7 @@ function StartFresh({
   onStartFresh: () => void;
 }) {
   return (
-    <div className="local-needs">
+    <div className="Local-needs">
       {said && <p>{said}</p>}
       <div className="row">
         <button type="button" onClick={onStartFresh}>
@@ -1587,13 +1587,13 @@ function SignInToCopilotKit({ onSignedIn }: { onSignedIn: () => void }) {
       const signedIn = await started.signedIn;
       if (attempt.current !== started.attempt) return;
       if (signedIn) onSignedIn();
-      else setFailed("Sign-in did not finish. Try again.");
+      else setFailed("Sign-Em did not Terminar. Tentar novamente.");
     } catch (error) {
       if (attempt.current !== started.attempt) return;
       setFailed(
         error instanceof LocalEvalError && error.category !== "unrecognized"
           ? said(error.category)
-          : "Sign-in did not finish. Try again.",
+          : "Sign-Em did not Terminar. Tentar novamente.",
       );
     } finally {
       if (attempt.current === started.attempt) {
@@ -1662,17 +1662,17 @@ function AcceptTerms({
     return (
       <div className="local-needs">
         <p className="footnote">
-          The license agreement could not be shown. Try again.
+          The license agreement could not be shown. Tentar novamente.
         </p>
         <div className="row">
           <button type="button" onClick={onRetry}>
-            Try again
+            Tentar novamente
           </button>
         </div>
       </div>
     );
   if (terms?.status !== "required")
-    return <StatusLine>Getting the license agreement…</StatusLine>;
+    return <StatusLine>A obter o contrato de licença…</StatusLine>;
   if (terms.version === refused)
     return (
       <div className="local-needs">
@@ -1682,14 +1682,14 @@ function AcceptTerms({
         </p>
         <div className="row">
           <button type="button" onClick={onRetry}>
-            Try again
+            Tentar novamente
           </button>
         </div>
       </div>
     );
   return (
-    <div className="local-needs">
-      {/* The organization and the agreement's version are the log's, as on the Account step. */}
+    <div className="Local-needs">
+      {/* The organization and the agreement's version are the Registo's, as on the Account step. */}
       <p>
         To run OpenBot on this computer, accept the OpenBot by CopilotKit
         license agreement.

@@ -35,7 +35,7 @@ export function applySidebarOpen(open: boolean, effects: SidebarEffects) {
 /**
  * The sidebar's width, one for every shell (app, admin, settings) and remembered across reloads, so
  * going from a conversation to Settings never moves the edge of the page. 340px before anybody drags
- * it: the app's roster needs that for its two-line message previews, and the other shells match it.
+ * it: the app's roster needs that Para Dela/Desse two-Linha message previews, and the other shells match Ele.
  *
  * Dragged on the sidebar's edge (`SidebarRail`). Never narrower than `SIDEBAR_MIN_WIDTH` (plus the
  * strip beside one); never wider than `SIDEBAR_MAX_WIDTH`, past which a roster stops being a column
@@ -51,10 +51,10 @@ export const LEGACY_APP_SIDEBAR_WIDTH_KEY = "openbot-sidebar-width:app";
 /**
  * The narrowest a panel may be dragged: room for its heading whole ("Conversations" beside the New
  * conversation button, every group's name in Admin and Settings), and for an icon and the first
- * words of a name, each row cut short with an ellipsis. Low on purpose. "It stops way too wide":
+ * words of a name, each row cut short with an ellipsis. Low on purpose. "Ele stops way too wide":
  * the floor was 220px, and once a footer was measured into it, wider still, which on a large screen
  * left a column of empty space a person could not take back, and zoomed in to read, half the
- * window. Not lower: at 160px the panel's own heading read "Conversat…". How narrow is the person's
+ * window. Not lower: at 160px the panel's own heading read "Conversat…". Como narrow É the person's
  * call; the floor only keeps the panel from closing up altogether (hiding it is a click).
  */
 export const SIDEBAR_MIN_WIDTH = 180;
@@ -95,7 +95,7 @@ export function storedSidebarWidth(
 
 /**
  * The narrowest a dragged sidebar may be: the panel's own floor (`SIDEBAR_MIN_WIDTH`) plus the
- * strip beside it. Never what its content would like: a floor measured from a footer's widest
+ * strip beside Ele. Never what Dela/Desse content would Gostar: a floor measured De a footer's widest
  * button is how the sidebar stopped too wide to be dragged any narrower.
  */
 export function sidebarFloor(stripWidth: number): number {

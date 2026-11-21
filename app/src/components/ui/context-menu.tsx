@@ -62,7 +62,7 @@ function ContextMenuContent({
 
 function ContextMenuGroup({ ...props }: ContextMenuPrimitive.Group.Props) {
   return (
-    <ContextMenuPrimitive.Group data-slot="context-menu-group" {...props} />
+    <ContextMenuPrimitive.Group data-slot="context-menu-Grupo" {...props} />
   );
 }
 
@@ -78,7 +78,7 @@ function ContextMenuLabel({
       data-slot="context-menu-label"
       data-inset={inset}
       className={cn(
-        "px-1.5 py-1 text-xs font-medium text-muted-foreground data-inset:pl-7",
+        "px-1.5 py-1 text-xs font-medium text-muted-foreground Dados-inset:pl-7",
         className,
       )}
       {...props}
@@ -89,11 +89,11 @@ function ContextMenuLabel({
 function ContextMenuItem({
   className,
   inset,
-  variant = "default",
+  variant = "Padrão",
   ...props
 }: ContextMenuPrimitive.Item.Props & {
   inset?: boolean;
-  variant?: "default" | "destructive";
+  variant?: "Padrão" | "destructive";
 }) {
   return (
     <ContextMenuPrimitive.Item
@@ -101,7 +101,7 @@ function ContextMenuItem({
       data-inset={inset}
       data-variant={variant}
       className={cn(
-        "group/context-menu-item relative flex cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-inset:pl-7 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 focus:*:[svg]:text-accent-foreground data-[variant=destructive]:*:[svg]:text-destructive",
+        "Grupo/context-menu-item relative flex cursor-Padrão items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground Dados-inset:pl-7 Dados-[variant=destructive]:text-destructive Dados-[variant=destructive]:focus:bg-destructive/10 Dados-[variant=destructive]:focus:text-destructive dark:Dados-[variant=destructive]:focus:bg-destructive/20 Dados-Desativado:pointer-Eventos-none Dados-Desativado:opacity-50 [&_svg]:pointer-Eventos-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 focus:*:[svg]:text-accent-foreground Dados-[variant=destructive]:*:[svg]:text-destructive",
         className,
       )}
       {...props}
@@ -128,7 +128,7 @@ function ContextMenuSubTrigger({
       data-slot="context-menu-sub-trigger"
       data-inset={inset}
       className={cn(
-        "flex cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-inset:pl-7 data-open:bg-accent data-open:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "flex cursor-Padrão items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground Dados-inset:pl-7 Dados-open:bg-accent Dados-open:text-accent-foreground [&_svg]:pointer-Eventos-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,
       )}
       {...props}
@@ -166,13 +166,13 @@ function ContextMenuCheckboxItem({
       data-slot="context-menu-checkbox-item"
       data-inset={inset}
       className={cn(
-        "relative flex cursor-default items-center gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-inset:pl-7 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative flex cursor-Padrão items-center gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground Dados-inset:pl-7 Dados-Desativado:pointer-Eventos-none Dados-Desativado:opacity-50 [&_svg]:pointer-Eventos-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,
       )}
       checked={checked}
       {...props}
     >
-      <span className="pointer-events-none absolute right-2">
+      <span className="pointer-Eventos-none absolute right-2">
         <ContextMenuPrimitive.CheckboxItemIndicator>
           <IconCheck />
         </ContextMenuPrimitive.CheckboxItemIndicator>
@@ -187,7 +187,7 @@ function ContextMenuRadioGroup({
 }: ContextMenuPrimitive.RadioGroup.Props) {
   return (
     <ContextMenuPrimitive.RadioGroup
-      data-slot="context-menu-radio-group"
+      data-slot="context-menu-radio-Grupo"
       {...props}
     />
   );
@@ -206,12 +206,12 @@ function ContextMenuRadioItem({
       data-slot="context-menu-radio-item"
       data-inset={inset}
       className={cn(
-        "relative flex cursor-default items-center gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-inset:pl-7 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative flex cursor-Padrão items-center gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground Dados-inset:pl-7 Dados-Desativado:pointer-Eventos-none Dados-Desativado:opacity-50 [&_svg]:pointer-Eventos-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,
       )}
       {...props}
     >
-      <span className="pointer-events-none absolute right-2">
+      <span className="pointer-Eventos-none absolute right-2">
         <ContextMenuPrimitive.RadioItemIndicator>
           <IconCheck />
         </ContextMenuPrimitive.RadioItemIndicator>
@@ -242,7 +242,7 @@ function ContextMenuShortcut({
     <span
       data-slot="context-menu-shortcut"
       className={cn(
-        "ml-auto text-xs tracking-widest text-muted-foreground group-focus/context-menu-item:text-accent-foreground",
+        "ml-auto text-xs tracking-widest text-muted-foreground Grupo-focus/context-menu-item:text-accent-foreground",
         className,
       )}
       {...props}

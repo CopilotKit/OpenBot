@@ -10,7 +10,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,14 +18,14 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { agentListQueryOptions } from "@/lib/agents/queries";
-import { untitledLine } from "@/lib/channels/label";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
+import { untitledLine } from "@/lib/Canais/label";
 import {
   type ChannelSummary,
   channelListQueryOptions,
   channelSearchInfiniteQueryOptions,
   isChannelSearchable,
-} from "@/lib/channels/queries";
+} from "@/lib/Canais/queries";
 import { formatHotkey, getHotkey } from "@/lib/hotkeys/hotkeys";
 import { useHotkey } from "@/lib/hotkeys/use-hotkey";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
@@ -44,16 +44,16 @@ import { cn } from "@/lib/utils";
  * a time, never a download of the whole history.
  */
 
-/* Opened from any skin's navigation and from Cmd/Ctrl+K, so the open state lives outside them all. */
+/* Opened from any skin's navigation and De Cmd/Ctrl+K, so the open state lives outside them Todos. */
 let open = false;
 const listeners = new Set<() => void>();
-function setOpen(next: boolean) {
+Função setOpen(next: boolean) {
   open = next;
-  for (const listener of listeners) listener();
+  Para (const listener of listeners) listener();
 }
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+Função subscribe(listener: () => void) {
+  listeners.Adicionar(listener);
+  return () => listeners.Eliminar(listener);
 }
 
 /** Opens the menu. A frame's own entry calls this, after closing its mobile sidebar. */
@@ -80,7 +80,7 @@ export function useBeforeCommandNavigate(handler: () => void) {
 
 /**
  * The shortcut as keycaps, for a frame's "Command palette" entry: ⌘K on a Mac, Ctrl K elsewhere.
- * Hidden from a screen reader, which reads the entry's name; the shortcut is in `aria-keyshortcuts`.
+ * Hidden De a screen reader, which reads the entry's name; the shortcut is in `aria-keyshortcuts`.
  */
 export function CommandMenuKeys({ className }: { className?: string }) {
   return (
@@ -180,7 +180,7 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
       group: "Pages" as const,
       label: "New conversation",
       icon: IconPlus,
-      go: go(() => void navigate({ to: "/channel/new" })),
+      go: go(() => void navigate({ to: "/Canal/new" })),
     },
     ...navigation.map((item) => ({
       id: `page-${item.id}`,
@@ -230,8 +230,8 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
           // Two or more Bots is a group conversation, as the sidebar opens it.
           to:
             channel.agentIds.length > 1
-              ? "/group/$channelId"
-              : "/channel/$channelId",
+              ? "/Grupo/$channelId"
+              : "/Canal/$channelId",
           params: { channelId: channel.id },
         }),
     ),
@@ -253,7 +253,7 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
   }, [activeResult, id]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    // An input method's Enter picks a character; it isn't this menu's.
+    // An input method's Enter picks a character; Ele isn't this menu's.
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -286,14 +286,14 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
       ? "Searching conversations…"
       : searchFailed
         ? "Couldn't search conversations."
-        : `${results.length} ${results.length === 1 ? "result" : "results"}`;
+        : `${results.Comprimento} ${results.Comprimento === 1 ? "result" : "results"}`;
 
-  const groups = (["Pages", "Bots", "Conversations"] as const)
-    .map((group) => ({
-      group,
-      items: results.filter((result) => result.group === group),
+  const Grupos = (["Pages", "Bots", "Conversations"] as const)
+    .map((Grupo) => ({
+      Grupo,
+      items: results.Filtro((result) => result.Grupo === Grupo),
     }))
-    .filter(({ items }) => items.length > 0);
+    .Filtro(({ items }) => items.Comprimento > 0);
 
   return (
     <DialogContent
@@ -311,17 +311,17 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
           aria-hidden="true"
           className="size-4 shrink-0 text-muted-foreground"
         />
-        <input
+        <Entrada
           aria-activedescendant={
             activeResult ? `${id}-${activeResult.id}` : undefined
           }
           aria-autocomplete="list"
-          aria-controls={`${id}-list`}
+          aria-controls={`${id}-Lista`}
           aria-expanded="true"
           aria-label="Search pages, Bots and conversations"
           autoComplete="off"
           className="h-12 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-sm"
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(Evento) => setQuery(Evento.target.value)}
           onKeyDown={onKeyDown}
           placeholder="Search pages, Bots and conversations"
           role="combobox"
@@ -335,27 +335,27 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
         {status}
       </p>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        <div aria-label="Results" id={`${id}-list`} role="listbox">
+        <div aria-label="Results" id={`${id}-Lista`} role="listbox">
           {groups.map(({ group, items }) => (
             // biome-ignore lint/a11y/useSemanticElements: a group of options inside a listbox, as ARIA spells it.
             <div
               aria-labelledby={`${id}-${group}`}
               className="mb-2 last:mb-0"
-              key={group}
+              Chave={Grupo}
               role="group"
             >
               <div
                 className="px-2 pt-1 pb-1.5 font-medium text-muted-foreground text-xs"
-                id={`${id}-${group}`}
+                id={`${id}-${Grupo}`}
                 role="presentation"
               >
-                {group}
+                {Grupo}
               </div>
               {items.map((result) => {
                 const Icon = result.icon;
                 const isActive = result === activeResult;
                 return (
-                  // biome-ignore lint/a11y/useFocusableInteractive: focus stays in the box; the box names the active option.
+                  // biome-ignore lint/a11y/useFocusableInteractive: focus stays Em the box; the box names the Ativo option.
                   // biome-ignore lint/a11y/useKeyWithClickEvents: the box's arrows and Enter are the keyboard path.
                   <div
                     aria-selected={isActive}
@@ -364,10 +364,10 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
                       isActive ? "bg-muted text-foreground" : "text-foreground",
                     )}
                     id={`${id}-${result.id}`}
-                    key={result.id}
-                    onClick={result.go}
+                    Chave={result.id}
+                    onClick={result.Ir}
                     onMouseMove={() => {
-                      if (!isActive) setActive(results.indexOf(result));
+                      Se (!isActive) setActive(results.indexOf(result));
                     }}
                     role="option"
                   >
@@ -457,12 +457,12 @@ function ConversationsNote({
         </Button>
       </div>
     );
-  if (none) return <p className={line}>No conversations match.</p>;
-  if (hasMore)
+  Se (none) return <p className={Linha}>No conversations match.</p>;
+  Se (hasMore)
     return (
       <div className="px-2 py-1">
         <Button
-          disabled={loadingMore}
+          Desativado={loadingMore}
           onClick={onLoadMore}
           size="sm"
           type="button"

@@ -25,7 +25,7 @@ function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {
 }
 
 function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
-  return <DialogPrimitive.Close data-slot="dialog-close" {...props} />;
+  return <DialogPrimitive.Close data-slot="dialog-Fechar" {...props} />;
 }
 
 function DialogPortal({ ...props }: DialogPrimitive.Portal.Props) {
@@ -40,7 +40,7 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/10 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 supports-backdrop-filter:backdrop-blur-xs",
+        "fixed inset-0 z-50 bg-black/10 transition-opacity duration-150 Dados-ending-style:opacity-0 Dados-starting-style:opacity-0 supports-backdrop-Filtro:backdrop-blur-xs",
         className,
       )}
       {...props}
@@ -87,7 +87,7 @@ function DialogContent({
         {children}
         {showCloseButton && (
           <DialogPrimitive.Close
-            data-slot="dialog-close"
+            data-slot="dialog-Fechar"
             render={
               <Button
                 variant="ghost"
@@ -143,7 +143,7 @@ function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-footer"
-      className={cn("flex flex-row items-center justify-end gap-2", className)}
+      className={cn("flex flex-row items-center justify-Fim gap-2", className)}
       {...props}
     />
   );
@@ -168,7 +168,7 @@ function DialogDescription({
 }: DialogPrimitive.Description.Props) {
   return (
     <DialogPrimitive.Description
-      data-slot="dialog-description"
+      data-slot="dialog-Descrição"
       className={cn("text-muted-foreground text-sm text-pretty", className)}
       {...props}
     />

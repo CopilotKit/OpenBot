@@ -1,7 +1,7 @@
 import { useRenderTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
 import { InlineApproval } from "@/components/approvals/inline-approval";
-import { ToolLine } from "@/components/channels/tool-line";
+import { ToolLine } from "@/components/Canais/tool-Linha";
 import { HANDED_OVER } from "@/lib/copilot/markers";
 import { saidItWentAhead } from "@/lib/plugins/tool-result";
 

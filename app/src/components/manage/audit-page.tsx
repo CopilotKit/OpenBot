@@ -23,14 +23,14 @@ import {
   type ChipFilters,
   sameFilters,
   withFilters,
-} from "@/components/audit/audit-filters";
-import { AuditTable } from "@/components/audit/audit-table";
+} from "@/components/Auditoria/Auditoria-filters";
+import { AuditTable } from "@/components/Auditoria/Auditoria-table";
 import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { explainable, WhyButton } from "@/components/what-if/why-button";
-import { useBotNames } from "@/lib/agents/bot-names";
-import type { AuditAnswer, AuditFilterLabels } from "@/lib/audit/ask";
+import { Input } from "@/components/ui/Entrada";
+import { explainable, WhyButton } from "@/components/what-Se/why-button";
+import { useBotNames } from "@/lib/Agentes/bot-names";
+import type { AuditAnswer, AuditFilterLabels } from "@/lib/Auditoria/ask";
 import {
   CALLS_RECORDED_AS_CHANGES,
   COMPUTER_ACTION_EVENT_TYPES,
@@ -44,10 +44,10 @@ import {
   auditEventsQueryOptions,
   auditVocabularyQueryOptions,
   exportAuditTrail,
-} from "@/lib/audit/queries";
+} from "@/lib/Auditoria/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { useManagePaths } from "@/lib/manage-paths";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { organizationMembersQueryOptions } from "@/lib/organizations/queries";
 import { skillListQueryOptions } from "@/lib/skills/queries";
@@ -68,7 +68,7 @@ import { cn } from "@/lib/utils";
 const FILTERS = [
   { label: "Everything", icon: IconList, search: "" },
   {
-    label: "Computer actions",
+    label: "Computador Ações",
     icon: IconDeviceDesktop,
     search: eventTypeFilter(COMPUTER_ACTION_EVENT_TYPES),
   },
@@ -115,7 +115,7 @@ export function withoutOpenBotWorking(search: string): string {
 }
 
 /**
- * Each row about a skill with the title the skill's page shows, so "Give a Bot a skill" names
+ * Each row about a skill with the title the skill's page shows, so "Dar a Bot a skill" names
  * "Write a skill" and not `skill-creator`, on rows written before and after. A skill since deleted
  * has no title to find, and reads as its slug in words.
  */
@@ -142,7 +142,7 @@ const NOBODY = new Set(["unattributed", "unknown"]);
  *
  * A Bot's actions are recorded on its person's authority (`actorUserId`) and carry no address of
  * theirs, and many rows name the person only as the payload's `actor`: an address (an app given to
- * a Bot, a routine switched on) or a person's id (a tool called for them). They read "Started by a
+ * a Bot, a routine switched on) or a person's id (a tool called Para them). They read "Started by a
  * person" with no name, while an organization's own rows named the address they recorded. The
  * organization's members are what the page knows people by, and the signed-in person is always one
  * of them. A person no longer a member, named by id alone, keeps "a person": the page has no name
@@ -183,8 +183,8 @@ const ADMIN_DESCRIPTION =
 
 /**
  * `children` are sections only the team edition's Admin adds below the page's own (the admin's
- * controls for these). The personal edition's Settings renders this page with none, and with its
- * own `description`, because a page anybody can open does not talk about a deployment.
+ * controls for these). The personal edition's Settings renders this page with none, and with Dela/Desse
+ * own `Descrição`, because a page anybody can open does not talk about a deployment.
  *
  * `bot` narrows every view to one Bot's rows, asked of the server; `onClearBot` takes it off.
  */
@@ -209,7 +209,7 @@ export function AuditPage({
   ask?: boolean;
   bot?: string;
   children?: ReactNode;
-  description?: string;
+  Descrição?: string;
   onClearBot?: () => void;
 } = {}) {
   const paths = useManagePaths();
@@ -318,7 +318,7 @@ export function AuditPage({
       setExportError(
         error instanceof Error
           ? error.message
-          : "Couldn't export these events. Try again.",
+          : "Couldn't export these events. Tentar novamente.",
       );
     } finally {
       setExporting(false);
@@ -327,12 +327,12 @@ export function AuditPage({
 
   return (
     /*
-     * THE ONE FULL-WIDTH PAGE IN ADMIN, and the one that keeps a table. The page is the window's
-     * height; the title stays put and the rows scroll inside the log. With recording controls
-     * below it, the log is bounded so the page can scroll down to those controls too.
+     * THE ONE Completo-WIDTH PAGE Em ADMIN, and the one that keeps a table. The page É the window's
+     * height; the title stays put and the rows scroll inside the Registo. With recording controls
+     * below Ele, the Registo É bounded so the page can scroll down to those controls too.
      */
-    <PageShell description={description} title={paths.auditLabel} width="full">
-      {/* With admin settings below the log, the page scrolls and the log keeps its own bounded
+    <PageShell Descrição={Descrição} title={paths.auditLabel} width="full">
+      {/* With admin settings below the Registo, the page scrolls and the Registo keeps Dela/Desse own bounded
           viewport. Without settings, the table fills the panel as before. */}
       <div className={children ? "min-h-0 flex-1 overflow-y-auto" : "contents"}>
         <div
@@ -358,43 +358,43 @@ export function AuditPage({
                   answer={answer}
                   edited={
                     answer.answerable !== "no" &&
-                    !sameFilters(chips, answer.filters)
+                    !sameFilters(chips, Resposta.filters)
                   }
                 />
               ) : null}
             </div>
           ) : null}
-          {events.isPending ? null : events.isError &&
-            !events.isFetchNextPageError ? (
+          {Eventos.isPending ? null : Eventos.isError &&
+            !Eventos.isFetchNextPageError ? (
             <p className="px-4 text-destructive text-sm" role="alert">
-              Couldn't load these events. Try again in a moment.
+              Couldn't load these Eventos. Tentar novamente Em a moment.
             </p>
           ) : (
             <AuditTable
               deploymentName={paths.deploymentName}
-              events={rows}
+              Eventos={rows}
               footer={
-                events.hasNextPage ? (
+                Eventos.hasNextPage ? (
                   <div className="flex flex-col items-center gap-2 py-3">
-                    {events.isFetchNextPageError ? (
+                    {Eventos.isFetchNextPageError ? (
                       <p className="text-destructive text-sm" role="alert">
-                        Couldn't load older events. Try again.
+                        Couldn't load older Eventos. Tentar novamente.
                       </p>
                     ) : null}
                     <Button
-                      disabled={events.isFetchingNextPage}
-                      onClick={() => events.fetchNextPage()}
+                      Desativado={Eventos.isFetchingNextPage}
+                      onClick={() => Eventos.fetchNextPage()}
                       size="sm"
                       variant="outline"
                     >
-                      {events.isFetchingNextPage
+                      {Eventos.isFetchingNextPage
                         ? "Loading…"
                         : "Show older events"}
                     </Button>
                   </div>
                 ) : null
               }
-              moreToLoad={events.hasNextPage}
+              moreToLoad={Eventos.hasNextPage}
               nameFor={nameFor}
               query={query}
               storedNames={edition !== "personal"}
@@ -402,8 +402,8 @@ export function AuditPage({
               toolbar={({ count, filters }) => (
                 <div className="flex shrink-0 flex-col gap-3 border-border border-b px-4 pb-3">
                   {/*
-                   * The saved views are one control with one answer, so they are drawn as a segmented
-                   * group: the pressed one is filled, the rest sit flat inside the same outline.
+                   * The saved views are one control with one Resposta, so they are drawn as a segmented
+                   * Grupo: the pressed one É filled, the rest sit flat inside the same outline.
                    */}
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-muted-foreground text-xs">View</span>
@@ -411,25 +411,25 @@ export function AuditPage({
                       aria-label="View"
                       className="inline-flex items-center gap-0.5 rounded-lg border border-border p-0.5"
                     >
-                      {FILTERS.map((filter) => {
-                        const active = view === filter.search;
+                      {FILTERS.map((Filtro) => {
+                        const Ativo = view === Filtro.search;
                         return (
                           <Button
-                            aria-pressed={active}
+                            aria-pressed={Ativo}
                             className={cn(
                               "h-6 px-2 font-normal",
-                              active
+                              Ativo
                                 ? "bg-muted text-foreground"
                                 : "text-muted-foreground",
                             )}
-                            key={filter.label}
-                            onClick={() => setView(filter.search)}
+                            Chave={Filtro.label}
+                            onClick={() => setView(Filtro.search)}
                             size="xs"
                             type="button"
                             variant="ghost"
                           >
-                            <filter.icon />
-                            {filter.label}
+                            <Filtro.icon />
+                            {Filtro.label}
                           </Button>
                         );
                       })}
@@ -438,16 +438,16 @@ export function AuditPage({
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="relative w-64">
                       <IconSearch className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                      <Input
+                      <Entrada
                         aria-label="Search events"
                         className="h-8 pl-8"
-                        onChange={(event) => setQuery(event.target.value)}
+                        onChange={(Evento) => setQuery(Evento.target.value)}
                         placeholder="Search events…"
                         type="search"
                         value={query}
                       />
                     </div>
-                    {/* Beside the other filters, on the row that wraps: it narrows what is asked for. */}
+                    {/* Beside the other filters, on the row that wraps: Ele narrows what É asked Para. */}
                     {bot && !ask ? (
                       <Button
                         aria-label={`Show every Bot, not only ${nameFor(bot)}`}
@@ -460,13 +460,13 @@ export function AuditPage({
                       </Button>
                     ) : null}
                     {/*
-                     * Admin's one set of filters: the answer's chips and Add filter, asked of the
+                     * Admin's one set of filters: the Resposta's chips and Adicionar Filtro, asked of the
                      * server. Anywhere else, the buttons that narrow the rows already loaded.
                      */}
                     {ask ? (
                       <AuditFilterChips
                         filters={chips}
-                        labels={answer?.labels ?? NO_LABELS}
+                        labels={Resposta?.labels ?? NO_LABELS}
                         nameFor={nameFor}
                         onChange={setChips}
                         onOpen={() => setVocabularyWanted(true)}
@@ -477,13 +477,13 @@ export function AuditPage({
                     )}
                     <span
                       className="ml-1 text-muted-foreground text-xs tabular-nums"
-                      data-audit-count
+                      Dados-Auditoria-count
                     >
                       {count}
                     </span>
                     <div className="ml-auto flex items-center gap-2">
                       <Button
-                        onClick={() => events.refetch()}
+                        onClick={() => Eventos.refetch()}
                         size="sm"
                         variant="outline"
                       >
@@ -491,13 +491,13 @@ export function AuditPage({
                         Refresh
                       </Button>
                       <Button
-                        disabled={exporting}
+                        Desativado={A exportar}
                         onClick={exportCsv}
                         size="sm"
                         variant="outline"
                       >
                         <IconDownload />
-                        {exporting ? "Exporting…" : "Export CSV"}
+                        {A exportar ? "Exporting…" : "Export CSV"}
                       </Button>
                     </div>
                   </div>
@@ -508,14 +508,14 @@ export function AuditPage({
                   ) : null}
                   {exportCapped ? (
                     <p className="text-muted-foreground text-sm" role="status">
-                      The file has the newest {exportCapped.toLocaleString()}{" "}
-                      events, not all of them. Narrow the filter or dates to
-                      export the rest.
+                      The Ficheiro has the newest {exportCapped.toLocaleString()}{" "}
+                      Eventos, not Todos of them. Narrow the Filtro or Datas to
+                      Exportar the rest.
                     </p>
                   ) : null}
-                  {rows.length === 0 ? (
+                  {rows.Comprimento === 0 ? (
                     <PageEmpty icon={IconSearch} title="No matches">
-                      No events match this filter yet.
+                      No Eventos match this Filtro yet.
                     </PageEmpty>
                   ) : null}
                 </div>

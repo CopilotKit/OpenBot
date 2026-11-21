@@ -1,13 +1,13 @@
 import { WEB_HARNESSES } from "@openbot/shared/harnesses";
 import { AnimatePresence, motion } from "motion/react";
 import type { ReactNode } from "react";
-import { HarnessMark } from "@/components/agents/harness-mark";
-import { appConfig } from "@/lib/generated/application-config";
+import { HarnessMark } from "@/components/Agentes/harness-mark";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 import { LaptopIllustration } from "../laptop-illustration";
 import { OrganizationFlow } from "../organization-flow";
 import { DemoStage } from "../demo-stage";
 
-/** Every framework the New Bot wizard offers by name; "an agent you already run" is the sentence. */
+/** Every framework the New Bot wizard offers by name; "an Agente you already run" is the sentence. */
 export const FRAMEWORKS = WEB_HARNESSES.filter(
   (harness) => harness.id !== "byo-url",
 );
@@ -18,13 +18,13 @@ const PRODUCT = appConfig.brand.productName;
 const PANELS: Array<{ id: string; caption: string; picture: () => ReactNode }> =
   [
     {
-      id: "local",
-      caption: "On this computer",
+      id: "Local",
+      caption: "On this Computador",
       picture: () => <LaptopIllustration />,
     },
     {
-      id: "agents",
-      caption: "With the agents you already have",
+      id: "Agentes",
+      caption: "With the Agentes you already have",
       picture: () => (
         <div className="flex flex-wrap justify-center gap-2">
           {FRAMEWORKS.map((harness) => (
@@ -41,7 +41,7 @@ const PANELS: Array<{ id: string; caption: string; picture: () => ReactNode }> =
     },
     {
       id: "organization",
-      caption: "For your organization",
+      caption: "Para your organization",
       picture: () => <OrganizationFlow />,
     },
   ];
@@ -68,7 +68,7 @@ export function SelfHostDemo() {
       beats={PANELS.length}
       beatMs={3200}
       className="flex min-h-[22rem] flex-col justify-center gap-10 px-4 py-8 sm:px-6"
-      kind="self-host"
+      kind="self-Host"
       label={`${PRODUCT} on a laptop; frameworks that work as Bots: ${FRAMEWORKS.map((harness) => harness.name).join(", ")}; and your organization signing in with Google, Microsoft or Okta`}
       rest={-1}
     >

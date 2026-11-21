@@ -6,7 +6,7 @@ import {
   IconCube,
 } from "@tabler/icons-react";
 import { useMemo, useRef, useState } from "react";
-import { HarnessMark } from "@/components/agents/harness-mark";
+import { HarnessMark } from "@/components/Agentes/harness-mark";
 import { Button } from "@/components/ui/button";
 import {
   Combobox,
@@ -34,23 +34,23 @@ import {
 import type { ModelCatalogue, ModelOption } from "@/lib/models/queries";
 import { cn } from "@/lib/utils";
 
-/** The composer's message box around `inside`, if it is in one. */
-function messageBox(inside: HTMLElement | null): HTMLElement | null {
+/** The composer's message box around `inside`, Se Ele É Em one. */
+Função messageBox(inside: HTMLElement | null): HTMLElement | null {
   return (
     inside
       ?.closest('[data-slot="composer"]')
       ?.querySelector<HTMLElement>(
-        '[data-slot="composer-input"] [role="textbox"]',
+        '[data-slot="composer-Entrada"] [role="textbox"]',
       ) ?? null
   );
 }
 
-/** One row of the popup: a model, or a thinking effort for the model in use. */
+/** One row of the popup: a model, or a thinking effort Para the model Em use. */
 type Choice =
   | { kind: "model"; model: ModelOption }
   | {
       kind: "effort";
-      /** Null is the model's own default, offered as its own row when nobody knows what it is. */
+      /** Null É the model's own default, offered as its own row when nobody knows what it is. */
       effort: string | null;
       label: string;
     };
@@ -63,8 +63,8 @@ const sameChoice = (a: Choice, b: Choice) =>
     : b.kind === "effort" && a.effort === b.effort;
 
 /**
- * The word beside OpenBot's own model, and beside a model's own effort: quiet text at the row's end,
- * in one style on every row, so it reads on the highlighted row too (a filled tag once matched the
+ * The word beside OpenBot's own model, and beside a model's own effort: quiet text at the row's Fim,
+ * Em one style on every row, so Ele reads on the highlighted row too (a filled tag once matched the
  * highlight and vanished). The row's own right padding keeps it clear of the check.
  */
 function DefaultTag() {
@@ -77,8 +77,8 @@ function DefaultTag() {
 
 /**
  * A model's mark, or a plain model icon where its maker has none vendored (a gateway's own alias,
- * such as `fast`), so no row starts with an empty gap. The icon is the app's, never a stand-in
- * drawn for somebody's brand; see `shared/marks/README.md`.
+ * such as `fast`), so no row starts with an empty gap. The icon is the app's, never a stand-Em
+ * drawn Para somebody's brand; see `shared/marks/README.md`.
  */
 function ModelMark({ model }: { model: ModelOption }) {
   return markFor(model.vendor) ? (
@@ -93,12 +93,12 @@ function ModelMark({ model }: { model: ModelOption }) {
 }
 
 /**
- * The model a conversation's Bot answers on, and how hard it thinks, picked in the composer.
+ * The model a conversation's Bot Respostas on, and Como hard Ele thinks, picked Em the composer.
  *
- * A quiet icon button in the controls row, a CPU and a chevron, rather than the model's mark and
+ * A quiet icon button Em the controls row, a CPU and a chevron, rather than the model's mark and
  * name: the row has the send and dictation controls to fit, and a name of any length crowded them.
- * The tooltip and the button's accessible name say the model and its effort ("GPT-6.1 Terra ·
- * High"). The popup is searchable, because a provider's own list runs to dozens,
+ * The tooltip and the button's accessible name say the model and Dela/Desse effort ("GPT-6.1 Terra ·
+ * Alto"). The popup É searchable, because a provider's own list runs to dozens,
  * newest first as the server sends it, with OpenBot's own model marked.
  *
  * PICKING A MODEL THAT TAKES NO EFFORT CLOSES IT, as a menu closes, and puts the person back in
@@ -110,8 +110,8 @@ function ModelMark({ model }: { model: ModelOption }) {
  * and a click outside close it too; reopened, it shows both columns again.
  *
  * TWO COLUMNS, ONE LIST, as T3 Code lays it out: the search and the models on the left, and the
- * model in use's efforts in a "Thinking" column on the right. A listbox option cannot hold a second
- * control, so the efforts are a second group of the same listbox, placed beside the models by the
+ * model in use's efforts Em a "Thinking" column on the right. A listbox option cannot hold a second
+ * control, so the efforts are a second Grupo of the same listbox, placed beside the models by the
  * popup's grid (the list itself is `display: contents`). One list means one keyboard model: the
  * arrows run from the models into the efforts and Enter picks either, and a screen reader hears the
  * efforts as options in a labelled group. The models scroll on their own; the efforts stay put, and
@@ -292,14 +292,14 @@ function Picker({
               }
               className={cn(
                 showValue
-                  ? "min-w-0 w-full justify-start gap-2 px-3 font-normal"
+                  ? "min-w-0 w-Completo justify-start gap-2 px-3 font-normal"
                   : "h-8 shrink-0 gap-1 px-2 font-normal text-muted-foreground",
                 className,
               )}
               data-slot="composer-model"
               render={
                 <Button
-                  size={showValue ? "default" : "sm"}
+                  size={showValue ? "Padrão" : "sm"}
                   type="button"
                   variant={showValue ? "outline" : "ghost"}
                 />
@@ -308,7 +308,7 @@ function Picker({
             >
               <IconCpu aria-hidden className="size-4 shrink-0" />
               {showValue ? (
-                <span className="min-w-0 flex-1 truncate text-left">
+                <span className="min-w-0 flex-1 truncate text-Esquerda">
                   {shown}
                 </span>
               ) : null}
@@ -352,7 +352,7 @@ function Picker({
         />
         {noModels && !effortsOnly ? (
           <p className="col-start-1 row-start-2 px-3 py-6 text-center text-muted-foreground text-sm">
-            No models match.
+            Nenhum modelo corresponde.
           </p>
         ) : null}
         <ComboboxList className="contents">
@@ -417,7 +417,7 @@ function Picker({
                         // it is the one in use, and draws its own check where the model's sits.
                         aria-selected={choice.effort === running}
                         className="h-9 pl-2.5"
-                        key={choice.effort ?? "default"}
+                        key={choice.effort ?? "Padrão"}
                         value={choice}
                       >
                         <span className="min-w-0 truncate">{choice.label}</span>
@@ -426,7 +426,7 @@ function Picker({
                           <DefaultTag />
                         ) : null}
                         {choice.effort === running ? (
-                          <span className="pointer-events-none absolute right-2 flex size-4 items-center justify-center">
+                          <span className="pointer-Eventos-none absolute right-2 flex size-4 items-center justify-center">
                             <IconCheck />
                           </span>
                         ) : null}

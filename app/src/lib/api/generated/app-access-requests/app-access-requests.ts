@@ -472,7 +472,7 @@ export const getDeleteAppAccessRequestUrl = (
 };
 
 /**
- * Withdraw your own request while it is waiting. Somebody else's request is not found, like one that doesn't exist, and one already answered is a conflict. Recorded on the audit trail.
+ * Withdraw your own request while it is waiting. Somebody else's request Não é found, Gostar one that doesn't exist, and one already answered is a conflict. Recorded on the audit trail.
  * @summary Withdraw a request for an app
  */
 export const deleteAppAccessRequest = async (
@@ -506,7 +506,7 @@ export const deleteAppAccessRequest = async (
     getDeleteAppAccessRequestUrl(organizationId, appAccessRequestId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
       headers: { ...headers, ...getHeaders(options?.headers) },
     },
   );

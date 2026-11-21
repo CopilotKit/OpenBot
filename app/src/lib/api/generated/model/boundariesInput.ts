@@ -11,7 +11,7 @@ export interface BoundariesInput {
   deny?: string[];
   /** The allow rules, each a CEL expression. Empty permits nothing. */
   allow?: string[];
-  /** Each rule's name and description, keyed by the rule's own text. A label for a rule in neither list is dropped. */
+  /** Each rule's name and Descrição, keyed by the rule's own text. A label for a rule in neither list is dropped. */
   labels?: BoundariesInputLabels;
   authoring?: Authoring;
 }

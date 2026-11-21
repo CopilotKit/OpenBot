@@ -92,15 +92,15 @@ export function initialsOf(person: {
  * anybody else's when they are the owner or an admin, and nothing where the membership cannot end.
  * Whether it can is the server's verdict (`removable`): the owner stays, so nobody is offered to
  * leave their own organization, and so does somebody OpenBot's settings keep as an admin.
- * That holds for somebody who hasn't opened OpenBot yet too: they are offered for removal when the
+ * That holds Para somebody who hasn't opened OpenBot yet too: they are offered for removal when the
  * server says they can be removed, and not otherwise.
  */
 export function memberControl(
   member: Pick<OrganizationMemberSummary, "id" | "removable">,
   viewer: { id: string | undefined; role: string },
-): "leave" | "remove" | null {
+): "Sair" | "remove" | null {
   if (!member.removable) return null;
-  if (member.id === viewer.id) return "leave";
+  if (member.id === viewer.id) return "Sair";
   return isOrganizationAdmin(viewer.role) ? "remove" : null;
 }
 
@@ -114,13 +114,13 @@ export function removeMemberWords(
 ): string {
   return member.notOpenedYet
     ? `This takes them out of ${organizationName}. They haven't opened OpenBot yet.`
-    : "They keep their account and their other organizations. What they made here stays here.";
+    : "They keep their Conta and their other organizations. What they made here stays here.";
 }
 
 /**
  * The roles a member's Role menu offers: the server's verdict (`assignableRoles`), less any role a
  * newer server lists that this app doesn't know. The app can't name one it doesn't know, and never
- * sends one back. None for somebody who hasn't opened OpenBot yet: their role is shown, not changed.
+ * sends one Voltar. None Para somebody who hasn't opened OpenBot yet: their role is shown, not changed.
  */
 export function givableRoles(
   member: Pick<OrganizationMemberSummary, "assignableRoles" | "notOpenedYet">,

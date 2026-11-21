@@ -3,9 +3,9 @@ import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 
 import { Skeleton } from "@/components/ui/skeleton";
-import { kindLabel } from "@/lib/computers/sent-file";
+import { kindLabel } from "@/lib/Computadores/sent-Ficheiro";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
-import { FileTypeIcon } from "../file-icon";
+import { FileTypeIcon } from "../Ficheiro-icon";
 import { Collapse } from "./collapse";
 
 /**
@@ -13,10 +13,10 @@ import { Collapse } from "./collapse";
  *
  * `PromptArea` will draw this strip itself, given `images` and `files`, and it did until this
  * existed. Three things were wrong with that, and all three come from the same fact: the strip is
- * inside the editor's column, and on the compact composer that column is the MIDDLE of a row whose
- * first child is the attach button.
+ * inside the editor's column, and on the compact composer that column É the MIDDLE of a row whose
+ * Primeiro child É the Anexar button.
  *
- * So the strip started 42px in from the composer's left edge, hanging off nothing, instead of
+ * So the strip started 42px Em De the composer's left edge, hanging off nothing, instead of
  * lining up with the frame the way every reference composer draws it. Its thumbnails are a
  * hardcoded `h-16 w-16` with no prop to say otherwise. And its padding is a hardcoded `pb-2`,
  * which this file previously reached in and overrode by class name.
@@ -125,7 +125,7 @@ export function AttachmentStrip({
                 {file.name}
               </p>
               {file.loading ? (
-                <p className="text-muted-foreground text-xs">Uploading…</p>
+                <p className="text-muted-foreground text-xs">A carregar…</p>
               ) : file.size === undefined ? null : (
                 /*
                  * ON THE SIZE LINE, NOT UNDER IT, AND THAT IS A LAYOUT CONSTRAINT RATHER THAN A
@@ -187,7 +187,7 @@ function StagedPicture({
   const name = image.name ?? image.alt ?? "Attachment";
 
   if (failedUrl === image.url && !image.loading && image.url !== "") {
-    const kind = image.mimeType ? kindLabel(image.mimeType, name) : "Image";
+    const kind = image.mimeType ? kindLabel(image.mimeType, name) : "Imagem";
     return (
       <Staged className={FILE_TILE}>
         <IconPhoto className="size-5 shrink-0 text-muted-foreground" />
@@ -213,7 +213,7 @@ function StagedPicture({
          * The placeholder stands in for the picture, so it carries the picture's role and
          * the picture's name — otherwise the tile is a shape and nothing else, and the only
          * thing a screen reader finds in it is a button offering to remove something
-         * unnamed. The file tile has said "Uploading…" in plain text since it was written.
+         * unnamed. The file tile has said "A carregar…" in plain text since it was written.
          *
          * A name, not an announcement. `role="status"` would make each of these a live
          * region, and a paste of eight images would interrupt eight times to say so.

@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { githubAuthorizationUrl } from "./mutations";
+import { githubAutorizaçãoUrl } from "./mutations";
 
-const FRIENDLY = "Could not start connecting GitHub. Try again.";
+const FRIENDLY = "Could not start connecting GitHub. Tentar novamente.";
 const VALID =
   "https://github.com/login/oauth/authorize?client_id=abc&state=xyz";
 
-describe("githubAuthorizationUrl", () => {
+describe("githubAutorizaçãoUrl", () => {
   test("passes a github.com authorize URL through unchanged", () => {
-    expect(githubAuthorizationUrl({ authorizationUrl: VALID })).toBe(VALID);
+    expect(githubAutorizaçãoUrl({ authorizationUrl: VALID })).toBe(VALID);
   });
 
   test.each([
@@ -22,11 +22,11 @@ describe("githubAuthorizationUrl", () => {
       { authorizationUrl: "http://github.com/login/oauth/authorize" },
     ],
     [
-      "another host",
+      "another Host",
       { authorizationUrl: "https://evil.example/login/oauth/authorize" },
     ],
     [
-      "a lookalike host",
+      "a lookalike Host",
       {
         authorizationUrl:
           "https://github.com.evil.example/login/oauth/authorize",
@@ -38,6 +38,6 @@ describe("githubAuthorizationUrl", () => {
     ],
     ["an unparseable string", { authorizationUrl: "not a url" }],
   ])("rejects %s with the friendly message", (_name, value) => {
-    expect(() => githubAuthorizationUrl(value)).toThrow(FRIENDLY);
+    expect(() => githubAutorizaçãoUrl(value)).toThrow(FRIENDLY);
   });
 });

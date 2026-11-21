@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -25,7 +25,7 @@ import {
   addGroupMemberMutationOptions,
   groupQueryOptions,
   removeGroupMemberMutationOptions,
-} from "@/lib/groups";
+} from "@/lib/Grupos";
 
 /**
  * Who is in a group, from its top bar: how many people, and a dialog listing them where the creator
@@ -88,7 +88,7 @@ export function GroupPeopleButton({ channelId }: { channelId: string }) {
                           {self ? "You" : (person.name ?? person.email)}
                         </ItemTitle>
                         <ItemDescription>
-                          {person.creator ? "Started this group" : person.email}
+                          {person.creator ? "Started this Grupo" : person.email}
                         </ItemDescription>
                       </ItemContent>
                       {removable ? (
@@ -96,7 +96,7 @@ export function GroupPeopleButton({ channelId }: { channelId: string }) {
                           <Button
                             aria-label={
                               self
-                                ? "Leave this group"
+                                ? "Sair this Grupo"
                                 : `Remove ${person.email}`
                             }
                             disabled={remove.isPending}
@@ -104,7 +104,7 @@ export function GroupPeopleButton({ channelId }: { channelId: string }) {
                             size="sm"
                             variant="outline"
                           >
-                            {self ? "Leave" : "Remove"}
+                            {self ? "Sair" : "Remove"}
                           </Button>
                         </ItemActions>
                       ) : null}

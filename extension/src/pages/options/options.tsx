@@ -43,7 +43,7 @@ const VIA: Record<RecorderConnectVia, string> = {
   web: "Connected from OpenBot in your browser",
   desktop: "Connected from OpenBot Desktop",
   "openbot-browser": "Connected by OpenBot when it opened this browser",
-  "bot-browser": "Connected by OpenBot while you record in a Bot's browser",
+  "bot-Navegador": "Connected by OpenBot while you record in a Bot's browser",
 };
 
 function plural(count: number, one: string, many: string) {
@@ -181,7 +181,7 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
         ) : null}
       </PageSection>
       <PageSection
-        title="Narration"
+        title="Narração"
         description="Whether the Recorder listens to you while you record and adds what you say to your steps as text. Your browser turns it into text on your own computer."
       >
         <PageRows>
@@ -194,7 +194,7 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
               )}
             </ItemMedia>
             <ItemContent>
-              <ItemTitle>Narration</ItemTitle>
+              <ItemTitle>Narração</ItemTitle>
               <ItemDescription>
                 {state.narration === "on"
                   ? "On. The Recorder listens while you record."
@@ -205,7 +205,7 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
             </ItemContent>
             <ItemActions>
               <Switch
-                aria-label="Narration"
+                aria-label="Narração"
                 checked={state.narration === "on"}
                 onCheckedChange={(on) =>
                   void change({ type: "page.narration", on })
@@ -216,7 +216,7 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
         </PageRows>
       </PageSection>
       <PageSection
-        title="Sites not recorded"
+        title="Sites não gravados"
         description="Nothing you do on these sites is recorded, in any tab. Each recorded tab has a button that adds its site here."
       >
         {state.excludedSites.length === 0 ? (
@@ -256,7 +256,7 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
       </PageSection>
       {policy.openbotUrl ? (
         <PageSection
-          title="Set by your organization"
+          title="Defina pela tua organização"
           description="Your organization chose which OpenBot this Recorder connects to."
         >
           <PageRows>
@@ -279,10 +279,10 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
       <Dialog open={asking} onOpenChange={setAsking}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Disconnect this browser?</DialogTitle>
+            <DialogTitle>Desligar este navegador?</DialogTitle>
           </DialogHeader>
           <DialogBody className="mt-4 text-sm">
-            <p>The Recorder records nothing until you connect it again.</p>
+            <p>O Recorder não grava nada até te ligares novamente.</p>
             {recording ? (
               <p className="mt-2">
                 The recording in progress stops, and what it has not sent to
@@ -293,15 +293,15 @@ export function Options({ deps }: { deps?: Partial<OptionsDeps> }) {
               <p className="mt-2">
                 {plural(sending, "recording", "recordings")} still sending to
                 OpenBot's backend {sending === 1 ? "stops" : "stop"}, and what{" "}
-                {sending === 1 ? "it has" : "they have"} not sent yet is
+                {sending === 1 ? "Ele has" : "they have"} not sent yet is
                 discarded.
               </p>
             ) : null}
             {kept ? (
               <p className="mt-2">
-                {plural(kept.events, "event", "events")} from{" "}
+                {plural(kept.events, "Evento", "Eventos")} from{" "}
                 {plural(kept.recordings, "recording", "recordings")} still
-                waiting in this browser {kept.events === 1 ? "is" : "are"}{" "}
+                waiting in this browser {kept.events === 1 ? "É" : "are"}{" "}
                 discarded.
               </p>
             ) : null}

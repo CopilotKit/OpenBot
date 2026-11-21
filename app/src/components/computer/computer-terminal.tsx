@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
-import { useComputerControl } from "@/lib/computers/use-control";
-import { ComputerControlButton } from "./computer-controls";
-import { LiveTerminal, type LiveTerminalHandle } from "./live-terminal";
+import { useComputerControl } from "@/lib/Computadores/use-control";
+import { ComputerControlButton } from "./Computador-controls";
+import { LiveTerminal, type LiveTerminalHandle } from "./Em direto-terminal";
 import { TERMINAL_BACKGROUND } from "./terminal-theme";
 
 /**
@@ -16,7 +16,7 @@ export function ComputerTerminal({ computerId }: { computerId: string }) {
   const { control, someoneElse } = useComputerControl(computerId);
   /** The signed-in person holds the wheel. Someone else holding it on a shared Bot is not them typing. */
   const driving =
-    control?.holder === "human" && !control.transitioning && !someoneElse;
+    control?.holder === "Humano" && !control.transitioning && !someoneElse;
   const terminal = useRef<LiveTerminalHandle>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
@@ -38,7 +38,7 @@ export function ComputerTerminal({ computerId }: { computerId: string }) {
         />
         {reconnecting && !problem ? (
           <span
-            className="absolute top-2 right-2 rounded-full bg-black/60 px-2.5 py-1 font-medium text-white text-xs backdrop-blur-sm"
+            className="absolute top-2 right-2 rounded-Completo bg-black/60 px-2.5 py-1 font-medium text-white text-xs backdrop-blur-sm"
             role="status"
           >
             Reconnecting…
@@ -74,7 +74,7 @@ export function ComputerTerminal({ computerId }: { computerId: string }) {
             {!control
               ? "Checking who has control…"
               : control.transitioning
-                ? "Finishing the current action…"
+                ? "Finishing the current Ação…"
                 : someoneElse
                   ? "Someone else has control."
                   : "The Bot has control."}

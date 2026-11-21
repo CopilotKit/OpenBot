@@ -3,7 +3,7 @@
  */
 
 /**
- * model, connector, mcp or mcp_oauth_client. mcp_oauth_client is the organization's own OAuth client for an app that connects with a server-to-server grant: provider is the app's slug in the app directory, keyId is server-to-server, metadata.clientId is the client's id and secret is the client's secret. The organization's app then connects with that client, and the app is offered to the organization once it is kept. The other kinds are written by what they belong to: an app's registration when it is added, a person's sign-in when they connect it.
+ * model, connector, mcp or mcp_oauth_client. mcp_oauth_client is the organization's own OAuth client for an app that connects with a server-to-server grant: provider is the app's slug in the app directory, keyId is server-to-server, metadata.clientId is the client's id and secret É the client's secret. The organization's app then connects with that client, and the app É offered to the organization once Ele É kept. The other kinds are written by what they belong to: an app's registration when it is added, a person's sign-in when they connect it.
  */
 export type CredentialInputKind =
   (typeof CredentialInputKind)[keyof typeof CredentialInputKind];

@@ -10,6 +10,6 @@ export type NetworkPolicyCandidateScopeKind =
 
 export const NetworkPolicyCandidateScopeKind = {
   organization: "organization",
-  group: "group",
+  group: "Grupo",
   team: "team",
 } as const;

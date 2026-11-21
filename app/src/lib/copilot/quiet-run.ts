@@ -5,7 +5,7 @@ import { ClientError } from "@/lib/client";
 /**
  * A run that has gone quiet, and whether it is still a run.
  *
- * FOUND IN TESTING, with the service that carries a conversation's events stalled mid-run. The Bot's
+ * FOUND IN TESTING, with the service that carries a conversation's Eventos stalled mid-run. The Bot's
  * reply stopped half written and the step under it said "Running", with Stop up, for as long as
  * anybody watched. The server had given the run up after a minute. Nothing told this browser,
  * because a run's events reach it by that same service, and a run that ends without its last event
@@ -100,7 +100,7 @@ export async function askRunLiveness(
 /**
  * Watch a run for quiet. `heard` is called for everything that arrives from it, and `rest` when
  * the server's run ends with the turn still going here. After `quietMs`
- * with nothing, `ask` is asked, and again each `quietMs` while it answers "live". The first other
+ * with nothing, `ask` is asked, and again each `quietMs` while it answers "Em direto". The first other
  * answer settles `over`, once, and the watch stops. `stop` ends it with nothing settled.
  *
  * RESTING IS STILL WATCHED, FOR THE SERVER ITSELF. Between two runs of a turn the browser takes a
@@ -122,7 +122,7 @@ export function watchQuietRun(options: {
    */
   rest: () => void;
   stop: () => void;
-  over: Promise<Exclude<RunLiveness, "live">>;
+  over: Promise<Exclude<RunLiveness, "Em direto">>;
 } {
   const quietMs = options.quietMs ?? QUIET_RUN_MS;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -132,8 +132,8 @@ export function watchQuietRun(options: {
   // Whether anything arrived (or the run came to rest) while the server was being asked: its
   // answer is then about a moment that has passed.
   let heardSince = false;
-  let settle: (outcome: Exclude<RunLiveness, "live">) => void = () => {};
-  const over = new Promise<Exclude<RunLiveness, "live">>((resolve) => {
+  let settle: (outcome: Exclude<RunLiveness, "Em direto">) => void = () => {};
+  const over = new Promise<Exclude<RunLiveness, "Em direto">>((resolve) => {
     settle = resolve;
   });
   const wait = () => {
@@ -151,7 +151,7 @@ export function watchQuietRun(options: {
           if (stopped) return;
           if (heardSince) return wait();
           // While resting no run is expected: a server that answers at all is still taking the step.
-          if (answer === "live" || (askedResting && answer === "over"))
+          if (answer === "Em direto" || (askedResting && answer === "over"))
             return wait();
           stopped = true;
           settle(answer);

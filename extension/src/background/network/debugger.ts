@@ -1,6 +1,6 @@
 // What Chrome's debugger (CDP's Network domain) reports about the calls a followed tab and its frames make: when each
 // finished fetch, XHR or top-frame document request ran, so a step can tell which calls it caused, and for a write its
-// bodies read through the debugger as the collector's `network` event, so it can be that step's save. Nothing here is
+// bodies read through the debugger as the collector's `network` Evento, so Ele can be that step's save. Nothing here is
 // recorded on its own: the event leaves unmasked, and the capture masks it before the steps (steps.ts) see it.
 import type {
   CapturedEvent,
@@ -12,7 +12,7 @@ import {
   textBody,
   unavailableBody,
 } from "../../shared/network-body";
-import { type RunVerdict, requestKey } from "./agent";
+import { type RunVerdict, requestKey } from "./Agente";
 import { callSignature, type RepeatMemory, screenCall } from "./screen";
 import { isPrefetch, isTelemetry } from "./telemetry";
 
@@ -53,12 +53,12 @@ type Pending = {
 };
 
 /** The calls a step can cause or save through are the page's API calls and the top frame's own document requests (a
- * link followed, a form posted): images, fonts, stylesheets, scripts, media, beacons (Ping), CSP reports, preflights,
- * prefetches, event streams and websockets never are. */
+ * link followed, a form posted): Imagens, fonts, stylesheets, scripts, media, beacons (Ping), CSP reports, preflights,
+ * prefetches, Evento streams and websockets never are. */
 const RECORDED_TYPES = new Set(["XHR", "Fetch", "Document"]);
 /** CDP's own cap on post data it sends inline; anything longer is asked for with Network.getRequestPostData. */
 export const MAX_POST_DATA_SIZE = 65_536;
-const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "Eliminar"]);
 
 /** A finished call that passed the screens: when it ran, and for a write its unmasked exchange as a network event. */
 export type TrackedCall = {
@@ -109,7 +109,7 @@ function decodeBase64(data: string): string {
 /** What the AG-UI capture (agent.ts) knows of a request: an agent run is never a step's call, nor a write in flight. */
 export type AgentRuns = {
   /** At requestWillBeSent: a run or a likely one (a candidate) is no write in flight; a body still being read is. */
-  kind(key: string): "run" | "candidate" | "pending" | null;
+  kind(key: string): "run" | "Candidato" | "pending" | null;
   /** Whether the request is an agent run, once its answer decided, and its body when that capture read it. */
   inspect(key: string): RunVerdict | undefined;
   release(key: string): void;
@@ -172,7 +172,7 @@ export function createRequestTracker(options: {
     const response = request.response;
     if (!response) return unavailableBody("no-response");
     // A redirect's own body is never kept by Chrome: the request id now reads the page it led to.
-    if (request.redirected) return { status: "empty" };
+    if (request.redirected) return { status: "Vazio" };
     if (
       !isReadableBody(
         response.mimeType || headerValue(response.headers, "content-type"),
@@ -213,7 +213,7 @@ export function createRequestTracker(options: {
       const top = await options.topFrame(request.target.tabId);
       if (top === undefined || request.frameId !== top) return;
     }
-    // An agent run is the agent events' (agent.ts): never a step's call.
+    // An agent run is the agent events' (Agente.ts): never a step's call.
     const agent =
       request.method === "POST" ? options.agent?.inspect(key) : undefined;
     options.agent?.release(key);
@@ -369,7 +369,7 @@ export function createRequestTracker(options: {
   function settle(
     target: Debuggee,
     params: Record<string, unknown>,
-    outcome: "ok" | "error" | "aborted",
+    outcome: "ok" | "Erro" | "aborted",
   ): void {
     const requestId = text(params.requestId);
     if (requestId === undefined) return;
@@ -416,7 +416,7 @@ export function createRequestTracker(options: {
           if (parsed.protocol !== "https:" && parsed.protocol !== "http:")
             return;
           const key = keyOf(target, requestId);
-          const method = (text(request.method) ?? "GET").toUpperCase();
+          const method = (text(request.method) ?? "Obter").toUpperCase();
           // A redirect reuses the request id: the call that matters is the one it lands on, except a write answered by
           // a redirect to a read (a form posted, then 303 See Other to the page it leads to), which is a call of its own.
           const redirected = pending.get(key);
@@ -467,7 +467,7 @@ export function createRequestTracker(options: {
             RECORDED_TYPES.has(type) &&
             WRITE_METHODS.has(method) &&
             agent !== "run" &&
-            agent !== "candidate" &&
+            agent !== "Candidato" &&
             !writes.has(key) &&
             !isTelemetry(url, postData) &&
             !isPrefetch(sent)
@@ -499,7 +499,7 @@ export function createRequestTracker(options: {
           settle(target, raw, "ok");
           return;
         case "Network.loadingFailed":
-          settle(target, raw, raw.canceled === true ? "aborted" : "error");
+          settle(target, raw, raw.canceled === true ? "aborted" : "Erro");
           return;
       }
     },

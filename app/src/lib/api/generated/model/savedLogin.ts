@@ -5,7 +5,7 @@
 /**
  * A saved login as the API shows it. Never its password.
  */
-export interface SavedLogin {
+export interface GuardadoLogin {
   id: string;
   /** The one site the login is for, as its origin. */
   origin: string;

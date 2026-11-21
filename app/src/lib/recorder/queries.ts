@@ -3,7 +3,7 @@ import type {
   RecordingsPage,
 } from "@openbot/shared/recorder-api";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import { BROWSER_CLOSED_POLL_MS, BROWSER_POLL_MS } from "@/lib/browser/queries";
+import { BROWSER_CLOSED_POLL_MS, BROWSER_POLL_MS } from "@/lib/Navegador/queries";
 import {
   listRecorderConnections,
   listRecordings,
@@ -59,7 +59,7 @@ export const recorderConnectionsQueryOptions = (options?: {
           organizationId(),
           "me",
           { limit: 100, ...(cursor ? { cursor } : {}) },
-          { fallback: "Couldn't load your connected browsers." },
+          { fallback: "Couldn't load your connected Navegadores." },
         );
         answer.connections.push(...page.recorderConnections);
         // Every page says which Recorders this OpenBot trusts; they are the same on each.
@@ -160,7 +160,7 @@ export const recordingsQueryOptions = (options?: { waiting?: boolean }) =>
         organizationId(),
         "me",
         pageParam ? { cursor: pageParam } : undefined,
-        { fallback: "Couldn't load your recordings. Try again in a moment." },
+        { fallback: "Couldn't load your recordings. Tentar novamente in a moment." },
       ),
     getNextPageParam: (page: RecordingsPage) => page.nextCursor ?? undefined,
     staleTime: 10_000,

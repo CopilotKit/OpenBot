@@ -5,12 +5,12 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useNavigate, useRouter } from "@tanstack/react-router";
-import { uploadHeldFiles } from "@/components/channels/composer/attachments";
-import { stashFirstMessage } from "@/components/channels/transcript-messages";
+import { uploadHeldFiles } from "@/components/Canais/composer/Anexos";
+import { stashFirstMessage } from "@/components/Canais/transcript-messages";
 import {
   createGroupMutationOptions,
   sendGroupMessageMutationOptions,
-} from "@/lib/groups";
+} from "@/lib/Grupos";
 import { saveConversationModel } from "@/lib/models/mutations";
 import type { ConversationModelInput } from "@/lib/models/queries";
 import { newId } from "@/lib/new-id";
@@ -54,7 +54,7 @@ export async function startWithChosen(input: {
  * opened when the group could not be made.
  *
  * A group exists to hold that first message, so one whose message did not send is discarded rather
- * than left in everybody's roster as an empty conversation. The send's own error is what the caller
+ * than left in everybody's roster as an Vazio conversation. The send's own error is what the caller
  * sees (the composer keeps the draft for another try); a failed discard is swallowed, because the
  * person's problem is the message, and an empty group is the lesser leftover.
  */
@@ -207,7 +207,7 @@ export function useStartChannel() {
         navigate({
           params: { channelId },
           replace: true,
-          to: "/group/$channelId",
+          to: "/Grupo/$channelId",
         }),
     });
 

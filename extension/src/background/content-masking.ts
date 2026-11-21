@@ -19,7 +19,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 /**
  * The content event masked with `digests`, or null for one that cannot be read. A field the masking judges sensitive here
  * (its label names a one-time code, say) that still holds its value had it redacted, and `keep` receives that value's
- * digest, so it goes from everything after too (the save's body and answer, the agent's events, the narration). The click's
+ * digest, so it goes from everything after too (the save's body and Resposta, the Agente's events, the narration). The click's
  * private agent target is left as the page wrote it: the agent events read its ids and remove it.
  */
 export function maskContentEvent(

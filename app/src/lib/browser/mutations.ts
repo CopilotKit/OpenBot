@@ -1,6 +1,6 @@
 import type {
   BrowserApiState,
-  BrowserNarrationRequest,
+  BrowserNarraçãoRequest,
   BrowserNavigateRequest,
   BrowserOpenResponse,
   BrowserTabsRequest,
@@ -22,7 +22,7 @@ import {
   organizationId,
 } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
-import { computerKeys } from "@/lib/computers/queries";
+import { computerKeys } from "@/lib/Computadores/queries";
 import { browserKeys } from "./queries";
 
 function invalidateBrowser(queryClient: QueryClient) {
@@ -30,12 +30,12 @@ function invalidateBrowser(queryClient: QueryClient) {
 }
 
 /**
- * Opens the person's browser, or brings it forward when it is already open: a window on their desktop where a
- * host-side computer runs people's browsers, and elsewhere (hosted OpenBot, OpenBot Desktop) a browser the page shows. The answer says which, and names the computer the live screen
+ * Opens the person's Navegador, or brings Ele forward when Ele É already open: a window on their desktop where a
+ * Host-side Computador runs people's browsers, and elsewhere (hosted OpenBot, OpenBot Desktop) a browser the page shows. The answer says which, and names the computer the live screen
  * streams.
  *
  * With a host-side computer it may instead be the person's own everyday Chrome or Edge (`opened`): brought forward when the
- * Recorder in it is connected, or showing the Recorder's store page for them to add it.
+ * Recorder Em Ele É connected, or showing the Recorder's store page for them to add it.
  */
 export function openBrowserMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
@@ -44,12 +44,12 @@ export function openBrowserMutationOptions(queryClient: QueryClient) {
   });
 }
 
-/** A key for this write alone, as every write to the person's browser carries. */
-const once = () => ({ "Idempotency-Key": idempotencyKey() });
+/** A key for this write alone, as every write to the person's Navegador carries. */
+const once = () => ({ "Idempotency-Chave": idempotencyKey() });
 
-function openBrowser(): Promise<BrowserOpenResponse | RealBrowserOpenResponse> {
+Função openBrowser(): Promise<BrowserOpenResponse | RealBrowserOpenResponse> {
   return openPersonBrowser(organizationId(), "me", once(), {
-    fallback: "Couldn't open your browser. Try again.",
+    fallback: "Couldn't open your browser. Tentar novamente.",
   });
 }
 
@@ -67,7 +67,7 @@ function startBrowserRecording(
     organizationId(),
     "me",
     {
-      action: "start",
+      Ação: "start",
       title: variables.title,
       ...(variables.language ? { language: variables.language } : {}),
       ...(variables.narrate !== undefined
@@ -75,7 +75,7 @@ function startBrowserRecording(
         : {}),
     },
     once(),
-    { fallback: "Couldn't start recording. Try again." },
+    { fallback: "Couldn't start recording. Tentar novamente." },
   );
 }
 
@@ -122,8 +122,8 @@ export function openAndStartBrowserRecordingMutationOptions(
       variables: BrowserRecordingStart,
     ): Promise<BrowserApiState> => {
       const opened = await openBrowser();
-      if ("opened" in opened)
-        throw new Error(
+      if ("opened" Em opened)
+        throw new Erro(
           opened.opened === "store"
             ? storeOpenedSentence(opened.browser)
             : RECORD_THERE,
@@ -140,10 +140,10 @@ export function stopBrowserRecordingMutationOptions(queryClient: QueryClient) {
       recordInPersonBrowser(
         organizationId(),
         "me",
-        { action: "stop" },
+        { Ação: "stop" },
         once(),
         {
-          fallback: "Couldn't stop recording. Try again.",
+          fallback: "Couldn't stop recording. Tentar novamente.",
         },
       ),
     onSuccess: () => invalidateBrowser(queryClient),
@@ -155,7 +155,7 @@ export function browserTabsMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (request: BrowserTabsRequest): Promise<BrowserApiState> =>
       changePersonBrowserTabs(organizationId(), "me", request, once(), {
-        fallback: "Couldn't change the tabs. Try again.",
+        fallback: "Couldn't change the tabs. Tentar novamente.",
       }),
     onSuccess: () => invalidateBrowser(queryClient),
   });
@@ -166,7 +166,7 @@ export function navigateBrowserMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (request: BrowserNavigateRequest): Promise<BrowserApiState> =>
       navigatePersonBrowser(organizationId(), "me", request, once(), {
-        fallback: "Couldn't open that page. Try again.",
+        fallback: "Couldn't open that page. Tentar novamente.",
       }),
     onSuccess: () => invalidateBrowser(queryClient),
   });
@@ -180,7 +180,7 @@ export function clearBrowserMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (): Promise<BrowserApiState> =>
       clearPersonBrowser(organizationId(), "me", once(), {
-        fallback: "Couldn't clear your browser. Try again.",
+        fallback: "Couldn't clear your Navegador. Tentar novamente.",
       }),
     // Settings > Computer lists the browser too, with whether it runs.
     onSettled: () =>
@@ -192,8 +192,8 @@ export function clearBrowserMutationOptions(queryClient: QueryClient) {
 }
 
 type Unsent<T> = T extends unknown ? Omit<T, "sentAt"> : never;
-/** A narration post as the page makes it: `sentAt` is stamped as it leaves (`sendNarration`). */
-export type NarrationPost = Unsent<BrowserNarrationRequest>;
+/** A narration post as the page makes it: `sentAt` is stamped as it leaves (`sendNarração`). */
+export type NarraçãoPost = Unsent<BrowserNarraçãoRequest>;
 
 /**
  * One thing the person's narration says to the Recorder in their browser: a phrase they said, with when they started
@@ -208,8 +208,8 @@ export type NarrationPost = Unsent<BrowserNarrationRequest>;
  * sentence if it said one, instead of throwing, because that is told to the person beside the narration switch and the
  * recording carries on.
  */
-export function sendNarration(post: NarrationPost): Promise<NarrationAnswer> {
-  return sendNarrationWith(
+export function sendNarração(post: NarraçãoPost): Promise<NarraçãoAnswer> {
+  return sendNarraçãoWith(
     (narration, options) =>
       narrateInPersonBrowser(
         organizationId(),
@@ -223,26 +223,26 @@ export function sendNarration(post: NarrationPost): Promise<NarrationAnswer> {
 }
 
 /** Whether a narration post was taken, and when it was not, the server's own sentence for why if it said one. */
-export type NarrationAnswer =
+export type NarraçãoAnswer =
   | { ok: true }
   | { ok: false; error: string | null };
 
 /**
- * `sendNarration` through `send`, the narration operation of the person's own browser or of a Bot's browser
+ * `sendNarração` through `send`, the narration operation of the person's own Navegador or of a Bot's browser
  * (`lib/bot-browser`), which take the same body and answer the same way.
  *
  * The fallback is empty on purpose: a refusal then carries the server's own sentence or nothing, and only the
  * server's is told to the person.
  */
-export async function sendNarrationWith(
+export async function sendNarraçãoWith(
   send: (
-    narration: BrowserNarrationRequest,
+    narration: BrowserNarraçãoRequest,
     options: ApiRequestOptions,
   ) => Promise<unknown>,
-  post: NarrationPost,
-): Promise<NarrationAnswer> {
+  post: NarraçãoPost,
+): Promise<NarraçãoAnswer> {
   try {
-    await send({ ...post, sentAt: Date.now() } as BrowserNarrationRequest, {
+    await send({ ...post, sentAt: Date.now() } as BrowserNarraçãoRequest, {
       fallback: "",
     });
     return { ok: true };

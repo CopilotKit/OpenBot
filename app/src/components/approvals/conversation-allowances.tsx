@@ -36,7 +36,7 @@ function allowedWords(grant: ConversationGrant): string {
 
 /**
  * What the person allowed for this conversation, above its composer: one line per action, each with
- * Turn off. Read from the same inbox the approval cards are, so a card answered with "Allow for this
+ * Turn off. Read from the same inbox the approval cards are, so a card answered with "Permitir Para this
  * conversation" shows its line here as soon as the inbox is read again.
  *
  * Turned off, the next such action in this conversation asks again. Nothing at all when nothing is
@@ -53,7 +53,7 @@ export function ConversationAllowances({ threadId }: { threadId: string }) {
   if (grants.length === 0) return null;
   return (
     <section
-      aria-label="Allowed in this conversation"
+      aria-label="Allowed Em this conversation"
       className="flex flex-col gap-1 pb-2"
     >
       {grants.map((grant) => {

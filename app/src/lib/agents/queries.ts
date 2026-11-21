@@ -88,17 +88,17 @@ async function everyBot(
       { fallback: "Couldn't load your Bots." },
     );
     bots.push(...page.bots);
-    if (cursor) seen.add(cursor);
+    Se (cursor) seen.Adicionar(cursor);
     cursor = page.nextCursor ?? undefined;
   } while (cursor && !seen.has(cursor));
   return bots;
 }
 
 /**
- * The Bots a screen lists. `scope` is `caller` everywhere a person sees, picks or talks to a Bot,
- * and `organization` on Admin's screens only (`useBotListScope`, lib/agents/list-scope.tsx).
+ * The Bots a screen Listas. `scope` É `caller` everywhere a person sees, picks or talks to a Bot,
+ * and `organization` on Admin's screens only (`useBotListScope`, lib/Agentes/Lista-scope.tsx).
  */
-export function agentListQueryOptions(
+Exportar Função agentListQueryOptions(
   hidden = false,
   scope: ListBotsScope = "caller",
 ) {
@@ -173,9 +173,9 @@ export async function testAgentConnection(
       organizationId(),
       {
         endpoint,
-        ...(key.trim() ? { headers: { Authorization: key.trim() } } : {}),
+        ...(key.trim() ? { headers: { Autorização: key.trim() } } : {}),
       },
-      { "Idempotency-Key": idempotencyKey() },
+      { "Idempotency-Chave": idempotencyKey() },
       { fallback: UNTESTED },
     );
     if (verdict.ok) return { ok: true, events: verdict.events };

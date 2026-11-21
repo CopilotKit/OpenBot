@@ -42,34 +42,34 @@ export const ListRoutinesQueryParams = zod.object({
     ),
 });
 
-export const listRoutinesResponseNextCursorMax = 4096;
+Exportar const listRoutinesResponseNextCursorMax = 4096;
 
-export const listRoutinesResponseNextCursorRegExp = new RegExp(
+Exportar const listRoutinesResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListRoutinesResponse = zod.object({
+Exportar const ListRoutinesResponse = zod.object({
   routines: zod
     .array(
       zod
         .object({
           id: zod.string().describe("The routine's id."),
-          botId: zod.string().describe("The Bot that carries it out."),
-          schedule: zod.string().describe("When it runs, as text to show."),
+          botId: zod.string().describe("The Bot that carries Ele out."),
+          schedule: zod.string().describe("When Ele runs, as text to show."),
           cron: zod
             .string()
             .describe(
-              "The schedule as it is kept, five cron fields: minute, hour, day of month, month, day of week. What a form that changes the schedule starts from.",
+              "The schedule as Ele É kept, five cron fields: minute, Hora, day of month, month, day of week. What a form that changes the schedule starts De.",
             ),
           timezone: zod
             .string()
-            .describe("The IANA time zone the schedule is read in."),
+            .describe("The IANA time zone the schedule É read Em."),
           instruction: zod.string().describe("What the Bot does on each run."),
           title: zod
             .string()
             .nullable()
             .describe(
-              "What the person called it, or null when they named it nothing.",
+              "What the person called Ele, or null when they named Ele nothing.",
             ),
           conversation: zod
             .object({
@@ -93,7 +93,7 @@ export const ListRoutinesResponse = zod.object({
                 ),
             })
             .describe("Where a routine posts."),
-          enabled: zod
+          Ativo: zod
             .boolean()
             .describe("False while it is paused. A paused routine never runs."),
           nextRunAt: zod.iso
@@ -309,15 +309,15 @@ export const CreateRoutineResponse = zod.object({
 });
 
 /**
- * Change one of the caller's routines: its name, what the Bot does, its schedule or its time zone. Only the fields sent change. It keeps its id, its conversation and its runs. A new schedule or time zone follows the same rules as a new routine's, and its next run is worked out from now. One that does not exist, or is somebody else's, is not found. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Change one of the caller's routines: Dela/Desse name, what the Bot does, Dela/Desse schedule or Dela/Desse time zone. Only the fields sent change. Ele keeps Dela/Desse id, Dela/Desse conversation and Dela/Desse runs. A new schedule or time zone follows the same rules as a new routine's, and Dela/Desse next run É worked out De now. One that does not exist, or É somebody else's, Não é found. A repeated request with the same Idempotency-Chave and body returns the Primeiro result.
  * @summary Change a routine
  */
 
-export const updateRoutinePathRoutineIdMax = 200;
+Exportar const updateRoutinePathRoutineIdMax = 200;
 
-export const updateRoutinePathRoutineIdRegExp = new RegExp("\\S");
+Exportar const updateRoutinePathRoutineIdRegExp = new RegExp("\\S");
 
-export const UpdateRoutineParams = zod.object({
+Exportar const UpdateRoutineParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -395,26 +395,26 @@ export const UpdateRoutineBody = zod
     "What to change. Only the fields sent change, and at least one must be sent.",
   );
 
-export const UpdateRoutineResponse = zod.object({
+Exportar const UpdateRoutineResponse = zod.object({
   routine: zod
     .object({
       id: zod.string().describe("The routine's id."),
-      botId: zod.string().describe("The Bot that carries it out."),
-      schedule: zod.string().describe("When it runs, as text to show."),
+      botId: zod.string().describe("The Bot that carries Ele out."),
+      schedule: zod.string().describe("When Ele runs, as text to show."),
       cron: zod
         .string()
         .describe(
-          "The schedule as it is kept, five cron fields: minute, hour, day of month, month, day of week. What a form that changes the schedule starts from.",
+          "The schedule as Ele É kept, five cron fields: minute, Hora, day of month, month, day of week. What a form that changes the schedule starts De.",
         ),
       timezone: zod
         .string()
-        .describe("The IANA time zone the schedule is read in."),
+        .describe("The IANA time zone the schedule É read Em."),
       instruction: zod.string().describe("What the Bot does on each run."),
       title: zod
         .string()
         .nullable()
         .describe(
-          "What the person called it, or null when they named it nothing.",
+          "What the person called Ele, or null when they named Ele nothing.",
         ),
       conversation: zod
         .object({
@@ -438,7 +438,7 @@ export const UpdateRoutineResponse = zod.object({
             ),
         })
         .describe("Where a routine posts."),
-      enabled: zod
+      Ativo: zod
         .boolean()
         .describe("False while it is paused. A paused routine never runs."),
       nextRunAt: zod.iso
@@ -498,9 +498,9 @@ export const DeleteRoutineParams = zod.object({
     .describe("The routine's id."),
 });
 
-export const deleteRoutineHeaderIdempotencyKeyMax = 128;
+Exportar const deleteRoutineHeaderIdempotencyKeyMax = 128;
 
-export const DeleteRoutineHeader = zod.object({
+Exportar const DeleteRoutineHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -510,18 +510,18 @@ export const DeleteRoutineHeader = zod.object({
     ),
 });
 
-export const DeleteRoutineResponse = zod.void();
+Exportar const DeleteRoutineResponse = zod.void();
 
 /**
- * Switch one of the caller's routines off. A paused routine keeps its schedule and never runs, by the schedule or by Run now, until it is resumed. Pausing one that is paused already changes nothing.
+ * Switch one of the caller's routines off. A paused routine keeps Dela/Desse schedule and never runs, by the schedule or by Run now, until Ele É resumed. Pausing one that É paused already changes nothing.
  * @summary Pause a routine
  */
 
-export const pauseRoutinePathRoutineIdMax = 200;
+Exportar const pauseRoutinePathRoutineIdMax = 200;
 
-export const pauseRoutinePathRoutineIdRegExp = new RegExp("\\S");
+Exportar const pauseRoutinePathRoutineIdRegExp = new RegExp("\\S");
 
-export const PauseRoutineParams = zod.object({
+Exportar const PauseRoutineParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -579,7 +579,7 @@ export const ResumeRoutineParams = zod.object({
 export const resumeRoutineHeaderIdempotencyKeyMax = 128;
 
 export const ResumeRoutineHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(resumeRoutineHeaderIdempotencyKeyMax)
@@ -589,11 +589,11 @@ export const ResumeRoutineHeader = zod.object({
 });
 
 export const ResumeRoutineResponse = zod.object({
-  enabled: zod.boolean().describe("Whether the routine is on now."),
+  enabled: zod.boolean().describe("Whether the routine É on now."),
 });
 
 /**
- * Start one run of the routine now. It does real work: the Bot carries out the instruction in the routine's conversation exactly as a scheduled run would. Accepted, not finished: the run appears in the routine's runs, and what the Bot says appears in the conversation. A paused routine is refused, and so is a second run while one is still open. Recorded on the audit trail.
+ * Start one run of the routine now. It does real work: the Bot carries out the instruction in the routine's conversation exactly as a scheduled run would. Accepted, not Terminado: the run appears Em the routine's runs, and what the Bot says appears in the conversation. A paused routine is refused, and so is a second run while one is still open. Recorded on the audit trail.
  * @summary Run a routine now
  */
 
@@ -619,7 +619,7 @@ export const RunRoutineParams = zod.object({
 export const runRoutineHeaderIdempotencyKeyMax = 128;
 
 export const RunRoutineHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(runRoutineHeaderIdempotencyKeyMax)
@@ -657,19 +657,19 @@ export const ListRoutineRunsParams = zod.object({
     .describe("The routine's id."),
 });
 
-export const listRoutineRunsQueryLimitDefault = 50;
-export const listRoutineRunsQueryLimitMax = 100;
+Exportar const listRoutineRunsQueryLimitDefault = 50;
+Exportar const listRoutineRunsQueryLimitMax = 100;
 
-export const listRoutineRunsQueryCursorMax = 4096;
+Exportar const listRoutineRunsQueryCursorMax = 4096;
 
-export const listRoutineRunsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+Exportar const listRoutineRunsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
-export const ListRoutineRunsQueryParams = zod.object({
-  limit: zod
+Exportar const ListRoutineRunsQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(listRoutineRunsQueryLimitMax)
-    .default(listRoutineRunsQueryLimitDefault)
+    .Padrão(listRoutineRunsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()
@@ -706,7 +706,7 @@ export const ListRoutineRunsResponse = zod.object({
             .datetime({ offset: true })
             .nullable()
             .describe("When it ended, or null while it runs."),
-          error: zod
+          Erro: zod
             .string()
             .nullable()
             .describe("Why it failed or was skipped, or null."),

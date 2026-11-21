@@ -21,7 +21,7 @@ const read = () =>
     signal: new AbortController().signal,
   } as never) as Promise<{ slack: boolean; github: boolean }>;
 
-describe("which account types can be linked", () => {
+describe("which Conta types can be linked", () => {
   test("reads the services the API lists", async () => {
     answer(
       Response.json({
@@ -43,7 +43,7 @@ describe("which account types can be linked", () => {
     expect(await read()).toEqual({ slack: false, github: false });
   });
 
-  test("any other 503 throws the server's message", async () => {
+  test("Qualquer other 503 throws the server's message", async () => {
     answer(Response.json({ error: "Bad gateway" }, { status: 503 }));
     await expect(read()).rejects.toThrow("Bad gateway");
   });

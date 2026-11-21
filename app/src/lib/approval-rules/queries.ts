@@ -21,23 +21,23 @@ export type ApprovalBacktest = ApprovalRuleDraftReplayReport;
 
 export type ApprovalRulesPreview = {
   /** The rules as they stand now, checked against this OpenBot's tools and Bots. */
-  check: RuleRowsCheck;
+  Verificação: RuleRowsCheck;
   warning: string | null;
   report: ApprovalBacktest;
 };
 
-export const approvalRuleKeys = {
-  all: ["approval-rules"] as const,
+Exportar const approvalRuleKeys = {
+  Todos: ["approval-rules"] as const,
   backtest: (rules: readonly ApprovalRuleInput[]) =>
     ["approval-rules", "backtest", { rules }] as const,
 };
 
 /**
- * What these rules would have changed, about actions the approval gate already decided, and whether
- * they check. Writes nothing.
+ * What these rules would have changed, about Ações the approval gate already decided, and whether
+ * they Verificação. Writes nothing.
  *
- * Keyed by the rules themselves: the answer is about those rules and nothing else, and editing back
- * to rules already tried answers from the cache. Not retried, as a boundary's dry-run is not.
+ * Keyed by the rules themselves: the Resposta É about those rules and nothing else, and editing Voltar
+ * to rules already tried Respostas De the cache. Not retried, as a boundary's dry-run is not.
  */
 export function approvalRulesBacktestQueryOptions(
   rules: readonly ApprovalRuleInput[],
@@ -48,7 +48,7 @@ export function approvalRulesBacktestQueryOptions(
       (await replayApprovalRules(
         organizationId(),
         { rules: [...rules] },
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         {
           signal,
           fallback: "The rules could not be tested against history.",

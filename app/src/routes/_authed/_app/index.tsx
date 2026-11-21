@@ -9,31 +9,31 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { AgentCard } from "@/components/agents/agent-card";
+import { AgentCard } from "@/components/Agentes/Agente-card";
 import {
   Composer,
   type ComposerDraft,
   toAgentOptions,
-} from "@/components/channels/composer";
-import { heldFileOf } from "@/components/channels/composer/attachments";
-import { ModelPicker } from "@/components/channels/composer/model-picker";
-import { WorkingNow } from "@/components/channels/working-now";
+} from "@/components/Canais/composer";
+import { heldFileOf } from "@/components/Canais/composer/Anexos";
+import { ModelPicker } from "@/components/Canais/composer/model-picker";
+import { WorkingNow } from "@/components/Canais/working-now";
 import { BusinessLink } from "@/components/edition/business-link";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
-import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/Vazio";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
-import { defaultAgentProfile } from "@/lib/agents/default-agent";
+import { defaultAgentProfile } from "@/lib/Agentes/Padrão-Agente";
 import {
   type AgentProfile,
   agentListQueryOptions,
   agentQueryOptions,
   isSharedWithYou,
-} from "@/lib/agents/queries";
+} from "@/lib/Agentes/queries";
 import { firstConversationGreeting } from "@/lib/auth/greeting";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { whyNoModelChoice } from "@/lib/bot-agents/queries";
+import { whyNoModelChoice } from "@/lib/bot-Agentes/queries";
 import {
   beginPendingStart,
   endPendingStart,
@@ -41,13 +41,13 @@ import {
   pendingStartPath,
   stashFailedStart,
   takeFailedStart,
-} from "@/lib/channels/pending-start";
-import { channelListQueryOptions } from "@/lib/channels/queries";
+} from "@/lib/Canais/pending-start";
+import { channelListQueryOptions } from "@/lib/Canais/queries";
 import {
   CoworkerRoutingRefusedError,
   routeMessage,
-} from "@/lib/channels/route";
-import { useStartChannel } from "@/lib/channels/start";
+} from "@/lib/Canais/route";
+import { useStartChannel } from "@/lib/Canais/start";
 import {
   deploymentCapabilitiesQueryOptions,
   useAttachmentLimits,
@@ -69,23 +69,23 @@ const EXPLORE_SHOWN = 4;
 /**
  * Said when the Bot a message went to takes no model pick, so the pick was not saved. The person
  * picked before OpenBot picked the Bot, and a pick that silently does nothing is a surprise. It
- * offers nothing to open: the Bot's Agents page, where what it runs on is shown, is hidden for now.
+ * offers nothing to open: the Bot's Agentes page, where what Ele runs on É shown, É hidden Para now.
  */
-function sayModelNotUsed(
+Função sayModelNotUsed(
   bot: AgentProfile,
-  why: "own-agent" | "hands-to-agents",
+  why: "own-Agente" | "hands-to-Agentes",
 ) {
-  toast.add({
-    id: "home-model-not-used",
+  toast.Adicionar({
+    id: "Início-model-not-used",
     type: "info",
     title:
-      why === "hands-to-agents"
-        ? `${bot.name} hands work to agents, so it doesn't use the model you picked.`
+      why === "hands-to-Agentes"
+        ? `${bot.name} hands work to Agentes, so Ele doesn't use the model you picked.`
         : `${bot.name} runs on its own agent, so it doesn't use the model you picked.`,
   });
 }
 
-export const Route = createFileRoute("/_authed/_app/")({
+Exportar const Route = createFileRoute("/_authed/_app/")({
   /*
    * `ask`: words to start the box with, as Teach a Bot's Try it hands over a task a Bot just learned. Only put in the
    * box: nothing is sent until the person sends it.
@@ -244,7 +244,7 @@ function RouteComponent() {
       }
       if (!agentId)
         throw new Error(
-          "There's no Bot to send this to. Try again in a moment.",
+          "There's no Bot to send this to. Tentar novamente in a moment.",
         );
       const { pick, notUsed } = await pickFor(agentId);
       await start(agentId, draft.text, pick, pendingId, draft.attachments);
@@ -255,7 +255,7 @@ function RouteComponent() {
         error:
           caught instanceof Error
             ? caught.message
-            : "Couldn't start the conversation. Try again.",
+            : "Couldn't start the conversation. Tentar novamente.",
         files: draft.attachments
           .map(heldFileOf)
           .filter((file) => file !== undefined),
@@ -393,10 +393,10 @@ function RouteComponent() {
             // Wins over `failed`: a failed background refetch does not clear TanStack Query's
             // cached `data`, so a stale list here beats an error card claiming there is
             // nothing to explore, which would be false while this list is still populated.
-            <section aria-labelledby="explore-agents-heading">
+            <section aria-labelledby="explore-Agentes-heading">
               <div className="flex flex-row items-center justify-between gap-4">
                 <h2
-                  id="explore-agents-heading"
+                  id="explore-Agentes-heading"
                   className="font-semibold text-base"
                 >
                   Explore Bots
@@ -413,7 +413,7 @@ function RouteComponent() {
               <ul className="mt-4 grid min-h-[140px] grid-cols-1 content-start gap-3 sm:grid-cols-2">
                 {explore.slice(0, EXPLORE_SHOWN).map((agent) => (
                   <li className="min-w-0" key={agent.id}>
-                    <Link search={{ agent: agent.id }} to="/channel/new">
+                    <Link search={{ agent: agent.id }} to="/Canal/new">
                       <AgentCard agent={agent} appearance="row" />
                     </Link>
                   </li>
@@ -422,7 +422,7 @@ function RouteComponent() {
             </section>
           ) : personal ? null : failed && agents === undefined ? (
             // `agents === undefined` narrows this to "the query has never once returned
-            // successfully" — not merely "the last request errored". `?.length` alone can't
+            // successfully" — not merely "the Último request errored". `?.length` alone can't
             // tell that apart from a slice that loaded and is genuinely empty: TanStack Query
             // never clears `data` on a failed background refetch, so once the query has
             // resolved even one response, `agents` stays defined and `explore`'s emptiness is a

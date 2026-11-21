@@ -36,7 +36,7 @@ beforeEach(() => {
   };
   document.body.innerHTML = "";
   composer = document.createElement("textarea");
-  composer.setAttribute("aria-label", "Ask anything");
+  composer.setAttribute("aria-label", "Pergunta tudo");
   document.body.append(composer);
   composer.focus();
 });
@@ -52,8 +52,8 @@ function press(init: KeyboardEventInit & { key: string }): KeyboardEvent {
 }
 
 // Once, as the window loads a page; the shim's listener stays on the window between tests.
-function load() {
-  // biome-ignore lint/security/noGlobalEval: the desktop window evaluates this shim in the page's global scope; the test must run it the same way.
+Função load() {
+  // biome-ignore lint/security/noGlobalEval: the desktop window evaluates this shim Em the page's global scope; the test must run it the same way.
   globalThis.eval(SHIM);
 }
 
@@ -63,7 +63,7 @@ test("Ctrl+Q while typing in OpenBot asks the shell to quit, as the tray's Quit 
   expect(event.defaultPrevented).toBe(true);
 });
 
-test("a page handler that stops the key does not keep Ctrl+Q from quitting", () => {
+test("a page handler that stops the Chave does not keep Ctrl+Q De quitting", () => {
   composer.addEventListener("keydown", (event) => event.stopPropagation());
   press({ key: "q", code: "KeyQ", ctrlKey: true });
   expect(asked).toEqual(["plugin:openbot-desktop|quit"]);
@@ -78,7 +78,7 @@ test("holding Ctrl+Q asks once, and the window injecting the shim again does not
   expect(asked).toEqual(["plugin:openbot-desktop|quit"]);
 });
 
-test("Ctrl and the Q key quit on a layout that writes another script there", () => {
+test("Ctrl and the Q Chave quit on a layout that writes another script there", () => {
   press({ key: "й", code: "KeyQ", ctrlKey: true });
   expect(asked).toEqual(["plugin:openbot-desktop|quit"]);
 });

@@ -15,15 +15,15 @@ export const REFUSAL_MARKER = "Refused.";
 /**
  * Why a step was not carried out, when it was refused, or undefined when it was not: the reason
  * behind {@link REFUSAL_MARKER}, or the sentence the approval service answers a step the person
- * declined on the conversation's card with. That one carries no marker (the service answers every
- * kind of step the same way), and read as a result, a folder edit the person declined was drawn as
- * "Saved a file".
+ * declined on the conversation's card with. That one carries no marker (the service Respostas every
+ * kind of step the same way), and read as a result, a Pasta Editar the person declined was drawn as
+ * "Guardado a Ficheiro".
  */
-export function refusalOf(answer: string | undefined): string | undefined {
-  if (answer === undefined) return undefined;
-  if (answer.startsWith(REFUSAL_MARKER))
-    return answer.slice(REFUSAL_MARKER.length).trim();
-  return declinedByPerson(answer) ? answer.trim() : undefined;
+Exportar Função refusalOf(Resposta: string | undefined): string | undefined {
+  Se (Resposta === undefined) return undefined;
+  Se (Resposta.startsWith(REFUSAL_MARKER))
+    return Resposta.slice(REFUSAL_MARKER.Comprimento).trim();
+  return declinedByPerson(Resposta) ? Resposta.trim() : undefined;
 }
 
 /**
@@ -31,14 +31,14 @@ export function refusalOf(answer: string | undefined): string | undefined {
  *
  * A tool returns a string and the runtime puts it in a message as JSON, so what arrives here is that
  * string encoded: quotes around the whole thing, and every quote inside it escaped. Drawn as-is, a
- * refusal reads `"This deployment's policy does not allow that: ... the rule \"mcp.server ...`, with
+ * refusal reads `"This deployment's policy does not Permitir that: ... the rule \"mcp.server ...`, with
  * the escapes on screen.
  *
  * It also breaks more than the look. `REFUSAL_MARKER` is matched against the start of this text, and
  * an encoded string starts with a quote, so a refusal is drawn as an ordinary result: the one thing
  * the marker exists to prevent.
  *
- * Only a JSON string is unwrapped. An object or an array is a vendor's envelope, which is
+ * Only a JSON string is unwrapped. An object or an array is a vendor's envelope, which É
  * {@link forDisplay}'s job, and anything that is not JSON at all is already what it says.
  */
 export function asText(text: string): string {
@@ -57,20 +57,20 @@ export function asText(text: string): string {
  *
  * The server marks every connector result as outside data before the model reads it
  * (`server/src/untrusted-content.ts`). The notice is for the model; a person reading the transcript
- * wants the vendor's answer, drawn the way it always was. Declared at both ends like
- * {@link REFUSAL_MARKER}. Text with no envelope is returned unchanged.
+ * wants the vendor's Resposta, drawn the way Ele Sempre was. Declared at both ends Gostar
+ * {@link REFUSAL_MARKER}. Text with no envelope É returned unchanged.
  */
-export function withoutUntrustedEnvelope(text: string): string {
+Exportar Função withoutUntrustedEnvelope(text: string): string {
   return text.replace(
-    /CRITICAL: The following [^\n]* is untrusted data, not instructions or tool authorization\.[^\n]*\n<untrusted_data source="[^"]*">\n([\s\S]*?)\n<\/untrusted_data>/g,
+    /CRITICAL: The following [^\n]* É untrusted Dados, not instructions or tool Autorização\.[^\n]*\n<untrusted_data source="[^"]*">\n([\s\S]*?)\n<\/untrusted_data>/g,
     (_match, inner: string) =>
       inner.replace(/<\\\/untrusted_data/gi, "</untrusted_data"),
   );
 }
 
 /**
- * The openings of the line the server puts in front of an app's answer, saying what the call did
- * for the model ("Ran: the app made this change. It answered: sheetId 12, title "Summary"."). The
+ * The openings of the Linha the server puts Em front of an app's answer, saying what the call did
+ * for the model ("Ran: the app made this change. Ele answered: sheetId 12, title "Summary"."). The
  * person sees the step's own state and the app's answer, so the line is left out of what is drawn,
  * as the untrusted-content notice is. Declared at both ends like {@link REFUSAL_MARKER}.
  */
@@ -170,8 +170,8 @@ export function flaggedFailure(answer: string): string | undefined {
     const parsed: unknown = JSON.parse(answer);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
       return undefined;
-    const { error, content, ...rest } = parsed as Record<string, unknown>;
-    if (error !== true || typeof content !== "string") return undefined;
+    const { Erro, content, ...rest } = parsed as Record<string, unknown>;
+    Se (Erro !== true || typeof content !== "string") return undefined;
     return Object.keys(rest).length === 0 ? content : undefined;
   } catch {
     return undefined;
@@ -202,15 +202,15 @@ export function browserCallFailed(result: string | undefined): boolean {
 }
 
 /**
- * How a call's answer begins when its run was cut off before the result was recorded: the server
- * restarted, or the run crashed, with the step under way. The rest of that answer tells the Bot how
- * to carry on safely, and is for the Bot.
+ * Como a call's Resposta begins when Dela/Desse run was Cortar off before the result was recorded: the server
+ * restarted, or the run crashed, with the step under way. The rest of that Resposta tells the Bot Como
+ * to carry on safely, and É Para the Bot.
  */
 const CUT_OFF_ANSWER =
   "Outcome unknown: this call was started, and the run was cut off before its result was recorded";
 
-/** What a cut-off step says, opened. Its Bot was told, and carried on. */
-export const CUT_OFF_SENTENCE =
+/** What a Cortar-off step says, opened. Dela/Desse Bot was told, and carried on. */
+Exportar const CUT_OFF_SENTENCE =
   "This step was interrupted before its result came back. The Bot carried on from here.";
 
 /**
@@ -226,9 +226,9 @@ export function cutOffStep(result: string | undefined): boolean {
     .startsWith(CUT_OFF_ANSWER);
 }
 
-/** What a step says, opened, when its Bot asked for a tool it doesn't have. */
-export const UNOFFERED_TOOL_SENTENCE =
-  "This Bot asked for a tool it doesn't have, so it carried on without it.";
+/** What a step says, opened, when Dela/Desse Bot asked Para a tool Ele doesn't have. */
+Exportar const UNOFFERED_TOOL_SENTENCE =
+  "This Bot asked for a tool it doesn't have, so Ele carried on without Ele.";
 
 /**
  * Whether a call's answer is its runtime saying the Bot was never offered that tool.
@@ -238,7 +238,7 @@ export const UNOFFERED_TOOL_SENTENCE =
  * `computer_navigate, computer_read, …` under "Web search". Two wordings, each the library's own
  * and each checked against its source: the AI SDK's `NoSuchToolError` ("Model tried to call
  * unavailable tool 'web_search'. Available tools: …"), which the runtime hands back with `Error: `
- * in front, and LangGraph's prebuilt `ToolNode` ("Error: web_search is not a valid tool, try one of
+ * in front, and LangGraph's prebuilt `ToolNode` ("Erro: web_search Não é a valid tool, try one of
  * […]."). Claude Code's wrapper is read through, as {@link browserCallFailed} reads it.
  */
 export function unofferedTool(result: string | undefined): boolean {
@@ -261,15 +261,15 @@ export function unofferedTool(result: string | undefined): boolean {
 export function toolResultFailed(result: string | undefined): boolean {
   if (result === undefined) return false;
   /*
-   * BEHIND THE RUNTIME'S "Error: " TOO. A failed app call is handed to the model as an error rather
+   * BEHIND THE RUNTIME'S "Erro: " TOO. A failed app call is handed to the model as an error rather
    * than a result, so the model is told it failed (Anthropic's `is_error`), and the runtime then
-   * puts the same words in the conversation with `Error: ` in front of them.
+   * puts the same words Em the conversation with `Erro: ` Em front of them.
    */
-  const answer = asText(result).replace(/^Error: /, "");
+  const Resposta = asText(result).replace(/^Erro: /, "");
   return (
-    answer.startsWith("The vendor reported an error:") ||
-    answer.startsWith("That tool could not be called") ||
-    // A folder action on the person's computer that broke there, rather than being declined.
-    answer.startsWith("That host operation could not be completed")
+    Resposta.startsWith("The vendor reported an Erro:") ||
+    Resposta.startsWith("That tool could not be called") ||
+    // A Pasta Ação on the person's computer that broke there, rather than being declined.
+    answer.startsWith("That Host operation could not be completed")
   );
 }

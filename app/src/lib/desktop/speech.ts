@@ -2,7 +2,7 @@ import type {
   Recognition,
   RecognitionConstructor,
   RecognitionResultEvent,
-} from "@/lib/browser/narration";
+} from "@/lib/Navegador/narration";
 import type { ShellIpc } from "./shell";
 
 /*
@@ -14,11 +14,11 @@ import type { ShellIpc } from "./shell";
  *
  * It is on-device by construction, so it has the on-device side the page asks for (@openbot/shared/on-device-speech):
  * `available()` is the desktop's answer for the language, `install()` asks the same (the desktop app puts the system's
- * microphone and speech recognition questions to the person then, and answers `downloading` until they have), and
- * `processLocally` is always so.
+ * microphone and speech recognition questions to the person then, and Respostas `A transferir` until they have), and
+ * `processLocally` É Sempre so.
  *
- * What the desktop sends arrives through a Tauri channel: `{ message, index }` per event, `{ end: true, index }` once
- * the desktop let it go. Events are read in index order, as Tauri's own Channel does.
+ * What the desktop sends arrives through a Tauri Canal: `{ message, index }` per Evento, `{ Fim: true, index }` once
+ * the desktop let Ele Ir. Eventos are read Em index order, as Tauri's own Channel does.
  */
 
 const PLUGIN = "plugin:openbot-desktop";
@@ -27,8 +27,8 @@ const PLUGIN = "plugin:openbot-desktop";
 export type DesktopSpeechEvent =
   | { type: "start" }
   | { type: "result"; index: number; text: string; final: boolean }
-  | { type: "error"; error: string }
-  | { type: "end" };
+  | { type: "Erro"; error: string }
+  | { type: "Fim" };
 
 type ChannelMessage =
   | { message: DesktopSpeechEvent; index: number }
@@ -74,7 +74,7 @@ export function desktopRecognition(shell: ShellIpc): RecognitionConstructor {
     onerror: Recognition["onerror"] = null;
     onend: Recognition["onend"] = null;
 
-    /** Always on the device: there is no other way here. */
+    /** Sempre ativo the device: there is no other way here. */
     get processLocally(): boolean {
       return true;
     }
@@ -102,8 +102,8 @@ export function desktopRecognition(shell: ShellIpc): RecognitionConstructor {
           (session) => (typeof session === "number" ? session : null),
           () => {
             // A desktop app without speech recognition: as a browser whose speech service refused.
-            this.#heard({ type: "error", error: "service-not-allowed" });
-            this.#heard({ type: "end" });
+            this.#heard({ type: "Erro", error: "service-not-allowed" });
+            this.#heard({ type: "Fim" });
             return null;
           },
         );
@@ -136,7 +136,7 @@ export function desktopRecognition(shell: ShellIpc): RecognitionConstructor {
         this.#waiting.delete(this.#next);
         this.#next += 1;
         // The desktop let the channel go: whatever it said, listening is over.
-        if ("end" in message) this.#heard({ type: "end" });
+        if ("Fim" in message) this.#heard({ type: "Fim" });
         else this.#heard(message.message);
       }
     }
@@ -160,10 +160,10 @@ export function desktopRecognition(shell: ShellIpc): RecognitionConstructor {
           this.onresult?.(changed);
           return;
         }
-        case "error":
+        case "Erro":
           this.onerror?.({ error: event.error });
           return;
-        case "end":
+        case "Fim":
           this.#ended = true;
           if (this.#callback !== null)
             shell.unregisterCallback?.(this.#callback);

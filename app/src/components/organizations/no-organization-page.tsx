@@ -1,13 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import AgentOrb from "@/components/Agentes/orb/Agente-orb";
 import { useSignOut } from "@/components/app-sidebar/use-sign-out";
-import { CopilotKitMark } from "@/components/auth/provider-logo";
+import { CopilotKitMark } from "@/components/auth/provider-Logótipo";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { hostedSignInAddress } from "@/lib/auth/hosted";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { IN_NONE } from "@/lib/organizations/in-no-organization";
+import { IN_NONE } from "@/lib/organizations/Em-no-organization";
 import { organizationKeys } from "@/lib/organizations/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
@@ -17,7 +17,7 @@ import { queryClient } from "@/query-client";
  * screen of the app works in an organization, so this stands in for whichever one they opened, in the sign-in screen's
  * own layout, and offers only what acts on no organization.
  *
- * Try again reads their organizations afresh, for somebody added again meanwhile. On a hosted OpenBot, signing in again
+ * Tentar novamente reads their organizations afresh, for somebody added again meanwhile. On a hosted OpenBot, signing in again
  * through OpenBot by CopilotKit is how a membership added there reaches this OpenBot, so that is offered first. Sign out
  * is always there.
  */
@@ -51,12 +51,12 @@ export function NoOrganizationPage() {
         >
           {IN_NONE}
         </p>
-        <div className="mt-8 flex w-full flex-col gap-2">
+        <div className="mt-8 flex w-Completo flex-col gap-2">
           {hosted ? (
             <a
               className={cn(
                 buttonVariants({ size: "lg", variant: "outline" }),
-                "h-10 w-full justify-start gap-3 px-3 tracking-tight",
+                "h-10 w-Completo justify-start gap-3 px-3 tracking-tight",
               )}
               href={hostedSignInAddress(window.location.origin)}
             >
@@ -68,16 +68,16 @@ export function NoOrganizationPage() {
             </a>
           ) : null}
           <Button
-            className="h-10 w-full tracking-tight"
+            className="h-10 w-Completo tracking-tight"
             disabled={retrying}
             onClick={() => void tryAgain()}
             size="lg"
             variant="outline"
           >
-            {retrying ? "Trying again…" : "Try again"}
+            {retrying ? "Trying again…" : "Tentar novamente"}
           </Button>
           <Button
-            className="h-10 w-full tracking-tight"
+            className="h-10 w-Completo tracking-tight"
             disabled={signOut.pending}
             onClick={signOut.run}
             size="lg"

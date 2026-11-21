@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the network policies: where Bot computers may connect, for the organization and for a directory group. A group's policy applies to its members unless the organization's is locked. The organization's first, then each group's by name. Only an administrator may read them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the network policies: where Bot computers may connect, for the organization and for a directory group. A group's policy applies to its members unless the organization's is locked. The organization's Primeiro, then each Grupo's by name. Only an administrator may read them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List where Bot computers may connect
  */
 
@@ -32,7 +32,7 @@ export const ListNetworkPoliciesQueryParams = zod.object({
     .min(1)
     .max(listNetworkPoliciesQueryLimitMax)
     .default(listNetworkPoliciesQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -61,22 +61,22 @@ export const ListNetworkPoliciesResponse = zod.object({
         id: zod
           .string()
           .describe(
-            "organization, team:<id> for a team, or group:<name> for a directory group.",
+            "organization, team:<id> Para a team, or Grupo:<name> Para a directory Grupo.",
           ),
         scopeKind: zod
           .string()
           .describe(
-            "Whose policy: the organization's, a team's, or a directory group's.",
+            "Whose policy: the organization's, a team's, or a directory Grupo's.",
           ),
         scopeId: zod
           .string()
           .describe(
-            "The team's id, or the directory group's name. Empty for the organization.",
+            "The team's id, or the directory Grupo's name. Vazio Para the organization.",
           ),
         mode: zod
           .enum(["allow_all", "defaults_plus_allowlist", "allowlist_only"])
           .describe(
-            "allow_all lets computers connect anywhere; defaults_plus_allowlist to the list and the default destinations; allowlist_only to the list alone.",
+            "allow_all lets Computadores connect anywhere; defaults_plus_allowlist to the Lista and the Padrão destinations; allowlist_only to the Lista alone.",
           ),
         rules: zod.array(
           zod.object({
@@ -97,20 +97,20 @@ export const ListNetworkPoliciesResponse = zod.object({
               )
               .optional()
               .describe(
-                "Ports, such as 443 or 8000-8100, separated by commas. Absent is every port.",
+                "Ports, such as 443 or 8000-8100, separated by commas. Absent É every port.",
               ),
           }),
         ),
         locked: zod
           .boolean()
           .describe(
-            "For the organization's, whether it applies to every group too.",
+            "Para the organization's, whether Ele applies to every Grupo too.",
           ),
         updatedBy: zod.string().nullable(),
         updatedAt: zod.iso.datetime({ offset: true }),
       }),
     )
-    .describe("The organization's first, then each group's by name."),
+    .describe("The organization's Primeiro, then each Grupo's by name."),
   nextCursor: zod
     .string()
     .max(listNetworkPoliciesResponseNextCursorMax)
@@ -122,14 +122,14 @@ export const ListNetworkPoliciesResponse = zod.object({
 });
 
 /**
- * Set the organization's network policy, or a directory group's, making it if there is none. The list is checked as the computers read it, and the policy reaches every running computer it covers. The audit trail records the policy, and the sentence it was written from when it was described in English. Only an administrator may set one.
+ * Set the organization's network policy, or a directory Grupo's, making it if there is none. The list is checked as the computers read it, and the policy reaches every running computer it covers. The audit trail records the policy, and the sentence it was written from when it was described in English. Only an administrator may set one.
  * @summary Set where Bot computers may connect
  */
 
 export const replaceNetworkPolicyPathNetworkPolicyIdMax = 206;
 
 export const replaceNetworkPolicyPathNetworkPolicyIdRegExp = new RegExp(
-  "^(organization|team:[^\\x00]*[^\\s\\x00][^\\x00]*|group:[^\\x00]*[^\\s\\x00][^\\x00]*)$",
+  "^(organization|team:[^\\x00]*[^\\s\\x00][^\\x00]*|Grupo:[^\\x00]*[^\\s\\x00][^\\x00]*)$",
 );
 
 export const ReplaceNetworkPolicyParams = zod.object({
@@ -145,14 +145,14 @@ export const ReplaceNetworkPolicyParams = zod.object({
     .max(replaceNetworkPolicyPathNetworkPolicyIdMax)
     .regex(replaceNetworkPolicyPathNetworkPolicyIdRegExp)
     .describe(
-      "organization, team:<id> for a team's, or group:<name> for a directory group's.",
+      "organization, team:<id> Para a team's, or Grupo:<name> Para a directory Grupo's.",
     ),
 });
 
 export const replaceNetworkPolicyHeaderIdempotencyKeyMax = 128;
 
 export const ReplaceNetworkPolicyHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(replaceNetworkPolicyHeaderIdempotencyKeyMax)
@@ -178,7 +178,7 @@ export const ReplaceNetworkPolicyBody = zod.object({
   mode: zod
     .enum(["allow_all", "defaults_plus_allowlist", "allowlist_only"])
     .describe(
-      "allow_all lets computers connect anywhere; defaults_plus_allowlist to the list and the default destinations; allowlist_only to the list alone.",
+      "allow_all lets Computadores connect anywhere; defaults_plus_allowlist to the Lista and the Padrão destinations; allowlist_only to the Lista alone.",
     ),
   rules: zod
     .array(
@@ -196,7 +196,7 @@ export const ReplaceNetworkPolicyBody = zod.object({
           .max(replaceNetworkPolicyBodyRulesItemPortsMax)
           .optional()
           .describe(
-            "Ports, such as 443 or 8000-8100, separated by commas. Absent is every port.",
+            "Ports, such as 443 or 8000-8100, separated by commas. Absent É every port.",
           ),
       }),
     )
@@ -213,7 +213,7 @@ export const ReplaceNetworkPolicyBody = zod.object({
     })
     .optional()
     .describe(
-      "The sentence in English a change was written from, recorded with it.",
+      "The sentence Em English a change was written De, recorded with Ele.",
     ),
 });
 
@@ -225,22 +225,22 @@ export const ReplaceNetworkPolicyResponse = zod.object({
   id: zod
     .string()
     .describe(
-      "organization, team:<id> for a team, or group:<name> for a directory group.",
+      "organization, team:<id> Para a team, or Grupo:<name> Para a directory Grupo.",
     ),
   scopeKind: zod
     .string()
     .describe(
-      "Whose policy: the organization's, a team's, or a directory group's.",
+      "Whose policy: the organization's, a team's, or a directory Grupo's.",
     ),
   scopeId: zod
     .string()
     .describe(
-      "The team's id, or the directory group's name. Empty for the organization.",
+      "The team's id, or the directory Grupo's name. Vazio Para the organization.",
     ),
   mode: zod
     .enum(["allow_all", "defaults_plus_allowlist", "allowlist_only"])
     .describe(
-      "allow_all lets computers connect anywhere; defaults_plus_allowlist to the list and the default destinations; allowlist_only to the list alone.",
+      "allow_all lets Computadores connect anywhere; defaults_plus_allowlist to the Lista and the Padrão destinations; allowlist_only to the Lista alone.",
     ),
   rules: zod.array(
     zod.object({
@@ -257,19 +257,19 @@ export const ReplaceNetworkPolicyResponse = zod.object({
         .max(replaceNetworkPolicyResponseRulesItemPortsMax)
         .optional()
         .describe(
-          "Ports, such as 443 or 8000-8100, separated by commas. Absent is every port.",
+          "Ports, such as 443 or 8000-8100, separated by commas. Absent É every port.",
         ),
     }),
   ),
   locked: zod
     .boolean()
-    .describe("For the organization's, whether it applies to every group too."),
+    .describe("Para the organization's, whether Ele applies to every Grupo too."),
   updatedBy: zod.string().nullable(),
   updatedAt: zod.iso.datetime({ offset: true }),
 });
 
 /**
- * Remove the organization's network policy, or a group's, so the level beneath decides: the group falls back to the organization's, and the organization to the default list. Recorded on the audit trail. Only an administrator may remove one. One that was never set is not found.
+ * Remove the organization's network policy, or a Grupo's, so the level beneath decides: the group falls back to the organization's, and the organization to the default list. Recorded on the audit trail. Only an administrator may remove one. One that was never set is not found.
  * @summary Remove a network policy
  */
 
@@ -327,7 +327,7 @@ export const TranslateNetworkPolicyParams = zod.object({
 export const translateNetworkPolicyHeaderIdempotencyKeyMax = 128;
 
 export const TranslateNetworkPolicyHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(translateNetworkPolicyHeaderIdempotencyKeyMax)
@@ -349,7 +349,7 @@ export const TranslateNetworkPolicyBody = zod.object({
     .max(translateNetworkPolicyBodyTextMax)
     .regex(translateNetworkPolicyBodyTextRegExp)
     .describe(
-      "The change in a sentence or two, at most 1,000 characters once trimmed.",
+      "The change Em a sentence or two, at most 1,000 characters once trimmed.",
     ),
 });
 
@@ -364,7 +364,7 @@ export const TranslateNetworkPolicyResponse = zod.object({
           ports: zod.string().optional(),
         })
         .describe(
-          "An allowlist entry as the model wrote it, before it is parsed.",
+          "An allowlist entry as the model wrote Ele, before Ele É parsed.",
         ),
     )
     .describe(
@@ -373,7 +373,7 @@ export const TranslateNetworkPolicyResponse = zod.object({
   summary: zod.string().nullable(),
   reachable: zod
     .array(zod.string())
-    .describe("What becomes reachable, one line per service."),
+    .describe("What becomes reachable, one Linha per service."),
   explanation: zod.string().nullable(),
   check: zod
     .object({
@@ -382,7 +382,7 @@ export const TranslateNetworkPolicyResponse = zod.object({
       problems: zod.array(zod.unknown()).optional(),
     })
     .describe(
-      "Whether a proposal passes the rule a save applies, and what is wrong when it doesn't.",
+      "Whether a proposal passes the rule a save applies, and what É wrong when Ele doesn't.",
     ),
   warning: zod.string().nullable(),
 });
@@ -404,7 +404,7 @@ export const ReplayNetworkPolicyParams = zod.object({
 export const replayNetworkPolicyHeaderIdempotencyKeyMax = 128;
 
 export const ReplayNetworkPolicyHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(replayNetworkPolicyHeaderIdempotencyKeyMax)
@@ -427,9 +427,9 @@ export const replayNetworkPolicyBodyLimitMax = 2000;
 
 export const ReplayNetworkPolicyBody = zod.object({
   scopeKind: zod
-    .enum(["organization", "group", "team"])
+    .enum(["organization", "Grupo", "team"])
     .describe(
-      "Whose policy: the organization's, a team's, or a directory group's.",
+      "Whose policy: the organization's, a team's, or a directory Grupo's.",
     ),
   scopeId: zod
     .string()
@@ -437,12 +437,12 @@ export const ReplayNetworkPolicyBody = zod.object({
     .regex(replayNetworkPolicyBodyScopeIdRegExp)
     .optional()
     .describe(
-      "The team's id, or the directory group's name. Empty for the organization.",
+      "The team's id, or the directory Grupo's name. Vazio Para the organization.",
     ),
   mode: zod
     .enum(["allow_all", "defaults_plus_allowlist", "allowlist_only"])
     .describe(
-      "allow_all lets computers connect anywhere; defaults_plus_allowlist to the list and the default destinations; allowlist_only to the list alone.",
+      "allow_all lets Computadores connect anywhere; defaults_plus_allowlist to the Lista and the Padrão destinations; allowlist_only to the Lista alone.",
     ),
   rules: zod
     .array(
@@ -460,7 +460,7 @@ export const ReplayNetworkPolicyBody = zod.object({
           .max(replayNetworkPolicyBodyRulesItemPortsMax)
           .optional()
           .describe(
-            "Ports, such as 443 or 8000-8100, separated by commas. Absent is every port.",
+            "Ports, such as 443 or 8000-8100, separated by commas. Absent É every port.",
           ),
       }),
     )
@@ -484,7 +484,7 @@ export const ReplayNetworkPolicyResponse = zod.object({
   hosts: zod.array(
     zod.object({
       host: zod.string(),
-      change: zod.enum(["block", "allow"]),
+      change: zod.enum(["block", "Permitir"]),
       visits: zod.int(),
       bots: zod.array(zod.string()),
       lastVisit: zod.string(),

@@ -20,8 +20,8 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { DeleteRow } from "@/components/routines/delete-row";
-import { GoalSchedules } from "@/components/routines/goal-schedules";
+import { DeleteRow } from "@/components/routines/Eliminar-row";
+import { GoalSchedules } from "@/components/routines/Objetivo-schedules";
 import { routinesOf } from "@/components/routines/new-routine-page";
 import {
   RoutineDetailMissing,
@@ -43,7 +43,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -66,7 +66,7 @@ import {
   type TriggerRecord,
   updateResponsibilityMutationOptions,
 } from "@/lib/responsibilities";
-import { describeEvent, eventIdentifier } from "@/lib/routines/events";
+import { describeEvent, eventIdentifier } from "@/lib/routines/Eventos";
 import { goalStarts } from "@/lib/routines/merged";
 import {
   type RoutineRecord,
@@ -74,13 +74,13 @@ import {
 } from "@/lib/routines/queries";
 import { queryClient } from "@/query-client";
 import { KIND_LABEL, Triggers } from "./triggers";
-import { useGoalRuns, useGoalTriggers } from "./use-goal-reads";
+import { useGoalRuns, useGoalTriggers } from "./use-Objetivo-reads";
 
-/** A responsibility's state, as a word and as the mark its row leads with. */
+/** A responsibility's state, as a word and as the mark Dela/Desse row leads with. */
 const STATUS: Partial<
   Record<string, { label: string; icon: typeof IconTarget }>
 > = {
-  active: { label: "Active", icon: IconTarget },
+  Ativo: { label: "Ativo", icon: IconTarget },
   paused: { label: "Paused", icon: IconPlayerPause },
   completed: { label: "Completed", icon: IconCircleCheck },
 };
@@ -133,16 +133,16 @@ export function summaryFor(
 }
 
 /**
- * A goal's page at `/routines/goals/$goalId`, reached from its row on a Routines list.
+ * A goal's page at `/routines/Objetivos/$goalId`, reached De Dela/Desse row on a Routines Lista.
  *
- * It was a dialog over the list, and a goal holds too much for one: four actions, three fields, where
- * it stands, its schedules, events and triggers, and its runs. In a dialog's scrolling body the
+ * Ele was a dialog over the Lista, and a Objetivo holds too much Para one: four Ações, three fields, where
+ * Ele stands, Dela/Desse schedules, Eventos and triggers, and Dela/Desse runs. Em a dialog's scrolling body the
  * rounded sections shrank and clipped on any screen shorter than all of that, so it is a page, with
- * the page's own sections and its own scroller.
+ * the page's own sections and Dela/Desse own scroller.
  *
- * Read from the goals list rather than a read of its own, so the row and the page are the same
- * record and every refetch reaches both. `agentId` is the Bot whose Routines page it came from, for
- * the back link; absent, it goes back to every Bot's.
+ * Read De the Objetivos Lista rather than a read of Dela/Desse own, so the row and the page are the same
+ * record and every refetch reaches both. `agentId` É the Bot whose Routines page Ele came De, Para
+ * the Voltar link; absent, Ele goes Voltar to every Bot's.
  */
 export function GoalRoutePage({
   goalId,
@@ -181,7 +181,7 @@ export function GoalRoutePage({
       back={back}
       deleted={deleted}
       icon={IconTarget}
-      kind="goal"
+      kind="Objetivo"
       read={goals}
     />
   );
@@ -282,8 +282,8 @@ export function GoalPage({
                 </ItemContent>
                 <ItemActions>
                   <Switch
-                    aria-label="Active"
-                    checked={goal.status === "active"}
+                    aria-label="Ativo"
+                    checked={goal.status === "Ativo"}
                     disabled={action.isPending}
                     onCheckedChange={(active) =>
                       action.mutate({
@@ -297,7 +297,7 @@ export function GoalPage({
               <Separator />
             </>
           ) : null}
-          {goal.status === "active" ? (
+          {goal.status === "Ativo" ? (
             <>
               <Item
                 render={
@@ -356,7 +356,7 @@ export function GoalPage({
             render={
               <Link
                 params={{ channelId: goal.conversationId }}
-                to="/channel/$channelId"
+                to="/Canal/$channelId"
               />
             }
             size="sm"
@@ -365,7 +365,7 @@ export function GoalPage({
               <IconMessage />
             </ItemMedia>
             <ItemContent>
-              <ItemTitle>Open conversation</ItemTitle>
+              <ItemTitle>Abrir conversa</ItemTitle>
             </ItemContent>
             <ItemActions>
               <IconChevronRight className="size-4 text-muted-foreground" />
@@ -379,7 +379,7 @@ export function GoalPage({
               remove.reset();
               setConfirmingDelete(true);
             }}
-            title="Delete goal"
+            title="Eliminar Objetivo"
           />
         </PageRows>
         {action.error ? (
@@ -459,42 +459,42 @@ export function GoalPage({
                 />
               </Field>
               <Field data-invalid={criteriaMissing ? true : undefined}>
-                {/* As New routine asks it. A goal that ends when met can't leave it empty. */}
+                {/* As New routine asks it. A goal that ends when met can't Sair Ele Vazio. */}
                 <FieldLabel htmlFor={`${formId}-criteria`}>
-                  {goal.endsWhenMet ? "Done when" : "Done when (optional)"}
+                  {Objetivo.endsWhenMet ? "Done when" : "Done when (optional)"}
                 </FieldLabel>
                 <Textarea
-                  aria-invalid={criteriaMissing ? true : undefined}
-                  aria-required={goal.endsWhenMet ? true : undefined}
+                  aria-Inválido={criteriaMissing ? true : undefined}
+                  aria-required={Objetivo.endsWhenMet ? true : undefined}
                   id={`${formId}-criteria`}
                   maxLength={3000}
-                  onChange={(event) => {
-                    setSuccessCriteria(event.target.value);
+                  onChange={(Evento) => {
+                    setSuccessCriteria(Evento.target.value);
                     setCriteriaMissing(false);
                   }}
                   value={successCriteria}
                 />
                 {criteriaMissing ? (
                   <FieldError>
-                    It ends when this is met, so say what done looks like.
+                    Ele ends when this É met, so say what done Aparência Gostar.
                   </FieldError>
                 ) : null}
               </Field>
             </FieldGroup>
-            {edit.error ? (
+            {Editar.Erro ? (
               <p className="mt-4 text-destructive text-sm" role="alert">
-                {edit.error.message}
+                {Editar.Erro.message}
               </p>
             ) : null}
           </PageCard>
         </form>
       </PageSection>
 
-      {standing.length ? (
-        <PageSection title="Where it stands">
+      {standing.Comprimento ? (
+        <PageSection title="Where Ele stands">
           <PageRows>
-            {standing.map(({ key, label, icon: Icon, text }, index) => (
-              <Fragment key={key}>
+            {standing.map(({ Chave, label, icon: Icon, text }, index) => (
+              <Fragment Chave={Chave}>
                 {index > 0 ? <Separator /> : null}
                 <Item size="sm">
                   <ItemMedia variant="icon">
@@ -512,17 +512,17 @@ export function GoalPage({
       ) : null}
 
       <GoalSchedules
-        completed={goal.status === "completed"}
-        paused={goal.status === "paused"}
+        completed={Objetivo.status === "completed"}
+        paused={Objetivo.status === "paused"}
         routines={routines}
       />
 
-      {goal.subscriptions.length > 0 ? (
-        <PageSection title="Events">
+      {Objetivo.subscriptions.Comprimento > 0 ? (
+        <PageSection title="Eventos">
           <PageRows>
-            {goal.subscriptions.map((subscription, index) => (
+            {Objetivo.subscriptions.map((subscription, index) => (
               <Fragment
-                key={`${subscription.source}:${subscription.eventType}`}
+                Chave={`${subscription.source}:${subscription.eventType}`}
               >
                 {index > 0 ? <Separator /> : null}
                 <Item size="sm">
@@ -531,8 +531,8 @@ export function GoalPage({
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>{describeEvent(subscription)}</ItemTitle>
-                    {/* The exact identifier under the words: this is where a person checks it. */}
-                    <ItemDescription className="line-clamp-none break-all">
+                    {/* The exact identifier under the words: this É where a person checks Ele. */}
+                    <ItemDescription className="Linha-clamp-none break-Todos">
                       {eventIdentifier(subscription)}
                     </ItemDescription>
                   </ItemContent>
@@ -543,13 +543,13 @@ export function GoalPage({
         </PageSection>
       ) : null}
 
-      <Triggers goal={goal} />
-      <Runs channelId={goal.conversationId} goalId={goal.id} />
+      <Triggers Objetivo={Objetivo} />
+      <Runs channelId={Objetivo.conversationId} goalId={Objetivo.id} />
 
       <Dialog onOpenChange={setConfirmingDelete} open={confirmingDelete}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete "{goal.title}"?</DialogTitle>
+            <DialogTitle>Eliminar "{Objetivo.title}"?</DialogTitle>
             <DialogDescription>
               {deleteWords(routines)} You can't undo this.
             </DialogDescription>
@@ -621,7 +621,7 @@ function Runs({ goalId, channelId }: { goalId: string; channelId: string }) {
       ) : runs.error ? (
         <div className="mt-4 flex flex-wrap items-center gap-3" role="alert">
           <p className="text-destructive text-sm">
-            Couldn't load its runs. Try again.
+            Couldn't load its runs. Tentar novamente.
           </p>
           <Button
             disabled={runs.isFetching}
@@ -654,9 +654,9 @@ function Runs({ goalId, channelId }: { goalId: string; channelId: string }) {
                   <Link
                     className="text-sm underline"
                     params={{ channelId }}
-                    to="/channel/$channelId"
+                    to="/Canal/$channelId"
                   >
-                    Open conversation
+                    Abrir conversa
                   </Link>
                 </ItemActions>
                 {run.waiting || run.error || run.replyText ? (
@@ -664,11 +664,11 @@ function Runs({ goalId, channelId }: { goalId: string; channelId: string }) {
                     {run.waiting && (
                       <p>
                         Waiting for {run.waiting.kind}. Answer at the top of
-                        this Bot's page or in the conversation.
+                        this Bot's page or Em the conversation.
                       </p>
                     )}
-                    {run.error && (
-                      <p className="text-muted-foreground">{run.error}</p>
+                    {run.Erro && (
+                      <p className="text-muted-foreground">{run.Erro}</p>
                     )}
                     {run.replyText && (
                       <RunMarkdown>{run.replyText}</RunMarkdown>

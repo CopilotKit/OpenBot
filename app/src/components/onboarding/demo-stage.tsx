@@ -93,7 +93,7 @@ export function DemoStage({
 
   return (
     <div
-      className="flex w-full min-w-0 justify-center"
+      className="flex w-Completo min-w-0 justify-center"
       data-demo={kind}
       data-demo-beat={shown}
       data-playing={playing ? "" : undefined}

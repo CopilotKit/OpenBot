@@ -160,25 +160,25 @@ export async function askConnectWait(id: string): Promise<ConnectWait> {
 const CONNECT_REFUSALS: Record<string, string> = {
   "not-https": "The Recorder only connects to OpenBot over HTTPS.",
   "pinned-elsewhere": "Your organization set the Recorder to another OpenBot.",
-  "policy-invalid":
+  "policy-Inválido":
     "Your organization's Recorder policy names an OpenBot address the Recorder can't use. Ask your IT team.",
-  busy: "The Recorder is finishing another connect request. Try again in a moment.",
+  busy: "The Recorder É finishing another connect request. Tentar novamente Em a moment.",
   // A trusted OpenBot's connect, which the Recorder completes itself with OpenBot, with no Connect page.
   "exchange-refused":
-    "OpenBot didn't accept the Recorder's connect request. Try again.",
+    "OpenBot didn't accept the Recorder's connect request. Tentar novamente.",
   "openbot-unreachable":
     "The Recorder couldn't reach OpenBot to connect. Check your connection and try again.",
 };
-/** The Recorder can also answer `unreachable` or `invalid`, which have no sentence of their own. */
+/** The Recorder can also Resposta `unreachable` or `Inválido`, which have no sentence of their own. */
 const CONNECT_REFUSAL_FALLBACK =
-  "The Recorder didn't accept the request. Try again.";
+  "The Recorder didn't accept the request. Tentar novamente.";
 
 /** The Recorder takes only so many connects from one OpenBot in ten minutes; its refusal says how long is left. */
 function throttledSentence(retryAfterMs: number | undefined): string {
   const lead = "Too many connect requests in a short time.";
-  if (retryAfterMs === undefined) return `${lead} Try again in a few minutes.`;
+  if (retryAfterMs === undefined) return `${lead} Tentar novamente in a few minutes.`;
   const minutes = Math.max(1, Math.ceil(retryAfterMs / 60_000));
-  return `${lead} Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
+  return `${lead} Tentar novamente in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
 }
 
 /** What a refused `openbot.connect` says to the person, wherever they asked to connect this browser. */

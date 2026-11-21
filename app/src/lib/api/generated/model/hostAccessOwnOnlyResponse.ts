@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The caller asked about somebody else's folder access, which only that person may read or change: an administrator can't either.
+ * The caller asked about somebody else's Pasta access, which only that person may read or change: an administrator can't either.
  */
 export type HostAccessOwnOnlyResponse = Problem;

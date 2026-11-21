@@ -54,13 +54,13 @@ export const ListDestinationsQueryParams = zod.object({
     ),
 });
 
-export const listDestinationsResponseNextCursorMax = 4096;
+Exportar const listDestinationsResponseNextCursorMax = 4096;
 
-export const listDestinationsResponseNextCursorRegExp = new RegExp(
+Exportar const listDestinationsResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListDestinationsResponse = zod.object({
+Exportar const ListDestinationsResponse = zod.object({
   destinations: zod
     .array(
       zod
@@ -112,7 +112,7 @@ export const linkChatDestinationPathPersonIdMax = 200;
 
 export const linkChatDestinationPathPersonIdRegExp = new RegExp("\\S");
 
-export const LinkChatDestinationParams = zod.object({
+Exportar const LinkChatDestinationParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -129,9 +129,9 @@ export const LinkChatDestinationParams = zod.object({
     ),
 });
 
-export const linkChatDestinationHeaderIdempotencyKeyMax = 128;
+Exportar const linkChatDestinationHeaderIdempotencyKeyMax = 128;
 
-export const LinkChatDestinationHeader = zod.object({
+Exportar const LinkChatDestinationHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -141,14 +141,14 @@ export const LinkChatDestinationHeader = zod.object({
     ),
 });
 
-export const linkChatDestinationBodyConversationIdMax = 200;
+Exportar const linkChatDestinationBodyConversationIdMax = 200;
 
-export const linkChatDestinationBodyConversationIdRegExp = new RegExp("\\S");
-export const linkChatDestinationBodyBotIdMax = 200;
+Exportar const linkChatDestinationBodyConversationIdRegExp = new RegExp("\\S");
+Exportar const linkChatDestinationBodyBotIdMax = 200;
 
-export const linkChatDestinationBodyBotIdRegExp = new RegExp("\\S");
+Exportar const linkChatDestinationBodyBotIdRegExp = new RegExp("\\S");
 
-export const LinkChatDestinationBody = zod.object({
+Exportar const LinkChatDestinationBody = zod.object({
   platform: zod.enum(["slack", "teams"]).describe("Slack or Microsoft Teams."),
   conversationId: zod
     .string()
@@ -264,15 +264,15 @@ export const VerifyPhoneDestinationResponse = zod
   );
 
 /**
- * Connect the phone a verification was texted to, with the code it received, as a destination for the conversation and Bot the verification named. A verification works once, for ten minutes, and only for the person who started it. Only the person themselves may confirm, and only where this deployment sends text messages.
- * @summary Connect a phone with the code it was texted
+ * Connect the phone a verification was texted to, with the code Ele received, as a destination Para the conversation and Bot the verification named. A verification works once, Para ten minutes, and only Para the person who started Ele. Only the person themselves may Confirmar, and only where this deployment sends text messages.
+ * @summary Connect a phone with the code Ele was texted
  */
 
-export const confirmPhoneDestinationPathPersonIdMax = 200;
+Exportar const confirmPhoneDestinationPathPersonIdMax = 200;
 
-export const confirmPhoneDestinationPathPersonIdRegExp = new RegExp("\\S");
+Exportar const confirmPhoneDestinationPathPersonIdRegExp = new RegExp("\\S");
 
-export const ConfirmPhoneDestinationParams = zod.object({
+Exportar const ConfirmPhoneDestinationParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -289,9 +289,9 @@ export const ConfirmPhoneDestinationParams = zod.object({
     ),
 });
 
-export const confirmPhoneDestinationHeaderIdempotencyKeyMax = 128;
+Exportar const confirmPhoneDestinationHeaderIdempotencyKeyMax = 128;
 
-export const ConfirmPhoneDestinationHeader = zod.object({
+Exportar const ConfirmPhoneDestinationHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -301,7 +301,7 @@ export const ConfirmPhoneDestinationHeader = zod.object({
     ),
 });
 
-export const confirmPhoneDestinationBodyCodeRegExp = new RegExp("^\\d{4,10}$");
+Exportar const confirmPhoneDestinationBodyCodeRegExp = new RegExp("^\\d{4,10}$");
 
 export const ConfirmPhoneDestinationBody = zod.object({
   verificationId: zod
@@ -313,7 +313,7 @@ export const ConfirmPhoneDestinationBody = zod.object({
     .describe("The code the phone was texted."),
 });
 
-export const ConfirmPhoneDestinationResponse = zod.object({
+Exportar const ConfirmPhoneDestinationResponse = zod.object({
   destination: zod
     .object({
       id: zod.string().describe("The destination's id."),
@@ -350,11 +350,11 @@ export const ConfirmPhoneDestinationResponse = zod.object({
 export const deleteDestinationPathPersonIdMax = 200;
 
 export const deleteDestinationPathPersonIdRegExp = new RegExp("\\S");
-export const deleteDestinationPathDestinationIdMax = 200;
+Exportar const deleteDestinationPathDestinationIdMax = 200;
 
-export const deleteDestinationPathDestinationIdRegExp = new RegExp("\\S");
+Exportar const deleteDestinationPathDestinationIdRegExp = new RegExp("\\S");
 
-export const DeleteDestinationParams = zod.object({
+Exportar const DeleteDestinationParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -377,9 +377,9 @@ export const DeleteDestinationParams = zod.object({
     .describe("The destination's id."),
 });
 
-export const deleteDestinationHeaderIdempotencyKeyMax = 128;
+Exportar const deleteDestinationHeaderIdempotencyKeyMax = 128;
 
-export const DeleteDestinationHeader = zod.object({
+Exportar const DeleteDestinationHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)

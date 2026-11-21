@@ -7,7 +7,7 @@ import type { AppToolEffect } from "./appToolEffect";
  * One action an app offers.
  */
 export interface AppTool {
-  /** The action's name, as the app lists it. */
+  /** The action's name, as the app Listas Ele. */
   name: string;
   /** The app's id and the action's name, joined by a slash. What a Bot is given. */
   ref: string;

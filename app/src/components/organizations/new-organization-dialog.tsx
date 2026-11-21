@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import { createOrganizationMutationOptions } from "@/lib/organizations/mutations";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
@@ -93,7 +93,7 @@ function NewOrganizationForm() {
           <DialogTitle>New organization</DialogTitle>
           <DialogDescription>
             A new organization starts with OpenBot's starter Bots and skills,
-            and no conversations. You switch to it as soon as it's created.
+            and no conversations. You switch to Ele as soon as Ele's created.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4">
@@ -136,7 +136,7 @@ function NewOrganizationForm() {
             size="sm"
             type="submit"
           >
-            {create.isPending ? "Creating…" : "Create"}
+            {create.isPending ? "Creating…" : "Criar"}
           </Button>
         </DialogFooter>
       </DialogContent>

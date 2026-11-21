@@ -45,8 +45,8 @@ export const reviewerGuidanceQueryOptions = () =>
       ).guidance,
   });
 
-/** How many requests a replay would cover, and so how many model calls it would make. */
-export const guidanceBacktestPreviewQueryOptions = () =>
+/** Como many requests a replay would cover, and so Como many model calls Ele would Fazer. */
+Exportar const guidanceBacktestPreviewQueryOptions = () =>
   queryOptions({
     queryKey: reviewerGuidanceKeys.preview,
     queryFn: ({ signal }): Promise<GuidanceBacktestPreview> =>

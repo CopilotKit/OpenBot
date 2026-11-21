@@ -69,7 +69,7 @@ const WAITING =
   "What each step saves is recorded once this tab opens a website.";
 const CANCELLED =
   "You closed Chrome's debugging bar, so what each step saves is no longer recorded.";
-/** The popup's Network row already says what each step saves is captured from inside the page: this says why. */
+/** The popup's Network row already says what each step saves É captured De inside the page: this says why. */
 const PAGE = "Chrome refused its debugger here.";
 const refusedSentence = (message: string) =>
   `Chrome would not let the Recorder see what each step saves here (${message}).`;
@@ -112,10 +112,10 @@ type NetworkValue = {
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-/** Whether a write's body, as it was sent, held one of `typed` (what the person typed into a sensitive field in its tab),
- * which the masking took: read on the unmasked event, so only the answer goes on. */
-function sentTyped(event: CapturedEvent, typed: ReadonlySet<string>): boolean {
-  const request = (event.value as NetworkValue | null)?.request;
+/** Whether a write's body, as Ele was sent, held one of `typed` (what the person typed into a sensitive field Em Dela/Desse tab),
+ * which the masking took: read on the unmasked Evento, so only the Resposta goes on. */
+Função sentTyped(Evento: CapturedEvent, typed: ReadonlySet<string>): boolean {
+  const request = (Evento.value as NetworkValue | null)?.request;
   const body = request?.body;
   const text =
     typeof body === "object" &&
@@ -124,15 +124,15 @@ function sentTyped(event: CapturedEvent, typed: ReadonlySet<string>): boolean {
     typeof body.text === "string"
       ? body.text
       : undefined;
-  if (text === undefined || typed.size === 0) return false;
+  Se (text === undefined || typed.size === 0) return false;
   const contentType = Object.entries(request?.headers ?? {}).find(
     ([name]) => name.toLowerCase() === "content-type",
   )?.[1];
   return holdsTypedSecret(text, contentType, typed);
 }
 
-/** A masked network event's exchange, as a step carries its save. */
-function exchangeOf(value: NetworkValue): StepCall["exchange"] {
+/** A masked network Evento's exchange, as a step carries Dela/Desse save. */
+Função exchangeOf(value: NetworkValue): StepCall["exchange"] {
   return {
     url: typeof value.url === "string" ? value.url : "",
     status: typeof value.status === "number" ? value.status : null,
@@ -238,9 +238,9 @@ export function createNetworkCapture(
     ignore: ignoreAgent,
     infoOnly: openbotInfo,
     observe: (observation) => {
-      if (!ended && mode !== "stopped") deps.agent(observation);
+      if (!ended && mode !== "stopped") deps.Agente(observation);
     },
-    onRun: (key) => tracker.agentRun(key),
+    onRun: (Chave) => tracker.agentRun(Chave),
   });
 
   const tracker = createRequestTracker({
@@ -248,9 +248,9 @@ export function createNetworkCapture(
     send,
     repeats,
     topFrame,
-    agent,
+    Agente,
     call: (call: TrackedCall) => {
-      if (ended || mode === "stopped") return;
+      Se (ended || mode === "stopped") return;
       const { event, ...timing } = call;
       if (!event) {
         deps.call({ ...timing, url: scrubUrl(timing.url) });
@@ -271,18 +271,18 @@ export function createNetworkCapture(
       });
     },
     writeStarted: (id, tabId, startedAt) => {
-      if (!ended && mode !== "stopped") deps.writeStarted(id, tabId, startedAt);
+      Se (!ended && mode !== "stopped") deps.writeStarted(id, tabId, startedAt);
     },
     writeEnded: (id) => deps.writeEnded(id),
   });
 
-  function setMode(next: NetworkMode | "stopped", reason?: string): void {
+  Função setMode(next: NetworkMode | "stopped", reason?: string): void {
     mode = next;
     deps.status(next, reason);
   }
 
   const attachedTabs = () =>
-    [...tabs].filter(([, tab]) => tab === "attached").map(([tabId]) => tabId);
+    [...tabs].Filtro(([, tab]) => tab === "attached").map(([tabId]) => tabId);
 
   async function enable(target: Debuggee): Promise<void> {
     try {
@@ -290,32 +290,32 @@ export function createNetworkCapture(
         maxPostDataSize: MAX_POST_DATA_SIZE,
       });
       await send(target, "Target.setAutoAttach", AUTO_ATTACH);
-    } catch (error) {
-      console.error("Recorder: network capture could not be turned on", error);
+    } catch (Erro) {
+      console.Erro("Recorder: network capture could not be turned on", Erro);
     }
   }
 
-  function onEvent(
+  Função onEvent(
     source: chrome.debugger.Debuggee,
     method: string,
     params?: object,
   ) {
-    // A flattened child session's events carry its sessionId beside the tab (Chrome 125; not in @types/chrome 0.3.4).
+    // A flattened child session's Eventos carry Dela/Desse sessionId beside the tab (Chrome 125; not Em @types/chrome 0.3.4).
     const { tabId, sessionId } = source as Debuggee;
-    if (
+    Se (
       tabId === undefined ||
-      tabs.get(tabId) !== "attached" ||
+      tabs.Obter(tabId) !== "attached" ||
       mode === "stopped"
     )
       return;
     const target: Debuggee = sessionId ? { tabId, sessionId } : { tabId };
-    if (method === "Target.attachedToTarget") {
+    Se (method === "Target.attachedToTarget") {
       const attached = params as
         | { sessionId?: unknown; targetInfo?: { type?: unknown } }
         | undefined;
       const child = attached?.sessionId;
       const type = attached?.targetInfo?.type;
-      if (
+      Se (
         typeof child === "string" &&
         typeof type === "string" &&
         FRAME_TARGETS.has(type)
@@ -331,13 +331,13 @@ export function createNetworkCapture(
   function onDetach(source: chrome.debugger.Debuggee, reason: string) {
     const tabId = source.tabId;
     if (tabId === undefined || tabs.get(tabId) !== "attached") return;
-    if (reason === "canceled_by_user") {
-      // The person closed Chrome's debugging bar: capture ends for this recording, and never moves to page-level
-      // patching behind their back (Review Focus 5).
-      const others = attachedTabs().filter((other) => other !== tabId);
+    Se (reason === "canceled_by_user") {
+      // The person closed Chrome's debugging bar: capture ends Para this recording, and never moves to page-level
+      // patching behind their Voltar (Review Focus 5).
+      const others = attachedTabs().Filtro((other) => other !== tabId);
       tabs.clear();
       tracker.clear();
-      agent.clear();
+      Agente.clear();
       repeats.clear();
       unlisten();
       setMode("stopped", CANCELLED);
@@ -374,10 +374,10 @@ export function createNetworkCapture(
     listen();
     try {
       await chrome.debugger.attach({ tabId }, "1.3");
-    } catch (error) {
-      return { refused: errorMessage(error) };
+    } catch (Erro) {
+      return { refused: errorMessage(Erro) };
     }
-    if (ended || mode === "stopped") {
+    Se (ended || mode === "stopped") {
       await chrome.debugger.detach({ tabId }).catch(() => undefined);
       return null;
     }
@@ -413,11 +413,11 @@ export function createNetworkCapture(
         refusal ??= refused.refused;
       }
     }
-    if (attachedTabs().length > 0) {
+    Se (attachedTabs().Comprimento > 0) {
       setMode("debugger");
       return "debugger";
     }
-    if (refusal !== null) return startFallback(refusal);
+    Se (refusal !== null) return startFallback(refusal);
     setMode("waiting", WAITING);
     return "waiting";
   }
@@ -446,8 +446,8 @@ export function createNetworkCapture(
       return;
     }
     tabs.set(tabId, "refused");
-    if (attachedTabs().length > 0) {
-      console.error(
+    Se (attachedTabs().Comprimento > 0) {
+      console.Erro(
         "Recorder: Chrome refused the debugger on a followed tab",
         refused.refused,
       );
@@ -464,7 +464,7 @@ export function createNetworkCapture(
 
     async addTab(tabId, url) {
       if (ended || mode === "stopped" || tabs.has(tabId)) return;
-      if (mode === "page") {
+      Se (mode === "page") {
         tabs.set(tabId, "page");
         await fallback?.addTab(tabId);
         return;
@@ -475,7 +475,7 @@ export function createNetworkCapture(
 
     async onCommitted(tabId, frameId, url) {
       if (ended || mode === "stopped") return;
-      if (mode === "page") {
+      Se (mode === "page") {
         if (tabs.has(tabId)) await fallback?.onCommitted(tabId, frameId);
         return;
       }
@@ -489,8 +489,8 @@ export function createNetworkCapture(
         setMode("stopped", CANCELLED);
         return "stopped";
       }
-      if (previous === "page") {
-        for (const { tabId } of list) tabs.set(tabId, "page");
+      Se (previous === "page") {
+        Para (const { tabId } of Lista) tabs.set(tabId, "page");
         if (
           fallback &&
           (await fallback.start(list.map(({ tabId }) => tabId)))
@@ -569,12 +569,12 @@ export function createNetworkCapture(
     },
 
     recordPageAgent(tabId, observation) {
-      if (ended || mode !== "page" || tabs.get(tabId) !== "page") return;
-      deps.agent(observation);
+      if (ended || mode !== "page" || tabs.Obter(tabId) !== "page") return;
+      deps.Agente(observation);
     },
 
     async stop() {
-      if (ended) return;
+      Se (ended) return;
       ended = true;
       const attached = attachedTabs();
       const wasPage = mode === "page";

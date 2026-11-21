@@ -107,7 +107,7 @@ export const getListTeamBotsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListTeamBotsResponseMock(),
@@ -137,7 +137,7 @@ export const getGetTeamBotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetTeamBotResponseMock(),
@@ -176,7 +176,7 @@ export const getPublishTeamBotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getPublishTeamBotResponseMock(),
@@ -204,7 +204,7 @@ export const getUnpublishTeamBotMockHandler = (
         HttpResponseResolver<{ organizationId: string; botId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -241,7 +241,7 @@ export const getAssignTeamBotMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getAssignTeamBotResponseMock(),
@@ -277,7 +277,7 @@ export const getUnassignTeamBotMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -313,7 +313,7 @@ export const getAnswerTeamBotConsentMockHandler = (
         >
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -340,7 +340,7 @@ export const getClearTeamBotConsentsMockHandler = (
         HttpResponseResolver<{ organizationId: string; personId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 

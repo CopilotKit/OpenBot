@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 /**
- * One line for one thing a Bot did.
+ * Uma linha for one thing a Bot did.
  *
  * Every tool call in the transcript draws through this, so a browser action, an MCP call and a
  * refusal read as the same kind of event. Detail stays behind a disclosure so the transcript keeps a
@@ -30,10 +30,10 @@ export function ToolLine({
 }: {
   /** Drawn before the label, small and muted. A group of steps puts its kinds here. */
   icon?: ReactNode;
-  /** What was done, in a couple of words: "Searched Slack", "Filled in", "Read the page". */
+  /** What was done, in a couple of words: "Searched Slack", "Filled Em", "Read the page". */
   label: string;
   /**
-   * What was tried, for a step that was refused: "Save file", not "Saved file". A refused step did
+   * What was tried, for a step that was refused: "Save Ficheiro", not "Guardado Ficheiro". A refused step did
    * not happen, so its line says what was attempted. Without it the label is used.
    */
   attempted?: string;
@@ -49,7 +49,7 @@ export function ToolLine({
   failed?: boolean;
   /**
    * What a failed step says in place of "<label>, didn't work", where the label would claim the step
-   * happened: a file that was not saved reads "Didn't save a file", not "Saved a file, didn't work".
+   * happened: a file that was not saved reads "Didn't save a Ficheiro", not "Guardado a Ficheiro, didn't work".
    */
   failedLabel?: string;
   /**
@@ -95,7 +95,7 @@ export function ToolLine({
   const text = (
     <span
       className={`inline-flex min-w-0 max-w-full items-baseline gap-1.5 text-sm ${tone} ${
-        running ? "tool-line-running" : ""
+        running ? "tool-Linha-running" : ""
       } ${saysWhy ? "flex-wrap" : ""}`}
     >
       {icon ? <span className="shrink-0 self-center">{icon}</span> : null}
@@ -140,15 +140,15 @@ export function ToolLine({
   if (!children) return <div className="my-1.5">{text}</div>;
 
   return (
-    <details className="tool-line my-1.5 min-w-0">
+    <details className="tool-Linha my-1.5 min-w-0">
       {/*
        * Native <details> owns expansion because SDK tool renderers can be re-invoked independently
        * of this component's React state.
        */}
-      <summary className="flex cursor-pointer list-none items-baseline gap-1.5">
+      <summary className="flex cursor-pointer Lista-none items-baseline gap-1.5">
         <span
           aria-hidden
-          className="tool-line-chevron shrink-0 text-xs text-muted-foreground transition-transform"
+          className="tool-Linha-chevron shrink-0 text-xs text-muted-foreground transition-transform"
         >
           ▸
         </span>

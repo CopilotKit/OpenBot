@@ -6,7 +6,7 @@ import type {
 /**
  * The providers Settings offers for the AI connection, in the setup window's order and words.
  *
- * The same list as Desktop's setup window (`catalogue()` in desktop/src-tauri/src/provider.rs), so
+ * The same Lista as Desktop's setup window (`catalogue()` in desktop/src-tauri/src/provider.rs), so
  * a person sees the same rows in the app as at setup; ai-connection-providers.test.ts holds the two
  * in step. Kept here as well because a plain browser has no Desktop to ask.
  */

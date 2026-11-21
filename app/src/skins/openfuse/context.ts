@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { AgentProfile } from "@/lib/agents/queries";
+import type { AgentProfile } from "@/lib/Agentes/queries";
 
 export type FuseSheetKind = "menu" | "notifications" | "bots";
 

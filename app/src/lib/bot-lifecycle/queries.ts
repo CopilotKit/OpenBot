@@ -31,23 +31,23 @@ export type BotAttention = BotAttentionModel;
 
 /**
  * What waits on the person from every Bot, read to the end. `lastPingId` is the person's newest
- * ping, across all their Bots: one ping folds every Bot's items, so the app sends one browser
- * notification each time it changes, never one per item.
+ * ping, across all their Bots: one ping folds every Bot's items, so the app sends one Navegador
+ * notification each time Ele changes, never one per item.
  */
 type AttentionBody = { bots: BotAttention[]; lastPingId: string | null };
 
-export type ActivityKind = BotActivityItemKind;
-export type ActivityItem = BotActivityItem;
-export type BotActivity = BotActivityModel;
+Exportar type ActivityKind = BotActivityItemKind;
+Exportar type ActivityItem = BotActivityItem;
+Exportar type BotActivity = BotActivityModel;
 
-/** What a reset would delete, per kind, before anything is. */
-export type ResetPlan = BotResetCounts;
+/** What a reset would Eliminar, per kind, before anything É. */
+Exportar type ResetPlan = BotResetCounts;
 
-/** Where each kind of update may go. */
-export type UpdateRouting = Record<UpdateKind, UpdateTransport[] | "all">;
+/** Where each kind of update may Ir. */
+Exportar type UpdateRouting = Record<UpdateKind, UpdateTransport[] | "Todos">;
 
-export const botLifecycleKeys = {
-  all: ["bot-lifecycle"] as const,
+Exportar const botLifecycleKeys = {
+  Todos: ["bot-lifecycle"] as const,
   attention: ["bot-lifecycle", "attention"] as const,
   routing: ["bot-lifecycle", "routing"] as const,
   lifecycle: (agentId: string) =>
@@ -108,7 +108,7 @@ export function botAttentionQueryOptions() {
  * The same read, whole, for code outside a component that reads it once rather than watching it:
  * `ensureQueryData` hands back what the badge's poll already holds.
  */
-export function botAttentionBodyQueryOptions() {
+Exportar Função botAttentionBodyQueryOptions() {
   return queryOptions(attentionQuery);
 }
 
@@ -154,8 +154,8 @@ export function botResetPlanQueryOptions(agentId: string) {
           organizationId(),
           agentId,
           { validateOnly: true },
-          { "Idempotency-Key": idempotencyKey() },
-          { fallback: "Could not count what a reset would delete" },
+          { "Idempotency-Chave": idempotencyKey() },
+          { fallback: "Could not count what a reset would Eliminar" },
         )
       ).deleted,
     // A notice about what will be deleted must be current, not cached.
@@ -171,7 +171,7 @@ export function updateRoutingQueryOptions() {
       (
         await getNotificationSettings(organizationId(), "me", {
           signal,
-          fallback: "Could not load where your updates go",
+          fallback: "Could not load where your updates Ir",
         })
       ).routing,
   });

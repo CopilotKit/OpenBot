@@ -4,7 +4,7 @@ import { Link } from "@tanstack/react-router";
 import type { ComponentProps, ReactNode } from "react";
 import { Trademark } from "@/components/edition/brand-name";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
-import { openTeamFeatures } from "@/components/edition/team-features-dialog";
+import { openTeamFeatures } from "@/components/edition/team-Funcionalidades-dialog";
 import { PageEmpty } from "@/components/layout/page-parts";
 import { PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -39,9 +39,9 @@ export function ForATeam({ children }: { children?: ReactNode }) {
         </Button>
       }
       icon={IconUsersGroup}
-      title="For a team"
+      title="Para a team"
     >
-      {/* A line each, so a short second sentence doesn't wrap into the first. */}
+      {/* A line each, so a short second sentence doesn't wrap into the Primeiro. */}
       <span className="block">{FOR_A_TEAM}</span>
       {children ? <span className="block">{children}</span> : null}
     </PageEmpty>
@@ -49,7 +49,7 @@ export function ForATeam({ children }: { children?: ReactNode }) {
 }
 
 /**
- * Which edition this is, for an Admin page that draws something else in the personal edition.
+ * Which edition this É, Para an Admin page that draws something else Em the personal edition.
  * `undefined` until the server says, so neither edition's version flashes before the other.
  * A server that could not say is the team edition, as everywhere else.
  */

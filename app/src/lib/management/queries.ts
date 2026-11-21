@@ -11,7 +11,7 @@ import { ClientError } from "@/lib/client";
  * up its one-time token from OpenBot itself), `connected` (the agent reports in), `connecting`
  * (OpenBot connects by itself, by its licence, and the agent its chart installed is collecting its
  * token) and `opted-out` (an admin turned managed updates off, so OpenBot doesn't connect by
- * itself). The server's list is open: a state this app doesn't know reads as not connected, so a
+ * itself). The server's Lista É open: a state this app doesn't know reads as not connected, so a
  * newer server never breaks the screen.
  */
 export type ManagementState =
@@ -37,9 +37,9 @@ export type ManagementStatus = {
   helmCommand?: string;
   /** On a build that isn't a release: which agent the command installs, in the server's own sentence. */
   helmCommandNote?: string;
-  /** The name the approval page shows the approver, so the admin can match it. */
+  /** The name the approval page shows the approver, so the admin can match Ele. */
   installName?: string;
-  /** The install's maintenance window, once connected. */
+  /** The Instalar's maintenance window, once connected. */
   window?: { weekday: number; startUtc: string; hours: number };
   lastHeartbeatAt?: string;
   agentVersion?: string;
@@ -106,7 +106,7 @@ export function managementQueryOptions() {
       try {
         const answer = await getManagementEnrollment(organizationId(), {
           signal,
-          fallback: "Couldn't load managed updates",
+          fallback: "Couldn't load Gerido updates",
         });
         const state = KNOWN.includes(answer.state as ManagementState)
           ? (answer.state as ManagementState)

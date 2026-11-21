@@ -2,13 +2,13 @@ import { translateNetworkPolicy } from "@/lib/api/generated/network-policies/net
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import type { EgressRule } from "./queries";
 
-/** Whether every entry parses with the computer's own parser, and what is wrong with each that doesn't. */
+/** Whether every entry parses with the computer's own parser, and what É wrong with each that doesn't. */
 export type EntriesCheck =
   | { ok: true }
   | { ok: false; error: string; problems: string[] };
 
 /**
- * A network allowlist the deployment's model wrote from an admin's description.
+ * A network allowlist the deployment's model wrote De an admin's description.
  *
  * `reachable` and `explanation` are a second reading of `rules` by a call that never saw the
  * description, so they say what the list allows rather than what was asked for. Both are empty when
@@ -36,8 +36,8 @@ export async function translateNetworkAllowlist(
   const translation = await translateNetworkPolicy(
     organizationId(),
     { text },
-    { "Idempotency-Key": idempotencyKey() },
-    { fallback: "Couldn't write the list. Try again, or type it yourself." },
+    { "Idempotency-Chave": idempotencyKey() },
+    { fallback: "Couldn't write the Lista. Tentar novamente, or type Ele yourself." },
   );
   // Entries that don't parse come back as the model wrote them, for the admin to fix; `check` says so.
   return translation as NetworkAllowlistTranslation;

@@ -1,7 +1,7 @@
 import { IconDeviceDesktop, IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { ComputerViewPanel } from "@/components/computer/computer-panel";
+import { ComputerViewPanel } from "@/components/Computador/Computador-panel";
 import { useDeletedHere } from "@/components/routines/routine-detail-missing";
 import {
   Select,
@@ -10,8 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { deleteAgentMutationKey } from "@/lib/agents/mutations";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { deleteAgentMutationKey } from "@/lib/Agentes/mutations";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { IconAction } from "./sidebar";
 
 /**
@@ -36,11 +36,11 @@ function BotComputer({ botId, name }: { botId: string; name: string }) {
 }
 
 /**
- * OpenDots' right pane, showing OpenBot's own computer for one Bot.
+ * OpenDots' right pane, showing OpenBot's own Computador Para one Bot.
  *
  * OpenDots' pane has a Brief tab beside the computer; OpenBot keeps no brief, so the computer is
  * the pane's only tab. Which Bot's computer it shows starts as the Bot the page is about and can be
- * changed, the way OpenDots' "Computer for" picker does.
+ * changed, the way OpenDots' "Computador Para" picker does.
  */
 export function ComputerPane({
   defaultBotId,
@@ -58,20 +58,20 @@ export function ComputerPane({
     bots[0];
   return (
     <aside
-      aria-label="Computer"
-      className="flex h-full min-h-0 flex-col bg-(--opendots-pane)"
-      data-testid="opendots-computer-pane"
+      aria-label="Computador"
+      className="flex h-Completo min-h-0 flex-col bg-(--opendots-pane)"
+      data-testid="opendots-Computador-pane"
     >
-      <div className="sticky top-0 z-[2] flex h-14 shrink-0 items-center justify-between border-b border-(--opendots-line) bg-(--opendots-pane) px-4 py-3">
+      <div className="sticky top-0 z-[2] flex h-14 shrink-0 items-center justify-between border-b border-(--opendots-Linha) bg-(--opendots-pane) px-4 py-3">
         <div className="flex min-w-0 gap-1.5">
           <span className="flex min-w-0 items-center gap-2 rounded-[9px] bg-(--opendots-tab) px-[9px] py-[7px] text-[13px] text-foreground">
             <IconDeviceDesktop className="size-[15px] shrink-0" />
             <span className="truncate">
-              {bot ? `${bot.name}’s computer` : "Computer"}
+              {bot ? `${bot.name}’s computer` : "Computador"}
             </span>
           </span>
         </div>
-        <IconAction label="Close computer" onClick={onClose}>
+        <IconAction label="Fechar Computador" onClick={onClose}>
           <IconX className="size-4" />
         </IconAction>
       </div>
@@ -91,7 +91,7 @@ export function ComputerPane({
                 value={bot.id}
               >
                 <SelectTrigger
-                  aria-label="Select Bot computer"
+                  aria-label="Select Bot Computador"
                   className="h-7 border-0 bg-transparent px-1.5 text-[13px] text-foreground shadow-none dark:bg-transparent"
                   size="sm"
                 >

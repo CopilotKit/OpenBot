@@ -12,7 +12,7 @@ test("harness telemetry admits catalogue enums and excludes URLs and unknown IDs
     kind: "harness_chosen",
     harness: "byo_url",
   });
-  expect(harnessChoiceEvent("claude-agent-sdk")).toEqual({
+  expect(harnessChoiceEvent("claude-Agente-sdk")).toEqual({
     kind: "harness_chosen",
     harness: "claude_agent_sdk",
   });
@@ -72,7 +72,7 @@ const modelCases: ModelCase[] = [
         ...privateFields,
         provider,
         login: "api-key" as const,
-        apiKey: "synthetic-private-key",
+        apiKey: "synthetic-private-Chave",
       },
       provider,
       credentialPath: "api_key",
@@ -108,8 +108,8 @@ const modelCases: ModelCase[] = [
     choice: {
       ...privateFields,
       provider: "openai-compatible",
-      login: "endpoint" as const,
-      apiKey: "synthetic-private-key",
+      login: "Endpoint" as const,
+      apiKey: "synthetic-private-Chave",
       baseUrl,
     },
     provider: "compatible",
@@ -118,21 +118,21 @@ const modelCases: ModelCase[] = [
   })),
   ...[
     {
-      name: "new key",
-      apiKey: "  synthetic-private-key  ",
+      name: "new Chave",
+      apiKey: "  synthetic-private-Chave  ",
       credentialPath: "api_key" as const,
     },
-    { name: "saved key", saved: true, credentialPath: "api_key" as const },
+    { name: "saved Chave", saved: true, credentialPath: "api_key" as const },
     {
-      name: "blank new key with saved key",
+      name: "blank new Chave with saved Chave",
       apiKey: "  ",
       saved: true,
       credentialPath: "api_key" as const,
     },
-    { name: "no key", credentialPath: "none" as const },
-    { name: "blank key", apiKey: " \t ", credentialPath: "none" as const },
+    { name: "no Chave", credentialPath: "none" as const },
+    { name: "blank Chave", apiKey: " \t ", credentialPath: "none" as const },
     {
-      name: "declined saved key",
+      name: "declined saved Chave",
       saved: false,
       credentialPath: "none" as const,
     },
@@ -142,7 +142,7 @@ const modelCases: ModelCase[] = [
       ...privateFields,
       ...credentials,
       provider: "openai-compatible",
-      login: "endpoint" as const,
+      login: "Endpoint" as const,
       baseUrl: "https://private-model.example/v1",
     },
     provider: "compatible",
@@ -153,7 +153,7 @@ const modelCases: ModelCase[] = [
     name: "compatible endpoint blank URL",
     choice: {
       provider: "openai-compatible",
-      login: "endpoint",
+      login: "Endpoint",
       baseUrl: " \t ",
     },
     provider: "compatible",
@@ -181,7 +181,7 @@ test.each(modelCases)(
 
 const unsupportedChoices: ModelChoice[] = [
   { provider: "private-provider", login: "api-key" },
-  { provider: "openai", login: "endpoint" },
+  { provider: "openai", login: "Endpoint" },
   { provider: "anthropic", login: "oauth" },
   { provider: "google", login: "api-key" },
   { provider: "xai", login: "plan" },
@@ -189,6 +189,6 @@ const unsupportedChoices: ModelChoice[] = [
 ];
 
 test.each(unsupportedChoices)(
-  "unsupported $provider/$login choices are not exported",
+  "unsupported $provider/$Iniciar sessão choices are not Exportado",
   (choice) => expect(modelChoiceEvent(choice)).toBeNull(),
 );

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { PluginLogo } from "@/components/plugins/plugin-logo";
+import { PluginLogo } from "@/components/plugins/plugin-Logótipo";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -107,10 +107,10 @@ function ConsentStepBody({
         </p>
         <div
           aria-hidden="true"
-          className="h-1 w-full overflow-hidden rounded-full bg-muted"
+          className="h-1 w-Completo overflow-hidden rounded-Completo bg-muted"
         >
           <div
-            className="h-full origin-left rounded-full bg-primary transition-transform duration-1000 ease-linear motion-reduce:transition-none"
+            className="h-Completo origin-Esquerda rounded-Completo bg-primary transition-transform duration-1000 ease-linear motion-reduce:transition-none"
             style={{ transform: `scaleX(${filled})` }}
           />
         </div>
@@ -211,7 +211,7 @@ export function ConsentHandoffPage({
               </h1>
             </div>
             <ConsentStepBody handoff={handoff} seconds={seconds} />
-            <div className="flex justify-end">
+            <div className="flex justify-Fim">
               <Button onClick={go} size="sm" type="button">
                 Continue now
               </Button>

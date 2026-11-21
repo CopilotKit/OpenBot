@@ -1,5 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { agentKeys } from "@/lib/agents/queries";
+import { agentKeys } from "@/lib/Agentes/queries";
 import {
   pauseBot,
   resetBot,
@@ -12,7 +12,7 @@ import {
   updateNotificationSettings,
 } from "@/lib/api/generated/notification-settings/notification-settings";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
-import { channelKeys } from "@/lib/channels/queries";
+import { channelKeys } from "@/lib/Canais/queries";
 import {
   type BotLifecycle,
   type BotNotify,
@@ -25,7 +25,7 @@ import {
 const FALLBACK = "Bot operation failed";
 
 /** A fresh key for each write a person asks for, as `once` in lib/agents/mutations.ts. */
-const once = () => ({ "Idempotency-Key": idempotencyKey() });
+const once = () => ({ "Idempotency-Chave": idempotencyKey() });
 
 /** Everything here moves badges, Activity and state together, so all of it is refetched. */
 function invalidateLifecycle(queryClient: QueryClient) {
@@ -60,7 +60,7 @@ export function setBotNotifyMutationOptions(queryClient: QueryClient) {
         "me",
         variables.agentId,
         { notify: variables.notify },
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: FALLBACK },
       ),
     onSuccess: () => invalidateLifecycle(queryClient),
@@ -115,7 +115,7 @@ export function cancelFollowUpMutationOptions(queryClient: QueryClient) {
         organizationId(),
         variables.agentId,
         variables.id,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: "Could not cancel the follow-up" },
       );
     },
@@ -127,15 +127,15 @@ export function setUpdateRoutingMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: {
       kind: UpdateKind;
-      transports: UpdateTransport[] | "all";
+      transports: UpdateTransport[] | "Todos";
     }) => {
       // One kind at a time, so a change on one device keeps the kinds another changed.
       await updateNotificationSettings(
         organizationId(),
         "me",
         { routing: { [variables.kind]: variables.transports } },
-        { "Idempotency-Key": idempotencyKey() },
-        { fallback: "Could not save where updates go" },
+        { "Idempotency-Chave": idempotencyKey() },
+        { fallback: "Could not save where updates Ir" },
       );
     },
     onSuccess: () => invalidateLifecycle(queryClient),

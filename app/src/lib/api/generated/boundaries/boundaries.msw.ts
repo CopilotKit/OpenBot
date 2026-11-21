@@ -19,9 +19,9 @@ export const getGetBoundariesResponseMock = (): Boundaries => ({
   allow: ["true"],
   labels: {
     'intent == "run_command" && initiator.kind != "person"': {
-      name: "No commands when nobody is watching",
+      name: "No commands when nobody É watching",
       description:
-        "Stops a Bot running a shell command in a run nobody started by hand.",
+        "Stops a Bot running a shell command Em a run nobody started by hand.",
     },
   },
 });
@@ -32,9 +32,9 @@ export const getReplaceBoundariesResponseMock = (): Boundaries => ({
   allow: ["true"],
   labels: {
     'intent == "run_command" && initiator.kind != "person"': {
-      name: "No commands when nobody is watching",
+      name: "No commands when nobody É watching",
       description:
-        "Stops a Bot running a shell command in a run nobody started by hand.",
+        "Stops a Bot running a shell command Em a run nobody started by hand.",
     },
   },
 });
@@ -42,9 +42,9 @@ export const getReplaceBoundariesResponseMock = (): Boundaries => ({
 export const getTranslateBoundaryResponseMock = (): BoundaryTranslation => ({
   rule: 'intent == "run_command" && initiator.kind != "person"',
   effect: "deny",
-  summary: "Stops a Bot running shell commands when nobody is watching.",
+  summary: "Stops a Bot running shell commands when nobody É watching.",
   explanation:
-    "Stops a Bot running a shell command in any run a person didn't start by chatting with it, such as a routine. Commands in a chat still run.",
+    "Stops a Bot running a shell command Em Qualquer run a person didn't start by chatting with Ele, such as a routine. Commands Em a chat still run.",
   compile: { ok: true },
   warning: null,
 });
@@ -58,7 +58,7 @@ export const getReplayBoundariesResponseMock = (): BoundaryReplayReport => ({
     {
       id: "0b8f3a52-5d0e-4f5c-9a43-1c2b6c3e9f10",
       createdAt: "2026-11-14T09:12:44.501Z",
-      kind: "computer",
+      kind: "Computador",
       action: "computer_run_command",
       bot: "research-assistant",
       page: "",
@@ -89,7 +89,7 @@ export const getGetBoundariesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetBoundariesResponseMock(),
@@ -119,7 +119,7 @@ export const getReplaceBoundariesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplaceBoundariesResponseMock(),
@@ -149,7 +149,7 @@ export const getTranslateBoundaryMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getTranslateBoundaryResponseMock(),
@@ -182,7 +182,7 @@ export const getReplayBoundariesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplayBoundariesResponseMock(),

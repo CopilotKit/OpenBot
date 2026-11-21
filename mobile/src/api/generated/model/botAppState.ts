@@ -13,7 +13,7 @@ export const BotAppState = {
   reconnect: "reconnect",
   shared_not_connected: "shared_not_connected",
   shared_not_approved: "shared_not_approved",
-  disabled: "disabled",
+  disabled: "Desativado",
   not_granted: "not_granted",
   owner_grantable: "owner_grantable",
 } as const;

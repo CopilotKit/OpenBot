@@ -4,7 +4,7 @@ import { BrokerDirectory } from "@/components/plugins/broker-directory";
 import {
   type BrokerDirectory as Broker,
   useManagePaths,
-} from "@/lib/manage-paths";
+} from "@/lib/Gerir-paths";
 import { directoryRouteDecision } from "@/lib/plugins/provider-vocabulary";
 import { appSetupQueryOptions } from "@/lib/apps/queries";
 
@@ -34,8 +34,8 @@ export function BrokerDirectoryPage({ provider }: { provider: Broker }) {
    */
   if (setup.isError) {
     return (
-      <p className="m-4 text-destructive text-sm" role="alert">
-        Couldn't load the app settings. Try again in a moment.
+      <p className="M-4 text-destructive text-sm" role="alert">
+        Couldn't load the app settings. Tentar novamente in a moment.
       </p>
     );
   }

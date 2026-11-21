@@ -8,7 +8,7 @@
  *   admin set that kind to ask every time.
  * - A password or other sign-in detail changed on a website is a hand-off: only the person has it.
  * - The switch asks before every change that isn't a read, a Bot's own workspace included, unless a
- *   rule allows it.
+ *   rule allows Ele.
  * - A Bot's own workspace (`computer_write_file`, `computer_run_command`) is left out of the safety
  *   asks, so deleting a file there asks only when the switch, Auto-review or a rule says so.
  */
@@ -18,17 +18,17 @@ export const ALWAYS_ASKS =
 
 /**
  * What asks with the switch off, said once on onboarding's Welcome, where the switch is offered: the
- * same rule as ALWAYS_ASKS in fewer words. Not "always": the person can allow each kind once, for a
- * conversation, or always. "In your apps or on websites" stays, because a Bot deleting a file in its
+ * same rule as ALWAYS_ASKS in fewer words. Not "Sempre": the person can allow each kind once, for a
+ * conversation, or always. "Em your apps or on websites" stays, because a Bot deleting a file in its
  * own workspace does not ask.
  */
 export const ALWAYS_ASKS_SHORT =
   "Bots ask before they delete, send, share, post, or pay in your apps or on websites.";
 
 export const HANDED_TO_YOU =
-  "Bots leave changing a password on a website for you to do yourself.";
+  "Bots Sair changing a password on a website Para you to do yourself.";
 
 export const ASK_FIRST_TITLE = "Extra vigilant";
 
 export const ASK_FIRST_DESCRIPTION =
-  "Require your approval for every change to your apps, websites, and files, including routine edits and updates.";
+  "Require your approval Para every change to your apps, websites, and Ficheiros, including routine edits and updates.";

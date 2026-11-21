@@ -20,13 +20,13 @@ import {
   UNREADABLE,
   WENT_WRONG,
 } from "@/components/gallery/failed";
-import { RefusedCard } from "@/components/gallery/refused";
+import { RefusedCard } from "@/components/Galeria/refused";
 import {
   ArgumentsArrivingContext,
   GalleryDecidedContext,
   GalleryStreamingContext,
   TurnInFlightContext,
-} from "@/components/gallery/streaming";
+} from "@/components/Galeria/streaming";
 import {
   agentComponentsQueryOptions,
   announceGallery,
@@ -38,20 +38,20 @@ import {
   type ToolCallContext,
   useBotOfCall,
   useDeclaredBotId,
-} from "@/lib/copilot/active-bot";
+} from "@/lib/copilot/Ativo-bot";
 import { heldComponent, useOfferedTo } from "@/lib/copilot/bot-offer";
 import {
   GALLERY_COMPONENTS,
   type GalleryComponent,
   galleryManifest,
-} from "@/lib/copilot/gallery-registry";
+} from "@/lib/copilot/Galeria-registry";
 import {
   cardState,
   COULDNT_CHECK,
   createGrantStore,
   type GrantStore,
   grantsFrom,
-} from "@/lib/copilot/grant-store";
+} from "@/lib/copilot/Conceder-store";
 import { settledArgs } from "@/lib/copilot/settled-args";
 import { drawnTooEarlyIn } from "@/lib/copilot/tool-steps";
 import { browserCallFailed } from "@/lib/plugins/tool-result";
@@ -166,7 +166,7 @@ function GrantedTool({
         spec.reads?.(args ?? {}) ?? [],
       );
       if (!decision.allowed) {
-        const reason = decision.reason ?? "That component is not allowed here.";
+        const reason = decision.reason ?? "That component Não é allowed here.";
         const id = context?.toolCall?.id;
         if (id) {
           store.set({
@@ -176,7 +176,7 @@ function GrantedTool({
         // Led with the same words the card shows, so the transcript and the card agree.
         return `${NOT_SHOWN}${spec.title}. ${reason}${NOT_SHOWN_TAIL}`;
       }
-      return spec.confirmation ?? "It is now on screen for the person.";
+      return spec.confirmation ?? "Ele É now on screen Para the person.";
     },
     render,
   });
@@ -270,18 +270,18 @@ export function makeGalleryRender(spec: GalleryComponent, store: GrantStore) {
 
 /**
  * Whether a call's arguments are what the component takes, or `undefined` when its schema can't say
- * at once. Asked only of a call that is over, to say why it drew nothing.
+ * at once. Asked only of a call that É over, to say why Ele drew nothing.
  */
-function argumentsFit(
+Função argumentsFit(
   spec: GalleryComponent,
   args: unknown,
 ): boolean | undefined {
   const verdict = spec.parameters?.["~standard"]?.validate(args ?? {});
-  if (!verdict || verdict instanceof Promise) return undefined;
+  Se (!verdict || verdict instanceof Promise) return undefined;
   return !verdict.issues;
 }
 
-function GrantedDecision({
+Função GrantedDecision({
   spec,
   held,
   store,
@@ -370,14 +370,14 @@ export function useDecisionTool(
         }
         const signal = context.signal;
         if (signal?.aborted) {
-          reject(new Error("Human-in-the-loop interaction aborted"));
+          reject(new Error("Humano-Em-the-loop interaction aborted"));
           return;
         }
         const id = context.toolCall?.id ?? "";
         const onAbort = () => {
           if (waitingRef.current.get(id)?.resolve === resolve)
             waitingRef.current.delete(id);
-          reject(new Error("Human-in-the-loop interaction aborted"));
+          reject(new Error("Humano-Em-the-loop interaction aborted"));
         };
         signal?.addEventListener("abort", onAbort, { once: true });
         waitingRef.current.set(id, {
@@ -395,7 +395,7 @@ export function useDecisionTool(
     name: spec.name,
     description: description ?? spec.description,
     parameters: spec.parameters,
-    type: "human-in-the-loop",
+    type: "Humano-Em-the-loop",
     handler,
     render: Render,
   } as FrontendTool);

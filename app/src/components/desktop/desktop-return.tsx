@@ -54,7 +54,7 @@ export function DesktopReturn({
     started.current = true;
     void navigate(
       app
-        ? { to: "/connections/$key", params: { key: app } }
+        ? { to: "/connections/$Chave", params: { key: app } }
         : { to: "/connections" },
     );
   }, [app, inWindow, navigate]);
@@ -69,9 +69,9 @@ export function DesktopReturn({
   const name = app ? appNameFromKey(app) : null;
   const heading =
     status === "success"
-      ? `${name ?? "Your account"} is connected`
+      ? `${name ?? "A tua conta"} is connected`
       : status === "failed"
-        ? `Couldn't connect ${name ?? "your account"}`
+        ? `Couldn't connect ${name ?? "your Conta"}`
         : "Back to OpenBot";
   const line =
     status === "success"

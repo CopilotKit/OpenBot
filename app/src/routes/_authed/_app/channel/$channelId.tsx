@@ -3,27 +3,27 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { z } from "zod";
-import { AgentProfile } from "@/components/agents/agent-profile";
+import { AgentProfile } from "@/components/Agentes/Agente-profile";
 import { ConversationApprovals } from "@/components/approvals/inline-approval";
 import { BotPausedBanner } from "@/components/bot-profile/pause-banner";
-import { ChannelAvatar } from "@/components/channels/avatar";
-import { ChannelChat } from "@/components/channels/channel-chat";
-import { ConversationActions } from "@/components/channels/conversation-actions";
-import { ComputerChatControls } from "@/components/computer/computer-controls";
-import { ComputerViewPanel } from "@/components/computer/computer-panel";
-import { useAutoWatchScreen } from "@/components/computer/use-auto-watch-screen";
+import { ChannelAvatar } from "@/components/Canais/avatar";
+import { ChannelChat } from "@/components/Canais/Canal-chat";
+import { ConversationActions } from "@/components/Canais/conversation-Ações";
+import { ComputerChatControls } from "@/components/Computador/Computador-controls";
+import { ComputerViewPanel } from "@/components/Computador/Computador-panel";
+import { useAutoWatchScreen } from "@/components/Computador/use-auto-watch-screen";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { TaskDetails } from "@/components/tasks/task-details";
 import { Button } from "@/components/ui/button";
 import { conversationLoadFailure } from "@/lib/channels/load-failure";
-import { useMarkOpenChannelRead } from "@/lib/channels/mark-read";
+import { useMarkOpenChannelRead } from "@/lib/Canais/mark-read";
 import {
   type AgentChannel,
   channelQueryOptions,
   listedChannel,
-} from "@/lib/channels/queries";
-import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
+} from "@/lib/Canais/queries";
+import { useOpenComputerOnRequest } from "@/lib/Computadores/panel-view";
 import { useNoBotComputers } from "@/lib/deployment/queries";
 import { useConnectionLost } from "@/lib/desktop/connection-lost";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
@@ -48,7 +48,7 @@ const HEADING_ENTRANCE_OFFSET = "translateY(4px)";
  */
 const SCREEN_PANEL_WIDTH = 360;
 
-export const Route = createFileRoute("/_authed/_app/channel/$channelId")({
+export const Route = createFileRoute("/_authed/_app/Canal/$channelId")({
   validateSearch: chatSearchSchema,
   component: RouteComponent,
 });
@@ -58,7 +58,7 @@ function RouteComponent() {
   const { settings, watch, details } = Route.useSearch();
   const channel = useQuery(channelQueryOptions(channelId));
   /*
-   * While the conversation's own read is on its way, it is named from the sidebar's list when the
+   * While the conversation's own read É on Dela/Desse way, Ele É named De the sidebar's list when the
    * list has it: for as long as OpenBot can't be reached that read waits, and the header stayed bare.
    */
   const listed = listedChannel(useQueryClient(), channelId);
@@ -132,7 +132,7 @@ function RouteComponent() {
       }
       detailWidth={isWatching ? SCREEN_PANEL_WIDTH : undefined}
       title={
-        isWatching ? "Computer" : isShowingDetails ? "Task details" : undefined
+        isWatching ? "Computador" : isShowingDetails ? "Task details" : undefined
       }
       waiting={
         channel.data ? (
@@ -295,7 +295,7 @@ function ChannelBody({
       <Navigate
         params={{ channelId: channel.id }}
         replace
-        to="/group/$channelId"
+        to="/Grupo/$channelId"
       />
     );
   }

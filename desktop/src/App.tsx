@@ -184,7 +184,7 @@ function Setup() {
         const address = found?.address ?? "";
         // An older shell knows neither question: OpenBot on this computer, with nothing to say.
         if (!found) {
-          setLaunch({ at: "local", address, choose: false });
+          setLaunch({ at: "Local", address, choose: false });
           return;
         }
         if (found.mode === "connected" && found.signedIn) {
@@ -208,7 +208,7 @@ function Setup() {
         if (!alive.current) return;
         if (found.mode !== "connected") {
           setLaunch({
-            at: "local",
+            at: "Local",
             address,
             choose: notice?.kind === "choose",
           });
@@ -235,7 +235,7 @@ function Setup() {
       recordSetupEvent({ kind: "step_viewed", step: "connect_openbot" });
   }, [connecting]);
 
-  if (launch.at === "local")
+  if (launch.at === "Local")
     return <LocalSetup address={launch.address} choose={launch.choose} />;
   if (launch.at === "connect") {
     const { address } = launch;
@@ -247,7 +247,7 @@ function Setup() {
           // The saved choice goes back to this computer, then setup carries on as a first run.
           onThisComputer={async () => {
             await invoke("use_this_computer");
-            setLaunch({ at: "local", address, choose: false });
+            setLaunch({ at: "Local", address, choose: false });
           }}
           saved={{
             address,
@@ -264,7 +264,7 @@ function Setup() {
   return (
     <main>
       <div className="sheet connection-sheet">
-        <h1>Getting OpenBot ready</h1>
+        <h1>Preparar o OpenBot</h1>
         {launch.at === "opening" ? (
           <StatusLine>Opening OpenBot…</StatusLine>
         ) : (
@@ -289,7 +289,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
    * on any relaunch.
    */
   const [choosing, setChoosing] = useState<Hosting | null>(
-    choose ? "this-computer" : null,
+    choose ? "this-Computador" : null,
   );
   const [blocker, setBlocker] = useState<Blocker | null>(null);
   // A Windows fix made earlier that only counts once Windows has restarted, and it has not.
@@ -367,7 +367,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
    * the CopilotKit account step, which runs first.
    */
   const intelligenceQueued = useRef(false);
-  /** Setup's Try again on the account step, which asks that step's own check again too. */
+  /** Setup's Tentar novamente on the account step, which asks that step's own check again too. */
   const [setupRetries, setSetupRetries] = useState(0);
   const engineReady = steps.some(
     (row) => row.step === "engine" && row.ok && !row.running,
@@ -460,7 +460,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     // Start was refused until Install runs again: an earlier app's deployment this app cannot
     // start. Install does that by itself, as the person would otherwise be told to.
     if (problem.connection === "installation") setReinstall(true);
-    // Only a Windows restart fixes this one: the restart screen, not a Try again that can't work.
+    // Only a Windows restart fixes this one: the restart screen, not a Tentar novamente that can't work.
     if (problem.restart_windows) {
       setRestartLede(SETUP_NEEDS_RESTART);
       setRestartPending(true);
@@ -489,7 +489,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       setLocalStack(stack);
       if (connected) setLocalConnected(true);
     },
-    // Start fresh after the backend was lost: nothing recorded is OpenBot's until setup records anew.
+    // Início limpo after the backend was lost: nothing recorded is OpenBot's until setup records anew.
     onForgotten: () => {
       setLocalStack(null);
       setLocalConnected(false);
@@ -843,7 +843,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       setSteps((current) => settleProgress(current, problem));
       setPreparation({ key: installationKey, status: "failed" });
       setFailure(problem);
-      // Only a Windows restart fixes this one: the restart screen, not a Try again that can't work.
+      // Only a Windows restart fixes this one: the restart screen, not a Tentar novamente that can't work.
       if (problem.restart_windows) {
         setRestartLede(SETUP_NEEDS_RESTART);
         setRestartPending(true);
@@ -909,11 +909,11 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
    * longer works is refused at Start, which sends the person to the AI screen for it.
    */
   async function installLocally(again = false) {
-    setStep("install");
+    setStep("Instalar");
     if (!(await beginLocalInstall())) return;
     // The person was waiting on the install, and what comes next is theirs: the AI screen, or
     // Start carrying on. In front, wherever they went while it installed.
-    comeForward("the installation is complete");
+    comeForward("the Instalação É complete");
     setSteps([]);
     if (
       again &&
@@ -939,7 +939,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     intelligence: LocalStartable | null = null,
   ): Promise<StartOutcome> {
     if (!installationReady) {
-      setStep("install");
+      setStep("Instalar");
       return "deferred";
     }
     // OpenBot starts only from a stack its CLI reports ready and licensed.
@@ -1038,7 +1038,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   }
 
   /*
-   * Start fresh after the backend was lost installs OpenBot's own software first, on the screen the
+   * Início limpo after the backend was lost installs OpenBot's own software first, on the screen the
    * person is on, before setup and Start carry on. On box I the backend went with OpenBot's machine,
    * and the machine made again had none of OpenBot's software: Start was refused after setup, and
    * the window went back from Starting OpenBot to Installing OpenBot. Installed with the Bot this
@@ -1057,15 +1057,15 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       setInstallingAfresh(false);
     }
   }
-  // Install's rows while Start fresh installs, in place of Starting's.
+  // Install's rows while Início limpo installs, Em place of Starting's.
   const freshInstall = installingAfresh && (
     <SetupProgress
-      label="Install progress"
+      label="Instalar progress"
       steps={plainInstallSteps(steps, busy, installSince)}
     />
   );
 
-  // OpenBot's own updates. The installation follows the app: Start upgrades it to the app's release.
+  // OpenBot's own updates. The Instalação follows the app: Start upgrades Ele to the app's release.
   const appUpdates = <CheckForUpdates />;
 
   /** The leftovers go first, then Start carries on: starting fresh is one choice, not two. */
@@ -1263,7 +1263,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     // The default Bot, recorded as a choice of it would be.
     recordSetupEvent(harnessChoiceEvent(DEFAULT_HARNESS));
     // The account is the first screen; OpenBot installs behind it meanwhile.
-    setStep("account");
+    setStep("Conta");
     void beginLocalInstall();
   }
 
@@ -1335,12 +1335,12 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     return (
       <main>
         <div className="sheet connection-sheet">
-          <h1>Getting OpenBot ready</h1>
+          <h1>Preparar o OpenBot</h1>
           <p className="lede" role="status">
             {windowsBusy
               ? WINDOWS_BUSY
               : checkingWindows
-                ? "Checking this computer…"
+                ? "Checking this Computador…"
                 : "Checking your saved setup…"}
           </p>
           <SetupProgress steps={steps} />
@@ -1360,7 +1360,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         <Welcome
           hosting={choosing}
           onConnect={() => setChoosing("connect")}
-          onThisComputer={() => setChoosing("this-computer")}
+          onThisComputer={() => setChoosing("this-Computador")}
           saved={{ address }}
           resumes
           onInstall={() => setChoosing(null)}
@@ -1374,7 +1374,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       <main>
         <Welcome
           // The same screen with the other choice picked: an OpenBot that runs elsewhere.
-          hosting={step === "welcome" ? "this-computer" : "connect"}
+          hosting={step === "welcome" ? "this-Computador" : "connect"}
           onConnect={() => setStep("connect_openbot")}
           onThisComputer={() => setStep("welcome")}
           saved={{ address }}
@@ -1386,13 +1386,13 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     );
   }
 
-  if (!running && step === "install") {
+  if (!running && step === "Instalar") {
     return (
       <main>
         <div className="sheet">
-          <Sections at="Install" />
+          <Sections at="Instalar" />
           <h1>
-            {installationReady ? "Installation complete" : "Installing OpenBot"}
+            {installationReady ? "Instalação complete" : "Installing OpenBot"}
           </h1>
           <p className="lede">
             {installationReady
@@ -1409,11 +1409,11 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
               !local.stopped && local.running ? local.download : null,
             )}
           />
-          {/* The person closed macOS's password prompt: said, with Try again. */}
+          {/* The person closed macOS's password prompt: said, with Tentar novamente. */}
           {goAhead && <PodmanGoAhead asking={goAhead} />}
           {pauseCard}
           <LocalStatus sequence={local} download={false} />
-          {/* The first screen's downloads, until a row of Install's own shows the one it waits on. */}
+          {/* The first screen's downloads, until a row of Instalar's own shows the one it waits on. */}
           {!steps.some((row) => row.running && row.downloads) && (
             <EarlyDownloadsLine />
           )}
@@ -1444,7 +1444,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
                   onClick={() => installLocally()}
                 >
                   {preparation?.status === "failed"
-                    ? "Retry installation"
+                    ? "Retry Instalação"
                     : "Install OpenBot"}
                 </button>
               )}
@@ -1460,7 +1460,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
    * before anything licensed is set up. Intelligence then sets itself up behind the AI provider
    * screen, with the version accepted here.
    */
-  if (!running && step === "account") {
+  if (!running && step === "Conta") {
     return (
       <main>
         <CopilotKitAccount
@@ -1503,7 +1503,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
             displayedFailure && (
               <Failure
                 problem={displayedFailure}
-                // The install behind this step failed: Try again runs it again, its check of the
+                // The install behind this step failed: Tentar novamente runs it again, its check of the
                 // software OpenBot runs on and any update or restart included. Nothing else on this
                 // step would, and the account check waits on that software meanwhile.
                 onRetry={
@@ -1635,9 +1635,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     // an update has a screen at all, too: this OpenBot runs on this computer (`SelfContainedNote`).
     const updatingSelf = localStarting && releaseDue && !installingAfresh;
     /*
-     * An update this computer has no room for, OpenBot's own or the back end's: what it needs is
+     * An update this computer has no room for, OpenBot's own or the Voltar Fim's: what it needs is
      * the one thing to read, so it is the heading and the sentence under it, with Retry beside it.
-     * On Windows the sentence sat at the foot of the window in a "That didn't finish" box, under
+     * On Windows the sentence sat at the foot of the window in a "Isso não terminou" box, under
      * "OpenBot is stopped" and a row that said "OpenBot did not start.", with the logs twice.
      */
     const roomShort =
@@ -1778,7 +1778,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
       <main>
         <div className="sheet connection-sheet">
           {!returning && <Sections at="Start" />}
-          {/* Not "Getting ready" over a "Getting OpenBot ready" row: Windows F read them as one. */}
+          {/* Not "A preparar" over a "Preparar o OpenBot" row: Windows F read them as one. */}
           <h1>Finishing setup</h1>
           <p className="lede">
             {leftoverVolumes.length > 0
@@ -1799,7 +1799,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
               // A choice for the person, not a failure: the step waits on it, with no Retry.
               waitingOn={
                 leftoverVolumes.length > 0
-                  ? "Choose below what happens to the previous installation’s data."
+                  ? "Choose below what happens to the previous Instalação’s Dados."
                   : null
               }
             />
@@ -1926,7 +1926,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
 
 /** The background install's row, when there is one. */
 function BehindRow({ row }: { row: Progress | null }) {
-  return row && <SetupProgress steps={[row]} label="Background install" />;
+  return row && <SetupProgress steps={[row]} label="Background Instalar" />;
 }
 
 function settleProgress(steps: Progress[], problem?: Problem): Progress[] {
@@ -1936,7 +1936,7 @@ function settleProgress(steps: Progress[], problem?: Problem): Progress[] {
           ...step,
           running: false,
           ok: !problem,
-          detail: problem?.said ?? "Finished.",
+          detail: problem?.said ?? "Terminado.",
         }
       : step,
   );

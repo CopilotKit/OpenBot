@@ -8,7 +8,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { TEACH_A_BOT } from "@/components/browser/browser-nav-item";
+import { TEACH_A_BOT } from "@/components/Navegador/Navegador-nav-item";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import {
   PageRows,
@@ -16,7 +16,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { StaggerItem } from "@/components/layout/stagger";
-import { LearningReview } from "@/components/settings/learning-review";
+import { LearningReview } from "@/components/settings/A aprendizagem-review";
 import {
   LearningSharing,
   SkillMark,
@@ -38,20 +38,20 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { grantRoster } from "@/lib/agents/grant-roster";
-import { grantSummary } from "@/lib/agents/grant-summary";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { grantRoster } from "@/lib/Agentes/Conceder-roster";
+import { grantSummary } from "@/lib/Agentes/Conceder-summary";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { browserStateQueryOptions } from "@/lib/browser/queries";
-import { useManagePaths } from "@/lib/manage-paths";
+import { browserStateQueryOptions } from "@/lib/Navegador/queries";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import { removeSkillMutationOptions } from "@/lib/skills/mutations";
 import { type Skill, skillListQueryOptions } from "@/lib/skills/queries";
 import { queryClient } from "@/query-client";
-import { EditSkill } from "./edit-skill";
+import { EditSkill } from "./Editar-skill";
 import { NewSkill } from "./new-skill";
 
 /**
- * Skills: the one page, for every Bot, that answers "what does it know how to do?", in the main
+ * Skills: the one page, for every Bot, that answers "what does Ele know Como to do?", in the main
  * menu. It was Capabilities → Skills, Settings → Skills, and Settings → Learning.
  *
  * 1. Your skills: one list of the skills that are yours, each marked with how it was made. Skills
@@ -97,7 +97,7 @@ export function SkillsSettingsPage({
   const skills = skillList.data ?? [];
   /*
    * The server has already left out skills this person may not see. Theirs are the ones they own;
-   * the ownerless ones are written for every Bot: the admin's in the team edition, and in the
+   * the ownerless ones are written for every Bot: the admin's Em the team edition, and Em the
    * personal edition the one person's too.
    */
   const mine = skills.filter((skill) => skill.ownerUserId === me.data?.id);
@@ -221,7 +221,7 @@ export function SkillsSettingsPage({
         ) : null}
         {loaded && !writtenKnown ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load the skills you wrote. Try again in a moment.
+            Couldn't load the skills you wrote. Tentar novamente in a moment.
           </p>
         ) : null}
 
@@ -229,7 +229,7 @@ export function SkillsSettingsPage({
           action={
             <Button
               render={(props) =>
-                // The personal edition's skills each have a switch per Bot, so a new one is written
+                // The personal edition's skills each have a switch per Bot, so a new one É written
                 // on the page that leads to those switches. Elsewhere a person's own skill is
                 // written in the panel beside the list.
                 personal ? (
@@ -255,7 +255,7 @@ export function SkillsSettingsPage({
          */}
         {!personal && everyBot.length > 0 ? (
           <PageSection
-            description="An admin writes these for everyone and picks which Bots use them."
+            description="An admin writes these Para everyone and picks which Bots use them."
             title="Workspace skills"
           >
             <PageRows>
@@ -285,7 +285,7 @@ export function SkillsSettingsPage({
         {browser.data?.available ? (
           <PageSection title={TEACH_A_BOT}>
             <PageRows>
-              <Item render={<Link to="/browser" />} size="sm">
+              <Item render={<Link to="/Navegador" />} size="sm">
                 <ItemMedia variant="icon">
                   <IconChalkboardTeacher />
                 </ItemMedia>

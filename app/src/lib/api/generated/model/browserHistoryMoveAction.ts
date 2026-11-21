@@ -6,7 +6,7 @@ export type BrowserHistoryMoveAction =
   (typeof BrowserHistoryMoveAction)[keyof typeof BrowserHistoryMoveAction];
 
 export const BrowserHistoryMoveAction = {
-  back: "back",
+  back: "Voltar",
   forward: "forward",
   reload: "reload",
 } as const;

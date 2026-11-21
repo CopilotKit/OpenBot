@@ -6,18 +6,18 @@ import {
 } from "@tabler/icons-react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
 import {
   attentionSummary,
   useStoppedTasks,
   waitingOnYou,
 } from "@/components/bot-profile/attention";
 import { Item, ItemContent, ItemTitle } from "@/components/ui/item";
-import { agentListQueryOptions } from "@/lib/agents/queries";
-import { shownSubtitle } from "@/lib/agents/subtitle";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
+import { shownSubtitle } from "@/lib/Agentes/subtitle";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
-import { channelListQueryOptions } from "@/lib/channels/queries";
-import { appConfig } from "@/lib/generated/application-config";
+import { channelListQueryOptions } from "@/lib/Canais/queries";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 import { cn } from "@/lib/utils";
 import { chooseBot } from "./chosen-bot";
 import { useFuse } from "./context";
@@ -46,8 +46,8 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
     if (tabFor(pathname) !== "chat") return;
     const main = mainChannel(agentId, channels.data);
     void (main
-      ? navigate({ to: "/channel/$channelId", params: { channelId: main.id } })
-      : navigate({ to: "/channel/new", search: { agent: agentId } }));
+      ? navigate({ to: "/Canal/$channelId", params: { channelId: main.id } })
+      : navigate({ to: "/Canal/new", search: { agent: agentId } }));
   };
 
   return (
@@ -58,9 +58,9 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
     >
       <div className="flex flex-col gap-3.5">
         {agents.isPending ? null : agents.error ? (
-          <ErrorNotice error="Couldn't load your Bots. Try again in a moment." />
+          <ErrorNotice error="Couldn't load your Bots. Tentar novamente Em a moment." />
         ) : agents.data.length === 0 ? (
-          <p className={fuseText.muted}>You don't have a Bot yet.</p>
+          <p className={fuseText.muted}>Ainda não tens Bot.</p>
         ) : (
           <div className="flex flex-col">
             {agents.data.map((agent) => {
@@ -76,7 +76,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
                 <Item
                   aria-pressed={selected}
                   className={cn(
-                    "flex-nowrap gap-3.5 rounded-[18px] border-0 px-2 py-2 text-left hover:bg-[var(--openfuse-pressed)]",
+                    "flex-nowrap gap-3.5 rounded-[18px] border-0 px-2 py-2 text-Esquerda hover:bg-[var(--openfuse-pressed)]",
                     selected &&
                       "bg-[var(--openfuse-sky)] hover:bg-[var(--openfuse-sky)]",
                   )}
@@ -94,7 +94,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
                     <ItemTitle className={cn(fuseText.body, "font-medium")}>
                       {agent.name}
                     </ItemTitle>
-                    <span className={cn(fuseText.small, "line-clamp-1")}>
+                    <span className={cn(fuseText.small, "Linha-clamp-1")}>
                       {asks
                         ? `Needs you · ${summary}`
                         : summary ||
@@ -110,7 +110,7 @@ export function BotsSheet({ onClose }: { onClose: () => void }) {
                   ) : summary ? (
                     <span
                       aria-hidden="true"
-                      className="size-2 shrink-0 rounded-full bg-[var(--openfuse-accent)]"
+                      className="size-2 shrink-0 rounded-Completo bg-[var(--openfuse-accent)]"
                     />
                   ) : null}
                 </Item>

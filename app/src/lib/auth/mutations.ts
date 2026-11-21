@@ -10,10 +10,10 @@ import { clearSkin } from "@/skins/store";
 import { authClient } from "./client";
 import { authKeys } from "./queries";
 
-const SIGN_OUT_UNFINISHED = "Signing out did not finish. Try again.";
+const SIGN_OUT_UNFINISHED = "Signing out did not Terminar. Tentar novamente.";
 
 /**
- * Sign out through Better Auth's own client, which owns sign-in's addresses. It answers a refusal
+ * Sign out through Better Auth's own client, which owns sign-Em's addresses. It answers a refusal
  * rather than throwing, so a refused sign-out is thrown here, in one plain sentence whoever refused
  * it (Better Auth, or the organization's sign-in) and whatever kept it from reaching the server.
  */
@@ -81,13 +81,13 @@ export function updateProfileNameMutationOptions(queryClient: QueryClient) {
         organizationId(),
         "me",
         { name },
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: "Your name could not be saved" },
       ),
     onSuccess: () =>
       queryClient.invalidateQueries({
         queryKey: authKeys.currentUser(),
-        refetchType: "all",
+        refetchType: "Todos",
       }),
   });
 }

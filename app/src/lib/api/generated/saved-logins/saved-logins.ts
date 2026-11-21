@@ -18,14 +18,14 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
-  DeleteSavedLoginHeaders,
+  DeleteGuardadoLoginHeaders,
   IdempotencyConflictResponse,
   InvalidRequestResponse,
-  ListSavedLoginsParams,
+  ListGuardadoLoginsParams,
   OrganizationNotFoundResponse,
   OwnOnlyResponse,
-  SavedLoginNotFoundResponse,
-  SavedLoginPage,
+  GuardadoLoginNotFoundResponse,
+  GuardadoLoginPage,
   ServerErrorResponse,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
@@ -57,10 +57,10 @@ const withQueryKey = <T extends object, K>(
   return result;
 };
 
-export const getListSavedLoginsUrl = (
+export const getListGuardadoLoginsUrl = (
   organizationId: string,
   personId: string,
-  params?: ListSavedLoginsParams,
+  params?: ListGuardadoLoginsParams,
 ) => {
   const normalizedParams = new URLSearchParams();
 
@@ -81,14 +81,14 @@ export const getListSavedLoginsUrl = (
  * Return one page of the logins a person saved for their Bots to sign in with, by site and username, and whether the password manager is on for them. Never a password: one goes in and is never read back out. Only the person themselves may list them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List a person's saved logins
  */
-export const listSavedLogins = async (
+export const listGuardadoLogins = async (
   organizationId: string,
   personId: string,
-  params?: ListSavedLoginsParams,
+  params?: ListGuardadoLoginsParams,
   options?: Parameters<typeof apiRequest>[1],
-): Promise<SavedLoginPage> => {
-  return apiRequest<SavedLoginPage>(
-    getListSavedLoginsUrl(organizationId, personId, params),
+): Promise<GuardadoLoginPage> => {
+  return apiRequest<GuardadoLoginPage>(
+    getListGuardadoLoginsUrl(organizationId, personId, params),
     {
       ...options,
       method: "GET",
@@ -96,10 +96,10 @@ export const listSavedLogins = async (
   );
 };
 
-export const getListSavedLoginsQueryKey = (
+export const getListGuardadoLoginsQueryKey = (
   organizationId: string,
   personId: string,
-  params?: ListSavedLoginsParams,
+  params?: ListGuardadoLoginsParams,
 ) => {
   return [
     `/api/v2/organizations/${organizationId}/people/${personId}/saved-logins`,
@@ -107,8 +107,8 @@ export const getListSavedLoginsQueryKey = (
   ] as const;
 };
 
-export const getListSavedLoginsQueryOptions = <
-  TData = Awaited<ReturnType<typeof listSavedLogins>>,
+export const getListGuardadoLoginsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listGuardadoLogins>>,
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
@@ -119,11 +119,11 @@ export const getListSavedLoginsQueryOptions = <
 >(
   organizationId: string,
   personId: string,
-  params?: ListSavedLoginsParams,
+  params?: ListGuardadoLoginsParams,
   options?: {
     query?: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof listSavedLogins>>,
+        Awaited<ReturnType<typeof listGuardadoLogins>>,
         TError,
         TData
       >
@@ -135,12 +135,12 @@ export const getListSavedLoginsQueryOptions = <
 
   const queryKey =
     queryOptions?.queryKey ??
-    getListSavedLoginsQueryKey(organizationId, personId, params);
+    getListGuardadoLoginsQueryKey(organizationId, personId, params);
 
-  const queryFn: QueryFunction<Awaited<ReturnType<typeof listSavedLogins>>> = ({
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listGuardadoLogins>>> = ({
     signal,
   }) =>
-    listSavedLogins(organizationId, personId, params, {
+    listGuardadoLogins(organizationId, personId, params, {
       signal,
       ...requestOptions,
     });
@@ -155,16 +155,16 @@ export const getListSavedLoginsQueryOptions = <
       personId !== undefined,
     ...queryOptions,
   } as UseQueryOptions<
-    Awaited<ReturnType<typeof listSavedLogins>>,
+    Awaited<ReturnType<typeof listGuardadoLogins>>,
     TError,
     TData
   > & { queryKey: DataTag<QueryKey, TData, TError> };
 };
 
-export type ListSavedLoginsQueryResult = NonNullable<
-  Awaited<ReturnType<typeof listSavedLogins>>
+export type ListGuardadoLoginsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listGuardadoLogins>>
 >;
-export type ListSavedLoginsQueryError =
+export type ListGuardadoLoginsQueryError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
   | OwnOnlyResponse
@@ -172,8 +172,8 @@ export type ListSavedLoginsQueryError =
   | ServerErrorResponse
   | UnexpectedErrorResponse;
 
-export function useListSavedLogins<
-  TData = Awaited<ReturnType<typeof listSavedLogins>>,
+export function useListGuardadoLogins<
+  TData = Awaited<ReturnType<typeof listGuardadoLogins>>,
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
@@ -184,20 +184,20 @@ export function useListSavedLogins<
 >(
   organizationId: string,
   personId: string,
-  params: undefined | ListSavedLoginsParams,
+  params: undefined | ListGuardadoLoginsParams,
   options: {
     query: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof listSavedLogins>>,
+        Awaited<ReturnType<typeof listGuardadoLogins>>,
         TError,
         TData
       >
     > &
       Pick<
         DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listSavedLogins>>,
+          Awaited<ReturnType<typeof listGuardadoLogins>>,
           TError,
-          Awaited<ReturnType<typeof listSavedLogins>>
+          Awaited<ReturnType<typeof listGuardadoLogins>>
         >,
         "initialData"
       >;
@@ -207,8 +207,8 @@ export function useListSavedLogins<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useListSavedLogins<
-  TData = Awaited<ReturnType<typeof listSavedLogins>>,
+export function useListGuardadoLogins<
+  TData = Awaited<ReturnType<typeof listGuardadoLogins>>,
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
@@ -219,20 +219,20 @@ export function useListSavedLogins<
 >(
   organizationId: string,
   personId: string,
-  params?: ListSavedLoginsParams,
+  params?: ListGuardadoLoginsParams,
   options?: {
     query?: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof listSavedLogins>>,
+        Awaited<ReturnType<typeof listGuardadoLogins>>,
         TError,
         TData
       >
     > &
       Pick<
         UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listSavedLogins>>,
+          Awaited<ReturnType<typeof listGuardadoLogins>>,
           TError,
-          Awaited<ReturnType<typeof listSavedLogins>>
+          Awaited<ReturnType<typeof listGuardadoLogins>>
         >,
         "initialData"
       >;
@@ -242,8 +242,8 @@ export function useListSavedLogins<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useListSavedLogins<
-  TData = Awaited<ReturnType<typeof listSavedLogins>>,
+export function useListGuardadoLogins<
+  TData = Awaited<ReturnType<typeof listGuardadoLogins>>,
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
@@ -254,11 +254,11 @@ export function useListSavedLogins<
 >(
   organizationId: string,
   personId: string,
-  params?: ListSavedLoginsParams,
+  params?: ListGuardadoLoginsParams,
   options?: {
     query?: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof listSavedLogins>>,
+        Awaited<ReturnType<typeof listGuardadoLogins>>,
         TError,
         TData
       >
@@ -273,8 +273,8 @@ export function useListSavedLogins<
  * @summary List a person's saved logins
  */
 
-export function useListSavedLogins<
-  TData = Awaited<ReturnType<typeof listSavedLogins>>,
+export function useListGuardadoLogins<
+  TData = Awaited<ReturnType<typeof listGuardadoLogins>>,
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
@@ -285,11 +285,11 @@ export function useListSavedLogins<
 >(
   organizationId: string,
   personId: string,
-  params?: ListSavedLoginsParams,
+  params?: ListGuardadoLoginsParams,
   options?: {
     query?: Partial<
       UseQueryOptions<
-        Awaited<ReturnType<typeof listSavedLogins>>,
+        Awaited<ReturnType<typeof listGuardadoLogins>>,
         TError,
         TData
       >
@@ -300,7 +300,7 @@ export function useListSavedLogins<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 } {
-  const queryOptions = getListSavedLoginsQueryOptions(
+  const queryOptions = getListGuardadoLoginsQueryOptions(
     organizationId,
     personId,
     params,
@@ -315,7 +315,7 @@ export function useListSavedLogins<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
-export const getDeleteSavedLoginUrl = (
+export const getDeleteGuardadoLoginUrl = (
   organizationId: string,
   personId: string,
   savedLoginId: string,
@@ -327,11 +327,11 @@ export const getDeleteSavedLoginUrl = (
  * Forget a saved login, password included. Only the person who saved it may delete it. One already deleted is not found, which a client can read as done.
  * @summary Delete a saved login
  */
-export const deleteSavedLogin = async (
+export const deleteGuardadoLogin = async (
   organizationId: string,
   personId: string,
   savedLoginId: string,
-  headers: DeleteSavedLoginHeaders,
+  headers: DeleteGuardadoLoginHeaders,
   options?: Parameters<typeof apiRequest>[1],
 ): Promise<void> => {
   const getHeaders = (
@@ -356,43 +356,43 @@ export const deleteSavedLogin = async (
     return headers;
   };
   return apiRequest<void>(
-    getDeleteSavedLoginUrl(organizationId, personId, savedLoginId),
+    getDeleteGuardadoLoginUrl(organizationId, personId, savedLoginId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
       headers: { ...headers, ...getHeaders(options?.headers) },
     },
   );
 };
 
-export const getDeleteSavedLoginMutationKey = () =>
-  ["deleteSavedLogin"] as const;
+export const getDeleteGuardadoLoginMutationKey = () =>
+  ["deleteGuardadoLogin"] as const;
 
-export const getDeleteSavedLoginMutationOptions = <
+export const getDeleteGuardadoLoginMutationOptions = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
     | OwnOnlyResponse
-    | SavedLoginNotFoundResponse
+    | GuardadoLoginNotFoundResponse
     | IdempotencyConflictResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof deleteSavedLogin>>,
+    Awaited<ReturnType<typeof deleteGuardadoLogin>>,
     TError,
-    DeleteSavedLoginMutationVariables,
+    DeleteGuardadoLoginMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof apiRequest>;
 }): UseMutationOptions<
-  Awaited<ReturnType<typeof deleteSavedLogin>>,
+  Awaited<ReturnType<typeof deleteGuardadoLogin>>,
   TError,
-  DeleteSavedLoginMutationVariables,
+  DeleteGuardadoLoginMutationVariables,
   TContext
 > => {
-  const mutationKey = getDeleteSavedLoginMutationKey();
+  const mutationKey = getDeleteGuardadoLoginMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -402,12 +402,12 @@ export const getDeleteSavedLoginMutationOptions = <
     : { mutation: { mutationKey }, request: undefined };
 
   const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof deleteSavedLogin>>,
-    DeleteSavedLoginMutationVariables
+    Awaited<ReturnType<typeof deleteGuardadoLogin>>,
+    DeleteGuardadoLoginMutationVariables
   > = (props) => {
     const { organizationId, personId, savedLoginId, headers } = props ?? {};
 
-    return deleteSavedLogin(
+    return deleteGuardadoLogin(
       organizationId,
       personId,
       savedLoginId,
@@ -419,34 +419,34 @@ export const getDeleteSavedLoginMutationOptions = <
   return { mutationFn, ...mutationOptions };
 };
 
-export type DeleteSavedLoginMutationResult = NonNullable<
-  Awaited<ReturnType<typeof deleteSavedLogin>>
+export type DeleteGuardadoLoginMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteGuardadoLogin>>
 >;
 
-export type DeleteSavedLoginMutationError =
+export type DeleteGuardadoLoginMutationError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
   | OwnOnlyResponse
-  | SavedLoginNotFoundResponse
+  | GuardadoLoginNotFoundResponse
   | IdempotencyConflictResponse
   | ServerErrorResponse
   | UnexpectedErrorResponse;
-export type DeleteSavedLoginMutationVariables = {
+export type DeleteGuardadoLoginMutationVariables = {
   organizationId: string;
   personId: string;
   savedLoginId: string;
-  headers: DeleteSavedLoginHeaders;
+  headers: DeleteGuardadoLoginHeaders;
 };
 
 /**
  * @summary Delete a saved login
  */
-export const useDeleteSavedLogin = <
+export const useDeleteGuardadoLogin = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
     | OwnOnlyResponse
-    | SavedLoginNotFoundResponse
+    | GuardadoLoginNotFoundResponse
     | IdempotencyConflictResponse
     | ServerErrorResponse
     | UnexpectedErrorResponse,
@@ -454,19 +454,19 @@ export const useDeleteSavedLogin = <
 >(
   options?: {
     mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof deleteSavedLogin>>,
+      Awaited<ReturnType<typeof deleteGuardadoLogin>>,
       TError,
-      DeleteSavedLoginMutationVariables,
+      DeleteGuardadoLoginMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof apiRequest>;
   },
   queryClient?: QueryClient,
 ): UseMutationResult<
-  Awaited<ReturnType<typeof deleteSavedLogin>>,
+  Awaited<ReturnType<typeof deleteGuardadoLogin>>,
   TError,
-  DeleteSavedLoginMutationVariables,
+  DeleteGuardadoLoginMutationVariables,
   TContext
 > => {
-  return useMutation(getDeleteSavedLoginMutationOptions(options), queryClient);
+  return useMutation(getDeleteGuardadoLoginMutationOptions(options), queryClient);
 };

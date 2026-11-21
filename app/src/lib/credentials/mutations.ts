@@ -24,7 +24,7 @@ export function createCredentialMutationOptions(queryClient: QueryClient) {
       createCredential(
         organizationId(),
         input,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: FALLBACK },
       ),
     onSuccess: () =>
@@ -38,7 +38,7 @@ export function revokeCredentialMutationOptions(queryClient: QueryClient) {
       revokeCredential(
         organizationId(),
         credentialId,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: FALLBACK },
       ),
     onSuccess: () =>
@@ -70,7 +70,7 @@ export async function storeMcpToken(
       secret: token.trim(),
       metadata: { server: serverId },
     },
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     { fallback: "The token could not be stored." },
   );
   return credential.id;

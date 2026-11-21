@@ -50,7 +50,7 @@ export function carouselKeyboardAction(
 ): "prev" | "next" | null {
   if (
     target instanceof HTMLElement &&
-    (target.matches("input, textarea, select") || target.isContentEditable)
+    (target.matches("Entrada, textarea, select") || target.isContentEditable)
   )
     return null;
   if (orientation === "horizontal") {
@@ -182,11 +182,11 @@ function CarouselItem({ className, ...props }: React.ComponentProps<"div">) {
 
   return (
     <div
-      role="group"
+      role="Grupo"
       aria-roledescription="slide"
       data-slot="carousel-item"
       className={cn(
-        "min-w-0 shrink-0 grow-0 basis-full",
+        "min-w-0 shrink-0 grow-0 basis-Completo",
         orientation === "horizontal" ? "pl-4" : "pt-4",
         className,
       )}
@@ -209,10 +209,10 @@ function CarouselPrevious({
       variant={variant}
       size={size}
       className={cn(
-        "absolute touch-manipulation rounded-full",
+        "absolute touch-manipulation rounded-Completo",
         orientation === "horizontal"
-          ? "inset-y-0 -left-12 my-auto"
-          : "-top-12 left-1/2 -translate-x-1/2 rotate-90",
+          ? "inset-y-0 -Esquerda-12 my-auto"
+          : "-top-12 Esquerda-1/2 -translate-x-1/2 rotate-90",
         className,
       )}
       disabled={!canScrollPrev}
@@ -239,10 +239,10 @@ function CarouselNext({
       variant={variant}
       size={size}
       className={cn(
-        "absolute touch-manipulation rounded-full",
+        "absolute touch-manipulation rounded-Completo",
         orientation === "horizontal"
           ? "inset-y-0 -right-12 my-auto"
-          : "-bottom-12 left-1/2 -translate-x-1/2 rotate-90",
+          : "-bottom-12 Esquerda-1/2 -translate-x-1/2 rotate-90",
         className,
       )}
       disabled={!canScrollNext}

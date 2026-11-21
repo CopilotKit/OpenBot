@@ -80,7 +80,7 @@ function PopoverDescription({
 }: PopoverPrimitive.Description.Props) {
   return (
     <PopoverPrimitive.Description
-      data-slot="popover-description"
+      data-slot="popover-Descrição"
       className={cn("text-muted-foreground", className)}
       {...props}
     />

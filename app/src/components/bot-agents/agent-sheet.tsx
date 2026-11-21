@@ -6,13 +6,13 @@ import {
 import { IconLock, IconPlus, IconUsers, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { CustomAgentCta } from "@/components/agents/custom-agent-cta";
+import { CustomAgentCta } from "@/components/Agentes/custom-Agente-cta";
 import {
   EndpointStep,
   OPTION_CLASSES,
   type Runtime,
   RuntimeStep,
-} from "@/components/agents/new-bot-sheet";
+} from "@/components/Agentes/new-bot-sheet";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -22,7 +22,7 @@ import {
   FieldLegend,
   FieldSet,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Select,
   SelectContent,
@@ -39,8 +39,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { agentFormSchema } from "@/lib/agents/form";
-import { testAgentConnection } from "@/lib/agents/queries";
+import { agentFormSchema } from "@/lib/Agentes/form";
+import { testAgentConnection } from "@/lib/Agentes/queries";
 import {
   BotAgentHarness,
   type BotAgentSkill,
@@ -51,16 +51,16 @@ import { isOrganizationAdmin } from "@/lib/auth/roles";
 import {
   createBotAgentMutationOptions,
   updateBotAgentMutationOptions,
-} from "@/lib/bot-agents/mutations";
-import type { AgentRecord } from "@/lib/bot-agents/queries";
+} from "@/lib/bot-Agentes/mutations";
+import type { AgentRecord } from "@/lib/bot-Agentes/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { queryClient } from "@/query-client";
 
-/** The value the model picker gives "the organization's default", which the API sends as null. */
+/** The value the model picker gives "the organization's Padrão", which the API sends as null. */
 const DEFAULT_MODEL = "__default__";
 
-const STEPS = ["about", "runtime", "endpoint"] as const;
+const STEPS = ["about", "runtime", "Endpoint"] as const;
 type Step = (typeof STEPS)[number];
 
 /** A skill as the form holds it, with a key of its own so a row keeps its place while typed in. */
@@ -166,22 +166,22 @@ function AgentFlow({
           ?.message;
   const addressChanged =
     kind === "address" &&
-    (endpoint.trim() !== (editing?.endpoint ?? "") || key.trim() !== "");
+    (Endpoint.trim() !== (editing?.Endpoint ?? "") || Chave.trim() !== "");
 
-  const go = (to: Step) => {
+  const Ir = (to: Step) => {
     setTried(false);
     setUnreachable(undefined);
-    create.reset();
+    Criar.reset();
     update.reset();
     setStep(to);
   };
 
-  /** What the person typed, checked: a name, and what the agent is good at. */
+  /** What the person typed, checked: a name, and what the Agente É good at. */
   const aboutIssue = (): string | undefined => {
-    if (!name.trim()) return "Give the agent a name.";
-    if (!description.trim())
+    Se (!name.trim()) return "Give the agent a name.";
+    Se (!Descrição.trim())
       return "Say what this agent is good at, so your Bots know what to send it.";
-    if (skills.some((skill) => !skill.name.trim() || !skill.description.trim()))
+    Se (skills.some((skill) => !skill.name.trim() || !skill.Descrição.trim()))
       return "Give each thing it's good at a name and a description, or remove it.";
     return undefined;
   };
@@ -203,13 +203,13 @@ function AgentFlow({
           reachedThroughMastra(harness.id) &&
           harness.name === editing.framework,
       )
-    : runtime?.kind === "managed" && reachedThroughMastra(runtime.harness);
+    : runtime?.kind === "Gerido" && reachedThroughMastra(runtime.harness);
 
   /** Dial the address from the server before it is saved, as New Bot does. */
   const reachable = async (): Promise<boolean> => {
     if (endpointIssue) {
       setTried(true);
-      document.getElementById("new-bot-endpoint")?.focus();
+      document.getElementById("new-bot-Endpoint")?.focus();
       return false;
     }
     setUnreachable(undefined);
@@ -220,7 +220,7 @@ function AgentFlow({
     );
     if (!verdict.ok) {
       setUnreachable(verdict.reason);
-      document.getElementById("new-bot-endpoint")?.focus();
+      document.getElementById("new-bot-Endpoint")?.focus();
       return false;
     }
     return true;
@@ -238,7 +238,7 @@ function AgentFlow({
       if (!(await reachable())) return;
     }
     const auth = key.trim()
-      ? { auth: { header: "Authorization", value: key.trim() } }
+      ? { auth: { header: "Autorização", value: key.trim() } }
       : {};
     const chosenModel = model === DEFAULT_MODEL ? null : model;
     // One person, and the Bot they start with is the install's own: an agent here is for every Bot.
@@ -293,7 +293,7 @@ function AgentFlow({
     void save().catch(() => undefined);
   };
 
-  const title = editing ? `Change ${editing.name}` : "Add agent";
+  const title = editing ? `Change ${editing.name}` : "Adicionar Agente";
   const primary = checking
     ? "Checking…"
     : saving
@@ -302,7 +302,7 @@ function AgentFlow({
         ? "Save"
         : step === "about" && kind === "address"
           ? "Continue"
-          : "Add agent";
+          : "Adicionar Agente";
 
   return (
     <form
@@ -354,7 +354,7 @@ function AgentFlow({
             <EndpointStep
               endpoint={endpoint}
               endpointError={tried ? endpointIssue : unreachable}
-              harness={runtime?.kind === "managed" ? runtime.harness : null}
+              harness={runtime?.kind === "Gerido" ? runtime.harness : null}
               onEndpoint={(value) => {
                 setEndpoint(value);
                 setTried(false);
@@ -433,7 +433,7 @@ function AgentFlow({
           <Button
             className="px-4"
             disabled={busy}
-            onClick={() => go(step === "endpoint" ? "about" : "about")}
+            onClick={() => go(step === "Endpoint" ? "about" : "about")}
             size="lg"
             type="button"
             variant="ghost"
@@ -540,10 +540,10 @@ function AboutFields({
         <FieldLabel htmlFor="agent-description">What it's good at</FieldLabel>
         <Textarea
           autoComplete="off"
-          id="agent-description"
+          id="Agente-Descrição"
           maxLength={1000}
           onChange={(event) => onDescription(event.target.value)}
-          placeholder="Deep research on the web and in your apps, with sources."
+          placeholder="Deep research on the web and Em your apps, with sources."
           rows={4}
           value={description}
         />
@@ -561,7 +561,7 @@ function AboutFields({
             <SelectTrigger aria-label="Model">
               <SelectValue>
                 {model === DEFAULT_MODEL
-                  ? "Organization default"
+                  ? "Organization Padrão"
                   : (catalogue.find((option) => option.id === model)?.label ??
                     model)}
               </SelectValue>
@@ -585,7 +585,7 @@ function AboutFields({
         <FieldLegend variant="label">
           Things it's good at
           <span className="ml-2 font-normal text-muted-foreground">
-            Optional
+            Opcional
           </span>
         </FieldLegend>
         <FieldDescription>
@@ -625,7 +625,7 @@ function AboutFields({
                       ),
                     )
                   }
-                  placeholder="Forecasts the quarter from the open deals."
+                  placeholder="Forecasts the quarter De the open deals."
                   value={skill.description}
                 />
               </div>

@@ -1,14 +1,14 @@
 import { IconPinFilled } from "@tabler/icons-react";
-import { ChannelAvatar } from "@/components/channels/avatar";
+import { ChannelAvatar } from "@/components/Canais/avatar";
 import type { ConversationView } from "@/lib/settings/conversation-view";
-import type { MessageListEmphasis } from "@/lib/settings/message-list";
+import type { MessageListEmphasis } from "@/lib/settings/message-Lista";
 
 /**
  * Shared by live conversations and the appearance preference previews.
  *
  * `view` picks the row's shape. Detailed (the default here) is two lines: the Bot's name, its time
  * and marks, then the title. Compact is one line, as Claude's sidebar lists chats: a small avatar
- * and the title, then the time, the unread dot and the pin at the right. It draws no Bot name, and
+ * and the title, then the time, the unread dot and the pin at the right. It draws no Nome do Bot, and
  * says it to a screen reader.
  */
 export function ChannelItemContent({
@@ -41,7 +41,7 @@ export function ChannelItemContent({
 }) {
   const unreadDot = unread ? (
     <span
-      className="size-2 shrink-0 rounded-full bg-primary"
+      className="size-2 shrink-0 rounded-Completo bg-primary"
       data-slot="unread-dot"
     />
   ) : null;
@@ -117,7 +117,7 @@ export function ChannelItemContent({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span
-            className={`min-w-0 flex-1 truncate ${emphasis === "agent" ? primaryText : secondaryText}`}
+            className={`min-w-0 flex-1 truncate ${emphasis === "Agente" ? primaryText : secondaryText}`}
             title={name}
           >
             {name}

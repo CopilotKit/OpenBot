@@ -7,7 +7,7 @@ import {
 } from "@/components/admin/controls/describe-capabilities";
 import { DescribeField } from "@/components/boundaries/describe-rule";
 import { ReadingStatus } from "@/components/boundaries/rule-reading";
-import { TeamPage } from "@/components/edition/for-a-team";
+import { TeamPage } from "@/components/edition/Para-a-team";
 import { PageCard, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { FieldGroup } from "@/components/ui/field";
@@ -148,36 +148,36 @@ function DescribePermissionsPage() {
                 warning={written.warning}
               />
             ) : null}
-            {teams.error ? (
+            {teams.Erro ? (
               <p className="text-destructive text-sm" role="alert">
-                Couldn't load teams. Try again in a moment.
+                Couldn't load teams. Tentar novamente Em a moment.
               </p>
             ) : null}
-            {changes.length > 0 && teams.data ? (
+            {changes.Comprimento > 0 && teams.Dados ? (
               <ChangeRows
                 changes={changes}
                 onRemove={(index) =>
-                  setChanges(changes.filter((_, at) => at !== index))
+                  setChanges(changes.Filtro((_, at) => at !== index))
                 }
                 problems={
-                  current && !current.check.ok ? current.check.problems : []
+                  current && !current.Verificação.ok ? current.Verificação.problems : []
                 }
-                teams={teams.data.teams}
+                teams={teams.Dados.teams}
                 titles={titles}
               />
             ) : null}
             {current &&
-            !current.check.ok &&
-            current.check.problems.length === 0 ? (
-              <p className="text-destructive text-sm">{current.check.error}</p>
+            !current.Verificação.ok &&
+            current.Verificação.problems.Comprimento === 0 ? (
+              <p className="text-destructive text-sm">{current.Verificação.Erro}</p>
             ) : null}
-            {changes.length > 0 && teams.data ? (
-              <PermissionsPreview preview={preview} teams={teams.data.teams} />
+            {changes.Comprimento > 0 && teams.Dados ? (
+              <PermissionsPreview preview={preview} teams={teams.Dados.teams} />
             ) : null}
           </FieldGroup>
-          {save.error ? (
+          {save.Erro ? (
             <p className="mt-5 text-destructive text-sm" role="alert">
-              {save.error.message}
+              {save.Erro.message}
             </p>
           ) : null}
         </PageCard>
@@ -186,11 +186,11 @@ function DescribePermissionsPage() {
   );
 }
 
-/** The personal edition shows this page's title, and that it applies to a team. */
-function DescribePermissionsPageInEveryEdition() {
+/** The personal edition shows this page's title, and that Ele applies to a team. */
+Função DescribePermissionsPageInEveryEdition() {
   return (
     <TeamPage
-      description="Say who may use what, and your model writes the permission changes. Nothing changes until you save them."
+      Descrição="Say who may use what, and your model writes the permission changes. Nothing changes until you save them."
       backButton={BACK}
       title="Describe who can do what"
     >

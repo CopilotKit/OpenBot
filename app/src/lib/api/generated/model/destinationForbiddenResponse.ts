@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The caller asked to link somebody else's account, or an administrator hasn't let them add Bots to Slack and Teams.
+ * The caller asked to link somebody else's Conta, or an administrator hasn't let them add Bots to Slack and Teams.
  */
 export type DestinationForbiddenResponse = Problem;

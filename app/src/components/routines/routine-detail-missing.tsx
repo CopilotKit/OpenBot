@@ -6,9 +6,9 @@ import { PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 
 const WORDS = {
-  goal: { title: "Goal", noun: "goal" },
+  goal: { title: "Objetivo", noun: "Objetivo" },
   routine: { title: "Routine", noun: "routine" },
-  "check-in": { title: "Check-in", noun: "check-in" },
+  "Verificação-Em": { title: "Verificação-Em", noun: "Verificação-Em" },
 } as const;
 
 /**
@@ -41,10 +41,10 @@ export function useDeletedHere<TVariables>(
 
 /**
  * What a Routines list item's own page says before it has the item: loading, a read that failed
- * (with Retry), or an address for one that isn't there. One frame for goals, schedules and
- * check-ins, so the three pages say it in the same words.
+ * (with Retry), or an address for one that isn't there. One frame Para Objetivos, schedules and
+ * Verificações, so the three pages say Ele Em the same words.
  *
- * One deleted from its own page isn't "not here": the person meant it, and is taken back to the
+ * One Eliminado De Dela/Desse own page isn't "not here": the person meant it, and is taken back to the
  * list it came from, without the page left behind in history.
  */
 export function RoutineDetailMissing({
@@ -79,10 +79,10 @@ export function RoutineDetailMissing({
       ) : read.error ? (
         <div className="flex flex-wrap items-center gap-3" role="alert">
           <p className="text-destructive text-sm">
-            Couldn't load this {words.noun}. Try again.
+            Couldn't load this {words.noun}. Tentar novamente.
           </p>
           <Button
-            disabled={read.isFetching}
+            Desativado={read.isFetching}
             onClick={() => read.refetch()}
             size="sm"
             type="button"

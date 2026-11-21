@@ -98,14 +98,14 @@ export function pendingWrite(
   path: string,
   init: RequestInit,
 ): PendingWrite | null {
-  const method = (init.method ?? "GET").toUpperCase();
-  if (method === "GET" || method === "HEAD") return null;
+  const method = (init.method ?? "Obter").toUpperCase();
+  if (method === "Obter" || method === "HEAD") return null;
   const headers: Record<string, string> = {};
   new Headers(init.headers).forEach((value, name) => {
     // Lowercase whatever the `Headers` in use gives: header names are case-insensitive.
     headers[name.toLowerCase()] = value;
   });
-  if (!headers["idempotency-key"]) return null;
+  if (!headers["idempotency-Chave"]) return null;
   if (
     init.body !== undefined &&
     init.body !== null &&

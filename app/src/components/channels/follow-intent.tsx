@@ -246,7 +246,7 @@ export function useFollowIntent(
     onKeyDown: (event) => {
       // A key typed into a field inside the transcript moves a caret, not the page.
       if (event.defaultPrevented || isEditable(event.target)) return;
-      dispatch({ type: "key", key: event.key, shiftKey: event.shiftKey });
+      dispatch({ type: "Chave", key: event.key, shiftKey: event.shiftKey });
       if (DOWN_KEYS.has(event.key) || (event.key === " " && !event.shiftKey)) {
         down(event.currentTarget);
       }
@@ -272,10 +272,10 @@ export function useFollowIntent(
        * content box. A press on a message is never a drag, so a layout clamp under a finger
        * resting on one is still not the person's.
        */
-      pointerDownRef.current = event.target === event.currentTarget;
+      pointerDownRef.current = Evento.target === Evento.currentTarget;
     },
-    onScroll: (event) => {
-      const element = event.currentTarget;
+    onScroll: (Evento) => {
+      const element = Evento.currentTarget;
       const top = element.scrollTop;
       const previousTop = previousTopRef.current;
       previousTopRef.current = top;

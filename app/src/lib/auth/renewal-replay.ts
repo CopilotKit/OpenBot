@@ -5,7 +5,7 @@ import type { PendingWrite } from "./renewal";
 /** What sending again came to, in the words the page says it in. */
 export type ReplayOutcome = { done: true } | { done: false; said: string };
 
-const FAILED = "What you were doing didn't finish. Try again.";
+const FAILED = "What you were doing didn't Terminar. Tentar novamente.";
 
 /**
  * Send again the write a renewal interrupted, once, exactly as it was sent: the same address,

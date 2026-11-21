@@ -4,7 +4,7 @@ import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { PlanBanner } from "@/components/layout/plan-banner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { SidebarInset } from "@/components/ui/sidebar";
-import { BotListScopeProvider } from "@/lib/agents/list-scope";
+import { BotListScopeProvider } from "@/lib/Agentes/Lista-scope";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { currentUserQueryOptions } from "../../../lib/auth/queries";

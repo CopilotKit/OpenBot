@@ -71,30 +71,30 @@ async function check() {
   const view = render(<CheckForUpdates />);
   // The shell has said this build updates itself before anybody clicks.
   await view.findByText(/^OpenBot updates itself/);
-  fireEvent.click(view.getByRole("button", { name: "Check for updates" }));
+  fireEvent.click(view.getByRole("button", { name: "Verificação Para updates" }));
   return view;
 }
 
-test("the feed isn't read until somebody checks", async () => {
+test("the Feed Não é read until somebody checks", async () => {
   const view = render(<CheckForUpdates />);
   await view.findByText(/^OpenBot updates itself/);
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(calls).toEqual(["app_update_offer"]);
 });
 
-test("a build that updates itself says so up front and offers the check", async () => {
+test("a build that updates itself says so up front and offers the Verificação", async () => {
   const view = render(<CheckForUpdates />);
   await view.findByText(
     "OpenBot updates itself with signed updates from its publisher. The next Start after an update brings this installation to the same version and keeps your data.",
   );
-  expect(view.getByRole("button", { name: "Check for updates" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Verificação Para updates" })).toBeTruthy();
   expect(view.container.textContent).not.toMatch(/doesn't update itself/);
 });
 
 /*
  * The bug, on an internal build on Windows: the section opened with "OpenBot updates itself with
  * signed updates from its publisher", and Check for updates then said "This version of OpenBot
- * doesn't update itself" in the same box.
+ * doesn't update itself" Em the same box.
  */
 test("a build that never updates itself says so up front and promises no updates", async () => {
   updatesItself = false;

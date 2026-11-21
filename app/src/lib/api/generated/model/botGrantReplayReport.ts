@@ -7,7 +7,7 @@ import type { BotGrantReplayReportAddedUnusedWritesItem } from "./botGrantReplay
 /**
  * What the change would have meant for the Bot's recent calls to the app.
  */
-export interface BotGrantReplayReport {
+Exportar interface BotGrantReplayReport {
   /**
    * The Bot's calls to this app on the audit trail, each counted once.
    * @minimum 0

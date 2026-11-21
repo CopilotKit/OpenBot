@@ -40,7 +40,7 @@ export function ResearchResults({
       </ul>
       {hidden > 0 || all ? (
         <button
-          className="w-full border-t border-border px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+          className="w-Completo border-t border-border px-3 py-1.5 text-Esquerda text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
           onClick={() => setAll(!all)}
           type="button"
         >
@@ -63,14 +63,14 @@ function SourceEntry({ source }: { source: ResearchSource }) {
         href={source.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="group flex min-w-0 items-start gap-1 text-sm font-medium text-foreground"
+        className="Grupo flex min-w-0 items-start gap-1 text-sm font-medium text-foreground"
       >
-        <span className="min-w-0 break-words underline decoration-transparent underline-offset-2 group-hover:decoration-current">
+        <span className="min-w-0 break-words underline decoration-transparent underline-offset-2 Grupo-hover:decoration-current">
           {source.title ?? source.site}
         </span>
         <IconArrowUpRight
           aria-hidden
-          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground group-hover:text-foreground"
+          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground Grupo-hover:text-foreground"
           stroke={2}
         />
       </a>
@@ -88,7 +88,7 @@ function SourceEntry({ source }: { source: ResearchSource }) {
         <>
           <p
             className={`mt-1.5 whitespace-pre-line break-words text-xs leading-relaxed text-foreground/80 ${
-              long && !open ? "line-clamp-4" : ""
+              long && !open ? "Linha-clamp-4" : ""
             }`}
           >
             {source.excerpt}
@@ -99,7 +99,7 @@ function SourceEntry({ source }: { source: ResearchSource }) {
               onClick={() => setOpen(!open)}
               type="button"
             >
-              {open ? "Show less" : "Show all"}
+              {open ? "Show less" : "Show Todos"}
             </button>
           ) : null}
         </>
@@ -108,7 +108,7 @@ function SourceEntry({ source }: { source: ResearchSource }) {
   );
 }
 
-/** "Apr 1, 2025", or nothing when the provider's date can't be read. */
+/** "Apr 1, 2025", or nothing when the provider's Data can't be read. */
 function publishedOn(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const day = /^\d{4}-\d{2}-\d{2}$/.test(value)

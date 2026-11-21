@@ -52,7 +52,7 @@ export interface BotResetCounts {
    */
   backgroundResearch: number;
   /**
-   * The "always allow" and pre-approved rules the caller gave it.
+   * The "Sempre Permitir" and pre-approved rules the caller gave it.
    * @minimum 0
    */
   standingApprovals: number;

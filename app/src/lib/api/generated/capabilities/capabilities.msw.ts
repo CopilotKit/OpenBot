@@ -14,7 +14,7 @@ import type {
   ChangeDescription,
   PersonCapabilities,
   PersonComputersStopped,
-  SavedCapabilityChanges,
+  GuardadoCapabilityChanges,
   UpdateCapabilityRequest,
 } from "../model";
 
@@ -22,9 +22,9 @@ export const getListCapabilitiesResponseMock = (): CapabilityPage => ({
   capabilities: [
     {
       id: "passwordManager",
-      title: "Password manager",
+      title: "Password Gestor",
       description:
-        "People may save logins and hand sign-ins to a Bot's browser.",
+        "People may save Iniciadores de sessão and hand sign-ins to a Bot's Navegador.",
       default: true,
       organization: null,
       roles: { member: false },
@@ -36,8 +36,8 @@ export const getListCapabilitiesResponseMock = (): CapabilityPage => ({
 
 export const getUpdateCapabilityResponseMock = (): Capability => ({
   id: "passwordManager",
-  title: "Password manager",
-  description: "People may save logins and hand sign-ins to a Bot's browser.",
+  title: "Password Gestor",
+  description: "People may save Iniciadores de sessão and hand sign-ins to a Bot's Navegador.",
   default: true,
   organization: null,
   roles: { member: false },
@@ -45,7 +45,7 @@ export const getUpdateCapabilityResponseMock = (): Capability => ({
 });
 
 export const getBatchUpdateCapabilitiesResponseMock =
-  (): SavedCapabilityChanges => ({
+  (): GuardadoCapabilityChanges => ({
     saved: [
       {
         scopeKind: "role",
@@ -54,7 +54,7 @@ export const getBatchUpdateCapabilitiesResponseMock =
         allowed: false,
       },
       {
-        scopeKind: "group",
+        scopeKind: "Grupo",
         scopeId: "Finance",
         capability: "passwordManager",
         allowed: true,
@@ -66,14 +66,14 @@ export const getTranslateCapabilityChangesResponseMock =
   (): CapabilityTranslation => ({
     changes: [
       {
-        scopeKind: "group",
+        scopeKind: "Grupo",
         scopeId: "Contractors",
         capability: "passwordManager",
         allowed: false,
       },
     ],
-    summary: "Contractors can't use the password manager.",
-    explanation: "Everybody else keeps it.",
+    summary: "Contractors can't use the password Gestor.",
+    explanation: "Everybody else keeps Ele.",
     check: { ok: true },
     warning: null,
   });
@@ -91,8 +91,8 @@ export const getPreviewCapabilityChangesResponseMock =
         capabilities: [
           {
             capability: "passwordManager",
-            title: "Password manager",
-            before: { allowed: true, decidedBy: "default", scopeId: "" },
+            title: "Password Gestor",
+            before: { allowed: true, decidedBy: "Padrão", scopeId: "" },
             after: { allowed: false, decidedBy: "role", scopeId: "member" },
           },
         ],
@@ -127,7 +127,7 @@ export const getStopPersonComputersResponseMock =
     failed: [
       {
         computer: "bot:research-assistant",
-        reason: "The computer did not answer in time.",
+        reason: "The Computador did not Resposta Em time.",
       },
     ],
   });
@@ -147,7 +147,7 @@ export const getListCapabilitiesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListCapabilitiesResponseMock(),
@@ -186,7 +186,7 @@ export const getUpdateCapabilityMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateCapabilityResponseMock(),
@@ -199,12 +199,12 @@ export const getUpdateCapabilityMockHandler = (
 
 export const getBatchUpdateCapabilitiesMockHandler = (
   overrideResponse?:
-    | SavedCapabilityChanges
+    | GuardadoCapabilityChanges
     | ((
         info: Parameters<
           HttpResponseResolver<{ organizationId: string }, CapabilityChanges>
         >[0],
-      ) => Promise<SavedCapabilityChanges> | SavedCapabilityChanges),
+      ) => Promise<GuardadoCapabilityChanges> | GuardadoCapabilityChanges),
   options?: RequestHandlerOptions,
 ) => {
   return http.post<{ organizationId: string }, CapabilityChanges>(
@@ -216,7 +216,7 @@ export const getBatchUpdateCapabilitiesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getBatchUpdateCapabilitiesResponseMock(),
@@ -246,7 +246,7 @@ export const getTranslateCapabilityChangesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getTranslateCapabilityChangesResponseMock(),
@@ -282,7 +282,7 @@ export const getPreviewCapabilityChangesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getPreviewCapabilityChangesResponseMock(),
@@ -312,7 +312,7 @@ export const getGetPersonCapabilitiesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetPersonCapabilitiesResponseMock(),
@@ -342,7 +342,7 @@ export const getStopPersonComputersMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getStopPersonComputersResponseMock(),

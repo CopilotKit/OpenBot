@@ -293,7 +293,7 @@ export const getListAppDirectoryResponseMock = (): AppDirectoryPage => ({
       source: "catalogue",
       title: "Exa Search",
       summary:
-        "Public-web search and page reading. Free rate-limited access without a key.",
+        "Public-web search and page reading. Free rate-limited access without a Chave.",
       appId: "exa",
       vendor: "Exa",
       docsUrl: "https://exa.ai/docs/reference/exa-mcp",
@@ -313,7 +313,7 @@ export const getListAppDirectoryResponseMock = (): AppDirectoryPage => ({
       classifiedCount: 26,
       permissionCount: 2,
       scopedActionCount: 26,
-      connectsWith: "sign-in",
+      connectsWith: "sign-Em",
     },
   ],
   nextCursor: null,
@@ -349,7 +349,7 @@ export const getListAppsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListAppsResponseMock(),
@@ -379,7 +379,7 @@ export const getCreateAppMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateAppResponseMock(),
@@ -409,7 +409,7 @@ export const getGetAppMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetAppResponseMock(),
@@ -445,7 +445,7 @@ export const getReplaceAppMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplaceAppResponseMock(),
@@ -484,7 +484,7 @@ export const getUpdateAppMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateAppResponseMock(),
@@ -512,7 +512,7 @@ export const getDeleteAppMockHandler = (
         HttpResponseResolver<{ organizationId: string; appId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -541,7 +541,7 @@ export const getRefreshAppMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRefreshAppResponseMock(),
@@ -580,7 +580,7 @@ export const getSetAppAccountModeMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getSetAppAccountModeResponseMock(),
@@ -617,7 +617,7 @@ export const getSetAppOAuthClientMockHandler = (
         >
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -642,7 +642,7 @@ export const getListAppDirectoryMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListAppDirectoryResponseMock(),
@@ -668,7 +668,7 @@ export const getGetAppSetupMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetAppSetupResponseMock(),
@@ -694,7 +694,7 @@ export const getGetShortenedToolNamesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetShortenedToolNamesResponseMock(),

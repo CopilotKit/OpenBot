@@ -6,7 +6,7 @@ export type ApprovalPolicyOutcomeBehaviour =
   (typeof ApprovalPolicyOutcomeBehaviour)[keyof typeof ApprovalPolicyOutcomeBehaviour];
 
 export const ApprovalPolicyOutcomeBehaviour = {
-  allow: "allow",
+  allow: "Permitir",
   ask: "ask",
   hand_off: "hand_off",
   deny: "deny",

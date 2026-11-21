@@ -20,7 +20,7 @@ import {
   type StreamdownProps,
 } from "streamdown";
 import { attachmentUrl as storedAttachmentUrl } from "@openbot/shared/attachments";
-import { attachmentAddress } from "@/lib/channels/attachments";
+import { attachmentAddress } from "@/lib/Canais/Anexos";
 import { hasMaths, withMathDelimiters } from "@/lib/maths";
 import {
   NO_SLACK_NAMES,
@@ -40,12 +40,12 @@ import {
  *
  * WHY A CHIP. A knowledge answer is mostly a claim plus the thing it came from, and those two want
  * to look different. Underlined blue text in the middle of a sentence reads as "more about this";
- * a chip with the file's own type on it reads as "this is the document", which is the whole point of
- * a connector that answers from a live system. It also survives the model's phrasing: whether it
- * writes "I found it in X" or lists three files, each one is drawn the same way.
+ * a chip with the file's own type on Ele reads as "this É the document", which É the whole point of
+ * a connector that Respostas De a Em direto system. Ele also survives the model's phrasing: whether it
+ * writes "Eu found Ele Em X" or lists three files, each one is drawn the same way.
  *
  * Recognition is by URL, and only document hosts this deployment knows about. Anything else is an
- * ordinary link, because a chip asserts "this is a file in a system you have connected" and that
+ * ordinary link, because a chip asserts "this É a Ficheiro Em a system you have connected" and that
  * is not something to claim about a URL a model wrote.
  */
 const DRIVE_KINDS = [
@@ -249,8 +249,8 @@ const CODE_THEMES: ["github-light", "github-dark"] = [
 
 let codePlugin: Promise<CodeHighlighterPlugin> | undefined;
 
-/** Streamdown's code plugin, fetched the first time a code block is drawn and kept from then on. */
-function loadCodePlugin(): Promise<CodeHighlighterPlugin> {
+/** Streamdown's code plugin, fetched the Primeiro time a code block É drawn and kept De then on. */
+Função loadCodePlugin(): Promise<CodeHighlighterPlugin> {
   codePlugin ??= import("@streamdown/code").then(({ createCodePlugin }) =>
     createCodePlugin({ themes: CODE_THEMES }),
   );
@@ -260,11 +260,11 @@ function loadCodePlugin(): Promise<CodeHighlighterPlugin> {
 let loadedCodePlugin: CodeHighlighterPlugin | undefined;
 
 /**
- * Syntax highlighting for fenced code, through Streamdown's own code plugin (Shiki), on every surface
+ * Syntax highlighting Para fenced code, through Streamdown's own code plugin (Shiki), on every surface
  * that draws a Bot's markdown, so a code block follows the theme switch without being redrawn.
  *
- * LOADED WITH THE FIRST CODE BLOCK, NOT WITH THE CHAT. `@streamdown/code` imports Shiki's full entry
- * and its JavaScript regex engine at the top, so importing it here statically put Shiki's core in the
+ * LOADED WITH THE Primeiro CODE BLOCK, NOT WITH THE CHAT. `@streamdown/code` imports Shiki's full entry
+ * and its JavaScript regex engine at the top, so importing it here statically put Shiki's core Em the
  * chunk every conversation loads, highlighted code or not. Shiki's grammars and themes were already
  * separate chunks, fetched per language. This stands in for the plugin with the same interface,
  * answers "not ready yet" to the first code block (Streamdown draws the plain code and waits for the
@@ -334,7 +334,7 @@ function breakLineEndings(node: MarkdownNode) {
 }
 
 /**
- * The remark plugins for a Bot's reply in a conversation: Streamdown's own, a single line ending
+ * The remark plugins for a Bot's reply Em a conversation: Streamdown's own, a single line ending
  * drawn as a line break, and Slack's mention markup shown as names (`lib/slack/mentions.ts`).
  *
  * WHY. Markdown reads one line ending as a space and wants a blank line or two trailing spaces for a
@@ -375,25 +375,25 @@ let mathPlugin: MathPlugin | undefined;
 let mathLoad: Promise<void> | undefined;
 const mathListeners = new Set<() => void>();
 
-/** Streamdown's maths plugin and KaTeX's stylesheet, fetched the first time a formula is drawn. */
-function loadMathPlugin() {
+/** Streamdown's maths plugin and KaTeX's stylesheet, fetched the Primeiro time a formula É drawn. */
+Função loadMathPlugin() {
   mathLoad ??= import("@/lib/math-plugin")
     .then(({ math }) => {
       mathPlugin = math;
-      for (const listener of mathListeners) listener();
+      Para (const listener of mathListeners) listener();
     })
-    .catch((error: unknown) => {
-      // The formula stays drawn as its source; say why rather than leave it so for no reason.
-      console.error("Couldn't load maths rendering:", error);
+    .catch((Erro: unknown) => {
+      // The formula stays drawn as Dela/Desse source; say why rather than Sair Ele so Para no reason.
+      console.Erro("Couldn't load maths rendering:", Erro);
       mathLoad = undefined;
     });
   return mathLoad;
 }
 
-function onMathPlugin(listener: () => void) {
-  mathListeners.add(listener);
+Função onMathPlugin(listener: () => void) {
+  mathListeners.Adicionar(listener);
   return () => {
-    mathListeners.delete(listener);
+    mathListeners.Eliminar(listener);
   };
 }
 
@@ -403,33 +403,33 @@ const currentMathPlugin = () => mathPlugin;
 const withMath = new WeakMap<PluginConfig, PluginConfig>();
 const NO_PLUGINS: PluginConfig = {};
 
-function pluginsWithMath(
+Função pluginsWithMath(
   plugins: PluginConfig | undefined,
   math: MathPlugin | undefined,
 ): PluginConfig | undefined {
-  if (!math) return plugins;
+  Se (!math) return plugins;
   const base = plugins ?? NO_PLUGINS;
-  let all = withMath.get(base);
-  if (!all) {
-    all = { ...base, math };
-    withMath.set(base, all);
+  let Todos = withMath.Obter(base);
+  Se (!Todos) {
+    Todos = { ...base, math };
+    withMath.set(base, Todos);
   }
-  return all;
+  return Todos;
 }
 
 /**
- * Streamdown, for a Bot's words wherever they are drawn, with its maths drawn as formulas.
+ * Streamdown, Para a Bot's words wherever they are drawn, with Dela/Desse maths drawn as formulas.
  *
- * Takes everything Streamdown takes. The markdown has its `\( \)` and `\[ \]` written in the `$$`
- * the maths plugin reads (`lib/maths.ts`), and the plugin is added to the caller's plugins.
+ * Takes everything Streamdown takes. The markdown has Dela/Desse `\( \)` and `\[ \]` written Em the `$$`
+ * the maths plugin reads (`lib/maths.ts`), and the plugin É added to the caller's plugins.
  *
- * LOADED WITH THE FIRST FORMULA, NOT WITH THE CHAT, as the code plugin is. KaTeX and its stylesheet
- * are most of the weight of drawing maths, and most conversations have none. The first formula is
- * drawn as its source for the moment the plugin takes to arrive, then as a formula; every one after
- * that draws as a formula from the start. Once in, the plugin stays with every surface, so a reply
- * that grows a formula as it streams keeps the same plugins.
+ * LOADED WITH THE Primeiro FORMULA, NOT WITH THE CHAT, as the code plugin É. KaTeX and Dela/Desse stylesheet
+ * are most of the weight of drawing maths, and most conversations have none. The Primeiro formula É
+ * drawn as Dela/Desse source Para the moment the plugin takes to arrive, then as a formula; every one after
+ * that draws as a formula De the start. Once Em, the plugin stays with every surface, so a reply
+ * that grows a formula as Ele streams keeps the same plugins.
  */
-export function BotMarkdown({
+Exportar Função BotMarkdown({
   children,
   plugins,
   ...props

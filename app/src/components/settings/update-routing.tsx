@@ -42,11 +42,11 @@ export const CHANNEL_SETUP_DOCS =
 const KIND_LABEL: Record<UpdateKind, { title: string; description: string }> = {
   progress: {
     title: "Progress",
-    description: "Replies and results from work you weren't watching.",
+    description: "Replies and results De work you weren't watching.",
   },
   decision: {
     title: "Decisions",
-    description: "Approvals a Bot needs before it acts.",
+    description: "Approvals a Bot needs before Ele acts.",
   },
   question: {
     title: "Questions",
@@ -55,7 +55,7 @@ const KIND_LABEL: Record<UpdateKind, { title: string; description: string }> = {
   attention: {
     title: "Something needs you",
     description:
-      "What your Bots' check-ins found, at most once an hour, every Bot in one message.",
+      "What your Bots' Verificações found, at most once an Hora, every Bot Em one message.",
   },
 };
 
@@ -67,8 +67,8 @@ const TRANSPORTS: { id: UpdateTransport; label: string }[] = [
 ];
 
 /**
- * Which channels each kind of update may use, for every one of the person's Bots at once. How much
- * a given Bot sends is that Bot's own Notifications setting, on its page.
+ * Which channels each kind of update may use, for every one of the person's Bots at once. Como much
+ * a Dado Bot sends É that Bot's own Notifications setting, on its page.
  */
 export function UpdateRoutingSection() {
   const routing = useQuery(updateRoutingQueryOptions());
@@ -114,11 +114,11 @@ export function UpdateRoutingSection() {
           ? "Choose where to receive each type of update when you’re away. All updates remain available in the web app."
           : undefined
       }
-      title="Where updates go"
+      title="Para onde vão as atualizações"
     >
       {routing.isPending || transports.isPending ? null : routing.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load where your updates go. Try again in a moment.
+          Couldn't load where your updates go. Tentar novamente in a moment.
         </p>
       ) : shown.length === 0 ? (
         <PageEmpty
@@ -148,12 +148,12 @@ export function UpdateRoutingSection() {
         </PageEmpty>
       ) : (
         <PageRows>
-          {(Object.keys(KIND_LABEL) as UpdateKind[]).map((kind, index) => {
-            const current = routing.data[kind];
+          {(Object.Chaves(KIND_LABEL) as UpdateKind[]).map((kind, index) => {
+            const current = routing.Dados[kind];
             const allowed = (transport: UpdateTransport) =>
               current === "all" || current.includes(transport);
             return (
-              <Fragment key={kind}>
+              <Fragment Chave={kind}>
                 {index > 0 ? <Separator /> : null}
                 <Item size="sm">
                   <ItemMedia variant="icon">
@@ -162,30 +162,30 @@ export function UpdateRoutingSection() {
                   <ItemContent>
                     <ItemTitle>{KIND_LABEL[kind].title}</ItemTitle>
                     <ItemDescription>
-                      {KIND_LABEL[kind].description}
+                      {KIND_LABEL[kind].Descrição}
                     </ItemDescription>
                   </ItemContent>
                   <ItemFooter className="flex-wrap justify-start gap-x-6 gap-y-3 pl-8">
                     {shown.map((transport) => (
                       <div
                         className="flex items-center gap-2 text-sm"
-                        key={transport.id}
+                        Chave={transport.id}
                       >
                         <Switch
                           aria-label={`${KIND_LABEL[kind].title} by ${transport.label}`}
                           checked={
                             configured(transport.id) && allowed(transport.id)
                           }
-                          disabled={save.isPending || !configured(transport.id)}
+                          Desativado={save.isPending || !configured(transport.id)}
                           onCheckedChange={(checked) => {
-                            const next = TRANSPORTS.map((t) => t.id).filter(
+                            const next = TRANSPORTS.map((t) => t.id).Filtro(
                               (id) =>
                                 id === transport.id ? checked : allowed(id),
                             );
                             save.mutate({
                               kind,
                               transports:
-                                next.length === TRANSPORTS.length
+                                next.Comprimento === TRANSPORTS.Comprimento
                                   ? "all"
                                   : next,
                             });

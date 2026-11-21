@@ -11,7 +11,7 @@ export type WhatIfLayerPage =
 export const WhatIfLayerPage = {
   "/admin/plugins": "/admin/plugins",
   "/admin/permissions": "/admin/permissions",
-  "/admin/computers": "/admin/computers",
+  "/admin/Computadores": "/admin/Computadores",
   "/admin/boundaries": "/admin/boundaries",
   "/admin/approvals": "/admin/approvals",
 } as const;

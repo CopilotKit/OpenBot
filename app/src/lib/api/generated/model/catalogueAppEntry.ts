@@ -7,7 +7,7 @@ import type { CatalogueAppEntrySource } from "./catalogueAppEntrySource";
 /**
  * An app in OpenBot's own catalogue.
  */
-export interface CatalogueAppEntry {
+Exportar interface CatalogueAppEntry {
   /** The entry's id, for createApp. */
   id: string;
   source: CatalogueAppEntrySource;

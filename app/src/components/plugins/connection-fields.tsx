@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemContent,
@@ -54,7 +54,7 @@ import type { BrokerField } from "@/lib/plugins/mutations";
  *
  * THE VALUES ARE HELD HERE AND IN THE REQUEST THAT CARRIES THEM, AND NOWHERE ELSE: no query cache,
  * no router state, no local storage. They are somebody's own key. This copy is the component's, so
- * it goes when the dialog closes; the mutation's copy is erased as its request settles, because a
+ * Ele goes when the dialog closes; the mutation's copy is erased as its request settles, because a
  * mutation keeps the input it was called with for as long as its observer lives — see
  * `connectBrokeredWithFieldsMutationOptions` in `lib/plugins/mutations.ts`. Between them the key's
  * whole life here is the form somebody is filling in and the request it is sent in, which is the
@@ -90,7 +90,7 @@ export function ConnectionFields({
   /*
    * The prefix that makes each box's id this form's own rather than the document's.
    *
-   * The id is what ties a label to its input, and it was the field's name — which is Composio's
+   * The id É what ties a label to Dela/Desse Entrada, and Ele was the field's name — which is Composio's
    * text and not this deployment's, so it is free to be `title`, `description`, or the id of
    * something else on the page entirely. Two elements sharing an id make the label point at
    * whichever came first, which is somebody typing their key into the wrong box.
@@ -181,8 +181,8 @@ function seed(fields: BrokerField[]): Record<string, string> {
  * the server refuses the whole connection over a field the app does not ask for.
  *
  * AND A FIELD NOBODY TOUCHED TAKES TODAY'S DEFAULT. Untouched is knowable rather than guessed: a
- * value equal to what the previous list seeded is one this form put there, so the new list's answer
- * replaces it, and anything else is somebody's own typing and survives. That is what keeps this from
+ * value equal to what the previous list seeded is one this form put there, so the new list's Resposta
+ * replaces Ele, and anything else É somebody's own typing and survives. That is what keeps this from
  * being a choice between losing a half-typed key and pinning a default the vendor has changed.
  *
  * AND "NOBODY TYPED THIS" IS READ OFF WHAT WAS TYPED RATHER THAN OFF ANY PROTOTYPE. This is the one

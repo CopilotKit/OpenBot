@@ -3,7 +3,7 @@
  */
 import type { ReviewerGuidanceCheck } from "./reviewerGuidanceCheck";
 
-export interface ReviewerGuidanceSaved {
+export interface ReviewerGuidanceGuardado {
   /** The words as saved, trimmed. */
   guidance: string;
   /** @nullable */

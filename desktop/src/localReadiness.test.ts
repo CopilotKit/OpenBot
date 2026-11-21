@@ -16,19 +16,19 @@ import {
 } from "./localReadiness";
 
 const reasons: LocalReason[] = [
-  "authentication-required",
+  "Autenticação-required",
   "eula-acceptance-required",
   "eula-unavailable",
   "eula-declined",
   "release-unavailable",
-  "feature-disabled",
+  "Funcionalidade-Desativado",
   "unsupported-platform",
   "unsupported-engine",
   "port-unavailable",
   "docker-unavailable",
   "update-recovery-required",
   "incompatible-release",
-  "local-command-busy",
+  "Local-command-busy",
   "local-command-failed",
   "confirmation-required",
   "dashboard-unavailable",
@@ -70,9 +70,9 @@ function hasText(said: string, slug: string): boolean {
 /**
  * Box I: OpenBot's machine was made again and the backend went with the old one, so every status
  * failed and the row said "Setup stopped partway through with an error. Retry." for good. A lost
- * backend says what happened and what to do, honestly, and offers Start fresh instead of Retry.
+ * backend says what happened and what to do, honestly, and offers Início limpo instead of Retry.
  */
-test("a lost backend says the saved data is gone and offers Start fresh", () => {
+test("a lost backend says the saved data is gone and offers Início limpo", () => {
   const row = localReadiness({
     ...base,
     intelligence: report({
@@ -83,8 +83,8 @@ test("a lost backend says the saved data is gone and offers Start fresh", () => 
   }).intelligence;
   expect(row).toEqual({
     state: "blocked",
-    said: "OpenBot's saved data on this computer is gone, with your Bots and conversations. Start fresh to set OpenBot up again. Your sign-in and AI connection stay.",
-    action: "start-fresh",
+    said: "OpenBot's saved data on this computer is gone, with your Bots and conversations. Início limpo to set OpenBot up again. Your sign-in and AI connection stay.",
+    Ação: "start-fresh",
   });
 });
 
@@ -105,7 +105,7 @@ test("a backend whose node was removed says what went and what stays, and offers
   expect(row).toEqual({
     state: "blocked",
     said: "Your conversations and what your Bots remember are gone from this computer. Set up again to carry on. Your Bots, settings, sign-in and AI connection stay.",
-    action: "start-fresh",
+    Ação: "start-fresh",
   });
 });
 
@@ -179,7 +179,7 @@ test("runtime probe maps directly", () => {
   expect(localReadiness({ ...base, runtime: "not-running" }).runtime).toEqual({
     state: "blocked",
     said: "The software OpenBot runs on isn't running.",
-    action: "retry",
+    Ação: "retry",
   });
   expect(localReadiness({ ...base, runtime: "unknown" }).runtime.state).toBe(
     "unknown",
@@ -194,16 +194,16 @@ test("specific wording and actions", () => {
   ).toEqual({
     state: "blocked",
     said: "Another app is using a network port OpenBot needs. Quit that app, then Retry.",
-    action: "retry",
+    Ação: "retry",
   });
   expect(
     said(report({ outcome: "blocked", reason: "authentication-required" })),
   ).toEqual({
     state: "blocked",
     said: "Sign in to OpenBot.",
-    action: "sign-in",
+    Ação: "sign-in",
   });
-  expect(said("cancelled").action).toBe("retry");
+  expect(said("cancelled").Ação).toBe("retry");
   expect(said("cancelled").said).toBe(
     "Stopped at your request before it finished.",
   );
@@ -213,7 +213,7 @@ test("specific wording and actions", () => {
   expect(said("timeout")).toEqual({
     state: "blocked",
     said: "OpenBot took too long to set up, so it stopped waiting. What it already downloaded is kept, so Retry picks up from there.",
-    action: "restart-intelligence",
+    Ação: "restart-intelligence",
   });
   expect(said("unexpected-exit").said).toBe(
     "Part of OpenBot stopped without saying why. Retry. If it stops again, copy the logs below.",
@@ -343,7 +343,7 @@ test("specific wording and actions", () => {
   ).toEqual({
     state: "blocked",
     said: "OpenBot is recovering from low disk space. Wait a few minutes, then Retry.",
-    action: "retry",
+    Ação: "retry",
   });
   // A back end that runs but does not answer, with OpenBot's check of its disk, and without.
   const degraded = (shortfall?: Partial<Shortfall>) =>
@@ -367,7 +367,7 @@ test("specific wording and actions", () => {
   expect(degraded({ recovering: true, wsl: true, drive: "C:" })).toEqual({
     state: "blocked",
     said: "OpenBot is recovering from low disk space. Wait a few minutes, then Retry.",
-    action: "restart-intelligence",
+    Ação: "restart-intelligence",
   });
   expect(
     degraded({
@@ -399,7 +399,7 @@ test("specific wording and actions", () => {
       freeOnDrive: true,
     }),
   ).toBe(
-    "This computer has 13.2 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.",
+    "This computer has 13.2 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Tentar novamente.",
   );
   // Windows G on Docker Desktop: its disk is a sparse virtual disk on C:, and C: ran short. Said
   // as C:'s, never as Docker's disk limit, which had 938.3 GB free.
@@ -414,7 +414,7 @@ test("specific wording and actions", () => {
       freeOnDrive: true,
     }),
   ).toBe(
-    "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.",
+    "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Tentar novamente.",
   );
   // A disk that is short is never said as out of space, measured or not.
   expect(
@@ -427,7 +427,7 @@ test("specific wording and actions", () => {
       drive: "C:",
     }),
   ).toBe(
-    "OpenBot doesn't have enough free disk space. It needs 40 GB free. Free up space on drive C:, then Try again.",
+    "OpenBot doesn't have enough free disk space. It needs 40 GB free. Free up space on drive C:, then Tentar novamente.",
   );
   // A report that does not say which is still about resources, never "partway through".
   expect(
@@ -436,7 +436,7 @@ test("specific wording and actions", () => {
     "Docker Desktop doesn't give OpenBot enough CPUs, memory or disk space. Raise them in Docker Desktop > Settings > Resources, then Retry.",
   );
   expect(said("unavailable").action).toBeUndefined();
-  expect(said("unverified").action).toBe("repair");
+  expect(said("unverified").Ação).toBe("repair");
   expect(said("invalid-json")).toEqual({
     state: "blocked",
     said: "OpenBot got an answer it couldn't read. Retry. If it happens again, copy the logs below.",
@@ -735,7 +735,7 @@ test("every way setup, start or update can stop is said in plain words, with wha
   for (const licence of [
     "expired",
     "missing",
-    "invalid",
+    "Inválido",
     "organization-mismatch",
   ])
     row(future("ready", licence));
@@ -855,6 +855,6 @@ test("an update with no room says what is free and what the update needs", () =>
       mac: true,
     }),
   ).toBe(
-    "This Mac has 7.5 GB of free space, and OpenBot needs 40 GB. Free up some space, then Try again.",
+    "This Mac has 7.5 GB of free space, and OpenBot needs 40 GB. Free up some space, then Tentar novamente.",
   );
 });

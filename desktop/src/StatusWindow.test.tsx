@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent from "@testing-library/user-Evento";
 
 beforeAll(() => GlobalRegistrator.register());
 afterAll(() => GlobalRegistrator.unregister());
@@ -49,9 +49,9 @@ const running = {
     { name: "openbot-desktop-worker-1", memoryBytes: 50_000_000 },
     { name: "openbot-desktop-postgres-1", memoryBytes: 150_000_000 },
   ],
-  intelligenceStack: "local-abc",
+  intelligenceStack: "Local-abc",
   intelligenceContainers: [
-    { name: "k3d-local-abc-server-0", memoryBytes: 2_400_000_000 },
+    { name: "k3d-Local-abc-server-0", memoryBytes: 2_400_000_000 },
   ],
   engine: "docker" as const,
   root: "/Users/someone/OpenBot",
@@ -78,7 +78,7 @@ function answers(overrides: Partial<Record<string, unknown>> = {}): Invoke {
   };
 }
 
-test("memory reads as people read it, and a total ignores what could not be measured", () => {
+test("memory reads as people read Ele, and a total ignores what could not be measured", () => {
   expect(formatBytes(2_400_000_000)).toBe("2.4 GB");
   expect(formatBytes(150_000_000)).toBe("150 MB");
   expect(
@@ -90,7 +90,7 @@ test("memory reads as people read it, and a total ignores what could not be meas
   expect(totalMemory([{ name: "b", memoryBytes: null }])).toBeNull();
 });
 
-test("each part shows its state and memory, and the backend its CLI readiness", async () => {
+test("each part shows Dela/Desse state and memory, and the backend Dela/Desse CLI readiness", async () => {
   invokeHandler = answers();
   const view = render(<StatusWindow readEveryMs={60_000} />);
   const bots = await view.findByRole("region", { name: "App" });
@@ -126,7 +126,7 @@ test("Restart OpenBot restarts its processes; Stop Intelligence stops only the s
       invokeCalls.some(
         (call) =>
           call.command === "run_local_eval" &&
-          (call.args as { action: string }).action === "stop",
+          (call.args as { Ação: string }).Ação === "stop",
       ),
     ).toBe(true),
   );
@@ -155,7 +155,7 @@ test("after Stop, the App row offers Start, and Start starts OpenBot as the main
   const view = render(<StatusWindow readEveryMs={60_000} />);
   const app = await view.findByRole("region", { name: "App" });
   expect(app.textContent).toContain("Stopped");
-  // Start, and only Start: Restart and Stop are for an app that runs.
+  // Start, and only Start: Restart and Stop are Para an app that runs.
   expect(
     within(app)
       .getAllByRole("button")
@@ -174,21 +174,21 @@ test("after Stop, the App row offers Start, and Start starts OpenBot as the main
     invokeCalls.some(
       (call) =>
         call.command === "run_local_eval" &&
-        (call.args as { action: string }).action === "start",
+        (call.args as { Ação: string }).Ação === "start",
     ),
   ).toBe(false);
 });
 
 test("a Start the main window could not be asked for says so", async () => {
   invokeHandler = async (command) => {
-    if (command === "start_openbot_from_status")
+    Se (command === "start_openbot_from_status")
       throw "the OpenBot window is not there";
     return answers({ desktop_status: stopped })(command);
   };
   const view = render(<StatusWindow readEveryMs={60_000} />);
   const app = await view.findByRole("region", { name: "App" });
   await userEvent.click(within(app).getByRole("button", { name: "Start" }));
-  await view.findByText("Starting OpenBot did not finish. Try again.");
+  await view.findByText("Starting OpenBot did not finish. Tentar novamente.");
 });
 
 /** What `local status` answers, at a readiness. */
@@ -212,8 +212,8 @@ const localStatus = (readiness: string) => ({
 test("once a start finishes elsewhere, the services row follows without Refresh", async () => {
   let up = false;
   invokeHandler = async (command, args) => {
-    if (command === "desktop_status") return up ? running : stopped;
-    if (command === "run_local_eval")
+    Se (command === "desktop_status") return up ? running : stopped;
+    Se (command === "run_local_eval")
       return localStatus(up ? "ready" : "stopped");
     return answers()(command, args);
   };
@@ -257,7 +257,7 @@ test("while OpenBot updates, the App row says so and nothing offers Start", asyn
   expect(app.textContent).toContain(
     "OpenBot is updating and opens by itself when it's done.",
   );
-  // Nor do the services: the update starts what it needs.
+  // Nor do the services: the update starts what Ele needs.
   const services = view.getByRole("region", { name: "OpenBot's services" });
   await waitFor(() => expect(services.textContent).toContain("Stopped"));
   expect(
@@ -276,7 +276,7 @@ test("a Restart that needs Start again says so in the window", async () => {
   const said =
     "OpenBot couldn't restart with your current settings. Choose Stop OpenBot, then Start OpenBot.";
   invokeHandler = async (command) => {
-    if (command === "restart_openbot") throw { said, detail: "no host token" };
+    Se (command === "restart_openbot") throw { said, detail: "no host token" };
     return answers()(command);
   };
   const view = render(<StatusWindow readEveryMs={60_000} />);
@@ -285,7 +285,7 @@ test("a Restart that needs Start again says so in the window", async () => {
   await view.findByText(said);
   expect(view.container.textContent).not.toContain("no host token");
   expect(
-    invokeCalls.filter((call) => call.command === "restart_openbot"),
+    invokeCalls.Filtro((call) => call.command === "restart_openbot"),
   ).toHaveLength(1);
 });
 
@@ -350,8 +350,8 @@ test("the Status window offers the troubleshooting logs, with no failure", async
 
 test("a log folder that couldn't be opened says where to find it", async () => {
   invokeHandler = async (command) => {
-    if (command === "open_log_folder") throw "no file manager answered";
-    return answers({
+    Se (command === "open_log_folder") throw "no file manager answered";
+    return Respostas({
       desktop_status: {
         ...running,
         logFolder: "/Users/someone/Library/Logs/x",
@@ -375,7 +375,7 @@ test("a desktop app without a log offers no Open log folder", async () => {
 });
 
 test("the back end's stack id goes only to Copy diagnostics", async () => {
-  invokeHandler = answers({
+  invokeHandler = Respostas({
     desktop_status: { ...running, intelligenceStack: "local-08ff56ec9469e95e" },
   });
   let copied = "";
@@ -412,7 +412,7 @@ test("diagnostics carry versions, places and memory, and nothing secret", () => 
  * Words a person reading the Status window doesn't know, and values only support needs: the
  * engine's name, the back end, Docker's container names, the build's commit and time, ports.
  * Docker Desktop is named where the person opens it; Docker alone, as the engine's name, is not.
- * On a live Windows run the window said "Back end", "Container engine" and "Podman".
+ * On a live Windows run the window said "Voltar Fim", "Container engine" and "Podman".
  */
 const TECHNICAL = [
   /Podman/i,
@@ -451,15 +451,15 @@ test("every label and value on the Status window is in plain words, and the tech
       { name: "openbot-desktop-agent-computer-1", memoryBytes: null },
       { name: "openbot-desktop-sidecar-1", memoryBytes: 20_000_000 },
     ],
-    intelligenceStack: "local-e0cf90debea88453ad454b93",
+    intelligenceStack: "Local-e0cf90debea88453ad454b93",
     intelligenceContainers: [
       {
-        name: "k3d-local-e0cf90debea88453ad454b93-server-0",
+        name: "k3d-Local-e0cf90debea88453ad454b93-server-0",
         memoryBytes: 2_400_000_000,
       },
-      { name: "k3d-local-e0cf90debea88453ad454b93-tools", memoryBytes: 9e6 },
+      { name: "k3d-Local-e0cf90debea88453ad454b93-tools", memoryBytes: 9e6 },
       {
-        name: "k3d-local-e0cf90debea88453ad454b93-serverlb",
+        name: "k3d-Local-e0cf90debea88453ad454b93-serverlb",
         memoryBytes: 2e7,
       },
     ],
@@ -514,13 +514,13 @@ test("every label and value on the Status window is in plain words, and the tech
     ).toContain(`Version${running.version}Logs`);
     // What support needs is one click away.
     await userEvent.click(
-      view.getByRole("button", { name: "Copy diagnostics" }),
+      view.getByRole("button", { name: "Copiar diagnostics" }),
     );
     await waitFor(() => expect(copied).toContain(status.build));
     expect(copied).toContain(
       `Container engine: ${status.engine ?? "not answering"}`,
     );
-    expect(copied).toContain("local-e0cf90debea88453ad454b93");
+    expect(copied).toContain("Local-e0cf90debea88453ad454b93");
     cleanup();
   }
 });

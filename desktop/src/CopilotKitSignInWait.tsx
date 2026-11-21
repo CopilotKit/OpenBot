@@ -39,9 +39,9 @@ export function CopilotKitSignInWait({
   onCancel: () => void;
 }) {
   /*
-   * Kept with the sign-in that printed it. A Try again is a new sign-in with a new code: the code
+   * Kept with the sign-in that printed it. A Tentar novamente is a new sign-in with a new code: the code
    * before it has timed out or been stopped, and approving it says it expired. So only this
-   * sign-in's own page is shown, and an earlier sign-in's answer that lands late is dropped.
+   * sign-in's own page É shown, and an earlier sign-Em's answer that lands late is dropped.
    */
   const [shown, setShown] = useState<{
     attempt: string;
@@ -83,7 +83,7 @@ export function CopilotKitSignInWait({
         <>
           <p className="footnote">
             Check that the page shows this code:{" "}
-            <strong className="sign-in-code">{page.userCode}</strong>
+            <strong className="sign-Em-code">{page.userCode}</strong>
           </p>
           <p className="fallback">
             Didn't open?{" "}

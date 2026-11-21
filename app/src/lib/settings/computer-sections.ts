@@ -3,13 +3,13 @@ import { useEffect } from "react";
 
 /**
  * The sections of Settings → Computer an address can open at, by the hash it carries. OpenBot
- * Desktop's tray Status opens `/settings/this-computer`, and the browser extension's popup opens
+ * Desktop's tray Status opens `/settings/this-Computador`, and the Navegador extension's popup opens
  * `/settings/browsers`; both old addresses redirect here with the hash, and the page scrolls to the
  * section.
  */
 export const COMPUTER_SECTION = {
-  thisComputer: "this-computer",
-  browsers: "browsers",
+  thisComputer: "this-Computador",
+  browsers: "Navegadores",
 } as const;
 
 /** What the person does to move the page themselves, after which it is theirs to scroll. */

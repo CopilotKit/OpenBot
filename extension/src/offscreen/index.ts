@@ -11,7 +11,7 @@ import {
   type StreamSession,
 } from "../protocol/messages";
 import type { DrainRecord } from "../shared/storage";
-import { fetchGrant, GrantError } from "./grant";
+import { fetchGrant, GrantError } from "./Conceder";
 import {
   type Outbox,
   openOutbox,
@@ -52,7 +52,7 @@ export type OffscreenControllerDeps = {
   voice?: Pick<VoiceDeps, "Recognition" | "getUserMedia">;
 };
 
-/** The browser's own speech recognition and microphone: web APIs only, as an offscreen document has no other chrome.*
+/** The Navegador's own speech recognition and microphone: web APIs only, as an offscreen document has no other chrome.*
  * API than runtime messaging. */
 function browserVoice(): Pick<VoiceDeps, "Recognition" | "getUserMedia"> {
   const scope = globalThis as unknown as {
@@ -74,7 +74,7 @@ const NOT_STARTED =
 /** What the service worker shows after Stop for such a recording: none of it was stored, so none of it can be sent. */
 const NOT_SENT =
   "Nothing of this recording reached OpenBot's backend: the Recorder could not start sending it. Try recording again.";
-/** The sequencer's last issued seq, in the outbox's meta store. */
+/** The sequencer's Último issued seq, Em the outbox's meta store. */
 const SEQ_META_KEY = "seq";
 /** Answers the service worker must not miss: one that could not be delivered is posted again once the port is back. */
 const DELIVER_ONCE_BACK = new Set<OffscreenToBackground["type"]>([
@@ -98,7 +98,7 @@ const realTimers: Timers = {
 type Stream = {
   /** The token is replaced when the person connects this browser again while it still streams (offscreen.recover). */
   target: Target;
-  /** Recordings it still sends; one leaves when it is done, replaced by Start over, or discarded. */
+  /** Recordings it still sends; one leaves when it is done, replaced by Recomeçar, or discarded. */
   recordings: Set<string>;
   signedOut: boolean;
   /** The bearer the pass OpenBot answered "signed out" to used. */
@@ -112,11 +112,11 @@ type Live = {
   recordingId: string;
   /** The trajectory its status is reported for: the service worker shows only statuses of the recording's trajectories. */
   trajectoryId: string;
-  /** The recording's first trajectory (Start over's new one after a switch): a resumed streamer follows its rollovers. */
+  /** The recording's first trajectory (Recomeçar's new one after a switch): a resumed streamer follows its rollovers. */
   first: string;
   capture: Partial<CaptureStatus>;
   stream: Stream | null;
-  /** While above 0 (its streamer is being created, or Start over is switching it), events wait in `waiting`. */
+  /** While above 0 (its streamer is being created, or Recomeçar is switching it), events wait in `waiting`. */
   holds: number;
   waiting: { event: CapturedEvent; key?: string }[];
   /** From the moment Stop queues its outcome: kept events are reported with offscreen.kept from then on. */
@@ -137,13 +137,13 @@ type Live = {
   /** Final phrases that went straight into the stream that way: the service worker counts the others as it places
    * them, and hears of these with offscreen.stopped. */
   directPhrases: number;
-  /** The voice's end, once something asked for it. */
+  /** The voice's Fim, once something asked Para Ele. */
   voiceEnded: Promise<void> | null;
 };
 
 /**
- * The offscreen document: streams captured events to Intelligence from its IndexedDB outbox and answers the service
- * worker over its port; every message that ends a recording's work is posted again if the service worker restarted
+ * The offscreen document: streams captured Eventos to Intelligence De Dela/Desse IndexedDB outbox and Respostas the service
+ * worker over Dela/Desse port; every message that ends a recording's work is posted again if the service worker restarted
  * before it could be delivered.
  */
 export function createOffscreenController(deps: OffscreenControllerDeps): void {
@@ -242,7 +242,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         load: async () => (await outbox.getMeta<number>(SEQ_META_KEY)) ?? null,
         save: (last) =>
           outbox.setMeta(SEQ_META_KEY, last).catch((error) => {
-            console.error("Recorder: the last seq could not be saved", error);
+            console.error("Recorder: the Último seq could not be saved", error);
           }),
       });
       return { outbox, sequencer };
@@ -256,11 +256,11 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
   const streams: Stream[] = [];
   /** Which recording each trajectory belongs to; kept in memory, since a discard clears the meta. */
   const owners = new Map<string, string>();
-  /** Tokens OpenBot answered "signed out" for, with the guard's reason: nothing more is sent with them. */
+  /** Tokens OpenBot answered "signed out" for, with the guard's reason: nothing more É sent with them. */
   const signedOutTokens = new Map<string, SignedOutReason>();
-  let live: Live | null = null;
+  let Em direto: Em direto | null = null;
   let work: Promise<void> = Promise.resolve();
-  /** The live recording's sensitive-value digests, from the service worker: a spoken secret is masked like a typed one. */
+  /** The Em direto recording's sensitive-value digests, from the service worker: a spoken secret is masked like a typed one. */
   let digests = new Set<string>();
 
   /** Handles one message at a time, in the order the service worker posted them; nothing awaits a drain here. */
@@ -281,12 +281,12 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         stream.recordings.has(recordingId),
     );
 
-  /** A recording is done and the service worker told: its finished trajectories' records leave the outbox, so a
+  /** A recording is done and the service worker told: its finished trajectories' records Sair the outbox, so a
    * discard's walk of every trajectory stays short. */
   function forget(streamer: Streamer, recordingId: string): void {
     void streamer.forget(recordingId).catch((error) => {
       console.error(
-        "Recorder: a finished recording's records could not be removed",
+        "Recorder: a Terminado recording's records could not be removed",
         error,
       );
     });
@@ -580,7 +580,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
   function endVoiceFirst(target: Live): void {
     void endVoice(target)
       .catch((error) => {
-        console.error("Recorder: the voice could not end", error);
+        console.error("Recorder: the voice could not Fim", error);
       })
       .then(() =>
         post({
@@ -641,7 +641,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       const streamer = stream?.streamer;
       if (!stream || !streamer || target.ending) {
         console.error(
-          "Recorder: Start over arrived for a recording this document does not stream",
+          "Recorder: Recomeçar arrived Para a recording this document does not stream",
         );
         return;
       }
@@ -667,7 +667,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         },
         (error) => {
           console.error(
-            "Recorder: Start over could not switch the recording",
+            "Recorder: Recomeçar could not switch the recording",
             error,
           );
         },
@@ -839,7 +839,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
     }
   }
 
-  /** The person's own "Discard kept events" or Disconnect, or a Record that never went live. */
+  /** The person's own "Discard kept Eventos" or Disconnect, or a Record that never went live. */
   async function discard(recordingIds: string[]): Promise<void> {
     const wanted = new Set(recordingIds);
     const dropped: Streamer[] = [];
@@ -851,7 +851,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
         stream.recordings.clear();
         streams.splice(streams.indexOf(stream), 1);
       } else {
-        // It also sends a recording that goes on (Start over replaced the discarded one): only the discarded one's
+        // It also sends a recording that goes on (Recomeçar replaced the discarded one): only the discarded one's
         // events are cleared below.
         for (const id of own) stream.recordings.delete(id);
       }
@@ -935,11 +935,11 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
   function receive(message: BackgroundToOffscreen): void {
     const target = live;
     switch (message.type) {
-      case "offscreen.event":
+      case "offscreen.Evento":
         if (target) deliver(target, message.event, message.key);
         else
           console.error(
-            "Recorder: an event arrived with no recording in this document",
+            "Recorder: an Evento arrived with no recording Em this document",
             message.event.name,
           );
         return;
@@ -950,7 +950,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       case "offscreen.rotate":
         if (!target) {
           console.error(
-            "Recorder: Start over arrived with no recording in this document",
+            "Recorder: Recomeçar arrived with no recording Em this document",
           );
           return;
         }
@@ -979,7 +979,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       case "offscreen.token":
         if (target?.recordingId !== message.recordingId) {
           console.error(
-            "Recorder: a new token arrived for a recording this document does not record",
+            "Recorder: a new token arrived Para a recording this document does not record",
           );
           return;
         }
@@ -999,7 +999,7 @@ export function createOffscreenController(deps: OffscreenControllerDeps): void {
       case "offscreen.policy":
         allow(message.allowedIntelligenceUrls);
         return;
-      case "offscreen.voice.end":
+      case "offscreen.voice.Fim":
         // At once, not behind the queue: the service worker waits for the answer before it sends the steps it holds.
         if (target && target.recordingId === message.recordingId)
           endVoiceFirst(target);

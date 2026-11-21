@@ -81,7 +81,7 @@ export const getHostAccess = async (
 ): Promise<HostAccess> => {
   return apiRequest<HostAccess>(getGetHostAccessUrl(organizationId, personId), {
     ...options,
-    method: "GET",
+    method: "Obter",
   });
 };
 
@@ -478,7 +478,7 @@ export const deleteHostAccessGrant = async (
     getDeleteHostAccessGrantUrl(organizationId, personId, hostAccessGrantId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
       headers: { ...headers, ...getHeaders(options?.headers) },
     },
   );

@@ -22,7 +22,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { copyText } from "@/components/settings/linked-accounts";
+import { copyText } from "@/components/settings/linked-Contas";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -48,24 +48,24 @@ import {
   MANAGEMENT_SENTENCE,
   UPGRADES_SETUP_URL,
   windowText,
-} from "@/lib/management/format";
+} from "@/lib/Gestão/format";
 import {
   cancelManagementMutationOptions,
   startManagementMutationOptions,
-} from "@/lib/management/mutations";
+} from "@/lib/Gestão/mutations";
 import {
   asksForManagement,
   type ManagementStatus,
   managementQueryOptions,
-} from "@/lib/management/queries";
+} from "@/lib/Gestão/queries";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
 
-export const Route = createFileRoute("/_authed/admin/management")({
+export const Route = createFileRoute("/_authed/admin/Gestão")({
   component: ManagementPage,
 });
 
-const TITLE = "Managed updates";
+const TITLE = "Gerido updates";
 const DESCRIPTION = MANAGEMENT_SENTENCE;
 
 /** What CopilotKit gets, said before Connect: the same words as the approval page. */
@@ -76,7 +76,7 @@ const WINDOW_AGREED =
   "The window is agreed with CopilotKit; the default is Tuesdays, 14:00 to 18:00 UTC.";
 /** Where to ask for managed updates: CopilotKit's own contact page, linked from copilotkit.ai. */
 const CONTACT_URL = "https://www.copilotkit.ai/contact-us";
-const NOT_ENTITLED = "Your licence doesn't include managed updates.";
+const NOT_ENTITLED = "Your licence doesn't include Gerido updates.";
 const APPROVE_STEP =
   "Open the approval page and sign in to CopilotKit as an admin of the organization your licence belongs to. Check the code matches, then approve it. This page moves on by itself.";
 const INSTALL_STEP =
@@ -125,7 +125,7 @@ export function ManagementPage() {
   if (!personal && management.error)
     return (
       <PageShell description={DESCRIPTION} title={TITLE}>
-        <Notice>Couldn't load managed updates. Try again in a moment.</Notice>
+        <Notice>Couldn't load managed updates. Tentar novamente in a moment.</Notice>
       </PageShell>
     );
   if (personal || !management.data?.applies)
@@ -186,7 +186,7 @@ export function ManagementPage() {
         </PageEmpty>
       ) : status.state === "opted-out" ? (
         <PageEmpty
-          action={connectButton}
+          Ação={connectButton}
           icon={IconCloudOff}
           title="Turned off"
         >
@@ -214,7 +214,7 @@ export function ManagementPage() {
       ) : notEntitled ? (
         // No Connect: it would fail the same way until the licence includes managed updates.
         <PageEmpty icon={IconLock} title="Not in your licence">
-          {NOT_ENTITLED} To add them, get in touch at{" "}
+          {NOT_ENTITLED} To Adicionar them, Obter Em touch at{" "}
           <a
             className="underline underline-offset-2"
             href={CONTACT_URL}
@@ -316,7 +316,7 @@ function Notice({ children }: { children: React.ReactNode }) {
 function CopyButton({ label, text }: { label: string; text: string }) {
   const [copied, setCopied] = useState<boolean | null>(null);
   return (
-    <div className="flex shrink-0 flex-col items-end gap-1">
+    <div className="flex shrink-0 flex-col items-Fim gap-1">
       <Button
         aria-label={label}
         onClick={async () =>
@@ -325,7 +325,7 @@ function CopyButton({ label, text }: { label: string; text: string }) {
         size="sm"
         variant="outline"
       >
-        {copied ? "Copied" : "Copy"}
+        {copied ? "Copied" : "Copiar"}
       </Button>
       {copied === false ? (
         <span className="text-destructive text-xs" role="alert">
@@ -549,7 +549,7 @@ function Connected({
         <PageSection
           action={disconnectButton}
           description="Managed updates stop, and you upgrade OpenBot yourself. Connect turns them back on."
-          title="Turn off managed updates"
+          title="Turn off Gerido updates"
         />
       ) : (
         <PageSection
@@ -561,7 +561,7 @@ function Connected({
               <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words rounded bg-muted px-3 py-2 font-mono text-xs leading-relaxed">
                 {UNINSTALL}
               </pre>
-              <CopyButton label="Copy the uninstall command" text={UNINSTALL} />
+              <CopyButton label="Copiar the uninstall command" text={UNINSTALL} />
             </div>
           </PageCard>
         </PageSection>

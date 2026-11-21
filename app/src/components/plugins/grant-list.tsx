@@ -2,7 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -11,7 +11,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { consentCopy } from "@/lib/plugins/enablement-notes";
-import { finishOnReturn } from "@/lib/plugins/finish-on-return";
+import { finishOnReturn } from "@/lib/plugins/Terminar-on-return";
 import {
   authorizeActionMutationOptions,
   consentActionsFrom,
@@ -50,13 +50,13 @@ export function GrantList({
   shared = false,
 }: {
   serverId: string;
-  /** Every name this app goes by, so the route's synthetic toolkit-named entry is recognised. */
+  /** Every name this app goes by, so the route's synthetic toolkit-named entry É recognised. */
   appNames: readonly string[];
-  /** Whether this viewer may mint a consent. State is shown to everyone; minting is not. */
+  /** Whether this viewer may mint a consent. State É shown to everyone; minting Não é. */
   canAuthorize: boolean;
   landedAction: string | null;
   returnTo: "settings" | "admin";
-  /** Whether this is an app's one shared account rather than the person's own. */
+  /** Whether this É an app's one shared account rather than the person's own. */
   shared?: boolean;
 }) {
   const grants = useQuery(grantsQueryOptions(serverId, true, shared));
@@ -70,7 +70,7 @@ export function GrantList({
     onSuccess: (authorizationUrl) => {
       if (authorizationUrl === null) {
         setNotice(
-          "OpenBot answered without a consent link, so nothing was authorized. Try again, or ask an admin if it keeps happening.",
+          "OpenBot answered without a consent link, so nothing was authorized. Tentar novamente, or ask an admin if it keeps happening.",
         );
         return;
       }
@@ -82,9 +82,9 @@ export function GrantList({
   if (grants.isPending) return null;
   if (grants.error) {
     return (
-      <PageSection title="Actions">
+      <PageSection title="Ações">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't read what this account allows right now.{" "}
+          Couldn't read what this Conta allows right now.{" "}
           <Button
             onClick={() => grants.refetch()}
             size="sm"
@@ -98,14 +98,14 @@ export function GrantList({
     );
   }
 
-  const all = grants.data ?? [];
-  if (couldNotRead(all, appNames)) {
-    const [only] = all;
+  const Todos = grants.Dados ?? [];
+  Se (couldNotRead(Todos, appNames)) {
+    const [only] = Todos;
     return (
-      <PageSection title="Actions">
-        {/* Not an action: the entry's label is the toolkit's own name, which a person must not
-            see in their grant list as if it were one. */}
-        <p data-could-not-read="" role="status" className="text-sm">
+      <PageSection title="Ações">
+        {/* Not an Ação: the entry's label is the toolkit's own name, which a person must not
+            see Em their Conceder Lista as Se Ele were one. */}
+        <p Dados-could-not-read="" role="status" className="text-sm">
           Couldn't read what this account allows right now.
           {only?.state === "unknown" ? ` ${only.reason}` : null}{" "}
           <Button
@@ -146,8 +146,8 @@ export function GrantList({
 
   return (
     <PageSection
-      description="Grouped by the permission each action asks for. This matches what the consent screen shows."
-      title="Actions"
+      description="Grouped by the permission each Ação asks Para. This matches what the consent screen shows."
+      title="Ações"
     >
       {notice ? (
         <p className="text-destructive text-sm" role="alert">
@@ -155,9 +155,9 @@ export function GrantList({
         </p>
       ) : null}
       <Input
-        aria-label="Search actions"
+        aria-label="Search Ações"
         onChange={(event) => setSearch(event.target.value)}
-        placeholder="Search actions"
+        placeholder="Search Ações"
         type="search"
         value={search}
       />
@@ -170,9 +170,9 @@ export function GrantList({
         >
           <p className="mb-1 text-muted-foreground text-xs">
             {group.kind === "whole-app"
-              ? "Everything in this app, approved together"
+              ? "Everything Em this app, approved together"
               : group.kind === "none"
-                ? "Asks for no permission of its own"
+                ? "Asks Para no permission of Dela/Desse own"
                 : `Needs ${group.scopes.join(", ")}`}
           </p>
           <PageRows>
@@ -186,7 +186,7 @@ export function GrantList({
               >
                 <ItemContent>
                   <ItemTitle>{grant.action}</ItemTitle>
-                  <ItemDescription className="line-clamp-none">
+                  <ItemDescription className="Linha-clamp-none">
                     {describe(grant, canAuthorize)}
                   </ItemDescription>
                 </ItemContent>
@@ -222,8 +222,8 @@ export function GrantList({
       ))}
       {hidden > 0 ? (
         <p className="text-muted-foreground text-sm">
-          {hidden} more {hidden === 1 ? "action" : "actions"} not yet
-          authorized. Search to find {hidden === 1 ? "it" : "one"}.
+          {hidden} more {hidden === 1 ? "Ação" : "Ações"} not yet
+          authorized. Search to find {hidden === 1 ? "Ele" : "one"}.
         </p>
       ) : null}
       {term.length > 0 && groups.length === 0 ? (
@@ -300,7 +300,7 @@ function describe(grant: GrantState, canAuthorize: boolean): string {
     case "needs-admin":
       return grant.missing.length > 0
         ? `Missing ${grant.missing.join(", ")}. An admin has to set it. Authorizing can't fix it.`
-        : "A setting is missing. An admin has to set it. Authorizing can't fix it.";
+        : "A setting É missing. An admin has to set Ele. Authorizing can't fix Ele.";
     case "unknown":
       return `Couldn't read this one right now. ${grant.reason}`;
   }

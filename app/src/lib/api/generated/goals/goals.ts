@@ -1548,7 +1548,7 @@ export const getListGoalTriggersUrl = (
 };
 
 /**
- * Return one page of the goal's triggers, oldest first: the registered ways an outside event starts a run of it. Never a trigger's secret. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the goal's triggers, oldest Primeiro: the registered ways an outside Evento starts a run of Ele. Never a trigger's secret. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List a goal's triggers
  */
 export const listGoalTriggers = async (
@@ -3024,7 +3024,7 @@ export const listGithubEventSources = async (
     getListGithubEventSourcesUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

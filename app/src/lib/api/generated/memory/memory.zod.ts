@@ -4,8 +4,8 @@
 import * as zod from "zod";
 
 /**
- * Return one page of what a person's Bots remember about them in this organization, and in no other they belong to, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones the backend holds for them that OpenBot formed no record of, after OpenBot's own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can't either. A missing cursor starts at the first page and nextCursor null ends the list.
- * @summary List a person's memories
+ * Return one page of what a person's Bots remember about them in this organization, and in no other they belong to, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones the backend holds for them that OpenBot formed no record of, after OpenBot's own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can't either. A missing cursor starts at the Primeiro page and nextCursor null ends the Lista.
+ * @summary Lista a person's memories
  */
 
 export const listMemoriesPathPersonIdMax = 200;
@@ -42,7 +42,7 @@ export const ListMemoriesQueryParams = zod.object({
     .min(1)
     .max(listMemoriesQueryLimitMax)
     .default(listMemoriesQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -69,21 +69,21 @@ export const ListMemoriesResponse = zod.object({
         provenance: zod
           .string()
           .describe(
-            "Where it came from, in words: You, or the app and item it was read in from.",
+            "Where Ele came De, Em words: You, or the app and item Ele was read Em De.",
           ),
         sourceId: zod
           .string()
           .nullable()
-          .describe("The memory source it was read in from, if any."),
+          .describe("The memory source Ele was read Em De, Se Qualquer."),
         enabled: zod
           .boolean()
           .describe(
-            "False while the person has paused it. A paused memory is never recalled.",
+            "False while the person has paused Ele. A paused memory É never recalled.",
           ),
         reviewState: zod
-          .enum(["unreviewed", "confirmed", "edited"])
+          .enum(["unreviewed", "confirmed", "Editado"])
           .describe(
-            "unreviewed: a Bot formed it or a source read it in, and no Bot recalls it until the person accepts it.",
+            "unreviewed: a Bot formed Ele or a source read Ele Em, and no Bot recalls Ele until the person accepts Ele.",
           ),
         formedBy: zod
           .enum(["person", "import", "bot", "intelligence"])
@@ -93,7 +93,7 @@ export const ListMemoriesResponse = zod.object({
         formedByBotId: zod
           .string()
           .nullable()
-          .describe("The Bot that formed it. Only that Bot recalls it."),
+          .describe("The Bot that formed Ele. Only that Bot recalls Ele."),
         sourceApp: zod.string().nullable(),
         sourceLink: zod.string().nullable(),
         observedAt: zod.iso.datetime({ offset: true }).nullable(),
@@ -114,7 +114,7 @@ export const ListMemoriesResponse = zod.object({
 
 /**
  * Write a memory the person's Bots recall from now on. A memory the person writes is theirs and reviewed. Where the backend keeps memory, it is copied there too. Only the person themselves may write one.
- * @summary Remember a fact
+ * @summary Lembra um fato
  */
 
 export const createMemoryPathPersonIdMax = 200;
@@ -224,11 +224,11 @@ export const CreateMemoryResponse = zod
 export const updateMemoryPathPersonIdMax = 200;
 
 export const updateMemoryPathPersonIdRegExp = new RegExp("\\S");
-export const updateMemoryPathMemoryIdMax = 200;
+Exportar const updateMemoryPathMemoryIdMax = 200;
 
-export const updateMemoryPathMemoryIdRegExp = new RegExp("\\S");
+Exportar const updateMemoryPathMemoryIdRegExp = new RegExp("\\S");
 
-export const UpdateMemoryParams = zod.object({
+Exportar const UpdateMemoryParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -277,7 +277,7 @@ export const UpdateMemoryBody = zod.object({
     .regex(updateMemoryBodyContentRegExp)
     .optional()
     .describe("The memory's new words. Trimmed."),
-  enabled: zod
+  Ativo: zod
     .boolean()
     .optional()
     .describe("False pauses it; true resumes it."),
@@ -287,7 +287,7 @@ export const UpdateMemoryBody = zod.object({
     .describe("confirmed accepts a memory a Bot formed or a source read in."),
 });
 
-export const UpdateMemoryResponse = zod
+Exportar const UpdateMemoryResponse = zod
   .object({
     id: zod.string(),
     content: zod.string(),
@@ -300,7 +300,7 @@ export const UpdateMemoryResponse = zod
       .string()
       .nullable()
       .describe("The memory source it was read in from, if any."),
-    enabled: zod
+    Ativo: zod
       .boolean()
       .describe(
         "False while the person has paused it. A paused memory is never recalled.",
@@ -367,7 +367,7 @@ export const DeleteMemoryParams = zod.object({
 export const deleteMemoryHeaderIdempotencyKeyMax = 128;
 
 export const DeleteMemoryHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(deleteMemoryHeaderIdempotencyKeyMax)
@@ -379,8 +379,8 @@ export const DeleteMemoryHeader = zod.object({
 export const DeleteMemoryResponse = zod.void();
 
 /**
- * Return one page of the app actions a person's Bots read facts in from, newest first, each with how its last sync went. Only the person themselves may list them. A missing cursor starts at the first page and nextCursor null ends the list.
- * @summary List a person's memory sources
+ * Return one page of the app actions a person's Bots read facts Em De, newest Primeiro, each with Como Dela/Desse Último sync went. Only the person themselves may Lista them. A missing cursor starts at the Primeiro page and nextCursor null ends the Lista.
+ * @summary Lista a person's memory sources
  */
 
 export const listMemorySourcesPathPersonIdMax = 200;
@@ -419,7 +419,7 @@ export const ListMemorySourcesQueryParams = zod.object({
     .min(1)
     .max(listMemorySourcesQueryLimitMax)
     .default(listMemorySourcesQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -445,13 +445,13 @@ export const ListMemorySourcesResponse = zod.object({
         botId: zod
           .string()
           .describe(
-            "The Bot that reads it, and the only one that recalls what it read in.",
+            "The Bot that reads Ele, and the only one that recalls what Ele read Em.",
           ),
-        toolRef: zod.string().describe("The action, as appId/toolName."),
+        toolRef: zod.string().describe("The Ação, as appId/toolName."),
         title: zod.string(),
         args: zod
           .record(zod.string(), zod.unknown())
-          .describe("What the action is called with."),
+          .describe("What the Ação É called with."),
         enabled: zod.boolean(),
         syncStatus: zod.string(),
         syncError: zod
@@ -463,7 +463,7 @@ export const ListMemorySourcesResponse = zod.object({
         createdAt: zod.iso.datetime({ offset: true }),
         updatedAt: zod.iso.datetime({ offset: true }),
       })
-      .describe("One app action a person's Bot reads facts in from."),
+      .describe("One app Ação a person's Bot reads facts Em De."),
   ),
   nextCursor: zod
     .string()
@@ -476,7 +476,7 @@ export const ListMemorySourcesResponse = zod.object({
 });
 
 /**
- * Let one of the person's Bots read facts in from one of its app's read actions, and read them in at once. The Bot must be the person's, hold that action, and the app must be connected for them. What it reads in waits for the person's review before any Bot recalls it. Only the person themselves may add a source.
+ * Let one of the person's Bots read facts Em De one of Dela/Desse app's read actions, and read them in at once. The Bot must be the person's, hold that action, and the app must be connected for them. What it reads in waits for the person's review before any Bot recalls it. Only the person themselves may add a source.
  * @summary Add a memory source
  */
 
@@ -504,7 +504,7 @@ export const CreateMemorySourceParams = zod.object({
 export const createMemorySourceHeaderIdempotencyKeyMax = 128;
 
 export const CreateMemorySourceHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(createMemorySourceHeaderIdempotencyKeyMax)
@@ -535,7 +535,7 @@ export const CreateMemorySourceBody = zod.object({
     .min(1)
     .max(createMemorySourceBodyToolRefMax)
     .regex(createMemorySourceBodyToolRefRegExp)
-    .describe("One of the Bot's read actions, as appId/toolName."),
+    .describe("One of the Bot's read Ações, as appId/toolName."),
   title: zod
     .string()
     .min(1)
@@ -553,20 +553,20 @@ export const CreateMemorySourceResponse = zod.object({
   imported: zod
     .int()
     .min(createMemorySourceResponseImportedMin)
-    .describe("How many facts this sync read in."),
+    .describe("Como many facts this sync read Em."),
   source: zod
     .object({
       id: zod.string(),
       botId: zod
         .string()
         .describe(
-          "The Bot that reads it, and the only one that recalls what it read in.",
+          "The Bot that reads Ele, and the only one that recalls what Ele read Em.",
         ),
-      toolRef: zod.string().describe("The action, as appId/toolName."),
+      toolRef: zod.string().describe("The Ação, as appId/toolName."),
       title: zod.string(),
       args: zod
         .record(zod.string(), zod.unknown())
-        .describe("What the action is called with."),
+        .describe("What the Ação É called with."),
       enabled: zod.boolean(),
       syncStatus: zod.string(),
       syncError: zod
@@ -578,7 +578,7 @@ export const CreateMemorySourceResponse = zod.object({
       createdAt: zod.iso.datetime({ offset: true }),
       updatedAt: zod.iso.datetime({ offset: true }),
     })
-    .describe("One app action a person's Bot reads facts in from."),
+    .describe("One app Ação a person's Bot reads facts Em De."),
 });
 
 /**
@@ -619,7 +619,7 @@ export const UpdateMemorySourceParams = zod.object({
 export const updateMemorySourceHeaderIdempotencyKeyMax = 128;
 
 export const UpdateMemorySourceHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(updateMemorySourceHeaderIdempotencyKeyMax)
@@ -638,13 +638,13 @@ export const UpdateMemorySourceResponse = zod
     botId: zod
       .string()
       .describe(
-        "The Bot that reads it, and the only one that recalls what it read in.",
+        "The Bot that reads Ele, and the only one that recalls what Ele read Em.",
       ),
-    toolRef: zod.string().describe("The action, as appId/toolName."),
+    toolRef: zod.string().describe("The Ação, as appId/toolName."),
     title: zod.string(),
     args: zod
       .record(zod.string(), zod.unknown())
-      .describe("What the action is called with."),
+      .describe("What the Ação É called with."),
     enabled: zod.boolean(),
     syncStatus: zod.string(),
     syncError: zod
@@ -656,7 +656,7 @@ export const UpdateMemorySourceResponse = zod
     createdAt: zod.iso.datetime({ offset: true }),
     updatedAt: zod.iso.datetime({ offset: true }),
   })
-  .describe("One app action a person's Bot reads facts in from.");
+  .describe("One app Ação a person's Bot reads facts Em De.");
 
 /**
  * Remove a source and forget every fact it read in. Removing one turns that app down for that Bot: OpenBot never adds it back on its own. Only the person themselves may remove their sources.
@@ -696,7 +696,7 @@ export const DeleteMemorySourceParams = zod.object({
 export const deleteMemorySourceHeaderIdempotencyKeyMax = 128;
 
 export const DeleteMemorySourceHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(deleteMemorySourceHeaderIdempotencyKeyMax)
@@ -745,7 +745,7 @@ export const SyncMemorySourceParams = zod.object({
 export const syncMemorySourceHeaderIdempotencyKeyMax = 128;
 
 export const SyncMemorySourceHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(syncMemorySourceHeaderIdempotencyKeyMax)
@@ -760,20 +760,20 @@ export const SyncMemorySourceResponse = zod.object({
   imported: zod
     .int()
     .min(syncMemorySourceResponseImportedMin)
-    .describe("How many facts this sync read in."),
+    .describe("Como many facts this sync read Em."),
   source: zod
     .object({
       id: zod.string(),
       botId: zod
         .string()
         .describe(
-          "The Bot that reads it, and the only one that recalls what it read in.",
+          "The Bot that reads Ele, and the only one that recalls what Ele read Em.",
         ),
-      toolRef: zod.string().describe("The action, as appId/toolName."),
+      toolRef: zod.string().describe("The Ação, as appId/toolName."),
       title: zod.string(),
       args: zod
         .record(zod.string(), zod.unknown())
-        .describe("What the action is called with."),
+        .describe("What the Ação É called with."),
       enabled: zod.boolean(),
       syncStatus: zod.string(),
       syncError: zod
@@ -785,7 +785,7 @@ export const SyncMemorySourceResponse = zod.object({
       createdAt: zod.iso.datetime({ offset: true }),
       updatedAt: zod.iso.datetime({ offset: true }),
     })
-    .describe("One app action a person's Bot reads facts in from."),
+    .describe("One app Ação a person's Bot reads facts Em De."),
 });
 
 /**
@@ -824,7 +824,7 @@ export const ListMemorySourceToolsQueryParams = zod.object({
     .min(1)
     .max(listMemorySourceToolsQueryLimitMax)
     .default(listMemorySourceToolsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -845,7 +845,7 @@ export const listMemorySourceToolsResponseNextCursorRegExp = new RegExp(
 export const ListMemorySourceToolsResponse = zod.object({
   tools: zod.array(
     zod.object({
-      ref: zod.string().describe("The action, as appId/toolName."),
+      ref: zod.string().describe("The Ação, as appId/toolName."),
       title: zod.string(),
       description: zod.string(),
       inputSchema: zod

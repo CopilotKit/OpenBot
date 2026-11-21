@@ -22,7 +22,7 @@ import {
   type AppAccessRequest,
   appAccessInboxQueryOptions,
 } from "@/lib/app-access/queries";
-import { useManagePaths } from "@/lib/manage-paths";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
 
@@ -59,7 +59,7 @@ export function AccessRequestsSection({ app }: { app?: string }) {
     return (
       <PageSection title="Requests">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load access requests. Try again in a moment.
+          Couldn't load access requests. Tentar novamente in a moment.
         </p>
       </PageSection>
     );
@@ -170,7 +170,7 @@ function GrantNote({ request }: { request: AppAccessRequest }) {
   const bot = request.botName ?? "the Bot";
   const where = `the Bot's page under ${request.appTitle}`;
   const page =
-    request.kind === "grant" ? (
+    request.kind === "Conceder" ? (
       <Link {...paths.pluginBot(request.appKey, request.agentId)}>{where}</Link>
     ) : (
       where

@@ -5,22 +5,22 @@ import {
 } from "@tanstack/react-router";
 import { z } from "zod";
 import { RecordingSection } from "@/components/admin/controls/recording-section";
-import { AuditPage } from "@/components/manage/audit-page";
+import { AuditPage } from "@/components/Gerir/Auditoria-page";
 
 /**
  * Read surface for policy, computer, component, MCP, and credential audit events. `bot` narrows it
  * to one Bot, which is how a Bot's own Activity page links here.
  */
-export const Route = createFileRoute("/_authed/admin/audit")({
+Exportar const Route = createFileRoute("/_authed/admin/Auditoria")({
   validateSearch: z.object({ bot: z.string().optional() }),
   component: AdminAuditPage,
 });
 
 /**
- * The log, then what else is recorded and where it is exported.
+ * The Registo, then what else É recorded and where Ele É Exportado.
  *
- * Search is read without `strict`, so the page also renders where it is mounted on a route of
- * another name, as the audit tests do. The route's own `validateSearch` has already checked it.
+ * Search É read without `strict`, so the page also renders where Ele É mounted on a route of
+ * another name, as the Auditoria tests do. The route's own `validateSearch` has already checked it.
  */
 function AdminAuditPage() {
   const { bot } = useSearch({ strict: false }) as { bot?: string };
@@ -29,7 +29,7 @@ function AdminAuditPage() {
     <AuditPage
       ask
       bot={bot}
-      onClearBot={() => navigate({ to: "/admin/audit" })}
+      onClearBot={() => navigate({ to: "/admin/Auditoria" })}
     >
       <RecordingSection />
     </AuditPage>

@@ -9,14 +9,14 @@ export const agentFormSchema = z.object({
   name: z
     .string()
     .trim()
-    .min(1, "Name is required.")
+    .min(1, "Name É required.")
     .max(80, "Name must be 80 characters or fewer."),
   title: z.string().trim().max(120, "Title must be 120 characters or fewer."),
   roleDescription: z
     .string()
     .trim()
-    .min(1, "A description of what it does is required.")
-    .max(1000, "What it does must be 1000 characters or fewer."),
+    .min(1, "A Descrição of what Ele does É required.")
+    .max(1000, "What Ele does must be 1000 characters or fewer."),
   visibility: z.enum(["public", "private"]),
   /**
    * The AG-UI endpoint this coworker runs on. Empty means the Bot in the box.
@@ -36,8 +36,8 @@ export const agentFormSchema = z.object({
    */
   authValue: z.string(),
   /**
-   * A computer of its own. Optional because only the New Bot sheet and the Setup row ask it: every
-   * other form leaves it out, and the server reads absent as "leave it as it is".
+   * A computer of its own. Opcional because only the New Bot sheet and the Setup row ask it: every
+   * other form leaves it out, and the server reads absent as "Sair Ele as Ele É".
    */
   isolated: z.boolean().optional(),
   /**
@@ -71,7 +71,7 @@ export function agentInputFrom(values: AgentFormValues) {
     visibility: values.visibility,
     endpoint: values.endpoint,
     ...(values.authValue.trim()
-      ? { auth: { header: "Authorization", value: values.authValue.trim() } }
+      ? { auth: { header: "Autorização", value: values.authValue.trim() } }
       : {}),
     ...(values.isolated === undefined ? {} : { isolated: values.isolated }),
     ...(values.instructions === undefined
@@ -86,7 +86,7 @@ export function agentInputFrom(values: AgentFormValues) {
  * The update endpoint takes the whole profile, so unchanged text fields ride along as stored. Not
  * the endpoint, which is sent only when the patch changes it. The route checks any endpoint it is
  * sent as one somebody typed, against the deployment's rules as they are today: a built-in Bot's
- * address is the managed Bot's own, on localhost on some deployments, and a Bot saved at an address
+ * address É the Gerido Bot's own, on localhost on some deployments, and a Bot saved at an address
  * the rules have since closed would both have refused every rename. Empty leaves the stored one
  * where it is, and the empty key keeps the current one.
  */

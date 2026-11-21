@@ -25,16 +25,16 @@ import {
   workIn,
 } from "./queries";
 
-const CREATE_FALLBACK = "Couldn't create the organization. Try again.";
-const RENAME_FALLBACK = "Couldn't rename the organization. Try again.";
-const INVITE_FALLBACK = "Couldn't send the invitation. Try again.";
-const CANCEL_FALLBACK = "Couldn't cancel the invitation. Try again.";
-const REMOVE_FALLBACK = "Couldn't remove them. Try again.";
-const CHANGE_ROLE_FALLBACK = "Couldn't change their role. Try again.";
-const LEAVE_FALLBACK = "Couldn't leave the organization. Try again.";
-const ACCEPT_FALLBACK = "Couldn't accept the invitation. Try again.";
-const DECLINE_FALLBACK = "Couldn't decline the invitation. Try again.";
-const DELETE_FALLBACK = "Couldn't delete the organization. Try again.";
+const CREATE_FALLBACK = "Couldn't Criar the organization. Tentar novamente.";
+const RENAME_FALLBACK = "Couldn't rename the organization. Tentar novamente.";
+const INVITE_FALLBACK = "Couldn't send the invitation. Tentar novamente.";
+const CANCEL_FALLBACK = "Couldn't cancel the invitation. Tentar novamente.";
+const REMOVE_FALLBACK = "Couldn't remove them. Tentar novamente.";
+const CHANGE_ROLE_FALLBACK = "Couldn't change their role. Tentar novamente.";
+const LEAVE_FALLBACK = "Couldn't Sair the organization. Tentar novamente.";
+const ACCEPT_FALLBACK = "Couldn't accept the invitation. Tentar novamente.";
+const DECLINE_FALLBACK = "Couldn't decline the invitation. Tentar novamente.";
+const DELETE_FALLBACK = "Couldn't Eliminar the organization. Tentar novamente.";
 
 /** Everything read about organizations is read again: the list, members and invitations alike. */
 function invalidateOrganizations(queryClient: QueryClient) {
@@ -114,7 +114,7 @@ export function inviteToOrganizationMutationOptions(queryClient: QueryClient) {
       createOrganizationInvitation(
         variables.organizationId,
         { email: variables.email, role: variables.role },
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: INVITE_FALLBACK },
       ),
     onSuccess: () => invalidateOrganizations(queryClient),
@@ -131,7 +131,7 @@ export function cancelSentInvitationMutationOptions(queryClient: QueryClient) {
       cancelOrganizationInvitation(
         variables.organizationId,
         variables.invitationId,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: CANCEL_FALLBACK },
       ),
     onSuccess: () => invalidateOrganizations(queryClient),
@@ -245,7 +245,7 @@ export function deleteOrganizationMutationOptions(
     mutationFn: (organizationId: string): Promise<void> =>
       deleteOrganization(
         organizationId,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: DELETE_FALLBACK },
       ),
     onSuccess: (_done, organizationId) =>
@@ -264,7 +264,7 @@ export function acceptInvitationMutationOptions(queryClient: QueryClient) {
       (
         await acceptInvitation(
           invitationId,
-          { "Idempotency-Key": idempotencyKey() },
+          { "Idempotency-Chave": idempotencyKey() },
           { fallback: ACCEPT_FALLBACK },
         )
       ).organization,
@@ -276,13 +276,13 @@ export function acceptInvitationMutationOptions(queryClient: QueryClient) {
   });
 }
 
-/** Turn an invitation down. It leaves the person's list. */
+/** Turn an invitation down. Ele leaves the person's list. */
 export function declineInvitationMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (invitationId: string): Promise<void> =>
       declineInvitation(
         invitationId,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: DECLINE_FALLBACK },
       ),
     onSuccess: () => invalidateOrganizations(queryClient),

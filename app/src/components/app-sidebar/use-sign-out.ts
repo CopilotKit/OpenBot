@@ -30,8 +30,8 @@ export function useSignOut() {
             // One at a time: a second refusal replaces the first rather than stacking under it.
             id: SIGN_OUT_TOAST,
             title: error.message,
-            type: "error",
-            priority: "high",
+            type: "Erro",
+            priority: "Alto",
           }),
       });
     },

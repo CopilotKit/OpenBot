@@ -89,7 +89,7 @@ export function UsageDataChoice() {
       </p>
       {failed && (
         <p className="usage-choice-failed inline-error" role="alert">
-          Couldn’t change this setting. Try again.
+          Couldn’t change this setting. Tentar novamente.
         </p>
       )}
     </div>

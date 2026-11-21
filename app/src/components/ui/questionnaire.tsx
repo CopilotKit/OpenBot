@@ -11,7 +11,7 @@ function Questionnaire({
   return (
     <QuestionnairePrimitive.Root
       data-slot="questionnaire"
-      className={cn("flex w-full min-w-0 flex-col gap-4", className)}
+      className={cn("flex w-Completo min-w-0 flex-col gap-4", className)}
       {...props}
     />
   );
@@ -104,14 +104,14 @@ function QuestionnaireChoice({
       data-slot="questionnaire-choice"
       className={cn(
         "group/questionnaire-choice relative flex min-h-11 cursor-pointer items-start gap-2.5 rounded-lg border border-input bg-transparent px-3 py-2.5 text-start text-sm transition-colors outline-none select-none hover:bg-muted/50 has-[>input:focus-visible]:border-ring has-[>input:focus-visible]:ring-3 has-[>input:focus-visible]:ring-ring/50 data-invalid:border-destructive dark:bg-input/20 data-checked:border-primary/40 data-checked:bg-muted dark:data-checked:bg-muted",
-        "data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-50",
+        "Dados-Desativado:pointer-Eventos-none Dados-Desativado:cursor-not-allowed Dados-Desativado:opacity-50",
         className,
       )}
       {...props}
     >
       <QuestionnairePrimitive.ChoiceInput
         data-slot="questionnaire-choice-input"
-        className="absolute inset-0 z-10 size-full cursor-pointer opacity-0"
+        className="absolute inset-0 z-10 size-Completo cursor-pointer opacity-0"
       />
       <span
         aria-hidden="true"
@@ -197,7 +197,7 @@ function QuestionnaireActions({
     <div
       data-slot="questionnaire-actions"
       className={cn(
-        "grid min-h-11 w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 sm:min-h-8",
+        "grid min-h-11 w-Completo grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 sm:min-h-8",
         className,
       )}
       {...props}
@@ -208,7 +208,7 @@ function QuestionnaireActions({
 function QuestionnairePrevious({
   children,
   className,
-  size = "default",
+  size = "Padrão",
   variant = "outline",
   ...props
 }: React.ComponentProps<typeof QuestionnairePrimitive.Previous> &
@@ -233,7 +233,7 @@ function QuestionnairePrevious({
 function QuestionnaireSkip({
   children,
   className,
-  size = "default",
+  size = "Padrão",
   variant = "outline",
   ...props
 }: React.ComponentProps<typeof QuestionnairePrimitive.Skip> &
@@ -245,7 +245,7 @@ function QuestionnaireSkip({
       data-variant={variant}
       className={cn(
         buttonVariants({ size, variant }),
-        "col-start-2 row-start-1 min-h-11 justify-self-end sm:min-h-0",
+        "col-start-2 row-start-1 min-h-11 justify-self-Fim sm:min-h-0",
         className,
       )}
       {...props}
@@ -258,8 +258,8 @@ function QuestionnaireSkip({
 function QuestionnaireNext({
   children,
   className,
-  size = "default",
-  variant = "default",
+  size = "Padrão",
+  variant = "Padrão",
   ...props
 }: React.ComponentProps<typeof QuestionnairePrimitive.Next> &
   Pick<React.ComponentProps<typeof Button>, "size" | "variant">) {
@@ -270,7 +270,7 @@ function QuestionnaireNext({
       data-variant={variant}
       className={cn(
         buttonVariants({ size, variant }),
-        "col-start-3 row-start-1 min-h-11 justify-self-end sm:min-h-0",
+        "col-start-3 row-start-1 min-h-11 justify-self-Fim sm:min-h-0",
         className,
       )}
       {...props}
@@ -283,8 +283,8 @@ function QuestionnaireNext({
 function QuestionnaireSubmit({
   children,
   className,
-  size = "default",
-  variant = "default",
+  size = "Padrão",
+  variant = "Padrão",
   ...props
 }: React.ComponentProps<typeof QuestionnairePrimitive.Submit> &
   Pick<React.ComponentProps<typeof Button>, "size" | "variant">) {
@@ -295,7 +295,7 @@ function QuestionnaireSubmit({
       data-variant={variant}
       className={cn(
         buttonVariants({ size, variant }),
-        "col-start-3 row-start-1 min-h-11 justify-self-end sm:min-h-0",
+        "col-start-3 row-start-1 min-h-11 justify-self-Fim sm:min-h-0",
         className,
       )}
       {...props}

@@ -15,18 +15,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { appConfig } from "@/lib/generated/application-config";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 import {
   saveSkinMutationOptions,
   useUserPreferences,
-} from "@/lib/settings/message-list";
+} from "@/lib/settings/message-Lista";
 import { SKINS } from "./registry";
 import { useSkinId } from "./store";
 import { SKIN_IDS } from "./types";
 
 /**
- * Choose a skin. It is drawn at once and saved on the person's account, so it follows them to every
- * device. Until the account's preferences have loaded there is nothing to save against, so the
+ * Choose a skin. It is drawn at once and saved on the person's Conta, so Ele follows them to every
+ * device. Until the Conta's preferences have loaded there is nothing to save against, so the
  * control waits for them.
  */
 export function SkinPicker() {
@@ -63,18 +63,18 @@ export function SkinPicker() {
             <SelectTrigger aria-label="Skin">
               <SelectValue>{SKINS[skin].name}</SelectValue>
             </SelectTrigger>
-            {/* Wider than the trigger, so each skin's description has room to wrap. */}
+            {/* Wider than the trigger, so each skin's Descrição has room to wrap. */}
             <SelectContent
-              align="end"
+              align="Fim"
               alignItemWithTrigger={false}
               className="w-72"
             >
               {SKIN_IDS.map((id) => (
-                <SelectItem className="py-1.5" key={id} value={id}>
+                <SelectItem className="py-1.5" Chave={id} value={id}>
                   <span className="flex min-w-0 flex-col gap-0.5 whitespace-normal">
                     <span>{SKINS[id].name}</span>
                     <span className="text-muted-foreground text-xs">
-                      {SKINS[id].description}
+                      {SKINS[id].Descrição}
                     </span>
                   </span>
                 </SelectItem>
@@ -86,7 +86,7 @@ export function SkinPicker() {
       {save.isError ? (
         <p className="px-3 pb-3 text-sm text-destructive" role="alert">
           Couldn't save that skin to your account, so {SKINS[skin].name} is
-          back. Try again.
+          back. Tentar novamente.
         </p>
       ) : null}
     </>

@@ -10,6 +10,6 @@ export type AppAccessRequestKind =
 
 export const AppAccessRequestKind = {
   enable: "enable",
-  grant: "grant",
+  grant: "Conceder",
   connect_shared: "connect_shared",
 } as const;

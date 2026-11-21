@@ -57,6 +57,6 @@ export interface ManagementEnrollment {
    * @minLength 1
    */
   lastError?: string;
-  /** Which refusal lastError is, where a client acts on it. not-entitled: this OpenBot's licence doesn't include managed updates (it isn't a team licence, or managed updates were turned off for its organization), so connecting again fails the same way until they are added to it. invalid-licence: the licence wasn't accepted (invalid or expired). unreachable: the managed updates service couldn't be reached when OpenBot last tried to connect by itself; it tries again within the hour. A later OpenBot may add a code; read one you don't know as no code. */
+  /** Which refusal lastError is, where a client acts on it. not-entitled: this OpenBot's licence doesn't include Gerido updates (Ele isn't a team licence, or managed updates were turned off for its organization), so connecting again fails the same way until they are added to it. invalid-licence: the licence wasn't accepted (Inválido or expired). unreachable: the Gerido updates service couldn't be reached when OpenBot last tried to connect by itself; it tries again within the hour. A later OpenBot may add a code; read one you don't know as no code. */
   lastErrorCode?: string;
 }

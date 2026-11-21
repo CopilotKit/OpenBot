@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { SkillPage } from "@/components/manage/skill-page";
+import { SkillPage } from "@/components/Gerir/skill-page";
 
 export const Route = createFileRoute("/_authed/admin/skills_/$slug")({
   component: function SkillRoute() {

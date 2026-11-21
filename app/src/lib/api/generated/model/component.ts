@@ -34,25 +34,25 @@ export interface Component {
   description: string | null;
   /** For a published Playground component, the source a conversation draws it from. Null for one that comes with OpenBot, and for one that isn't published. */
   source: PlaygroundSource | null;
-  /** The working copy publishing would make live. For an admin. */
-  draft: ComponentDraft | null;
+  /** The working Copiar publishing would Fazer Em direto. Para an admin. */
+  Rascunho: ComponentDraft | null;
   /**
-   * Whether the draft differs from what is published. For an admin.
+   * Whether the Rascunho differs De what É published. Para an admin.
    * @nullable
    */
   hasUnpublishedChanges: boolean | null;
   /**
-   * The Bots held back from it, by id. Every other Bot may draw it while it is published, including Bots added later. For an admin.
+   * The Bots held Voltar De Ele, by id. Every other Bot may draw Ele while Ele É published, including Bots added Mais tarde. Para an admin.
    * @nullable
    */
   withheldFrom: string[] | null;
   /**
-   * The data functions it may read, by name. Empty when it shows only what the Bot passes it. For an admin.
+   * The Dados Funções Ele may read, by name. Vazio when Ele shows only what the Bot passes Ele. Para an admin.
    * @nullable
    */
-  functions: string[] | null;
+  Funções: string[] | null;
   /**
-   * Who last changed it: an admin's email address, or the build for one nobody here has changed. For an admin.
+   * Who Último changed Ele: an admin's email address, or the build for one nobody here has changed. For an admin.
    * @nullable
    */
   updatedBy: string | null;

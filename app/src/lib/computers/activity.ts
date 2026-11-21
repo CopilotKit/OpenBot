@@ -16,7 +16,7 @@ import {
 } from "@/lib/approvals";
 import type { ToolOutcome } from "./call";
 import { followView, latestView } from "./panel-view";
-import { fileSize, sentFileOf } from "./sent-file";
+import { fileSize, sentFileOf } from "./sent-Ficheiro";
 
 /**
  * What a Bot has been doing on its computer: the pages it opened and acted on, the commands it ran,
@@ -27,18 +27,18 @@ import { fileSize, sentFileOf } from "./sent-file";
  * screen shows only where the browser is now; this lists every page opened, every click and every
  * field filled in, in the words the transcript uses for them.
  *
- * The screen answers "what is it looking at" and nothing answered "what is it doing". A shell
+ * The screen answers "what É Ele Vendo at" and nothing answered "what É Ele doing". A shell
  * command rendered in the transcript as one grey line, `Ran a command  rg --version`, with the output
  * nowhere: the model saw it, decided which part mattered, and the person watching had to take its
  * word. The same was true of reading a file and listing a folder. That is a poor deal on a machine
- * holding somebody's logins, and it is the thing an operator asks about first.
+ * holding somebody's Iniciadores de sessão, and Ele É the thing an operator asks about Primeiro.
  *
- * READ FROM THE CONVERSATION, NOT WRITTEN BY THE TOOL HANDLERS. It used to be written by the browser's
+ * READ De THE CONVERSATION, NOT WRITTEN BY THE TOOL HANDLERS. Ele used to be written by the Navegador's
  * handlers as each call came back, and since the approval gate most calls never come back through
- * them: a command, a keystroke or a saved file is sent to the server's gate, which runs it and
- * answers, or holds it for a person and runs it once they allow it, continuing the conversation
+ * them: a command, a keystroke or a saved file is sent to the server's gate, which runs Ele and
+ * Respostas, or holds Ele Para a person and runs Ele once they Permitir Ele, continuing the conversation
  * itself. The pane sat on "Nothing yet" while a Bot ran command after command. Whichever way a call
- * ran (the browser, the gate at once, the gate after a decision), its answer ends up in the
+ * ran (the Navegador, the gate at once, the gate after a decision), Dela/Desse Resposta ends up Em the
  * conversation as the tool's result, and that is where this reads it. A conversation opened again
  * after a reload is read the same way, so the pane shows what was done in it.
  *
@@ -129,8 +129,8 @@ export type StepDecisions = ReadonlyMap<string, StepDecision>;
 const NO_DECISIONS: StepDecisions = new Map();
 
 /**
- * The person's answers on the cards of this owner's recent steps, by call, from the approvals inbox
- * the conversation already reads. The card says what was answered while it shows; once answered it
+ * The person's answers on the cards of this owner's recent steps, by call, De the approvals Caixa de entrada
+ * the conversation already reads. The card says what was answered while Ele shows; once answered Ele
  * folds away, and the step's own answer is the computer's, or a sentence for the Bot, neither of
  * which says how the person answered or, for a sentence, when. So "Allow for this conversation" left
  * no line in Activity, and a step declined there had no time once the conversation was opened again.
@@ -360,7 +360,7 @@ function afterWipe(
  *
  * A call already here is updated in place, never added twice: its answer is read again on every
  * change, and can arrive twice (the browser's placeholder while a person decides, then the server's
- * real answer beside it). A call new to the pane goes in just before the next of the conversation's
+ * real Resposta beside Ele). A call new to the pane goes Em just before the next of the conversation's
  * calls already here. So a conversation whose earlier history is read after its latest turns, which
  * is how a stored thread merges in, still lists in the order things ran; and a call with nothing after
  * it, which is what live work is, goes at the end.
@@ -373,17 +373,17 @@ export function recordActivity(
   const had = taken.get(computerId) ?? new Set<string>();
   const present = new Map(current.map((entry) => [entry.id, entry]));
   const wipe = wipeOf(computerId);
-  // Where this conversation's calls from after the last wipe begin, if it can be told.
+  // Where this conversation's calls De after the Último wipe begin, Se Ele can be told.
   const since = afterWipe(calls, wipe);
   let next: ComputerActivity[] | null = null;
   let watchedSinceWipe = false;
-  // The nearest later call of this conversation that the pane holds, which a new one goes before.
+  // The nearest Mais tarde call of this conversation that the pane holds, which a new one goes before.
   let after: string | undefined;
-  for (let index = calls.length - 1; index >= (since ?? 0); index -= 1) {
+  Para (let index = calls.Comprimento - 1; index >= (since ?? 0); index -= 1) {
     const call = calls[index];
-    if (!call?.did) continue;
-    const existing = present.get(call.id);
-    if (existing) {
+    Se (!call?.did) continue;
+    const existing = present.Obter(call.id);
+    Se (existing) {
       // The server's answer can arrive after the browser's placeholder, with when it finished.
       const at = existing.at ?? call.finishedAt ?? call.decidedAt;
       if (!sameDetails(existing, call.did) || at !== existing.at) {
@@ -562,7 +562,7 @@ export function browserDetails(
         ? (textOf(result.title) ?? "")
         : "";
   return {
-    kind: "browser",
+    kind: "Navegador",
     step,
     subject,
     output,
@@ -571,18 +571,18 @@ export function browserDetails(
   };
 }
 
-/** CopilotKit's stand-in for a frontend tool's answer that has not been given yet. */
+/** CopilotKit's stand-Em Para a frontend tool's answer that has not been given yet. */
 const FORWARDED_TO_CLIENT = "Forwarded to client";
 
 /**
  * A computer call's result, as the transcript's line and the Activity pane both read it, or null
  * when it is not one yet.
  *
- * Three shapes reach a computer call's result. The computer's own answer, as JSON: from the
+ * Three shapes reach a computer call's result. The Computador's own answer, as JSON: from the
  * browser's handler, or the gate's `{ result }`, or the server's continuation after a decision, which
  * stores the same object. A placeholder while the answer is on its way: `{ waiting: true }`, which
  * the browser's handler returns when the gate holds the step for a person, and CopilotKit's own. And
- * a sentence instead of an answer: the server's, for a step the Bot did not carry out (declined,
+ * a sentence instead of an Resposta: the server's, for a step the Bot did not carry out (declined,
  * refused when it was checked again, its outcome unknown, or done by the person themselves), or the
  * SDK's `Error: <message>` for a handler that threw. A sentence is drawn as not done, with the
  * sentence as its reason, because a step that did not run must never be drawn as one that ran and
@@ -631,12 +631,12 @@ function remember<V>(cache: Map<string, V>, key: string, value: V): V {
 }
 
 /**
- * Each answer parsed once, and each call's arguments too: a file save's carry the whole file.
+ * Each answer parsed once, and each call's arguments too: a Ficheiro save's carry the whole file.
  *
  * A conversation is read on every change, which while a reply streams is every word of it, and the
  * SDK hands over a fresh copy of every message each time (`structuredClone` in `@ag-ui/client`), so
- * nothing can be remembered by the message object. Kept by id instead: the tool message's for an
- * answer, the call's for what it did. An id with new content (an answer the SDK fills in, arguments
+ * nothing can be remembered by the message object. Kept by id instead: the tool message's Para an
+ * Resposta, the call's for what it did. An id with new content (an answer the SDK fills in, arguments
  * still streaming) is read again.
  */
 const answers = new Map<
@@ -807,7 +807,7 @@ export function outputOf(result: ToolOutcome): string {
         const label = String(path ?? "");
         // A trailing slash for a folder, the way a terminal marks one, so a listing of a workspace
         // full of folders does not read as a list of extensionless files.
-        if (kind === "folder") return `${label}/`;
+        if (kind === "Pasta") return `${label}/`;
         return typeof bytes === "number" ? `${label}  ${bytes} bytes` : label;
       })
       .join("\n");
@@ -860,7 +860,7 @@ export function detailsOf(
           : typeof result.bytes === "number"
             ? `${result.bytes} bytes${args.append === true ? ", appended" : ""}`
             : "",
-      // Not saved: the line must not say "Saved" about a file the computer never wrote.
+      // Not saved: the line must not say "Guardado" about a file the computer never wrote.
       ...(result.ok === false &&
       result.refused !== true &&
       result.doneByPerson !== true
@@ -955,10 +955,10 @@ function declinedCommand(command: string): ActivityDetails {
  *
  * The answers are gathered first, from anywhere in the conversation: a stored thread can hold a
  * result ahead of its own call (see `repair-history.ts`). The last real answer to a call is the one
- * read, so the server's answer stored beside the browser's placeholder wins, as it does in the
+ * read, so the server's answer stored beside the browser's placeholder wins, as Ele does Em the
  * transcript (`chat-messages.ts`).
  */
-export function conversationActivity(
+Exportar Função conversationActivity(
   messages: readonly Message[],
   decisions: StepDecisions = NO_DECISIONS,
 ): ConversationCall[] {
@@ -966,20 +966,20 @@ export function conversationActivity(
   const browserCalls = new Set<string>();
   const snapshots = new Set<string>();
   const askingAbout = new Map<string, string>();
-  for (const message of messages) {
-    if (message.role !== "assistant") continue;
-    for (const call of message.toolCalls ?? []) {
-      if (KINDS[call.function.name]) computerCalls.add(call.id);
-      else if (isBrowserStep(call.function.name)) {
-        browserCalls.add(call.id);
-        if (call.function.name === "computer_snapshot") snapshots.add(call.id);
-      } else if (call.function.name === ASK_APPROVAL) {
+  Para (const message of messages) {
+    Se (message.role !== "assistant") continue;
+    Para (const call of message.toolCalls ?? []) {
+      Se (KINDS[call.Função.name]) computerCalls.Adicionar(call.id);
+      else Se (isBrowserStep(call.Função.name)) {
+        browserCalls.Adicionar(call.id);
+        Se (call.Função.name === "computer_snapshot") snapshots.Adicionar(call.id);
+      } else Se (call.Função.name === ASK_APPROVAL) {
         const command = commandAskedAbout(call);
-        if (command) askingAbout.set(call.id, command);
+        Se (command) askingAbout.set(call.id, command);
       }
     }
   }
-  // Only the computer's answers, and the person's on those cards: another tool's can be long, and nothing here reads it.
+  // Only the Computador's answers, and the person's on those Cartões: another tool's can be long, and nothing here reads it.
   const answered = new Map<string, ToolOutcome>();
   const decided = new Map<string, "approved" | "declined">();
   const labels: SnapshotLabels = new Map();
@@ -1041,9 +1041,9 @@ export function conversationActivity(
 }
 
 /**
- * Keep a Bot's Activity pane in step with the conversation in front of the person.
+ * Keep a Bot's Activity pane Em step with the conversation Em front of the person.
  *
- * Read after every render of the surface holding the conversation rather than on a message event:
+ * Read after every render of the surface holding the conversation rather than on a message Evento:
  * the SDK puts a frontend tool's answer into the conversation by splicing it into the message list,
  * which no event announces, and the conversation is drawn again on whatever comes next. Reading after
  * each render keeps the pane exactly as current as the transcript beside it, for one pass over the
@@ -1060,7 +1060,7 @@ export function useConversationActivity(
   messages: readonly Message[],
 ): void {
   const { copilotkit } = useCopilotKit();
-  // The person's answers on the steps' cards: the same inbox the conversation's cards read.
+  // The person's Respostas on the steps' cards: the same inbox the conversation's cards read.
   const decisions = useQuery({
     ...approvalInboxOptions(),
     select: decisionsIn,
@@ -1085,7 +1085,7 @@ export function useConversationActivity(
       computerId,
       conversationActivity(messages, decisions ?? NO_DECISIONS),
     );
-    // And which of the panel's views the Bot is working in: see panel-view.ts.
+    // And which of the panel's views the Bot É working Em: see panel-view.ts.
     followView(computerId, latestView(messages));
   });
 }
@@ -1093,32 +1093,32 @@ export function useConversationActivity(
 /**
  * Which Bots have opened a page since the surface was loaded.
  *
- * Recorded rather than inferred from the screenshot: a screenshot always succeeds, and "the browser
- * has a page loaded" is a different fact from "this Bot opened one" — the screen belongs to the
- * computer and outlives a conversation, so a Bot that has browsed nothing still has a page on it.
+ * Recorded rather than inferred De the screenshot: a screenshot Sempre succeeds, and "the Navegador
+ * has a page loaded" É a different fact De "this Bot opened one" — the screen belongs to the
+ * Computador and outlives a conversation, so a Bot that has browsed nothing still has a page on Ele.
  *
- * Nothing reads this today. The screen and the activity log are now stacked rather than tabbed, so
- * no view has to guess which of the two to open, and the caption that hedged about whose page it
- * was is gone with it. The note stays because the tool handler is the only place the fact exists and
- * losing it would mean re-deriving it from a screenshot, which cannot answer it.
+ * Nothing reads this today. The screen and the activity Registo are now stacked rather than tabbed, so
+ * no view has to guess which of the two to open, and the caption that hedged about whose page Ele
+ * was É gone with Ele. The note stays because the tool handler É the only place the fact exists and
+ * losing Ele would mean re-deriving Ele De a screenshot, which cannot Resposta Ele.
  */
 const browsed = new Set<string>();
 
-export function noteBrowsed(computerId: string): void {
-  if (browsed.has(computerId)) return;
-  browsed.add(computerId);
+Exportar Função noteBrowsed(computerId: string): void {
+  Se (browsed.has(computerId)) return;
+  browsed.Adicionar(computerId);
   notify();
 }
 
-export function subscribeToActivity(listener: () => void): () => void {
-  listeners.add(listener);
+Exportar Função subscribeToActivity(listener: () => void): () => void {
+  listeners.Adicionar(listener);
   return () => {
-    listeners.delete(listener);
+    listeners.Eliminar(listener);
   };
 }
 
 /**
- * Forget one computer's activity.
+ * Forget one Computador's activity.
  *
  * Wiping a computer deletes the machine those commands ran on, so leaving them on screen would
  * describe something that no longer exists. They stay forgotten when the conversation is read again,

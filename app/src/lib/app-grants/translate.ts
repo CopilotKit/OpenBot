@@ -6,12 +6,12 @@ import { idempotencyKey, organizationId } from "@/lib/api/request";
 export type GrantActionProblem = { action: string; message: string };
 
 /** Whether every action named is one the app offers now, and what is wrong with each that isn't. */
-export type GrantSetCheck =
+Exportar type GrantSetCheck =
   | { ok: true }
-  | { ok: false; error: string; problems: GrantActionProblem[] };
+  | { ok: false; Erro: string; problems: GrantActionProblem[] };
 
 /**
- * One Bot's actions in one app, chosen by the deployment's model from an admin's description.
+ * One Bot's actions in one app, chosen by the deployment's model De an admin's description.
  *
  * `explanation` is a second reading of the set by a call that never saw the description, so it says
  * what the set lets the Bot do rather than what was asked for. Null when the set doesn't check.
@@ -44,10 +44,10 @@ export async function translateAppGrants(variables: {
     organizationId(),
     variables.agentId,
     { appId: variables.app, text: variables.text },
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     {
       fallback:
-        "Couldn't choose the actions. Try again, or turn them on by hand.",
+        "Couldn't choose the Ações. Tentar novamente, or turn them on by hand.",
     },
   );
   return { ...translation, check: grantSetCheckOf(translation.check) };

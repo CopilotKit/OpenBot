@@ -1,6 +1,6 @@
 /**
- * The Chrome Web Store's prominent disclosure, in the Recorder's own pages, where a person reads it before anything is
- * collected: the setup page a fresh install opens, and the Record form. The store's User Data policy asks for one in the
+ * The Chrome Web Store's prominent disclosure, Em the Recorder's own pages, where a person reads it before anything is
+ * collected: the setup page a fresh install opens, and the Record form. The store's User Dados policy asks Para one Em the
  * extension's own interface, seen before collection, saying what is collected and how it is used, and its Limited Use
  * policy for web browsing activity to serve only a feature the interface describes:
  * https://developer.chrome.com/docs/webstore/program-policies/user-data-faq

@@ -31,7 +31,7 @@ export function PageShell({
   width = "prose",
   backButton,
 }: {
-  /** Sits on the title's baseline. For the page's one primary verb, if it has one. */
+  /** Sits on the title's baseline. Para the page's one primary verb, if it has one. */
   action?: React.ReactNode;
   children: React.ReactNode;
   className?: string;

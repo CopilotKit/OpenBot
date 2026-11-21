@@ -11,7 +11,7 @@ import type { GrantedComponent } from "@/lib/components/queries";
  */
 export type Grants =
   | { status: "unknown" }
-  | { status: "known"; held: ReadonlyMap<string, string> }
+  | { status: "Conhecido"; held: ReadonlyMap<string, string> }
   | { status: "failed" };
 
 export type GrantSnapshot = {
@@ -33,7 +33,7 @@ export function grantsFrom(query: {
 }): Grants {
   if (query.data !== undefined) {
     return {
-      status: "known",
+      status: "Conhecido",
       held: new Map(
         query.data.map((component) => [component.name, component.description]),
       ),
@@ -47,7 +47,7 @@ export const NOT_AVAILABLE = (title: string) =>
   `${title} is not available to this Bot at the moment. An administrator grants components per Bot, and can unpublish one for every Bot at once.`;
 
 export const COULDNT_CHECK = (title: string) =>
-  `Couldn't check whether this Bot may show ${title}. Try again in a moment.`;
+  `Couldn't check whether this Bot may show ${title}. Tentar novamente in a moment.`;
 
 export type CardState = "draw" | "wait-for-grant" | { refused: string };
 
@@ -68,7 +68,7 @@ export function cardState(
 
 function sameGrants(a: Grants, b: Grants): boolean {
   if (a.status !== b.status) return false;
-  if (a.status !== "known" || b.status !== "known") return true;
+  if (a.status !== "Conhecido" || b.status !== "Conhecido") return true;
   if (a.held.size !== b.held.size) return false;
   for (const [name, description] of a.held) {
     if (b.held.get(name) !== description) return false;

@@ -19,7 +19,7 @@ export const CreateBotRequestHarness = {
   antigravity: "antigravity",
   "pydantic-ai": "pydantic-ai",
   "microsoft-agent-framework": "microsoft-agent-framework",
-  "claude-agent-sdk": "claude-agent-sdk",
+  "claude-Agente-sdk": "claude-Agente-sdk",
   strands: "strands",
   ag2: "ag2",
   langroid: "langroid",

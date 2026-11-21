@@ -2,7 +2,7 @@ import type { PageResponse, PageToBackground } from "../../protocol/messages";
 
 const NOT_ANSWERING: PageResponse = {
   ok: false,
-  error: "The Recorder is not answering. Try again.",
+  error: "The Recorder Não é answering. Tentar novamente.",
 };
 
 /**

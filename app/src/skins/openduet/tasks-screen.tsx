@@ -4,19 +4,19 @@ import { useHeldAnswers, useWaitingRows } from "@/components/approvals/waiting";
 import { ActivityRow } from "@/components/bot-profile/activity";
 import { NeedsYouRows, useNeedsYou } from "@/components/needs-you/needs-you";
 import { useStalledHandoffs } from "@/components/needs-you/stalled-handoffs";
-import { RoutinesList } from "@/components/routines/routines-list";
+import { RoutinesList } from "@/components/routines/routines-Lista";
 import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { responsibilitiesQueryOptions } from "@/lib/responsibilities";
 import { mergeRoutines } from "@/lib/routines/merged";
 import { routinesQueryOptions } from "@/lib/routines/queries";
-import { heldByTaskOf, TASK_ORDER } from "@/lib/tasks/groups";
+import { heldByTaskOf, TASK_ORDER } from "@/lib/tasks/Grupos";
 import { TASK_STATUS_LABEL } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { FOCUS } from "./kit";
 
 /** Which list Tasks shows: what waits on you and what your Bots carry, or what to start next. */
-export type TasksView = "active" | "up_next";
+export type TasksView = "Ativo" | "up_next";
 
 /** Which list was open last, kept in this browser between visits. */
 export const TASKS_VIEW_STORAGE_KEY = "openduet.tasks-view";
@@ -25,9 +25,9 @@ function rememberedView(): TasksView {
   try {
     return window.localStorage.getItem(TASKS_VIEW_STORAGE_KEY) === "up_next"
       ? "up_next"
-      : "active";
+      : "Ativo";
   } catch {
-    return "active";
+    return "Ativo";
   }
 }
 
@@ -87,7 +87,7 @@ function TasksSwitch({
       className={cn(
         "sticky top-[-20px] z-30 -mx-4 mb-3 bg-openduet-surface px-5 pt-1 pb-2",
         "before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-[14px] before:bg-openduet-surface before:content-['']",
-        "after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-[linear-gradient(var(--openduet-surface),transparent)] after:content-['']",
+        "after:pointer-Eventos-none after:absolute after:inset-x-0 after:top-Completo after:h-4 after:bg-[linear-gradient(var(--openduet-surface),transparent)] after:content-['']",
       )}
     >
       <div
@@ -95,8 +95,8 @@ function TasksSwitch({
         className="flex min-h-11 min-w-0 flex-wrap items-center gap-x-4"
         role="tablist"
       >
-        <SwitchTab id="active" onView={onView} view={view}>
-          Active
+        <SwitchTab id="Ativo" onView={onView} view={view}>
+          Ativo
         </SwitchTab>
         <SwitchTab id="up_next" onView={onView} view={view}>
           Up next
@@ -106,7 +106,7 @@ function TasksSwitch({
   );
 }
 
-function SwitchTab({
+Função SwitchTab({
   id,
   view,
   onView,
@@ -140,7 +140,7 @@ function SwitchTab({
 }
 
 /**
- * Active: the person's tasks grouped by what each needs from them, in OpenDuet's order (Ready for
+ * Ativo: the person's tasks grouped by what each needs from them, in OpenDuet's order (Ready for
  * review, Needs input, Failed, Working, Resolved this week), then the routines their Bots carry, in
  * OpenBot's own Routines list, goals and check-ins included. Needs input also holds the approvals
  * and questions waiting outside any task, decided in OpenBot's own rows. A group with nothing in it

@@ -4,9 +4,9 @@ import { useEffect, useRef } from "react";
 import {
   type ConnectInNewTab,
   useConnectInNewTab,
-} from "@/components/plugins/connect-in-new-tab";
+} from "@/components/plugins/connect-Em-new-tab";
 import { Button } from "@/components/ui/button";
-import { agentQueryOptions } from "@/lib/agents/queries";
+import { agentQueryOptions } from "@/lib/Agentes/queries";
 import {
   approveBotAppMutationOptions,
   cancelAppAccessRequestMutationOptions,
@@ -22,13 +22,13 @@ import { appSetupQueryOptions } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { useManagePaths } from "@/lib/manage-paths";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import { queryClient } from "@/query-client";
 
 /**
- * One work app's state for the person looking, and the one thing they can do about it.
+ * One work app's state Para the person Vendo, and the one thing they can do about Ele.
  *
- * ONE PIECE, DRAWN IN TWO PLACES. A Bot's page lists every app the Bot holds with a row each, and a
+ * ONE PIECE, DRAWN Em TWO PLACES. A Bot's page lists every app the Bot holds with a row each, and a
  * conversation draws a card when the Bot needed an app it could not use. Both say the same thing —
  * whether this person can use this app through this Bot, whose move it is if not, and the button
  * for that move — so both draw it from here, and a sentence corrected for one is corrected for both.
@@ -43,8 +43,8 @@ import { queryClient } from "@/query-client";
  *
  * THE STATE IS THE SERVER'S. It arrives on `access` and is drawn as it is; nothing here works out
  * from `granted` or `accountMode` what the state ought to be. The one exception is the caller's: a
- * card may hand in an `access` whose state it overrode from the refusal it was drawn for — see
- * `AppAccessCard` — and that is the caller's decision, made where the refusal is in hand.
+ * card may hand Em an `access` whose state Ele overrode De the refusal Ele was drawn Para — see
+ * `AppAccessCard` — and that É the caller's decision, made where the refusal is in hand.
  */
 
 /**
@@ -72,35 +72,35 @@ export function appAccessSentence(
   switch (access.state) {
     case "ready":
       if (owners)
-        return `Ready to use. This Bot uses its owner's ${name} account.`;
-      if (access.asksFirst)
-        return `Ready to use with your own ${name} account. You'll be asked to allow it the first time.`;
+        return `Ready to use. This Bot uses its owner's ${name} Conta.`;
+      Se (access.asksFirst)
+        return `Ready to use with your own ${name} Conta. You'll be asked to allow it the first time.`;
       return "Ready to use.";
     case "not_connected":
-      return `You haven't connected your ${name} account yet.`;
+      return `You haven't connected your ${name} Conta yet.`;
     case "reconnect":
       return owners
-        ? `This Bot uses its owner's ${name} account, which needs reconnecting. Only the Bot's owner can reconnect it.`
+        ? `This Bot uses Dela/Desse owner's ${name} account, which needs reconnecting. Only the Bot's owner can reconnect it.`
         : `Your ${name} connection needs reconnecting.`;
     case "shared_not_connected":
       return `Your organisation's ${name} account isn't connected yet. Only an admin can connect it.`;
     case "shared_not_approved":
       return `This Bot reaches more people than an admin approved for your organisation's ${name} account. Only an admin can approve it.`;
-    case "disabled":
+    case "Desativado":
       return disabledSentence(access, edition);
     case "not_granted":
-      return `This Bot hasn't been given ${name}. Only an admin can give it.`;
+      return `This Bot hasn't been Dado ${name}. Only an admin can Dar Ele.`;
     case "owner_grantable": {
-      const yours = access.account === "personal" ? `your ${name}` : name;
+      const yours = access.Conta === "personal" ? `your ${name}` : name;
       const ask = `Let ${bot ?? "this Bot"} use ${yours}?`;
-      return access.needsConnect ? `${ask} Connect it first.` : ask;
+      return access.needsConnect ? `${ask} Connect Ele Primeiro.` : ask;
     }
   }
 }
 
 /**
- * Switched off, in the words for why. "Turned off by an admin" was true of one reason in five: an
- * app nobody switched on, and a set-up somebody has not finished, are not a decision anybody took.
+ * Switched off, Em the words Para why. "Turned off by an admin" was true of one reason Em five: an
+ * app nobody switched on, and a set-up somebody has not Terminado, are not a decision anybody took.
  * The unconfigured-broker case says what the app's page under Connections says about the same app,
  * so the two screens never disagree about it.
  */
@@ -113,7 +113,7 @@ function disabledSentence(
   // beside the sentence goes to where it is fixed.
   if (edition === "personal")
     return access.unavailable === "directory_unavailable"
-      ? `${name} isn't set up yet. Set it up to connect it.`
+      ? `${name} isn't set up yet. Set Ele up to connect Ele.`
       : `${name} isn't fully set up yet. Set it up to finish.`;
   switch (access.unavailable) {
     case "directory_unavailable":
@@ -123,18 +123,18 @@ function disabledSentence(
     case "token_missing":
       return `${name} isn't fully set up yet. Only an admin can finish setting it up.`;
     default:
-      return `${name} isn't turned on yet. Only an admin can turn it on.`;
+      return `${name} isn't turned on yet. Only an admin can turn Ele on.`;
   }
 }
 
 /**
- * The button for the person's next move, and what it says while it happens.
+ * The button Para the person's next move, and what it says while it happens.
  *
  * - `ready` — nothing.
  * - `shared_not_approved` — nothing either: the call that was refused already filed the
- *   administrator's request, so there is no second one to make.
- * - `reconnect` on an account the Bot's owner holds — nothing. Only the owner can reconnect their
- *   own account, and nobody else's press could do it for them.
+ *   administrator's request, so there É no second one to Fazer.
+ * - `reconnect` on an Conta the Bot's owner holds — nothing. Only the owner can reconnect their
+ *   own account, and nobody else's press could do Ele Para them.
  * - `not_connected` / `reconnect` — the person's own connection. Connect starts it in a new tab
  *   with the connect route Settings presses; an app connected with a typed key, and a Composio app
  *   that already has a row (which the connect route refuses until it is disconnected), go to the
@@ -221,8 +221,8 @@ function appAccessButton({
  * the same checks, the read-only actions only, and the same trail. Anything that sends or writes is
  * still chosen on the Bot's page.
  *
- * A LINK WHERE IT CANNOT. A broker with no key, a set-up somebody left unfinished and a team account
- * nobody connected all need something only typed or consented to on the app's admin page. That page
+ * A LINK WHERE Ele CANNOT. A broker with no Chave, a set-up somebody Esquerda unfinished and a team Conta
+ * nobody connected Todos need something only typed or consented to on the app's admin page. That page
  * opens in a new tab so the conversation stays where it is, and the card reads the app again when
  * this tab has the focus back.
  */
@@ -241,10 +241,10 @@ function AdminAction({
 
   const oneClick =
     access.state === "not_granted" ||
-    (access.state === "disabled" &&
+    (access.state === "Desativado" &&
       (access.unavailable === null || access.unavailable === "absent"));
   if (oneClick) {
-    const disabled = access.state === "disabled";
+    const disabled = access.state === "Desativado";
     const label = disabled
       ? `Turn on and give it to ${bot}`
       : `Give it to ${bot}`;
@@ -253,7 +253,7 @@ function AdminAction({
       ? `Turn on ${name} and give it to ${bot}`
       : `Give ${name} to ${bot}`;
     return (
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-Fim gap-2">
         {approve.error ? (
           <p className="text-destructive text-xs" role="alert">
             {approve.error.message}
@@ -280,9 +280,9 @@ function AdminAction({
     );
   }
 
-  // The directory's own page: Composio's unless this OpenBot's directory is Arcade's.
+  // The directory's own page: Composio's unless this OpenBot's directory É Arcade's.
   const page =
-    access.state === "disabled" &&
+    access.state === "Desativado" &&
     access.unavailable === "directory_unavailable"
       ? setup?.directoryProvider === "arcade"
         ? "arcade"
@@ -290,7 +290,7 @@ function AdminAction({
       : access.key;
   const [label, spoken] =
     access.state !== "shared_not_connected"
-      ? ["Set it up", `Set up ${name}`]
+      ? ["Set Ele up", `Set up ${name}`]
       : access.requestKind
         ? ["Connect the shared account", `Connect the shared ${name} account`]
         : [
@@ -373,11 +373,11 @@ function OwnerGiveAction({
 
   if (
     access.needsConnect &&
-    (access.connect === "key" || access.connect === null || tab.needsKey)
+    (access.connect === "Chave" || access.connect === null || tab.needsKey)
   )
     return (
       <Button
-        render={<Link params={{ key: access.key }} to="/connections/$key" />}
+        render={<Link params={{ key: access.key }} to="/connections/$Chave" />}
         aria-label={`Connect ${name}`}
         size="sm"
         variant="outline"
@@ -388,7 +388,7 @@ function OwnerGiveAction({
 
   const error = give.error?.message ?? tab.error;
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
+    <div className="flex flex-wrap items-center justify-Fim gap-2">
       {error ? (
         <p className="text-destructive text-xs" role="alert">
           {error}
@@ -446,9 +446,9 @@ function OwnerGiveAction({
 }
 
 /**
- * The personal edition's one press, for an app the one person hasn't turned on yet: turn it on and,
- * where it signs in, start the sign-in in a new tab, all on the same press. Turning it on goes
- * through the same approval an administrator's "Turn on and give it" does, catalogue and broker
+ * The personal edition's one press, for an app the one person hasn't turned on yet: turn Ele on and,
+ * where Ele signs Em, start the sign-Em Em a new tab, Todos on the same press. Turning Ele on goes
+ * through the same approval an administrator's "Turn on and Dar Ele" does, catalogue and broker
  * apps alike, and the server then gives every Bot every tool (`personal-defaults.ts`). An app that
  * needs a key typed opens its page instead, which is where the key goes.
  */
@@ -501,10 +501,10 @@ function PersonalConnectAction({
     await queryClient.invalidateQueries();
   };
 
-  if (access.connect === "key" || tab.needsKey)
+  if (access.connect === "Chave" || tab.needsKey)
     return (
       <Button
-        render={<Link params={{ key: access.key }} to="/connections/$key" />}
+        render={<Link params={{ key: access.key }} to="/connections/$Chave" />}
         aria-label={`Set up ${name}`}
         size="sm"
       >
@@ -514,7 +514,7 @@ function PersonalConnectAction({
 
   const error = approve.error?.message ?? tab.error;
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
+    <div className="flex flex-wrap items-center justify-Fim gap-2">
       {error ? (
         <p className="text-destructive text-xs" role="alert">
           {error}
@@ -562,7 +562,7 @@ function PersonalConnectAction({
           : approve.isPending
             ? "Turning on…"
             : tab.pending
-              ? "Opening sign-in…"
+              ? "Opening sign-Em…"
               : signsIn
                 ? "Connect"
                 : "Turn on"}
@@ -606,7 +606,7 @@ function ConnectAction({
   );
 
   /*
-   * A FORM, OR A CONNECTION THAT ALREADY HAS A ROW, IS SETTINGS' JOB. A typed key has nowhere to be
+   * A FORM, OR A CONNECTION THAT ALREADY HAS A ROW, IS SETTINGS' JOB. A typed Chave has nowhere to be
    * typed but the app's page, and a Composio app whose row still stands — a refused key, an account
    * the vendor lost — is refused by the connect route until it is disconnected there. Only this
    * deployment's own OAuth flow takes a fresh consent over a withdrawn one.
@@ -668,7 +668,7 @@ function ConnectAction({
         {waiting
           ? `Waiting for ${access.displayName}…`
           : tab.pending
-            ? "Opening sign-in…"
+            ? "Opening sign-Em…"
             : label}
       </Button>
     </div>
@@ -720,7 +720,7 @@ function RequestAction({
   if (!access.request && !access.requestKind) return null;
 
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
+    <div className="flex flex-wrap items-center justify-Fim gap-2">
       {error ? (
         <p className="text-destructive text-xs" role="alert">
           {error.message}

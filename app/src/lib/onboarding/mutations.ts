@@ -5,7 +5,7 @@ import {
 } from "@/lib/api/generated/people/people";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { authKeys, type OnboardingStatus } from "@/lib/auth/queries";
-import { channelKeys } from "@/lib/channels/queries";
+import { channelKeys } from "@/lib/Canais/queries";
 
 /** The sentence for every write here, since they all fail the same way to a reader. */
 const FALLBACK = "Onboarding could not be saved";
@@ -16,7 +16,7 @@ const FALLBACK = "Onboarding could not be saved";
  * No `onboardingKeys` on purpose: a key nothing reads would be a cache entry nothing invalidates.
  * The `_authed` gate and the wizard both read `currentUserQueryOptions`.
  *
- * `refetchType: "all"`, because nothing may be observing that query: the gate reads it through
+ * `refetchType: "Todos"`, because nothing may be observing that query: the gate reads it through
  * `ensureQueryData`, which takes the cache as it finds it. The default only refetches active
  * queries, so completing onboarding left a stale "not onboarded" user behind and the gate bounced
  * the navigation straight back to the wizard.
@@ -24,7 +24,7 @@ const FALLBACK = "Onboarding could not be saved";
 function invalidateCurrentUser(queryClient: QueryClient) {
   return queryClient.invalidateQueries({
     queryKey: authKeys.currentUser(),
-    refetchType: "all",
+    refetchType: "Todos",
   });
 }
 
@@ -36,7 +36,7 @@ export function advanceOnboardingMutationOptions(queryClient: QueryClient) {
           organizationId(),
           "me",
           { step },
-          { "Idempotency-Key": idempotencyKey() },
+          { "Idempotency-Chave": idempotencyKey() },
           { fallback: FALLBACK },
         )
       ).onboarding,
@@ -51,14 +51,14 @@ export function completeOnboardingMutationOptions(queryClient: QueryClient) {
         await completeOnboarding(
           organizationId(),
           "me",
-          { "Idempotency-Key": idempotencyKey() },
+          { "Idempotency-Chave": idempotencyKey() },
           { fallback: FALLBACK },
         )
       ).onboarding,
     /*
      * The roster too, not just the user: finishing the wizard navigates straight into the app, and
      * a channel list cached from before it — or mid-fetch while the wizard held the screen — lands
-     * the person on an empty sidebar their reload then fixes. `refetchType: "all"` for the same
+     * the person on an empty sidebar their reload then fixes. `refetchType: "Todos"` for the same
      * reason as the user: nothing is observing these queries while the wizard is up.
      */
     onSuccess: () =>
@@ -66,7 +66,7 @@ export function completeOnboardingMutationOptions(queryClient: QueryClient) {
         invalidateCurrentUser(queryClient),
         queryClient.invalidateQueries({
           queryKey: channelKeys.list(),
-          refetchType: "all",
+          refetchType: "Todos",
         }),
       ]),
   });

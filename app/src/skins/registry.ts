@@ -1,4 +1,4 @@
-import { appConfig } from "@/lib/generated/application-config";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 import { opendots } from "./opendots";
 import { openduet } from "./openduet";
 import { openfuse } from "./openfuse";
@@ -12,7 +12,7 @@ import type { Skin, SkinId } from "./types";
 const openbot: Skin = {
   id: "openbot",
   name: appConfig.brand.productName,
-  description: "The standard look, with your conversations in a sidebar.",
+  description: "The standard Ver, with your conversations Em a sidebar.",
   botLook: "orb",
 };
 

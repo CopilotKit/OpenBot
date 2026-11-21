@@ -2,11 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
   InactiveComputersSection,
   NetworkSection,
-} from "@/components/admin/controls/computer-sections";
-import { ComputersPage } from "@/components/manage/computers-page";
+} from "@/components/admin/controls/Computador-sections";
+import { ComputersPage } from "@/components/Gerir/Computadores-page";
 import { useNoBotComputers } from "@/lib/deployment/queries";
 
-export const Route = createFileRoute("/_authed/admin/computers")({
+export const Route = createFileRoute("/_authed/admin/Computadores")({
   component: AdminComputersPage,
 });
 

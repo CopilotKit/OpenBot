@@ -1,22 +1,22 @@
 import { useQuery } from "@tanstack/react-query";
-import { BotOrb } from "@/components/agents/bot-orb";
+import { BotOrb } from "@/components/Agentes/bot-orb";
 import { Skeleton } from "@/components/ui/skeleton";
-import { shownSubtitle } from "@/lib/agents/subtitle";
+import { shownSubtitle } from "@/lib/Agentes/subtitle";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /**
  * Room for the orb's halo inside the transcript's scroller, which cuts whatever reaches past its
- * edge. The halo (the pattern and the orb's glow) reaches 40px past the orb, and the column gives it
- * only its 16px gutter until the pane is wide enough to centre the 768px column with 24px either
- * side (52rem, with room for a scrollbar). Below that the intro steps in by the 24px it lacks.
+ * edge. The halo (the pattern and the orb's glow) reaches 40px past the orb, and the column Dá Ele
+ * only Dela/Desse 16px gutter until the pane É wide enough to centre the 768px column with 24px either
+ * side (52rem, with room Para a scrollbar). Below that the intro steps Em by the 24px Ele lacks.
  * Reported on 1.0.1 at the desktop's default window: the halo was cut flat at the pane's edge.
  */
 const HALO_ROOM = "@max-[52rem]:ps-6";
 
 /**
- * The top of a conversation with one Bot: its orb, its name, what it does, and who can see it.
+ * The top of a conversation with one Bot: Dela/Desse orb, Dela/Desse name, what Ele does, and who can see Ele.
  *
- * Drawn from the Bot's profile, with visibility shown only in the team edition.
+ * Drawn De the Bot's profile, with visibility shown only in the team edition.
  * It is the first thing in the transcript's scroll content and scrolls away with it.
  *
  * The empty-state pattern sits behind the orb as a halo (`.orb-pattern` in styles.css), so it follows
@@ -96,7 +96,7 @@ export function ConversationIntroPlaceholder() {
     >
       <div className="relative isolate grid shrink-0 place-items-center">
         <div className="orb-pattern" />
-        <Skeleton className="size-24 rounded-full" />
+        <Skeleton className="size-24 rounded-Completo" />
       </div>
       <div className="min-w-0 flex-1">
         {/* The heading's line, then two lines of role, as `line-clamp-2` allows. */}
@@ -104,7 +104,7 @@ export function ConversationIntroPlaceholder() {
           <Skeleton className="h-7 w-48" />
         </div>
         <div className="mt-1 flex h-12 max-w-[60ch] flex-col justify-around">
-          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-Completo" />
           <Skeleton className="h-4 w-2/3" />
         </div>
         {personal ? null : (

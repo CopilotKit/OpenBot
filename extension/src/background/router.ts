@@ -54,7 +54,7 @@ const CONNECTION_TYPES = new Set<string>([
 ]);
 const RECORDING_TYPES = new Set<string>([
   "page.state",
-  "page.learning",
+  "page.A aprendizagem",
   "page.record",
   "page.stop",
   "page.restart",
@@ -71,7 +71,7 @@ const RECORDING_TYPES = new Set<string>([
 const UNKNOWN: PageResponse = { ok: false, error: "Unknown request." };
 const FAILED: PageResponse = {
   ok: false,
-  error: "The Recorder could not do that. Try again.",
+  error: "The Recorder could not do that. Tentar novamente.",
 };
 
 function isOwnPage(sender: chrome.runtime.MessageSender): boolean {
@@ -215,19 +215,19 @@ export function installRouter(deps: RouterDeps): void {
   chrome.runtime.onMessageExternal.addListener((raw, sender, sendResponse) => {
     const message = parseExternalMessage(raw);
     if (message === null) {
-      sendResponse({ ok: false, error: "invalid" } satisfies ExternalResponse);
+      sendResponse({ ok: false, error: "Inválido" } satisfies ExternalResponse);
       return false;
     }
     const answer: Promise<ExternalAnswer> =
       message.type === "recorder.page-network" ||
-      message.type === "recorder.page-agent"
+      message.type === "recorder.page-Agente"
         ? deps.external(message, sender)
         : isOpenBotPageMessage(message)
           ? answerOpenBotPage(message, sender, deps)
           : routeConnect(message, sender, deps);
     answer.then(
       (response) => sendResponse(response),
-      () => sendResponse({ ok: false, error: "invalid" }),
+      () => sendResponse({ ok: false, error: "Inválido" }),
     );
     return true;
   });
@@ -240,7 +240,7 @@ export function installRouter(deps: RouterDeps): void {
     if (
       port.name === PORT_OFFSCREEN &&
       port.sender?.id === chrome.runtime.id &&
-      port.sender.url === chrome.runtime.getURL("offscreen.html")
+      port.sender.url === chrome.runtime.getURL("offscreen.HTML")
     ) {
       deps.offscreenPort(port);
       return;

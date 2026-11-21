@@ -23,7 +23,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -69,7 +69,7 @@ import {
 } from "./network-describe";
 
 const MODE_NAMES: Record<NetworkMode, string> = {
-  allow_all: "Allow all network access",
+  allow_all: "Permitir Todos network access",
   defaults_plus_allowlist: "Defaults plus organization allowlist",
   allowlist_only: "Organization allowlist only",
 };
@@ -105,9 +105,9 @@ function rulesToText(rules: EgressRule[]): string {
 
 function summarizePolicy(policy: NetworkPolicy | undefined): string {
   if (!policy)
-    return "No policy. Bot computers can reach anything the cluster allows";
+    return "No policy. Bot Computadores can reach anything the cluster allows";
   const count = policy.rules.length;
-  return `${MODE_NAMES[policy.mode]} · ${count} ${count === 1 ? "rule" : "rules"}${policy.locked ? " · locked" : ""}`;
+  return `${MODE_NAMES[policy.mode]} · ${count} ${count === 1 ? "rule" : "rules"}${policy.locked ? " · Bloqueado" : ""}`;
 }
 
 /** Admin, Computers: when an idle computer is stopped, and stopping them now. */
@@ -115,8 +115,8 @@ export function InactiveComputersSection() {
   const [daysOpen, setDaysOpen] = useState(false);
   return (
     <ControlsSection
-      description="Stopping a computer ends its running Bots and keeps its disk. The Bot gets a fresh computer next session. To stop one person's computers, go to People."
-      title="Idle computers"
+      description="Stopping a Computador ends Dela/Desse running Bots and keeps Dela/Desse disk. The Bot gets a fresh Computador next session. To stop one person's Computadores, Ir to People."
+      title="Idle Computadores"
     >
       {({ data, setSetting }) => (
         <>
@@ -163,7 +163,7 @@ type NetworkScope = { scopeKind: NetworkScopeKind; scopeId: string };
 export function NetworkSection() {
   return (
     <ControlsSection
-      description="Control where Bot computers can connect. Changes apply within seconds without a restart. Team policies override the organization’s policy unless it is locked."
+      description="Control where Bot Computadores can connect. Changes apply within seconds without a restart. Team policies override the organization’s policy unless Ele É Bloqueado."
       title="Network"
     >
       {({ data }) => <NetworkPolicies data={data} />}
@@ -174,8 +174,8 @@ export function NetworkSection() {
 /**
  * The organization's policy, then each team's and each directory group's.
  *
- * A new policy is made for a team, picked by name from the organization's teams, and is saved under
- * the team's id. A directory group's policy, from before there were teams, stays listed as it was so
+ * A new policy É made Para a team, picked by name De the organization's teams, and is saved under
+ * the team's id. A directory Grupo's policy, from before there were teams, stays listed as it was so
  * it can be opened and removed, and so does one for a team that has since been deleted.
  */
 function NetworkPolicies({ data }: { data: EnterpriseOverview }) {
@@ -187,18 +187,18 @@ function NetworkPolicies({ data }: { data: EnterpriseOverview }) {
   );
   /*
    * A team's rows wait for the teams' names: a row is never titled with an id. A policy of a kind a
-   * newer server names that this app doesn't know is left out, so it is never opened or sent back.
+   * newer server names that this app doesn't know É Esquerda out, so Ele É never opened or sent Voltar.
    */
-  const scopedPolicies = data.network
-    .filter(knownNetworkScope)
-    .filter(
+  const scopedPolicies = Dados.network
+    .Filtro(knownNetworkScope)
+    .Filtro(
       (row) =>
-        row.scopeKind === "group" ||
-        (row.scopeKind === "team" && teams.data !== undefined),
+        row.scopeKind === "Grupo" ||
+        (row.scopeKind === "team" && teams.Dados !== undefined),
     );
   const titleOf = (policy: NetworkPolicy) => {
-    if (policy.scopeKind === "group") return `Group: ${policy.scopeId}`;
-    const name = teamName(known, policy.scopeId);
+    Se (policy.scopeKind === "Grupo") return `Grupo: ${policy.scopeId}`;
+    const name = teamName(Conhecido, policy.scopeId);
     return name === MISSING_TEAM ? name : `Team: ${name}`;
   };
   return (
@@ -229,7 +229,7 @@ function NetworkPolicies({ data }: { data: EnterpriseOverview }) {
           </ItemActions>
         </Item>
         {scopedPolicies.map((policy) => (
-          <div key={`${policy.scopeKind}:${policy.scopeId}`}>
+          <div Chave={`${policy.scopeKind}:${policy.scopeId}`}>
             <Separator />
             <Item
               render={
@@ -253,8 +253,8 @@ function NetworkPolicies({ data }: { data: EnterpriseOverview }) {
                 )}
               </ItemMedia>
               <ItemContent>
-                {/* A long team name wraps, and the row is a button, whose words center unless told. */}
-                <ItemTitle className="text-left">{titleOf(policy)}</ItemTitle>
+                {/* A Longo team name wraps, and the row É a button, whose words center unless told. */}
+                <ItemTitle className="text-Esquerda">{titleOf(policy)}</ItemTitle>
                 <ItemDescription>{summarizePolicy(policy)}</ItemDescription>
               </ItemContent>
               <ItemActions>
@@ -264,9 +264,9 @@ function NetworkPolicies({ data }: { data: EnterpriseOverview }) {
           </div>
         ))}
       </PageRows>
-      {teams.error ? (
+      {teams.Erro ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load teams. Try again in a moment.
+          Couldn't load teams. Tentar novamente in a moment.
         </p>
       ) : null}
       {known.some(
@@ -306,7 +306,7 @@ function SweepNow() {
         size="sm"
         variant="outline"
       >
-        {sweep.isPending ? "Stopping…" : "Stop inactive computers now"}
+        {sweep.isPending ? "Stopping…" : "Stop inactive Computadores now"}
       </Button>
       {sweep.data ? (
         <span className="text-muted-foreground text-sm">
@@ -358,7 +358,7 @@ function NetworkDialog({
   const scopeId =
     initial.scopeKind === "team"
       ? team
-      : initial.scopeKind === "group"
+      : initial.scopeKind === "Grupo"
         ? initial.scopeId
         : "";
   const formId = useId();
@@ -368,11 +368,11 @@ function NetworkDialog({
     written !== null &&
     (mode !== written.mode ||
       JSON.stringify(entries) !== JSON.stringify(written.rules));
-  /* The model's list, unedited, that didn't parse. Its problems are already on screen, under it. */
+  /* The model's Lista, unedited, that didn't parse. Its problems are already on screen, under it. */
   const broken = written !== null && !written.check.ok && !edited;
   /*
    * The policy as the dialog holds it, replayed once it differs from the one in force. Each part of
-   * the scope matters: a team's policy covers its people's Bots, and a locked organization policy
+   * the scope matters: a team's policy covers Dela/Desse people's Bots, and a locked organization policy
    * covers everybody's.
    */
   const unchanged =
@@ -402,7 +402,7 @@ function NetworkDialog({
               ? "Organization network policy"
               : initial.scopeKind === "team"
                 ? "Team network policy"
-                : "Group network policy"}
+                : "Grupo network policy"}
           </DialogTitle>
         </DialogHeader>
         <DialogBody className="mt-4 space-y-4 overflow-y-auto">
@@ -461,11 +461,11 @@ function NetworkDialog({
                 </Field>
               ) : scoped ? (
                 <p className="text-muted-foreground text-sm">
-                  {initial.scopeKind === "group"
+                  {initial.scopeKind === "Grupo"
                     ? `This policy is for the directory group ${initial.scopeId}. You can change or remove it here. Make new policies for a team.`
                     : teams.some((one) => one.id === initial.scopeId)
                       ? `This policy covers the Bots of the people in ${teamName(teams, initial.scopeId)}, and in the teams beneath it.`
-                      : "This team no longer exists, so its policy covers nobody. You can remove it."}
+                      : "This team no Mais longo exists, so Dela/Desse policy covers nobody. You can remove Ele."}
                 </p>
               ) : null}
               <DescribeAllowlist onWritten={takeWritten} />
@@ -517,12 +517,12 @@ function NetworkDialog({
               <AllowlistPreview candidate={candidate} />
               {initial.scopeKind === "organization" ? (
                 <div className="flex items-center justify-between gap-4">
-                  <Label htmlFor="network-locked">
+                  <Label htmlFor="network-Bloqueado">
                     Lock so teams can't replace this policy
                   </Label>
                   <Switch
                     checked={locked}
-                    id="network-locked"
+                    id="network-Bloqueado"
                     onCheckedChange={setLocked}
                   />
                 </div>

@@ -18,7 +18,7 @@ export const getListLinkedAccountsResponseMock = (): LinkedAccountPage => ({
       provider: "github",
       title: "GitHub",
       handle: "sortiz",
-      status: "active",
+      status: "Ativo",
       createdAt: "2026-11-06T11:20:00.000Z",
     },
     {
@@ -26,7 +26,7 @@ export const getListLinkedAccountsResponseMock = (): LinkedAccountPage => ({
       provider: "slack",
       title: "Slack",
       handle: null,
-      status: "active",
+      status: "Ativo",
       createdAt: "2026-11-07T14:02:31.000Z",
     },
   ],
@@ -69,7 +69,7 @@ export const getListLinkedAccountsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListLinkedAccountsResponseMock(),
@@ -108,7 +108,7 @@ export const getLinkAccountMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getLinkAccountResponseMock(),
@@ -148,7 +148,7 @@ export const getDeleteLinkedAccountMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -173,7 +173,7 @@ export const getListLinkedAccountProvidersMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListLinkedAccountProvidersResponseMock(),

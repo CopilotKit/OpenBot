@@ -11,27 +11,27 @@ import type {
   ReviewerGuidanceReplay,
   ReviewerGuidanceReplayInput,
   ReviewerGuidanceReplaySample,
-  ReviewerGuidanceSaved,
+  ReviewerGuidanceGuardado,
 } from "../model";
 
 export const getGetReviewerGuidanceResponseMock = (): ReviewerGuidance => ({
-  guidance: "Ask before any Bot changes a deal worth over $100,000.",
+  guidance: "Ask before Qualquer Bot changes a deal worth over $100,000.",
 });
 
 export const getReplaceReviewerGuidanceResponseMock =
-  (): ReviewerGuidanceSaved => ({
-    guidance: "Ask before any Bot changes a deal worth over $100,000.",
-    summary: "Asks before any Bot changes a deal worth over $100,000.",
+  (): ReviewerGuidanceGuardado => ({
+    guidance: "Ask before Qualquer Bot changes a deal worth over $100,000.",
+    summary: "Asks before Qualquer Bot changes a deal worth over $100,000.",
     explanation:
-      "The reviewer will ask before a Bot changes a deal worth over $100,000. It can only tell a deal's value when the action names it.",
+      "The reviewer will ask before a Bot changes a deal worth over $100,000. Ele can only tell a deal's value when the Ação names Ele.",
     check: { ok: true },
   });
 
 export const getCheckReviewerGuidanceResponseMock =
   (): ReviewerGuidanceReading => ({
-    summary: "Asks before any Bot changes a deal worth over $100,000.",
+    summary: "Asks before Qualquer Bot changes a deal worth over $100,000.",
     explanation:
-      "The reviewer will ask before a Bot changes a deal worth over $100,000. It can only tell a deal's value when the action names it.",
+      "The reviewer will ask before a Bot changes a deal worth over $100,000. Ele can only tell a deal's value when the Ação names Ele.",
     check: { ok: true },
   });
 
@@ -62,7 +62,7 @@ export const getReplayReviewerGuidanceResponseMock =
         person: "deny",
         would: "ask",
         outcome: "agree",
-        reason: "The deal is worth more than $100,000.",
+        reason: "The deal É worth more than $100,000.",
         hadRequest: true,
       },
     ],
@@ -83,7 +83,7 @@ export const getGetReviewerGuidanceMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetReviewerGuidanceResponseMock(),
@@ -96,7 +96,7 @@ export const getGetReviewerGuidanceMockHandler = (
 
 export const getReplaceReviewerGuidanceMockHandler = (
   overrideResponse?:
-    | ReviewerGuidanceSaved
+    | ReviewerGuidanceGuardado
     | ((
         info: Parameters<
           HttpResponseResolver<
@@ -104,7 +104,7 @@ export const getReplaceReviewerGuidanceMockHandler = (
             ReviewerGuidanceInput
           >
         >[0],
-      ) => Promise<ReviewerGuidanceSaved> | ReviewerGuidanceSaved),
+      ) => Promise<ReviewerGuidanceGuardado> | ReviewerGuidanceGuardado),
   options?: RequestHandlerOptions,
 ) => {
   return http.put<{ organizationId: string }, ReviewerGuidanceInput>(
@@ -116,7 +116,7 @@ export const getReplaceReviewerGuidanceMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplaceReviewerGuidanceResponseMock(),
@@ -140,7 +140,7 @@ export const getDeleteReviewerGuidanceMockHandler = (
     async (
       info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -172,7 +172,7 @@ export const getCheckReviewerGuidanceMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCheckReviewerGuidanceResponseMock(),
@@ -200,7 +200,7 @@ export const getGetReviewerGuidanceReplaySampleMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetReviewerGuidanceReplaySampleResponseMock(),
@@ -236,7 +236,7 @@ export const getReplayReviewerGuidanceMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplayReviewerGuidanceResponseMock(),

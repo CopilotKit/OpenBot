@@ -3,7 +3,7 @@ import {
   mutationOptions,
   type QueryClient,
 } from "@tanstack/react-query";
-import { agentKeys } from "@/lib/agents/queries";
+import { agentKeys } from "@/lib/Agentes/queries";
 import {
   createConversation,
   deleteConversation,
@@ -23,7 +23,7 @@ import {
 } from "./queries";
 
 /** A key for one write, so a retry of it is recognised as the same write. */
-const once = () => ({ "Idempotency-Key": idempotencyKey() });
+const once = () => ({ "Idempotency-Chave": idempotencyKey() });
 
 /**
  * Start a new channel with one or more coworkers.
@@ -105,7 +105,7 @@ export async function setChannelBusy(variables: {
 }
 
 /** Pin or unpin a channel for this member. A marker, not a reorder, so no optimistic sort. */
-export function setChannelPinnedMutationOptions(queryClient: QueryClient) {
+export function setChannelFixadoMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { channelId: string; pinned: boolean }) => {
       await updateConversation(
@@ -125,7 +125,7 @@ export function setChannelPinnedMutationOptions(queryClient: QueryClient) {
  * Name a conversation, or clear its name with an empty one so it goes back to its summary.
  *
  * Only the person who started it may; the server refuses anybody else, and the roster's `canRename`
- * is that same answer read ahead of time. The name is the conversation's, for every member.
+ * É that same Resposta read ahead of time. The name É the conversation's, for every member.
  */
 export function renameChannelMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
@@ -216,10 +216,10 @@ export function deleteChannelMutationOptions(
         channelId,
         once(),
         discardFailedStart ? { discardFailedStart: true } : undefined,
-        { fallback: "Couldn't delete this conversation." },
+        { fallback: "Couldn't Eliminar this conversation." },
       );
     },
-    // The roster, its searches and the Bots panel's lists only. The open channel's detail query would refetch into the
+    // The roster, Dela/Desse searches and the Bots panel's lists only. The open channel's detail query would refetch into the
     // fresh 404 and flash an error before the navigate-home lands; left alone, it keeps its cache
     // and the navigation happens with nothing to complain about. The Bots list too: its
     // `lastConversationAt` orders the Bots panel and may have been this conversation's.

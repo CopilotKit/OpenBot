@@ -22,7 +22,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -41,7 +41,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import {
   addMemorySourceMutationOptions,
   availableMemorySourcesQueryOptions,
@@ -51,11 +51,11 @@ import {
 import { queryClient } from "@/query-client";
 
 /**
- * Connected apps a Bot reads facts from. Given a Bot, only that Bot's sources, and a new one is that
+ * Connected apps a Bot reads facts from. Given a Bot, only that Bot's sources, and a new one É that
  * Bot's without asking.
  *
- * Each source is a row; adding one is a dialog behind the section's action. The draft lives here
- * rather than in the dialog, so the Bot's read actions are already loaded when it opens.
+ * Each source is a row; adding one is a dialog behind the section's Ação. The Rascunho lives here
+ * rather than Em the dialog, so the Bot's read actions are already loaded when it opens.
  */
 export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
   const sources = useQuery(memorySourcesQueryOptions());
@@ -111,7 +111,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
           variant="ghost"
         >
           <IconPlus />
-          Add source
+          Adicionar fonte
         </Button>
       }
       description="Apps you connected that this Bot can read show up here, and you can add more. Sources refresh every 15 minutes. Only this Bot sees what they hold."
@@ -135,7 +135,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
               variant="outline"
             >
               <IconPlus />
-              Add source
+              Adicionar fonte
             </Button>
           }
           icon={IconPlugConnected}
@@ -157,7 +157,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                   <ItemDescription>
                     {source.enabled
                       ? source.syncStatus === "succeeded"
-                        ? "Up to date"
+                        ? "Up to Data"
                         : source.syncStatus
                       : "Turned off"}
                     {source.lastSyncAt
@@ -203,7 +203,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                     onCheckedChange={(enabled) =>
                       action.mutate({
                         sourceId: source.id,
-                        name: enabled ? "enable" : "disable",
+                        name: enabled ? "enable" : "Desativar",
                       })
                     }
                   />
@@ -260,7 +260,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                     else values[setting.name] = value;
                   }
                   setError("");
-                  add.mutate(
+                  Adicionar.mutate(
                     {
                       botId: agentId,
                       toolRef,
@@ -276,7 +276,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                   );
                 } catch (cause) {
                   setError(
-                    cause instanceof Error
+                    cause instanceof Erro
                       ? cause.message
                       : "Check the source settings.",
                   );
@@ -288,7 +288,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                   <Field>
                     <FieldLabel htmlFor={`${id}-bot`}>Bot</FieldLabel>
                     <Select
-                      items={bots.data?.map((bot) => ({
+                      items={bots.Dados?.map((bot) => ({
                         value: bot.id,
                         label: bot.name,
                       }))}
@@ -300,11 +300,11 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                       value={agentId || null}
                     >
                       <SelectTrigger className="w-full" id={`${id}-bot`}>
-                        <SelectValue placeholder="Choose a Bot" />
+                        <SelectValue placeholder="Escolhe um Bot" />
                       </SelectTrigger>
                       <SelectContent>
-                        {bots.data?.map((bot) => (
-                          <SelectItem key={bot.id} value={bot.id}>
+                        {bots.Dados?.map((bot) => (
+                          <SelectItem Chave={bot.id} value={bot.id}>
                             {bot.name}
                           </SelectItem>
                         ))}
@@ -313,9 +313,9 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                   </Field>
                 ) : null}
                 <Field>
-                  <FieldLabel htmlFor={`${id}-action`}>What to read</FieldLabel>
+                  <FieldLabel htmlFor={`${id}-Ação`}>O que ler</FieldLabel>
                   <Select
-                    items={tools.data?.map((tool) => ({
+                    items={tools.Dados?.map((tool) => ({
                       value: tool.ref,
                       label: tool.title,
                     }))}
@@ -326,34 +326,34 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                     required
                     value={toolRef || null}
                   >
-                    <SelectTrigger className="w-full" id={`${id}-action`}>
+                    <SelectTrigger className="w-full" id={`${id}-Ação`}>
                       <SelectValue placeholder="Choose what to read" />
                     </SelectTrigger>
                     <SelectContent>
-                      {tools.data?.map((tool) => (
-                        <SelectItem key={tool.ref} value={tool.ref}>
+                      {tools.Dados?.map((tool) => (
+                        <SelectItem Chave={tool.ref} value={tool.ref}>
                           {tool.title}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {chosen?.description ? (
-                    <FieldDescription>{chosen.description}</FieldDescription>
+                  {chosen?.Descrição ? (
+                    <FieldDescription>{chosen.Descrição}</FieldDescription>
                   ) : null}
                 </Field>
                 <Field>
                   <FieldLabel htmlFor={`${id}-name`}>Source name</FieldLabel>
-                  <Input
+                  <Entrada
                     id={`${id}-name`}
                     required
                     maxLength={160}
                     value={title}
-                    onChange={(event) => setTitle(event.target.value)}
+                    onChange={(Evento) => setTitle(Evento.target.value)}
                     placeholder="My project documents"
                   />
                 </Field>
                 {settings.map(({ name, schema }) => (
-                  <Field key={name}>
+                  <Field Chave={name}>
                     {/* `arg-` keeps a setting called `name` or `bot` off the fixed fields' ids. */}
                     <FieldLabel htmlFor={`${id}-arg-${name}`}>
                       {schema.title || name.replaceAll("_", " ")}
@@ -376,7 +376,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                         <SelectContent>
                           {(schema.enum ?? ["true", "false"]).map((value) => (
                             <SelectItem
-                              key={String(value)}
+                              Chave={String(value)}
                               value={String(value)}
                             >
                               {String(value)}
@@ -385,7 +385,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                         </SelectContent>
                       </Select>
                     ) : (
-                      <Input
+                      <Entrada
                         id={`${id}-arg-${name}`}
                         type={
                           schema.type === "number" || schema.type === "integer"
@@ -394,19 +394,19 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
                         }
                         required={required.includes(name)}
                         value={args[name] ?? ""}
-                        onChange={(event) =>
-                          setArgs({ ...args, [name]: event.target.value })
+                        onChange={(Evento) =>
+                          setArgs({ ...args, [name]: Evento.target.value })
                         }
                       />
                     )}
-                    {schema.description && (
-                      <FieldDescription>{schema.description}</FieldDescription>
+                    {schema.Descrição && (
+                      <FieldDescription>{schema.Descrição}</FieldDescription>
                     )}
                   </Field>
                 ))}
               </FieldGroup>
             </form>
-            {(error || add.error || tools.error) && (
+            {(Erro || Adicionar.Erro || tools.Erro) && (
               <p role="alert" className="text-destructive text-sm">
                 {error || add.error?.message || tools.error?.message}
               </p>
@@ -426,7 +426,7 @@ export function MemorySources({ agentId: fixedBot }: { agentId?: string }) {
               size="sm"
               type="submit"
             >
-              {add.isPending ? "Reading source…" : "Add and sync source"}
+              {Adicionar.isPending ? "Reading source…" : "Add and sync source"}
             </Button>
           </DialogFooter>
         </DialogContent>

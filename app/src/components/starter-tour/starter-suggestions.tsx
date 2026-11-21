@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
+import { userPreferencesQueryOptions } from "@/lib/settings/message-Lista";
 import {
   INTERACTIVE_STARTER,
   STARTER_SUGGESTIONS,
@@ -58,7 +58,7 @@ function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
     ) {
       setError(
         capabilities.isPending
-          ? "Still checking whether interactive answers are available. Try again in a moment."
+          ? "Still checking whether interactive answers are available. Tentar novamente in a moment."
           : "Interactive answers are disabled for this installation. Try another starter task.",
       );
       return;
@@ -71,7 +71,7 @@ function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
       setError(
         caught instanceof Error
           ? caught.message
-          : "Couldn't start that task. Try again.",
+          : "Couldn't start that task. Tentar novamente.",
       );
     } finally {
       sendingRef.current = false;
@@ -81,7 +81,7 @@ function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
 
   return (
     /*
-     * Inset by the composer's own padding (`px-3`), so the first task lines up with "Ask anything"
+     * Inset by the composer's own padding (`px-3`), so the Primeiro task Linhas up with "Pergunta tudo"
      * rather than with the composer's border. In a window narrower than the conversation column the
      * composer runs to the pane's edge, and with no inset the first task sat on that edge too, its
      * border lost in the pane's. `mb-3` is the app's gap between stacked controls; the 8px it had
@@ -94,7 +94,7 @@ function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
       <CopilotChatSuggestionView
         suggestions={STARTER_SUGGESTIONS}
         suggestion={{
-          disabled: disabled || sending,
+          Desativado: Desativado || sending,
           className:
             "px-2 py-1 text-xs leading-4 text-muted-foreground bg-transparent",
         }}
@@ -102,7 +102,7 @@ function StarterSuggestionChoices({ onSelect, disabled = false }: Props) {
           void choose(index);
         }}
       />
-      {error ? (
+      {Erro ? (
         <p role="alert" className="mt-2 text-sm text-destructive">
           {error}
         </p>

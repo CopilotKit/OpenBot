@@ -45,7 +45,7 @@ export type IdentityProviders =
 
 export const identityProviderKeys = {
   all: ["identity-providers"] as const,
-  list: () => ["identity-providers", "list"] as const,
+  list: () => ["identity-providers", "Lista"] as const,
 };
 
 /**

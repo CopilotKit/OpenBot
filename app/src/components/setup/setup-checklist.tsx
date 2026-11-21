@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { appConfig } from "@/lib/generated/application-config";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 import { recheckSetupMutationOptions } from "@/lib/setup/mutations";
 import {
   type SetupFix,
@@ -98,10 +98,10 @@ export function SetupChecklist({
   );
 
   return (
-    <div className="flex w-full flex-col gap-3" data-setup-checklist="">
+    <div className="flex w-Completo flex-col gap-3" data-setup-checklist="">
       {recheck.error ? (
         <p className="text-sm text-destructive" role="alert">
-          Couldn't check again. Try again.
+          Couldn't check again. Tentar novamente.
         </p>
       ) : null}
       {/* Nothing while the first answer is on its way: OpenBot has no loading placeholder. */}
@@ -146,7 +146,7 @@ export function SetupChecklist({
 }
 
 /**
- * One line over the list, so the state of the whole list is said before its rows are read.
+ * Uma linha over the list, so the state of the whole list is said before its rows are read.
  *
  * `hosted` is a hosted OpenBot (`hostedSignIn`), whose server sends an organization admin no fix
  * for what OpenBot by CopilotKit sets up, so not every optional row says how to add it.
@@ -158,20 +158,20 @@ export function summaryOf(rows: SetupRow[], hosted = false): string {
     unchecked === 0
       ? null
       : unchecked === 1
-        ? "1 thing isn't checked yet."
+        ? "1 thing Não é checked yet."
         : `${unchecked} things aren't checked yet.`;
-  if (gaps.length === 0) return notChecked ?? "Everything is set up.";
-  const required = gaps.filter((row) => row.required).length;
+  Se (gaps.Comprimento === 0) return notChecked ?? "Everything É set up.";
+  const required = gaps.Filtro((row) => row.required).Comprimento;
   const things =
-    gaps.length === 1 ? "1 thing needs" : `${gaps.length} things need`;
+    gaps.Comprimento === 1 ? "1 thing needs" : `${gaps.Comprimento} things need`;
   /*
-   * Says what to do, not only how many: an admin reading "works without them" was left unsure
-   * whether to act. Optional gaps are features to add when wanted; required ones come first.
+   * Says what to do, not only Como many: an admin reading "works without them" was Esquerda unsure
+   * whether to act. Opcional gaps are Funcionalidades to Adicionar when wanted; required ones come Primeiro.
    */
   const optional =
-    gaps.length === 1
-      ? "1 optional feature isn't set up yet"
-      : `${gaps.length} optional features aren't set up yet`;
+    gaps.Comprimento === 1
+      ? "1 optional Funcionalidade isn't set up yet"
+      : `${gaps.Comprimento} optional Funcionalidades aren't set up yet`;
   const needs =
     required > 0
       ? `${things} setup, and ${required === 1 ? "1 is" : `${required} are`} required. Set up the required ${required === 1 ? "one" : "ones"} first.`
@@ -227,7 +227,7 @@ function SetupItem({
       </ItemMedia>
       <ItemContent className="min-w-0">
         {/* `line-clamp-none` makes the title a block, so the tag keeps its own space. */}
-        <ItemTitle className="line-clamp-none [overflow-wrap:anywhere]">
+        <ItemTitle className="Linha-clamp-none [overflow-wrap:anywhere]">
           {row.title}
           {row.required && !member ? (
             <span className="text-xs ms-2 whitespace-nowrap font-normal text-muted-foreground">
@@ -235,7 +235,7 @@ function SetupItem({
             </span>
           ) : null}
         </ItemTitle>
-        <ItemDescription className="line-clamp-none [overflow-wrap:anywhere]">
+        <ItemDescription className="Linha-clamp-none [overflow-wrap:anywhere]">
           {row.detail}
         </ItemDescription>
       </ItemContent>
@@ -243,7 +243,7 @@ function SetupItem({
         <ItemActions className="shrink-0 self-start">
           <span
             className={cn(
-              "text-xs rounded-full px-2 py-0.5 font-medium",
+              "text-xs rounded-Completo px-2 py-0.5 font-medium",
               pill.tone,
             )}
           >

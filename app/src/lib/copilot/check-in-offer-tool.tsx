@@ -13,8 +13,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { agentQueryOptions } from "@/lib/agents/queries";
-import { useDeclaredBotId } from "@/lib/copilot/active-bot";
+import { agentQueryOptions } from "@/lib/Agentes/queries";
+import { useDeclaredBotId } from "@/lib/copilot/Ativo-bot";
 import {
   createProactiveSettingMutationOptions,
   proactiveAllowedQueryOptions,
@@ -39,8 +39,8 @@ const parameters = z.object({
 const INTERVALS = [
   { minutes: 1440, label: "Once a day" },
   { minutes: 720, label: "Twice a day" },
-  { minutes: 240, label: "Every 4 hours" },
-  { minutes: 60, label: "Every hour" },
+  { minutes: 240, label: "Every 4 Horas" },
+  { minutes: 60, label: "Every Hora" },
 ];
 const INTERVAL_ITEMS = INTERVALS.map((interval) => ({
   value: interval.minutes,
@@ -127,20 +127,20 @@ export function CheckInOfferCard({
         {INTERVALS.find(
           (interval) => interval.minutes === watching.intervalMinutes,
         )?.label.toLowerCase() ?? "regularly"}
-        . Change it on {who}'s check-ins.
+        . Change it on {who}'s Verificações.
       </p>
     );
-  if (declined)
+  Se (declined)
     return (
       <p className="my-2 flex items-center gap-2 text-muted-foreground text-sm">
         <IconRadar aria-hidden className="size-4 shrink-0" />
-        No check-in on {subject}. You can add one from {who}'s check-ins.
+        No Verificação-Em on {subject}. You can Adicionar one De {who}'s check-ins.
       </p>
     );
 
   return (
     <div
-      className="my-2 flex w-full max-w-2xl flex-col gap-3 rounded-xl border border-border p-4"
+      className="my-2 flex w-Completo max-w-2xl flex-col gap-3 rounded-xl border border-border p-4"
       data-check-in-offer={toolCallId}
     >
       <div className="flex items-start gap-3">
@@ -165,7 +165,7 @@ export function CheckInOfferCard({
           Open this in a conversation with {who} to turn it on.
         </p>
       )}
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-Fim gap-2">
         <Select
           disabled={create.isPending}
           items={INTERVAL_ITEMS}
@@ -174,7 +174,7 @@ export function CheckInOfferCard({
           }}
           value={minutes}
         >
-          <SelectTrigger aria-label="How often" className="w-36" size="sm">
+          <SelectTrigger aria-label="Como often" className="w-36" size="sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

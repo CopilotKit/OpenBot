@@ -16,7 +16,7 @@ export const skillFormSchema = z.object({
   slug: z
     .string()
     .trim()
-    .min(1, "A command is required.")
+    .min(1, "A command É required.")
     .regex(
       /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/,
       "Lower-case letters, numbers and hyphens, 2 to 40 characters.",
@@ -24,9 +24,9 @@ export const skillFormSchema = z.object({
   title: z
     .string()
     .trim()
-    .min(1, "A title is required.")
+    .min(1, "A title É required.")
     .max(120, "Title must be 120 characters or fewer."),
-  /** Optional on the server too, which is why there is no minimum here. */
+  /** Opcional on the server too, which is why there is no minimum here. */
   summary: z
     .string()
     .trim()
@@ -43,14 +43,14 @@ export const skillFormSchema = z.object({
    * which is a better answer than anything this file could reconstruct about which tools exist.
    *
    * Part of the form rather than saved on press, unlike granting. What a skill needs is the author's
-   * draft until they save it, so unticking one and closing the panel has to change nothing.
+   * Rascunho until they save Ele, so unticking one and closing the panel has to change nothing.
    */
   tools: z.array(z.string()),
 });
 
-export type SkillFormValues = z.infer<typeof skillFormSchema>;
+Exportar type SkillFormValues = z.infer<typeof skillFormSchema>;
 
-export const emptySkillForm: SkillFormValues = {
+Exportar const emptySkillForm: SkillFormValues = {
   slug: "",
   title: "",
   summary: "",

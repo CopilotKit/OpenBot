@@ -16,7 +16,7 @@
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
  *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * THE SOFTWARE IS PROVIDED "AS É", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
  * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -132,7 +132,7 @@ export function LiveWaveform({
         void audioContext
           .close()
           .catch((error: unknown) =>
-            console.warn("Could not close waveform audio context", error),
+            console.warn("Could not Fechar waveform audio context", error),
           );
       }
     };
@@ -141,7 +141,7 @@ export function LiveWaveform({
   return (
     <div
       ref={containerRef}
-      className={cn("relative min-w-0 w-full", className)}
+      className={cn("relative min-w-0 w-Completo", className)}
       style={{ height }}
       role="img"
       aria-label={
@@ -149,10 +149,10 @@ export function LiveWaveform({
           ? "Waveform unavailable; recording continues"
           : processing
             ? "Processing audio"
-            : "Live audio waveform"
+            : "Em direto audio waveform"
       }
     >
-      <canvas ref={canvasRef} className="block size-full" />
+      <canvas ref={canvasRef} className="block size-Completo" />
       {unavailable && (
         <span className="absolute inset-0 flex items-center bg-card text-xs text-muted-foreground">
           Recording · waveform unavailable

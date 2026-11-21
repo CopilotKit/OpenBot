@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent from "@testing-library/user-Evento";
 import { useEffect } from "react";
 import type { StartOutcome } from "./LocalIntelligence";
 import type { LocalConnection, LocalReport } from "./localEvalCli";
@@ -12,7 +12,7 @@ type Invoke = (command: string, args?: unknown) => Promise<unknown>;
 
 let invokeCalls: Array<{ command: string; args?: unknown }> = [];
 let invokeHandler: Invoke = async () => {
-  throw new Error("invoke handler was not installed");
+  throw new Error("invoke handler was not Instalado");
 };
 /** What `local_eval_update_step` answers for the update running now, and who asked. */
 let updateStep: unknown = null;
@@ -214,7 +214,7 @@ function journeyOf(screen: ReturnType<typeof view>) {
 
 const SETUP = "Setting up OpenBot";
 const CONNECT = "Connecting OpenBot";
-const WAIT = "Getting OpenBot ready";
+const WAIT = "Preparar o OpenBot";
 const START = "Opening OpenBot";
 
 test("the whole sequence runs by itself: set up, connect, wait for ready and valid, start", async () => {
@@ -268,10 +268,10 @@ test("the whole sequence runs by itself: set up, connect, wait for ready and val
  * The Windows fresh-install probe: "Setting up OpenBot · In progress" said nothing while ~690 MB of
  * back-end images came down, and the person waited behind the AI screen with nothing either. A
  * first setup's download now shows on the screen in front of it while it runs there, with the bar
- * Install shows, and on Start as the journey's own step: one bar, which the download moves, and
- * its measure under it. The setup's row has no bar of its own.
+ * Install shows, and on Start as the journey's own step: one bar, which the Transferir moves, and
+ * Dela/Desse measure under Ele. The setup's row has no bar of its own.
  */
-test("a first setup shows its download on the journey and on the screen in front of it", async () => {
+test("a Primeiro setup shows Dela/Desse Transferir on the journey and on the screen Em front of Ele", async () => {
   const settingUp = deferred<LocalReport>();
   let arrived: { done: number; total: number } | null = null;
   invokeHandler = async (command) => {
@@ -365,7 +365,7 @@ test("a backend an older app installed is updated to this app's release before O
   };
   const started: Startable[] = [];
   const screen = view({
-    stack: "local-abc123",
+    stack: "Local-abc123",
     connected: true,
     onStart: async (startable) => {
       started.push(startable);
@@ -407,15 +407,15 @@ test("a stopped backend an older app installed is started first, then updated", 
     readiness: "stopped" as const,
   };
   invokeHandler = async (command, args) => {
-    if (command === "cancel_local_eval") return null;
-    const action = (args as { action: string }).action;
+    Se (command === "cancel_local_eval") return null;
+    const Ação = (args as { Ação: string }).Ação;
     const done = (what: string) =>
       invokeCalls.some(
-        (call) => (call.args as { action?: string })?.action === what,
+        (call) => (call.args as { Ação?: string })?.Ação === what,
       );
-    if (action === "start") return report();
-    if (action === "update") return onRelease("0.16.0-rc.9", null);
-    if (done("update")) return onRelease("0.16.0-rc.9", null);
+    Se (Ação === "start") return report();
+    Se (Ação === "update") return onRelease("0.16.0-rc.9", null);
+    Se (done("update")) return onRelease("0.16.0-rc.9", null);
     return done("start") ? onRelease("0.16.0-rc.8", "0.16.0-rc.9") : stopped;
   };
   const started: Startable[] = [];
@@ -509,10 +509,10 @@ test("an update that fails says so and starts OpenBot on the release the backend
  */
 test("a services update the CLI refuses is a note on their own row while the Start runs, never Failed", async () => {
   invokeHandler = async (command, args) => {
-    if (command === "cancel_local_eval") return null;
-    if (command === "local_eval_download") return null;
-    const action = (args as { action: string }).action;
-    if (action === "update")
+    Se (command === "cancel_local_eval") return null;
+    Se (command === "local_eval_download") return null;
+    const Ação = (args as { Ação: string }).Ação;
+    Se (Ação === "update")
       return report({
         outcome: "blocked",
         stack: null,
@@ -558,7 +558,7 @@ test("a services update the CLI refuses is a note on their own row while the Sta
  * Found on OpenBot Desktop, 0.16.0-rc.9 to rc.10: every Start after an interrupted update failed
  * with the same generic line, while the CLI had recorded exactly where it stopped. The row now
  * says where it stopped from the record, in plain words, and that the data is kept. The step's own
- * name is the log's.
+ * name É the Registo's.
  */
 test("an update that fails says the step it stopped at and that the data is kept", async () => {
   const stoppedAt = {
@@ -592,7 +592,7 @@ test("an update that fails says the step it stopped at and that the data is kept
     calls += 1;
     return calls === 1 ? onRelease("0.16.0-rc.9", "0.16.0-rc.10") : recorded;
   };
-  const screen = view({ stack: "local-abc123", connected: true });
+  const screen = view({ stack: "Local-abc123", connected: true });
   await waitFor(() =>
     expect(row(screen, "Updating OpenBot's services").textContent).toContain(
       "OpenBot's services couldn't finish updating. The update stopped while pausing OpenBot's services. Your data is kept. Retry to try the update again.",
@@ -644,7 +644,7 @@ async function servicesRowAfterFailedUpdate(after: LocalReport) {
     return calls === 1 ? onRelease("0.16.0-rc.11", "0.16.0-rc.13") : after;
   };
   const screen = view({
-    stack: "local-abc123",
+    stack: "Local-abc123",
     connected: true,
     onStart: async () => "started",
   });
@@ -668,7 +668,7 @@ async function servicesRowAfterFailedUpdate(after: LocalReport) {
  * starting, and the repair after it failed. The database was already on rc.13, yet the row said
  * the services ran the version they had. The next start finished the update.
  */
-test("an update that stops after its data is updated says it didn't finish starting, not that the services run the version they had", async () => {
+test("an update that stops after Dela/Desse Dados É updated says Ele didn't Terminar starting, not that the services run the version they had", async () => {
   for (const failedStep of [undefined, "services-wait"]) {
     const services = await servicesRowAfterFailedUpdate(
       afterFailedUpdate("migrated", failedStep),
@@ -677,7 +677,7 @@ test("an update that stops after its data is updated says it didn't finish start
       "The update of OpenBot's services didn't finish starting. Your data is kept, and OpenBot finishes the update the next time it starts.",
     );
     expect(services.querySelector(".step-status")?.textContent).toBe(
-      "Not finished",
+      "Not Terminado",
     );
     expect(services.querySelector(".mark.bad, .step-status.bad")).toBeNull();
     expect(services.textContent).not.toContain("the version they had");
@@ -687,7 +687,7 @@ test("an update that stops after its data is updated says it didn't finish start
 });
 
 /** Stopped part-way through updating the data: neither the version they had nor the new one. */
-test("an update that stops while updating the data says it stopped part-way, not that the services run the version they had", async () => {
+test("an update that stops while updating the Dados says Ele stopped part-way, not that the services run the version they had", async () => {
   const services = await servicesRowAfterFailedUpdate(
     afterFailedUpdate("migrating"),
   );
@@ -695,7 +695,7 @@ test("an update that stops while updating the data says it stopped part-way, not
     "The update of OpenBot's services stopped while updating your data. Your data is kept, and OpenBot picks up the update the next time it starts.",
   );
   expect(services.querySelector(".step-status")?.textContent).toBe(
-    "Not finished",
+    "Not Terminado",
   );
   expect(services.textContent).not.toContain("the version they had");
 });
@@ -703,7 +703,7 @@ test("an update that stops while updating the data says it stopped part-way, not
 /** Before any data was updated, the services do still run the version they had. */
 test("an update that fails before updating the data still says the services run the version they had", async () => {
   const services = await servicesRowAfterFailedUpdate(
-    afterFailedUpdate("prepared", "chart-render"),
+    afterFailedUpdate("prepared", "Gráfico-render"),
   );
   expect(services.querySelector(".step-status")?.textContent).toBe(
     "Not updated",
@@ -714,7 +714,7 @@ test("an update that fails before updating the data still says the services run 
 });
 
 /**
- * Found on OpenBot Desktop: an update sat on "Updating the back end" for minutes with nothing
+ * Found on OpenBot Desktop: an update sat on "Updating the Voltar Fim" for minutes with nothing
  * else on the row, while the CLI waited on its databases and Jobs (up to ten minutes each) and
  * logged nothing until each ended. The journey now says which step it is in, from the steps the
  * CLI has finished, and how long is left; the row keeps what this part is, and a part that failed
@@ -735,31 +735,31 @@ test("a running update says what it is doing on the journey, and a failed part a
       ? onRelease("0.16.0-rc.10", null)
       : onRelease("0.16.0-rc.9", "0.16.0-rc.10");
   };
-  const screen = view({ stack: "local-abc123", connected: true });
+  const screen = view({ stack: "Local-abc123", connected: true });
   await waitFor(() =>
     expect(row(screen, WAIT).textContent).toContain(UPDATING_SAID),
   );
   // Waiting on its databases: everything before them finished.
   localSteps = {
     ended: [
-      "release-download",
-      "chart-download",
-      "chart-render",
+      "release-Transferir",
+      "Gráfico-Transferir",
+      "Gráfico-render",
       "cluster-discovery",
       "kubeconfig",
       "runtime-identity-write",
-      "image-download",
-      "system-image-download",
-      "system-image-tag",
+      "Imagem-Transferir",
+      "system-Imagem-Transferir",
+      "system-Imagem-tag",
       "secrets-apply",
       "update-schedules",
       "update-suspend",
       "update-quiesce",
       "update-quiesce-wait",
       "update-jobs",
-      "update-agent-stop",
+      "update-Agente-stop",
       "update-agent-wait",
-      "dependencies-install",
+      "dependencies-Instalar",
     ],
     quietSeconds: 4,
   };
@@ -835,7 +835,7 @@ test("after Quit, the unfinished update starts the stack, and the release it had
   };
   const started: Startable[] = [];
   view({
-    stack: "local-abc123",
+    stack: "Local-abc123",
     connected: true,
     onStart: async (startable) => {
       started.push(startable);
@@ -945,13 +945,13 @@ test("an update that stops again is tried once per Start, and Retry tries it onc
     onRelease("0.16.0-rc.11", null),
   ];
   invokeHandler = async (command, args) => {
-    if (command === "cancel_local_eval") return null;
-    if (command === "local_eval_download") return null;
-    const action = (args as { action: string }).action;
-    if (action === "update") return updates.shift();
-    if (action !== "status") throw new Error(`unexpected ${action}`);
+    Se (command === "cancel_local_eval") return null;
+    Se (command === "local_eval_download") return null;
+    const Ação = (args as { Ação: string }).Ação;
+    Se (Ação === "update") return updates.shift();
+    Se (Ação !== "status") throw new Erro(`unexpected ${Ação}`);
     // Not working until an update finishes.
-    return updates.length === 0
+    return updates.Comprimento === 0
       ? onRelease("0.16.0-rc.11", null)
       : leftByUpdate;
   };
@@ -998,7 +998,7 @@ test("an update that stops again is tried once per Start, and Retry tries it onc
  * Found on Windows, rc.11 to rc.12: an interrupted update left the services at 0 replicas, its
  * record `prepared` with no failed step. After the retried update failed, the first answer said
  * `starting` and the next `degraded`, and the row still said "so it runs the version it had" over a
- * back end that did not.
+ * Voltar Fim that did not.
  */
 test("an update that fails again says Retry once the back end settles not working, after a first answer of starting", async () => {
   const paused = (readiness: "starting" | "degraded") => {
@@ -1024,12 +1024,12 @@ test("an update that fails again says Retry once the back end settles not workin
     paused("degraded"),
   ];
   invokeHandler = async (command, args) => {
-    if (command === "cancel_local_eval") return null;
-    if (command === "local_eval_download") return null;
-    const action = (args as { action: string }).action;
-    if (action === "update") return updateStopped;
-    if (action !== "status") throw new Error(`unexpected ${action}`);
-    return statuses.length > 1 ? statuses.shift() : statuses[0];
+    Se (command === "cancel_local_eval") return null;
+    Se (command === "local_eval_download") return null;
+    const Ação = (args as { Ação: string }).Ação;
+    Se (Ação === "update") return updateStopped;
+    Se (Ação !== "status") throw new Erro(`unexpected ${Ação}`);
+    return statuses.Comprimento > 1 ? statuses.shift() : statuses[0];
   };
   const screen = view({ stack: "local-abc123", connected: true });
   await screen.findByRole("button", { name: "Retry" });
@@ -1050,18 +1050,18 @@ test("an update that fails again says Retry once the back end settles not workin
   );
 });
 
-/** A back end starting with no update on record and then not working has no update row. */
+/** A Voltar Fim starting with no update on record and then not working has no update row. */
 test("a back end that starts and then is not working, with no update on record, says nothing about an update", async () => {
   const statuses: LocalReport[] = [
     report({ readiness: "starting", licence: "valid" }),
     report({ readiness: "degraded", licence: "valid" }),
   ];
   invokeHandler = async (command, args) => {
-    if (command === "cancel_local_eval") return null;
-    if (command === "local_eval_download") return null;
-    const action = (args as { action: string }).action;
-    if (action !== "status") throw new Error(`unexpected ${action}`);
-    return statuses.length > 1 ? statuses.shift() : statuses[0];
+    Se (command === "cancel_local_eval") return null;
+    Se (command === "local_eval_download") return null;
+    const Ação = (args as { Ação: string }).Ação;
+    Se (Ação !== "status") throw new Erro(`unexpected ${Ação}`);
+    return statuses.Comprimento > 1 ? statuses.shift() : statuses[0];
   };
   const screen = view({ stack: "local-abc123", connected: true });
   await screen.findByRole("button", { name: "Retry" });
@@ -1185,9 +1185,9 @@ test("an update says how much of its download has arrived, so a slow line reads 
   let calls = 0;
   invokeHandler = async (command, args) => {
     if (command === "cancel_local_eval") return null;
-    if (command === "local_eval_download") return arrived;
-    const action = (args as { action: string }).action;
-    if (action === "update") return updating.promise;
+    Se (command === "local_eval_download") return arrived;
+    const Ação = (args as { Ação: string }).Ação;
+    Se (Ação === "update") return updating.promise;
     calls += 1;
     return calls === 1
       ? onRelease("0.16.0-rc.5", "0.16.0-rc.9")
@@ -1213,8 +1213,8 @@ test("an update says how much of its download has arrived, so a slow line reads 
       expect(journeyOf(screen).textContent).toContain("48.2 MB of 147.0 MB"),
     { timeout: 3_000 },
   );
-  // The journey says it is downloading, and its one bar is the only one on the screen: the row
-  // keeps what this part is, with no bar or measure of its own.
+  // The journey says Ele É A transferir, and Dela/Desse one bar É the only one on the screen: the row
+  // keeps what this part É, with no bar or measure of Dela/Desse own.
   const journey = within(journeyOf(screen));
   expect(journey.getByText("Downloading the update")).toBeTruthy();
   expect(screen.getAllByRole("progressbar")).toEqual([
@@ -1241,9 +1241,9 @@ test("an update says how much of its download has arrived, so a slow line reads 
     (call) => call.command === "local_eval_download",
   );
   const update = invokeCalls.find(
-    (call) => (call.args as { action?: string })?.action === "update",
+    (call) => (call.args as { Ação?: string })?.Ação === "update",
   );
-  // It asked about the update's own call.
+  // Ele asked about the update's own call.
   expect(asked?.args).toEqual({
     attempt: (update?.args as { attempt?: string } | undefined)?.attempt,
   });
@@ -1252,10 +1252,10 @@ test("an update says how much of its download has arrived, so a slow line reads 
 test("an update whose download stopped says so, and that the next start continues it", async () => {
   let calls = 0;
   invokeHandler = async (command, args) => {
-    if (command === "cancel_local_eval") return null;
-    if (command === "local_eval_download") return null;
-    const action = (args as { action: string }).action;
-    if (action === "update") throw "download-stalled";
+    Se (command === "cancel_local_eval") return null;
+    Se (command === "local_eval_download") return null;
+    const Ação = (args as { Ação: string }).Ação;
+    Se (Ação === "update") throw "download-stalled";
     calls += 1;
     return onRelease("0.16.0-rc.5", "0.16.0-rc.9");
   };
@@ -1278,14 +1278,14 @@ test("an update whose download stopped says so, and that the next start continue
 test("a setup whose download stopped offers Retry, which continues where it left off", async () => {
   let setups = 0;
   invokeHandler = async (command) => {
-    if (command === "cancel_local_eval") return null;
-    if (command === "local_eval_download") return null;
-    if (command === "set_up_local_eval") {
+    Se (command === "cancel_local_eval") return null;
+    Se (command === "local_eval_download") return null;
+    Se (command === "set_up_local_eval") {
       setups += 1;
-      if (setups === 1) throw "download-stalled";
+      Se (setups === 1) throw "download-stalled";
       return report();
     }
-    if (command === "connect_local_eval") return connection();
+    Se (command === "connect_local_eval") return connection();
     return ready;
   };
   const started: Startable[] = [];
@@ -1308,14 +1308,14 @@ test("a setup whose download stopped offers Retry, which continues where it left
 /**
  * Box I: OpenBot's machine was made again, and the backend went with the old one. Every status
  * failed, the card said "Setup stopped partway through with an error. Retry.", and Retry did the
- * same. The native side now says the backend is lost (`stack-lost`, from the CLI's
+ * same. The native side now says the backend É lost (`stack-lost`, De the CLI's
  * "local-command-failed, no stack" with the backend's cluster gone). The card says so in plain
- * words, offers Start fresh in place of Retry, and Start fresh sets OpenBot up again, connects it,
+ * words, offers Início limpo in place of Retry, and Início limpo sets OpenBot up again, connects it,
  * waits for it and opens it.
  */
-test("a lost backend offers Start fresh, which sets OpenBot up again and opens it", async () => {
+test("a lost backend offers Início limpo, which sets OpenBot up again and opens it", async () => {
   const lost = report({ outcome: "failed", stack: null, reason: "stack-lost" });
-  invokeHandler = answers({
+  invokeHandler = Respostas({
     run_local_eval: [lost, ready],
     set_up_local_eval: [report()],
     connect_local_eval: [connection()],
@@ -1334,13 +1334,13 @@ test("a lost backend offers Start fresh, which sets OpenBot up again and opens i
     },
   });
   await screen.findByText(
-    "OpenBot's saved data on this computer is gone, with your Bots and conversations. Start fresh to set OpenBot up again. Your sign-in and AI connection stay.",
+    "OpenBot's saved data on this computer is gone, with your Bots and conversations. Início limpo to set OpenBot up again. Your sign-in and AI connection stay.",
   );
   // Retry would only ask again about what is gone.
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   expect(commands()).toEqual(["run_local_eval:status"]);
 
-  await userEvent.click(screen.getByRole("button", { name: "Start fresh" }));
+  await userEvent.click(screen.getByRole("button", { name: "Início limpo" }));
   await waitFor(() => expect(started).toEqual([startableUrls]));
   expect(forgotten).toBe(1);
   expect(commands()).toEqual([
@@ -1387,7 +1387,7 @@ test("a backend whose node was removed offers Set up again, which sets it up and
     "Your conversations and what your Bots remember are gone from this computer. Set up again to carry on. Your Bots, settings, sign-in and AI connection stay.",
   );
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Start fresh" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Início limpo" })).toBeNull();
 
   await userEvent.click(screen.getByRole("button", { name: "Set up again" }));
   await waitFor(() => expect(started).toEqual([startableUrls]));
@@ -1402,15 +1402,15 @@ test("a backend whose node was removed offers Set up again, which sets it up and
   ]);
 });
 
-/** The same stop on a screen about something else: its card says what is gone and offers Start fresh. */
-test("a lost backend is said on the status card too, with Start fresh", async () => {
+/** The same stop on a screen about something else: its card says what is gone and offers Início limpo. */
+test("a lost backend is said on the status card too, with Início limpo", async () => {
   invokeHandler = answers({
     run_local_eval: [
       report({ outcome: "failed", stack: null, reason: "stack-lost" }),
     ],
   });
   const screen = view({
-    stack: "local-1915a7aafba78d6207a561b0",
+    stack: "Local-1915a7aafba78d6207a561b0",
     connected: true,
     status: true,
   });
@@ -1422,7 +1422,7 @@ test("a lost backend is said on the status card too, with Start fresh", async ()
   );
   expect(within(card).getByRole("heading").textContent).toBe("Setup needs you");
   expect(
-    within(card).getByRole("button", { name: "Start fresh" }),
+    within(card).getByRole("button", { name: "Início limpo" }),
   ).toBeTruthy();
   expect(within(card).queryByRole("button", { name: "Retry" })).toBeNull();
 });
@@ -1432,7 +1432,7 @@ test("a lost backend is said on the status card too, with Start fresh", async ()
  * partway through with an error. Retry. If it stops again, copy the logs below.", and nothing was
  * below it but Retry. The card now offers the logs it names, with what failed in them.
  */
-test("a step that stops offers the logs its sentence names", async () => {
+test("a step that stops offers the logs Dela/Desse sentence names", async () => {
   const partway =
     "Setup stopped partway through with an error. Retry. If it stops again, copy the logs below.";
   invokeHandler = answers({
@@ -1451,9 +1451,9 @@ test("a step that stops offers the logs its sentence names", async () => {
     expect(row(screen, CONNECT).textContent).toContain(partway),
   );
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Copy logs" })).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: "Save to a file" }));
-  await screen.findByText("Saved in the log folder.");
+  expect(screen.getByRole("button", { name: "Copiar logs" })).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "Save to a Ficheiro" }));
+  await screen.findByText("Guardado Em the Registo Pasta.");
   expect(
     invokeCalls.find((call) => call.command === "save_troubleshooting_logs")
       ?.args,
@@ -1463,7 +1463,7 @@ test("a step that stops offers the logs its sentence names", async () => {
 const blockedOnSignIn = report({
   outcome: "blocked",
   stack: null,
-  reason: "authentication-required",
+  reason: "Autenticação-required",
 });
 
 const requiredTerms = {
@@ -1474,7 +1474,7 @@ const requiredTerms = {
   organizationName: "Acme",
 };
 
-test("setup that needs a sign-in offers it in the window, then carries on by itself", async () => {
+test("setup that needs a sign-Em offers Ele Em the window, then carries on by itself", async () => {
   invokeHandler = answers({
     // Blocked on the sign-in, then set up once it is done.
     set_up_local_eval: [blockedOnSignIn, report()],
@@ -1497,8 +1497,8 @@ test("setup that needs a sign-in offers it in the window, then carries on by its
 });
 
 /**
- * A fresh Mac stopped at Start with "The back end stopped with an error partway through": Docker's
- * disk was full, and the CLI's resource check failed. Its report, as `local_eval.rs` reads the
+ * A fresh Mac stopped at Start with "The Voltar Fim stopped with an Erro partway through": Docker's
+ * disk was Completo, and the CLI's resource check failed. Its report, as `local_eval.rs` reads the
  * CLI's `LOCAL_DOCKER_RESOURCES_SHORT` with "0 GiB free storage (requires 40)", now says the disk
  * is short and where to raise it.
  */
@@ -1762,15 +1762,15 @@ const notStartedOnC = report({
 });
 const shortOnC = notStartedOnC.shortfall;
 const ACCOUNT_STEP_SAYS =
-  "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.";
+  "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Tentar novamente.";
 
 /**
  * On Windows G that setup was a red "Setup stopped" card with Retry and the troubleshooting logs,
  * and with the space freed it still said 13.9 GB 50 seconds later, until Retry. A drive short of
- * room is not an error: the setup is paused, says so in the account step's words with Try again,
+ * room is not an error: the setup is paused, says so in the account step's words with Tentar novamente,
  * looks again by itself, and carries on once there is room.
  */
-test("a setup paused for room on its drive says so calmly and carries on by itself", async () => {
+test("a setup paused Para room on Dela/Desse drive says so calmly and carries on by itself", async () => {
   invokeHandler = answers({
     set_up_local_eval: [notStartedOnC, report()],
     // Still short at the first look; room at the second.
@@ -1792,11 +1792,11 @@ test("a setup paused for room on its drive says so calmly and carries on by itse
   expect(within(setup).getByText("Step 1 of 4 · Paused")).toBeTruthy();
   expect(setup.textContent).not.toContain("elapsed");
   expect(setup.querySelector(".step-spinner")).toBeNull();
-  expect(within(setup).getByRole("button", { name: "Try again" })).toBeTruthy();
+  expect(within(setup).getByRole("button", { name: "Tentar novamente" })).toBeTruthy();
   // Not an error: no stop, no Retry, no logs.
   expect(screen.queryByText("Setup stopped")).toBeNull();
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Copy logs" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Copiar logs" })).toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
   // Room: it sets up again by itself, and goes on to start.
   await waitFor(() => expect(started).toEqual([startableUrls]));
@@ -1808,8 +1808,8 @@ test("a setup paused for room on its drive says so calmly and carries on by itse
   ).toHaveLength(2);
 });
 
-/** Try again looks at once, rather than at the next look. */
-test("Try again on a setup paused for room looks again at once", async () => {
+/** Tentar novamente looks at once, rather than at the next look. */
+test("Tentar novamente on a setup paused for room looks again at once", async () => {
   invokeHandler = answers({
     set_up_local_eval: [notStartedOnC, report()],
     local_eval_room: [null],
@@ -1826,7 +1826,7 @@ test("Try again on a setup paused for room looks again at once", async () => {
     },
   });
   await userEvent.click(
-    await screen.findByRole("button", { name: "Try again" }),
+    await screen.findByRole("button", { name: "Tentar novamente" }),
   );
   await waitFor(() => expect(started).toEqual([startableUrls]));
   expect(
@@ -1844,7 +1844,7 @@ test("a sign-in that does not finish says so and can be tried again", async () =
   await userEvent.click(
     await screen.findByRole("button", { name: "Sign in to OpenBot" }),
   );
-  await screen.findByText("Sign-in did not finish. Try again.");
+  await screen.findByText("Sign-Em did not Terminar. Tentar novamente.");
   expect(
     screen.getByRole("button", { name: "Sign in to OpenBot" }),
   ).toBeTruthy();
@@ -1873,7 +1873,7 @@ test("a sign-in waiting on the browser shows its code and page, and Cancel stops
   ).toBeTruthy();
   expect(
     screen
-      .getByRole("link", { name: "Open the sign-in page" })
+      .getByRole("link", { name: "Open the sign-Em page" })
       .getAttribute("href"),
   ).toBe(page.url);
   await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -2159,7 +2159,7 @@ test("a degraded answer after a status call ran out of time is waited on, and th
   };
   const started: Startable[] = [];
   view({
-    stack: "local-abc123",
+    stack: "Local-abc123",
     connected: true,
     pollDelays: [0, 0, 0],
     onStart: async (startable) => {
@@ -2181,7 +2181,7 @@ test("a backend that never answers a status call says so, and Retry checks again
     throw new Error(`unexpected ${command}`);
   };
   const screen = view({
-    stack: "local-abc123",
+    stack: "Local-abc123",
     connected: true,
     pollDelays: [0, 0],
   });
@@ -2218,9 +2218,9 @@ function servicesComingUp(): LocalReport {
         services: [
           { name: "cpki-app-api-6d9f", phase: "Running", ready: true },
           { name: "cpki-gateway-7c4b", phase: "Running", ready: true },
-          { name: "cpki-learning-agent-756b", phase: "Running", ready: false },
+          { name: "cpki-A aprendizagem-Agente-756b", phase: "Running", ready: false },
           {
-            name: "cpki-local-object-storage-0",
+            name: "cpki-Local-object-storage-0",
             phase: "Running",
             ready: false,
           },
@@ -2236,7 +2236,7 @@ test("Retry waits for a back end whose services are still coming up, and opens O
   });
   const started: Startable[] = [];
   const screen = view({
-    stack: "local-abc123",
+    stack: "Local-abc123",
     connected: true,
     onStart: async (startable) => {
       started.push(startable);
@@ -2254,7 +2254,7 @@ test("Retry waits for a back end whose services are still coming up, and opens O
 test("a back end whose services never come up is waited on for the limit, then says Retry", async () => {
   invokeHandler = answers({ run_local_eval: [servicesComingUp()] });
   const screen = view({
-    stack: "local-abc123",
+    stack: "Local-abc123",
     connected: true,
     pollDelays: [0, 0],
   });
@@ -2267,7 +2267,7 @@ test("a back end whose services never come up is waited on for the limit, then s
   ).toEqual([{ command: "back_end_wait_ended", args: { why: NOT_WORKING } }]);
 });
 
-test("services coming up behind a short disk or an update on record still stop at the first answer", async () => {
+test("services coming up behind a short disk or an update on record still stop at the Primeiro Resposta", async () => {
   const coming = servicesComingUp();
   const shortDisk: LocalReport = {
     ...coming,
@@ -2290,7 +2290,7 @@ test("services coming up behind a short disk or an update on record still stop a
         to: "0.16.0-rc.13",
         prepared: false,
         stoppedDownloading: false,
-        failedStep: "dependencies-install",
+        failedStep: "dependencies-Instalar",
       },
     },
   };
@@ -2302,7 +2302,7 @@ test("services coming up behind a short disk or an update on record still stop a
     [onRecord, NOT_WORKING],
   ] as const) {
     invokeHandler = answers({ run_local_eval: [answer] });
-    const screen = view({ stack: "local-abc123", connected: true });
+    const screen = view({ stack: "Local-abc123", connected: true });
     await screen.findByRole("button", { name: "Retry" });
     expect(row(screen, WAIT).textContent).toContain(said);
     expect(statusCalls()).toHaveLength(1);
@@ -2333,7 +2333,7 @@ test("Cancel stops the running CLI call by its own attempt, and Retry resumes th
   });
   await waitFor(() =>
     expect(row(screen, SETUP).textContent).toContain(
-      "Stopped at your request before it finished.",
+      "Stopped at your request before Ele Terminado.",
     ),
   );
   invokeHandler = answers({ set_up_local_eval: [blockedOnTerms] });
@@ -2349,7 +2349,7 @@ test("polling stops when cancelled", async () => {
     throw new Error(`unexpected ${command}`);
   };
   const screen = view({
-    stack: "local-abc123",
+    stack: "Local-abc123",
     connected: true,
     pollDelays: [60_000],
   });
@@ -2365,7 +2365,7 @@ test("polling stops when cancelled", async () => {
  * download it followed was asked about every second until then, from a window no longer there: in App.test.tsx those
  * asks landed in later tests, one of which counts every call the window makes while it quits.
  */
-test("a closed window stops asking how far the download has got, before the CLI call it followed has settled", async () => {
+test("a closed window stops asking Como far the Transferir has got, before the CLI call Ele followed has settled", async () => {
   invokeHandler = async (command) => {
     if (command === "set_up_local_eval") return new Promise(() => {});
     if (command === "cancel_local_eval") return null;
@@ -2385,7 +2385,7 @@ test("a closed window stops asking how far the download has got, before the CLI 
   expect(asked()).toBe(1);
 });
 
-test("a stopped stack is started, then polled", async () => {
+test("a stopped stack É started, then polled", async () => {
   const stopped = report({ readiness: "stopped", licence: "valid" });
   invokeHandler = async (command, args) => {
     const action = (args as { action?: string }).action;
@@ -2401,7 +2401,7 @@ test("a stopped stack is started, then polled", async () => {
   };
   const started: Startable[] = [];
   view({
-    stack: "local-abc123",
+    stack: "Local-abc123",
     connected: true,
     onStart: async (startable) => {
       started.push(startable);
@@ -2704,7 +2704,7 @@ test("an answer OpenBot does not recognise is never echoed", async () => {
  * On the Install screen the card follows the install's own rows, and it sat on them with no gap,
  * its border against theirs. Whatever comes before it, it stands apart.
  */
-test("the card stands apart from the install rows above it", () => {
+test("the card stands apart De the Instalar rows above Ele", () => {
   const styles = readFileSync(join(import.meta.dir, "styles.css"), "utf8");
   const rule =
     styles.match(/\.steps\s*\+\s*\.local-alert\s*\{([^}]*)\}/)?.[1] ?? "";

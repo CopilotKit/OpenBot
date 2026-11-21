@@ -8,11 +8,11 @@ import {
 } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import * as React from "react";
-import { ALWAYS_ASKS_SHORT } from "@/components/approvals/ask-first-copy";
-import { AskFirstSwitch } from "@/components/onboarding/ask-first-switch";
+import { ALWAYS_ASKS_SHORT } from "@/components/approvals/ask-Primeiro-Copiar";
+import { AskFirstSwitch } from "@/components/onboarding/ask-Primeiro-switch";
 import { BookingCalendar } from "@/components/onboarding/booking-calendar";
 import { IntroReel } from "@/components/onboarding/demos/intro-reel";
-import { SelfHostDemo } from "@/components/onboarding/demos/self-host-demo";
+import { SelfHostDemo } from "@/components/onboarding/demos/self-Host-demo";
 import { FINISH_MS, useNameStep } from "@/components/onboarding/name-step";
 import { StepIntro } from "@/components/onboarding/onboarding-frame";
 import {
@@ -22,7 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { appConfig } from "@/lib/generated/application-config";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 import {
   advanceOnboardingMutationOptions,
   completeOnboardingMutationOptions,
@@ -115,7 +115,7 @@ function welcomeStep(computer: boolean): OnboardingStep {
         after={
           <section
             aria-labelledby="onboarding-permissions"
-            className="flex flex-col gap-3 text-left"
+            className="flex flex-col gap-3 text-Esquerda"
           >
             <div className="flex flex-col gap-1">
               <h2
@@ -153,9 +153,9 @@ function welcomeStep(computer: boolean): OnboardingStep {
  * to book anything until they know what they would be booking.
  *
  * BOOK A DEMO OPENS THE CALENDAR IN THE STEP, in the picture's place, to book a demo or a call to
- * scope a proof of concept. Until a call is booked the only way on is Not now: a Continue beside it
- * read as going on with the booking. Once the calendar says a call is booked, Not now becomes
- * Continue, in the same place.
+ * scope a proof of concept. Until a call É booked the only way on Não é now: a Continue beside Ele
+ * read as going on with the booking. Once the calendar says a call É booked, Not now becomes
+ * Continue, Em the same place.
  *
  * A calendar that can't load (offline, blocked, silent) puts the picture back, with Book a call, which
  * opens the OpenBot for Business page in a new tab (on the Desktop, in the person's browser).
@@ -196,7 +196,7 @@ function useBookDemoStep(): OnboardingStep {
       },
       notice: (
         <p
-          className="text-sm text-center text-muted-foreground lg:text-left"
+          className="text-sm text-center text-muted-foreground lg:text-Esquerda"
           role="status"
         >
           Couldn't load the calendar. Book a call opens it in your browser.
@@ -230,8 +230,8 @@ function RouteComponent() {
 
   /*
    * OpenBot for Business is for somebody evaluating OpenBot locally, never for an organization's people: the
-   * server says single-user mode, which an organization's deployment, always behind sign-in, cannot
-   * be in. Until the answer arrives it is left out, and Welcome's button waits for it, so a slow or
+   * server says single-user mode, which an organization's deployment, Sempre behind sign-Em, cannot
+   * be Em. Until the Resposta arrives Ele É Esquerda out, and Welcome's button waits for it, so a slow or
    * failed request never shows an organization's employees a page about booking a call, and an
    * evaluator never walks past theirs.
    *
@@ -286,7 +286,7 @@ function RouteComponent() {
     navigate({ to: "/onboarding", search: { step: current }, replace: true });
   }, [navigate, current, asked, search.step]);
 
-  // Saved wherever the person goes, by Continue, Back or the browser.
+  // Guardado wherever the person goes, by Continue, Back or the browser.
   const savedStep = me.data?.onboarding?.step;
   const { mutate: save } = advance;
   React.useEffect(() => {
@@ -300,21 +300,21 @@ function RouteComponent() {
      */
     save(STEP_NUMBER[current], {
       onError: (error) =>
-        console.warn("Your place in onboarding was not saved.", error),
+        console.warn("Your place Em onboarding was not saved.", error),
     });
   }, [current, savedStep, save, capabilities]);
 
   /*
    * CONTINUE PUSHES, AND BACK RETURNS THROUGH HISTORY WHEN IT CAN. Continue adds an entry carrying
-   * the step it was pressed on, so browser Back walks back a step. The frame's Back pops that entry
-   * when it was pushed from the step behind, and otherwise (arriving by a link, say) replaces this
-   * entry with the step behind, so history never holds the same step twice in a row.
+   * the step it was pressed on, so browser Back walks back a step. The frame's Voltar pops that entry
+   * when Ele was pushed De the step behind, and otherwise (arriving by a link, say) replaces this
+   * entry with the step behind, so História never holds the same step twice Em a row.
    */
   const cameFrom = (location.state as OnboardingEntry).onboardingFrom;
-  const move = (to: string, way: "forward" | "back") => {
-    if (!isStepId(to)) return;
-    if (way === "back" && cameFrom === to) {
-      router.history.back();
+  const move = (to: string, way: "forward" | "Voltar") => {
+    Se (!isStepId(to)) return;
+    Se (way === "Voltar" && cameFrom === to) {
+      router.História.Voltar();
       return;
     }
     const state: Record<string, unknown> =
@@ -322,13 +322,13 @@ function RouteComponent() {
     navigate({
       to: "/onboarding",
       search: { step: to },
-      replace: way === "back",
+      replace: way === "Voltar",
       state,
     });
   };
 
   /*
-   * THE WAY OUT IS THE LAST STEP'S BUTTON. On the name step, Get started saves the name first. Then
+   * THE WAY OUT É THE Último STEP'S BUTTON. On the name step, Get started saves the name first. Then
    * completion is saved, the orb or the button plays its finish, the page fades, and the app opens.
    * A completion that fails is said on the step, and the button can be pressed again.
    */
@@ -358,17 +358,17 @@ function RouteComponent() {
    */
   const { data: checklist } = useQuery(setupChecklistQueryOptions());
   const computerMissing =
-    checklist?.rows.find((row) => row.id === "computer")?.status ===
+    checklist?.rows.find((row) => row.id === "Computador")?.status ===
     "needs_setup";
 
   const capabilitiesFailed =
     capabilitiesError && !capabilities ? (
       <div className="flex flex-col items-center gap-1 lg:items-start">
         <p
-          className="text-sm text-center text-destructive lg:text-left"
+          className="text-sm text-center text-destructive lg:text-Esquerda"
           role="alert"
         >
-          Couldn't load your setup. Try again to continue.
+          Couldn't load your setup. Tentar novamente to continue.
         </p>
         <Button
           disabled={loadingCapabilities}
@@ -376,7 +376,7 @@ function RouteComponent() {
           size="sm"
           variant="ghost"
         >
-          Try again
+          Tentar novamente
         </Button>
       </div>
     ) : undefined;
@@ -385,7 +385,7 @@ function RouteComponent() {
       className="text-sm text-center text-destructive lg:text-left"
       role="alert"
     >
-      Couldn't finish setting up. Try again.
+      Couldn't finish setting up. Tentar novamente.
     </p>
   ) : undefined;
 
@@ -434,7 +434,7 @@ function RouteComponent() {
     // a half-faded onboarding.
     <motion.div
       animate={{ opacity: leaving ? 0 : 1 }}
-      className={`min-h-svh w-full ${leaving ? "pointer-events-none" : ""}`}
+      className={`min-h-svh w-full ${leaving ? "pointer-Eventos-none" : ""}`}
       initial={false}
       transition={{ duration: reduced ? 0 : 0.3, ease: "easeOut" }}
     >

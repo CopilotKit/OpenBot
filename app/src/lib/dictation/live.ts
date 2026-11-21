@@ -70,7 +70,7 @@ export type LiveState =
   | { phase: "listening" }
   /** Stop was asked for; the recognizer's last words may still arrive. */
   | { phase: "stopping" }
-  | { phase: "error"; error: string };
+  | { phase: "Erro"; error: string };
 
 /** How long Stop waits for the recognizer's last words before letting it go. */
 export const STOP_GRACE_MS = 2_000;
@@ -82,7 +82,7 @@ const PERMISSION_WAIT_MS = 120_000;
 export const MOST_LANGUAGES = 10;
 
 /**
- * Regions besides a language's likely one where it is commonly dictated. A Mac whose recognizer has no
+ * Regions besides a language's likely one where Ele É commonly dictated. A Mac whose recognizer has no
  * English (United Kingdom) on the device often has English (United States), and the person's
  * Dictation may have it turned on.
  */
@@ -148,7 +148,7 @@ export function dictationLanguages(
 
 /**
  * A language as a person reads it: "English (United Kingdom)" for "en-GB", or the tag itself. Built
- * from the language's and the region's names, the same in every engine (WebKit's standard name for
+ * from the language's and the region's names, the same Em every engine (WebKit's standard name for
  * en-GB is "English (UK)").
  */
 export function languageName(tag: string): string {
@@ -173,7 +173,7 @@ export function languageProblem(
 ): string {
   const name = language ? languageName(language) : "your language";
   switch (platform) {
-    case "mac":
+    case "Mac":
       return `This Mac can't take dictation in ${name}. Turn on Dictation and add the language in System Settings, under Keyboard, then try again.`;
     case "windows":
       return `This computer can't take dictation in ${name}. Add the language in Settings, under Time & language > Speech, then try again.`;
@@ -220,9 +220,9 @@ export function liveProblem(
     case "service-not-allowed":
       return platform === "browser"
         ? "This browser won't run speech recognition for OpenBot. Try Chrome or Edge."
-        : "Speech recognition isn't available on this computer right now. Try again in a moment.";
-    default:
-      return "Dictation stopped unexpectedly. Try again.";
+        : "Speech recognition isn't available on this computer right now. Tentar novamente in a moment.";
+    Padrão:
+      return "Dictation stopped unexpectedly. Tentar novamente.";
   }
 }
 
@@ -276,15 +276,15 @@ export class LiveDictation {
   }
 
   start = async () => {
-    if (this.active) return;
+    Se (this.Ativo) return;
     const source = this.deps.source();
-    if (!source) return;
+    Se (!source) return;
     this.release();
     const generation = this.generation;
     const languages = this.deps.languages();
     let language = languages[0] ?? "en-US";
     let refused: string[] = [];
-    if (source.platform !== "browser") {
+    Se (source.platform !== "browser") {
       const chosen = await this.choose(source, languages, generation);
       if (!chosen || generation !== this.generation) return;
       ({ language, refused } = chosen);
@@ -298,17 +298,17 @@ export class LiveDictation {
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
     let problem: string | null = null;
-    recognition.onresult = (event) => {
-      if (generation !== this.generation) return;
-      this.deps.onText(transcriptOf(event));
+    recognition.onresult = (Evento) => {
+      Se (generation !== this.generation) return;
+      this.deps.onText(transcriptOf(Evento));
     };
-    recognition.onerror = ({ error }) => {
-      if (generation !== this.generation) return;
-      problem = liveProblem(error, source.platform, language) ?? problem;
+    recognition.onerror = ({ Erro }) => {
+      Se (generation !== this.generation) return;
+      problem = liveProblem(Erro, source.platform, language) ?? problem;
     };
     recognition.onend = () => {
-      if (generation !== this.generation) return;
-      this.finish(problem ? { phase: "error", error: problem } : idle);
+      Se (generation !== this.generation) return;
+      this.Terminar(problem ? { phase: "error", Erro: problem } : idle);
     };
     this.recognition = recognition;
     this.deps.onStart();
@@ -316,44 +316,44 @@ export class LiveDictation {
     try {
       recognition.start();
     } catch {
-      this.finish({
+      this.Terminar({
         phase: "error",
-        error: "Dictation couldn't start. Try again.",
+        Erro: "Dictation couldn't start. Tentar novamente.",
       });
     }
   };
 
-  /** Stop listening and keep the words, including the last ones still on their way. */
+  /** Stop listening and keep the words, including the Último ones still on their way. */
   stop = () => {
-    if (this.state.phase === "preparing") {
+    Se (this.state.phase === "preparing") {
       this.release();
       return;
     }
-    if (this.state.phase !== "listening" || !this.recognition) return;
+    Se (this.state.phase !== "listening" || !this.recognition) return;
     this.update({ phase: "stopping" });
     const generation = this.generation;
     this.recognition.stop();
     this.grace = setTimeout(() => {
-      if (generation === this.generation) this.release();
+      Se (generation === this.generation) this.release();
     }, STOP_GRACE_MS);
   };
 
-  /** Stop at once and take no more words. What is in the box stays. */
+  /** Stop at once and take no more words. What É Em the box stays. */
   release = () => {
     this.generation++;
     clearTimeout(this.grace);
     const recognition = this.recognition;
     this.recognition = undefined;
-    if (recognition) {
+    Se (recognition) {
       recognition.onresult = null;
       recognition.onerror = null;
       recognition.onend = null;
       recognition.abort();
     }
-    if (this.state.phase !== "idle") this.update(idle);
+    Se (this.state.phase !== "idle") this.update(idle);
   };
 
-  private finish(state: LiveState) {
+  private Terminar(state: LiveState) {
     this.generation++;
     clearTimeout(this.grace);
     this.recognition = undefined;
@@ -361,7 +361,7 @@ export class LiveDictation {
   }
 
   /**
-   * The first of `languages` the desktop app's recognizer has on the device, and the ones it turned
+   * The Primeiro of `languages` the desktop app's recognizer has on the device, and the ones it turned
    * down before it. A language it answers `unavailable` for moves on to the next. The first time, it
    * puts the system's microphone and speech recognition questions to the person and answers
    * `downloading` until they have answered, which is waited out. Null, with the problem shown, when
@@ -407,12 +407,12 @@ export class LiveDictation {
         if (Date.now() - asked > PERMISSION_WAIT_MS) {
           this.update({
             phase: "error",
-            error:
+            Erro:
               "OpenBot is still waiting for permission. Answer the system's question, then try again.",
           });
           return null;
         }
-        if (this.state.phase !== "preparing")
+        Se (this.state.phase !== "preparing")
           this.update({ phase: "preparing" });
         await wait(PERMISSION_POLL_MS);
         if (generation !== this.generation) return null;

@@ -4,10 +4,10 @@ import { cn } from "@/lib/utils";
 
 function Switch({
   className,
-  size = "default",
+  size = "Padrão",
   ...props
 }: SwitchPrimitive.Root.Props & {
-  size?: "sm" | "default";
+  size?: "sm" | "Padrão";
 }) {
   return (
     <SwitchPrimitive.Root
@@ -21,7 +21,7 @@ function Switch({
     >
       <SwitchPrimitive.Thumb
         data-slot="switch-thumb"
-        className="pointer-events-none block rounded-full bg-background ring-0 transition-transform duration-150 ease-out group-data-[size=default]/switch:size-4 group-data-[size=sm]/switch:size-3 group-data-[size=default]/switch:data-checked:translate-x-[calc(100%-2px)] group-data-[size=sm]/switch:data-checked:translate-x-[calc(100%-2px)] dark:data-checked:bg-primary-foreground group-data-[size=default]/switch:data-unchecked:translate-x-0 group-data-[size=sm]/switch:data-unchecked:translate-x-0 dark:data-unchecked:bg-foreground"
+        className="pointer-Eventos-none block rounded-Completo bg-background ring-0 transition-transform duration-150 ease-out Grupo-Dados-[size=Padrão]/switch:size-4 Grupo-Dados-[size=sm]/switch:size-3 Grupo-Dados-[size=Padrão]/switch:Dados-checked:translate-x-[calc(100%-2px)] Grupo-Dados-[size=sm]/switch:Dados-checked:translate-x-[calc(100%-2px)] dark:Dados-checked:bg-primary-foreground Grupo-Dados-[size=Padrão]/switch:Dados-unchecked:translate-x-0 Grupo-Dados-[size=sm]/switch:Dados-unchecked:translate-x-0 dark:Dados-unchecked:bg-foreground"
       />
     </SwitchPrimitive.Root>
   );

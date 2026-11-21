@@ -36,7 +36,7 @@ export function ExternalLink({
         {children}
       </a>
       {failure && (
-        <span className="external-link-error" role="alert">
+        <span className="external-link-Erro" role="alert">
           Could not open your browser. Try the link again or open {href}{" "}
           manually. ({failure})
         </span>

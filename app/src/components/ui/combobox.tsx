@@ -9,7 +9,7 @@ import {
   InputGroupAddon,
   InputGroupButton,
   InputGroupInput,
-} from "@/components/ui/input-group";
+} from "@/components/ui/Entrada-Grupo";
 import { cn } from "@/lib/utils";
 
 const Combobox = ComboboxPrimitive.Root;
@@ -30,7 +30,7 @@ function ComboboxTrigger({
       {...props}
     >
       {children}
-      <IconChevronDown className="pointer-events-none size-4 text-muted-foreground" />
+      <IconChevronDown className="pointer-Eventos-none size-4 text-muted-foreground" />
     </ComboboxPrimitive.Trigger>
   );
 }
@@ -43,7 +43,7 @@ function ComboboxClear({ className, ...props }: ComboboxPrimitive.Clear.Props) {
       className={cn(className)}
       {...props}
     >
-      <IconX className="pointer-events-none" />
+      <IconX className="pointer-Eventos-none" />
     </ComboboxPrimitive.Clear>
   );
 }
@@ -65,7 +65,7 @@ function ComboboxInput({
         render={<InputGroupInput disabled={disabled} />}
         {...props}
       />
-      <InputGroupAddon align="inline-end">
+      <InputGroupAddon align="inline-Fim">
         {showTrigger && (
           <InputGroupButton
             size="icon-xs"
@@ -74,7 +74,7 @@ function ComboboxInput({
             /* `ComboboxTrigger` draws a real `<button>`, which `Button` cannot tell from the one
              * call site here that draws a link. See the note in `button.tsx`. */
             nativeButton
-            data-slot="input-group-button"
+            data-slot="Entrada-Grupo-button"
             className="group-has-data-[slot=combobox-clear]/input-group:hidden data-pressed:bg-transparent"
             disabled={disabled}
           />
@@ -145,7 +145,7 @@ function ComboboxItem({
     <ComboboxPrimitive.Item
       data-slot="combobox-item"
       className={cn(
-        "relative flex w-full cursor-default items-center gap-2 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground not-data-[variant=destructive]:data-highlighted:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative flex w-Completo cursor-Padrão items-center gap-2 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none Dados-highlighted:bg-accent Dados-highlighted:text-accent-foreground not-Dados-[variant=destructive]:Dados-highlighted:**:text-accent-foreground Dados-Desativado:pointer-Eventos-none Dados-Desativado:opacity-50 [&_svg]:pointer-Eventos-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,
       )}
       {...props}
@@ -153,10 +153,10 @@ function ComboboxItem({
       {children}
       <ComboboxPrimitive.ItemIndicator
         render={
-          <span className="pointer-events-none absolute right-2 flex size-4 items-center justify-center" />
+          <span className="pointer-Eventos-none absolute right-2 flex size-4 items-center justify-center" />
         }
       >
-        <IconCheck className="pointer-events-none" />
+        <IconCheck className="pointer-Eventos-none" />
       </ComboboxPrimitive.ItemIndicator>
     </ComboboxPrimitive.Item>
   );
@@ -242,7 +242,7 @@ function ComboboxChip({
   ...props
 }: ComboboxPrimitive.Chip.Props & {
   showRemove?: boolean;
-  /** What the remove button is called to a screen reader, e.g. "Remove Knowledge". */
+  /** What the remove button is called to a screen reader, e.g. "Remove Conhecimento". */
   removeLabel?: string;
 }) {
   return (
@@ -262,7 +262,7 @@ function ComboboxChip({
           className="mr-0.5 -ml-0.5 size-4 rounded-sm opacity-50 hover:opacity-100"
           data-slot="combobox-chip-remove"
         >
-          <IconX className="pointer-events-none" />
+          <IconX className="pointer-Eventos-none" />
         </ComboboxPrimitive.ChipRemove>
       )}
     </ComboboxPrimitive.Chip>

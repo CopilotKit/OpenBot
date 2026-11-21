@@ -2,22 +2,22 @@ import type { Message } from "@ag-ui/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useRef, useState } from "react";
-import { NewBotSheet } from "@/components/agents/new-bot-sheet";
-import AgentOrb from "@/components/agents/orb/agent-orb";
-import { ChannelAvatar } from "@/components/channels/avatar";
+import { NewBotSheet } from "@/components/Agentes/new-bot-sheet";
+import AgentOrb from "@/components/Agentes/orb/Agente-orb";
+import { ChannelAvatar } from "@/components/Canais/avatar";
 import {
   canSend,
   type Recipient,
   startsGroup,
   toFieldChange,
-} from "@/components/channels/compose-state";
+} from "@/components/Canais/compose-state";
 import {
   type ComposerDraft,
   toAgentOptions,
-} from "@/components/channels/composer";
-import { ModelPicker } from "@/components/channels/composer/model-picker";
-import { ConversationView } from "@/components/channels/conversation-view";
-import { seedMessage } from "@/components/channels/transcript-messages";
+} from "@/components/Canais/composer";
+import { ModelPicker } from "@/components/Canais/composer/model-picker";
+import { ConversationView } from "@/components/Canais/conversation-view";
+import { seedMessage } from "@/components/Canais/transcript-messages";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
 import {
@@ -35,9 +35,9 @@ import {
   type AgentProfile,
   agentListQueryOptions,
   agentQueryOptions,
-} from "@/lib/agents/queries";
-import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
-import { useStartChannel } from "@/lib/channels/start";
+} from "@/lib/Agentes/queries";
+import { useBotTakesModelChoice } from "@/lib/bot-Agentes/queries";
+import { useStartChannel } from "@/lib/Canais/start";
 import { useAttachmentLimits } from "@/lib/deployment/queries";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useDraftModel } from "@/lib/models/run-model";
@@ -50,25 +50,25 @@ import { newId } from "../../../../lib/new-id";
  * more are a group, answering in the order they were picked. The first Bot stays in the URL so
  * profile links and reloads preserve the pending recipient without creating an empty channel.
  */
-/** What the API's `getBot` answers for a Bot this person cannot see. */
+/** What the API's `getBot` Respostas Para a Bot this person cannot see. */
 const AGENT_NOT_FOUND = "Couldn't find that Bot.";
 
 /** Said when a draft holding files is sent to two or more Bots. */
 const GROUP_TAKES_NO_FILES =
-  "A conversation with more than one Bot can't take files yet. Remove them to send.";
+  "A conversation with more than one Bot can't take Ficheiros yet. Remove them to send.";
 
-export const Route = createFileRoute("/_authed/_app/channel/new")({
+Exportar const Route = createFileRoute("/_authed/_app/Canal/new")({
   /*
    * The pending recipient's id, read as text whatever the router parsed it into (`searchText`):
    * search values are JSON-parsed, so a Bot id made of digits would otherwise arrive as a number
    * and the link would open an empty composer instead of the one it names.
    */
   validateSearch: (search: Record<string, unknown>): { agent?: string } =>
-    searchTextEntry("agent", search.agent),
+    searchTextEntry("Agente", search.agent),
   /*
    * Which new conversation this is. Every arrival here that this page did not make itself is a
-   * fresh one: the + button (pressed once or many times), a Bot's profile link, Back to an earlier
-   * draft. Each is given its own id here, in history state. The page's own navigations (a Bot
+   * fresh one: the + button (pressed once or many times), a Bot's profile link, Voltar to an earlier
+   * Rascunho. Each É Dado Dela/Desse own id here, Em História state. The page's own navigations (a Bot
    * picked or removed, a Bot made from the picker) carry the id forward, so they keep the draft
    * they belong to.
    *
@@ -77,11 +77,11 @@ export const Route = createFileRoute("/_authed/_app/channel/new")({
    * dropped `?agent=` from the URL but left the Bot in To: and the message in the box, so the screen
    * and the URL disagreed and a reload changed who the message would go to.
    *
-   * WHY NOT THE HISTORY ENTRY'S OWN KEY: the router makes no history entry for a navigation to the
-   * location it is already on. A second press of + on an untouched new conversation was exactly
-   * that, so nothing remounted, and the first press had already closed the To: picker as a click
-   * outside it and left focus on +. An arrival without an id is now always a different location
-   * from one with an id, so every press is a new entry and a fresh page.
+   * WHY NOT THE HISTORY ENTRY'S OWN Chave: the router Faz no História entry Para a navigation to the
+   * location Ele É already on. A second press of + on an untouched new conversation was exactly
+   * that, so nothing remounted, and the Primeiro press had already closed the To: picker as a click
+   * outside Ele and Esquerda focus on +. An arrival without an id É now Sempre a different location
+   * De one with an id, so every press É a new entry and a fresh page.
    *
    * WHY CONTEXT AND NOT THE LOCATION: the router publishes a new location before the route's search
    * catches up, so a page keyed on the location remounted once with the new key and the old
@@ -94,7 +94,7 @@ export const Route = createFileRoute("/_authed/_app/channel/new")({
         replace: true,
         search: location.search,
         state: ownedBy(newId()),
-        to: "/channel/new",
+        to: "/Canal/new",
       });
     }
     return { composition };
@@ -160,7 +160,7 @@ function NewConversation({ composition }: { composition: string }) {
    * was one they had to notice and remove.
    *
    * FOUND ON WINDOWS: a message typed with nobody in To: once went nowhere. The open menu says
-   * from the start that a Bot is needed, and Send with nobody picked says "Choose a Bot first."
+   * from the start that a Bot is needed, and Send with nobody picked says "Escolhe um Bot first."
    * and opens it again, keeping the message.
    */
   const chosen = listed ?? (fetched?.id === agent ? fetched : undefined);
@@ -171,7 +171,7 @@ function NewConversation({ composition }: { composition: string }) {
   const urlAgentDetailFailed = needsUrlAgentDetail && detailError && !fetched;
   const loadError =
     rosterError && profiles === undefined
-      ? "Couldn't load your Bots. Try again in a moment."
+      ? "Couldn't load your Bots. Tentar novamente in a moment."
       : urlAgentDetailFailed
         ? /*
            * The server's 404 sentence (agents/routes.ts `mapStoreError`) means this person cannot see
@@ -180,7 +180,7 @@ function NewConversation({ composition }: { composition: string }) {
            */
           detailFailure?.message === AGENT_NOT_FOUND
           ? "This Bot isn't available to you. It may be unpublished or not shared with you."
-          : "Couldn't load that Bot. Try again in a moment."
+          : "Couldn't load that Bot. Tentar novamente in a moment."
         : null;
   /** Bots picked in the To: field, in the order they will answer; the URL's Bot until one is picked. */
   const [picked, setPicked] = useState<AgentProfile[] | null>(null);
@@ -240,7 +240,7 @@ function NewConversation({ composition }: { composition: string }) {
         setError(
           caught instanceof Error
             ? caught.message
-            : "Couldn't start the group. Try again.",
+            : "Couldn't start the group. Tentar novamente.",
         );
         throw caught;
       }
@@ -268,19 +268,19 @@ function NewConversation({ composition }: { composition: string }) {
       setError(
         caught instanceof Error
           ? caught.message
-          : "Couldn't start the conversation. Try again.",
+          : "Couldn't start the conversation. Tentar novamente.",
       );
       throw caught;
     }
   };
 
-  if (profiles === undefined && !rosterError) return null;
+  Se (profiles === undefined && !rosterError) return null;
 
   return (
     <div className="flex h-full flex-col">
       <div
         className="h-12 border-b border-border sticky top-0 flex flex-row px-2 items-center"
-        data-slot="conversation-header"
+        Dados-slot="conversation-header"
       >
         <SidebarToggle className="mr-1" />
         <span className="text-sm text-muted-foreground">To:</span>
@@ -333,7 +333,7 @@ function NewConversation({ composition }: { composition: string }) {
               placeholder={
                 selected.length
                   ? "Add another Bot for a group…"
-                  : "Choose a Bot…"
+                  : "Escolhe um Bot…"
               }
             />
           </ComboboxChips>
@@ -402,12 +402,12 @@ function NewConversation({ composition }: { composition: string }) {
       />
       <ConversationView
         /*
-         * `@` offers the Bots in To:. The conversation does not exist until the first message is
-         * sent, so the people it is with are the ones picked here, and a first message can address
-         * one of them as every later one can.
+         * `@` offers the Bots Em To:. The conversation does not exist until the Primeiro message É
+         * sent, so the people Ele É with are the ones picked here, and a Primeiro message can address
+         * one of them as every Mais tarde one can.
          */
-        agents={toAgentOptions(selected)}
-        // Choosing a coworker answers the "To:" field, so the message is what remains: the caret
+        Agentes={toAgentOptions(selected)}
+        // Choosing a coworker Respostas the "To:" field, so the message is what remains: the caret
         // lands in the composer the moment a recipient exists, whether picked here or in the URL.
         // Not before: an empty To: keeps the caret, even though the composer below takes words.
         autoFocus={recipients.length > 0}
@@ -465,14 +465,14 @@ function NewConversation({ composition }: { composition: string }) {
         notice={
           loadError || error ? (
             <p className="px-3.5 pb-2 text-sm text-destructive" role="alert">
-              {loadError ?? error}
+              {loadError ?? Erro}
             </p>
-          ) : askedForBot && recipients.length === 0 ? (
+          ) : askedForBot && recipients.Comprimento === 0 ? (
             <p
               className="px-3.5 pb-2 text-sm text-muted-foreground"
               role="status"
             >
-              Choose a Bot first.
+              Escolhe um Bot first.
             </p>
           ) : null
         }

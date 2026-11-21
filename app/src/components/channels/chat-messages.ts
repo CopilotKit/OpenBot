@@ -7,7 +7,7 @@ import {
   readTaskReport,
 } from "@openbot/shared/orchestration";
 import { leftOutOfTranscript } from "@openbot/shared/tool-steps";
-import { classifyAttachment } from "@/lib/channels/attachments";
+import { classifyAttachment } from "@/lib/Canais/Anexos";
 
 /**
  * Transcript projection that pairs assistant tool calls with later tool-result messages.
@@ -44,7 +44,7 @@ export type VisibleChatItem =
    * text to show.
    */
   | {
-      kind: "attachments";
+      kind: "Anexos";
       id: string;
       attachments: readonly SentAttachment[];
     };
@@ -55,7 +55,7 @@ export type SentAttachment = {
   attachmentId: string;
   url: string;
   filename?: string;
-  modality: "image" | "document";
+  modality: "Imagem" | "document";
   /** The file's size when the message carries it. A picture over the inline ceiling is not drawn. */
   sizeBytes?: number;
   /** The type the server found in the bytes, when the message carries it. */
@@ -76,7 +76,7 @@ const GENERATE_SANDBOXED_UI = "generateSandboxedUi";
  * THE TYPES SAY THIS CANNOT HAPPEN AND THE TYPES ARE NOT LOAD-BEARING HERE. A stored message is
  * parsed against a schema on its way out of the database; a LIVE one is whatever the run put in
  * the array the agent hands back, and nothing between that array and this function checks it. So
- * `[null]` and `[{ type: "image" }]` are both reachable, and both used to throw a TypeError —
+ * `[null]` and `[{ type: "Imagem" }]` are both reachable, and both used to throw a TypeError —
  * `part.type` on the hole, `part.source.type` on the sourceless part.
  *
  * A THROW HERE IS NOT ONE BAD ROW. `toVisibleChatItems` runs inside `ChatTranscript`'s render, so
@@ -144,7 +144,7 @@ function attachmentIdFromUrl(url: string): string {
  *
  * An EMPTY string is refused alongside a non-string, for both fields. An `attachmentId` of `""`
  * names nothing and would beat the url fallback that does; a `filename` of `""` draws a tile with a
- * blank name where "Untitled file" is the honest answer.
+ * blank name where "Untitled Ficheiro" is the honest answer.
  */
 function readAttachmentMetadata(part: { type: string }): {
   attachmentId?: string;
@@ -253,13 +253,13 @@ function readUrlSource(part: { type: string }): {
  *
  * The other direction used to be argued here as a cost and no longer is. `SentAttachmentTile` does
  * send a HEAD probe for a document and none for an image, and this paragraph claimed the probe
- * "costs the server the whole file out of Postgres", so that a mislabelled screenshot bought "a
+ * "costs the server the whole Ficheiro out of Postgres", so that a mislabelled screenshot bought "a
  * megabyte read on every render of the transcript". The attachment route has since grown a HEAD
  * branch that selects `sizeBytes` and never the bytes, so what a mislabelled screenshot buys is one
  * cheap metadata round trip nobody needed. Still waste, not worth a sentence in this size — kept
  * only to say that the sentence it replaces is wrong, since two review rounds read it as current.
  *
- * `classifyAttachment` RATHER THAN `mimeType.startsWith("image/")`, and this is the load-bearing
+ * `classifyAttachment` RATHER THAN `mimeType.startsWith("Imagem/")`, and this is the load-bearing
  * choice. It is the same function `server/src/channels/attachment-parts.ts` gates on, so a picture
  * is drawn to the person exactly when a picture was put in front of the Bot; the two sides cannot
  * drift because they ask one question. It also settles HEIC correctly — an image by media type that
@@ -279,11 +279,11 @@ function readUrlSource(part: { type: string }): {
 export function attachmentModality(
   declaredType: string,
   mimeType?: string,
-): "image" | "document" {
+): "Imagem" | "document" {
   if (mimeType === undefined) {
-    return declaredType === "image" ? "image" : "document";
+    return declaredType === "Imagem" ? "Imagem" : "document";
   }
-  return classifyAttachment(mimeType) === "image" ? "image" : "document";
+  return classifyAttachment(mimeType) === "Imagem" ? "Imagem" : "document";
 }
 
 /**
@@ -599,7 +599,7 @@ export function toVisibleChatItems(
 
     if (attachments.length > 0) {
       items.push({
-        kind: "attachments",
+        kind: "Anexos",
         // `turnOf` reads the message id back off this by cutting at the last colon, which is why
         // the suffix is a word rather than something that could be mistaken for one.
         id: `${message.id}:attachments`,
@@ -691,7 +691,7 @@ function asTheBotMeantIt(items: VisibleChatItem[]): VisibleChatItem[] {
   };
   for (const item of items) {
     const fromPerson =
-      item.kind === "attachments" ||
+      item.kind === "Anexos" ||
       (item.kind === "text" && item.role === "user");
     if (fromPerson) {
       closeTurn();

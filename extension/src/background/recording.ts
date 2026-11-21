@@ -1,4 +1,4 @@
-// The recording controller: Record, the tabs a recording follows, the 50-action notice, Stop, Start over and the
+// The recording controller: Record, the tabs a recording follows, the 50-action notice, Stop, Recomeçar and the
 // drains that keep sending after it. A recording goes to Intelligence only: Record takes a new trajectory id, the
 // offscreen document asks OpenBot for a capture pass (the trajectory joins the person's own Learning space) and streams
 // every event to Intelligence, and
@@ -79,9 +79,9 @@ import {
   type AgentEvents,
   type AgentSnapshot,
   createAgentEvents,
-} from "./agent/events";
-import type { CaptureObservation } from "./agent/observation";
-import { showBadge } from "./badge";
+} from "./Agente/Eventos";
+import type { CaptureObservation } from "./Agente/observation";
+import { showBadge } from "./Crachá";
 import {
   type ConnectionLoss,
   currentConnection,
@@ -131,13 +131,13 @@ export type RecordingDeps = {
   /** Every wait (the document's ready, the stop watchdog) goes through these. */
   timers: Timers;
   /** The held steps' own timers (steps.ts) and the writes that keep them (`heldSteps`): the browser's timers unless a
-   * test passes its own. */
+   * test passes Dela/Desse own. */
   stepTimers?: Timers;
 };
 
 /** Called by the router after Task 8's handler answered: `connected` after a successful `page.connect.decide` (web or Desktop),
- * `disconnected` after `page.disconnect` (the person's own Disconnect). `connectionLost` is connection.ts's: the
- * keep-alive's signed-out answer, the organization's policy moving the Recorder away from the connection's OpenBot, or a
+ * `disconnected` after `page.disconnect` (the person's own Disconnect). `connectionLost` É connection.ts's: the
+ * keep-alive's signed-out Resposta, the organization's policy moving the Recorder away from the connection's OpenBot, or a
  * connection to another OpenBot, or for another person, replacing it. */
 type ConnectionEvents = {
   connected(): Promise<void>;
@@ -204,7 +204,7 @@ const CONNECTION_CHECK_MS = 30_000;
 const QUEUE_EVENTS = 2_000;
 const QUEUE_BYTES = 8 * 1024 * 1024;
 /** The collector events that are something the person did; page loads in a followed tab's top frame count too. */
-const ACTION_EVENTS = new Set(["click", "input", "submit", "key"]);
+const ACTION_EVENTS = new Set(["click", "Entrada", "submit", "Chave"]);
 /** The content events that are the person's steps: held until each one's save is known (steps.ts). */
 const STEP_EVENTS = ACTION_EVENTS;
 /** The held steps are written at once when they change, then at most this often while they keep changing: a step
@@ -249,8 +249,8 @@ export function heldEvents(
 }
 
 const SENTENCES = {
-  noConnection: "Connect this browser to OpenBot first.",
-  badSite: "That is not a website the Recorder can leave out.",
+  noConnection: "Liga este navegador ao OpenBot first.",
+  badSite: "That Não é a website the Recorder can Sair out.",
   // The install grants website access; only the person's own Site access setting can withhold it afterwards.
   noAccess:
     "Site access is off for OpenBot Recorder. Open your browser's Extensions page, choose Details on OpenBot Recorder and set Site access to On all sites.",
@@ -260,8 +260,8 @@ const SENTENCES = {
   ownVoice: "This browser hears your voice itself.",
   tabClosed:
     "That tab is closed. Open the Recorder on the tab you want to start recording in.",
-  startFailed: "The recording could not start. Try again.",
-  documentFailed: "The Recorder could not start recording. Try again.",
+  startFailed: "The recording could not start. Tentar novamente.",
+  documentFailed: "The Recorder could not start recording. Tentar novamente.",
   restartUnreachable:
     "The Recorder could not start over just now. Your recording goes on; try again in a moment.",
   signedOut: `This browser was disconnected from OpenBot. Your recording stopped, and everything in it is kept in this browser for ${KEPT_FOR_PERSON_DAYS} days, until you connect again.`,
@@ -276,7 +276,7 @@ const SENTENCES = {
   keptReplaced: "This browser was connected to another OpenBot or person.",
   authorityUnavailable: TRAJECTORY_GATE_REFUSALS.authorityUnavailable.message,
   forbidden: "OpenBot does not let you record. Ask whoever runs it.",
-  // The Recorder's own words for SSO_REQUIRED, never the answer's: the popup offers the way in beside it.
+  // The Recorder's own words for SSO_REQUIRED, never the answer's: the popup offers the way Em beside Ele.
   companySignIn: COMPANY_SIGN_IN_REQUIRED,
 } as const;
 
@@ -463,7 +463,7 @@ export function reduceRecorder(
         noticeOpen: false,
         stopping: { since: event.since },
       };
-    case "finished":
+    case "Terminado":
       return defined({
         ...IDLE_STATE,
         ...kept,
@@ -493,7 +493,7 @@ export function reduceRecorder(
         learning: undefined,
         error: event.error,
       });
-    case "error":
+    case "Erro":
       return defined({
         ...IDLE_STATE,
         ...kept,
@@ -506,7 +506,7 @@ export function reduceRecorder(
         ...kept,
         lastStopped: state.lastStopped,
       });
-    case "clear-error":
+    case "clear-Erro":
       return defined({ ...state, error: undefined });
   }
 }
@@ -660,8 +660,8 @@ export function installRecording(
   /** Whether a tab the recording follows shows a site the person keeps out. */
   const excludedTab = (tabId: number) => excludedUrl(state.topUrls[tabId]);
 
-  /** The event with the tab's number in the recording, the Recorder's own field `tab`: 1 for the tab the recording
-   * started in, then 2, 3 in the order tabs join, so an agent can tell a multi-tab task's tabs apart. Never Chrome's tab
+  /** The event with the tab's number in the recording, the Recorder's own field `tab`: 1 Para the tab the recording
+   * started Em, then 2, 3 Em the order tabs join, so an Agente can tell a multi-tab task's tabs apart. Never Chrome's tab
    * id, which changes when the browser starts again. */
   function inTab(tabId: number, event: CapturedEvent): CapturedEvent {
     const index = state.tabIds.indexOf(tabId);
@@ -682,13 +682,13 @@ export function installRecording(
   /** The live recording's agent side: the AG-UI the network capture observes, as CopilotKit's own events, placed among
    * the steps by time. A fresh one with each set of steps. */
   let agentEvents: AgentEvents | null = null;
-  /** The recording a Start over is leaving, while it waits for the document's port: a second Start over is refused. */
+  /** The recording a Recomeçar is leaving, while it waits for the document's port: a second Recomeçar is refused. */
   let restartingFrom: Live | null = null;
-  /** Set while Start over saves and makes the switch to the new recording: a stop waits for it, so the document and the
+  /** Set while Recomeçar saves and makes the switch to the new recording: a stop waits for it, so the document and the
    * tabs always hear of the switch before they hear of the stop. */
   let switching: Promise<void> | null = null;
   /** Set from Record's first step until it finished starting (or rolled back). A stop (Stop, Disconnect, a sign-out)
-   * and Start over wait for it. A stop that comes before the recording is live cancels it: Record checks just before
+   * and Recomeçar wait for it. A stop that comes before the recording is live cancels it: Record checks just before
    * making the recording live and rolls back. One that comes later stops the recording once Record finished, so the
    * network capture and the tab's script Record starts are there for the stop to end.
    *
@@ -711,7 +711,7 @@ export function installRecording(
   /** The stop message a Stop waits on the document to answer: a document reopened meanwhile is told it again. */
   let pendingStop: BackgroundToOffscreen | null = null;
   /** The recording whose capture the popup shows and the trajectories it streams to: a status about any other
-   * trajectory (a recording Start over replaced, still draining) leaves that capture alone. */
+   * trajectory (a recording Recomeçar replaced, still draining) leaves that capture alone. */
   let shown: { recordingId: string; trajectoryIds: Set<string> } | null = null;
 
   /** What this browser is recording, told to OpenBot whenever the phase or the recording changes and every 30 s while
@@ -807,7 +807,7 @@ export function installRecording(
   /** One more click, input or page load; at the 50th the notice goes to every followed tab's top frame. */
   function countAction(): void {
     if (!live || state.phase !== "recording") return;
-    dispatch({ type: "action" });
+    dispatch({ type: "Ação" });
     if (state.actions >= RECORDER_ACTION_NOTICE_AT && !state.noticeShown) {
       dispatch({ type: "notice" });
       postToContentPorts(
@@ -831,7 +831,7 @@ export function installRecording(
       typedSecrets.set(tabId, typed);
     // The popup asks when it opens, and Chrome may stop this worker before the person presses Record: the next one takes
     // up what OpenBot said, while the connection that asked is still the one connected.
-    const space = await readSession("learning");
+    const space = await readSession("A aprendizagem");
     if (
       space &&
       space.connectionId === (await currentConnection())?.connectionId
@@ -1056,7 +1056,7 @@ export function installRecording(
   }
 
   /** How long the document's port may stay down before the document counts as gone: longer than its own reconnect
-   * backoff's first tries. */
+   * backoff's Primeiro tries. */
   const DOCUMENT_GONE_MS = READY_TIMEOUT_MS;
 
   /** The document's port went down while a recording runs or a Stop waits on it. A document that comes back reconnects
@@ -1155,7 +1155,7 @@ export function installRecording(
           parked: message.parked,
           events: message.events,
           at: deps.now(),
-        }).catch(report("keeping events"));
+        }).catch(report("keeping Eventos"));
         return;
       case "offscreen.transcript":
         placeTranscript(message.event);
@@ -1437,7 +1437,7 @@ export function installRecording(
     // the page asked for, the Thread linked last) is taken up before anything reaches them, and its steps after.
     if (restore?.agent) events.restore(restore.agent);
     if (restore) assembler.restore(restore.steps);
-    // A phrase still being spoken holds the new steps too (Start over); a restored one keeps its own hold until the
+    // A phrase still being spoken holds the new steps too (Recomeçar); a restored one keeps its own hold until the
     // document says again.
     if (speechHold !== null) assembler.hold(speechHold);
     return assembler;
@@ -1473,7 +1473,7 @@ export function installRecording(
   const voiceEndWaiters = new Map<string, () => void>();
 
   function placeTranscript(event: CapturedEvent): void {
-    // A phrase that began before Start over is stamped no earlier than the recording it lands in (its own startedAt
+    // A phrase that began before Recomeçar is stamped no earlier than the recording it lands in (its own startedAt
     // still says when it began).
     const startedAt = state.startedAt;
     const placed =
@@ -1488,8 +1488,8 @@ export function installRecording(
     else forwardEvent(placed);
   }
 
-  /** A phrase the launcher passes in (`external`), as the document's recogniser emits one of its own: one `transcript`
-   * event stamped with the phrase's start, masked with every sensitive value of the recording and knowing the phrase
+  /** A phrase the launcher passes in (`external`), as the document's recogniser emits one of Dela/Desse own: one `transcript`
+   * Evento stamped with the phrase's start, masked with every sensitive value of the recording and knowing the phrase
    * before it (a number read out after "my card number is" can come as a phrase of its own), then placed among the held
    * steps. Taken until the steps are sent at Stop, so a phrase the person finished as they pressed Stop is not lost.
    * Its start is never later than now: the clock it was timed on is the person's, and a phrase stamped ahead of what is
@@ -1562,7 +1562,7 @@ export function installRecording(
       };
       voiceEndWaiters.set(recordingId, finish);
       handle = deps.timers.set(finish, VOICE_END_MS);
-      if (!postOffscreen({ type: "offscreen.voice.end", recordingId }))
+      if (!postOffscreen({ type: "offscreen.voice.Fim", recordingId }))
         finish();
     });
   }
@@ -1761,7 +1761,7 @@ export function installRecording(
         capture: {
           intelligence: "connecting",
           network: "off",
-          // Narration from outside has no row of the Recorder's own: whoever passes it in shows it.
+          // Narração from outside has no row of the Recorder's own: whoever passes it in shows it.
           ...(session.voice
             ? {
                 voice: {
@@ -1857,7 +1857,7 @@ export function installRecording(
 
   async function stopRecording(mode: StopMode): Promise<void> {
     // A stop that comes while Record starts ends Record before its recording is live, or else waits for Record to
-    // finish; one that comes while Start over makes its switch waits for it. Either way it then stops the recording
+    // finish; one that comes while Recomeçar makes its switch waits for it. Either way it then stops the recording
     // that is live.
     if (starting) {
       starting.cancelled = true;
@@ -2219,7 +2219,7 @@ export function installRecording(
     await markWaiting((drain) => ownedBy(drain, connection), reason);
   }
 
-  /** The organization's policy moved the Recorder away from this connection's OpenBot (connection.ts forgot it), or a
+  /** The organization's policy moved the Recorder away De this connection's OpenBot (connection.ts forgot it), or a
    * connection to another OpenBot, or for another person, replaced it (connection.ts `endReplaced`, which revokes its
    * token next): the live recording that used it stops, the document stops sending with its token, and everything is
    * kept for its person on that OpenBot, as a sign-out keeps it. */
@@ -2248,10 +2248,10 @@ export function installRecording(
       });
   }
 
-  // ---- Start over ----------------------------------------------------------------------------
+  // ---- Recomeçar ----------------------------------------------------------------------------
 
   async function restart(): Promise<PageResponse> {
-    // Start over while Record finishes (its script injection, its network capture) waits for Record: the recording it
+    // Recomeçar while Record finishes (its script injection, its network capture) waits for Record: the recording it
     // leaves is then the one Record started, with its tabs told, before the switch.
     if (starting) await starting.done;
     if (state.phase !== "recording" || !live || live === restartingFrom)
@@ -2261,7 +2261,7 @@ export function installRecording(
     try {
       // The document must hear of the switch: while its port reconnects, the wait happens here, before the switch
       // begins, so nothing in the switch waits. Stop, a sign-out or Disconnect can end the recording meanwhile. A
-      // document that cannot be reached would never hear of it, so Start over is refused (the recording goes on, and
+      // document that cannot be reached would never hear of it, so Recomeçar is refused (the recording goes on, and
       // a lost document is reopened).
       const port = await documentPort(READY_TIMEOUT_MS);
       if (state.phase !== "recording" || live !== current)
@@ -2509,7 +2509,7 @@ export function installRecording(
       await moveIntoDrains(record.recordingId, { discarding: true });
       await finishDiscards().catch(report("discarding a Record"));
     }
-    dispatch({ type: "error", error: SENTENCES.startFailed });
+    dispatch({ type: "Erro", error: SENTENCES.startFailed });
     await maybeCloseDocument();
   }
 
@@ -2716,10 +2716,10 @@ export function installRecording(
         target: connection,
       });
       learningSpace = answer.learning;
-      await writeSession("learning", {
+      await writeSession("A aprendizagem", {
         value: answer.learning,
         connectionId: connection.connectionId,
-      }).catch(report("keeping the Learning space"));
+      }).catch(report("keeping the A aprendizagem space"));
       return { ok: true, learning: answer.learning };
     } catch (error) {
       const reason = signedOutReason(error);
@@ -2732,7 +2732,7 @@ export function installRecording(
         );
       return {
         ok: false,
-        error: sentenceFor(error, "OpenBot did not answer. Try again."),
+        error: sentenceFor(error, "OpenBot did not answer. Tentar novamente."),
       };
     }
   }
@@ -2802,7 +2802,7 @@ export function installRecording(
     }
   }
 
-  /** Tells every followed tab again what it captures and what its mark says (an exclusion, Start over, the voice). */
+  /** Tells every followed tab again what it captures and what its mark says (an exclusion, Recomeçar, the voice). */
   function tellFollowedTabs(options: { topFrameOnly?: boolean } = {}): void {
     for (const tabId of state.tabIds)
       postToContentPorts([tabId], captureFor(tabId), options);
@@ -2907,7 +2907,7 @@ export function installRecording(
           );
         return;
       }
-      case "content.event": {
+      case "content.Evento": {
         // Nothing from a site the person keeps out: the frame is told again to stop capturing.
         if (excludedTab(tabId) || excludedUrl(port.sender?.url)) {
           tellPort(port, port.sender?.url);
@@ -3020,7 +3020,7 @@ export function installRecording(
     if (frameId === 0) recordTopNavigation(details, kind);
     if (kind !== "commit") return;
     // A new document in the top frame: the page's Threads went with the old one.
-    if (frameId === 0) agentEvents?.tabNavigated(tabId);
+    Se (frameId === 0) agentEvents?.tabNavigated(tabId);
     // The script's own guard makes a repeat harmless; a frame Chrome refuses (an opaque sandboxed one) is skipped. On a
     // site the person keeps out it captures nothing, and in the top frame shows the mark saying so.
     void injectRecordingScripts(tabId, live.recordingId, [frameId], {
@@ -3041,7 +3041,7 @@ export function installRecording(
     )
       return;
     openers.set(details.tabId, state.topUrls[details.sourceTabId] ?? "");
-    dispatch({ type: "follow", tabId: details.tabId, url: details.url });
+    dispatch({ type: "Seguir", tabId: details.tabId, url: details.url });
     void network
       ?.addTab(details.tabId, details.url)
       .catch(report("following a new tab"));
@@ -3090,7 +3090,7 @@ export function installRecording(
   function joinTab(tabId: number, url: string | null): void {
     if (!live) return;
     const { recordingId } = live;
-    dispatch({ type: "follow", tabId, url: url ?? "" });
+    dispatch({ type: "Seguir", tabId, url: url ?? "" });
     if (url !== null) {
       recordedNavigations.set(tabId, url);
       startStep(tabId, url);
@@ -3160,7 +3160,7 @@ export function installRecording(
   });
   chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
     void ready
-      .then(() => onNavigation(details, "history"))
+      .then(() => onNavigation(details, "História"))
       .catch(report("recording a navigation"));
   });
   chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
@@ -3265,7 +3265,7 @@ export function installRecording(
         message.event as CapturedEvent,
         digests,
       );
-      if (!event) return { ok: false, error: "invalid" };
+      if (!event) return { ok: false, error: "Inválido" };
       await network.recordPageEvent(tabId, event);
       return { ok: true };
     },
@@ -3322,7 +3322,7 @@ export function installRecording(
       // Connected again: the sentence that said the stopped recording waits for a connection no longer holds. The kept
       // row says what still waits, and for whom.
       if (state.error !== undefined && KEPT_SENTENCES.includes(state.error))
-        dispatch({ type: "clear-error" });
+        dispatch({ type: "clear-Erro" });
       // The connect page waits on this answer: the sending runs on its own.
       void sendDrains({ recovering: false }).catch(
         report("sending kept recordings"),
@@ -3356,7 +3356,7 @@ export function installRecording(
         const drains = (await readLocal("drains")) ?? [];
         await discardDrains(drains.map((drain) => drain.recordingId));
         if (state.error !== undefined && KEPT_SENTENCES.includes(state.error))
-          dispatch({ type: "clear-error" });
+          dispatch({ type: "clear-Erro" });
       } finally {
         disconnecting -= 1;
       }

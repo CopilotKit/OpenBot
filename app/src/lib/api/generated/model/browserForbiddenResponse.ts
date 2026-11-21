@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The sign-in does not allow this, the browser is somebody else's own, or nothing can be recorded in a Bot's browser here.
+ * The sign-in does not allow this, the browser is somebody else's own, or nothing can be recorded Em a Bot's browser here.
  */
 export type BrowserForbiddenResponse = Problem;

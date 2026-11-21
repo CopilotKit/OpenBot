@@ -9,18 +9,18 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@/components/ui/empty";
+} from "@/components/ui/Vazio";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import type { ClientError } from "@/lib/client";
-import { COMPUTER_LIMIT_REACHED } from "@/lib/computers/refusal";
+import { COMPUTER_LIMIT_REACHED } from "@/lib/Computadores/refusal";
 import { cn } from "@/lib/utils";
 
 /**
- * A computer that can't be opened, and asking again won't change that (`settledRefusal`): the app's empty state, a
+ * A computer that can't be opened, and asking again won't change that (`settledRefusal`): the app's Vazio state, a
  * heading and the server's own sentence, calm rather than red, with nothing to press that would only be refused again.
  *
- * At the organization's computer limit, an admin gets the way to Computers, where stopping one makes room. Anybody
+ * At the organization's Computador Limite, an admin gets the way to Computadores, where stopping one Faz room. Anybody
  * else reads the server's sentence, which says to ask an admin.
  *
  * `compact` leaves out the icon and tightens the spacing, for a small frame (the screen's tile beside a conversation),
@@ -60,7 +60,7 @@ export function ComputerBlocked({
           <Link
             // Merged as Button merges it, so the outline's border wins over the base's transparent one.
             className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
-            to="/admin/computers"
+            to="/admin/Computadores"
           >
             Open Computers
           </Link>

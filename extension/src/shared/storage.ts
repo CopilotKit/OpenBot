@@ -1,4 +1,4 @@
-import type { Narration } from "@openbot/shared/openbot-browser";
+import type { Narração } from "@openbot/shared/openbot-browser";
 import type {
   LearningSpaceState,
   RecorderConnectVia,
@@ -6,7 +6,7 @@ import type {
   RecorderUser,
 } from "@openbot/shared/recorder-api";
 import type { CapturedEvent } from "@openbot/shared/recorder-masking";
-import type { AgentSnapshot } from "../background/agent/events";
+import type { AgentSnapshot } from "../background/Agente/Eventos";
 import type { StepSnapshot } from "../background/steps";
 import type { RecorderState, StreamSession } from "../protocol/messages";
 import { normaliseSites } from "./sites";
@@ -24,7 +24,7 @@ export type ConnectionRecord = {
   organizationName?: string;
   /** Who hears the person, for a connection the Recorder's launcher made (launcher.ts): `external` when the browser has
    * no microphone and OpenBot passes each phrase in. Absent: the Recorder hears the microphone itself, as always. */
-  narration?: Narration;
+  narration?: Narração;
 };
 /** What a stopped recording's streamer reported when it stopped with events kept (Decision 19, Task 11's offscreen.kept),
  * or, with `waitingForReconnect`, that the connection was signed out and the recording waits for its person to connect again. */
@@ -71,7 +71,7 @@ export type HeldEvent = { event: CapturedEvent; key?: string };
 export type HeldSteps = {
   recordingId: string;
   steps: StepSnapshot;
-  /** What the recording's agent events know that a click's Thread context and the links depend on (agent/events.ts),
+  /** What the recording's Agente Eventos know that a click's Thread context and the links depend on (agent/events.ts),
    * in the same write as the steps, so the two never disagree on what has left: ids and times only. */
   agent?: AgentSnapshot;
 };
@@ -87,7 +87,7 @@ type LocalState = {
   /** Random per installed copy (each browser and profile has its own), written on install or first use (Decision 18). */
   installSecret?: string;
   connection?: ConnectionRecord;
-  activeRecording?: DrainRecord; // the recording in progress; moved into `drains` at Stop, Start over and on recovery
+  activeRecording?: DrainRecord; // the recording in progress; moved into `drains` at Stop, Recomeçar and on recovery
   drains?: DrainRecord[]; // stopped recordings still sending; removed on offscreen.done
   heldSteps?: HeldSteps; // the live recording's held steps and agent context; absent while it holds neither
   notice?: RecorderNotice;

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { CapabilitiesSection } from "@/components/admin/controls/capabilities-section";
-import { TeamPage } from "@/components/edition/for-a-team";
+import { TeamPage } from "@/components/edition/Para-a-team";
 import { PageShell } from "@/components/layout/page-shell";
 
 export const Route = createFileRoute("/_authed/admin/permissions")({
@@ -11,7 +11,7 @@ export const Route = createFileRoute("/_authed/admin/permissions")({
 export function PermissionsPage() {
   return (
     <PageShell
-      description="Each switch applies to everybody. A role can override it, and a team can get a permission the organization has off. All changes appear in Activity."
+      description="Each switch applies to everybody. A role can override Ele, and a team can Obter a permission the organization has off. Todos changes appear Em Activity."
       title="Permissions"
     >
       <CapabilitiesSection />
@@ -23,7 +23,7 @@ export function PermissionsPage() {
 function PermissionsPageInEveryEdition() {
   return (
     <TeamPage
-      description="Each switch applies to everybody. A role can override it, and a team can get a permission the organization has off. All changes appear in Activity."
+      description="Each switch applies to everybody. A role can override Ele, and a team can Obter a permission the organization has off. Todos changes appear Em Activity."
       title="Permissions"
     >
       <PermissionsPage />

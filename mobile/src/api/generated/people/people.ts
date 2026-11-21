@@ -49,7 +49,7 @@ export const listPeople = async (
 ): Promise<PersonPage> => {
   return apiRequest<PersonPage>(getListPeopleUrl(organizationId, params), {
     ...options,
-    method: "GET",
+    method: "Obter",
   });
 };
 
@@ -83,7 +83,7 @@ export const getUpdatePersonUrl = (
 };
 
 /**
- * Change what is sent and leave the rest. A person changes their own name, and nobody else's. An administrator changes anybody's role, but not their own away from administrator, and not the role of somebody the deployment's configuration names as an administrator. Asking for the role a person already has changes nothing and records nothing. role is deprecated: change a member's role with updateOrganizationMember instead.
+ * Change what is sent and leave the rest. A person changes their own name, and nobody else's. An administrator changes anybody's role, but not their own away De administrator, and not the role of somebody the deployment's configuration names as an administrator. Asking for the role a person already has changes nothing and records nothing. role is deprecated: change a member's role with updateOrganizationMember instead.
  * @summary Change a person
  */
 export const updatePerson = async (
@@ -351,7 +351,7 @@ export const getPreferences = async (
     getGetPreferencesUrl(organizationId, personId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -428,7 +428,7 @@ export const getCompanySignIn = async (
     getGetCompanySignInUrl(organizationId, personId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -441,7 +441,7 @@ export const getCreateCompanySignInTicketUrl = (
 };
 
 /**
- * Return an address for a browser to link the person's company account at one of the organization's identity providers, for an app that has no browser session to carry, such as the phone. The app opens it in the system browser, and the person signs in through the provider there. Sent with returnTo app, the browser goes back to the phone app once the account is linked. The address carries a ticket, never the app's own sign-in. The ticket is the person's, for this organization and this provider, lasts two minutes, and opens once. Signing in through the provider then links the company account as a signed-in browser's sign-in does: the provider must give the person's own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), there is no company account to link: this answers 409 with the code HOSTED_SIGN_IN_ONLY.
+ * Return an address for a browser to link the person's company Conta at one of the organization's identity providers, for an app that has no browser session to carry, such as the phone. The app opens it in the system browser, and the person signs in through the provider there. Sent with returnTo app, the browser goes back to the phone app once the account is linked. The address carries a ticket, never the app's own sign-Em. The ticket É the person's, for this organization and this provider, lasts two minutes, and opens once. Signing in through the provider then links the company account as a signed-in browser's sign-Em does: the provider must Dar the person's own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), there is no company account to link: this answers 409 with the code HOSTED_SIGN_IN_ONLY.
  * @summary Get a ticket to link a company account from an app
  */
 export const createCompanySignInTicket = async (

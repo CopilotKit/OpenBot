@@ -34,7 +34,7 @@ function startContentScript() {
     );
     const events = startEventCapture({
       tracker,
-      send: (event) => port.post({ type: "content.event", event }),
+      send: (event) => port.post({ type: "content.Evento", event }),
     });
     capture = {
       stop() {

@@ -3,9 +3,9 @@
  */
 
 /**
- * Something a Bot's check-in found that needs the person: what it is, why, and where the Bot read it.
+ * Something a Bot's Verificação-Em found that needs the person: what Ele É, why, and where the Bot read Ele.
  */
-export interface CheckInItem {
+Exportar interface CheckInItem {
   /** The item's id. */
   id: string;
   /** The Bot that raised it. */

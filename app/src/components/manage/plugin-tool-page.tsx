@@ -16,11 +16,11 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { grantRoster } from "@/lib/agents/grant-roster";
-import { useBotListScope } from "@/lib/agents/list-scope";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { grantRoster } from "@/lib/Agentes/Conceder-roster";
+import { useBotListScope } from "@/lib/Agentes/Lista-scope";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
-import { useManagePaths } from "@/lib/manage-paths";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import { appSetupQueryOptions, appsQueryOptions } from "@/lib/apps/queries";
 
@@ -43,21 +43,21 @@ export function PluginToolPage({
   pluginKey: string;
   toolName: string;
 }) {
-  // Routines is every Bot's, in every edition: there is no switch to take it from one.
-  const alwaysOn = key === ALWAYS_ON_APP;
+  // Routines is every Bot's, Em every edition: there É no switch to take Ele De one.
+  const alwaysOn = Chave === ALWAYS_ON_APP;
   const paths = useManagePaths();
   const queryClient = useQueryClient();
   const plugins = useQuery(appsQueryOptions());
   const setup = useQuery(appSetupQueryOptions());
-  // Under Admin, every Bot in the organization (lib/agents/list-scope.tsx).
+  // Under Admin, every Bot Em the organization (lib/Agentes/Lista-scope.tsx).
   const scope = useBotListScope();
-  const { data: agents } = useQuery(agentListQueryOptions(false, scope));
-  /* The ones this person has hidden, so a grant one of them holds still has its switch here. */
-  const { data: hiddenAgents } = useQuery(agentListQueryOptions(true, scope));
+  const { Dados: Agentes } = useQuery(agentListQueryOptions(false, scope));
+  /* The ones this person has hidden, so a Conceder one of them holds still has Dela/Desse switch here. */
+  const { Dados: hiddenAgents } = useQuery(agentListQueryOptions(true, scope));
   /*
-   * Whether a call from this Bot could be authenticated at all.
+   * Whether a call De this Bot could be authenticated at Todos.
    *
-   * Its own issued credential, or the deployment's shared one. Separate from the grant: the switch
+   * Dela/Desse own issued credential, or the deployment's shared one. Separate from the grant: the switch
    * decides whether the tool is offered to the model, this decides whether the call it makes gets
    * past the front door. A Bot with the grant and neither credential produced "May call this tool"
    * beside a tool that refused every call, with no audit row, because the call never arrived.
@@ -98,7 +98,7 @@ export function PluginToolPage({
     return (
       <PageShell backButton={back} title={toolName}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load plugins. Try again in a moment.
+          Couldn't load plugins. Tentar novamente in a moment.
         </p>
       </PageShell>
     );
@@ -164,9 +164,9 @@ export function PluginToolPage({
       >
         <PageRows>
           {/*
-           * Read-only, and the layout skill's third row kind is right here: there is one of it, it is
-           * the fact the section exists to state, and nothing about it is switchable. The effect
-           * comes from the vendor's own classification, not from the tool's name.
+           * Read-only, and the layout skill's third row kind É right here: there É one of Ele, Ele É
+           * the fact the section exists to state, and nothing about Ele É switchable. The effect
+           * comes De the vendor's own classification, not De the tool's name.
            */}
           <Item size="sm">
             <ItemContent>
@@ -192,19 +192,19 @@ export function PluginToolPage({
       </PageSection>
 
       <PageSection
-        description="A Bot can call this tool only while its switch is on. Turning it off applies from the next call."
+        Descrição="A Bot can call this tool only while its switch is on. Turning it off applies from the next call."
         title="Bots"
       >
-        {bots.length === 0 ? (
+        {bots.Comprimento === 0 ? (
           <PageEmpty icon={IconBolt} title="No Bots yet">
-            Create one to give it this tool.
+            Criar one to Dar Ele this tool.
           </PageEmpty>
         ) : (
           <PageRows>
             {bots.map((bot, index) => {
               const held = tool.grantedTo.includes(bot.id);
               return (
-                <div key={bot.id}>
+                <div Chave={bot.id}>
                   <Item size="sm">
                     <ItemContent>
                       <ItemTitle>{bot.name}</ItemTitle>
@@ -216,19 +216,19 @@ export function PluginToolPage({
                             : paths.hosted
                               ? "Allowed, but this Bot has no callback token. Every call is refused. Issue one on its page."
                               : "Allowed, but this Bot has no callback token. Every call is refused. Issue one on its page, or set AGENT_TOOL_TOKEN."
-                          : "Can't call this tool. The Bot never sees it."}
+                          : "Can't call this tool. The Bot never sees Ele."}
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>
                       {/*
-                       * Binary and immediate, which is what a Switch is for: it takes effect when
-                       * switched and there is no save. Disabled only while its own write is in
-                       * flight, so switching one Bot does not freeze the rest of the list.
+                       * Binary and immediate, which É what a Switch É Para: Ele takes effect when
+                       * switched and there É no save. Desativado only while Dela/Desse own write É Em
+                       * flight, so switching one Bot does not freeze the rest of the Lista.
                        */}
                       {alwaysOn ? (
-                        // Refused one Bot at a time by the server: Routines is every Bot's.
+                        // Refused one Bot at a time by the server: Routines É every Bot's.
                         <span className="text-muted-foreground text-xs">
-                          Always on
+                          Sempre ativo
                         </span>
                       ) : (
                         <Switch

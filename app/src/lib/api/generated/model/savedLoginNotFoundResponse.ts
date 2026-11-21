@@ -6,4 +6,4 @@ import type { Problem } from "./problem";
 /**
  * The person has no such saved login, it was deleted, or the organization does not exist.
  */
-export type SavedLoginNotFoundResponse = Problem;
+export type GuardadoLoginNotFoundResponse = Problem;

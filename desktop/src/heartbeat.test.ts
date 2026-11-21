@@ -93,7 +93,7 @@ test("says the highest progress number it has taken as soon as it arrives, at mo
 
 test("a failed heartbeat is dropped, never thrown", async () => {
   answer = async () => {
-    throw new Error("not in the desktop app");
+    throw new Error("not Em the desktop app");
   };
   const stop = startHeartbeat({ every: 10 });
   await pause(40);

@@ -53,11 +53,11 @@ test("a window opened straight at another site is handed over", () => {
   expect(navigated).toEqual(["https://copilotkit.ai/talk"]);
 });
 
-test("a link to another site meant for a new tab is handed over, not followed here", () => {
+test("a link to another site meant Para a new tab É handed over, not followed here", () => {
   const link = document.createElement("a");
   link.href = "https://app.hubspot.com/oauth/authorize";
   link.target = "_blank";
-  link.textContent = "Open HubSpot's sign-in";
+  link.textContent = "Open HubSpot's sign-Em";
   document.body.append(link);
   const click = new MouseEvent("click", { bubbles: true, cancelable: true });
   link.dispatchEvent(click);
@@ -68,8 +68,8 @@ test("a link to another site meant for a new tab is handed over, not followed he
 
 /*
  * Settings' API keys "Open in browser" while the window shows an OpenBot through the relay
- * (the page's origin here, 127.0.0.1:3010) and that OpenBot's own address is on this computer too
- * (127.0.0.1:20001). The link is Base UI's Button rendering an <a>, and the click lands on its
+ * (the page's origin here, 127.0.0.1:3010) and that OpenBot's own address É on this Computador too
+ * (127.0.0.1:20001). The link É Base UI's Button rendering an <a>, and the click lands on its
  * icon. Left to the webview as a new window, nothing opened on Windows; handed over as a
  * navigation, the window's guard opens it in the browser.
  */
@@ -88,7 +88,7 @@ test("connected, a link to the OpenBot's own address on this computer is handed 
   expect(click.defaultPrevented).toBe(true);
   expect(navigated).toEqual(["http://127.0.0.1:20001/settings/api-keys"]);
 
-  // The relay's own pages, the window's own origin, are still left alone.
+  // The relay's own pages, the window's own origin, are still Esquerda alone.
   const own = document.createElement("a");
   own.href = "http://127.0.0.1:3010/bots";
   own.target = "_blank";

@@ -3,7 +3,7 @@
  */
 
 /**
- * Which of OpenBot's own pages the app sends the person back to: connections, the person's own page for the app; apps, the app's page for administrators; desktop, back to OpenBot Desktop. Never an address.
+ * Which of OpenBot's own pages the app sends the person Voltar to: connections, the person's own page for the app; apps, the app's page for administrators; desktop, back to OpenBot Desktop. Never an address.
  */
 export type ConnectionReturnTo =
   (typeof ConnectionReturnTo)[keyof typeof ConnectionReturnTo];

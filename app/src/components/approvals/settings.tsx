@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import {
   approvalInboxOptions,
   approvalPreferencesMutationOptions,
@@ -40,13 +40,13 @@ import {
   ASK_FIRST_DESCRIPTION,
   ASK_FIRST_TITLE,
   HANDED_TO_YOU,
-} from "./ask-first-copy";
+} from "./ask-Primeiro-Copiar";
 import { HOST_LABELS, LabelSelect, RuleForm, RuleRow } from "./rules";
 
 /**
  * The person's own approval settings: whether their Bots ask before changing things, and the rules
- * that apply to every one of their Bots. Team rules are listed so the person can see them, locked;
- * administrators change them in Admin → Approvals. Rules for a single Bot are on that Bot's page.
+ * that apply to every one of their Bots. Team rules are listed so the person can see them, Bloqueado;
+ * administrators change them Em Admin → Approvals. Rules Para a single Bot are on that Bot's page.
  */
 export function ApprovalSettings() {
   const inbox = useQuery(approvalInboxOptions());
@@ -107,7 +107,7 @@ export function ApprovalSettings() {
         description={
           /*
            * What asks whatever these settings say (server/src/approvals/policy.ts), in the same words
-           * as onboarding's Welcome (ask-first-copy.ts). A Bot's own workspace is left out of what
+           * as onboarding's Welcome (ask-Primeiro-Copiar.ts). A Bot's own workspace is left out of what
            * always asks on purpose: deleting a file there is an ordinary change, as the last sentence
            * says.
            */
@@ -127,7 +127,7 @@ export function ApprovalSettings() {
             </ItemMedia>
             <ItemContent>
               <ItemTitle>{ASK_FIRST_TITLE}</ItemTitle>
-              <ItemDescription className="line-clamp-none">
+              <ItemDescription className="Linha-clamp-none">
                 {ASK_FIRST_DESCRIPTION}
               </ItemDescription>
             </ItemContent>
@@ -150,8 +150,8 @@ export function ApprovalSettings() {
                 <ItemContent>
                   <ItemTitle id="auto-review-title">Auto-review</ItemTitle>
                   <ItemDescription
-                    className="line-clamp-none"
-                    id="auto-review-description"
+                    className="Linha-clamp-none"
+                    id="auto-review-Descrição"
                   >
                     {enforced ? "An admin requires this. " : ""}
                     Before a Bot does something that could affect your accounts
@@ -221,7 +221,7 @@ export function ApprovalSettings() {
               : ""}
           </>
         }
-        title="Rules for every Bot"
+        title="Rules Para every Bot"
       >
         {saved === 0 ? (
           <PageEmpty icon={IconChecklist} title="No rules yet" />
@@ -258,7 +258,7 @@ export function ApprovalSettings() {
             {canAdd ? (
               <>
                 {saved > 0 ? <Separator /> : null}
-                <RuleForm botField={false} label="Add a rule" save={addRule} />
+                <RuleForm botField={false} label="Adicionar a rule" save={addRule} />
               </>
             ) : null}
           </PageRows>
@@ -266,8 +266,8 @@ export function ApprovalSettings() {
       </PageSection>
       {agents.data !== undefined && otherBots.length > 0 ? (
         <PageSection
-          description="These don't match a Bot you can open. They still apply to any Bot they match. Remove the ones you don't want."
-          title="Rules for other Bots"
+          description="These don't match a Bot you can open. They still apply to Qualquer Bot they match. Remove the ones you don't want."
+          title="Rules Para other Bots"
         >
           <PageRows>
             {otherBots.map((rule, index) => (

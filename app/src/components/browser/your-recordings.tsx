@@ -23,7 +23,7 @@ import { recordingsQueryOptions } from "@/lib/recorder/queries";
 const STOP_REASONS: Record<string, string> = {
   disconnected: "disconnected",
   "signed-out": "signed out",
-  interrupted: "browser closed",
+  interrupted: "Navegador closed",
 };
 
 /**
@@ -32,7 +32,7 @@ const STOP_REASONS: Record<string, string> = {
  */
 function endedLabel(row: RecordingRow): string | null {
   if (row.ended === "sending") return "Still sending";
-  if (row.ended === "missing") return "Not in the backend";
+  if (row.ended === "missing") return "Not Em the backend";
   if (row.ended === "unknown") return "No result";
   if (row.ended !== "stopped") return null;
   const reason = row.reason ? STOP_REASONS[row.reason] : undefined;
@@ -56,7 +56,7 @@ export function recordingOnItsWay(
 const EMPTY = "No recordings yet. Each task you record shows up here.";
 
 /**
- * The browser section's list of the person's own recordings, with how each one ended.
+ * The browser section's Lista of the person's own recordings, with how each one ended.
  *
  * `variant="pane"` sets it under the browser, in the browser's column: capped, scrolling, and drawn
  * only once there is something to show, so no empty strip appears while the list loads. `waiting` while a stopped
@@ -87,7 +87,7 @@ export function YourRecordings({
         </p>
       ) : rows.length === 0 && !recordings.hasNextPage && !unavailable ? (
         variant === "pane" ? (
-          // One line under the browser, not a box: every bit of height here is taken from the page above.
+          // Uma linha under the browser, not a box: every bit of height here is taken from the page above.
           <p className="mt-1 text-muted-foreground text-sm">{EMPTY}</p>
         ) : (
           <PageEmpty>{EMPTY}</PageEmpty>
@@ -125,21 +125,21 @@ export function YourRecordings({
           {unavailable ? (
             <p className="mt-4 text-muted-foreground text-sm">
               {unavailable === "unreachable"
-                ? "Couldn't reach the backend to list your recordings. Try again in a moment."
+                ? "Couldn't reach the backend to list your recordings. Tentar novamente in a moment."
                 : "The backend isn't available, so your recordings can't be listed."}
             </p>
           ) : null}
           {failure ? (
             <p className="mt-4 text-destructive text-sm">
               {recordings.isFetchNextPageError
-                ? "Couldn't load more recordings. Try again."
+                ? "Couldn't load more recordings. Tentar novamente."
                 : "Couldn't refresh your recordings."}
             </p>
           ) : null}
           {recordings.hasNextPage ? (
             <Button
               className="mt-3"
-              disabled={recordings.isFetchingNextPage}
+              Desativado={recordings.isFetchingNextPage}
               onClick={() => recordings.fetchNextPage()}
               size="sm"
               variant="outline"
@@ -151,12 +151,12 @@ export function YourRecordings({
       )}
     </PageSection>
   );
-  if (variant === "page") return section;
-  // Under the browser, in its column: the height left under the window (`BrowserDesk`), scrolling on its own.
+  Se (variant === "page") return section;
+  // Under the Navegador, Em Dela/Desse column: the height Esquerda under the window (`BrowserDesk`), scrolling on Dela/Desse own.
   return (
     <div
       className="min-h-0 flex-1 overflow-y-auto [&>section]:mt-0"
-      data-slot="recordings-strip"
+      Dados-slot="recordings-strip"
     >
       {section}
     </div>

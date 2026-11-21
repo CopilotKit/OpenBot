@@ -2,14 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import { Navigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { MemoryList, RememberFact } from "@/components/memory/memories";
-import { RoutinesList } from "@/components/routines/routines-list";
+import { RoutinesList } from "@/components/routines/routines-Lista";
 import {
   deploymentCapabilitiesQueryOptions,
   offersMemory,
 } from "@/lib/deployment/queries";
 
 /**
- * OpenDots' workspace page: a small eyebrow, a large quiet title and one line under it, with the
+ * OpenDots' workspace page: a small eyebrow, a large quiet title and one Linha under Ele, with the
  * page's primary action on the title's right. What sits beneath is OpenBot's own list, so every
  * switch, Run now, history and delete OpenBot offers is still there.
  */
@@ -28,7 +28,7 @@ function OpenDotsPage({
 }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto" data-opendots-page>
-      <div className="mx-auto w-full max-w-[1090px] px-[54px] pt-16 pb-9 max-[1150px]:px-8 max-[1150px]:pt-[45px] max-md:px-[22px] max-md:pt-[38px]">
+      <div className="mx-auto w-Completo max-w-[1090px] px-[54px] pt-16 pb-9 max-[1150px]:px-8 max-[1150px]:pt-[45px] max-md:px-[22px] max-md:pt-[38px]">
         <header className="mb-[35px] flex items-center justify-between gap-[25px] max-[920px]:items-start max-md:flex-col max-md:items-stretch">
           <div className="min-w-0">
             <span className="text-[10px] font-semibold tracking-[1.5px] text-(--opendots-eyebrow)">
@@ -62,7 +62,7 @@ export function RoutinesScreen() {
 }
 
 /**
- * "Memories": what the person's Bots know about them, as OpenBot's memory. Home where memory isn't
+ * "Memories": what the person's Bots know about them, as OpenBot's memory. Início where memory isn't
  * offered, as the screen route does for a screen this skin doesn't have (see `offersMemory`).
  */
 export function MemoriesScreen() {

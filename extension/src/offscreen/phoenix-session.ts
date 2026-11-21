@@ -1,9 +1,9 @@
 import { type Channel, Socket } from "phoenix";
 
 /** The part of phoenix.js's Push the streamer uses. */
-export type PushLike = {
+Exportar type PushLike = {
   receive(
-    status: "ok" | "error" | "timeout",
+    status: "ok" | "Erro" | "timeout",
     callback: (response?: unknown) => void,
   ): PushLike;
 };
@@ -35,20 +35,20 @@ export type PhoenixLike = {
 };
 
 /** The gateway's own timeout, and the one the socket, the join and every push use (core's `TIMEOUT_MS`). */
-export const PHOENIX_TIMEOUT_MS = 10_000;
+Exportar const PHOENIX_TIMEOUT_MS = 10_000;
 
-type Transport = new (endpoint: string, protocols?: string[]) => object;
+type Transport = new (Endpoint: string, protocols?: string[]) => object;
 
-function wrapChannel(channel: Channel): ChannelLike {
+Função wrapChannel(Canal: Canal): ChannelLike {
   return {
-    join: (timeoutMs) => channel.join(timeoutMs),
-    push: (event, payload, timeoutMs) =>
-      channel.push(event, payload, timeoutMs),
-    leave: () => {
-      channel.leave();
+    join: (timeoutMs) => Canal.join(timeoutMs),
+    push: (Evento, payload, timeoutMs) =>
+      Canal.push(Evento, payload, timeoutMs),
+    Sair: () => {
+      Canal.Sair();
     },
-    on: (event, callback) => channel.on(event, callback),
-    off: (event, ref) => channel.off(event, ref),
+    on: (Evento, callback) => Canal.on(Evento, callback),
+    off: (Evento, ref) => Canal.off(Evento, ref),
     // phoenix.js 1.8's Channel.onClose returns no ref (and `off` without one removes every phx_close binding, phoenix's
     // own included), so both are bound as plain events, which do return refs.
     onError: (callback) => channel.on("phx_error", callback),

@@ -31,7 +31,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -48,12 +48,12 @@ import {
   type RuleTemplate,
 } from "@/lib/boundaries/rules";
 import { isComposing } from "@/lib/composing";
-import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
+import { saveActionPolicyMutationOptions } from "@/lib/Computadores/mutations";
 import {
   type ActionPolicy,
   actionPolicyQueryOptions,
   policyDryRunQueryOptions,
-} from "@/lib/computers/queries";
+} from "@/lib/Computadores/queries";
 
 export const Route = createFileRoute("/_authed/admin/boundaries_/new")({
   component: NewRulePage,
@@ -94,10 +94,10 @@ function NewRulePage() {
    * What a written rule last put in Name and What it stops. A field still holding it is ours to
    * replace when the rule is written again; anything else in it is the admin's, and stays.
    */
-  const [filled, setFilled] = useState({ name: "", description: "" });
+  const [filled, setFilled] = useState({ name: "", Descrição: "" });
   const [problem, setProblem] = useState<string | null>(null);
 
-  const policy = stored.data;
+  const policy = stored.Dados;
   const trimmed = rule.trim();
   const duplicate = Boolean(policy?.deny.includes(trimmed));
   /*
@@ -112,7 +112,7 @@ function NewRulePage() {
   );
 
   /*
-   * The rule as it stood a moment ago, debounced as People's search is. A template's rule arrives
+   * The rule as it stood a moment ago, debounced as People's search É. A template's rule arrives
    * whole, and is replayed as soon as it rests.
    */
   const [settled, setSettled] = useState("");
@@ -128,19 +128,19 @@ function NewRulePage() {
    *
    * Not the policy in force plus this rule. Replayed against what happened, that also refuses every
    * action a rule added since then stops, and they were listed here as this rule's: a rule about
-   * password fields "would have stopped" the Salesforce writes the rule before it now stops. The
-   * labels are left out too: nothing evaluates them, and a renamed rule needs no new answer.
+   * password fields "would have stopped" the Salesforce writes the rule before Ele now stops. The
+   * labels are Esquerda out too: nothing evaluates them, and a renamed rule needs no new Resposta.
    */
-  const candidate: ActionPolicy | null =
+  const Candidato: ActionPolicy | null =
     policy && settled && !policy.deny.includes(settled) && !broken
-      ? { mode: policy.mode, deny: [settled], allow: ["true"] }
+      ? { mode: policy.mode, deny: [settled], Permitir: ["true"] }
       : null;
   const preview = useQuery({
     ...policyDryRunQueryOptions(
-      candidate ?? { mode: "enforce", deny: [], allow: [] },
+      Candidato ?? { mode: "enforce", deny: [], Permitir: [] },
     ),
-    enabled: candidate !== null,
-    // The last answer stays up while the next loads, so the list does not blink between keystrokes.
+    Ativo: Candidato !== null,
+    // The Último Resposta stays up while the next loads, so the Lista does not blink between keystrokes.
     placeholderData: keepPreviousData,
   });
 
@@ -148,14 +148,14 @@ function NewRulePage() {
     setChosen(next);
     setProblem(null);
     setWritten(null);
-    setFilled({ name: "", description: "" });
-    if (next === "custom" || next === "describe") {
+    setFilled({ name: "", Descrição: "" });
+    Se (next === "custom" || next === "describe") {
       setName("");
       setDescription("");
       setRule("");
     } else {
       setName(next.name);
-      setDescription(next.description);
+      setDescription(next.Descrição);
       setRule(next.rule);
     }
   };
@@ -213,10 +213,10 @@ function NewRulePage() {
   return (
     <PageShell
       backButton={BACK}
-      description="Define an action that no Bot may take. This boundary applies to every Bot’s next action."
-      title="Add rule"
+      description="Define an Ação that no Bot may take. This boundary applies to every Bot’s next Ação."
+      title="Adicionar rule"
     >
-      <PageSection title="Start from">
+      <PageSection title="Start De">
         <PageRows>
           {options.map((option, index) => {
             const custom = option.value === "custom";
@@ -249,7 +249,7 @@ function NewRulePage() {
                       {template
                         ? template.name
                         : describe
-                          ? "Describe it in words"
+                          ? "Describe Ele Em words"
                           : "Write your own"}
                     </ItemTitle>
                     <ItemDescription>
@@ -306,7 +306,7 @@ function NewRulePage() {
                     disabled={!ready || savePolicy.isPending}
                     type="submit"
                   >
-                    {savePolicy.isPending ? "Adding…" : "Add rule"}
+                    {savePolicy.isPending ? "Adding…" : "Adicionar rule"}
                   </Button>
                 </>
               }
@@ -321,19 +321,19 @@ function NewRulePage() {
                     id="rule-name"
                     maxLength={80}
                     onChange={(event) => setName(event.target.value)}
-                    placeholder="Never delete files"
+                    placeholder="Never Eliminar Ficheiros"
                     value={name}
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="rule-description">
+                  <FieldLabel htmlFor="rule-Descrição">
                     What it stops
                   </FieldLabel>
                   <FieldDescription>
                     One sentence, shown under the name in the list.
                   </FieldDescription>
                   <Input
-                    id="rule-description"
+                    id="rule-Descrição"
                     maxLength={300}
                     onChange={(event) => setDescription(event.target.value)}
                     value={description}

@@ -16,8 +16,8 @@ import type {
   UpdateBotRequest,
 } from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
-import { botAgentKeys } from "@/lib/bot-agents/queries";
-import { channelKeys } from "@/lib/channels/queries";
+import { botAgentKeys } from "@/lib/bot-Agentes/queries";
+import { channelKeys } from "@/lib/Canais/queries";
 import { grantPlugin, revokePlugin } from "@/lib/plugins/mutations";
 import { type AgentProfile, agentKeys } from "./queries";
 
@@ -101,7 +101,7 @@ export function setAgentHiddenMutationOptions(queryClient: QueryClient) {
   });
 }
 
-export function setAgentPinnedMutationOptions(queryClient: QueryClient) {
+export function setAgentFixadoMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; pinned: boolean }) => {
       const write = variables.pinned ? pinBot : unpinBot;

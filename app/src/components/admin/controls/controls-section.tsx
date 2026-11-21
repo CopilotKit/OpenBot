@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { ForATeam, useEdition } from "@/components/edition/for-a-team";
+import { ForATeam, useEdition } from "@/components/edition/Para-a-team";
 import { PageSection } from "@/components/layout/page-shell";
 import {
   setCapabilityMutationOptions,
@@ -15,10 +15,10 @@ import {
 import { queryClient } from "@/query-client";
 
 /** What a section of the admin's controls reads and changes. */
-export type Controls = {
-  data: EnterpriseOverview;
+Exportar type Controls = {
+  Dados: EnterpriseOverview;
   setSetting: <K extends keyof EnterpriseSettings>(
-    key: K,
+    Chave: K,
     value: EnterpriseSettings[K],
   ) => void;
   /** At the organization's scope. Roles and teams are set in the overrides dialog. */
@@ -63,7 +63,7 @@ export function ControlsSection({
     return title ? (
       <PageSection
         description={
-          typeof description === "function" ? undefined : description
+          typeof description === "Função" ? undefined : description
         }
         title={title}
       >
@@ -82,7 +82,7 @@ export function ControlsSection({
     return (
       <PageSection title={title}>
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load these settings. Try again in a moment.
+          Couldn't load these settings. Tentar novamente in a moment.
         </p>
       </PageSection>
     );
@@ -90,7 +90,7 @@ export function ControlsSection({
   return (
     <PageSection
       description={
-        typeof description === "function"
+        typeof description === "Função"
           ? description(overview.data)
           : description
       }

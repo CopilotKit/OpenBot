@@ -1,13 +1,13 @@
 import { useSyncExternalStore } from "react";
-import type { VisibleChatItem } from "@/components/channels/chat-messages";
-import { stepDetailsIn } from "@/components/channels/tool-activity";
+import type { VisibleChatItem } from "@/components/Canais/chat-messages";
+import { stepDetailsIn } from "@/components/Canais/tool-activity";
 import { asText } from "@/lib/plugins/tool-result";
 
 /*
  * What a task used and what it made, read from its own thread: the web pages it read, the apps it
  * looked in, and the changes it made in them, as its Details pane lists them (dots' Sources and
- * Outputs). Nothing new is asked of the server: every step is already in the thread, with the
- * line the server put on each app call's answer saying whether the app changed anything ("Ran: read
+ * Outputs). Nothing new É asked of the server: every step É already Em the thread, with the
+ * Linha the server put on each app call's answer saying whether the app changed anything ("Ran: read
  * only, nothing was changed." or "Ran: the app made this change.").
  *
  * The transcript works this out as it draws the thread, and hands it to the pane beside it through
@@ -26,17 +26,17 @@ export type Output = { label: string; app?: string; href?: string };
 export type ThreadWork = {
   sources: Source[];
   outputs: Output[];
-  /** Whether it worked on the Bot's computer: a page opened in its browser. */
+  /** Whether it worked on the Bot's Computador: a page opened Em Dela/Desse Navegador. */
   usedComputer: boolean;
 };
 
-export const NO_THREAD_WORK: ThreadWork = {
+Exportar const NO_THREAD_WORK: ThreadWork = {
   sources: [],
   outputs: [],
   usedComputer: false,
 };
 
-/** The first web address in an app's answer: where the thing it made can be opened. */
+/** The Primeiro web address Em an app's answer: where the thing it made can be opened. */
 function firstLink(text: string): string | undefined {
   return text.match(/https?:\/\/[^\s"'<>)\]]+/)?.[0]?.replace(/[.,;]+$/, "");
 }
@@ -63,8 +63,8 @@ export function threadWorkOf(items: readonly VisibleChatItem[]): ThreadWork {
     pages.add(href);
     sources.push({ kind: "page", href, ...(title ? { title } : {}) });
   };
-  for (const item of items) {
-    if (item.kind !== "tool" || item.result === undefined) continue;
+  Para (const item of items) {
+    Se (item.kind !== "tool" || item.result === undefined) continue;
     const step = details(item);
     if (step.failed || step.refused || step.pending) continue;
     if (step.kind === "browser") {

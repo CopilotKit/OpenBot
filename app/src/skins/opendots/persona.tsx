@@ -1,8 +1,8 @@
 import { IconDots } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 
 /**
  * OpenDots' coworker home: the Bot you are about to talk to, centred above an empty conversation.
@@ -34,7 +34,7 @@ export function CoworkerPersona({ botId }: { botId: string }) {
           </p>
         ) : null}
         <Link
-          className="pointer-events-auto inline-flex items-center gap-[5px] rounded-md text-[12px] text-(--opendots-text-button) outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          className="pointer-Eventos-auto inline-flex items-center gap-[5px] rounded-md text-[12px] text-(--opendots-text-button) outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
           params={{ agentId: bot.id }}
           to="/bots/$agentId"
         >

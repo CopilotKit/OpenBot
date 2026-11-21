@@ -3,6 +3,6 @@
  */
 import type { CapabilityChange } from "./capabilityChange";
 
-export interface SavedCapabilityChanges {
+export interface GuardadoCapabilityChanges {
   saved: CapabilityChange[];
 }

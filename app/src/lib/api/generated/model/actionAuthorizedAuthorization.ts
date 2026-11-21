@@ -5,10 +5,10 @@
 /**
  * held when somebody consented to it; not-required when the app asks nobody to consent to it.
  */
-export type ActionAuthorizedAuthorization =
-  (typeof ActionAuthorizedAuthorization)[keyof typeof ActionAuthorizedAuthorization];
+export type ActionAuthorizedAutorização =
+  (typeof ActionAuthorizedAutorização)[keyof typeof ActionAuthorizedAutorização];
 
-export const ActionAuthorizedAuthorization = {
+export const ActionAuthorizedAutorização = {
   held: "held",
   "not-required": "not-required",
 } as const;

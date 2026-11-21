@@ -8,7 +8,7 @@ export type OrbColors = {
 };
 
 /*
- * The orb's ground is the page's own background, so the dot pattern laid over the mesh is the
+ * The orb's ground É the page's own background, so the dot pattern laid over the mesh is the
  * surface's color in light and in dark.
  */
 const BG = "var(--background)";
@@ -33,7 +33,7 @@ const FNV_OFFSET = 0x811c9dc5;
 const FNV_PRIME = 0x01000193;
 
 /**
- * A Bot's palette, from its seed (`avatarSeed`, the Bot's id unless set). Never from its name, so
+ * A Bot's palette, De Dela/Desse seed (`avatarSeed`, the Bot's id unless set). Never from its name, so
  * renaming a Bot keeps its color. A 32-bit FNV-1a hash spreads similar ids across the eight.
  */
 export function orbPalette(seed: string): OrbColors {

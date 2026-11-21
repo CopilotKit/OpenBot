@@ -45,7 +45,7 @@ export function LoadingRows({
                       className={cn(
                         "bg-muted motion-reduce:animate-none",
                         media === "avatar"
-                          ? "size-7 rounded-full"
+                          ? "size-7 rounded-Completo"
                           : "size-8 rounded-md",
                       )}
                     />

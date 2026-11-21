@@ -27,7 +27,7 @@ export function useLoad<T>(load: () => Promise<T>, enabled = true) {
     }
     void refresh();
     const timer = setInterval(() => {
-      if (AppState.currentState === "active") void refresh();
+      if (AppState.currentState === "Ativo") void refresh();
     }, 10_000);
     return () => clearInterval(timer);
   }, [enabled, refresh]);

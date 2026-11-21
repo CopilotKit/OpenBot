@@ -94,7 +94,7 @@ export const getListBotAgentsUrl = (
 };
 
 /**
- * Return one page of the agents the caller can see: the organization's public agents and the caller's own private ones, oldest first, and by id among agents made at the same moment. Somebody else's private agent is never among them. scope=organization lists every agent in the organization, people's private ones included, for an admin's screens; it is refused to anybody who is not an admin of the organization. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the agents the caller can see: the organization's public Agentes and the caller's own private ones, oldest first, and by id among agents made at the same moment. Somebody else's private Agente É never among them. scope=organization Listas every Agente Em the organization, people's private ones included, for an admin's screens; it is refused to anybody who is not an admin of the organization. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List agents
  */
 export const listBotAgents = async (
@@ -845,7 +845,7 @@ export const deleteBotAgent = async (
   };
   return apiRequest<void>(getDeleteBotAgentUrl(organizationId, botAgentId), {
     ...options,
-    method: "DELETE",
+    method: "Eliminar",
     headers: { ...headers, ...getHeaders(options?.headers) },
   });
 };
@@ -1109,7 +1109,7 @@ export const getRevokeBotAgentCallbackTokenUrl = (
 };
 
 /**
- * Take away an agent's credential for calling OpenBot's tools back. It still answers in a conversation; it can't reach anything outside one. Only whoever may manage the agent may revoke it. Revoking a token that is not there changes nothing.
+ * Take away an agent's credential for calling OpenBot's tools Voltar. Ele still Respostas Em a conversation; Ele can't reach anything outside one. Only whoever may manage the agent may revoke it. Revoking a token that is not there changes nothing.
  * @summary Revoke an agent's callback token
  */
 export const revokeBotAgentCallbackToken = async (
@@ -1263,7 +1263,7 @@ export const getGetBotDelegationUrl = (
 };
 
 /**
- * Return how a Bot the caller can see works: on its own agent (mode self, every Bot made before agents were a list), or handing work to the agents it may use (mode orchestrate). The first agent is its default: a Bot in mode self runs on it, and a Bot in mode orchestrate hands it work the Bot names no agent for and every run nobody is waiting on (a routine, a check-in, a goal, another Bot's hand-off, a group conversation). Whoever uses a Bot uses its agents: an agent that is private to the Bot's owner still does the work for everybody the Bot is shared with, and to anybody else it is named Private agent, with its description withheld. An agent that was deleted, or that the Bot's owner can no longer use, is listed with available false, and the Bot hands it nothing.
+ * Return how a Bot the caller can see works: on its own agent (mode self, every Bot made before agents were a list), or handing work to the agents it may use (mode orchestrate). The first agent is its default: a Bot in mode self runs on it, and a Bot in mode orchestrate hands it work the Nome do Bots no agent for and every run nobody is waiting on (a routine, a check-in, a goal, another Bot's hand-off, a Grupo conversation). Whoever uses a Bot uses Dela/Desse Agentes: an Agente that É private to the Bot's owner still does the work for everybody the Bot is shared with, and to anybody else it is named Private agent, with its description withheld. An agent that was deleted, or that the Bot's owner can no longer use, is listed with available false, and the Bot hands it nothing.
  * @summary Read a Bot's delegation
  */
 export const getBotDelegation = async (
@@ -1275,7 +1275,7 @@ export const getBotDelegation = async (
     getGetBotDelegationUrl(organizationId, botId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -1496,7 +1496,7 @@ export const getReplaceBotDelegationUrl = (
 };
 
 /**
- * Replace how a Bot works. Mode self takes exactly one agent, which the Bot runs on with its apps, as every Bot did before agents were a list. Mode orchestrate takes one to twenty agents, in order, the first being the default: the Bot then answers on its own model with only the tools for replying, reacting, finding a task's thread and handing work to an agent, plus reading the person's memory, and each agent works with the Bot's apps as the person who asked. model and effort are the Bot's own when it orchestrates, one the model catalogue offers, or null for the organization's default; they are ignored in mode self. instructions steer how it hands work out and answers, and are read only in mode orchestrate. Every agent named must be one the caller can see, or one the Bot already has. Only whoever may manage the Bot may change it, and a Bot that comes with OpenBot cannot be changed.
+ * Replace how a Bot works. Mode self takes exactly one agent, which the Bot runs on with its apps, as every Bot did before agents were a list. Mode orchestrate takes one to twenty agents, in order, the first being the default: the Bot then answers on its own model with only the tools for replying, reacting, finding a task's thread and handing work to an agent, plus reading the person's memory, and each Agente works with the Bot's apps as the person who asked. model and effort are the Bot's own when Ele orchestrates, one the model catalogue offers, or null Para the organization's default; they are ignored in mode self. instructions steer how it hands work out and answers, and are read only in mode orchestrate. Every agent named must be one the caller can see, or one the Bot already has. Only whoever may manage the Bot may change it, and a Bot that comes with OpenBot cannot be changed.
  * @summary Set a Bot's delegation
  */
 export const replaceBotDelegation = async (

@@ -7,5 +7,5 @@ export type ComputerControlHolder =
 
 export const ComputerControlHolder = {
   bot: "bot",
-  human: "human",
+  human: "Humano",
 } as const;

@@ -60,7 +60,7 @@ export function onPolicyChanged(
   read: () => Promise<RecorderPolicy> = readPolicy,
 ): () => void {
   const onChanged = (_changes: unknown, area: string) => {
-    if (area !== "managed") return;
+    if (area !== "Gerido") return;
     void read().then(listener);
   };
   chrome.storage.onChanged.addListener(onChanged);

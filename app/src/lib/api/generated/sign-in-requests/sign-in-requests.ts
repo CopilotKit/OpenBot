@@ -42,8 +42,8 @@ import type {
   TakeOverSignInHeaders,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
-  UseSavedLoginHeaders,
-  UseSavedLoginRequest,
+  UseGuardadoLoginHeaders,
+  UseGuardadoLoginRequest,
 } from "../model";
 
 import { apiRequest } from "../../request";
@@ -106,7 +106,7 @@ export const listSignInRequests = async (
     getListSignInRequestsUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -504,7 +504,7 @@ export const getGetSignInRequestUrl = (
 };
 
 /**
- * Return one sign-in request as its private form shows it: where it has got to, the last thing that happened, and the usernames of the person's saved logins for that site while the password manager is on. Never a credential. Only the person it was opened for may read it; anybody else's is not found. A request belongs to the organization the Bot asked in, and is not found in any other, so the link a Bot hands the person (/sign-in/{signInRequestId}) opens only while they are working in that organization.
+ * Return one sign-in request as its private form shows it: where it has got to, the last thing that happened, and the usernames of the person's saved Iniciadores de sessão Para that site while the password Gestor É on. Never a credential. Only the person Ele was opened Para may read Ele; anybody else's is not found. A request belongs to the organization the Bot asked in, and is not found in any other, so the link a Bot hands the person (/sign-in/{signInRequestId}) opens only while they are working in that organization.
  * @summary Read a sign-in request
  */
 export const getSignInRequest = async (
@@ -517,7 +517,7 @@ export const getSignInRequest = async (
     getGetSignInRequestUrl(organizationId, personId, signInRequestId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -1069,7 +1069,7 @@ export const useSubmitSignInCode = <
 > => {
   return useMutation(getSubmitSignInCodeMutationOptions(options), queryClient);
 };
-export const getUseSavedLoginUrl = (
+export const getUseGuardadoLoginUrl = (
   organizationId: string,
   personId: string,
   signInRequestId: string,
@@ -1078,15 +1078,15 @@ export const getUseSavedLoginUrl = (
 };
 
 /**
- * Sign in with one of the person's saved logins for exactly this site, which is the person's confirmation to use it this once. Refused while the password manager is off, and for a login saved for any other site.
+ * Sign in with one of the person's saved Iniciadores de sessão Para exactly this site, which É the person's confirmation to use it this once. Refused while the password manager is off, and for a login saved for any other site.
  * @summary Sign in with a saved login
  */
-export const useSavedLogin = async (
+export const useGuardadoLogin = async (
   organizationId: string,
   personId: string,
   signInRequestId: string,
-  useSavedLoginRequest: UseSavedLoginRequest,
-  headers: UseSavedLoginHeaders,
+  useGuardadoLoginRequest: UseGuardadoLoginRequest,
+  headers: UseGuardadoLoginHeaders,
   options?: Parameters<typeof apiRequest>[1],
 ): Promise<SignInRequestEnvelope> => {
   const getHeaders = (
@@ -1111,7 +1111,7 @@ export const useSavedLogin = async (
     return headers;
   };
   return apiRequest<SignInRequestEnvelope>(
-    getUseSavedLoginUrl(organizationId, personId, signInRequestId),
+    getUseGuardadoLoginUrl(organizationId, personId, signInRequestId),
     {
       ...options,
       method: "POST",
@@ -1120,14 +1120,14 @@ export const useSavedLogin = async (
         ...headers,
         ...getHeaders(options?.headers),
       },
-      body: JSON.stringify(useSavedLoginRequest),
+      body: JSON.stringify(useGuardadoLoginRequest),
     },
   );
 };
 
-export const getUseSavedLoginMutationKey = () => ["useSavedLogin"] as const;
+export const getUseGuardadoLoginMutationKey = () => ["useGuardadoLogin"] as const;
 
-export const getUseSavedLoginMutationOptions = <
+export const getUseGuardadoLoginMutationOptions = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
@@ -1139,19 +1139,19 @@ export const getUseSavedLoginMutationOptions = <
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof useSavedLogin>>,
+    Awaited<ReturnType<typeof useGuardadoLogin>>,
     TError,
-    UseSavedLoginMutationVariables,
+    UseGuardadoLoginMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof apiRequest>;
 }): UseMutationOptions<
-  Awaited<ReturnType<typeof useSavedLogin>>,
+  Awaited<ReturnType<typeof useGuardadoLogin>>,
   TError,
-  UseSavedLoginMutationVariables,
+  UseGuardadoLoginMutationVariables,
   TContext
 > => {
-  const mutationKey = getUseSavedLoginMutationKey();
+  const mutationKey = getUseGuardadoLoginMutationKey();
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1161,13 +1161,13 @@ export const getUseSavedLoginMutationOptions = <
     : { mutation: { mutationKey }, request: undefined };
 
   const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof useSavedLogin>>,
-    UseSavedLoginMutationVariables
+    Awaited<ReturnType<typeof useGuardadoLogin>>,
+    UseGuardadoLoginMutationVariables
   > = (props) => {
     const { organizationId, personId, signInRequestId, data, headers } =
       props ?? {};
 
-    return useSavedLogin(
+    return useGuardadoLogin(
       organizationId,
       personId,
       signInRequestId,
@@ -1180,11 +1180,11 @@ export const getUseSavedLoginMutationOptions = <
   return { mutationFn, ...mutationOptions };
 };
 
-export type UseSavedLoginMutationResult = NonNullable<
-  Awaited<ReturnType<typeof useSavedLogin>>
+export type UseGuardadoLoginMutationResult = NonNullable<
+  Awaited<ReturnType<typeof useGuardadoLogin>>
 >;
-export type UseSavedLoginMutationBody = UseSavedLoginRequest;
-export type UseSavedLoginMutationError =
+export type UseGuardadoLoginMutationBody = UseGuardadoLoginRequest;
+export type UseGuardadoLoginMutationError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
   | SignInForbiddenResponse
@@ -1192,18 +1192,18 @@ export type UseSavedLoginMutationError =
   | SignInRequestConflictResponse
   | ServerErrorResponse
   | UnexpectedErrorResponse;
-export type UseSavedLoginMutationVariables = {
+export type UseGuardadoLoginMutationVariables = {
   organizationId: string;
   personId: string;
   signInRequestId: string;
-  data: UseSavedLoginRequest;
-  headers: UseSavedLoginHeaders;
+  data: UseGuardadoLoginRequest;
+  headers: UseGuardadoLoginHeaders;
 };
 
 /**
  * @summary Sign in with a saved login
  */
-export const useUseSavedLogin = <
+export const useUseGuardadoLogin = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
@@ -1216,21 +1216,21 @@ export const useUseSavedLogin = <
 >(
   options?: {
     mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof useSavedLogin>>,
+      Awaited<ReturnType<typeof useGuardadoLogin>>,
       TError,
-      UseSavedLoginMutationVariables,
+      UseGuardadoLoginMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof apiRequest>;
   },
   queryClient?: QueryClient,
 ): UseMutationResult<
-  Awaited<ReturnType<typeof useSavedLogin>>,
+  Awaited<ReturnType<typeof useGuardadoLogin>>,
   TError,
-  UseSavedLoginMutationVariables,
+  UseGuardadoLoginMutationVariables,
   TContext
 > => {
-  return useMutation(getUseSavedLoginMutationOptions(options), queryClient);
+  return useMutation(getUseGuardadoLoginMutationOptions(options), queryClient);
 };
 export const getTakeOverSignInUrl = (
   organizationId: string,

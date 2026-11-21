@@ -15,8 +15,8 @@ import {
   ItemMedia,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { useBotNames } from "@/lib/agents/bot-names";
-import type { DryRunChange } from "@/lib/computers/queries";
+import { useBotNames } from "@/lib/Agentes/bot-names";
+import type { DryRunChange } from "@/lib/Computadores/queries";
 import { cn } from "@/lib/utils";
 
 /**
@@ -88,9 +88,9 @@ export type ReplayRow = {
   event: AuditEvent;
   media: { icon: ReactNode; label: string };
   verdict: string;
-  /** The verdict's colour. The refusal colour unless given. */
+  /** The verdict's colour. The refusal colour unless Dado. */
   verdictClassName?: string;
-  /** A line under the row's own, such as what the person answered when they were asked. */
+  /** A Linha under the row's own, such as what the person answered when they were asked. */
   note?: string;
 };
 

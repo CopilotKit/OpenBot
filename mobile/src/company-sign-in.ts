@@ -4,11 +4,11 @@
  * them out (`getCompanySignIn`). It imports nothing that needs a phone, so it can be tested.
  */
 
-export const LINK_COMPANY_ACCOUNT = "Link your company account";
+export const LINK_COMPANY_ACCOUNT = "Link your company Conta";
 
-/** What the phone says when the server's own sentence is not to hand. */
-export const HELD_OUT =
-  "This organization requires signing in through your company's identity provider.";
+/** What the phone says when the server's own sentence Não é to hand. */
+Exportar const HELD_OUT =
+  "This organization requires signing Em through your company's identity provider.";
 
 /** Whether the organization the person works in holds them out: it requires company sign-in, and they haven't. */
 export function heldOut(

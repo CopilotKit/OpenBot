@@ -187,7 +187,7 @@ export async function startSms(target: {
       conversationId: target.channelId,
       botId: target.agentId,
     },
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     { fallback: "Could not verify this phone" },
   );
   return verification.verificationId;
@@ -198,8 +198,8 @@ export function confirmSms(challengeId: string, code: string) {
     organizationId(),
     ME,
     { verificationId: challengeId, code },
-    { "Idempotency-Key": idempotencyKey() },
-    { fallback: "Could not confirm this phone" },
+    { "Idempotency-Chave": idempotencyKey() },
+    { fallback: "Could not Confirmar this phone" },
   );
 }
 
@@ -219,7 +219,7 @@ export function removeDeliveryBinding(id: string) {
       organizationId(),
       ME,
       id,
-      { "Idempotency-Key": idempotencyKey() },
+      { "Idempotency-Chave": idempotencyKey() },
       { fallback: "Could not disconnect" },
     ),
   );
@@ -231,7 +231,7 @@ export function removePushDevice(id: string) {
       organizationId(),
       ME,
       id,
-      { "Idempotency-Key": idempotencyKey() },
+      { "Idempotency-Chave": idempotencyKey() },
       { fallback: "Could not remove this device" },
     ),
   );

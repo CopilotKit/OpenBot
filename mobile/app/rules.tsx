@@ -73,7 +73,7 @@ function BehaviourPicker({
 
 const describe = (rule: ApprovalRule) =>
   [
-    rule.toolRef === "*" ? "Any tool" : rule.toolRef,
+    rule.toolRef === "*" ? "Qualquer tool" : rule.toolRef,
     rule.effect === "*" ? null : rule.effect,
     rule.scope === "*" ? null : rule.scope,
   ]
@@ -151,7 +151,7 @@ export default function RulesScreen() {
               {data.team?.enforceAutoReview ? " (required by your team)" : ""}
             </Text>
             <Switch
-              accessibilityLabel="Auto-review low-risk actions"
+              accessibilityLabel="Auto-review low-risk Ações"
               value={data.preferences.autoReview}
               disabled={
                 Boolean(action.busy) || Boolean(data.team?.enforceAutoReview)
@@ -221,7 +221,7 @@ export default function RulesScreen() {
         ))}
       </Section>
       {editable && (
-        <Section title="Add a rule">
+        <Section title="Adicionar a rule">
           <View style={card}>
             <TextInput
               accessibilityLabel="Tool or app"
@@ -235,10 +235,10 @@ export default function RulesScreen() {
             />
             <BehaviourPicker value={behaviour} onChange={setBehaviour} />
             <Button
-              title="Add rule"
+              title="Adicionar rule"
               disabled={Boolean(action.busy) || !toolRef.trim()}
               onPress={() => {
-                void action.run("add", async () => {
+                void action.run("Adicionar", async () => {
                   await createPersonApprovalRule(ORGANIZATION_ID, ME, {
                     botId,
                     toolRef: toolRef.trim(),

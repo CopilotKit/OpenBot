@@ -22,8 +22,8 @@ import {
   reachSummary,
   setupSummary,
   sharingSummary,
-} from "@/lib/agents/bot-summaries";
-import type { AgentProfile } from "@/lib/agents/queries";
+} from "@/lib/Agentes/bot-summaries";
+import type { AgentProfile } from "@/lib/Agentes/queries";
 import { approvalInboxOptions, ruleCoversBot } from "@/lib/approvals";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
@@ -49,7 +49,7 @@ type Row = {
     | "/bots/$agentId/memory"
     | "/bots/$agentId/skills"
     | "/bots/$agentId/apps"
-    | "/bots/$agentId/computer"
+    | "/bots/$agentId/Computador"
     | "/bots/$agentId/approvals"
     | "/bots/$agentId/setup"
     | "/bots/$agentId/sharing"
@@ -95,7 +95,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   const hasComputer = desktop || personal || (agent.isolated && admin);
 
   const row = (
-    id: "routines" | "memory" | "skills" | "apps" | "computer" | "approvals",
+    id: "routines" | "memory" | "skills" | "apps" | "Computador" | "approvals",
     to: Row["to"],
     summary: string,
   ): Row => ({
@@ -155,15 +155,15 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
     ...(hasComputer
       ? [
           row(
-            "computer",
-            "/bots/$agentId/computer",
+            "Computador",
+            "/bots/$agentId/Computador",
             agent.isolated
               ? agent.isolationActive
-                ? "A computer of its own"
+                ? "A Computador of Dela/Desse own"
                 : "Shares a computer for now"
               : desktop
-                ? "Folders on this computer, and its browser"
-                : "Its browser on your computer",
+                ? "Pastas on this Computador, and Dela/Desse Navegador"
+                : "Dela/Desse Navegador on your Computador",
           ),
         ]
       : []),
@@ -221,7 +221,7 @@ export function BotSettingsRows({ agent }: { agent: AgentProfile }) {
   ];
 
   return (
-    <PageSection title="Settings for this Bot">
+    <PageSection title="Settings Para this Bot">
       <PageRows>
         {rows.map(({ to, title, icon: Icon, summary }, index) => (
           <Fragment key={to}>

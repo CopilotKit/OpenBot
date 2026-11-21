@@ -2,14 +2,14 @@ import { MAX_DICTATION_SECONDS } from "@openbot/shared/dictation";
 import type { Recording } from "./recording";
 
 export type DictationState = {
-  phase: "idle" | "requesting" | "recording" | "transcribing" | "error";
+  phase: "idle" | "requesting" | "recording" | "transcribing" | "Erro";
   seconds: number;
   error?: string;
   canRetry: boolean;
   stream?: MediaStream;
 };
 
-export type DictationIntent = "draft" | "send";
+export type DictationIntent = "Rascunho" | "send";
 
 const idle: DictationState = { phase: "idle", seconds: 0, canRetry: false };
 
@@ -22,7 +22,7 @@ export class DictationSession {
   private audio?: Blob;
   private abort?: AbortController;
   private timer?: ReturnType<typeof setInterval>;
-  private intent: DictationIntent = "draft";
+  private intent: DictationIntent = "Rascunho";
 
   constructor(
     private readonly deps: {
@@ -54,7 +54,7 @@ export class DictationSession {
     this.recording = undefined;
     this.abort?.abort();
     this.audio = undefined;
-    this.intent = "draft";
+    this.intent = "Rascunho";
     this.update(idle);
   };
 
@@ -66,7 +66,7 @@ export class DictationSession {
       const recording = await this.deps.record((error) => {
         if (generation !== this.generation) return;
         this.cancel();
-        this.update({ ...idle, phase: "error", error: error.message });
+        this.update({ ...idle, phase: "Erro", error: error.message });
       });
       if (generation !== this.generation) {
         recording.cancel();
@@ -85,7 +85,7 @@ export class DictationSession {
       if (generation !== this.generation) return;
       this.update({
         ...idle,
-        phase: "error",
+        phase: "Erro",
         error:
           error instanceof Error && error.name === "NotAllowedError"
             ? "Microphone access was denied. Allow it in your browser and try again."
@@ -94,7 +94,7 @@ export class DictationSession {
     }
   };
 
-  finish = async (intent: DictationIntent = "draft") => {
+  finish = async (intent: DictationIntent = "Rascunho") => {
     if (this.state.phase !== "recording" || !this.recording) return;
     this.clearTimer();
     this.intent = intent;
@@ -112,14 +112,14 @@ export class DictationSession {
       this.recording = undefined;
       this.update({
         ...idle,
-        phase: "error",
+        phase: "Erro",
         error: "Could not finish recording. Please record again.",
       });
     }
   };
 
   retry = async () => {
-    if (this.state.phase !== "error" || !this.audio) return;
+    if (this.state.phase !== "Erro" || !this.audio) return;
     await this.transcribe(this.generation);
   };
 
@@ -146,7 +146,7 @@ export class DictationSession {
       if (generation !== this.generation) return;
       this.update({
         ...this.state,
-        phase: "error",
+        phase: "Erro",
         canRetry: true,
         error:
           error instanceof Error

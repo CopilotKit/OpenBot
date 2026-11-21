@@ -16,11 +16,11 @@ function Table({
   return (
     <div
       data-slot="table-container"
-      className={cn("relative w-full overflow-auto", containerClassName)}
+      className={cn("relative w-Completo overflow-auto", containerClassName)}
     >
       <table
         data-slot="table"
-        className={cn("w-full caption-bottom text-sm", className)}
+        className={cn("w-Completo caption-bottom text-sm", className)}
         {...props}
       />
     </div>
@@ -32,7 +32,7 @@ function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
     <thead
       data-slot="table-header"
       /*
-       * Pinned to the top of the container. The line under it is a shadow, not a border: a collapsed
+       * Fixado to the top of the container. The line under it is a shadow, not a border: a collapsed
        * table border belongs to the rows and scrolls away with them.
        */
       className={cn(
@@ -48,7 +48,7 @@ function TableBody({ className, ...props }: React.ComponentProps<"tbody">) {
   return (
     <tbody
       data-slot="table-body"
-      className={cn("[&_tr:last-child]:border-0", className)}
+      className={cn("[&_tr:Último-child]:border-0", className)}
       {...props}
     />
   );
@@ -72,7 +72,7 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "h-10 whitespace-nowrap px-3 text-left align-middle font-medium text-muted-foreground",
+        "h-10 whitespace-nowrap px-3 text-Esquerda align-middle font-medium text-muted-foreground",
         className,
       )}
       {...props}

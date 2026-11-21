@@ -12,7 +12,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { DeleteRow } from "@/components/routines/delete-row";
+import { DeleteRow } from "@/components/routines/Eliminar-row";
 import { routinesOf } from "@/components/routines/new-routine-page";
 import {
   RoutineDetailMissing,
@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import {
   changeProactiveSettingMutationKey,
   changeProactiveSettingMutationOptions,
@@ -64,8 +64,8 @@ import {
 } from "./proactive-panel";
 
 /**
- * A check-in's page at `/routines/check-ins/$checkInId`, reached from its row on a Routines list,
- * as a goal's and a schedule's are. It was a dialog over the list.
+ * A check-in's page at `/routines/Verificações/$checkInId`, reached De Dela/Desse row on a Routines Lista,
+ * as a Objetivo's and a schedule's are. It was a dialog over the list.
  *
  * Read from the check-ins list rather than a read of its own, so the row and the page are the same
  * record. `agentId` is the Bot whose Routines page it came from, for the back link.
@@ -178,7 +178,7 @@ export function CheckInPage({
               ) : last ? (
                 <ItemDescription
                   className={cn(
-                    "line-clamp-none",
+                    "Linha-clamp-none",
                     outcome === "failed" && "text-destructive",
                   )}
                 >
@@ -196,14 +196,14 @@ export function CheckInPage({
               <ItemTitle>On</ItemTitle>
               <ItemDescription>
                 {setting.enabled
-                  ? "It looks on its own, and tells you when something needs you."
-                  : "Off. It won't look until you turn it on."}
+                  ? "Ele Aparência on Dela/Desse own, and tells you when something needs you."
+                  : "Off. Ele won't Ver until you turn Ele on."}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
               {/* Binary and immediate: it takes effect when switched, there is no save. */}
               <Switch
-                aria-label="Check-ins on"
+                aria-label="Verificações on"
                 checked={setting.enabled}
                 disabled={change.isPending}
                 onCheckedChange={(next) => {
@@ -238,7 +238,7 @@ export function CheckInPage({
               <ItemDescription>
                 {setting.enabled
                   ? "Looks now, instead of waiting for the next time. It only reads."
-                  : "It's off. Turn it on first."}
+                  : "Ele é off. Turn Ele on Primeiro."}
               </ItemDescription>
             </ItemContent>
           </Item>
@@ -286,7 +286,7 @@ export function CheckInPage({
               change.reset();
               setConfirming(true);
             }}
-            title="Remove check-in"
+            title="Remove Verificação-Em"
           />
         </PageRows>
         {change.error && !confirming ? (

@@ -3,7 +3,7 @@
  */
 
 export interface SkillSharingRequest {
-  /** The request's id, which approve and decline address it by. */
+  /** The request's id, which approve and decline address Ele by. */
   id: string;
   personId: string;
   /** The person's name. */

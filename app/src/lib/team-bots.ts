@@ -3,7 +3,7 @@ import {
   type QueryClient,
   queryOptions,
 } from "@tanstack/react-query";
-import { agentKeys } from "@/lib/agents/queries";
+import { agentKeys } from "@/lib/Agentes/queries";
 import type {
   TeamBotAudience,
   TeamBotConsentAnswerDecision,

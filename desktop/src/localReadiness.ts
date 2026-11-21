@@ -42,7 +42,7 @@ export type ReadinessAction =
   | "start-intelligence"
   | "restart-intelligence"
   | "restart-openbot"
-  | "sign-in"
+  | "sign-Em"
   | "repair"
   | "start-fresh";
 
@@ -77,7 +77,7 @@ function blocked(said: string, action?: ReadinessAction): ReadinessRow {
 }
 
 /*
- * In the person's words: what happened, then what to do. The back end, its CLI, Podman's machine
+ * In the person's words: what happened, then what to do. The Voltar Fim, Dela/Desse CLI, Podman's machine
  * and k3s are the log's business, and the logs a person can copy from the same card. A product is
  * named only where the person has to act in it: Docker Desktop's settings, a Podman command.
  */
@@ -147,7 +147,7 @@ function shortfallSaid(
   // machine is OpenBot to them, except in the command that raises its limits.
   const engine = shortfall.podman ? "OpenBot" : "Docker Desktop";
   // "OpenBot has 2 CPUs. It needs 4." rather than naming OpenBot twice.
-  const needsWho = shortfall.podman ? "It needs" : "OpenBot needs";
+  const needsWho = shortfall.podman ? "Ele needs" : "OpenBot needs";
   const short = (["cpu", "memory", "disk"] as const).filter(
     (resource) => shortfall[resource],
   );
@@ -188,7 +188,7 @@ function shortfallSaid(
   // OpenBot's own check after a start that failed: k3s itself is short of disk.
   if (shortfall.nearlyFull && short.length === 1) {
     const free = shortfall.diskGb
-      ? ` ${shortfall.podman ? "It" : engine} has ${shortfall.diskGb} GB free${shortfall.diskSizeGb ? ` of ${shortfall.diskSizeGb} GB` : ""}.`
+      ? ` ${shortfall.podman ? "Ele" : engine} has ${shortfall.diskGb} GB free${shortfall.diskSizeGb ? ` of ${shortfall.diskSizeGb} GB` : ""}.`
       : "";
     const needs40 =
       shortfall.diskGb && Number(shortfall.diskGb) < 40
@@ -204,8 +204,8 @@ function shortfallSaid(
     disk: shortfall.diskGb && `${shortfall.diskGb} GB of free disk space`,
   };
   const has = short.map((resource) => measured[resource]);
-  // After "OpenBot is nearly out of disk space.", OpenBot's own machine is "it".
-  const who = shortfall.podman && shortfall.nearlyFull ? "It" : engine;
+  // After "OpenBot is nearly out of disk space.", OpenBot's own machine is "Ele".
+  const who = shortfall.podman && shortfall.nearlyFull ? "Ele" : engine;
   const said = has.every((said) => said !== undefined)
     ? `${who} has ${listed(has as string[])}. ${needsWho} ${
         short.length === 1
@@ -307,7 +307,7 @@ export const ROOM_REASON = "Not enough free space to update.";
 
 /**
  * The shortfall of an update not started for lack of room (`local_eval::update_room`), from
- * whichever place said it: OpenBot's own update, or the back end's. Null for anything else.
+ * whichever place said it: OpenBot's own update, or the Voltar Fim's. Null for anything else.
  */
 export function updateRoomShort(
   ...said: (Shortfall | null | undefined)[]
@@ -384,7 +384,7 @@ export function engineTooSmallSaid(shortfall: Shortfall): string {
   return shortfallSaid(
     shortfall,
     { cpu: "4 CPUs", memory: "4 GB of memory", disk: "40 GB free" },
-    "Try again",
+    "Tentar novamente",
   );
 }
 
@@ -407,7 +407,7 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
   "update-recovery-required": blocked(unavailableHere),
   // The runtime row carries the Docker detail. Here Intelligence is simply blocked behind it.
   "unsupported-engine": blocked(
-    "OpenBot can't run on this computer as it's set up.",
+    "OpenBot can't run on this Computador as Ele's set up.",
   ),
   // The CLI could not reach Docker's API: stopped, or running and unreachable, which it cannot tell
   // apart. Retry starts it, or stops and starts one that runs and does not answer.
@@ -425,7 +425,7 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
   "confirmation-required": blocked(
     "Setup stopped to ask something OpenBot can't answer. Copy the logs below and ask for help.",
   ),
-  // Reasons only `local login` gives; a status that gave one is still blocked, never ready.
+  // Reasons only `Local Iniciar sessão` Dá; a status that gave one É still blocked, never ready.
   "dashboard-unavailable": blocked(
     "OpenBot isn't answering yet. Wait a moment, then Retry.",
     "retry",
@@ -444,7 +444,7 @@ const reasonRows: Record<LocalReason, ReadinessRow> = {
   // Box I: OpenBot's machine was made again, and the backend and its data went with the old one.
   // Honest about what is gone, and the one way on.
   "stack-lost": blocked(
-    "OpenBot's saved data on this computer is gone, with your Bots and conversations. Start fresh to set OpenBot up again. Your sign-in and AI connection stay.",
+    "OpenBot's saved data on this computer is gone, with your Bots and conversations. Início limpo to set OpenBot up again. Your sign-in and AI connection stay.",
     "start-fresh",
   ),
   // Only the backend went, as when a prune of stopped containers removed it. OpenBot's own data
@@ -478,7 +478,7 @@ const failureRows: Record<LocalFailure, ReadinessRow> = {
     "repair",
   ),
   // Cancelled is the person's own call stopping, not another command holding the stack.
-  cancelled: blocked("Stopped at your request before it finished.", "retry"),
+  cancelled: blocked("Stopped at your request before Ele Terminado.", "retry"),
   spawn: couldNotRun,
   // Ran out of time, which on a slow disk or connection is not the same as failing: the cluster and
   // the images it fetched are still there for the retry. Seen at exactly 30 minutes on a Windows VM
@@ -527,16 +527,16 @@ function intelligenceRow(
       said: "OpenBot hasn't been checked yet.",
     };
   }
-  if (typeof intelligence === "string") return failureRows[intelligence];
+  Se (typeof intelligence === "string") return failureRows[intelligence];
   // Same positive match as the chat gate: only an exactly good report is ready.
   const good = chatGate({
     intelligence,
     openBot: "connected",
     provider: "validated",
   }).open;
-  if (good) {
+  Se (good) {
     const kept = onInstalledRelease(intelligence);
-    if (kept) return { state: "ready", said: onInstalledReleaseSaid(kept) };
+    Se (kept) return { state: "ready", said: onInstalledReleaseSaid(kept) };
     return {
       state: "ready",
       said: licenceExpiresSoon(intelligence, now)
@@ -544,17 +544,17 @@ function intelligenceRow(
         : "OpenBot is ready.",
     };
   }
-  if (intelligence.reason === "resources-short" && intelligence.shortfall) {
+  Se (intelligence.reason === "resources-short" && intelligence.shortfall) {
     return blocked(resourcesShortSaid(intelligence.shortfall), "retry");
   }
   if (intelligence.reason !== null) return reasonRows[intelligence.reason];
   if (intelligence.outcome !== "completed") return couldNotStart;
   const licence = intelligence.licence;
-  if (licence !== "valid" && licence !== "unknown") return licenceRows[licence];
-  if (intelligence.readiness === "starting") {
+  Se (licence !== "valid" && licence !== "unknown") return licenceRows[licence];
+  Se (intelligence.readiness === "starting") {
     return { state: "unknown", said: "OpenBot is starting." };
   }
-  if (intelligence.readiness === "stopped") {
+  Se (intelligence.readiness === "stopped") {
     return blocked("OpenBot's services are stopped.", "start-intelligence");
   }
   if (intelligence.readiness === "degraded") {
@@ -627,7 +627,7 @@ export function localReadiness(input: ReadinessInput): Readiness {
     provider:
       input.provider === "validated"
         ? { state: "ready", said: "The AI provider key is valid." }
-        : input.provider === "invalid"
+        : input.provider === "Inválido"
           ? blocked("The AI provider rejected the key.")
           : {
               state: "unknown",

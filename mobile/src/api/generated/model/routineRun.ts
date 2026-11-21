@@ -4,9 +4,9 @@
 import type { RoutineRunSource } from "./routineRunSource";
 
 /**
- * One run of a routine. What the Bot said is in the routine's conversation and is not kept here.
+ * One run of a routine. What the Bot said is in the routine's conversation and Não é kept here.
  */
-export interface RoutineRun {
+Exportar interface RoutineRun {
   /** The run's id. */
   id: string;
   /** running until it ends; waiting while it waits on the person, for an approval or an answer. */

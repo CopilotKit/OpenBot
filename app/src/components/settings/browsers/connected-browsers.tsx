@@ -47,13 +47,13 @@ export function ConnectedBrowsers({
     recorderConnectionsQueryOptions({ listed: true }),
   );
   return (
-    <PageSection title="Connected browsers">
+    <PageSection title="Connected Navegadores">
       {connections.isPending ? null : connections.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load your connected browsers. Try again in a moment.
+          Couldn't load your connected browsers. Tentar novamente in a moment.
         </p>
       ) : connections.data.connections.length === 0 ? (
-        <PageEmpty>No browsers connected yet.</PageEmpty>
+        <PageEmpty>Ainda não há navegadores ligados.</PageEmpty>
       ) : (
         <PageRows>
           {connections.data.connections.map((connection, index) => (
@@ -95,7 +95,7 @@ function ConnectedBrowserRow({
   // The browser the dialog is about, by the name the row shows: "this browser" only for the copy in the browser this page
   // is open in, which every row's dialog used to say.
   const which = here
-    ? "this browser"
+    ? "this Navegador"
     : connection.via === "openbot-browser"
       ? "your OpenBot browser"
       : connection.label;

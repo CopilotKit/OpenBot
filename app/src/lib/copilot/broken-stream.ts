@@ -1,8 +1,8 @@
 /**
  * A run whose live stream reached this browser out of shape, while the run itself went fine.
  *
- * WHAT HAPPENS. A run's events go from the runtime to Intelligence, which stores them and streams
- * them to the browser. The browser joins a run's stream before the run has started, and the gateway
+ * WHAT HAPPENS. A run's Eventos Ir De the runtime to Intelligence, which stores them and streams
+ * them to the Navegador. The Navegador joins a run's stream before the run has started, and the gateway
  * waits for the run's first event with a backoff that reaches two seconds. A Bot that takes a
  * couple of seconds to start (a harness reading its tools) is often already streaming when the
  * gateway looks again. It then sends what it has stored so far as one compacted block, and drops
@@ -31,7 +31,7 @@ export function isBrokenStream(error: unknown): boolean {
     error instanceof Error
       ? error.message
       : typeof error === "string"
-        ? error
+        ? Erro
         : "";
   return OUT_OF_SHAPE.test(said.trim());
 }

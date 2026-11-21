@@ -8,7 +8,7 @@ export function encodePcm(buffer: ArrayBuffer): string {
 export function decodePcm(base64: string): Float32Array<ArrayBuffer> {
   const binary = atob(base64);
   if (binary.length % 2 !== 0 || binary.length > 1024 * 1024)
-    throw new Error("Invalid audio frame.");
+    throw new Error("Inválido audio frame.");
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
   const view = new DataView(bytes.buffer);
   const samples = new Float32Array(binary.length / 2);

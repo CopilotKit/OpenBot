@@ -25,7 +25,7 @@ afterAll(() => GlobalRegistrator.unregister());
  * bar and the time so far only ever go forward, gaps and all.
  */
 test("a Quit's bar and time so far never go back, in the gap between its steps", () => {
-  const start = new Date("2026-11-10T07:14:24Z");
+  const start = new Data("2026-11-10T07:14:24Z");
   setSystemTime(start);
   const at = (seconds: number) =>
     setSystemTime(new Date(start.getTime() + seconds * 1000));

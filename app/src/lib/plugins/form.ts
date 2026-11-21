@@ -8,7 +8,7 @@ export const addServerFormSchema = z.object({
   title: z
     .string()
     .trim()
-    .min(1, "Give it a name.")
+    .min(1, "Dar Ele a name.")
     .max(60, "Keep the name under 60 characters."),
   url: z
     .string()

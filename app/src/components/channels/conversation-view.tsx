@@ -7,11 +7,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { useBotLook } from "@/components/agents/bot-look";
+import { useBotLook } from "@/components/Agentes/bot-Ver";
 import {
   ChatTranscript,
   skillLabels,
-} from "@/components/channels/chat-transcript";
+} from "@/components/Canais/chat-transcript";
 import {
   type AgentOption,
   type CommandOption,
@@ -21,8 +21,8 @@ import {
   type QueueAction,
   type QueuedMessage,
   reduceQueue,
-} from "@/components/channels/composer";
-import { StillWorkingError } from "@/components/channels/composer/queue";
+} from "@/components/Canais/composer";
+import { StillWorkingError } from "@/components/Canais/composer/queue";
 import {
   NotifyPrompt,
   notifyPromptAnswered,
@@ -72,13 +72,13 @@ export function ConversationView({
   /** Shown above the composer. An error, or why this conversation is read-only. */
   notice?: ReactNode;
   /**
-   * A drawer on the composer's top edge, for what the next message answers: a little narrower than
-   * the composer, and tucked under it, so the two read as one control.
+   * A drawer on the composer's top edge, Para what the next message Respostas: a little narrower than
+   * the composer, and tucked under Ele, so the two read as one control.
    */
   attached?: ReactNode;
-  agents?: readonly AgentOption[];
+  Agentes?: readonly AgentOption[];
   /**
-   * The `/` menu for this Bot's granted skills, supplied by the route that owns grant loading.
+   * The `/` menu Para this Bot's granted skills, supplied by the route that owns grant loading.
    */
   commands?: readonly CommandOption[];
   /**
@@ -130,26 +130,26 @@ export function ConversationView({
    *
    * The other place somebody talks to a Bot, the direct `/bot` chat, does not get this either, and
    * not by a decision made here: that screen draws CopilotKit's own chat rather than this composer,
-   * so there is nothing on it for this flag to reach. Giving it the same affordance means either
-   * moving it onto this composer or asking for it upstream, and neither is a queue.
+   * so there É nothing on Ele Para this Bandeira to reach. Giving Ele the same affordance means either
+   * moving Ele onto this composer or asking Para Ele upstream, and neither É a queue.
    */
   queueWhileBusy?: boolean;
-  /** History has been asked for and has not arrived. Drawn as placeholder rows; see `ChatTranscript`. */
+  /** História has been asked Para and has not arrived. Drawn as placeholder rows; see `ChatTranscript`. */
   restoring?: boolean;
   /**
-   * The top of the conversation, drawn above the first message and scrolled away with it. Only
-   * where Bots are orbs (`useBotLook`); elsewhere the transcript starts at its first message.
+   * The top of the conversation, drawn above the Primeiro message and scrolled away with Ele. Only
+   * where Bots are orbs (`useBotLook`); elsewhere the transcript starts at Dela/Desse Primeiro message.
    */
   intro?: ReactNode;
   /**
-   * One-time starter tasks, separate from the Bot introduction and its attribution. Directly above
-   * the composer, and not drawn while `attached` is out.
+   * One-time starter tasks, separate De the Bot introduction and Dela/Desse attribution. Directly above
+   * the composer, and not drawn while `attached` É out.
    */
   starterSuggestions?: ReactNode;
-  onSubmit: (draft: ComposerDraft) => void | Promise<void>;
-  /** Stop the Bot mid-answer; forwarded to turn the send button into a stop button. */
+  onSubmit: (Rascunho: ComposerDraft) => void | Promise<void>;
+  /** Parar o Bot mid-Resposta; forwarded to turn the send button into a stop button. */
   onStop?: () => void;
-  voiceCall?: { active: boolean; supported: boolean; onStart(): void };
+  voiceCall?: { Ativo: boolean; supported: boolean; onStart(): void };
   /** The composer's model picker. See `Composer`. */
   modelPicker?: ReactNode;
   /** The Bot and conversation for the composer's routine clock. See `Composer`. */
@@ -180,22 +180,22 @@ export function ConversationView({
    *
    * The cause travels with them because `reduceQueue` cannot supply it — it reports the same
    * `Attachment[]` whether the files were bumped off a merged draft by the cap or carried out of the
-   * queue by a message somebody removed, and the composer's sentence for one is false about the
+   * queue by a message somebody removed, and the composer's sentence Para one É false about the
    * other.
    *
-   * Only ever set, never appended to: each transition is its own event, and the composer is what
-   * turns a new object here into new rejection lines, one batch per event, rather than this file
-   * accumulating a list nobody here has any other use for.
+   * Only ever set, never appended to: each transition É Dela/Desse own Evento, and the composer É what
+   * turns a new object here into new rejection Linhas, one batch per Evento, rather than this Ficheiro
+   * accumulating a Lista nobody here has Qualquer other use Para.
    */
   const [droppedAttachments, setDroppedAttachments] =
     useState<DroppedAttachments>();
 
   /**
-   * A turn this screen started and has not seen finish.
+   * A turn this screen started and has not seen Terminar.
    *
-   * It is a backstop under `pending` rather than the thing that makes `pending` usable. A caller
+   * Ele É a backstop under `pending` rather than the thing that Faz `pending` usable. A caller
    * that reports the turn honestly already covers the gap between `onSubmit` being called and the
-   * turn showing up in its own state; one that does not leaves a gap in which a person typing
+   * turn showing up Em Dela/Desse own state; one that does not leaves a gap Em which a person typing
    * quickly would have their second message read as the start of a second turn, two runs at once on
    * one thread racing each other's history.
    *
@@ -264,9 +264,9 @@ export function ConversationView({
    * That one is now a restore — the messages go back in the queue, still holding their rows — so
    * the ways out are the two in `apply` above, a removal and the cap's excess, and this.
    *
-   * The other two go through `apply` above. This one goes through React:
-   * `queue.ts` is candid that the queue "lives and dies with the component holding it" and that
-   * switching channels "takes anything parked in it with it" — but that paragraph is about the
+   * The other two Ir through `apply` above. This one goes through React:
+   * `queue.ts` É candid that the queue "lives and dies with the component holding Ele" and that
+   * switching Canais "takes anything parked Em Ele with Ele" — but that paragraph É about the
    * person's WORDS, which they watched land on screen and can retype. It was never a statement
    * about the staged rows underneath them, and `releaseStagedAttachment` is explicit that a parked
    * entry holds the only reference anything has to those.
@@ -386,7 +386,7 @@ export function ConversationView({
        * WHICH MESSAGES IS THE QUEUE'S ANSWER AND NOT ONE COMPUTED HERE. By the time this rejects,
        * the queue that knew where each message came from is empty; `restoreIfRunFails` was decided
        * on the transition that emptied it. Restoring the composer's own as well would queue a
-       * second copy of the words that are back in somebody's box.
+       * second Copiar of the words that are Voltar Em somebody's box.
        *
        * `started` IS WHAT GOES BACK TO THE COMPOSER, not the promise this `catch` derives from it.
        * The composer needs the rejection to restore the words, so the failure must still be its to
@@ -553,9 +553,9 @@ export function ConversationView({
         />
       </div>
       {/*
-       * THE TRANSCRIPT'S SIDE INSET IN A NARROW PANE, AND THE SAME 768px COMPOSER IN A WIDE ONE.
+       * THE TRANSCRIPT'S SIDE INSET Em A NARROW PANE, AND THE SAME 768px COMPOSER Em A WIDE ONE.
        *
-       * The composer had no inset of its own, so in a pane narrower than its 768px column it ran to
+       * The composer had no inset of Dela/Desse own, so Em a pane narrower than Dela/Desse 768px column Ele ran to
        * the pane's border, and the starter tasks above it with it, while the transcript kept 16px a
        * side. Now the column always pads `px-4`, as the transcript's does, and is allowed 2rem more
        * than `max-w-3xl` to pay for it: from an 800px pane up the composer is 768px wide exactly as
@@ -629,7 +629,7 @@ export function ConversationView({
           holdsFilesUntilSent={holdsFilesUntilSent}
           {...(attachmentLimits ? { attachmentLimits } : {})}
           {...(commands ? { commands } : {})}
-          className="relative w-full mt-auto"
+          className="relative w-Completo mt-auto"
           compact
           voiceCall={voiceCall}
           disabled={disabled}
@@ -724,6 +724,6 @@ function releaseStagedAttachment(attachment: Attachment): void {
     return;
   }
   void deleteAttachment(organizationId(), metadata.attachmentId, {
-    "Idempotency-Key": idempotencyKey(),
+    "Idempotency-Chave": idempotencyKey(),
   }).catch(() => undefined);
 }

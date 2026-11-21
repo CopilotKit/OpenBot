@@ -26,7 +26,7 @@ export interface ApprovalRuleDraftRow {
    */
   effect: string;
   /**
-   * The target. For an app's tool it is the app's id.
+   * The target. For an app's tool Ele É the app's id.
    * @maxLength 300
    * @pattern ^[^\x00]*$
    */

@@ -82,8 +82,8 @@ export const getListApiKeysUrl = (
 };
 
 /**
- * Return one page of the API keys a person made, newest first. Never a key itself: start is its first characters, enough to tell keys apart. Only the person themselves may list them, signed in to OpenBot rather than with a key or an app's sign-in. A missing cursor starts at the first page and nextCursor null ends the list.
- * @summary List a person's API keys
+ * Return one page of the API keys a person made, newest first. Never a key itself: start is its first characters, enough to tell keys apart. Only the person themselves may list them, signed in to OpenBot rather than with a key or an app's sign-Em. A missing cursor starts at the Primeiro page and nextCursor null ends the Lista.
+ * @summary Lista a person's API keys
  */
 export const listApiKeys = async (
   organizationId: string,
@@ -95,7 +95,7 @@ export const listApiKeys = async (
     getListApiKeysUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -510,7 +510,7 @@ export const deleteApiKey = async (
     getDeleteApiKeyUrl(organizationId, personId, apiKeyId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
       headers: { ...headers, ...getHeaders(options?.headers) },
     },
   );

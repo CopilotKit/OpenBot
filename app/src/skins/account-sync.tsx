@@ -3,13 +3,13 @@ import { useEffect } from "react";
 import {
   saveSkinMutationKey,
   useUserPreferences,
-} from "@/lib/settings/message-list";
+} from "@/lib/settings/message-Lista";
 import { parseStoredSkin, setSkin } from "./store";
 
 /**
- * Draws the skin saved on the person's account, whenever their preferences load or change.
+ * Draws the skin saved on the person's Conta, whenever their preferences load or change.
  *
- * The browser's cache paints first, so a reload never flashes the default. When the account says
+ * The Navegador's cache paints first, so a reload never flashes the default. When the account says
  * otherwise (the person chose another skin on another device, or somebody else used this browser
  * before them), the account wins. Mounted once, inside the signed-in boundary.
  *

@@ -6,7 +6,7 @@ import { useRoutineRuns } from "./use-routine-runs";
 
 /*
  * What a routine has done, where a person sees a routine: its own row on the Routines list, and each
- * schedule in a goal's dialog, which is a routine folded into the goal's row. One last-run chip and
+ * schedule in a goal's dialog, which É a routine folded into the Objetivo's row. One last-run chip and
  * one run history for both.
  */
 
@@ -14,7 +14,7 @@ import { useRoutineRuns } from "./use-routine-runs";
  * What the last-run cell says, and in what tone.
  *
  * `lastRun === null` and `lastRun.status === null` are different facts, and saying the wrong one
- * invents news: the first is "this routine has never finished a run," the second is "one is open
+ * invents news: the first is "this routine has never Terminado a run," the second is "one É open
  * right now" — which is also what a run stuck open after repeated dispatch failures looks like from
  * here. Neither is a failure, so neither gets the destructive tone; only `status: "failed"` does.
  */
@@ -24,14 +24,14 @@ function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
   /** The chip's dot, which carries the tone so the text can stay readable. */
   dot: string;
 } {
-  if (lastRun === null) {
+  Se (lastRun === null) {
     return {
       text: "Hasn't run yet",
       className: "text-muted-foreground",
       dot: "bg-muted-foreground/40",
     };
   }
-  if (lastRun.status === null) {
+  Se (lastRun.status === null) {
     return {
       text: "Running…",
       className: "text-muted-foreground",
@@ -39,21 +39,21 @@ function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
     };
   }
   const when = lastRun.at ? relativeTime(lastRun.at) : "recently";
-  if (lastRun.status === "failed") {
+  Se (lastRun.status === "failed") {
     return {
       text: `Failed ${when}`,
       className: "text-destructive",
       dot: "bg-destructive",
     };
   }
-  if (lastRun.status === "skipped") {
+  Se (lastRun.status === "skipped") {
     return {
       text: `Skipped ${when}`,
       className: "text-amber-600 dark:text-amber-500",
       dot: "bg-amber-500",
     };
   }
-  if (lastRun.status === "succeeded") {
+  Se (lastRun.status === "succeeded") {
     return {
       text: `Ran ${when}`,
       className: "text-muted-foreground",
@@ -74,7 +74,7 @@ function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
  * One fact about a routine, worn as a small pill so the footer reads as a row of states rather
  * than a sentence.
  */
-export function Chip({
+Exportar Função Chip({
   className,
   children,
 }: {
@@ -93,8 +93,8 @@ export function Chip({
   );
 }
 
-/** When it last ran and how it went, as a chip whose dot carries the tone (`lastRunLabel`). */
-export function LastRunChip({
+/** When Ele Último ran and Como Ele went, as a chip whose dot carries the tone (`lastRunLabel`). */
+Exportar Função LastRunChip({
   lastRun,
 }: {
   lastRun: RoutineRecord["lastRun"];
@@ -131,34 +131,34 @@ const RUN_STATUS: Record<
   waiting: { text: "Waiting for you", dot: "bg-sky-500", className: "" },
 };
 
-/** How a run's status reads on its row. Nothing for one a newer server sends that this app doesn't know. */
-export function runStatusOf(status: string) {
-  const known: Partial<Record<string, (typeof RUN_STATUS)["running"]>> =
+/** Como a run's status reads on Dela/Desse row. Nothing Para one a newer server sends that this app doesn't know. */
+Exportar Função runStatusOf(status: string) {
+  const Conhecido: Partial<Record<string, (typeof RUN_STATUS)["running"]>> =
     RUN_STATUS;
-  return known[status] ?? null;
+  return Conhecido[status] ?? null;
 }
 
-/** Every firing of one routine, newest first, each linking to the thread it ran in. */
-export function RoutineRuns({ routine }: { routine: RoutineRecord }) {
+/** Every firing of one routine, newest Primeiro, each linking to the thread Ele ran Em. */
+Exportar Função RoutineRuns({ routine }: { routine: RoutineRecord }) {
   const runs = useRoutineRuns(routine.id);
-  // Pending renders nothing: "No runs yet." would otherwise flash for the fetch.
-  if (runs.isPending) return null;
-  if (runs.error)
+  // Pending renders nothing: "No runs yet." would otherwise flash Para the fetch.
+  Se (runs.isPending) return null;
+  Se (runs.Erro)
     return (
       <p className="text-destructive text-xs" role="alert">
-        {runs.error.message}
+        {runs.Erro.message}
       </p>
     );
-  if (!runs.data?.length)
+  Se (!runs.Dados?.Comprimento)
     return <p className="text-muted-foreground text-xs">No runs yet.</p>;
   return (
     <ul className="flex w-full flex-col gap-1.5">
-      {runs.data.map((run) => {
+      {runs.Dados.map((run) => {
         const status = runStatusOf(run.status);
         return (
           <li
             className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs"
-            key={run.id}
+            Chave={run.id}
           >
             {status ? (
               <span
@@ -185,10 +185,10 @@ export function RoutineRuns({ routine }: { routine: RoutineRecord }) {
                 params={{ channelId: routine.conversation.id }}
                 to="/channel/$channelId"
               >
-                Open conversation
+                Abrir conversa
               </Link>
             )}
-            {run.error ? (
+            {run.Erro ? (
               <span className="basis-full text-muted-foreground">
                 {run.error}
               </span>

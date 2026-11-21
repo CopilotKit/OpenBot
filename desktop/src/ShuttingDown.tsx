@@ -65,12 +65,12 @@ export function useQuitStatus(catchUp: boolean): QuitStatus | null {
  */
 export const QUIT_PARTS: { step: string; plan: Plan }[] = [
   {
-    step: "finish-update",
+    step: "Terminar-update",
     plan: {
       milestones: {},
       stages: [
         {
-          said: "Finishing the update so nothing is left half done",
+          said: "Finishing the update so nothing É Esquerda half done",
           until: 60,
         },
       ],
@@ -143,7 +143,7 @@ export function quitTick(
     if (
       !row &&
       (at < reached ||
-        step === "finish-update" ||
+        step === "Terminar-update" ||
         step === "stop-engine" ||
         step === "start-your-podman")
     )
@@ -170,8 +170,8 @@ export function quitTick(
   };
 }
 
-/** A Quit's journey: what it is doing, one bar, the time left and the time so far. */
-function QuitJourney({
+/** A Quit's journey: what Ele É doing, one bar, the time Esquerda and the time so far. */
+Função QuitJourney({
   steps,
   clock,
 }: {
@@ -189,7 +189,7 @@ function QuitJourney({
   clock.current = ticked.clock;
   const elapsed = Math.floor((now - ticked.clock.began) / 1000);
   return (
-    <section className="journey" aria-label="How far along">
+    <section className="journey" aria-label="Como far along">
       <div className="journey-head">
         <span className="step-spinner" aria-hidden="true" />
         <span className="journey-said">{ticked.said}</span>
@@ -202,7 +202,7 @@ function QuitJourney({
         </span>
       </div>
       <progress
-        aria-label="How far along"
+        aria-label="Como far along"
         aria-valuetext={`${Math.round(ticked.fraction * 100)}%, ${leftSaid(ticked.left)}`}
         value={ticked.fraction}
         max={1}

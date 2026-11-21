@@ -6,4 +6,4 @@ import type { NotificationTransport } from "./notificationTransport";
 /**
  * Where one kind of update may go. all: every way the person can be reached, now and any set up later. A list: only those ways; an empty list keeps that kind in OpenBot.
  */
-export type UpdateRoute = "all" | NotificationTransport[];
+export type UpdateRoute = "Todos" | NotificationTransport[];

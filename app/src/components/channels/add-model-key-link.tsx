@@ -13,8 +13,8 @@ import { queryClient } from "@/query-client";
 export const NO_AI_CONNECTION =
   "This organization doesn't have an AI connection yet. An admin can add a model key in Admin, under Vault.";
 
-/** Where an admin adds the key: a new credential in Admin, under Vault. */
-export const ADD_MODEL_KEY_PATH = "/admin/credentials/new";
+/** Where an admin adds the Chave: a new credential Em Admin, under Vault. */
+Exportar const ADD_MODEL_KEY_PATH = "/admin/credentials/new";
 
 /**
  * Add a model key, beside the sentence that says there is none: where the admin already is when

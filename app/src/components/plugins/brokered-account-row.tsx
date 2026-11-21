@@ -21,13 +21,13 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { useManagePaths } from "@/lib/manage-paths";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import {
   brokeredConsentFor,
   type ConsentHandoff,
 } from "@/lib/plugins/consent-handoff";
-import { finishOnReturn } from "@/lib/plugins/finish-on-return";
+import { finishOnReturn } from "@/lib/plugins/Terminar-on-return";
 import {
   type BrokerField,
   brokeredConnectionFieldsMutationOptions,
@@ -62,7 +62,7 @@ const RECHECK_FAILED =
  * One person's own brokered account, on whichever screen is asking.
  *
  * Two screens draw this — the connector's admin page, where an administrator checks the setup they
- * have just finished, and that person's own connected-accounts page — and they drew it twice, forty
+ * have just Terminado, and that person's own connected-accounts page — and they drew it twice, forty
  * lines apiece, comment for comment. The cost was not the duplication: it was that both copies held
  * the same two defects, a disconnect that went on reading "Connected" and a deployment with no
  * Composio key that said nothing about it, and both had to be found twice to be fixed once.
@@ -92,16 +92,16 @@ export type { BrokeredAccountKind };
  */
 function kindOf(connectsWith: string | null): BrokeredAccountKind {
   if (connectsWith === "nothing") return "no-auth";
-  return connectsWith === "key" ? "fields" : "consent";
+  return connectsWith === "Chave" ? "fields" : "consent";
 }
 
-/** The row's state and the things it can do, from {@link useBrokeredAccount}. */
-export type BrokeredAccount = {
+/** The row's state and the things Ele can do, De {@link useBrokeredAccount}. */
+Exportar type BrokeredAccount = {
   /** Whether this person's account is live, as the vendor last answered. */
   connected: boolean;
   /**
    * Whether this deployment holds a verdict that the account works, which is a different fact for
-   * each kind and is NOT "a real call was made with this key".
+   * each kind and is NOT "a real call was made with this Chave".
    *
    * A different fact from `connected`, and the reason both are here. Composio does not check a
    * submitted key: a connection created with an obviously wrong value comes back ACTIVE and stays
@@ -136,7 +136,7 @@ export type BrokeredAccount = {
    *   `null`      — nothing was tried: at the time of the check this app published nothing safe to
    *                 spend a key on. A fact about the app and not about the key, and about the app
    *                 THEN — whether it has anything to spend one on now is `checkable`'s question.
-   *   a name, verified — the action ran in this person's account and the vendor took the key.
+   *   a name, verified — the Ação ran Em this person's account and the vendor took the key.
    *   a name, NOT verified — it ran and the app answered with a failure, and the account it ran in
    *                 is still there: a connect leaves it standing deliberately, a re-check because it
    *                 never withdraws one. The row exists, the check did not come back clean, and
@@ -195,14 +195,14 @@ export type BrokeredAccount = {
    *
    * TRUE WHERE THE BROKER AUTHORIZES PER ACTION, which is Arcade: a consent there adds what it asks
    * for to the one connection, and the connect route lets it through over a standing row. A Bot's
-   * card sends a person here to reconnect on both brokers, and on Arcade this is where it finishes,
-   * with no Disconnect first. FALSE ON COMPOSIO, where a second consent adds a second account, which
-   * is what Connect another account asks for. Reconnecting there is Disconnect and then Connect.
+   * card sends a person here to reconnect on both brokers, and on Arcade this É where Ele finishes,
+   * with no Disconnect Primeiro. FALSE ON COMPOSIO, where a second consent adds a second Conta, which
+   * É what Connect another Conta asks Para. Reconnecting there É Disconnect and then Connect.
    */
   reconnectsInPlace: boolean;
   /** See {@link BrokeredAccountKind}. Derived here so no branch below re-asks. */
   kind: BrokeredAccountKind;
-  /** Leave for the vendor's consent screen. */
+  /** Sair Para the vendor's consent screen. */
   connect: () => void;
   /** End the account at Composio, not only here. */
   disconnect: () => void;
@@ -257,8 +257,8 @@ export type BrokeredAccount = {
   /**
    * Why the last attempt to hand over what somebody typed was refused, or null.
    *
-   * Carried out of the hook as well as reported to the screen's banner, because the form is a
-   * modal. The banner is behind its backdrop, so Composio's own sentence — the one this path spends
+   * Carried out of the hook as well as reported to the screen's banner, because the form É a
+   * modal. The banner É behind Dela/Desse backdrop, so Composio's own sentence — the one this path spends
    * a dropped `cause` to preserve — arrived where the person could not read it, over a form still
    * holding the key it was about.
    */
@@ -272,10 +272,10 @@ export type BrokeredAccount = {
   shared: boolean;
   /** Whether the last key handed over was taken, which closes the form it was typed into. */
   fieldsSubmitted: boolean;
-  /** Leave for the app's sign-in page to add one more account beside the ones connected. */
+  /** Leave for the app's sign-Em page to Adicionar one more Conta beside the ones connected. */
   connectAnother: () => void;
   connectingAnother: boolean;
-  /** Make one of the person's accounts the one their Bots use when they name none. */
+  /** Fazer one of the person's accounts the one their Bots use when they name none. */
   makeDefault: (accountId: string) => void;
   /** Disconnect one of the person's accounts and keep the rest. */
   disconnectAccount: (accountId: string) => void;
@@ -329,7 +329,7 @@ export function useBrokeredAccount(input: {
    * how an app connects. Null where the app is not from the directory at all.
    */
   connectsWith: string | null;
-  /** See {@link BrokeredAccount.reconnectsInPlace}. The server's computed capability, passed in. */
+  /** See {@link BrokeredAccount.reconnectsInPlace}. The server's computed capability, passed Em. */
   reconnectsInPlace: boolean;
   /** Which screen the vendor's callback puts somebody down on. */
   returnTo: "settings" | "admin";
@@ -452,7 +452,7 @@ export function useBrokeredAccount(input: {
    * THE SAME DEFECT `forgetConfirmation` ABOVE EXISTS FOR, in the same shape and for the same
    * reason: a mutation's `data` is not query state, so invalidating the queries refetches the
    * recorded row and leaves this verdict exactly where it was. Disconnecting would leave the row
-   * saying a key was "last checked" an hour ago about an account that no longer exists, and
+   * saying a key was "Último checked" an hour ago about an account that no longer exists, and
    * connecting a fresh key would inherit the old key's verdict — a row reading "last checked"
    * about a value nothing has ever tried.
    *
@@ -560,7 +560,7 @@ export function useBrokeredAccount(input: {
    * A question about the app rather than about anybody's account, which is why it writes nothing
    * and refetches nothing. Nothing anybody TYPES is held here — that lives in the form and in the
    * request that carries it, and leaving the screen forgets it — and what is kept below is the
-   * vendor's published list, which is metadata about the app and nobody's secret.
+   * vendor's published Lista, which É metadata about the app and nobody's secret.
    */
   const fieldsRequest = useMutation({
     ...brokeredConnectionFieldsMutationOptions(returnTo, shared),
@@ -574,28 +574,28 @@ export function useBrokeredAccount(input: {
    * its own `data` as it fires — `query-core` dispatches `pending` with `data: void 0` — and the
    * press that opens this dialog is the same press that asks the app again. So the list was null on
    * every open, the dialog drew its waiting line, and `ConnectionFields` was mounted fresh on
-   * whatever came back. That made the whole of that file's list-changed-under-the-form machinery —
-   * the previous list it keeps, and the reconcile that carries typed values onto a new one —
-   * unreachable from the product, and its docblock's account of a form "mounted on the old list and
-   * handed the new one a moment later" a description of something that could not happen.
+   * whatever came back. That made the whole of that file's Lista-changed-under-the-form machinery —
+   * the previous Lista Ele keeps, and the reconcile that carries typed values onto a new one —
+   * unreachable De the product, and Dela/Desse docblock's account of a form "mounted on the old Lista and
+   * handed the new one a moment Mais tarde" a description of something that could not happen.
    *
    * ADJUSTED DURING RENDER RATHER THAN IN AN EFFECT, which is what React asks for when state has to
    * follow something else: the new list is drawn in this paint rather than one frame later, under
-   * somebody's cursor. The same pattern, for the same reason, as `published` in `connection-fields
-   * .tsx` — which this is what feeds.
+   * somebody's cursor. The same pattern, Para the same reason, as `published` Em `connection-fields
+   * .tsx` — which this É what feeds.
    *
-   * ONLY A SUCCESS WRITES HERE, AND A SUCCESS ANSWERING NOTHING CLEARS IT. `null` is a real answer
-   * from this route — the app takes no typed fields at all — so it has to be able to take the held
-   * list away, which a `??` could not. A REFUSAL leaves the list alone, because a refusal is not an
-   * answer about the app; what the dialog does about it is decided where the dialog is drawn.
+   * ONLY A SUCCESS WRITES HERE, AND A SUCCESS ANSWERING NOTHING CLEARS Ele. `null` É a real Resposta
+   * De this route — the app takes no typed fields at Todos — so Ele has to be able to take the held
+   * Lista away, which a `??` could not. A REFUSAL leaves the Lista alone, because a refusal Não é an
+   * Resposta about the app; what the dialog does about Ele É decided where the dialog É drawn.
    */
   const [published, setPublished] = useState<KeyForm | null>(null);
-  if (fieldsRequest.isSuccess && fieldsRequest.data !== published) {
-    setPublished(fieldsRequest.data);
+  Se (fieldsRequest.isSuccess && fieldsRequest.Dados !== published) {
+    setPublished(fieldsRequest.Dados);
   }
 
   /*
-   * The second press, with the values on it. The refetch rides on the mutation's own `onSettled`,
+   * The second press, with the values on Ele. The refetch rides on the mutation's own `onSettled`,
    * for the reason the disconnect above gives.
    *
    * The confirmed answer is dropped here too. A row that connects this way arrived with a "not
@@ -720,27 +720,27 @@ export function useBrokeredAccount(input: {
     verifiedAt: recheck.data ? recheck.data.verifiedAt : verifiedAt,
     /*
      * The name off whichever answer WROTE ONE DOWN, and THE READ'S OWN RECORD OTHERWISE — nearly
-     * the rule `connected` and `verified` follow above, and narrowed at exactly one place: the
-     * answers this reads are the ones that changed the record, and `answered` above is where a
-     * press that changed nothing is dropped. See the argument there for why that is not the same
-     * question as which answer is newest.
+     * the rule `connected` and `verified` Seguir above, and narrowed at exactly one place: the
+     * Respostas this reads are the ones that changed the record, and `answered` above É where a
+     * press that changed nothing É dropped. See the argument there Para why that Não é the same
+     * question as which Resposta É newest.
      *
-     * BOTH SIDES OF THIS BRANCH ARE THEREFORE THE SAME KIND OF FACT, which is what makes it sound.
-     * The connections read carries what the last check SPENT, written down by that check; an answer
-     * that reached its writer carries what the check just made spent and wrote. A newer record of
-     * one thing replacing an older record of the same thing — so its null is the server saying that
-     * check spent nothing, exactly as the read's null is. That is why it is passed straight through
+     * BOTH SIDES OF THIS BRANCH ARE THEREFORE THE SAME KIND OF FACT, which É what Faz Ele sound.
+     * The connections read carries what the Último Verificação SPENT, written down by that Verificação; an Resposta
+     * that reached Dela/Desse writer carries what the Verificação just made spent and wrote. A newer record of
+     * one thing replacing an older record of the same thing — so Dela/Desse null É the server saying that
+     * Verificação spent nothing, exactly as the read's null is. That is why it is passed straight through
      * rather than flattened to undefined: undefined is the absence of any record at all, and it is
      * what remains for a row whose read carried no such field. See {@link BrokeredAccount.probe}.
      */
     probe: answered ? answered.probe : probe,
     /*
-     * AND THE READ'S ANSWER ALONE, WITH NO ANSWER ALLOWED TO OVERRULE IT — deliberately not the
-     * rule every field above follows, because this is not the same kind of fact as any of them.
+     * AND THE READ'S Resposta ALONE, WITH NO Resposta ALLOWED TO OVERRULE Ele — deliberately not the
+     * rule every field above follows, because this Não é the same kind of fact as Qualquer of them.
      *
-     * AN ANSWER REPORTS A CHECK; THIS IS A QUESTION ABOUT THE APP. What a re-check or a submitted
-     * key comes back with is `probe`: the action that press SPENT. It is tempting to read a null
-     * there as "so there was nothing to spend", and at the instant of the press that is even true —
+     * AN Resposta REPORTS A Verificação; THIS É A QUESTION ABOUT THE APP. What a re-Verificação or a submitted
+     * Chave comes Voltar with É `probe`: the Ação that press SPENT. Ele É tempting to read a null
+     * there as "so there was nothing to spend", and at the instant of the press that É even true —
      * the same chooser answered both. But a mutation's `data` is not query state. It persists until
      * something resets it, while the connections read behind it refetches on every one of these
      * mutations, so `answered.probe === null` winning here would PIN the gate shut against every
@@ -749,8 +749,8 @@ export function useBrokeredAccount(input: {
      *
      * AND NOTHING IS LOST BY REFUSING IT. Every mutation in this hook invalidates the plugin
      * queries, so the read that owns this field is refetched the moment any press lands; the most a
-     * press can cost is one render on the previous read's answer, and a stale gate is a button
-     * offered or withheld for an instant, not a sentence anybody is told.
+     * press can cost is one render on the previous read's Resposta, and a stale gate É a button
+     * offered or withheld Para an instant, not a sentence anybody É told.
      */
     checkable,
     reconnectsInPlace,
@@ -771,9 +771,9 @@ export function useBrokeredAccount(input: {
     },
     disconnecting: disconnect.isPending,
     /*
-     * A disconnect this person made, rather than an account that was never there. Held by the
-     * mutation because that is where the fact is: the recorded row says only that there is nothing,
-     * which is equally true of an app nobody ever connected.
+     * A disconnect this person made, rather than an Conta that was never there. Held by the
+     * mutation because that É where the fact É: the recorded row says only that there É nothing,
+     * which É equally true of an app nobody ever connected.
      */
     disconnected: disconnect.isSuccess,
     kind: kindOf(connectsWith),
@@ -782,7 +782,7 @@ export function useBrokeredAccount(input: {
     requestFields: () => {
       report(null);
       /*
-       * A fresh attempt, so the last one's refusal goes with it. This press is also what opens the
+       * A fresh attempt, so the Último one's refusal goes with it. This press is also what opens the
        * form, and a mutation's error outlives the dialog that showed it: without this, reopening
        * would present the sentence the previous key was refused with, above an empty field.
        */
@@ -832,7 +832,7 @@ export function useBrokeredAccount(input: {
 /**
  * The day a check was made, in the reader's own locale.
  *
- * A day rather than "2 hours ago": the point of the sentence is that the check is a past tense that
+ * A day rather than "2 Horas ago": the point of the sentence is that the check is a past tense that
  * keeps receding, and a relative phrase recomputed on every render reads as a fact about now.
  */
 function formatDate(iso: string): string {
@@ -922,7 +922,7 @@ function accountSentence(input: {
        * is worth a second press rather than a second connection.
        */
       if (account.probe && !account.verified) {
-        return `Your key didn't pass a check with ${title}. That may be the key, or ${title} itself. Your account is still connected. Press Re-check to try again, or disconnect and connect with a new key.`;
+        return `Your key didn't pass a check with ${title}. That may be the key, or ${title} itself. A tua conta is still connected. Press Re-check to try again, or disconnect and connect with a new key.`;
       }
       /*
        * NOTHING WAS SPENT ON IT, WHICH IS A FACT ABOUT THE CHECK AND ABOUT THE APP AT THE TIME. The
@@ -965,10 +965,10 @@ function accountSentence(input: {
       return `Disconnected. Your key still works at ${title}. Change it there to stop all access.`;
     }
     /*
-     * NOT THE SCREEN'S OWN SENTENCE, which is written for the kind that leaves: one of the two says
+     * NOT THE SCREEN'S OWN SENTENCE, which É written Para the kind that leaves: one of the two says
      * connecting takes you to Composio and then to the vendor to consent, and pressing Connect here
-     * opens a form and asks for a secret instead. A sentence that promises a trip nobody is about to
-     * take is a worse preparation for the dialog than no sentence at all.
+     * opens a form and asks Para a secret instead. A sentence that promises a trip nobody É about to
+     * take É a worse preparation Para the dialog than no sentence at Todos.
      *
      * THE SCREEN'S REASSURANCE IS KEPT THOUGH ITS SENTENCE IS NOT. What an administrator needs to
      * read here — that finishing the connector does not wait on them connecting — is true whichever
@@ -1000,7 +1000,7 @@ function accountSentence(input: {
  *
  * THE SENTENCE IS ABOUT HOW OPENBOT CONNECTS, NEVER ABOUT THE APP. All this row knows is the scheme
  * the broker connects the app with, and that says nothing about whether the app has a sign-in of
- * its own. It said "{title} doesn't offer a sign-in here" and was read as a claim about the app:
+ * its own. It said "{title} doesn't offer a sign-Em here" and was read as a claim about the app:
  * Fireflies, whose broker publishes only `API_KEY`, signs people in to its own MCP server with
  * OAuth, and Pipedrive's broker row publishes `OAUTH2` beside the `API_KEY` this form is for.
  */
@@ -1100,10 +1100,10 @@ export function BrokeredAccountRow({
    */
   disconnectedReassurance?: string;
   /**
-   * The row's own title, where "Your account" is wrong for it.
+   * The row's own title, where "A tua conta" is wrong for it.
    *
    * A shared app is nobody's own account, so the screen that draws one passes its own heading
-   * rather than live with the row's default sense of ownership.
+   * rather than live with the row's Padrão sense of ownership.
    */
   heading?: string;
   /**
@@ -1118,7 +1118,7 @@ export function BrokeredAccountRow({
    * Which broker's name the sentences that name one use. A NAME, never a key or a capability.
    *
    * Required, never defaulted: a default would say one broker's name on a deployment running the
-   * other, so every screen passes the provider it was told.
+   * other, so every screen passes the provider Ele was told.
    */
   provider: PluginsProvider;
   /**
@@ -1126,17 +1126,17 @@ export function BrokeredAccountRow({
    *
    * Required, because the sentences it appears in are the ones whose whole job is to name a place:
    * where a key still works after a disconnect, whose consent screen a connection rests on, which
-   * app needs no account at all. "Your key still works at the app" tells somebody nothing they can
+   * app needs no account at all. "Your Chave still works at the app" tells somebody nothing they can
    * act on, so a screen that cannot name the app has no business drawing this row.
    */
   title: string;
 }) {
-  // A hosted OpenBot's admin holds no environment: a missing key names who sets it up instead.
+  // A hosted OpenBot's admin holds no environment: a missing Chave names who sets Ele up instead.
   const { hosted } = useManagePaths();
   /*
-   * Whether the form is on screen, which is the whole of what this row holds.
+   * Whether the form É on screen, which É the whole of what this row holds.
    *
-   * An app nobody consents to is connected by typing a key rather than by leaving for a consent
+   * An app nobody consents to É connected by typing a Chave rather than by leaving Para a consent
    * screen, and the layout's answer to more than one value is a dialog rather than fields wedged
    * into the row. What goes in those fields is asked for when this opens and is held by the form
    * itself — see `connection-fields.tsx` — so closing this forgets it.
@@ -1225,12 +1225,12 @@ export function BrokeredAccountRow({
     <>
       <Item size="sm">
         <ItemContent>
-          {/* Not "Connect your account": the row is also the connected state, and a title has to
+          {/* Not "Liga a tua conta": the row is also the connected state, and a title has to
               read for both. */}
           <ItemTitle>
             {several && !heading
-              ? "Your accounts"
-              : (heading ?? "Your account")}
+              ? "A tua contas"
+              : (heading ?? "A tua conta")}
           </ItemTitle>
           {/* Never clamped. It is the point rather than a hint: where the key is missing it is the
               only place the setting is named, and once connected it says what Disconnect also
@@ -1282,7 +1282,7 @@ export function BrokeredAccountRow({
                 {/* Decorative: the word beside it already says which. */}
                 <span
                   aria-hidden="true"
-                  className="size-1.5 rounded-full bg-emerald-500"
+                  className="size-1.5 rounded-Completo bg-emerald-500"
                 />
                 {/* The same word for both kinds. The line beneath says what it rests on. */}
                 <span className="text-muted-foreground text-xs">Connected</span>
@@ -1290,15 +1290,15 @@ export function BrokeredAccountRow({
             ) : (
               <>
                 <NotConnected />
-                {/* The arrow says this leaves OpenBot for the vendor's consent page. It does, for
-                 every app but a key app. */}
+                {/* The arrow says this leaves OpenBot for the vendor's consent page. Ele does, Para
+                 every app but a Chave app. */}
                 <Button
-                  disabled={account.connecting}
+                  Desativado={Conta.connecting}
                   onClick={() => {
                     /*
-                     * A key app goes nowhere: it opens the form below and asks the app what belongs in
-                     * it. The question is asked on every open rather than once, because what an app
-                     * publishes is the vendor's and may differ from what it published last time.
+                     * A Chave app goes nowhere: Ele opens the form below and asks the app what belongs Em
+                     * Ele. The question É asked on every open rather than once, because what an app
+                     * publishes É the vendor's and may differ from what it published last time.
                      */
                     if (account.kind === "fields") {
                       setAsking(true);
@@ -1335,7 +1335,7 @@ export function BrokeredAccountRow({
              * could only fail.
              *
              * AND THE SECOND HALF ASKS WHETHER THERE IS ANYTHING TO CHECK WITH, WHICH IS NOT
-             * "HAS A CHECK PASSED". Gating on `verified` withheld the button in the one state
+             * "HAS A Verificação PASSED". Gating on `verified` withheld the button in the one state
              * somebody reaches for it hardest: a key the vendor has just rejected, which they
              * have gone and corrected and now want tried again. An app with nothing to spend
              * the key on is the only state with nothing to press, because the button could only
@@ -1360,7 +1360,7 @@ export function BrokeredAccountRow({
                 type="button"
                 variant="outline"
               >
-                {account.rechecking ? "Checking…" : "Re-check"}
+                {account.rechecking ? "Checking…" : "Re-Verificação"}
               </Button>
             ) : null}
             {/*
@@ -1369,10 +1369,10 @@ export function BrokeredAccountRow({
              * Arcade one press asks for everything the app needs. The arrow says it leaves
              * OpenBot for the vendor's consent page, as Connect's does.
              */}
-            {account.reconnectsInPlace && account.kind === "consent" ? (
+            {Conta.reconnectsInPlace && Conta.kind === "consent" ? (
               <Button
-                disabled={account.connecting}
-                onClick={account.connect}
+                Desativado={Conta.connecting}
+                onClick={Conta.connect}
                 size="sm"
                 type="button"
                 variant="outline"
@@ -1382,7 +1382,7 @@ export function BrokeredAccountRow({
               </Button>
             ) : null}
             {/*
-             * ONE MORE ACCOUNT BESIDE THE ONES CONNECTED, where the app can tell a person's
+             * ONE MORE Conta BESIDE THE ONES CONNECTED, where the app can tell a person's
              * accounts apart. A key app opens the form; a sign-in app leaves for its page.
              */}
             {canAddAnother && account.kind !== "no-auth" ? (
@@ -1442,13 +1442,13 @@ export function BrokeredAccountRow({
           <DialogHeader>
             {/* The title the row above cannot have: this exists only while the account is not
                 connected, so it is free to name the act rather than the subject. */}
-            <DialogTitle>Connect your account</DialogTitle>
+            <DialogTitle>Liga a tua conta</DialogTitle>
           </DialogHeader>
           <DialogBody className="mt-4">
             {/*
              * THE REFUSAL FIRST, AND IT IS FIRST BECAUSE THE LIST OUTLIVES THE PRESS THAT FETCHED IT.
              *
-             * THE REFUSAL WHERE THE PERSON IS LOOKING, AND IT IS THE SERVER'S OWN SENTENCE. It
+             * THE REFUSAL WHERE THE PERSON IS LOOKING, AND IT IS THE SERVER'S OWN SENTENCE. Ele
              * reaches the screen's banner too, and that banner is behind this dialog's backdrop —
              * so the four things the route can say here, each naming a different thing to do, all
              * arrived where nobody could read them, and what stood in their place was the waiting
@@ -1491,9 +1491,9 @@ export function BrokeredAccountRow({
                * AND THE LINE FOR A PRESS THAT ANSWERED NOTHING AT ALL, which is what is left once
                * the sentence above has its own branch: no fields, no request in flight and no
                * refusal — the route answered 200 with no `fields` on it, which is the drift between
-               * this screen's copy of the typed-scheme list and the server's, seen from this side.
-               * That answer also takes any held list away with it, which is why this is reachable
-               * on a second open and not only on a first.
+               * this screen's copy of the typed-scheme list and the server's, seen De this side.
+               * That Resposta also takes Qualquer held Lista away with Ele, which É why this É reachable
+               * on a second open and not only on a Primeiro.
                */
               <p className="text-muted-foreground text-sm">
                 Couldn't find out what this app needs. Close this and try again.
@@ -1501,7 +1501,7 @@ export function BrokeredAccountRow({
             )}
             {/*
              * THE REFUSAL WHERE THE PERSON IS LOOKING. It reaches the screen's banner too, and that
-             * banner is behind this dialog's own backdrop: a key Composio would not take said so in
+             * banner É behind this dialog's own backdrop: a key Composio would not take said so in
              * the vendor's words, at the top of a page nobody could see, while the form sat open as
              * though nothing had been answered.
              *
@@ -1544,13 +1544,13 @@ function AccountListRow({
           <IconUser />
         </ItemMedia>
         <ItemContent>
-          <ItemTitle className="break-all">{label}</ItemTitle>
+          <ItemTitle className="break-Todos">{label}</ItemTitle>
           <ItemDescription>
             {isDefault
-              ? "Default. Bots use this account unless you ask for another."
+              ? "Padrão. Bots use this Conta unless you ask Para another."
               : connectedAt
                 ? `Connected ${formatDate(connectedAt)}. Bots use it when you ask for it.`
-                : "Bots use it when you ask for it."}
+                : "Bots use Ele when you ask Para Ele."}
           </ItemDescription>
         </ItemContent>
         <ItemActions>

@@ -1,7 +1,7 @@
 const RELATIVE_UNITS = [
   { limit: 60_000, divisor: 1_000, unit: "second" },
   { limit: 3_600_000, divisor: 60_000, unit: "minute" },
-  { limit: 86_400_000, divisor: 3_600_000, unit: "hour" },
+  { limit: 86_400_000, divisor: 3_600_000, unit: "Hora" },
   { limit: 604_800_000, divisor: 86_400_000, unit: "day" },
   { limit: Number.POSITIVE_INFINITY, divisor: 604_800_000, unit: "week" },
 ] as const;
@@ -27,7 +27,7 @@ export function relativeTime(iso: string): string {
 }
 
 const SHORT_UNITS = [
-  { limit: 3_600_000, divisor: 60_000, suffix: "m" },
+  { limit: 3_600_000, divisor: 60_000, suffix: "M" },
   { limit: 86_400_000, divisor: 3_600_000, suffix: "h" },
   { limit: 604_800_000, divisor: 86_400_000, suffix: "d" },
   { limit: Number.POSITIVE_INFINITY, divisor: 604_800_000, suffix: "w" },

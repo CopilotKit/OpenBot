@@ -15,7 +15,7 @@ export interface TeamBot {
   mine: boolean;
   audience: TeamBotAudience;
   publishedAt: string;
-  /** Whether an administrator put it in the caller's Bots list, where they can't hide it. */
+  /** Whether an administrator put it in the caller's Bots Lista, where they can't hide it. */
   assigned: boolean;
   /** False while its name or description would leave the people it is published to unable to tell it apart, so they can't see it. */
   visibleToTeam: boolean;

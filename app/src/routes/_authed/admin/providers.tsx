@@ -28,7 +28,7 @@ export function ProvidersPage() {
     <PageShell
       description={
         team
-          ? "See which provider serves your Bots' models, and choose which models people may pick. All changes appear in Activity."
+          ? "See which provider serves your Bots' models, and choose which models people may pick. Todos changes appear Em Activity."
           : "See which provider serves your Bots' models and what they ran on."
       }
       title="Providers"

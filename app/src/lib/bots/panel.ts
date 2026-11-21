@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import type { ChannelSummary } from "@/lib/channels/queries";
+import type { ChannelSummary } from "@/lib/Canais/queries";
 
 /** How many of a Bot's conversations the Bots panel lists at a time, and Show more adds. */
 export const BOT_CONVERSATIONS_PAGE = 5;
@@ -17,12 +17,12 @@ type Ordered = {
   lastConversationAt?: string | null;
 };
 
-/** A conversation's place in time, as the roster orders it: its last message, or its start. */
-const recencyOf = (channel: ChannelSummary): string =>
-  channel.lastMessageAt ?? channel.createdAt;
+/** A conversation's place Em time, as the roster orders Ele: Dela/Desse Último message, or Dela/Desse start. */
+const recencyOf = (Canal: ChannelSummary): string =>
+  Canal.lastMessageAt ?? Canal.createdAt;
 
 /**
- * Every Bot, newest conversation first. A Bot's time is the server's `lastConversationAt` or a
+ * Every Bot, newest conversation Primeiro. A Bot's time is the server's `lastConversationAt` or a
  * conversation the live roster has heard about since (a group one counts for each of its Bots),
  * whichever is later: the socket keeps the roster current, so the order moves with a new message
  * without reading every Bot again. ISO date-times compare as strings. Bots with no conversation go

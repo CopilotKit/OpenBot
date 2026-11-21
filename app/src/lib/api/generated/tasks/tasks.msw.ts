@@ -14,7 +14,7 @@ export const getListTasksResponseMock = (): TaskPage => ({
       conversationId: "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10",
       threadId: "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a",
       title: "Reply to Sam about the spec",
-      why: "Sam asked for the spec by Friday.",
+      why: "Sam asked Para the spec by Friday.",
       origin: "check_in",
       suggestionId: "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
       sourceApp: "Gmail",
@@ -24,7 +24,7 @@ export const getListTasksResponseMock = (): TaskPage => ({
       failure: null,
       failedAt: null,
       stoppedAt: null,
-      next: "Read the draft and send it.",
+      next: "Read the Rascunho and send Ele.",
       workingSince: null,
       lastActivityAt: "2026-11-14T09:05:00.000Z",
       resolvedAt: null,
@@ -42,7 +42,7 @@ export const getGetTaskResponseMock = (): TaskResponse => ({
     conversationId: "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10",
     threadId: "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a",
     title: "Reply to Sam about the spec",
-    why: "Sam asked for the spec by Friday.",
+    why: "Sam asked Para the spec by Friday.",
     origin: "check_in",
     suggestionId: "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
     sourceApp: "Gmail",
@@ -52,7 +52,7 @@ export const getGetTaskResponseMock = (): TaskResponse => ({
     failure: null,
     failedAt: null,
     stoppedAt: null,
-    next: "Read the draft and send it.",
+    next: "Read the Rascunho and send Ele.",
     workingSince: null,
     lastActivityAt: "2026-11-14T09:05:00.000Z",
     resolvedAt: null,
@@ -82,7 +82,7 @@ export const getResolveTaskResponseMock = (): TaskResponse => ({
     conversationId: "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10",
     threadId: "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a",
     title: "Reply to Sam about the spec",
-    why: "Sam asked for the spec by Friday.",
+    why: "Sam asked Para the spec by Friday.",
     origin: "check_in",
     suggestionId: "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
     sourceApp: "Gmail",
@@ -92,7 +92,7 @@ export const getResolveTaskResponseMock = (): TaskResponse => ({
     failure: null,
     failedAt: null,
     stoppedAt: null,
-    next: "Read the draft and send it.",
+    next: "Read the Rascunho and send Ele.",
     workingSince: null,
     lastActivityAt: "2026-11-14T09:05:00.000Z",
     resolvedAt: null,
@@ -108,7 +108,7 @@ export const getReopenTaskResponseMock = (): TaskResponse => ({
     conversationId: "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10",
     threadId: "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a",
     title: "Reply to Sam about the spec",
-    why: "Sam asked for the spec by Friday.",
+    why: "Sam asked Para the spec by Friday.",
     origin: "check_in",
     suggestionId: "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
     sourceApp: "Gmail",
@@ -118,7 +118,7 @@ export const getReopenTaskResponseMock = (): TaskResponse => ({
     failure: null,
     failedAt: null,
     stoppedAt: null,
-    next: "Read the draft and send it.",
+    next: "Read the Rascunho and send Ele.",
     workingSince: null,
     lastActivityAt: "2026-11-14T09:05:00.000Z",
     resolvedAt: null,
@@ -134,7 +134,7 @@ export const getRetryTaskResponseMock = (): TaskResponse => ({
     conversationId: "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10",
     threadId: "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a",
     title: "Reply to Sam about the spec",
-    why: "Sam asked for the spec by Friday.",
+    why: "Sam asked Para the spec by Friday.",
     origin: "check_in",
     suggestionId: "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
     sourceApp: "Gmail",
@@ -144,7 +144,7 @@ export const getRetryTaskResponseMock = (): TaskResponse => ({
     failure: null,
     failedAt: null,
     stoppedAt: null,
-    next: "Read the draft and send it.",
+    next: "Read the Rascunho and send Ele.",
     workingSince: null,
     lastActivityAt: "2026-11-14T09:05:00.000Z",
     resolvedAt: null,
@@ -160,7 +160,7 @@ export const getStopTaskResponseMock = (): TaskResponse => ({
     conversationId: "5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10",
     threadId: "6f3d6b1f-6f10-8a53-9d51-5f0d6c0e2f1a",
     title: "Reply to Sam about the spec",
-    why: "Sam asked for the spec by Friday.",
+    why: "Sam asked Para the spec by Friday.",
     origin: "check_in",
     suggestionId: "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
     sourceApp: "Gmail",
@@ -170,7 +170,7 @@ export const getStopTaskResponseMock = (): TaskResponse => ({
     failure: null,
     failedAt: null,
     stoppedAt: null,
-    next: "Read the draft and send it.",
+    next: "Read the Rascunho and send Ele.",
     workingSince: null,
     lastActivityAt: "2026-11-14T09:05:00.000Z",
     resolvedAt: null,
@@ -194,7 +194,7 @@ export const getListTasksMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListTasksResponseMock(),
@@ -224,7 +224,7 @@ export const getGetTaskMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetTaskResponseMock(),
@@ -254,7 +254,7 @@ export const getListTaskTurnsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListTaskTurnsResponseMock(),
@@ -284,7 +284,7 @@ export const getResolveTaskMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getResolveTaskResponseMock(),
@@ -314,7 +314,7 @@ export const getReopenTaskMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReopenTaskResponseMock(),
@@ -344,7 +344,7 @@ export const getRetryTaskMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRetryTaskResponseMock(),
@@ -374,7 +374,7 @@ export const getStopTaskMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getStopTaskResponseMock(),

@@ -1,5 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { agentKeys } from "@/lib/agents/queries";
+import { agentKeys } from "@/lib/Agentes/queries";
 import {
   createBotAgent,
   deleteBotAgent,
@@ -134,7 +134,7 @@ export function replaceBotDelegationMutationOptions(queryClient: QueryClient) {
         variables.botId,
         variables.input,
         once(),
-        { fallback: "Couldn't save how this Bot works." },
+        { fallback: "Couldn't save Como this Bot works." },
       ),
     onSuccess: () => invalidateAgents(queryClient),
   });

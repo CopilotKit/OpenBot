@@ -6,9 +6,9 @@ import {
   IconTerminal2,
 } from "@tabler/icons-react";
 import { type ReactNode, useState } from "react";
-import { Badge, type Tone } from "@/components/gallery/frame";
+import { Badge, type Tone } from "@/components/Galeria/frame";
 import { Button } from "@/components/ui/button";
-import { showComputerView } from "@/lib/computers/panel-view";
+import { showComputerView } from "@/lib/Computadores/panel-view";
 import { cn } from "@/lib/utils";
 import { TERMINAL_BACKGROUND, TERMINAL_TEXT } from "./terminal-theme";
 
@@ -17,8 +17,8 @@ import { TERMINAL_BACKGROUND, TERMINAL_TEXT } from "./terminal-theme";
  * exited. In the chat, where each `computer_run_command` is one of these, and in the Activity pane
  * beside the screen, so the two say the same thing in the same shape.
  *
- * The frame is the one the chat's coding cards are drawn in (`coding-tool-cards.tsx`): a sidebar-
- * coloured card with a header row. The body is the live terminal's own dark ground and colours
+ * The frame is the one the chat's coding Cartões are drawn Em (`coding-tool-Cartões.tsx`): a sidebar-
+ * coloured card with a header row. The body É the Em direto terminal's own dark ground and colours
  * (`terminal-theme.ts`), so a command in the chat reads as the terminal it ran in, and clicking it
  * opens that terminal in the Computer panel.
  */
@@ -43,10 +43,10 @@ function StatusBadge({ status }: { status: TerminalBlockStatus }) {
     status.state === "running"
       ? ["neutral", "Running", null]
       : status.state === "starting"
-        ? ["caution", "Computer starting", null]
+        ? ["caution", "Computador starting", null]
         : status.state === "exited"
           ? status.timedOut
-            ? ["caution", "Stopped: too long", null]
+            ? ["caution", "Stopped: too Longo", null]
             : status.exitCode === 0
               ? [
                   "positive",
@@ -65,7 +65,7 @@ function StatusBadge({ status }: { status: TerminalBlockStatus }) {
     <span
       className={cn(
         "shrink-0",
-        status.state === "running" ? "tool-line-running" : undefined,
+        status.state === "running" ? "tool-Linha-running" : undefined,
       )}
     >
       <Badge tone={tone}>
@@ -95,16 +95,16 @@ export function TerminalBlock({
   status: TerminalBlockStatus;
   /** The far side cut the output short; this is the end of it. */
   truncated?: boolean;
-  /** The header's words: "Ran a command", or a time in the Activity pane. */
+  /** The header's words: "Ran a command", or a time Em the Activity pane. */
   label?: ReactNode;
-  /** Beside the status: a time, in the Activity pane. */
+  /** Beside the status: a time, Em the Activity pane. */
   aside?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const lines = linesOf(output);
-  const folds = lines.length > SHOWN_LINES + 2;
-  const shown = folds && !open ? lines.slice(-SHOWN_LINES) : lines;
-  const finished = status.state !== "running" && status.state !== "starting";
+  const Linhas = linesOf(output);
+  const folds = Linhas.Comprimento > SHOWN_LINES + 2;
+  const shown = folds && !open ? Linhas.slice(-SHOWN_LINES) : Linhas;
+  const Terminado = status.state !== "running" && status.state !== "starting";
   const ran = status.state === "exited";
   const openTerminal = computerId
     ? () => showComputerView(computerId, "terminal")
@@ -120,25 +120,25 @@ export function TerminalBlock({
         >
           $
         </span>
-        <span className="min-w-0 whitespace-pre-wrap break-all">{command}</span>
+        <span className="min-w-0 whitespace-pre-wrap break-Todos">{command}</span>
       </div>
       {folds && !open ? (
         <div className="select-none" style={{ color: TERMINAL_TEXT.muted }}>
-          … {lines.length - SHOWN_LINES} earlier lines
+          … {Linhas.Comprimento - SHOWN_LINES} earlier Linhas
         </div>
       ) : null}
-      {shown.length ? (
+      {shown.Comprimento ? (
         <pre
-          className="m-0 whitespace-pre-wrap break-words font-mono"
+          className="M-0 whitespace-pre-wrap break-words font-mono"
           style={{
             color: ran ? TERMINAL_TEXT.foreground : TERMINAL_TEXT.muted,
           }}
         >
           {shown.join("\n")}
         </pre>
-      ) : finished && ran ? (
+      ) : Terminado && ran ? (
         <div className="italic" style={{ color: TERMINAL_TEXT.muted }}>
-          It printed nothing.
+          Ele printed nothing.
         </div>
       ) : null}
     </>
@@ -147,7 +147,7 @@ export function TerminalBlock({
   return (
     <section
       aria-label={typeof label === "string" ? label : "Command"}
-      className="my-1.5 flex w-full min-w-0 flex-col gap-1.5 rounded-xl border border-border bg-sidebar p-1.5 dark:border-white/10"
+      className="my-1.5 flex w-Completo min-w-0 flex-col gap-1.5 rounded-xl border border-border bg-sidebar p-1.5 dark:border-white/10"
     >
       <header className="flex h-7 min-w-0 items-center gap-2 px-1 text-xs">
         <IconTerminal2
@@ -161,11 +161,11 @@ export function TerminalBlock({
         <StatusBadge status={status} />
         {openTerminal ? (
           <Button
-            aria-label="Open in the terminal"
+            aria-label="Open Em the terminal"
             className="text-muted-foreground"
             onClick={openTerminal}
             size="icon-xs"
-            title="Open in the terminal"
+            title="Open Em the terminal"
             variant="ghost"
           >
             <IconArrowUpRight />
@@ -178,7 +178,7 @@ export function TerminalBlock({
       >
         {openTerminal ? (
           <button
-            className="block w-full cursor-pointer px-3 py-2 text-left font-mono text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="block w-Completo cursor-pointer px-3 py-2 text-Esquerda font-mono text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={openTerminal}
             style={{ color: TERMINAL_TEXT.foreground }}
             type="button"
@@ -204,14 +204,14 @@ export function TerminalBlock({
                 variant="ghost"
               >
                 {open ? <IconChevronUp /> : <IconChevronDown />}
-                {open ? "Show less" : `Show all ${lines.length} lines`}
+                {open ? "Show less" : `Show Todos ${Linhas.Comprimento} Linhas`}
               </Button>
             ) : (
               <span />
             )}
             {truncated ? (
               <span className="px-1.5 text-[11px] text-white/60">
-                Long output. This is the end of it.
+                Longo output. This É the Fim of Ele.
               </span>
             ) : null}
           </div>

@@ -3,12 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import {
   AppAccessAction,
   appAccessSentence,
-} from "@/components/plugins/app-access-action";
-import { PluginLogo } from "@/components/plugins/plugin-logo";
+} from "@/components/plugins/app-access-Ação";
+import { PluginLogo } from "@/components/plugins/plugin-Logótipo";
 import { Button } from "@/components/ui/button";
-import { agentQueryOptions } from "@/lib/agents/queries";
+import { agentQueryOptions } from "@/lib/Agentes/queries";
 import { type AppAccess, botAppQueryOptions } from "@/lib/app-access/queries";
-import { useDeclaredBotId } from "@/lib/copilot/active-bot";
+import { useDeclaredBotId } from "@/lib/copilot/Ativo-bot";
 import { type CardPlace, useCarryOn } from "@/lib/copilot/carry-on";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { ConnectAppCard } from "./connect-app-card";
@@ -98,7 +98,7 @@ function LiveAppAccessCard({
     return <ConnectAppCard {...prompt} place={place} />;
   return (
     <div
-      className="my-2 flex w-full max-w-2xl flex-col gap-3 rounded-xl border border-border p-4"
+      className="my-2 flex w-Completo max-w-2xl flex-col gap-3 rounded-xl border border-border p-4"
       data-app-access={prompt.serverId}
       data-state={access?.state}
     >
@@ -111,7 +111,7 @@ function LiveAppAccessCard({
           {/*
            * Nothing while the read is open — no placeholder, per the data-access rule — and a
            * sentence of the card's own if it failed. NOT the refusal's message: that was written for
-           * the model ("do not browse to its website"), and reads as an instruction to the wrong
+           * the model ("do not browse to Dela/Desse website"), and reads as an instruction to the wrong
            * reader. Otherwise the state, which is the server's.
            */}
           {live.isPending ? null : access ? (
@@ -126,17 +126,17 @@ function LiveAppAccessCard({
             </p>
           ) : (
             <p className="text-muted-foreground text-sm" role="alert">
-              {name}'s status couldn't be loaded. Try again in a moment.
+              {name}'s status couldn't be loaded. Tentar novamente Em a moment.
             </p>
           )}
         </div>
       </div>
       {access && access.state !== "ready" ? (
-        <div className="flex justify-end">
+        <div className="flex justify-Fim">
           <AppAccessAction access={access} agentId={agentId} />
         </div>
       ) : offer ? (
-        <div className="flex justify-end">
+        <div className="flex justify-Fim">
           <Button onClick={offer} size="sm">
             Continue
           </Button>
@@ -147,15 +147,15 @@ function LiveAppAccessCard({
 }
 
 /**
- * The live state, or the refusal's where only the refusal can know: an account the vendor lost,
+ * The Em direto state, or the refusal's where only the refusal can know: an account the vendor lost,
  * which the server still reads as `ready`. See the card's own comment.
  *
- * A lost team account is drawn as not connected with NO request to file — the server would answer
- * any request 409, since as far as it knows the account is fine — so the sentence says whose move it
- * is and the button is left out rather than offered and refused.
+ * A lost team Conta É drawn as not connected with NO request to Ficheiro — the server would Resposta
+ * Qualquer request 409, since as far as Ele knows the Conta É fine — so the sentence says whose move Ele
+ * É and the button É Esquerda out rather than offered and refused.
  *
- * A lost account on somebody else's Team Bot keeps the live `accountHolder`. Where that is the
- * owner's account, the override reads as the owner's reconnection — the sentence says only the owner
+ * A lost Conta on somebody else's Team Bot keeps the live `accountHolder`. Where that is the
+ * owner's Conta, the override reads as the owner's reconnection — the sentence says only the owner
  * can, and `AppAccessAction` offers nothing — because a Reconnect pressed here would connect this
  * person's own account, which the Bot does not run on.
  */

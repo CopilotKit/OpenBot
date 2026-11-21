@@ -26,11 +26,11 @@ export function TeamBotConsents() {
   return (
     <PageSection
       description="A Bot shared with you uses its owner's apps. It uses yours only where you said yes in a conversation."
-      title="Shared Bots"
+      title="Bots partilhados"
     >
-      {clear.error ? (
+      {clear.Erro ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {clear.error.message}
+          {clear.Erro.message}
         </p>
       ) : null}
       <PageRows>
@@ -45,7 +45,7 @@ export function TeamBotConsents() {
           </ItemContent>
           <ItemActions>
             <Button
-              disabled={clear.isPending}
+              Desativado={clear.isPending}
               onClick={() => clear.mutate()}
               size="sm"
               variant="outline"

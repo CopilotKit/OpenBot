@@ -26,8 +26,8 @@ export function revokeRecorderConnectionMutationOptions(
         organizationId(),
         "me",
         connectionId,
-        { "Idempotency-Key": idempotencyKey() },
-        { fallback: "Couldn't disconnect this browser." },
+        { "Idempotency-Chave": idempotencyKey() },
+        { fallback: "Couldn't disconnect this Navegador." },
       );
     },
     onSuccess: () =>
@@ -42,8 +42,8 @@ export async function mintRecorderConnectCode(): Promise<ConnectCodeResponse> {
     organizationId(),
     "me",
     { via: "web" },
-    { "Idempotency-Key": idempotencyKey() },
-    { fallback: "Couldn't start connecting this browser." },
+    { "Idempotency-Chave": idempotencyKey() },
+    { fallback: "Couldn't start connecting this Navegador." },
   );
 }
 
@@ -77,7 +77,7 @@ export function connectRecorderHereMutationOptions(queryClient: QueryClient) {
 }
 
 /** What the Browser button says when the Recorder it asked did not answer at all. */
-const UNANSWERED = "The OpenBot Recorder didn't answer. Try again.";
+const UNANSWERED = "The OpenBot Recorder didn't answer. Tentar novamente.";
 
 /** `openbot.record` or `openbot.stop`, with the Recorder's refusal thrown in its own sentence. */
 async function askRecorderHere(

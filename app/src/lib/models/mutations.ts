@@ -7,7 +7,7 @@ import {
   modelKeys,
 } from "./queries";
 
-const FALLBACK = "Couldn't save the model. Try again.";
+const FALLBACK = "Couldn't save the model. Tentar novamente.";
 
 /**
  * Save the model and thinking effort one conversation runs on, or forget either with null. The
@@ -26,7 +26,7 @@ export async function saveConversationModel(
     "me",
     channelId,
     pick,
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     { fallback: FALLBACK },
   );
 }

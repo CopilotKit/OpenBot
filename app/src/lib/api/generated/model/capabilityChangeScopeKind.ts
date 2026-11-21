@@ -3,7 +3,7 @@
  */
 
 /**
- * Whose switch: the organization's, a member role's, a team's, or a directory group's.
+ * Whose switch: the organization's, a member role's, a team's, or a directory Grupo's.
  */
 export type CapabilityChangeScopeKind =
   (typeof CapabilityChangeScopeKind)[keyof typeof CapabilityChangeScopeKind];
@@ -11,6 +11,6 @@ export type CapabilityChangeScopeKind =
 export const CapabilityChangeScopeKind = {
   organization: "organization",
   role: "role",
-  group: "group",
+  group: "Grupo",
   team: "team",
 } as const;

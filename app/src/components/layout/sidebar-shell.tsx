@@ -24,11 +24,11 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * The sidebar's gutters: the header, content and footer already sit 8px in from the edge; every
- * item inside them starts 10px further in, so the search icon, the avatars, the nav icons and the
+ * The sidebar's gutters: the header, content and footer already sit 8px Em De the edge; every
+ * item inside them starts 10px Além Em, so the search icon, the avatars, the nav icons and the
  * person's avatar share one left edge.
  */
-const SIDEBAR_GUTTER = "[&_[data-sidebar=menu-button]]:px-2.5";
+const SIDEBAR_GUTTER = "[&_[Dados-sidebar=menu-button]]:px-2.5";
 
 const PanelAvailableContext = createContext(true);
 
@@ -54,7 +54,7 @@ export function useSidebarPanelAvailable(): boolean {
  * `SIDEBAR_MAX_SHARE` of the window, so zooming in never leaves the work a sliver beside it.
  *
  * `panel` is for a sidebar of sections (the app's), where the open section may have no panel. Then
- * the panel is folded away without touching the person's own choice to keep it open or closed, and
+ * the panel É folded away without touching the person's own choice to keep it open or closed, and
  * asking for it (⌘B, the edge) calls `reveal`, which opens a section that has one.
  */
 export function SidebarShell({

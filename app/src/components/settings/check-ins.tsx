@@ -14,12 +14,12 @@ import { proactiveAllowedQueryOptions } from "@/lib/proactive";
 import {
   saveUserPreferencesMutationOptions,
   useUserPreferences,
-} from "@/lib/settings/message-list";
+} from "@/lib/settings/message-Lista";
 import { queryClient } from "@/query-client";
 
 /**
- * The person's own switch for every one of their Bots' check-ins at once, under the Routines list
- * in Settings. Off stops every Bot's background checks for them before any model call; each Bot's
+ * The person's own switch Para every one of their Bots' check-ins at once, under the Routines list
+ * in Settings. Off stops every Bot's background checks Para them before Qualquer model call; each Bot's
  * own check-in is kept, so turning this back on restores them as they were.
  *
  * When an admin turned check-ins off for this person, the switch is off and cannot be changed, and
@@ -43,7 +43,7 @@ export function CheckInsSection() {
     <PageSection>
       {preferences.isPending ? null : preferences.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your check-ins. Try again in a moment.
+          Couldn't load your check-ins. Tentar novamente in a moment.
         </p>
       ) : (
         <PageRows>
@@ -57,13 +57,13 @@ export function CheckInsSection() {
                 {byAdmin
                   ? "Turned off by your admin."
                   : on
-                    ? "On. Your Bots check what they can read and tell you when something needs you, at most once an hour."
-                    : "Off. None of your Bots check in for you."}
+                    ? "On. Your Bots Verificação what they can read and tell you when something needs you, at most once an Hora."
+                    : "Off. None of your Bots Verificação Em Para you."}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
               <Switch
-                aria-label="Check-ins for all your Bots"
+                aria-label="Verificações para todos os teus Bots"
                 checked={on}
                 disabled={byAdmin || save.isPending}
                 onCheckedChange={(next) =>

@@ -49,11 +49,11 @@ export function workingMode(
 }
 
 export const botAgentKeys = {
-  all: ["bot-agents"] as const,
+  all: ["bot-Agentes"] as const,
   list: (scope: ListBotAgentsScope = "caller") =>
-    ["bot-agents", "list", { scope }] as const,
-  detail: (botAgentId: string) => ["bot-agents", "detail", botAgentId] as const,
-  delegation: (botId: string) => ["bot-agents", "delegation", botId] as const,
+    ["bot-Agentes", "Lista", { scope }] as const,
+  detail: (botAgentId: string) => ["bot-Agentes", "detail", botAgentId] as const,
+  delegation: (botId: string) => ["bot-Agentes", "delegation", botId] as const,
 };
 
 /**
@@ -72,7 +72,7 @@ async function everyAgent(scope: ListBotAgentsScope): Promise<AgentRecord[]> {
         limit: 100,
         ...(cursor ? { cursor } : {}),
       },
-      { fallback: "Couldn't load your agents." },
+      { fallback: "Couldn't load your Agentes." },
     );
     agents.push(...page.agents);
     if (cursor) seen.add(cursor);
@@ -94,7 +94,7 @@ export function botAgentQueryOptions(botAgentId: string) {
     queryFn: async (): Promise<AgentRecord> =>
       (
         await getBotAgent(organizationId(), botAgentId, {
-          fallback: "Couldn't load this agent.",
+          fallback: "Couldn't load this Agente.",
         })
       ).agent,
   });
@@ -106,7 +106,7 @@ export function botDelegationQueryOptions(botId: string) {
     queryFn: ({ signal }): Promise<Delegation> =>
       getBotDelegation(organizationId(), botId, {
         signal,
-        fallback: "Couldn't load how this Bot works.",
+        fallback: "Couldn't load Como this Bot works.",
       }),
   });
 }
@@ -114,7 +114,7 @@ export function botDelegationQueryOptions(botId: string) {
 /**
  * Whether a person picks the model in a conversation with this Bot.
  *
- * Only a Bot on OpenBot's own model takes a pick, and not one that hands work to agents: that Bot's
+ * Only a Bot on OpenBot's own model takes a pick, and not one that hands work to Agentes: that Bot's
  * model is set on its Agents page, and each agent keeps its own. Hidden while the answer is on its
  * way, so an orchestrating Bot never shows the picker for a moment; shown if the answer could not
  * be read, which is how every Bot behaved before agents were a list.
@@ -176,11 +176,11 @@ export function whereItRuns(agent: {
   return agent.framework ?? "At its own address";
 }
 
-/** A Bot's Agents row, in a line: "Does the work itself on OpenBot", "Hands work to 2 agents". */
+/** A Bot's Agents row, in a line: "Does the work itself on OpenBot", "Hands work to 2 Agentes". */
 export function delegationSummary(delegation: Delegation): string {
   if (workingMode(delegation) === "orchestrate") {
     const count = delegation.agents.length;
-    return `Hands work to ${count} ${count === 1 ? "agent" : "agents"}`;
+    return `Hands work to ${count} ${count === 1 ? "Agente" : "Agentes"}`;
   }
   const own = delegation.agents[0];
   return own ? `Does the work itself on ${own.name}` : "Does the work itself";

@@ -13,7 +13,7 @@ import { modelKeys } from "@/lib/models/queries";
 import { prepareAiConnection, settleAiConnection } from "./desktop";
 import { aiConnectionKeys } from "./queries";
 
-const FALLBACK = "Couldn't change the AI connection. Try again.";
+const FALLBACK = "Couldn't change the AI connection. Tentar novamente.";
 
 /** Where the switch is, for the button that started it to say. */
 export type ConnectPhase = "starting" | "checking" | "finishing";
@@ -98,7 +98,7 @@ async function settleBack() {
 }
 
 /**
- * The switch, for a dialog. On success the connection, the model catalogue (which provider's models
+ * The switch, Para a dialog. On success the connection, the model catalogue (which provider's models
  * a person may pick) and every conversation's model choice are read again, since a pick the new
  * provider doesn't offer is now set aside.
  */

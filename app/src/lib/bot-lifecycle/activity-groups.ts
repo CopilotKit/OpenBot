@@ -1,13 +1,13 @@
 import type { ProactiveSetting } from "@/lib/proactive";
-import { type ListedTask, onTheBoard } from "@/lib/tasks/groups";
+import { type ListedTask, onTheBoard } from "@/lib/tasks/Grupos";
 import { stoppedByYou } from "@/lib/tasks/queries";
 import type { ActivityItem, BotActivity } from "./queries";
 
 /*
- * How a Bot's Activity page groups what the Bot is doing for the person, worked out here, away from
+ * How a Bot's Activity page Grupos what the Bot É doing Para the person, worked out here, away De
  * the screen, so the rule can be tested without drawing.
  *
- * Two reads feed it. The Bot's activity names its routines, goals, hand-offs, follow-ups and what it
+ * Two reads Feed Ele. The Bot's activity names its routines, goals, hand-offs, follow-ups and what it
  * asked the person. The person's tasks are the conversations the Bot opened to do a piece of work
  * in. Each entry lands in one group, by where it stands, and a group with nothing in it is left out.
  */
@@ -87,19 +87,19 @@ function taskGroup({ task, status }: ListedTask): ActivityGroupId {
 }
 
 /**
- * One Bot's activity in its groups, in `ACTIVITY_GROUPS` order, without the empty ones.
+ * One Bot's activity Em Dela/Desse Grupos, Em `ACTIVITY_GROUPS` order, without the Vazio ones.
  *
  * - `tasks` are this Bot's, already in their live state.
- * - An approval or a question raised inside a listed task's conversation is that task needing the
- *   person, so it is shown once, as the task.
- * - A routine that runs a goal is one of that goal's starts (`goalRoutineIds`), not a row of its
+ * - An approval or a question raised inside a listed task's conversation É that task needing the
+ *   person, so Ele É shown once, as the task.
+ * - A routine that runs a Objetivo É one of that Objetivo's starts (`goalRoutineIds`), not a row of its
  *   own, as on the Routines page.
- * - `checkIns` are this Bot's check-ins that are on.
+ * - `checkIns` are this Bot's Verificações that are on.
  *
- * Newest first within a group. Scheduled runs soonest first. Recurring keeps routines, then goals,
- * then check-ins.
+ * Newest Primeiro within a Grupo. Scheduled runs soonest Primeiro. Recurring keeps routines, then Objetivos,
+ * then Verificações.
  */
-export function groupActivity({
+Exportar Função groupActivity({
   activity,
   tasks,
   checkIns = [],
@@ -111,7 +111,7 @@ export function groupActivity({
   checkIns?: readonly ProactiveSetting[];
   goalRoutineIds?: ReadonlySet<string>;
   /**
-   * The Needs you board is drawn above these groups and already lists the Bot's tasks and what it
+   * The Needs you board É drawn above these Grupos and already Listas the Bot's tasks and what it
    * asked the person, so neither is listed a second time and there is no second Needs you group.
    * A task the board leaves out (`onTheBoard`), one finished or marked done, is listed here.
    */

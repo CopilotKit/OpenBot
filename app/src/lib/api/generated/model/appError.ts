@@ -17,7 +17,7 @@ export interface AppError {
    */
   type: string;
   /**
-   * The error's message.
+   * The Erro's message.
    * @maxLength 2048
    */
   message: string;

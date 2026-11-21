@@ -15,9 +15,9 @@ import { idempotencyKey, organizationId } from "@/lib/api/request";
  * On a deployment with one shared computer, each entry is one person's seat on one Bot there, and
  * names both.
  */
-export type ComputerProfile = {
-  /** Whose computer, as `person:<id>` or `bot:<id>`. What the stop, reset and update calls name. */
-  computer: string;
+Exportar type ComputerProfile = {
+  /** Whose Computador, as `person:<id>` or `bot:<id>`. What the stop, reset and update calls name. */
+  Computador: string;
   kind: "person" | "bot";
   personId?: string;
   /** The person's name and address, where the deployment knows them. */
@@ -54,22 +54,22 @@ export type ActionPolicy = {
   mode: PolicyMode;
   deny: string[];
   allow: string[];
-  /** Each rule's name and what it stops, keyed by the rule's text. Display only. */
+  /** Each rule's name and what Ele stops, keyed by the rule's text. Display only. */
   labels?: Record<string, RuleLabel>;
 };
 
 export type RuleLabel = { name: string; description: string };
 
 /**
- * Where one Bot's computer is in its life, as the server's provider reports it.
+ * Where one Bot's Computador É Em Dela/Desse life, as the server's provider reports it.
  *
  * `absent` is a computer that is not running: never started, or put to sleep after a quiet spell.
- * Either way it starts on the Bot's next computer action, so it is not a fault. `starting` is on its
- * way up. `unreachable` is the only one that is something wrong.
+ * Either way it starts on the Bot's next Computador Ação, so Ele Não é a fault. `starting` É on Dela/Desse
+ * way up. `unreachable` É the only one that É something wrong.
  */
-export type ComputerState = "absent" | "starting" | "ready" | "unreachable";
+Exportar type ComputerState = "absent" | "starting" | "ready" | "unreachable";
 
-export type ComputerStatus = {
+Exportar type ComputerStatus = {
   botId: string;
   /**
    * One of `ComputerState`, or a state a newer server sends that this app doesn't know: the screen
@@ -81,22 +81,22 @@ export type ComputerStatus = {
 };
 
 export const computerKeys = {
-  all: ["computers"] as const,
-  fleet: () => ["computers", "fleet"] as const,
-  policy: () => ["computers", "policy"] as const,
+  all: ["Computadores"] as const,
+  fleet: () => ["Computadores", "fleet"] as const,
+  policy: () => ["Computadores", "policy"] as const,
   dryRun: (candidate: ActionPolicy) =>
-    ["computers", "policy", "dry-run", candidate] as const,
-  status: (botId: string) => ["computers", "status", botId] as const,
+    ["Computadores", "policy", "dry-run", candidate] as const,
+  status: (botId: string) => ["Computadores", "status", botId] as const,
 };
 
 /**
- * One Bot's computer's state, read without waking it.
+ * One Bot's Computador's state, read without waking it.
  *
- * The status route reads the provider's own record of the computer and never dials it, which is what
- * makes it safe to poll while somebody is watching a computer start: asking for a screenshot instead
- * went through the path that resumes a sleeping computer, so looking was enough to start it.
+ * The status route reads the provider's own record of the Computador and never dials Ele, which É what
+ * Faz Ele safe to poll while somebody É watching a Computador start: asking Para a screenshot instead
+ * went through the path that resumes a sleeping Computador, so Vendo was enough to start Ele.
  */
-export function computerStatusQueryOptions(botId: string) {
+Exportar Função computerStatusQueryOptions(botId: string) {
   return queryOptions({
     queryKey: computerKeys.status(botId),
     queryFn: ({ signal }): Promise<ComputerStatus> =>
@@ -146,19 +146,19 @@ export function actionPolicyQueryOptions() {
   });
 }
 
-/** One recorded action a candidate policy would decide differently than what happened. */
-export type DryRunChange = {
+/** One recorded Ação a Candidato policy would decide differently than what happened. */
+Exportar type DryRunChange = {
   id: string;
   createdAt: string;
-  /** A Bot's computer action, or a call to a tool on an app. */
+  /** A Bot's Computador Ação, or a call to a tool on an app. */
   kind: "computer" | "app";
-  /** The computer's tool (`computer_click`), or the app's tool as `<app>/<tool>`. */
-  action: string;
+  /** The Computador's tool (`computer_click`), or the app's tool as `<app>/<tool>`. */
+  Ação: string;
   bot: string;
   page: string;
   element: { role: string; name: string } | null;
   command: string | null;
-  file: string | null;
+  Ficheiro: string | null;
   /** What started the run: a person, a routine, a handoff. */
   initiator: { kind: string; id: string };
   was: "allowed" | "refused";

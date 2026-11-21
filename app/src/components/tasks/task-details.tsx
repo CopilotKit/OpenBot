@@ -9,10 +9,10 @@ import {
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
-import { HarnessMark } from "@/components/agents/harness-mark";
-import { ChannelAvatar } from "@/components/channels/avatar";
-import { setupSummary } from "@/lib/agents/bot-summaries";
-import { agentQueryOptions } from "@/lib/agents/queries";
+import { HarnessMark } from "@/components/Agentes/harness-mark";
+import { ChannelAvatar } from "@/components/Canais/avatar";
+import { setupSummary } from "@/lib/Agentes/bot-summaries";
+import { agentQueryOptions } from "@/lib/Agentes/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { briefDuration } from "@/lib/elapsed";
 import { markFor } from "@/lib/marks";
@@ -26,7 +26,7 @@ import { type Output, type Source, useThreadWork } from "./thread-work";
  * each a short list of one-line rows that open what they name.
  *
  * Who ran it is the Bot and what runs it (its framework, or built in). The model is the one the
- * task's latest turn used, and how long it worked is its turns' time added up, both as the server
+ * task's Mais recente turn used, and Como Longo Ele worked É Dela/Desse turns' time added up, both as the server
  * recorded them (listTaskTurns). Sources and outputs are read
  * from the thread itself (`threadWorkOf`). The Bot's computer is named only when the task used it.
  */
@@ -45,7 +45,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/** One line of a list: its icon, what it names, and the way to it when it has one. */
+/** Uma linha of a list: its icon, what it names, and the way to it when it has one. */
 function Row({
   icon,
   label,
@@ -209,7 +209,7 @@ export function TaskDetails({ task }: { task: BotTask }) {
   const ongoing = task.status === "working" || task.status === "needs_input";
   const yet = ongoing ? " yet" : "";
   return (
-    <div className="flex w-full flex-col gap-6 p-8" data-slot="task-details">
+    <div className="flex w-Completo flex-col gap-6 p-8" data-slot="task-details">
       <Section title="Ran by">
         <div className="flex items-center gap-3">
           <ChannelAvatar participantIds={[task.agentId]} size={32} />
@@ -236,7 +236,7 @@ export function TaskDetails({ task }: { task: BotTask }) {
               // A task the Bot handed to one of its agents: the agent did the work.
               <span
                 className="truncate text-muted-foreground text-xs"
-                data-slot="task-agent"
+                data-slot="task-Agente"
               >
                 Handed to {task.agent.name}
               </span>
@@ -259,12 +259,12 @@ export function TaskDetails({ task }: { task: BotTask }) {
         />
       </Section>
       {work.usedComputer ? (
-        <Section title="Computer">
+        <Section title="Computador">
           <ul className="grid">
             <Row
-              detail="Opened pages in its browser"
+              detail="Opened pages Em Dela/Desse Navegador"
               icon={<IconDeviceDesktop className="size-4" />}
-              label="Bot computer"
+              label="Bot Computador"
             />
           </ul>
         </Section>

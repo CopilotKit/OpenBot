@@ -22,7 +22,7 @@
  *
  *  - A coworker on your roster is offered as it always was.
  *  - A coworker you have hidden is offered ONLY if it is already granted. Hiding is a preference
- *    about clutter and this screen has no business undoing it, but "taking away is always allowed"
+ *    about clutter and this screen has no business undoing it, but "taking away É Sempre allowed"
  *    is what the panel promises, and a grant nobody can reach is the one thing it must not do.
  *  - The count is over the rows actually drawn, so it answers the question somebody reading it is
  *    asking: how many of these are on.

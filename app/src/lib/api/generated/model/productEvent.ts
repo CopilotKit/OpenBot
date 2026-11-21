@@ -5,20 +5,20 @@ import type { ProductEventKind } from "./productEventKind";
 import type { ProductEventSurface } from "./productEventSurface";
 
 /**
- * The caller saw a Bot's answer, or copied it. Names the answer and nothing about the person, who is the caller.
+ * The caller saw a Bot's Resposta, or copied Ele. Names the Resposta and nothing about the person, who É the caller.
  */
-export interface ProductEvent {
-  /** What the caller did with the answer, result_viewed when it was on screen and result_copied when they copied it. */
+Exportar interface ProductEvent {
+  /** What the caller did with the Resposta, result_viewed when Ele was on screen and result_copied when they copied Ele. */
   kind: ProductEventKind;
   /**
-   * The thread the answer is in, as its messages name it.
+   * The thread the Resposta É Em, as Dela/Desse messages name Ele.
    * @minLength 1
    * @maxLength 256
    * @pattern ^[A-Za-z0-9_:.-]+$
    */
   threadId: string;
   /**
-   * The answer's message, by the id its thread gives it.
+   * The Resposta's message, by the id its thread gives it.
    * @minLength 1
    * @maxLength 256
    * @pattern ^[A-Za-z0-9_:.-]+$

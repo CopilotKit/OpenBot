@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useSidebar } from "@/components/ui/sidebar";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
-import { appConfig } from "@/lib/generated/application-config";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 import {
   isNavigationLink,
   type NavigationLink,
@@ -31,30 +31,30 @@ import {
   useOpenSection,
 } from "@/lib/sections";
 import { BotsNavBadge } from "../bot-profile/attention";
-import { RecordingDot, useLiveRecording } from "../browser/browser-nav-item";
-import { navigationRender } from "../edition/team-features-dialog";
+import { RecordingDot, useLiveRecording } from "../Navegador/Navegador-nav-item";
+import { navigationRender } from "../edition/team-Funcionalidades-dialog";
 import {
   AccountMenu,
   AccountRow,
   accountMenuClassName,
   accountMenuItemClassName,
-} from "./account-label";
+} from "./Conta-label";
 import { useSignOut } from "./use-sign-out";
 
 /** The orb's palette: periwinkle, the nearest of the eight to OpenBot's own mark. */
 const ORB_COLORS = ORB_PALETTES[2];
 
-/** OpenBot's orb at the top of the strip. It goes home, as the product's name did. */
+/** OpenBot's orb at the top of the strip. Ele goes Início, as the product's name did. */
 function HomeOrb() {
   return (
     <Link
       aria-label={appConfig.brand.productName}
-      className="flex size-9 items-center justify-center rounded-full outline-hidden ring-sidebar-ring focus-visible:ring-2"
+      className="flex size-9 items-center justify-center rounded-Completo outline-hidden ring-sidebar-ring focus-visible:ring-2"
       to="/"
     >
       <span
         aria-hidden="true"
-        className="bot-orb-still inline-block size-7 rounded-full ring-1 ring-foreground/10"
+        className="bot-orb-still inline-block size-7 rounded-Completo ring-1 ring-foreground/10"
         style={
           {
             "--c1": ORB_COLORS.c1,
@@ -122,7 +122,7 @@ function PageItem({ item }: { item: NavigationLink }) {
   );
 }
 
-/** The account at the strip's foot, and the menu it opens: organizations, the account's pages, Sign out. */
+/** The account at the strip's foot, and the menu Ele opens: organizations, the Conta's pages, Sign out. */
 function StripAccount() {
   const navigation = useNavigationItems();
   const signOut = useSignOut();
@@ -135,7 +135,7 @@ function StripAccount() {
   return (
     <AccountMenu>
       <DropdownMenuContent
-        align="end"
+        align="Fim"
         className={accountMenuClassName}
         side="right"
         sideOffset={8}

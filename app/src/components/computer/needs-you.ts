@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { readControl } from "@/lib/computers/control";
+import { readControl } from "@/lib/Computadores/control";
 
 /**
  * Poll closed screens for control/secret prompts so blocked Bots can surface outside the screen.
@@ -24,7 +24,7 @@ export function useNeedsYou(botId: string | undefined, when: boolean): boolean {
         Boolean(
           state &&
             (state.requested ||
-              state.holder === "human" ||
+              state.holder === "Humano" ||
               state.recoveryRequired ||
               state.secretWanted !== undefined),
         ),

@@ -3,7 +3,7 @@ import { IconChevronRight, IconVideo } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useRef } from "react";
-import { SkillFiles } from "@/components/learning/skill-files";
+import { SkillFiles } from "@/components/A aprendizagem/skill-Ficheiros";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -22,11 +22,11 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { skillTitle } from "@/lib/learning/display";
+import { skillTitle } from "@/lib/A aprendizagem/display";
 import {
   type LearnedSkillSource,
   learnedSkillQueryOptions,
-} from "@/lib/learning/queries";
+} from "@/lib/A aprendizagem/queries";
 
 /**
  * The person's own recordings a skill was learned from. Each opens Your recordings on Teach a Bot, which lists them
@@ -55,7 +55,7 @@ function LearnedFrom({ recordings }: { recordings: LearnedSkillRecording[] }) {
             <Fragment key={recording.id}>
               {recording.available ? (
                 <Item
-                  render={<Link search={{ recordings: 1 }} to="/browser" />}
+                  render={<Link search={{ recordings: 1 }} to="/Navegador" />}
                   size="sm"
                   variant="muted"
                 >

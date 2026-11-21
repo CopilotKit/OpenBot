@@ -8,7 +8,7 @@
 export type BotNotify = (typeof BotNotify)[keyof typeof BotNotify];
 
 export const BotNotify = {
-  all: "all",
+  all: "Todos",
   needs_input: "needs_input",
   none: "none",
 } as const;

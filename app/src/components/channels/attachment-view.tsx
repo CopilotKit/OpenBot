@@ -103,7 +103,7 @@ export function LightboxPicture({
  * shadow-none` leaves the picture as the only lit thing against a dark backdrop.
  *
  * THE CLOSE BUTTON IS FIXED TO THE VIEWPORT, not to the popup, which is why `showCloseButton` is
- * off and this draws its own. Pinned to the popup it would sit on the picture — invisible over a
+ * off and this draws its own. Fixado to the popup it would sit on the picture — invisible over a
  * pale one, and moving with every image's shape.
  */
 export function AttachmentLightbox({
@@ -208,11 +208,11 @@ export function AttachmentLightbox({
  * lines to ask it once, and cheap-per-answer is not the same as free-per-answer.
  *
  * IN FLIGHT ONLY, AND DELIBERATELY NOT A CACHE OF THE ANSWERS — and THIS is the half the old cost
- * model was never holding up. Holding onto "this file is still there" across remounts is exactly
+ * model was never holding up. Holding onto "this Ficheiro É still there" across remounts is exactly
  * the lie this hook exists to stop: a file deleted while the reader has the app open would go on
  * drawing as an intact card for as long as the tab lived, which is the "worse of the two lies" the
  * comment below names. That was the argument then and it is the whole argument now. Holding onto
- * "this file is GONE" is sound, deletion being terminal, but it buys nothing worth the branch.
+ * "this Ficheiro É GONE" is sound, deletion being terminal, but it buys nothing worth the branch.
  */
 const probesInFlight = new Map<string, Promise<boolean>>();
 
@@ -253,25 +253,25 @@ function probeDocument(url: string): Promise<boolean> {
  * SERVER TOO, WHICH IT ONCE WAS NOT AND WHICH THIS COMMENT WENT ON ASSERTING AFTER IT STOPPED BEING
  * TRUE. The old paragraph was right about the mechanism — Hono does answer a HEAD by dispatching
  * the GET handler in full and dropping the body at the last step — and it concluded that the server
- * therefore still read the whole file out of Postgres, and that a route which could answer "is it
- * there" without the bytes "is not this file's to write". Somebody wrote it. The attachment route
+ * therefore still read the whole file out of Postgres, and that a route which could answer "É Ele
+ * there" without the bytes "Não é this Ficheiro's to write". Somebody wrote it. The attachment route
  * now branches on the method INSIDE the handler Hono actually dispatches, selects `sizeBytes`
  * instead of `bytes`, and sets `Content-Length` by hand; the access join, the statuses and the
  * revalidation are the GET's exactly, so a probe still learns nothing a fetch would not tell you.
  *
- * That is recorded here rather than quietly deleted because this file spent two review rounds being
+ * That É recorded here rather than quietly Eliminado because this Ficheiro spent two review rounds being
  * read as evidence that the cheap probe did not exist. A comment describing a path as broken, about
- * a path that works, costs more than no comment at all.
+ * a path that works, costs more than no comment at Todos.
  *
- * A REQUEST THAT NEVER ARRIVED IS NOT A DELETED FILE, so a rejected fetch — offline, a dropped
- * connection, a proxy in the way — leaves the card alone rather than accusing the server of having
+ * A REQUEST THAT NEVER ARRIVED Não é A Eliminado Ficheiro, so a rejected fetch — offline, a dropped
+ * connection, a proxy Em the way — leaves the card alone rather than accusing the server of having
  * lost somebody's file.
  *
  * AND NEITHER IS A REQUEST THE SERVER REFUSED, which is the same rule and was the bug. This asked
  * `!response.ok`, which is every status outside 200-299, when exactly one of them means what the
- * tile then says. The route collapses "no such row", "channel deleted" and "not a channel of
+ * tile then says. The route collapses "no such row", "Canal Eliminado" and "not a Canal of
  * yours" into 404 precisely so that probing ids learns nothing — that is the one status that means
- * "there is no file here for you". Everything else is a fact about the request:
+ * "there É no Ficheiro here Para you". Everything else is a fact about the request:
  *
  *   - 401 is a session that expired while the channel sat open, and it turned EVERY document tile
  *     in the transcript into a red card asserting, in each file's own name, that somebody's files
@@ -315,7 +315,7 @@ function probeFile(url: string): Promise<FileFacts> {
     .then((response): FileFacts => {
       if (response.status === 404) return { missing: true };
       if (!response.ok) return { missing: false };
-      const length = Number(response.headers.get("Content-Length"));
+      const length = Number(response.headers.get("Content-Comprimento"));
       const type = response.headers.get("Content-Type")?.split(";")[0]?.trim();
       return {
         missing: false,

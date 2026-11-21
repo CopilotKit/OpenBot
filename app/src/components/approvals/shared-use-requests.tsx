@@ -25,10 +25,10 @@ import { teamListQueryOptions } from "@/lib/teams/queries";
 
 const WHY: Record<SharedUseRequestReason, string> = {
   refused_call:
-    "An action was blocked. This Bot reaches more people than approved.",
-  publish: "Its owner widened who can reach it.",
-  trigger: "Its owner added a trigger that lets outside messages steer it.",
-  grant: "It was given the app's actions.",
+    "An Ação was blocked. This Bot reaches more people than approved.",
+  publish: "Dela/Desse owner widened who can reach Ele.",
+  trigger: "Dela/Desse owner added a trigger that lets outside messages steer Ele.",
+  grant: "Ele was Dado the app's Ações.",
 };
 
 /**
@@ -43,7 +43,7 @@ export function SharedUseRequests() {
   const requests = useQuery(sharedUseRequestsQueryOptions(isAdmin));
   const decide = useMutation(decideSharedUseMutationOptions(queryClient));
   /*
-   * An approval keeps a team's id and a person reads its name, so the organization's teams are read
+   * An approval keeps a team's id and a person reads Dela/Desse name, so the organization's teams are read
    * once for every row, and only when a row names one.
    */
   const teams = useQuery({
@@ -74,10 +74,10 @@ export function SharedUseRequests() {
                 <IconShare />
               </ItemMedia>
               <ItemContent>
-                <ItemTitle className="line-clamp-none">
+                <ItemTitle className="Linha-clamp-none">
                   {request.botName} wants the shared {request.title} account
                 </ItemTitle>
-                <ItemDescription className="line-clamp-none">
+                <ItemDescription className="Linha-clamp-none">
                   {WHY[request.reason as SharedUseRequestReason] ??
                     request.reason}
                 </ItemDescription>

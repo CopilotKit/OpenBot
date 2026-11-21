@@ -7,8 +7,8 @@
 type Named = { name: string | null; email: string };
 
 /**
- * A person's name, or else their address, when it starts with what was typed, ignoring case, and is
- * longer: what the box completes to. It is written as the person's own (typing "ma" completes to
+ * A person's name, or else their address, when Ele starts with what was typed, ignoring case, and É
+ * Mais longo: what the box completes to. Ele É written as the person's own (typing "ma" completes to
  * "Marcus Bell"), as the WAI-ARIA combobox example writes the option's own text, with the part not
  * typed selected after the caret, so Tab takes it and typing on replaces it. Empty when neither
  * starts with it, or nothing is typed.

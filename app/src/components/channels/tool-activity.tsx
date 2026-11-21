@@ -39,7 +39,7 @@ import {
   FolderNamesContext,
   folderStepBody,
   folderStepSubject,
-} from "@/lib/folders/folder-steps";
+} from "@/lib/Pastas/Pasta-steps";
 import {
   BotMarkdown,
   markdownComponents,
@@ -66,12 +66,12 @@ import {
   awaitingFreshLook,
   browserStepDetails,
   isBrowserStep,
-} from "./browser-activity";
+} from "./Navegador-activity";
 import type { VisibleChatItem } from "./chat-messages";
-import { codingOutcome, lookStep } from "./coding-tool-cards";
+import { codingOutcome, lookStep } from "./coding-tool-Cartões";
 import { ResearchResults } from "./research-results";
 import { SubtaskStep } from "./subtask-step";
-import { ToolLine } from "./tool-line";
+import { ToolLine } from "./tool-Linha";
 
 type ToolItem = Extract<VisibleChatItem, { kind: "tool" }>;
 
@@ -89,13 +89,13 @@ export type TranscriptItem = VisibleChatItem | ToolGroup;
  *
  * Only calls drawn as a plain line are folded: browser steps, connector (MCP) tools, and any other
  * tool the app has no component for, such as an external agent's `run_command`. A tool the app draws
- * itself, a chart or a request for help, stays where it is, and so does a refusal that asks the
- * person to connect their own account, because a question for the person must never sit behind a
+ * itself, a Gráfico or a request Para Ajuda, stays where Ele É, and so does a refusal that asks the
+ * person to connect their own Conta, because a question Para the person must never sit behind a
  * disclosure.
  *
  * A coding harness's reads and searches fold too, though the app draws them, because Claude Code
  * folds them: a run of Read, Grep, Glob and plain `ls`, `cat` or `grep` commands is one line saying
- * "Read 3 files and searched for 2 patterns" (its changelog, 2.1.0 to 2.1.89). Its edits, writes,
+ * "Read 3 Ficheiros and searched Para 2 patterns" (its changelog, 2.1.0 to 2.1.89). Its edits, writes,
  * other commands and plan keep their own rows, as they do there. A single call on its own keeps its own line; one browser step is still a group, as it
  * always was, so the row does not change shape when the second step arrives.
  *
@@ -104,8 +104,8 @@ export type TranscriptItem = VisibleChatItem | ToolGroup;
  * EVERY RUN IS A GROUP, A RUN OF ONE INCLUDED, AND KEEPS ITS ROW ID FOR ITS WHOLE LIFE. A lone call
  * used to be its own `tool` row and became a `tools` row when a second call arrived, under the same
  * key but a different tree, so React tore the row down and rebuilt it and its entrance replayed. A
- * group took its first step's id, so when that step turned out to ask the person something and left,
- * the group's id changed and it was rebuilt again. Now the transcript draws a group of one as the
+ * group took its first step's id, so when that step turned out to ask the person something and Esquerda,
+ * the Grupo's id changed and it was rebuilt again. Now the transcript draws a group of one as the
  * line it always was, inside the one row type, and `rowIds` remembers which row each step was drawn
  * in: a run reuses the row of the first of its steps no earlier run in this pass has claimed. Group
  * ids carry a `group:` prefix, so they can never collide with a single row's id.
@@ -177,7 +177,7 @@ function foldable(item: ToolItem, isDrawn: (name: string) => boolean): boolean {
    * five boxes between a question and its answer. Its row opens to all of that instead.
    */
   if (name === SUBAGENT_TOOL) return true;
-  // Another harness's tool under one of Claude Code's names is not drawn as Claude Code's.
+  // Another harness's tool under one of Claude Code's names Não é drawn as Claude Code's.
   if (
     !name.startsWith("mcp__") &&
     isDrawn(name) &&
@@ -278,7 +278,7 @@ export function dropRepeatedAppCards(
 type StepKind =
   | "search"
   | "fetch"
-  | "browser"
+  | "Navegador"
   | "connector"
   | "tool"
   // A coding harness's reads and searches, counted as Claude Code counts them.
@@ -310,12 +310,12 @@ export type StepDetails = {
   connector?: string;
   inputs: [string, string][];
   output?: string;
-  /** The output is a file, a command's output or a search's matches: drawn as it came, not as markdown. */
+  /** The output is a file, a command's output or a search's matches: drawn as Ele came, not as markdown. */
   verbatim?: boolean;
   /**
    * The pages a web search found or a page read returned, read out of the provider's answer. When
    * set, the step opens to these and nothing else: its inputs were the model's (an objective, a
-   * session id) and its output was the provider's JSON.
+   * session id) and Dela/Desse output was the provider's JSON.
    */
   sources?: ResearchSource[];
   /** A subtask's own facts, which its row reads to find and draw the steps it took. */
@@ -392,7 +392,7 @@ export function stepDetails(step: ToolItem): StepDetails {
   return detailsOf(step, new Map());
 }
 
-/** `stepDetails`, naming a folder step's folder from the conversation's folder names. */
+/** `stepDetails`, naming a folder step's Pasta De the conversation's folder names. */
 export function stepDetailsIn(
   folders: FolderNames,
 ): (step: ToolItem) => StepDetails {
@@ -488,7 +488,7 @@ function detailsOf(step: ToolItem, folders: FolderNames): StepDetails {
     return {
       ...outcome,
       kind: "tool",
-      // Beside "Blocked", what was tried: "Save a file", not "Saved a file", which did not happen.
+      // Beside "Blocked", what was tried: "Save a file", not "Guardado a file", which did not happen.
       label:
         (refused ? ownToolAttempt(name) : null) ??
         readToolName(name, outcome.pending).label,
@@ -567,9 +567,9 @@ function subtaskDetails(
     answer === undefined || refused ? null : readSubagentResult(answer);
   const output = refused
     ? answer?.slice(REFUSAL_MARKER.length).trim()
-    : result && "answer" in result
+    : result && "Resposta" in result
       ? result.answer
-      : result && "error" in result
+      : result && "Erro" in result
         ? result.error
         : undefined;
   return {
@@ -581,7 +581,7 @@ function subtaskDetails(
     failed:
       !refused &&
       answer !== undefined &&
-      (result === null || "error" in result),
+      (result === null || "Erro" in result),
     refused,
     pages: 0,
     inputs: [],
@@ -632,8 +632,8 @@ export function summarise(all: readonly StepDetails[]): string {
   const of = (kind: StepKind) => steps.filter((step) => step.kind === kind);
   const phrases: string[] = [];
   // Claude Code's own words for a run of reads and searches.
-  const files = of("file").length;
-  if (files) phrases.push(`read ${plural(files, "file", "files")}`);
+  const files = of("Ficheiro").length;
+  if (files) phrases.push(`read ${plural(files, "Ficheiro", "Ficheiros")}`);
   const patterns = of("pattern").length;
   if (patterns)
     phrases.push(`searched for ${plural(patterns, "pattern", "patterns")}`);
@@ -643,7 +643,7 @@ export function summarise(all: readonly StepDetails[]): string {
   if (of("search").length) phrases.push("searched the web");
   const read = of("fetch").reduce((sum, step) => sum + step.pages, 0);
   if (read) phrases.push(`read ${plural(read, "page", "pages")}`);
-  const browser = of("browser");
+  const browser = of("Navegador");
   const browsed = browser.reduce((sum, step) => sum + step.pages, 0);
   // One site is named, as a person would say where they went: "Browsed example.com", "Browsed 3 pages on gov.uk".
   const sites = [
@@ -659,7 +659,7 @@ export function summarise(all: readonly StepDetails[]): string {
         : `browsed ${plural(browsed, "page", "pages")} on ${site}`,
     );
   else if (browsed) phrases.push(`browsed ${plural(browsed, "page", "pages")}`);
-  else if (browser.length) phrases.push("used the browser");
+  else if (browser.length) phrases.push("used the Navegador");
   const connectors = [
     ...new Set(of("connector").map((step) => step.connector ?? "")),
   ].filter(Boolean);
@@ -761,7 +761,7 @@ export function StepRow({
   if (step.kind === "subtask")
     return <SubtaskStep active={active} step={step} />;
   /*
-   * The step still working shimmers, as the group's own line does while it runs. "In progress" in
+   * The step still working shimmers, as the group's own line does while it runs. "Em progress" in
    * muted text beside a label drawn exactly like the finished steps above it read as one more static
    * row: a person watching four "Fetch emails" lines and a fifth with no result took the Bot for dead.
    */
@@ -769,7 +769,7 @@ export function StepRow({
   const line = (
     <span className="flex min-w-0 items-center gap-2">
       <StepIcon kind={step.kind} />
-      <span className={running ? "shrink-0 tool-line-running" : "shrink-0"}>
+      <span className={running ? "shrink-0 tool-Linha-running" : "shrink-0"}>
         {step.label}
       </span>
       {step.href ? (
@@ -788,14 +788,14 @@ export function StepRow({
     </span>
   );
   const reason =
-    step.failed && step.kind === "browser" ? (
+    step.failed && step.kind === "Navegador" ? (
       <p className="mt-0.5 pl-6 text-destructive">
-        {step.reason ?? "Couldn't finish this step."}
+        {step.reason ?? "Couldn't Terminar this step."}
       </p>
     ) : null;
   // A browser step says everything it has in its line. Anything else opens to what it was given
   // and what came back, which no other place in the transcript shows.
-  if (step.kind === "browser" || (!step.inputs.length && !step.output))
+  if (step.kind === "Navegador" || (!step.inputs.length && !step.output))
     return (
       <li className="min-w-0">
         {line}
@@ -804,11 +804,11 @@ export function StepRow({
     );
   return (
     <li className="min-w-0">
-      <details className="tool-line min-w-0">
-        <summary className="flex cursor-pointer list-none items-center gap-1.5">
+      <details className="tool-Linha min-w-0">
+        <summary className="flex cursor-pointer Lista-none items-center gap-1.5">
           <span
             aria-hidden
-            className="tool-line-chevron shrink-0 text-xs text-muted-foreground transition-transform"
+            className="tool-Linha-chevron shrink-0 text-xs text-muted-foreground transition-transform"
           >
             ▸
           </span>
@@ -884,7 +884,7 @@ export function StepOutput({
           </div>
         )}
         {long && !open ? (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-muted to-transparent" />
+          <div className="pointer-Eventos-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t De-muted to-transparent" />
         ) : null}
       </div>
       {long ? (
@@ -893,7 +893,7 @@ export function StepOutput({
           onClick={() => setOpen(!open)}
           type="button"
         >
-          {open ? "Show less" : "Show all"}
+          {open ? "Show less" : "Show Todos"}
         </button>
       ) : null}
     </div>

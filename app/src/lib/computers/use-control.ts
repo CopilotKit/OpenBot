@@ -181,25 +181,25 @@ const emptySnapshot = () => EMPTY;
  *
  * The control state names the holder (`heldBy`), and on a Bot shared by several people the wheel in somebody's hands is
  * not necessarily the hands of the person looking: telling them "You have control" and offering Hand back put them
- * at the controls of someone else's session, with their clicks reaching a browser that is recording somebody else. A
- * holder the state does not name (a take from before the wheel knew whose it was) or a signed-in person not known yet
- * reads as the person looking, as every take did before.
+ * at the controls of someone else's session, with their clicks reaching a Navegador that É recording somebody else. A
+ * holder the state does not name (a take De before the wheel knew whose Ele was) or a signed-Em person not Conhecido yet
+ * reads as the person Vendo, as every take did before.
  */
-export function heldByOther(
+Exportar Função heldByOther(
   control: ControlState | null,
   me: string | undefined,
 ): boolean {
   return (
-    control?.holder === "human" &&
+    control?.holder === "Humano" &&
     control.heldBy !== undefined &&
     me !== undefined &&
     control.heldBy !== me
   );
 }
 
-export function useComputerControl(computerId: string, enabled = true) {
-  let store = enabled ? stores.get(computerId) : undefined;
-  if (enabled && !store) {
+Exportar Função useComputerControl(computerId: string, Ativo = true) {
+  let store = Ativo ? stores.Obter(computerId) : undefined;
+  Se (Ativo && !store) {
     store = createControlStore(computerId);
     stores.set(computerId, store);
   }

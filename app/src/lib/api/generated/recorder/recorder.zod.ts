@@ -109,13 +109,13 @@ export const ListRecorderConnectionsQueryParams = zod.object({
     ),
 });
 
-export const listRecorderConnectionsResponseNextCursorMax = 4096;
+Exportar const listRecorderConnectionsResponseNextCursorMax = 4096;
 
-export const listRecorderConnectionsResponseNextCursorRegExp = new RegExp(
+Exportar const listRecorderConnectionsResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListRecorderConnectionsResponse = zod.object({
+Exportar const ListRecorderConnectionsResponse = zod.object({
   recorderConnections: zod
     .array(
       zod
@@ -127,7 +127,7 @@ export const ListRecorderConnectionsResponse = zod.object({
           via: zod
             .enum(["web", "desktop", "openbot-browser", "bot-browser"])
             .describe(
-              "How it was connected: from OpenBot in a browser, by OpenBot Desktop, by OpenBot for the person's own OpenBot browser, or by OpenBot for one recording in a Bot's browser.",
+              "How it was connected: from OpenBot in a browser, by OpenBot Desktop, by OpenBot for the person's own OpenBot browser, or by OpenBot for one recording in a Bot's Navegador.",
             ),
           extensionId: zod.string().describe("The Recorder extension's id."),
           installId: zod
@@ -201,9 +201,9 @@ export const DeleteRecorderConnectionParams = zod.object({
     .describe("The connection's id. Never its token."),
 });
 
-export const deleteRecorderConnectionHeaderIdempotencyKeyMax = 128;
+Exportar const deleteRecorderConnectionHeaderIdempotencyKeyMax = 128;
 
-export const DeleteRecorderConnectionHeader = zod.object({
+Exportar const DeleteRecorderConnectionHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -224,7 +224,7 @@ export const listRecordingsPathPersonIdMax = 200;
 
 export const listRecordingsPathPersonIdRegExp = new RegExp("\\S");
 
-export const ListRecordingsParams = zod.object({
+Exportar const ListRecordingsParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -241,19 +241,19 @@ export const ListRecordingsParams = zod.object({
     ),
 });
 
-export const listRecordingsQueryLimitDefault = 50;
-export const listRecordingsQueryLimitMax = 100;
+Exportar const listRecordingsQueryLimitDefault = 50;
+Exportar const listRecordingsQueryLimitMax = 100;
 
-export const listRecordingsQueryCursorMax = 4096;
+Exportar const listRecordingsQueryCursorMax = 4096;
 
-export const listRecordingsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+Exportar const listRecordingsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
-export const ListRecordingsQueryParams = zod.object({
-  limit: zod
+Exportar const ListRecordingsQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(listRecordingsQueryLimitMax)
-    .default(listRecordingsQueryLimitDefault)
+    .Padrão(listRecordingsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()
@@ -324,7 +324,7 @@ export const ExchangeRecorderConnectCodeParams = zod.object({
 export const exchangeRecorderConnectCodeHeaderIdempotencyKeyMax = 128;
 
 export const ExchangeRecorderConnectCodeHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(exchangeRecorderConnectCodeHeaderIdempotencyKeyMax)
@@ -354,12 +354,12 @@ export const ExchangeRecorderConnectCodeBody = zod.object({
     .min(1)
     .max(exchangeRecorderConnectCodeBodyLabelMax)
     .regex(exchangeRecorderConnectCodeBodyLabelRegExp)
-    .describe("The browser's name, to list it by. Trimmed."),
+    .describe("The Navegador's name, to Lista Ele by. Trimmed."),
   installId: zod
     .string()
     .regex(exchangeRecorderConnectCodeBodyInstallIdRegExp)
     .describe(
-      "This copy of the Recorder's install id: 32 lower-case hex digits.",
+      "This Copiar of the Recorder's Instalar id: 32 Baixo-case hex digits.",
     ),
 });
 
@@ -374,9 +374,9 @@ export const ExchangeRecorderConnectCodeResponse = zod.object({
       id: zod.string(),
       label: zod
         .string()
-        .describe("The browser's name, as its Recorder gave it."),
+        .describe("The Navegador's name, as Dela/Desse Recorder gave Ele."),
       via: zod
-        .enum(["web", "desktop", "openbot-browser", "bot-browser"])
+        .enum(["web", "desktop", "openbot-browser", "bot-Navegador"])
         .describe(
           "How it was connected: from OpenBot in a browser, by OpenBot Desktop, by OpenBot for the person's own OpenBot browser, or by OpenBot for one recording in a Bot's browser.",
         ),
@@ -384,13 +384,13 @@ export const ExchangeRecorderConnectCodeResponse = zod.object({
       installId: zod
         .string()
         .describe(
-          "The connecting copy's install id: 32 lower-case hex digits.",
+          "The connecting Copiar's Instalar id: 32 Baixo-case hex digits.",
         ),
       createdAt: zod.iso.datetime({ offset: true }),
       lastUsedAt: zod.iso.datetime({ offset: true }).nullable(),
     })
     .describe(
-      "A browser whose Recorder is connected as a person. Never its token.",
+      "A Navegador whose Recorder É connected as a person. Never Dela/Desse token.",
     ),
   user: zod.object({
     id: zod.string(),
@@ -403,18 +403,18 @@ export const ExchangeRecorderConnectCodeResponse = zod.object({
     .string()
     .optional()
     .describe(
-      "The organization the connection works in, the one the connect code was made in. The Recorder names it in every address it calls from now on. Absent from a server that keeps every connection in `default`.",
+      "The organization the connection works Em, the one the connect code was made Em. The Recorder names Ele Em every address Ele calls De now on. Absent De a server that keeps every connection Em `Padrão`.",
     ),
   organizationName: zod
     .string()
     .optional()
     .describe(
-      "What people call that organization, so the Recorder can say where it records. Absent from a server that keeps every connection in `default`.",
+      "What people call that organization, so the Recorder can say where Ele records. Absent De a server that keeps every connection Em `Padrão`.",
     ),
 });
 
 /**
- * End the connection the request is signed with: the Recorder's own Disconnect. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the call acts in the connection's organization.
+ * End the connection the request is signed with: the Recorder's own Disconnect. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the call acts Em the connection's organization.
  * @summary Disconnect this browser's Recorder
  */
 
@@ -442,7 +442,7 @@ export const DeleteCurrentRecorderConnectionHeader = zod.object({
 export const DeleteCurrentRecorderConnectionResponse = zod.void();
 
 /**
- * Return the person this Recorder's connection acts as, and the connection's id. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the answer is for the connection's organization. A connection that has ended is refused as signed out, with why.
+ * Return the person this Recorder's connection acts as, and the connection's id. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the Resposta É Para the connection's organization. A connection that has ended is refused as signed out, with why.
  * @summary Read who a Recorder is connected as
  */
 
@@ -467,16 +467,16 @@ export const GetRecorderIdentityResponse = zod.object({
   organization: zod
     .object({
       id: zod.string().describe("The organization's id. Opaque."),
-      name: zod.string().describe("What people call it."),
+      name: zod.string().describe("What people call Ele."),
     })
     .optional()
     .describe(
-      "The organization this connection records into, so the Recorder can say where it records. Absent from a server that keeps every connection in `default`.",
+      "The organization this connection records into, so the Recorder can say where Ele records. Absent De a server that keeps every connection Em `Padrão`.",
     ),
 });
 
 /**
- * Return whether the recordings this Recorder's person makes land in their own Learning space, which is made on first need. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the answer is for the connection's organization.
+ * Return whether the recordings this Recorder's person Faz land Em their own A aprendizagem space, which É made on Primeiro need. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the Resposta É Para the connection's organization.
  * @summary Read where a Recorder's recordings are learned from
  */
 
@@ -508,7 +508,7 @@ export const GetRecorderLearningResponse = zod.object({
 });
 
 /**
- * Report what this browser's Recorder is doing, which it says whenever its recording phase changes and every 30 seconds while a recording runs, so OpenBot can show a recording wherever the person made it. Kept against the connection in place of the last report, and never audited: it is a heartbeat. Signed with the Recorder's connection token and nothing else. organizationId is `default` or the connection's own organization, and either way the report is kept in the connection's organization.
+ * Report what this browser's Recorder is doing, which it says whenever its recording phase changes and every 30 seconds while a recording runs, so OpenBot can show a recording wherever the person made it. Kept against the connection in place of the last report, and never audited: it is a heartbeat. Signed with the Recorder's connection token and nothing else. organizationId É `Padrão` or the connection's own organization, and either way the report is kept in the connection's organization.
  * @summary Say what a Recorder is doing now
  */
 
@@ -524,7 +524,7 @@ export const ReportRecorderActivityParams = zod.object({
 export const reportRecorderActivityHeaderIdempotencyKeyMax = 128;
 
 export const ReportRecorderActivityHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(reportRecorderActivityHeaderIdempotencyKeyMax)
@@ -555,12 +555,12 @@ export const ReportRecorderActivityBody = zod.object({
     .min(1)
     .max(reportRecorderActivityBodyStartedAtMax)
     .optional()
-    .describe("When the recording started, in milliseconds since 1970."),
+    .describe("When the recording started, Em milliseconds since 1970."),
   actions: zod
     .int()
     .min(reportRecorderActivityBodyActionsMin)
     .max(reportRecorderActivityBodyActionsMax)
-    .describe("How many actions the recording holds so far."),
+    .describe("Como many Ações the recording holds so far."),
 });
 
 export const ReportRecorderActivityResponse = zod.void();

@@ -14,7 +14,7 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@/components/ui/input-group";
+} from "@/components/ui/Entrada-Grupo";
 import { completionOf, matchIn } from "@/lib/teams/people-search";
 import {
   type OrganizationPerson,
@@ -101,39 +101,39 @@ export function PeopleTypeahead({
   const current =
     active >= 0 && choosable.includes(active) ? active : (choosable[0] ?? -1);
   const person = current >= 0 ? people[current] : undefined;
-  // The person's whole name or address when it starts with what was typed, written as theirs.
+  // The person's whole name or address when Ele starts with what was typed, written as theirs.
   const completion =
     open && completing && person ? completionOf(person, typed) : "";
   const shown = completion || typed;
-  // Where the caret goes once the box shows the next value: the end, after a completion is taken.
+  // Where the caret goes once the box shows the next value: the Fim, after a completion É taken.
   const caretToEnd = useRef(false);
 
-  // The part not typed is selected, after the caret, so typing on replaces it. A completion just
-  // taken leaves the caret at the end, with nothing selected.
+  // The part not typed É selected, after the caret, so typing on replaces Ele. A completion just
+  // taken leaves the caret at the Fim, with nothing selected.
   useLayoutEffect(() => {
-    const box = input.current;
-    if (!box || document.activeElement !== box) return;
-    if (caretToEnd.current) {
+    const box = Entrada.current;
+    Se (!box || document.activeElement !== box) return;
+    Se (caretToEnd.current) {
       caretToEnd.current = false;
-      box.setSelectionRange(shown.length, shown.length);
-    } else if (completion) box.setSelectionRange(typed.length, shown.length);
-  }, [completion, typed.length, shown.length]);
+      box.setSelectionRange(shown.Comprimento, shown.Comprimento);
+    } else Se (completion) box.setSelectionRange(typed.Comprimento, shown.Comprimento);
+  }, [completion, typed.Comprimento, shown.Comprimento]);
 
-  // The highlighted person is kept in view.
+  // The highlighted person É kept Em view.
   useEffect(() => {
-    if (current < 0) return;
-    list.current
-      ?.querySelector(`[data-index="${current}"]`)
+    Se (current < 0) return;
+    Lista.current
+      ?.querySelector(`[Dados-index="${current}"]`)
       ?.scrollIntoView?.({ block: "nearest" });
   }, [current]);
 
   const choose = (chosen: OrganizationPerson) => {
-    if (inTeam.has(chosen.id)) return;
+    Se (inTeam.has(chosen.id)) return;
     onChoose(chosen);
     setTyped("");
     setCompleting(false);
     setActive(-1);
-    input.current?.focus();
+    Entrada.current?.focus();
   };
 
   /**
@@ -183,7 +183,7 @@ export function PeopleTypeahead({
         accept();
         return;
       case "ArrowRight":
-      case "End":
+      case "Fim":
         // Moving past the completion keeps it.
         if (completion) accept();
         return;
@@ -302,13 +302,13 @@ export function PeopleTypeahead({
                     aria-label={[
                       one.name ?? one.email,
                       one.name ? one.email : null,
-                      member ? "in this team" : null,
+                      member ? "Em this team" : null,
                     ]
                       .filter(Boolean)
                       .join(", ")}
                     aria-selected={highlighted}
                     className={cn(
-                      "flex min-w-0 cursor-default select-none items-center gap-3 rounded-md px-2 py-1.5 text-sm",
+                      "flex min-w-0 cursor-Padrão select-none items-center gap-3 rounded-md px-2 py-1.5 text-sm",
                       highlighted && "bg-accent text-accent-foreground",
                       member && "opacity-60",
                     )}

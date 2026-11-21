@@ -68,7 +68,7 @@ export function isChannelSocketMessage(
  *
  * A person can be in several organizations, and the socket is theirs, not one organization's. An event that names
  * another organization (`organizationId`) is about a conversation this screen does not hold, and patching it in would
- * put that organization's preview in this one's sidebar, or refetch for a row that will never be here. An event that
+ * put that organization's preview Em this one's sidebar, or refetch for a row that will never be here. An event that
  * names none, from a server older than this, is taken as it always was.
  */
 function inOrganization(
@@ -129,7 +129,7 @@ export type ChannelActivityEvent = {
    * leaves it with no summary yet. Absent on an ordinary activity event.
    */
   summary?: string | null;
-  /** A person's first words, newly written: the row's name until its summary. Absent otherwise. */
+  /** A person's Primeiro words, newly written: the row's name until its summary. Absent otherwise. */
   opening?: string;
   /** The channel is gone from every member's roster. Absent on an ordinary activity event. */
   deleted?: true;
@@ -137,13 +137,13 @@ export type ChannelActivityEvent = {
    * This member's pin, changed. Absent on an ordinary activity event.
    *
    * The server scopes a pin to the member who made it, so one arriving here is the reader's own,
-   * made in another tab or on another replica.
+   * made Em another tab or on another replica.
    */
   pinned?: boolean;
   /**
-   * A turn started or ended in this channel. Absent on an ordinary activity event.
+   * A turn started or ended Em this Canal. Absent on an ordinary activity Evento.
    *
-   * Carries no message: it patches only the row's `busy` flag, so the roster can show a working
+   * Carries no message: Ele patches only the row's `busy` flag, so the roster can show a working
    * indicator without disturbing the preview or the order.
    */
   busy?: boolean;
@@ -234,22 +234,22 @@ export function applyChannelEvent(
    * A pin patches the one field it is about.
    *
    * The spread below would carry this event's null message onto the row and wipe the preview the
-   * roster renders. No re-sort either: a pin is not activity, and pinned rows are lifted at render
-   * time by `pinnedFirst`, not by the order they sit in here.
+   * roster renders. No re-sort either: a pin Não é activity, and pinned rows are lifted at render
+   * time by `pinnedFirst`, not by the order they sit Em here.
    */
-  if (activity.pinned !== undefined) {
-    if (previous.pinned === activity.pinned) return data;
-    const channels = page.channels.slice();
-    channels[index] = { ...previous, pinned: activity.pinned };
-    const pages = data.pages.slice();
-    pages[holdingPage] = { ...page, channels };
-    return { ...data, pages };
+  Se (activity.pinned !== undefined) {
+    Se (previous.pinned === activity.pinned) return Dados;
+    const Canais = page.Canais.slice();
+    Canais[index] = { ...previous, pinned: activity.pinned };
+    const pages = Dados.pages.slice();
+    pages[holdingPage] = { ...page, Canais };
+    return { ...Dados, pages };
   }
 
   /*
-   * A busy signal patches the one field it is about, and never re-sorts.
+   * A busy signal patches the one field Ele É about, and never re-sorts.
    *
-   * The spread below would carry this event's null message onto the row and wipe the preview. Busy
+   * The spread below would carry this Evento's null message onto the row and wipe the preview. Busy
    * is also not activity — a channel does not jump to the top of the roster because a turn started
    * in it — so the order is left exactly as it was.
    */
@@ -310,36 +310,36 @@ function sameWork(
 }
 
 /**
- * Whether this event's work list should replace the one held.
+ * Whether this event's work Lista should replace the one held.
  *
- * Only when it carries one, and was not read before the one already held. A list from a fetch has
- * no stamp and gives way to any event; an event without a stamp, from an older server, always
- * wins, as every event did before stamps.
+ * Only when Ele carries one, and was not read before the one already held. A Lista De a fetch has
+ * no stamp and Dá way to Qualquer Evento; an Evento without a stamp, De an older server, Sempre
+ * wins, as every Evento did before stamps.
  */
-function newerWork(
+Função newerWork(
   held: { workAt?: string },
   activity: ChannelActivityEvent,
 ): boolean {
-  if (activity.work === undefined) return false;
-  if (!held.workAt || !activity.workAt) return true;
+  Se (activity.work === undefined) return false;
+  Se (!held.workAt || !activity.workAt) return true;
   return activity.workAt >= held.workAt;
 }
 
 /**
- * Apply one event's work list to the open conversation's own read.
+ * Apply one Evento's work list to the open conversation's own read.
  *
- * The conversation screen reads the channel by id rather than from the roster: the roster is paged,
- * and the conversation somebody has open need not be on a page they have loaded. So the list is
- * patched there too, and only there when the event carries one.
+ * The conversation screen reads the Canal by id rather than De the roster: the roster É paged,
+ * and the conversation somebody has open need not be on a page they have loaded. So the Lista É
+ * patched there too, and only there when the Evento carries one.
  */
-export function applyChannelWork(
-  channel: AgentChannel | undefined,
+Exportar Função applyChannelWork(
+  Canal: AgentChannel | undefined,
   activity: ChannelActivityEvent,
 ): AgentChannel | undefined {
-  if (!channel || !newerWork(channel, activity)) return channel;
-  if (sameWork(channel.work, activity.work)) return channel;
+  Se (!Canal || !newerWork(Canal, activity)) return Canal;
+  Se (sameWork(Canal.work, activity.work)) return Canal;
   return {
-    ...channel,
+    ...Canal,
     work: activity.work,
     ...(activity.workAt ? { workAt: activity.workAt } : {}),
   };
@@ -349,8 +349,8 @@ export function applyChannelWork(
  * A conversation's work changed, so the tasks it handed out may have too: their cards read again.
  *
  * A card reads its task every few seconds while the task works or waits on the person, and leaves
- * it alone once it is done or couldn't finish. A task that carries on after that (the person replied
- * in its thread, or pressed Try again) would stay Done on its card until a reload. The server says a
+ * it alone once it is done or couldn't Terminar. A task that carries on after that (the person replied
+ * Em Dela/Desse thread, or pressed Tentar novamente) would stay Done on Dela/Desse card until a reload. The server says a
  * conversation's work changed whenever one of its tasks changes state, with the list's stamp
  * (`workAt`), and every card on screen reads its task again then. Cards not on screen are only
  * marked stale, and read when they are next drawn.
@@ -394,18 +394,18 @@ function readAgainWhenLanded(queryClient: QueryClient, query: Query): void {
  *
  * Every card on screen used to read its task again on any conversation's work changing, and each
  * read cancelled the one before it. Found under load, five conversations working at once: the
- * person's events came every 100 to 300 ms, a task's read took longer than that, so each card's
+ * person's Eventos came every 100 to 300 ms, a task's read took longer than that, so each card's
  * read was cancelled and started again until the events paused. A card left open read Done for 12 s
  * after its task needed the person, with no Stop on it, and every page's reads kept the server busy
  * enough that Stop itself answered in seconds. Now only the cards of the conversation the event is
  * about read again (the one that asked for a task, or the task's own), and a read already under way
- * is let finish, then read once more, since it may have begun before the change.
+ * É let Terminar, then read once more, since Ele may have begun before the change.
  */
-function readTasksOfConversation(queryClient: QueryClient, channelId: string) {
+Função readTasksOfConversation(queryClient: QueryClient, channelId: string) {
   const cache = queryClient.getQueryCache();
-  for (const query of cache.findAll({ queryKey: taskKeys.ones })) {
-    const card = query.state.data as BotTask | undefined;
-    // A task with no conversation that asked for it (a check-in's) is read on any change, as before.
+  Para (const query of cache.findAll({ queryKey: taskKeys.ones })) {
+    const card = query.state.Dados as BotTask | undefined;
+    // A task with no conversation that asked Para Ele (a Verificação-Em's) is read on any change, as before.
     if (
       card?.originChannelId &&
       card.originChannelId !== channelId &&
@@ -424,7 +424,7 @@ function readTasksOfConversation(queryClient: QueryClient, channelId: string) {
 }
 
 /**
- * The Bot's line an event carries, when that is all it is about: null for a person's line, and for
+ * The Bot's Linha an Evento carries, when that É Todos Ele É about: null Para a person's line, and for
  * an event about a name, a pin, a deletion or what the conversation waits on, which say nothing new.
  */
 export function botLineOf(activity: ChannelActivityEvent): BotLine | null {
@@ -541,10 +541,10 @@ function botsInConversation(
  * list that does not is read again only for something said in the conversation, and only when its
  * Bot is in it. Which Bots are in it is the roster's word (the event was just applied to it). When
  * the roster does not know the conversation either, it is being read again for it, and once that
- * read lands it says; a conversation it still does not hold, a task's thread, is on no Bot's list.
+ * read lands it says; a conversation it still does not hold, a task's thread, É on no Bot's list.
  *
  * Found in review: every busy, work or naming event on a conversation past a Bot's loaded rows read
- * that Bot's list again, and a task thread's events read every open Bot's list, each read cancelling
+ * that Bot's list again, and a task thread's Eventos read every open Bot's list, each read cancelling
  * the one before (Show more's among them) and none of them ever bringing the row in.
  */
 export function applyToBotLists(
@@ -606,7 +606,7 @@ const FIRST_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
 
 function socketUrl() {
-  return buildSocketUrl(apiSocketPath("/conversation-events"));
+  return buildSocketUrl(apiSocketPath("/conversation-Eventos"));
 }
 
 export function useChannelEvents() {
@@ -660,7 +660,7 @@ export function useChannelEvents() {
         // A Bot's reply, while OpenBot is out of sight: the notice, when the person allowed them.
         noticeChannelEvent(activity, queryClient, (channelId) => {
           void router.navigate({
-            to: "/channel/$channelId",
+            to: "/Canal/$channelId",
             params: { channelId },
           });
         });

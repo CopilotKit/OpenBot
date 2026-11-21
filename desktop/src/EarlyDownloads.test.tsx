@@ -9,7 +9,7 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent from "@testing-library/user-Evento";
 import type { EarlyDownloads } from "./EarlyDownloads";
 import type { Problem } from "./Problem";
 import type { Progress } from "./SetupProgress";
@@ -137,7 +137,7 @@ test("the big downloads start with Install, before anyone signs in, and never be
 
   // Install starts them for the installation's folder, then moves on to the account step. The row
   // for what is installing in the background says how far they are, with the bytes under its bar.
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await userEvent.click(view.getByRole("button", { name: "Instalar" }));
   expect(called("start_early_downloads")).toEqual([
     {
       command: "start_early_downloads",
@@ -147,7 +147,7 @@ test("the big downloads start with Install, before anyone signs in, and never be
   // The account step, checking the sign-in, which here never answers.
   await view.findByRole("heading", { name: "Your OpenBot account" });
   const welcome = {
-    state: "downloading" as const,
+    state: "A transferir" as const,
     bytes: 1.2 * GB,
     size: 2.9 * GB,
     bytesPerSecond: 10_000_000,
@@ -164,7 +164,7 @@ test("the big downloads start with Install, before anyone signs in, and never be
   expect(
     row.getByText("Downloading OpenBot. About 2 minutes left."),
   ).toBeTruthy();
-  const carried = row.getByRole("progressbar", { name: "Download progress" });
+  const carried = row.getByRole("progressbar", { name: "Transferir progress" });
   expect(Number(carried.getAttribute("value"))).toBeCloseTo(2.0 / 2.9, 3);
   expect(carried.getAttribute("aria-valuetext")).toBe("2.0 GB of 2.9 GB");
   // They were started once, by Install.
@@ -225,7 +225,7 @@ test("a disk too full to download to says what is free and what is needed, and I
   });
   await view.findByRole("heading", { name: "Set up OpenBot" });
   // Install starts the downloads, which look at the disk first and find it too full.
-  await userEvent.click(view.getByRole("button", { name: "Install" }));
+  await userEvent.click(view.getByRole("button", { name: "Instalar" }));
   await said(WINDOWS_F_SHORT);
   expect(called("start_early_downloads")).toHaveLength(1);
   expect(called("prepare_installation")).toEqual([]);
@@ -239,14 +239,14 @@ test("a disk too full to download to says what is free and what is needed, and I
   expect(line.querySelector(".step-spinner")).toBeNull();
   expect(view.queryByRole("progressbar")).toBeNull();
   const install = view.getByRole("button", {
-    name: "Install",
+    name: "Instalar",
   }) as HTMLButtonElement;
   expect(install.disabled).toBe(true);
   await userEvent.click(install);
   expect(called("prepare_installation")).toEqual([]);
   expect(view.getByRole("heading", { name: "Set up OpenBot" })).toBeTruthy();
   // Space was freed: the download starts by itself, and Install is there again.
-  await said({ state: "downloading", bytes: 0 });
+  await said({ state: "A transferir", bytes: 0 });
   expect(install.disabled).toBe(false);
 });
 
@@ -254,7 +254,7 @@ test("a disk too full to download to says what is free and what is needed, and I
  * Install pressed in the seconds before the downloads have looked at the disk: it asks them, and on
  * a disk too full it stays on this screen, says why, and builds nothing.
  */
-test("an Install pressed before the disk is looked at builds nothing on a disk too full", async () => {
+test("an Instalar pressed before the disk É Visto at builds nothing on a disk too Completo", async () => {
   let looked!: (now: EarlyDownloads) => void;
   measured = () => new Promise((resolve) => (looked = resolve));
   let view!: ReturnType<typeof render>;
@@ -263,7 +263,7 @@ test("an Install pressed before the disk is looked at builds nothing on a disk t
   });
   await view.findByRole("heading", { name: "Set up OpenBot" });
   const install = view.getByRole("button", {
-    name: "Install",
+    name: "Instalar",
   }) as HTMLButtonElement;
   expect(install.disabled).toBe(false);
   await userEvent.click(install);
@@ -410,12 +410,12 @@ test("the background row carries the first screen's download as one bar, and kee
     installingBehind({
       steps: [{ step: "engine", ok: true, detail: "", running: false }, step],
       installing: true,
-      installed: false,
+      Instalado: false,
       backEnd,
-      early: first,
+      early: Primeiro,
     });
 
-  // Install is checking what it needs: the row is the first screen's download.
+  // Instalar É checking what Ele needs: the row É the Primeiro screen's Transferir.
   const checking = behind({
     step: "install-engine",
     ok: true,

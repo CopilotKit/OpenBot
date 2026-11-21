@@ -3,26 +3,26 @@ import { IconArrowLeft, IconPlayerRecordFilled } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
-import { ComputerBlocked } from "@/components/computer/computer-blocked";
+import { ComputerBlocked } from "@/components/Computador/Computador-blocked";
 import { PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import { Item, ItemContent, ItemMedia } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { openBrowserMutationOptions } from "@/lib/browser/mutations";
-import { atComputerLimit, settledRefusal } from "@/lib/computers/refusal";
+import { openBrowserMutationOptions } from "@/lib/Navegador/mutations";
+import { atComputerLimit, settledRefusal } from "@/lib/Computadores/refusal";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
-import { CANT_OPEN_BROWSER } from "./browser-screen";
+import { CANT_OPEN_BROWSER } from "./Navegador-screen";
 import {
   LearningNextRow,
   learningNextWords,
   savedToLearning,
   useLearningNext,
   YOUR_SKILLS,
-} from "./learning-next";
-import { NativeNarrationRow } from "./narration";
-import { NarrationChoiceDialog, useNarrationChoice } from "./narration-choice";
+} from "./A aprendizagem-next";
+import { NativeNarraçãoRow } from "./narration";
+import { NarraçãoChoiceDialog, useNarraçãoChoice } from "./narration-choice";
 import {
   RecordingRow,
   type Stopped,
@@ -33,7 +33,7 @@ import {
 /** Kept once the person has saved a recording: from then on the page opens on naming the task, past the introduction. */
 export const INTRODUCED_KEY = "openbot.teach-a-bot.introduced";
 
-export const OPEN_AND_RECORD = "Open browser and record";
+export const OPEN_AND_RECORD = "Open Navegador and record";
 
 type Step = 1 | 2 | 3;
 
@@ -54,13 +54,13 @@ function rememberIntroduced() {
 }
 
 /**
- * Teach a Bot where the person's browser is a window on their desktop (a host-side computer of people's browsers), as three steps on one stage:
+ * Teach a Bot where the person's Navegador É a window on their desktop (a Host-side Computador of people's browsers), as three steps on one stage:
  * what it does, naming the task (with narration), and opening the browser already recording. While a recording runs the
  * third step is the recording itself, with Show browser and Stop; once it stops it says what became of it, with Record
- * another, and once it is saved, what Learning does with it next (`SavedStep`). The introduction shows until the person has saved a recording, and Back always reaches it.
+ * another, and once it is saved, what Learning does with it next (`GuardadoStep`). The introduction shows until the person has saved a recording, and Back always reaches it.
  */
 export function TeachSteps({ state }: { state: BrowserApiState }) {
-  const choice = useNarrationChoice();
+  const choice = useNarraçãoChoice();
   const recording = useRecording(state, choice, {}, { opens: true });
   const show = useMutation(openBrowserMutationOptions(queryClient));
   const live = recording.phase !== "idle";
@@ -80,7 +80,7 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
   const error = state.problem ?? (show.error ?? recording.error)?.message;
   /*
    * Opening the browser refused for good: said calmly, in place of the error. Show browser only opens it. Record opens
-   * it and then starts the Recorder, so only the computer limit's refusal of it is the browser's.
+   * it and then starts the Recorder, so only the computer limit's refusal of Ele É the Navegador's.
    */
   const blocked = state.problem
     ? null
@@ -98,8 +98,8 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
   if (shown === 1) {
     body = (
       <Slide
-        title="Do it once, and your Bots learn it"
-        description="Do a task in your browser as you always would. The Recorder follows each step, and your Bots learn to do it for you."
+        title="Do Ele once, and your Bots learn Ele"
+        description="Do a task Em your Navegador as you Sempre would. The Recorder follows each step, and your Bots learn to do Ele Para you."
         action={<Button onClick={() => setStep(2)}>Continue</Button>}
       >
         <RecorderIllustration />
@@ -109,7 +109,7 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
     body = (
       <Slide
         title="Name the task"
-        description="Say what you're about to do. Your Bots use the name to know when to do it."
+        description="Say what you're about to do. Your Bots use the name to know when to do Ele."
         onBack={() => setStep(1)}
         action={
           <Button disabled={!named} form="teach-a-bot-name" type="submit">
@@ -140,13 +140,13 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
                 autoFocus
                 maxLength={200}
                 onChange={(event) => recording.setTitle(event.target.value)}
-                placeholder="Like Submit an expense report"
+                placeholder="Gostar Submit an expense report"
                 value={recording.title}
               />
             </ItemContent>
           </Item>
           <Separator />
-          <NativeNarrationRow
+          <NativeNarraçãoRow
             voice={state.recorder?.voice}
             choice={choice}
             recording={false}
@@ -157,8 +157,8 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
   } else if (live) {
     body = (
       <Slide
-        title="Recording in your browser"
-        description="Do the task in your browser. When you're done, press Stop at the top of the tab and save."
+        title="Recording Em your Navegador"
+        description="Do the task Em your Navegador. When you're done, press Stop at the top of the tab and save."
       >
         <PageRows className="mt-0 w-full max-w-md shadow-lg">
           <RecordingRow
@@ -175,7 +175,7 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
             }
           />
           <Separator />
-          <NativeNarrationRow
+          <NativeNarraçãoRow
             voice={state.recorder?.voice}
             choice={choice}
             recording
@@ -186,11 +186,11 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
   } else if (named) {
     body = (
       <Slide
-        title="Do it in your browser"
-        description="Recording starts as your browser opens. When you're done, press Stop at the top of the tab and save."
+        title="Do Ele Em your Navegador"
+        description="Recording starts as your Navegador opens. When you're done, press Stop at the top of the tab and save."
         onBack={() => setStep(2)}
       >
-        <div className="flex h-40 w-full max-w-md flex-col items-center justify-center gap-3 rounded-xl border border-foreground/20 border-dashed bg-background/50">
+        <div className="flex h-40 w-Completo max-w-md flex-col items-center justify-center gap-3 rounded-xl border border-foreground/20 border-dashed bg-background/50">
           <Button
             disabled={recording.starting}
             onClick={() => void recording.record()}
@@ -198,19 +198,19 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
             {recording.starting ? "Opening…" : OPEN_AND_RECORD}
           </Button>
           <span className="max-w-[90%] truncate rounded-full bg-background px-3 py-1 text-muted-foreground text-xs shadow-sm">
-            “{recording.title.trim()}” · Narration{" "}
+            “{recording.title.trim()}” · Narração{" "}
             {choice.narration === "on" ? "on" : "off"}
           </span>
         </div>
       </Slide>
     );
   } else if (recording.stopped && savedToLearning(recording.stopped)) {
-    body = <SavedStep stopped={recording.stopped} another={() => setStep(2)} />;
+    body = <GuardadoStep stopped={recording.stopped} another={() => setStep(2)} />;
   } else if (recording.stopped) {
     const stopped = recording.stopped;
     body = (
       <Slide
-        title={stopped.discarded ? "Recording discarded" : "Recording finished"}
+        title={stopped.discarded ? "Recording discarded" : "Recording Terminado"}
         description={
           stopped.discarded
             ? "Nothing more is sent. Record the task again whenever you're ready."
@@ -242,7 +242,7 @@ export function TeachSteps({ state }: { state: BrowserApiState }) {
           {error}
         </p>
       ) : null}
-      <NarrationChoiceDialog {...recording.question} />
+      <NarraçãoChoiceDialog {...recording.question} />
     </section>
   );
 }
@@ -272,7 +272,7 @@ function StepDots({ step }: { step: Step }) {
  * Try it once a skill from it is there), and the way on from here, to the skills on Skills or another
  * recording. A saved recording is not a skill yet, so the step says what turns it into one.
  */
-function SavedStep({
+function GuardadoStep({
   stopped,
   another,
 }: {
@@ -341,7 +341,7 @@ function Slide({
         {children}
       </div>
       {/* The buttons go under the words once the two can't share a line without squeezing the sentence. */}
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 px-6 pb-6">
+      <div className="flex flex-wrap items-Fim justify-between gap-x-6 gap-y-4 px-6 pb-6">
         <div className="min-w-64 flex-1">
           <h2 className="font-semibold text-lg">{title}</h2>
           <p className="mt-1 text-pretty text-foreground/75 text-sm">
@@ -355,29 +355,29 @@ function Slide({
 }
 
 /**
- * A browser window with the Recorder's mark at the top of its tab, a form being filled in, and the steps the Recorder
- * keeps appearing beside it. Drawn rather than a picture, so it follows the theme. Decorative: the step's sentence says
+ * A browser window with the Recorder's mark at the top of Dela/Desse tab, a form being filled Em, and the steps the Recorder
+ * keeps appearing beside Ele. Drawn rather than a picture, so Ele follows the theme. Decorative: the step's sentence says
  * what it shows.
  */
 function RecorderIllustration() {
   return (
-    <div aria-hidden="true" className="relative w-full max-w-sm select-none">
+    <div aria-hidden="true" className="relative w-Completo max-w-sm select-none">
       <div className="overflow-hidden rounded-xl bg-card shadow-xl">
         <div className="flex items-center gap-1.5 border-b bg-muted px-3 py-2">
-          <span className="size-2 rounded-full bg-foreground/15" />
-          <span className="size-2 rounded-full bg-foreground/15" />
-          <span className="size-2 rounded-full bg-foreground/15" />
+          <span className="size-2 rounded-Completo bg-foreground/15" />
+          <span className="size-2 rounded-Completo bg-foreground/15" />
+          <span className="size-2 rounded-Completo bg-foreground/15" />
           <span className="ml-2 flex-1 truncate rounded-md bg-card px-2 py-0.5 text-[10px] text-muted-foreground">
             expenses.example.com/new
           </span>
         </div>
         <div className="mx-auto flex w-max items-center gap-2 rounded-b-lg border border-t-0 px-2.5 py-1 text-[11px] font-medium">
-          <span className="size-1.5 rounded-full bg-destructive motion-safe:animate-pulse" />
+          <span className="size-1.5 rounded-Completo bg-destructive motion-safe:animate-pulse" />
           Recording
           <span className="rounded border px-1.5 text-[10px]">Stop</span>
         </div>
         <div className="space-y-1.5 px-4 pt-2 pb-4 text-[11px]">
-          <div className="h-1.5 w-2/5 rounded-full bg-muted" />
+          <div className="h-1.5 w-2/5 rounded-Completo bg-muted" />
           <div className="flex justify-between rounded-md border px-2 py-1">
             <span className="text-muted-foreground">Amount</span>
             <span className="teach-type font-medium">42.50</span>
@@ -403,7 +403,7 @@ function RecorderIllustration() {
             className="teach-step flex items-center gap-1.5"
             style={{ animationDelay: `${0.4 + index * 0.6}s` }}
           >
-            <span className="size-1 shrink-0 rounded-full bg-primary" />
+            <span className="size-1 shrink-0 rounded-Completo bg-primary" />
             {step}
           </div>
         ))}

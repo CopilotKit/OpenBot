@@ -4,9 +4,9 @@
 import { HttpResponse, http } from "msw";
 import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
-import type { SavedLoginPage } from "../model";
+import type { GuardadoLoginPage } from "../model";
 
-export const getListSavedLoginsResponseMock = (): SavedLoginPage => ({
+export const getListGuardadoLoginsResponseMock = (): GuardadoLoginPage => ({
   savedLogins: [
     {
       id: "7b1d6f0e-3c2a-4b5d-8e9f-0a1b2c3d4e5f",
@@ -21,14 +21,14 @@ export const getListSavedLoginsResponseMock = (): SavedLoginPage => ({
   nextCursor: null,
 });
 
-export const getListSavedLoginsMockHandler = (
+export const getListGuardadoLoginsMockHandler = (
   overrideResponse?:
-    | SavedLoginPage
+    | GuardadoLoginPage
     | ((
         info: Parameters<
           HttpResponseResolver<{ organizationId: string; personId: string }>
         >[0],
-      ) => Promise<SavedLoginPage> | SavedLoginPage),
+      ) => Promise<GuardadoLoginPage> | GuardadoLoginPage),
   options?: RequestHandlerOptions,
 ) => {
   return http.get<{ organizationId: string; personId: string }>(
@@ -40,10 +40,10 @@ export const getListSavedLoginsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
-          : getListSavedLoginsResponseMock(),
+          : getListGuardadoLoginsResponseMock(),
         { status: 200 },
       );
     },
@@ -51,7 +51,7 @@ export const getListSavedLoginsMockHandler = (
   );
 };
 
-export const getDeleteSavedLoginMockHandler = (
+export const getDeleteGuardadoLoginMockHandler = (
   overrideResponse?:
     | void
     | ((
@@ -80,7 +80,7 @@ export const getDeleteSavedLoginMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -89,7 +89,7 @@ export const getDeleteSavedLoginMockHandler = (
     options,
   );
 };
-export const getSavedLoginsMock = () => [
-  getListSavedLoginsMockHandler(),
-  getDeleteSavedLoginMockHandler(),
+export const getGuardadoLoginsMock = () => [
+  getListGuardadoLoginsMockHandler(),
+  getDeleteGuardadoLoginMockHandler(),
 ];

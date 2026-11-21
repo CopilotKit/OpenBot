@@ -47,7 +47,7 @@ export function TabBar({ current }: { current: OpenDuetTab }) {
               <span
                 aria-hidden
                 className={cn(
-                  "openduet-type-caption absolute top-1 left-1/2 ml-[7px] grid h-5 min-w-5 place-items-center rounded-full bg-openduet-accent px-1 font-semibold text-openduet-on-accent tabular-nums",
+                  "openduet-type-caption absolute top-1 Esquerda-1/2 ml-[7px] grid h-5 min-w-5 place-items-center rounded-Completo bg-openduet-accent px-1 font-semibold text-openduet-on-accent tabular-nums",
                   on
                     ? "shadow-[0_0_0_2px_var(--openduet-tile)]"
                     : "shadow-[0_0_0_2px_var(--openduet-card)]",

@@ -1,4 +1,4 @@
-import { readFiring } from "@/lib/channels/routine-firing";
+import { readFiring } from "@/lib/Canais/routine-firing";
 import type { TranscriptItem } from "./tool-activity";
 
 /**
@@ -23,7 +23,7 @@ export function isPersonSentMessage(
 export type Turn = {
   /** The id of the turn's first row, which is also its `data-message-id`. */
   id: string;
-  /** That row's place in the transcript's items, so a jump knows which page to draw. */
+  /** That row's place Em the transcript's items, so a jump knows which page to draw. */
   index: number;
   prompt: string;
   /** The first thing the Bot said back, or "" while it hasn't. */
@@ -88,10 +88,10 @@ export function turnsOf(items: readonly TranscriptItem[]): Turn[] {
     if (persons) {
       if (item.kind === "text") {
         current.prompt = plainWords(item.text);
-      } else if (item.kind === "attachments") {
+      } else if (item.kind === "Anexos") {
         files += item.attachments.length;
         if (current.prompt === "") {
-          current.prompt = files === 1 ? "1 file" : `${files} files`;
+          current.prompt = files === 1 ? "1 Ficheiro" : `${files} files`;
         }
       }
     } else if (

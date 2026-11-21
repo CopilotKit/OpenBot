@@ -26,7 +26,7 @@ import type {
   ApprovalRuleDraftDescription,
   ApprovalRuleDraftReplay,
   ApprovalRuleDraftReplayInput,
-  ApprovalRuleDraftSavedRules,
+  ApprovalRuleDraftGuardadoRules,
   ApprovalRuleDraftTranslation,
   ApprovalRuleInput,
   ApprovalRuleNotFoundResponse,
@@ -96,7 +96,7 @@ export const getApprovalSettings = async (
     getGetApprovalSettingsUrl(organizationId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -469,7 +469,7 @@ export const getListApprovalRulesUrl = (
 };
 
 /**
- * Return one page of the rules the organization set for everybody's Bots' actions, newest first. They come ahead of a person's own rules. Everybody in the organization may read them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the rules the organization set for everybody's Bots' Ações, newest Primeiro. They come ahead of a person's own rules. Everybody in the organization may read them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the organization's approval rules
  */
 export const listApprovalRules = async (
@@ -1484,7 +1484,7 @@ export const batchCreateApprovalRules = async (
   approvalRuleDraftBatch: ApprovalRuleDraftBatch,
   headers: BatchCreateApprovalRulesHeaders,
   options?: Parameters<typeof apiRequest>[1],
-): Promise<ApprovalRuleDraftSavedRules> => {
+): Promise<ApprovalRuleDraftGuardadoRules> => {
   const getHeaders = (
     h?: NonNullable<RequestInit["headers"]>,
   ): Record<string, string | readonly string[]> => {
@@ -1506,7 +1506,7 @@ export const batchCreateApprovalRules = async (
     }
     return headers;
   };
-  return apiRequest<ApprovalRuleDraftSavedRules>(
+  return apiRequest<ApprovalRuleDraftGuardadoRules>(
     getBatchCreateApprovalRulesUrl(organizationId),
     {
       ...options,

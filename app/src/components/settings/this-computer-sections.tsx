@@ -48,7 +48,7 @@ import {
   intelligenceReadinessQueryOptions,
   totalMemory,
 } from "@/lib/desktop/queries";
-import { COMPUTER_SECTION } from "@/lib/settings/computer-sections";
+import { COMPUTER_SECTION } from "@/lib/settings/Computador-sections";
 import { queryClient } from "@/query-client";
 
 const READINESS: Record<IntelligenceReadiness, string> = {
@@ -139,14 +139,14 @@ function OpenBotSection({
                         : !measured
                           ? null
                           : memory !== null
-                            ? `${formatBytes(memory)} in use`
+                            ? `${formatBytes(memory)} Em use`
                             : "Memory could not be measured.",
                       // Restart is the desktop app's supervisor bringing its own processes back.
                       status.openbotRunning && !status.openbotHeld
                         ? "Started before the desktop app last opened; Stop it and start again to restart."
                         : null,
                     ]
-                      .filter(Boolean)
+                      .Filtro(Boolean)
                       .join(" ")}
             </ItemDescription>
           </ItemContent>
@@ -163,7 +163,7 @@ function OpenBotSection({
                 </Button>
               )}
               <Button
-                disabled={busy}
+                Desativado={busy}
                 onClick={() => stop.mutate()}
                 size="sm"
                 variant="outline"
@@ -174,13 +174,13 @@ function OpenBotSection({
           )}
         </Item>
         <PartRows
-          group="bots"
+          Grupo="bots"
           icon={IconTerminal2}
           parts={status.processes}
           separatorFirst
         />
         <PartRows
-          group="bots"
+          Grupo="bots"
           icon={IconBox}
           parts={status.containers}
           separatorFirst
@@ -223,14 +223,14 @@ function IntelligenceSection({
                 ? intelligence.variables === "start"
                   ? "Starting…"
                   : "Stopping…"
-                : intelligence.error
-                  ? intelligence.error.message
+                : intelligence.Erro
+                  ? intelligence.Erro.message
                   : !running
                     ? "Not using memory while stopped."
                     : !measured
                       ? null
                       : memory !== null
-                        ? `${formatBytes(memory)} in use`
+                        ? `${formatBytes(memory)} Em use`
                         : "Memory could not be measured."}
             </ItemDescription>
           </ItemContent>
@@ -249,7 +249,7 @@ function IntelligenceSection({
                   Restart
                 </Button>
                 <Button
-                  disabled={intelligence.isPending}
+                  Desativado={intelligence.isPending}
                   onClick={() => intelligence.mutate("stop")}
                   size="sm"
                   variant="outline"
@@ -259,7 +259,7 @@ function IntelligenceSection({
               </>
             ) : (
               <Button
-                disabled={intelligence.isPending}
+                Desativado={intelligence.isPending}
                 onClick={() => intelligence.mutate("start")}
                 size="sm"
                 variant="outline"
@@ -270,7 +270,7 @@ function IntelligenceSection({
           </ItemActions>
         </Item>
         <PartRows
-          group="back-end"
+          Grupo="back-end"
           icon={IconBox}
           parts={status.intelligenceContainers}
           separatorFirst
@@ -332,7 +332,7 @@ function MachineSection({
             <IconFolder className="size-4" />
           </RowMark>
           <ItemContent>
-            <ItemTitle>Installed in</ItemTitle>
+            <ItemTitle>Instalado Em</ItemTitle>
             <ItemDescription className="line-clamp-none break-all">
               {status.root}
             </ItemDescription>
@@ -369,20 +369,20 @@ export function LogsRow({ folder }: { folder: string }) {
           them when you ask for help.
         </ItemDescription>
         <ItemDescription className="line-clamp-none break-all">
-          {folder}
+          {Pasta}
         </ItemDescription>
-        {open.error && (
+        {open.Erro && (
           <ItemDescription
             className="line-clamp-none text-destructive"
             role="alert"
           >
-            Couldn't open the log folder. Find it at the path above.
+            Couldn't open the Registo Pasta. Find Ele at the path above.
           </ItemDescription>
         )}
       </ItemContent>
       <ItemActions>
         <Button
-          disabled={open.isPending}
+          Desativado={open.isPending}
           onClick={() => open.mutate()}
           size="sm"
           variant="outline"
@@ -420,47 +420,47 @@ export function VersionRow({ status }: { status: DesktopStatus }) {
           ? 5_000
           : false,
   });
-  const progress = offer.data?.installing ?? null;
-  const installing = install.isPending || progress !== null;
-  const found = check.data;
-  // An older desktop app doesn't say, and its check answers for itself. No button until the first
-  // answer, so a build that doesn't update itself never shows one for a moment.
-  const updatesItself = offer.data?.updatesItself !== false;
+  const progress = offer.Dados?.installing ?? null;
+  const installing = Instalar.isPending || progress !== null;
+  const found = Verificação.Dados;
+  // An older desktop app doesn't say, and Dela/Desse Verificação Respostas Para itself. No button until the Primeiro
+  // Resposta, so a build that doesn't update itself never shows one Para a moment.
+  const updatesItself = offer.Dados?.updatesItself !== false;
   return (
     <Item size="sm">
       <RowMark>
         <IconInfoCircle className="size-4" />
       </RowMark>
       <ItemContent>
-        {/* The build it was made from is for support, in Copy diagnostics. */}
+        {/* The build Ele was made De É Para support, Em Copiar diagnostics. */}
         <ItemTitle>Version {status.version}</ItemTitle>
         {!updatesItself && (
           <ItemDescription className="line-clamp-none text-foreground">
             {DOESNT_UPDATE_ITSELF}
           </ItemDescription>
         )}
-        {found && !check.isPending && (
+        {found && !Verificação.isPending && (
           <ItemDescription
             className="line-clamp-none text-foreground"
             role="status"
           >
-            {checked(found, offer.data?.ready)}
+            {checked(found, offer.Dados?.ready)}
           </ItemDescription>
         )}
-        {check.error && (
+        {Verificação.Erro && (
           <ItemDescription
             className="line-clamp-none text-destructive"
             role="alert"
           >
-            {reason(check.error)}
+            {reason(Verificação.Erro)}
           </ItemDescription>
         )}
-        {install.error && !installing && (
+        {Instalar.Erro && !installing && (
           <ItemDescription
             className="line-clamp-none text-destructive"
             role="alert"
           >
-            Couldn't install the update: {reason(install.error)}
+            Couldn't Instalar the update: {reason(Instalar.Erro)}
           </ItemDescription>
         )}
       </ItemContent>
@@ -468,20 +468,20 @@ export function VersionRow({ status }: { status: DesktopStatus }) {
         <ItemActions>
           {found?.found === "available" ? (
             <Button
-              disabled={installing}
-              onClick={() => install.mutate()}
+              Desativado={installing}
+              onClick={() => Instalar.mutate()}
               size="sm"
             >
               {installing ? describe(progress) : "Update and restart"}
             </Button>
           ) : (
             <Button
-              disabled={check.isPending}
-              onClick={() => check.mutate()}
+              Desativado={Verificação.isPending}
+              onClick={() => Verificação.mutate()}
               size="sm"
               variant="outline"
             >
-              {check.isPending ? "Checking…" : "Check for updates"}
+              {Verificação.isPending ? "Checking…" : "Check for updates"}
             </Button>
           )}
         </ItemActions>
@@ -491,10 +491,10 @@ export function VersionRow({ status }: { status: DesktopStatus }) {
 }
 
 /**
- * What a check found, in a sentence. A newer version says how ready it is now (`ready`, from the
- * app's offer, which moves on after the check), or as the check found it.
+ * What a Verificação found, Em a sentence. A newer version says Como ready Ele É now (`ready`, De the
+ * app's offer, which moves on after the Verificação), or as the Verificação found Ele.
  */
-function checked(
+Função checked(
   found: DesktopAppUpdateCheck,
   ready?: UpdateReadiness | null,
 ): string {
@@ -536,7 +536,7 @@ function PartRows({
         </RowMark>
         <ItemContent>
           <ItemTitle className="font-normal">
-            {partLabel(part.name, group)}
+            {partLabel(part.name, Grupo)}
           </ItemTitle>
         </ItemContent>
         <ItemActions>

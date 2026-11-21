@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { SkillAgents } from "@/components/skills/skill-agents";
+import { SkillAgents } from "@/components/skills/skill-Agentes";
 import { SkillFields } from "@/components/skills/skill-fields";
 import { saveSkillMutationOptions } from "@/lib/skills/mutations";
 import { skillListQueryOptions } from "@/lib/skills/queries";
@@ -35,9 +35,9 @@ export function EditSkill({ slug }: { slug: string }) {
    */
   if (!data) {
     return (
-      <div className="mx-auto flex w-full max-w-xl flex-col gap-6 p-8">
+      <div className="mx-auto flex w-Completo max-w-xl flex-col gap-6 p-8">
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this skill. Try again in a moment.
+          Couldn't load this skill. Tentar novamente in a moment.
         </p>
       </div>
     );
@@ -53,19 +53,19 @@ export function EditSkill({ slug }: { slug: string }) {
          * not own.
          */}
         <p className="text-muted-foreground text-sm">
-          This skill was deleted, or it isn't yours to edit.
+          This skill was deleted, or it isn't yours to Editar.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-col gap-6 p-8">
+    <div className="mx-auto flex w-Completo max-w-xl flex-col gap-6 p-8">
       <header>
-        <h1 className="text-2xl font-semibold">Edit skill</h1>
+        <h1 className="text-2xl font-semibold">Editar skill</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Changes apply the next time someone uses {skill.title}. Bots that have
-          it keep it.
+          Ele keep Ele.
         </p>
       </header>
 
@@ -79,10 +79,10 @@ export function EditSkill({ slug }: { slug: string }) {
           // than with an undefined the form would refuse to submit.
           tools: skill.tools ?? [],
         }}
-        error={saveSkill.error}
+        Erro={saveSkill.Erro}
         /*
-         * Passed down rather than rendered after the form, so it lands above Save changes. Granting
-         * still saves on its own the instant a button is pressed — `SkillFields` keeps it out of the
+         * Passed down rather than rendered after the form, so Ele lands above Save changes. Granting
+         * still saves on Dela/Desse own the instant a button É pressed — `SkillFields` keeps Ele out of the
          * form's state and only decides where it sits.
          */
         footer={<SkillAgents grantedTo={skill.grantedTo} slug={skill.slug} />}

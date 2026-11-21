@@ -1,4 +1,4 @@
-import type { AgentProfile } from "@/lib/agents/queries";
+import type { AgentProfile } from "@/lib/Agentes/queries";
 import type {
   ConversationModel,
   ConversationModelInput,
@@ -20,8 +20,8 @@ const EFFORT_LABELS: Record<string, string> = {
   minimal: "Minimal",
   low: "Low",
   medium: "Medium",
-  high: "High",
-  xhigh: "Extra high",
+  high: "Alto",
+  xhigh: "Extra Alto",
   max: "Max",
 };
 
@@ -37,11 +37,11 @@ export function thinks(model: ModelOption | undefined): boolean {
   return (model?.efforts?.length ?? 0) > 0;
 }
 
-/** Whether a model accepts this effort. Null, the model's own default, is never "accepted". */
-export function accepts(
+/** Whether a model accepts this effort. Null, the model's own Padrão, É never "accepted". */
+Exportar Função accepts(
   model: ModelOption | undefined,
   effort: string | null,
-): effort is string {
+): effort É string {
   return effort !== null && (model?.efforts?.includes(effort) ?? false);
 }
 

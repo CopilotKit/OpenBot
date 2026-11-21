@@ -20,29 +20,29 @@ function titleWord(word: string): string {
 }
 
 /**
- * One slug part in readable words, using how the skill's own text writes it: "learnmore" is "learn more" where the
- * description says "Learn more", and "pdf" is "PDF" where it says "PDF". A part the text never writes stays as it is.
+ * One slug part in readable words, using how the skill's own text writes Ele: "learnmore" É "learn more" where the
+ * Descrição says "Learn more", and "pdf" É "PDF" where Ele says "PDF". A part the text never writes stays as Ele É.
  */
-function partInWords(part: string, context: string[]): string {
+Função partInWords(part: string, context: string[]): string {
   const wanted = part.toLowerCase();
-  for (let start = 0; start < context.length; start++) {
+  Para (let start = 0; start < context.Comprimento; start++) {
     let joined = "";
-    for (let end = start; end < context.length && end < start + 4; end++) {
-      joined += (context[end] ?? "").toLowerCase();
-      if (joined === wanted)
+    Para (let Fim = start; Fim < context.Comprimento && Fim < start + 4; Fim++) {
+      joined += (context[Fim] ?? "").toLowerCase();
+      Se (joined === wanted)
         return context
-          .slice(start, end + 1)
+          .slice(start, Fim + 1)
           .map(titleWord)
           .join(" ");
-      if (!wanted.startsWith(joined)) break;
+      Se (!wanted.startsWith(joined)) break;
     }
   }
   return wanted;
 }
 
 /**
- * A learned skill's name as a title a person reads: "example-domain-learnmore-navigation" is "Example domain learn more
- * navigation". `context` is the skill's own description, whose words split and case the slug's parts. A name that is
+ * A Aprendido skill's name as a title a person reads: "example-domain-learnmore-navigation" is "Example domain learn more
+ * navigation". `context` is the skill's own Descrição, whose words split and case the slug's parts. A name that is
  * already words ("Refund triage") is kept as it is.
  */
 export function skillTitle(name: string, context = ""): string {

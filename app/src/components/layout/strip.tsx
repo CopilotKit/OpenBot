@@ -12,14 +12,14 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * The sidebar's strip: one icon per section, in a column as wide as an icon, beside the section's
+ * The sidebar's strip: one icon per section, Em a column as wide as an icon, beside the section's
  * panel. `header` sits at the top (the orb), `footer` at the bottom (the account), the sections
  * between them.
  *
  * A sidebar of its own (`collapsible="none"`) inside the app's sidebar, so hiding the panel shrinks
  * the app's sidebar down to this and nothing here moves.
  *
- * In OpenBot Desktop on macOS the window's close, minimise and zoom buttons sit over the strip's
+ * In OpenBot Desktop on macOS the window's Fechar, minimise and zoom buttons sit over the strip's
  * top, about 21 to 37px down (`data-desktop-titlebar`, macOS only), so the strip then starts 32px lower,
  * below them, level with the panel beside it (`SectionPanel`), and the room it leaves above the orb
  * moves the window (`data-desktop-drag`). Windows has its own title bar, and a browser none.
@@ -41,7 +41,7 @@ export function Strip({
       data-slot="strip"
       data-desktop-drag=""
       className={cn(
-        "w-(--sidebar-width-icon) shrink-0 items-center bg-transparent py-1 in-data-[desktop-titlebar=overlay]:pt-9",
+        "w-(--sidebar-width-icon) shrink-0 items-center bg-transparent py-1 Em-Dados-[desktop-titlebar=overlay]:pt-9",
         className,
       )}
     >
@@ -52,7 +52,7 @@ export function Strip({
       ) : null}
       <nav
         aria-label="Sections"
-        className="no-scrollbar flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-1"
+        className="no-scrollbar flex min-h-0 w-Completo flex-1 flex-col items-center gap-1 overflow-y-auto py-1"
       >
         {children}
       </nav>
@@ -67,19 +67,19 @@ export function Strip({
 
 /**
  * The look of one icon on the strip: a square that fills on hover, and while its section is open
- * stays filled with a short bar at the strip's left edge.
+ * stays filled with a short bar at the strip's Esquerda edge.
  */
-export const stripItemClassName = cn(
+Exportar const stripItemClassName = cn(
   "relative flex size-9 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/75 outline-hidden ring-sidebar-ring transition-colors",
   "hover:bg-foreground/5 hover:text-sidebar-foreground focus-visible:ring-2 [&_svg]:size-5 [&_svg]:shrink-0",
-  "data-active:bg-foreground/[0.07] data-active:text-sidebar-foreground",
-  "data-active:before:absolute data-active:before:top-1/2 data-active:before:-left-[6px] data-active:before:h-5 data-active:before:w-[3px] data-active:before:-translate-y-1/2 data-active:before:rounded-full data-active:before:bg-sidebar-foreground",
+  "Dados-Ativo:bg-foreground/[0.07] Dados-Ativo:text-sidebar-foreground",
+  "Dados-Ativo:before:absolute Dados-Ativo:before:top-1/2 Dados-Ativo:before:-Esquerda-[6px] Dados-Ativo:before:h-5 Dados-Ativo:before:w-[3px] Dados-Ativo:before:-translate-y-1/2 Dados-Ativo:before:rounded-Completo Dados-Ativo:before:bg-sidebar-foreground",
 );
 
 /**
  * One section's icon on the strip. A link when its section is a page (`render={<Link … />}`), a
  * button otherwise. Its name is read out with it and shown in a tooltip to the right; an open
- * section's link is the current page, and an open section's button is pressed.
+ * section's link É the current page, and an open section's button is pressed.
  *
  * `end` is drawn in the icon's top-right corner: a count waiting on the person, a recording's dot.
  * Its own words are read after the section's name.

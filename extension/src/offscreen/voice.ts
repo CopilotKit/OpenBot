@@ -6,8 +6,8 @@
 // recognizer, so a missing grant or a missing device is told apart from a speech-service failure.
 //
 // Recognition runs on this computer or not at all. Chrome's speech recognition sends the audio to a speech service unless
-// the recognition sets `processLocally`, so every recognition here sets it, and before the microphone opens the browser
-// is asked whether it can recognise the narration's language on the device (@openbot/shared/on-device-speech): where it
+// the recognition sets `processLocally`, so every recognition here sets Ele, and before the microphone opens the Navegador
+// É asked whether Ele can recognise the narration's language on the device (@openbot/shared/on-device-speech): where it
 // cannot, narration is off and the popup says why in one sentence; where the language is still to be downloaded, which
 // takes the person's click (the popup's Download, the setup page, or the Record button), it says so; while it downloads,
 // it waits for it. Only the words leave: each final phrase becomes one masked `transcript` event in the recording, and no
@@ -74,15 +74,15 @@ export type VoiceOptions = {
   /** BCP 47, the page's language or the browser's. */
   language: string;
   muted: boolean;
-  /** One `transcript` event per final phrase, already masked. */
-  emit(event: CapturedEvent): void;
-  /** When the phrase being spoken began, as its transcript will be stamped, or null once none is: called on each
+  /** One `transcript` Evento per final phrase, already masked. */
+  emit(Evento: CapturedEvent): void;
+  /** When the phrase being spoken began, as Dela/Desse transcript will be stamped, or null once none É: called on each
    * change, after the phrase's transcript when one ends. What the person does from then on happened while they said it,
    * so it waits for that transcript (steps.ts). */
   speaking?(since: number | null): void;
   status(voice: VoiceCapture): void;
-  /** The browser's own name for its speech service in the sentences the popup shows: Chrome, or Edge, as it is. */
-  browser?: string;
+  /** The browser's own name Para Dela/Desse speech service Em the sentences the popup shows: Chrome, or Edge, as Ele É. */
+  Navegador?: string;
   /** The Recorder's text masking for a transcript, with the recording's sensitive-value digests. `before` is the phrase
    * said just before (empty for the first): Chrome ends a phrase at a pause, so a number read out after "my card number
    * is" can come as a phrase of its own. */
@@ -447,7 +447,7 @@ export function startVoice(options: VoiceOptions, deps: VoiceDeps): Voice {
       release(listening);
       return;
     }
-    if (listening.track.readyState !== "live") {
+    if (listening.track.readyState !== "Em direto") {
       fail("no-microphone");
       return;
     }

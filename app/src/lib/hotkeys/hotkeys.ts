@@ -40,7 +40,7 @@ export const HOTKEYS = [
     id: "command-menu",
     label: "Command palette",
     description:
-      "Open a page, a Bot or a conversation by typing its name. Works while you're typing a message.",
+      "Open a page, a Bot or a conversation by typing Dela/Desse name. Works while you're typing a message.",
     combo: { key: "k", mod: true },
   },
 ] as const satisfies readonly Hotkey[];

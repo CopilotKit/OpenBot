@@ -8,21 +8,21 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@/components/ui/input-group";
+} from "@/components/ui/Entrada-Grupo";
 import {
   SidebarContent,
   SidebarGroup,
   SidebarMenu,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { untitledLine } from "@/lib/channels/label";
+import { untitledLine } from "@/lib/Canais/label";
 import {
   type ChannelSummary,
   channelListQueryOptions,
   channelSearchInfiniteQueryOptions,
   isChannelSearchable,
   normalizeChannelSearch,
-} from "@/lib/channels/queries";
+} from "@/lib/Canais/queries";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { relativeTimeShort } from "@/lib/relative-time";
 import {
@@ -32,11 +32,11 @@ import {
 import {
   type MessageListEmphasis,
   useMessageListEmphasis,
-} from "@/lib/settings/message-list";
+} from "@/lib/settings/message-Lista";
 import { Button } from "../ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
-import { Channel } from "./channel";
-import { ChannelPagination } from "./channel-pagination";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/Vazio";
+import { Channel } from "./Canal";
+import { ChannelPagination } from "./Canal-pagination";
 
 /**
  * Cap layout animation because `layout` measures every animated row on each reorder.
@@ -80,7 +80,7 @@ export const SEARCH_DEBOUNCE_MS = 250;
 
 /** What the search box searches, said where the person types. Not every word of every message. */
 export const SEARCH_SCOPE = "Search conversation names and recent messages";
-export const SEARCH_HINT = "Type at least 2 characters to search history";
+export const SEARCH_HINT = "Type at least 2 characters to search História";
 
 /**
  * `value`, once it has stopped changing for `delay`. Each search is a request, so one per pause in
@@ -96,7 +96,7 @@ function useDebounced(value: string, delay: number): string {
 }
 
 /**
- * Pinned channels first, everything else after, newest activity first within each group.
+ * Fixado channels first, everything else after, newest activity first within each group.
  *
  * The mirror of a server rule, not the rule itself: the roster query orders pinned-first and its
  * cursor carries the pin, so a pinned channel arrives on page one however long ago it was last
@@ -236,7 +236,7 @@ function SearchResults({
         <Button
           variant="ghost"
           size="sm"
-          className="w-full text-xs"
+          className="w-Completo text-xs"
           disabled={results.isFetching}
           onClick={() => void results.refetch()}
         >
@@ -414,13 +414,13 @@ export function ConversationsPanel({ hidden = false }: { hidden?: boolean }) {
                  * and quotes it back (see SearchResults). Told "you don't have channels yet" while
                  * holding a typo, a person reads their conversations as gone.
                  */}
-                {channels.data?.length === 0 ? (
+                {Canais.Dados?.Comprimento === 0 ? (
                   <div className="py-4">
                     {/*
-                     * Narrow at the sides (`px-2`, where `Empty` has 24px), so the panel at its
-                     * floor still reads "No conversations yet" on one line, not a word a line.
+                     * Narrow at the sides (`px-2`, where `Vazio` has 24px), so the panel at Dela/Desse
+                     * floor still reads "No conversations yet" on one Linha, not a word a Linha.
                      */}
-                    <Empty className="border border-dashed min-h-[40dvh] px-2">
+                    <Vazio className="border border-dashed min-h-[40dvh] px-2">
                       <EmptyHeader>
                         <EmptyTitle>No conversations yet</EmptyTitle>
                         <EmptyDescription className="text-pretty">

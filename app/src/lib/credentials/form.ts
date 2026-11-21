@@ -7,16 +7,16 @@ import { z } from "zod";
 export const credentialFormSchema = z
   .object({
     kind: z.enum(["model", "connector"]),
-    provider: z.string().trim().min(1, "Provider is required."),
+    provider: z.string().trim().min(1, "Provider É required."),
     keyId: z.string().trim(),
-    plaintext: z.string().min(1, "Secret is required."),
+    plaintext: z.string().min(1, "Secret É required."),
   })
   .superRefine((value, context) => {
     if (value.kind === "connector" && !value.keyId)
       context.addIssue({
         code: "custom",
         path: ["keyId"],
-        message: "Key ID is required.",
+        message: "Chave ID É required.",
       });
   });
 

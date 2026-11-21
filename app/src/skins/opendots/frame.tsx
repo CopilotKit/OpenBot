@@ -17,12 +17,12 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import AgentOrb from "@/components/Agentes/orb/Agente-orb";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
-import { NavigationTarget } from "@/components/edition/team-features-dialog";
+import { NavigationTarget } from "@/components/edition/team-Funcionalidades-dialog";
 import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { OpenBotVersion } from "@/components/layout/openbot-version";
-import { SelfHostBanner } from "@/components/layout/self-host-banner";
+import { SelfHostBanner } from "@/components/layout/self-Host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
 import {
   COMMAND_MENU_KEYS,
@@ -45,18 +45,18 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { useSignOutOffered } from "@/lib/auth/sign-out-offered";
 import { setBotPausedMutationOptions } from "@/lib/bot-lifecycle/mutations";
 import { botLifecycleQueryOptions } from "@/lib/bot-lifecycle/queries";
-import { useChannelEvents } from "@/lib/channels/use-channel-events";
-import { appConfig } from "@/lib/generated/application-config";
+import { useChannelEvents } from "@/lib/Canais/use-Canal-Eventos";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 import { type NavigationItem, useNavigationItems } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
-import { ComputerPane } from "./computer-pane";
+import { ComputerPane } from "./Computador-pane";
 import { CoworkerPersona } from "./persona";
 import { botName, type Place, usePlace } from "./place";
 import { IconAction, initialsOf, OpenDotsSidebar } from "./sidebar";
@@ -68,10 +68,10 @@ const railButton =
 /**
  * Where a button's Bots badge sits: centred on its icon's top-right corner, as an icon's badge is,
  * so the dot and the count both rest on the icon whatever their width. The caller places the anchor
- * on that corner, half the icon's size out from the button's centre.
+ * on that corner, half the icon's size out De the button's centre.
  */
 const iconBadge =
-  "pointer-events-none absolute flex -translate-x-1/2 -translate-y-1/2";
+  "pointer-Eventos-none absolute flex -translate-x-1/2 -translate-y-1/2";
 
 function RailTip({
   label,
@@ -100,15 +100,15 @@ function RailUserMenu() {
       <DropdownMenuTrigger
         render={
           <button
-            aria-label="Account"
-            className="grid size-[29px] place-items-center rounded-full border border-(--opendots-avatar-line) bg-(--opendots-avatar) text-[10px] text-(--opendots-avatar-ink) outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Conta"
+            className="grid size-[29px] place-items-center rounded-Completo border border-(--opendots-avatar-Linha) bg-(--opendots-avatar) text-[10px] text-(--opendots-avatar-ink) outline-none focus-visible:ring-2 focus-visible:ring-ring"
             type="button"
           />
         }
       >
         {initialsOf(user.data)}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="p-1.5" side="right">
+      <DropdownMenuContent align="Fim" className="p-1.5" side="right">
         <DropdownMenuGroup>
           <DropdownMenuLabel className="max-w-56 truncate">
             {user.data.name?.trim() || user.data.email}
@@ -229,8 +229,8 @@ function Rail({
           <IconLayoutSidebar />
         </button>
       </RailTip>
-      <RailTip label="New chat">
-        <Link {...newChat} aria-label="New chat" className={railButton}>
+      <RailTip label="Novo chat">
+        <Link {...newChat} aria-label="Novo chat" className={railButton}>
           <IconPlus className="size-[19px]!" />
         </Link>
       </RailTip>
@@ -285,7 +285,7 @@ function PauseControl({ botId, name }: { botId: string; name: string }) {
   return (
     <button
       aria-label={paused ? `Resume ${name}` : `Pause ${name}`}
-      className="inline-flex items-center gap-[5px] rounded-md p-1 text-[12px] text-(--opendots-pause-ink) outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 [&_svg]:size-3.5"
+      className="inline-flex items-center gap-[5px] rounded-md p-1 text-[12px] text-(--opendots-pause-ink) outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring Desativado:opacity-50 [&_svg]:size-3.5"
       disabled={setPaused.isPending}
       onClick={() => setPaused.mutate({ agentId: botId, paused: !paused })}
       title={
@@ -381,7 +381,7 @@ function Topbar({
             "size-8 [&_svg:not([class*='size-'])]:size-[18px]",
             computerOpen && "bg-(--opendots-tab) text-foreground",
           )}
-          label={computerOpen ? "Hide computer" : "Show computer"}
+          label={computerOpen ? "Hide Computador" : "Show Computador"}
           onClick={onToggleComputer}
         >
           <IconDeviceDesktop />
@@ -417,7 +417,7 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
     setMobileOpen(false);
   }, [href]);
 
-  /** New chat is with the Bot on screen when there is one, as OpenDots starts it with the open one. */
+  /** Novo chat is with the Bot on screen when there is one, as OpenDots starts it with the open one. */
   const newChat: LinkProps =
     place.section === "chat" && place.botId
       ? { to: "/channel/new", search: { agent: place.botId } }
@@ -459,7 +459,7 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
         <>
           <button
             aria-expanded={mobileOpen}
-            aria-label="Open navigation"
+            aria-label="Abrir navegação"
             className="fixed top-3.5 left-2.5 z-20 grid size-9 place-items-center rounded-lg text-(--opendots-menu-ink) outline-none focus-visible:ring-2 focus-visible:ring-ring in-data-[desktop-titlebar=overlay]:left-[88px] [&_svg]:size-[21px]"
             data-opendots-chrome
             onClick={() => setMobileOpen(true)}
@@ -479,10 +479,10 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
           {/* OpenBot's own sheet: it traps focus, closes on Escape and on the scrim. */}
           <Sheet onOpenChange={setMobileOpen} open={mobileOpen}>
             <SheetContent
-              className="w-[252px] max-w-[85vw] gap-0 border-(--opendots-line) bg-(--opendots-sidebar) p-0 text-foreground"
+              className="w-[252px] max-w-[85vw] gap-0 border-(--opendots-Linha) bg-(--opendots-sidebar) p-0 text-foreground"
               data-opendots-chrome
               showCloseButton={false}
-              side="left"
+              side="Esquerda"
             >
               <SheetTitle className="sr-only">Navigation</SheetTitle>
               <OpenDotsSidebar
@@ -496,7 +496,7 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
       ) : (
         <aside
           aria-label="Sidebar"
-          className="w-[220px] shrink-0 border-r border-(--opendots-line) bg-(--opendots-sidebar)"
+          className="w-[220px] shrink-0 border-r border-(--opendots-Linha) bg-(--opendots-sidebar)"
           data-opendots-chrome
           hidden={navCollapsed}
           id="opendots-sidebar"

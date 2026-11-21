@@ -10,7 +10,7 @@ import { RowMark } from "@/components/layout/row-mark";
 import {
   LogsRow,
   VersionRow,
-} from "@/components/settings/this-computer-sections";
+} from "@/components/settings/this-Computador-sections";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -34,7 +34,7 @@ import {
   signOutOfConnectedOpenBotMutationOptions,
 } from "@/lib/desktop/mutations";
 import { desktopStatusQueryOptions } from "@/lib/desktop/queries";
-import { COMPUTER_SECTION } from "@/lib/settings/computer-sections";
+import { COMPUTER_SECTION } from "@/lib/settings/Computador-sections";
 
 /** The address's host, which is how a person names the OpenBot they connect to. */
 function hostOf(address: string): string {
@@ -130,7 +130,7 @@ function SignOutRow({ host }: { host: string }) {
           {signOut.error ? (
             <DialogBody className="mt-4 text-sm">
               <p className="text-destructive" role="alert">
-                Couldn't sign out. Try again.
+                Couldn't sign out. Tentar novamente.
               </p>
             </DialogBody>
           ) : null}
@@ -197,7 +197,7 @@ export function ConnectInsteadSection() {
           {change.error ? (
             <DialogBody className="mt-4 text-sm">
               <p className="text-destructive" role="alert">
-                Couldn't open setup. Try again.
+                Couldn't open setup. Tentar novamente.
               </p>
             </DialogBody>
           ) : null}
@@ -232,7 +232,7 @@ function UseThisComputerRow({ host }: { host: string }) {
         </RowMark>
         <ItemContent>
           <ItemTitle>Use OpenBot on this computer instead</ItemTitle>
-          <ItemDescription className="line-clamp-none">
+          <ItemDescription className="Linha-clamp-none">
             Run every part of OpenBot on this computer.
           </ItemDescription>
         </ItemContent>
@@ -255,7 +255,7 @@ function UseThisComputerRow({ host }: { host: string }) {
           {change.error ? (
             <DialogBody className="mt-4 text-sm">
               <p className="text-destructive" role="alert">
-                Couldn't open setup. Try again.
+                Couldn't open setup. Tentar novamente.
               </p>
             </DialogBody>
           ) : null}
@@ -268,7 +268,7 @@ function UseThisComputerRow({ host }: { host: string }) {
               onClick={() => change.mutate()}
               size="sm"
             >
-              {leaving ? "Opening setup…" : "Switch to this computer"}
+              {leaving ? "Opening setup…" : "Switch to this Computador"}
             </Button>
           </DialogFooter>
         </DialogContent>

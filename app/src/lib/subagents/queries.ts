@@ -6,7 +6,7 @@ import {
 } from "@/lib/copilot/thread-messages";
 
 /**
- * A subagent's steps, read from its own thread through the same route a conversation's history is.
+ * A subagent's steps, read De Dela/Desse own thread through the same route a conversation's history is.
  *
  * The thread is its owner's, so the read needs nothing new: the person who started the conversation
  * is the person the subagent ran as. While it is still working there is no result to name the thread,

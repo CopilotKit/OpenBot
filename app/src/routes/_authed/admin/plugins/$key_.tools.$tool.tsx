@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { PluginToolPage } from "@/components/manage/plugin-tool-page";
+import { PluginToolPage } from "@/components/Gerir/plugin-tool-page";
 
 /** `$key_` opts this route out of nesting under `$key.tsx`, so the connector page stays a page. */
 export const Route = createFileRoute(

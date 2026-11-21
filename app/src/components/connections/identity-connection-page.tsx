@@ -12,7 +12,7 @@ import {
   type LinkableProvider,
   LinkedAccountSection,
   linkableProviderTitle,
-} from "@/components/settings/linked-accounts";
+} from "@/components/settings/linked-Contas";
 import {
   linkedNotice,
   visibleLinkedNotice,
@@ -78,11 +78,11 @@ export function IdentityConnectionPage({
       {notice ? (
         <p
           className={
-            notice.tone === "error"
+            notice.tone === "Erro"
               ? "mt-4 text-destructive text-sm"
               : "mt-4 text-muted-foreground text-sm"
           }
-          role={notice.tone === "error" ? "alert" : "status"}
+          role={notice.tone === "Erro" ? "alert" : "status"}
         >
           {notice.text}
         </p>
@@ -118,12 +118,12 @@ function GithubTools() {
   ).some((row) => row.serverId === app.id);
   return (
     <PageSection
-      description="Lets your Bots read and change your repositories as you. You connect this separately from your account above."
+      description="Lets your Bots read and change your repositories as you. You connect this separately De your Conta above."
       title="Tools"
     >
       <PageRows>
         <Item
-          render={<Link params={{ key: app.id }} to="/connections/$key" />}
+          render={<Link params={{ key: app.id }} to="/connections/$Chave" />}
           size="sm"
         >
           <ItemMedia variant="icon">

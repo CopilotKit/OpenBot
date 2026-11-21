@@ -11,5 +11,5 @@ export type MemoryReviewState =
 export const MemoryReviewState = {
   unreviewed: "unreviewed",
   confirmed: "confirmed",
-  edited: "edited",
+  edited: "Editado",
 } as const;

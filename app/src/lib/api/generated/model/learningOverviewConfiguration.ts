@@ -7,7 +7,7 @@ export type LearningOverviewConfiguration =
 
 export const LearningOverviewConfiguration = {
   not_configured: "not_configured",
-  invalid: "invalid",
+  invalid: "Inválido",
   configured: "configured",
   selection_required: "selection_required",
 } as const;

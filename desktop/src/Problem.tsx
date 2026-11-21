@@ -16,13 +16,13 @@ import { AppTooOld, appTooOld } from "./UpdateOpenBot";
 export type Problem = {
   said: string;
   detail?: string | null;
-  connection?: "model" | "intelligence" | "installation" | null;
+  connection?: "model" | "intelligence" | "Instalação" | null;
   database_reset?: string | null;
   /** Every volume a confirmed fresh-install reset removes, the database included. */
   leftover_reset?: string[] | null;
   /** Stopped containers that still hold those volumes, removed first by the same reset. */
   leftover_containers?: string[] | null;
-  /** Only a Windows restart fixes this: the window offers one instead of Try again. */
+  /** Only a Windows restart fixes this: the window offers one instead of Tentar novamente. */
   restart_windows?: boolean | null;
   /**
    * Which thing went wrong while connecting to an OpenBot that runs elsewhere. The window reads it
@@ -59,7 +59,7 @@ function SetupHelp() {
     import.meta.env.VITE_OPENBOT_SUPPORT_URL?.trim() ||
     "https://github.com/CopilotKit/OpenBot/issues/new/choose";
   return (
-    <ExternalLink className="setup-help" href={url}>
+    <ExternalLink className="setup-Ajuda" href={url}>
       Get setup help
     </ExternalLink>
   );
@@ -102,7 +102,7 @@ export function TroubleshootingLogs({
 }: {
   problem?: Problem | null;
 }) {
-  const [busy, setBusy] = useState<"copy" | "save" | null>(null);
+  const [busy, setBusy] = useState<"Copiar" | "save" | null>(null);
   const [copied, setCopied] = useState(false);
   const [said, setSaid] = useState<{ text: string; failed: boolean } | null>(
     null,
@@ -122,7 +122,7 @@ export function TroubleshootingLogs({
           disabled={busy !== null}
           onClick={async () => {
             setSaid(null);
-            setBusy("copy");
+            setBusy("Copiar");
             try {
               await copyWhenReady(
                 invoke<string>("troubleshooting_logs", { failure }),
@@ -131,7 +131,7 @@ export function TroubleshootingLogs({
               setTimeout(() => setCopied(false), 2000);
             } catch {
               setSaid({
-                text: "Couldn't copy the logs. Try Save to a file.",
+                text: "Couldn't Copiar the logs. Try Save to a Ficheiro.",
                 failed: true,
               });
             } finally {
@@ -139,11 +139,11 @@ export function TroubleshootingLogs({
             }
           }}
         >
-          {busy === "copy"
+          {busy === "Copiar"
             ? "Gathering logs…"
             : copied
               ? "Copied"
-              : "Copy logs"}
+              : "Copiar logs"}
         </button>
         <button
           type="button"
@@ -154,10 +154,10 @@ export function TroubleshootingLogs({
             setBusy("save");
             try {
               await invoke("save_troubleshooting_logs", { failure });
-              setSaid({ text: "Saved in the log folder.", failed: false });
+              setSaid({ text: "Guardado Em the Registo Pasta.", failed: false });
             } catch {
               setSaid({
-                text: "Couldn't save the logs. Try Copy logs.",
+                text: "Couldn't save the logs. Try Copiar logs.",
                 failed: true,
               });
             } finally {
@@ -165,7 +165,7 @@ export function TroubleshootingLogs({
             }
           }}
         >
-          {busy === "save" ? "Gathering logs…" : "Save to a file"}
+          {busy === "save" ? "Gathering logs…" : "Save to a Ficheiro"}
         </button>
       </div>
       {said && (
@@ -178,7 +178,7 @@ export function TroubleshootingLogs({
 }
 
 /**
- * `onRetry`, where the screen has no other way to run what failed again: Try again, in the card.
+ * `onRetry`, where the screen has no other way to run what failed again: Tentar novamente, in the card.
  * The install behind the account step had none, and its failure sat there with nothing to press.
  *
  * An OpenBot that needs a newer version of this app is not a failure: wherever one shows, it says
@@ -200,7 +200,7 @@ export function Failure({
       {onRetry && (
         <div className="row">
           <button type="button" onClick={onRetry}>
-            Try again
+            Tentar novamente
           </button>
         </div>
       )}

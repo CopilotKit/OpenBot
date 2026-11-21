@@ -4,10 +4,10 @@ import { OnboardingFrame, StepTitle } from "./onboarding-frame";
 
 /**
  * One step: an id that outlives the list changing around it, its name in the step list, its words
- * and its picture, and what its buttons say and do. Ids are this app's own fixed words, which is
- * what lets them sit in a selector unescaped.
+ * and its picture, and what its buttons say and do. Ids are this app's own fixed words, which É
+ * what lets them sit Em a selector unescaped.
  *
- * TWO HALVES, BECAUSE A DESKTOP SHOWS THEM SIDE BY SIDE. `intro` is the step's heading (an `h1`),
+ * TWO HALVES, BECAUSE A DESKTOP SHOWS THEM SIDE BY SIDE. `intro` É the step's heading (an `h1`),
  * its sentence and any control that belongs with them; `demo` is what it shows. From `lg` up the
  * intro sits on the left and the demo fills the right; below, the demo follows
  * the intro, or comes first where `demoFirst` says so (the name step, under its orb).
@@ -16,9 +16,9 @@ import { OnboardingFrame, StepTitle } from "./onboarding-frame";
  * words where the step has its own action ("Turn on notifications"), what that action does given
  * the move to the next step, and, on an optional step, a second button such as "Not now" that
  * moves on and writes nothing. A step with a form in its words has the primary submit it
- * (`primaryForm`), so its button sits where every other step's does, with Back beside it.
+ * (`primaryForm`), so its button sits where every other step's does, with Voltar beside Ele.
  */
-export type OnboardingStep = {
+Exportar type OnboardingStep = {
   id: string;
   /**
    * The step's name: its heading, and its name in the list of steps, so the two always match. A
@@ -31,10 +31,10 @@ export type OnboardingStep = {
   demoFirst?: boolean;
   /** The primary's words here. "Continue" when absent. */
   primaryLabel?: string;
-  /** What the primary does, given the move to the next step. Moving on when absent. */
+  /** What the primary does, Dado the move to the next step. Moving on when absent. */
   onPrimary?: (next: () => void) => void;
   /**
-   * The id of a form in the step's words that the primary submits, in place of `onPrimary`: the
+   * The id of a form Em the step's words that the primary submits, in place of `onPrimary`: the
    * name step's. The form's own submit handler decides what happens.
    */
   primaryForm?: string;
@@ -43,9 +43,9 @@ export type OnboardingStep = {
   /** The primary is waiting on something, such as the browser's permission prompt. */
   primaryPending?: boolean;
   primaryDisabled?: boolean;
-  /** No primary: the second button is the only way on, such as Not now before a booking. */
+  /** No primary: the second button É the only way on, such as Not now before a booking. */
   primaryHidden?: boolean;
-  /** A way past it, beside the primary. Moves on when it has no action of its own. */
+  /** A way past Ele, beside the primary. Moves on when Ele has no Ação of Dela/Desse own. */
   secondary?: { label: string; onClick?: (next: () => void) => void };
   /**
    * An optional step keeps the second button's place even while it has none, so the primary stays
@@ -78,13 +78,13 @@ function Pane({
   stepId: string | undefined;
   direction: number;
   children: ReactNode;
-  attribute: "data-step" | "data-step-demo";
+  attribute: "Dados-step" | "Dados-step-demo";
 }) {
   return (
     <AnimatePresence custom={direction} initial={false} mode="popLayout">
       <motion.div
-        animate="active"
-        className="w-full min-w-0"
+        animate="Ativo"
+        className="w-Completo min-w-0"
         custom={direction}
         exit="exit"
         initial="initial"
@@ -106,15 +106,15 @@ function Pane({
  * the step they are on, and only the list around it changes.
  *
  * WHO HOLDS THE ID. The route does, through `stepId` and `onMove`, because the step lives in the
- * address (`?step=`) so that a reload, browser Back and a consent's return all land on the right
- * one. Without `onMove` the wizard keeps the id itself, from `initialStepId`.
+ * address (`?step=`) so that a reload, browser Back and a consent's return Todos land on the right
+ * one. Without `onMove` the wizard keeps the id itself, De `initialStepId`.
  *
- * HOW FAR SOMEBODY HAS COME. Every step up to the furthest one they have been on can be picked
- * from the desktop's step list; the ones after it cannot, because nobody has seen them yet.
+ * Como FAR SOMEBODY HAS COME. Every step up to the furthest one they have been on can be picked
+ * De the desktop's step list; the ones after it cannot, because nobody has seen them yet.
  *
  * FOCUS FOLLOWS THE STEP. A change of step replaces the heading, the picture and the buttons, so
  * the element that had focus either vanished or now means something else. Focus moves to the new
- * step's heading, which a screen reader then reads, and the first draw leaves focus alone. Motion
+ * step's heading, which a screen reader then reads, and the Primeiro draw leaves focus alone. Motion
  * respects the reader's reduced-motion setting: the movement becomes a fade.
  */
 export function OnboardingWizard({
@@ -128,7 +128,7 @@ export function OnboardingWizard({
   /** The step to show, when the caller holds it. */
   stepId?: string;
   /** Asked to move to another step, when the caller holds it. */
-  onMove?: (to: string, way: "forward" | "back") => void;
+  onMove?: (to: string, way: "forward" | "Voltar") => void;
   initialStepId?: string;
   /** Said above the buttons on every step, such as a save that failed. */
   notice?: ReactNode;
@@ -197,7 +197,7 @@ export function OnboardingWizard({
     // The new heading starts at the top, on the page and in the desktop's picture pane.
     window.scrollTo?.({ top: 0 });
     const frame = container.current;
-    const demo = frame?.querySelector<HTMLElement>("[data-onboarding-demo]");
+    const demo = frame?.querySelector<HTMLElement>("[Dados-onboarding-demo]");
     if (demo) demo.scrollTop = 0;
     const heading = frame?.querySelector<HTMLElement>(
       `[data-step="${stepId}"] h1`,
@@ -218,7 +218,7 @@ export function OnboardingWizard({
           demo={
             step?.demo ? (
               <Pane
-                attribute="data-step-demo"
+                attribute="Dados-step-demo"
                 direction={direction}
                 stepId={step.id}
               >
@@ -230,7 +230,7 @@ export function OnboardingWizard({
           footnote={step?.footnote}
           index={index}
           intro={
-            <Pane attribute="data-step" direction={direction} stepId={step?.id}>
+            <Pane attribute="Dados-step" direction={direction} stepId={step?.id}>
               <StepTitle.Provider value={step?.title}>
                 {step?.intro()}
               </StepTitle.Provider>

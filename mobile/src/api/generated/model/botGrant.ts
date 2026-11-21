@@ -10,13 +10,13 @@ import type { BotGrantSkill } from "./botGrantSkill";
  */
 export interface BotGrant {
   /**
-   * The grant's address: action:<app id>:<action name>, skill:<slug> or bot:<Bot id>.
+   * The grant's address: Ação:<app id>:<Ação name>, skill:<slug> or bot:<Bot id>.
    * @minLength 1
    */
   id: string;
   kind: BotGrantKind;
   /**
-   * What it names: an action as <app id>/<action name>, a skill's slug, or a Bot's id.
+   * What Ele names: an Ação as <app id>/<Ação name>, a skill's slug, or a Bot's id.
    * @minLength 1
    */
   ref: string;

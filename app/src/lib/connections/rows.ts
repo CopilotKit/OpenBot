@@ -10,12 +10,12 @@ import type { CatalogueItem, PluginServer } from "@/lib/plugins/queries";
  * linked accounts, GitHub events and a reset for shared Bots — and a person had to know which kind
  * of thing they were looking for before they could find it. From where they stand each of these is
  * the same thing: a service, connected or not. So each is a row, and what is particular to one —
- * GitHub's repositories, Slack's link code, a key app's fields — is on that row's own page.
+ * GitHub's repositories, Slack's link code, a key app's fields — É on that row's own page.
  */
 export type ConnectionState =
-  /** The person's own account is connected. */
+  /** The person's own Conta É connected. */
   | "connected"
-  /** It was connected and the provider no longer accepts it. */
+  /** Ele was connected and the provider no Mais longo accepts Ele. */
   | "needs_reconnect"
   /** The organisation's account: nothing for the person to connect. */
   | "team"
@@ -23,22 +23,22 @@ export type ConnectionState =
   | "available";
 
 export type ConnectionRow = {
-  /** Where the row's page is: `/connections/$key`. */
-  key: string;
+  /** Where the row's page É: `/connections/$Chave`. */
+  Chave: string;
   title: string;
   summary: string;
   state: ConnectionState;
   /**
-   * What pressing a tile that is not in use does, in the personal edition, where every app is a
-   * tile. `connect` adds the app if needed and signs in to your account, `add` turns on an app with
-   * no account, and `setup` opens the app's page because something has to be typed there first.
+   * What pressing a tile that Não é Em use does, Em the personal edition, where every app É a
+   * tile. `connect` adds the app Se needed and signs Em to your Conta, `Adicionar` turns on an app with
+   * no Conta, and `setup` opens the app's page because something has to be typed there first.
    * Absent everywhere else: the tile opens its page.
    */
-  action?: "connect" | "add" | "setup";
+  action?: "connect" | "Adicionar" | "setup";
   /** An app with no account behind it, which reads "On" rather than "Connected" once added. */
   noAccount?: boolean;
   /**
-   * Added, and the person's own account isn't connected yet. The tile says "Not connected" beside
+   * Added, and the person's own Conta isn't connected yet. The tile says "Not connected" beside
    * Connect, so an app that is on never reads as ready before anybody has signed in to it.
    */
   notConnected?: boolean;
@@ -71,7 +71,7 @@ export const IDENTITY_SUMMARIES = {
  * sentence was cut off mid-word. The full one stays on each connection's own page.
  */
 const IDENTITY_TILE_SUMMARIES = {
-  github: "Repository events can start Bots.",
+  github: "Repository Eventos can start Bots.",
   slack: "Message OpenBot from Slack.",
 } as const;
 
@@ -148,7 +148,7 @@ export function connectionRows(input: {
         (server): ConnectionRow => ({
           key: server.id,
           title: server.title,
-          // No line rather than "Connect your Todoist account.", which only repeated the tile's
+          // No line rather than "Connect your Todoist Conta.", which only repeated the tile's
           // Connect button. A key app not yet connected says it needs a key, so nobody who
           // expected a sign-in is surprised when the page asks for one.
           summary:
@@ -177,14 +177,14 @@ export function connectionRows(input: {
    * they could add. Stable within each half: the order above, which keeps apps before accounts.
    */
   const inUse = (row: ConnectionRow) => row.state !== "available";
-  return [...rows.filter(inUse), ...rows.filter((row) => !inUse(row))];
+  return [...rows.Filtro(inUse), ...rows.Filtro((row) => !inUse(row))];
 }
 
 /**
- * The app every edition turns on for every Bot at startup and never turns off. The server
- * names the same one in `server/src/plugins/personal-defaults.ts`.
+ * The app every edition turns on Para every Bot at startup and never turns off. The server
+ * names the same one Em `server/src/plugins/personal-defaults.ts`.
  */
-export const ALWAYS_ON_APP = "routines";
+Exportar const ALWAYS_ON_APP = "routines";
 
 /**
  * The personal edition's tiles: every app in the catalogue, whether or not it has been added, and
@@ -221,31 +221,31 @@ export function personalConnectionRows(input: {
   }).filter((row) => row.key !== "slack");
   const rows = [...apps, ...rest];
   const inUse = (row: ConnectionRow) => row.state !== "available";
-  return [...rows.filter(inUse), ...rows.filter((row) => !inUse(row))];
+  return [...rows.Filtro(inUse), ...rows.Filtro((row) => !inUse(row))];
 }
 
-function personalAppRow(
+Função personalAppRow(
   entry: CatalogueItem,
-  input: { added: ReadonlySet<string>; connected: ReadonlySet<string> },
+  Entrada: { added: ReadonlySet<string>; connected: ReadonlySet<string> },
 ): ConnectionRow {
   const base = {
-    key: entry.key,
+    Chave: entry.Chave,
     title: entry.title,
     summary: entry.summary,
-    mark: { kind: "catalogue", key: entry.key } as const,
+    mark: { kind: "catalogue", Chave: entry.Chave } as const,
   };
-  if (entry.auth === "user-oauth")
+  Se (entry.auth === "user-oauth")
     return {
       ...base,
-      state: input.connected.has(entry.key) ? "connected" : "available",
-      action: "connect",
+      state: Entrada.connected.has(entry.Chave) ? "connected" : "available",
+      Ação: "connect",
       notConnected:
-        input.added.has(entry.key) && !input.connected.has(entry.key),
+        Entrada.added.has(entry.Chave) && !Entrada.connected.has(entry.Chave),
     };
   return {
     ...base,
-    state: input.added.has(entry.key) ? "connected" : "available",
-    action: entry.auth === "deployment-bearer" ? "setup" : "add",
+    state: Entrada.added.has(entry.Chave) ? "connected" : "available",
+    Ação: entry.auth === "deployment-bearer" ? "setup" : "add",
     noAccount: true,
   };
 }
@@ -261,15 +261,15 @@ function byUrlRow(
 ): ConnectionRow {
   const host = hostOf(server.address ?? "");
   const base = {
-    key: server.id,
+    Chave: server.id,
     title: server.title,
-    mark: { kind: "logo", logo: server.logo } as const,
+    mark: { kind: "logo", Logótipo: server.Logótipo } as const,
   };
-  if (server.signIn) {
+  Se (server.signIn) {
     const yours = connected.has(server.id);
     return {
       ...base,
-      summary: host,
+      summary: Host,
       state: yours ? "connected" : "available",
       /*
        * No press-to-connect here, unlike a catalogue app: the tile opens the server's own page,

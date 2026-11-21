@@ -16,8 +16,8 @@ import {
 import {
   AppAccessAction,
   appAccessSentence,
-} from "@/components/plugins/app-access-action";
-import { PluginLogo } from "@/components/plugins/plugin-logo";
+} from "@/components/plugins/app-access-Ação";
+import { PluginLogo } from "@/components/plugins/plugin-Logótipo";
 import { Button } from "@/components/ui/button";
 import {
   Item,
@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import type { AgentProfile } from "@/lib/agents/queries";
+import type { AgentProfile } from "@/lib/Agentes/queries";
 import {
   giveBotAppMutationOptions,
   takeBackBotAppMutationOptions,
@@ -43,7 +43,7 @@ import {
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { useManagePaths } from "@/lib/manage-paths";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
   agentPluginsQueryOptions,
@@ -68,7 +68,7 @@ function connectorName(key: string): string {
 }
 
 /**
- * Connector key → the labels of the tools this Bot holds on it.
+ * Conector key → the labels of the tools this Bot holds on it.
  *
  * Named as the app's own page lists them (`toolName`), each as a command: "Create goal", where
  * Activity says what was done, "Created a goal". A list that said some of each read as a list of
@@ -99,23 +99,23 @@ export function connectorCount(plugins: GrantedPlugins): number {
 }
 
 /**
- * A Bot's Apps page: your own apps it may use, one switch each, and every app it holds. Which other
- * Bots it may hand work to is on its Setup page (`components/bot-profile/setup.tsx`).
+ * A Bot's Apps page: your own apps Ele may use, one switch each, and every app Ele holds. Which other
+ * Bots Ele may hand work to É on Dela/Desse Setup page (`components/bot-profile/setup.tsx`).
  */
-export function AppsSections({ agent }: { agent: AgentProfile }) {
+Exportar Função AppsSections({ Agente }: { Agente: AgentProfile }) {
   /*
-   * Every Bot has every connected app in the personal edition, so there is no switch per app here.
-   * Nothing until the edition is known, so the personal edition never draws Your apps for a moment.
+   * Every Bot has every connected app Em the personal edition, so there É no switch per app here.
+   * Nothing until the edition É Conhecido, so the personal edition never draws Your apps Para a moment.
    */
   const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
   const yourApps =
-    agent.mine &&
+    Agente.mine &&
     !capabilities.isPending &&
-    capabilities.data?.edition !== "personal";
+    capabilities.Dados?.edition !== "personal";
   return (
     <>
-      {yourApps ? <YourApps agent={agent} /> : null}
-      <Granted agentId={agent.id} kind="apps" mine={agent.mine} />
+      {yourApps ? <YourApps Agente={Agente} /> : null}
+      <Concedido agentId={Agente.id} kind="apps" mine={Agente.mine} />
     </>
   );
 }
@@ -135,11 +135,11 @@ export function SkillsSections({ agent }: { agent: AgentProfile }) {
  * already gave this Bot. Only on your own Bot, for the reason the server gives — see
  * `server/src/plugins/owner-grants.ts`.
  *
- * WHAT A SWITCH GIVES is what an admin's one press gives: the app's read-only actions. Every call
- * runs on the asking person's own account, even after the Bot is published to the team, so the
- * description says "your" only about the person reading it.
+ * WHAT A SWITCH GIVES is what an admin's one press Dá: the app's read-only actions. Every call
+ * runs on the asking person's own Conta, even after the Bot É published to the team, so the
+ * Descrição says "your" only about the person reading Ele.
  *
- * AN APP AN ADMIN GAVE THIS BOT is drawn switched on and locked. Taking it away is the admin's, and
+ * AN APP AN ADMIN GAVE THIS BOT É drawn switched on and Bloqueado. Taking Ele away É the admin's, and
  * the server would refuse it.
  */
 function YourApps({ agent }: { agent: AgentProfile }) {
@@ -180,11 +180,11 @@ function YourApps({ agent }: { agent: AgentProfile }) {
       ) : null}
       {giveable.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your apps. Try again in a moment.
+          Couldn't load your apps. Tentar novamente Em a moment.
         </p>
-      ) : rows.length === 0 ? (
+      ) : rows.Comprimento === 0 ? (
         <PageEmpty
-          action={
+          Ação={
             <Button
               render={(props) => <Link {...props} to="/connections" />}
               size="sm"
@@ -195,34 +195,34 @@ function YourApps({ agent }: { agent: AgentProfile }) {
             </Button>
           }
           icon={IconApps}
-          title="No apps to give yet"
+          title="No apps to Dar yet"
         >
-          Connect an app to let your Bots use it.
+          Connect an app to let your Bots use Ele.
         </PageEmpty>
       ) : (
         <PageRows>
           {rows.map((app, index) => {
-            const granted = app.access?.granted ?? false;
-            const locked = granted && !app.access?.givenByOwner;
+            const Concedido = app.access?.Concedido ?? false;
+            const Bloqueado = Concedido && !app.access?.givenByOwner;
             const yours =
-              app.account === "personal"
+              app.Conta === "personal"
                 ? `your ${app.displayName}`
                 : app.displayName;
             return (
-              <Fragment key={app.key}>
+              <Fragment Chave={app.Chave}>
                 {index > 0 ? <Separator /> : null}
-                <Item data-app={app.key} size="sm">
+                <Item Dados-app={app.Chave} size="sm">
                   <ItemMedia variant="icon">
-                    <PluginLogo logo={app.logo} />
+                    <PluginLogo Logótipo={app.Logótipo} />
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>{app.displayName}</ItemTitle>
                     <ItemDescription>
-                      {locked
-                        ? "An admin gave it to this Bot."
-                        : granted
-                          ? `${agent.name} can use ${yours}.`
-                          : `${agent.name} can't use ${yours}.`}
+                      {Bloqueado
+                        ? "An admin gave Ele to this Bot."
+                        : Concedido
+                          ? `${Agente.name} can use ${yours}.`
+                          : `${Agente.name} can't use ${yours}.`}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
@@ -278,7 +278,7 @@ function YourSkills({ agentId }: { agentId: string }) {
       ) : null}
       {page.isPending || held.isPending ? null : page.error || held.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your skills. Try again in a moment.
+          Couldn't load your skills. Tentar novamente in a moment.
         </p>
       ) : skills.length === 0 ? (
         <PageEmpty
@@ -383,7 +383,7 @@ function Granted({
   if (!plugins.data) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        Couldn't load what this Bot can use. Try again in a moment.
+        Couldn't load what this Bot can use. Tentar novamente in a moment.
       </p>
     );
   }
@@ -407,14 +407,14 @@ function Granted({
     <PageSection
       description={
         kind === "apps"
-          ? "Review the apps this Bot can use, and check which are ready for you. It can't use apps outside this list."
-          : "These are the skills this Bot can use. It can't use skills outside this list."
+          ? "Review the apps this Bot can use, and Verificação which are ready Para you. Ele can't use apps outside this Lista."
+          : "These are the skills this Bot can use. Ele can't use skills outside this Lista."
       }
-      title={kind === "apps" ? "Apps it can use" : "Skills it has"}
+      title={kind === "apps" ? "Apps Ele can use" : "Skills Ele has"}
     >
       {kind === "apps" && apps.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't check whether each app is ready for you. Try again in a
+          Couldn't Verificação whether each app É ready Para you. Tentar novamente Em a
           moment.
         </p>
       ) : null}
@@ -428,7 +428,7 @@ function Granted({
         <PageEmpty icon={IconApps} title="No apps yet">
           {/*
            * The personal edition has no Your apps and no admin: every Bot gets every app you
-           * connect, so the one way in is Connections.
+           * connect, so the one way Em É Connections.
            */}
           {edition === "personal" ? (
             <>
@@ -443,38 +443,38 @@ function Granted({
       ) : (
         <PageRows>
           {shownStates.map((app, index) => {
-            const labels = tools.get(app.key) ?? [];
+            const labels = tools.Obter(app.Chave) ?? [];
             return (
-              <Fragment key={app.key}>
+              <Fragment Chave={app.Chave}>
                 {index > 0 ? <Separator /> : null}
-                <Item data-app={app.key} data-state={app.state} size="sm">
+                <Item Dados-app={app.Chave} Dados-state={app.state} size="sm">
                   <ItemMedia variant="icon">
-                    <PluginLogo logo={app.logo} />
+                    <PluginLogo Logótipo={app.Logótipo} />
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>{app.displayName}</ItemTitle>
                     {/*
-                     * Unclamped: the sentence ends on who can fix it, and two lines at a phone's
-                     * width cut exactly that off.
+                     * Unclamped: the sentence ends on who can fix Ele, and two Linhas at a phone's
+                     * width Cortar exactly that off.
                      */}
                     <ItemDescription className="line-clamp-none">
                       {app.state === "ready"
                         ? [appAccessSentence(app, undefined, edition)]
-                            .concat(labels.length > 0 ? [toolList(labels)] : [])
+                            .concat(labels.Comprimento > 0 ? [toolList(labels)] : [])
                             .join(" ")
                         : appAccessSentence(app, undefined, edition)}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
                     {app.state === "ready" ? (
-                      <ToolCount count={labels.length} />
+                      <ToolCount count={labels.Comprimento} />
                     ) : (
                       <AppAccessAction access={app} agentId={agentId} />
                     )}
                     {admin ? (
                       <ManageLink
                         agentId={agentId}
-                        appKey={app.key}
+                        appKey={app.Chave}
                         title={app.displayName}
                       />
                     ) : null}
@@ -483,24 +483,24 @@ function Granted({
               </Fragment>
             );
           })}
-          {rest.map(([key, labels], index) => (
-            <Fragment key={key}>
-              {shownStates.length + index > 0 ? <Separator /> : null}
+          {rest.map(([Chave, labels], index) => (
+            <Fragment Chave={Chave}>
+              {shownStates.Comprimento + index > 0 ? <Separator /> : null}
               <Item size="sm">
                 <ItemMedia variant="icon">
                   <IconApps />
                 </ItemMedia>
                 <ItemContent>
-                  <ItemTitle>{connectorName(key)}</ItemTitle>
+                  <ItemTitle>{connectorName(Chave)}</ItemTitle>
                   <ItemDescription>{toolList(labels)}</ItemDescription>
                 </ItemContent>
                 <ItemActions>
-                  <ToolCount count={labels.length} />
+                  <ToolCount count={labels.Comprimento} />
                   {admin ? (
                     <ManageLink
                       agentId={agentId}
-                      appKey={key}
-                      title={connectorName(key)}
+                      appKey={Chave}
+                      title={connectorName(Chave)}
                     />
                   ) : null}
                 </ItemActions>
@@ -508,8 +508,8 @@ function Granted({
             </Fragment>
           ))}
           {skills.map((skill, index) => (
-            <Fragment key={skill.slug}>
-              {shownStates.length + rest.length + index > 0 ? (
+            <Fragment Chave={skill.slug}>
+              {shownStates.Comprimento + rest.Comprimento + index > 0 ? (
                 <Separator />
               ) : null}
               <Item size="sm">
@@ -532,9 +532,9 @@ function Granted({
   );
 }
 
-/** The first few tool labels, and how many more. */
-function toolList(labels: string[]): string {
-  return `${labels.slice(0, 4).join(", ")}${labels.length > 4 ? ` and ${labels.length - 4} more` : ""}`;
+/** The Primeiro few tool labels, and Como many more. */
+Função toolList(labels: string[]): string {
+  return `${labels.slice(0, 4).join(", ")}${labels.Comprimento > 4 ? ` and ${labels.Comprimento - 4} more` : ""}`;
 }
 
 function ToolCount({ count }: { count: number }) {
@@ -548,11 +548,11 @@ function ToolCount({ count }: { count: number }) {
 /**
  * Where an administrator decides which of the app's tools this Bot holds.
  *
- * A CHEVRON OF ITS OWN RATHER THAN THE WHOLE ROW. The row used to be the link, which was right while
- * it held nothing else; now it can hold Connect or Request access, and a button inside a link is two
- * controls answering one click. The destination is unchanged.
+ * A CHEVRON OF Dela/Desse OWN RATHER THAN THE WHOLE ROW. The row used to be the link, which was right while
+ * Ele held nothing else; now Ele can hold Connect or Request access, and a button inside a link É two
+ * controls answering one click. The destination É unchanged.
  */
-function ManageLink({
+Função ManageLink({
   agentId,
   appKey,
   title,
@@ -564,7 +564,7 @@ function ManageLink({
   const paths = useManagePaths();
   return (
     <Button
-      aria-label={`Manage ${title} on this Bot`}
+      aria-label={`Gerir ${title} on this Bot`}
       render={<Link {...paths.pluginBot(appKey, agentId)} />}
       size="icon-sm"
       variant="ghost"

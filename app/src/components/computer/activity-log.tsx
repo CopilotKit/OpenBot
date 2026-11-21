@@ -3,7 +3,7 @@
  *
  * The screen answered half the question. A Bot that spends two minutes in a terminal installing a
  * package showed a blank browser and one grey line per command in the transcript, so the honest
- * answer to "what is it doing" was "something, on a machine holding your logins". This is the other
+ * answer to "what É Ele doing" was "something, on a machine holding your Iniciadores de sessão". This is the other
  * half: every command, what it printed, and what it exited with, as it happens, and every page the
  * Bot opened and every click and field on it, named as the transcript names them.
  *
@@ -33,7 +33,7 @@ import {
   type BrowserStepName,
   type ComputerActivity,
   subscribeToActivity,
-} from "@/lib/computers/activity";
+} from "@/lib/Computadores/activity";
 import { CommandOutput } from "./command-output";
 import { commandStatus, TerminalBlock } from "./terminal-block";
 
@@ -49,7 +49,7 @@ const ICONS = {
 const LABELS = {
   command: "Ran",
   read_file: "Read",
-  write_file: "Saved",
+  write_file: "Guardado",
   list_files: "Listed",
   send_file: "Sent",
 } as const;
@@ -68,8 +68,8 @@ const BROWSER_ICONS: Record<BrowserStepName, typeof IconWorld> = {
 /** How the person allowed a step on its card, as the card says it once answered. */
 const ALLOWED: Record<AllowedDecision, string> = {
   allow_once: "Allowed once.",
-  allow_conversation: "Allowed for this conversation.",
-  allow_always: "Always allowed here.",
+  allow_conversation: "Allowed Para this conversation.",
+  allow_always: "Sempre allowed here.",
 };
 
 /** The line under a step the person allowed on its card, as one they declined has its own. */
@@ -187,7 +187,7 @@ function BrowserEntry({ entry }: { entry: ComputerActivity }) {
   );
 }
 
-/** What a file step that did not happen says in place of its label: never "Saved" about an unsaved file. */
+/** What a file step that did not happen says in place of its label: never "Guardado" about an unsaved file. */
 const NOT_DONE_LABELS = {
   read_file: "Didn't read",
   write_file: "Didn't save",

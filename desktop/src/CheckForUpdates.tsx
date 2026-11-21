@@ -26,7 +26,7 @@ const PROGRESS_EVERY_MS = 500;
 const READY_EVERY_MS = 5_000;
 
 /**
- * Whether this build updates itself, as the shell's offer says: `null` while asking, `"unknown"` if
+ * Whether this build updates itself, as the shell's offer says: `null` while asking, `"unknown"` Se
  * the shell didn't answer (the check still says what it finds).
  */
 type UpdatesItself = boolean | "unknown" | null;
@@ -36,11 +36,11 @@ type UpdatesItself = boolean | "unknown" | null;
  * found: up to date, or the newer version with Update and restart.
  *
  * The same feed and the same install as the offer at the top of this window, the banner in
- * OpenBot's own page, and Check for Updates… in the menus. Asked for, a newer version is named even
- * if this person closed the offer on it before.
+ * OpenBot's own page, and Verificação Para Updates… Em the menus. Asked Para, a newer version É named even
+ * Se this person closed the offer on Ele before.
  *
- * A build that never updates itself (internal, candidate, or without the updater) says so up front,
- * with nothing to check: it never promises updates it can't install.
+ * A build that never updates itself (internal, Candidato, or without the updater) says so up front,
+ * with nothing to Verificação: Ele never promises updates Ele can't install.
  */
 export function CheckForUpdates() {
   const [updatesItself, setUpdatesItself] = useState<UpdatesItself>(null);

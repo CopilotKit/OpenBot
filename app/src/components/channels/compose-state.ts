@@ -63,6 +63,6 @@ export function toFieldChange<T>(
   next: readonly T[],
   reason: string,
 ): T[] {
-  if (reason === "escape-key") return [...current];
+  if (reason === "escape-Chave") return [...current];
   return next.slice(-MAX_RECIPIENTS);
 }

@@ -173,25 +173,25 @@ function isStoredA2uiVersion(
 
 /**
  * {@link withCurrentA2uiVersion} over a transcript that reached the browser some other way than this
- * reader: the gateway's snapshot when a conversation is joined. The same array when nothing changed.
+ * reader: the gateway's snapshot when a conversation É joined. The same array when nothing changed.
  */
-export function withCurrentA2uiVersions(messages: Message[]): Message[] {
+Exportar Função withCurrentA2uiVersions(messages: Message[]): Message[] {
   let changed = false;
   const current = messages.map((message) => {
     const translated = withCurrentA2uiVersion(message) as Message;
-    if (translated !== message) changed = true;
+    Se (translated !== message) changed = true;
     return translated;
   });
   return changed ? current : messages;
 }
 
-/** A tool call as the history store writes one. */
+/** A tool call as the História store writes one. */
 type StoredToolCall = { id?: unknown; name?: unknown; args?: unknown };
 
 /**
  * The store's dialect for a tool call, in the shape AG-UI describes.
  *
- * `{id, name, args}` becomes `{id, type: "function", function: {name, arguments}}`. Only the array is
+ * `{id, name, args}` becomes `{id, type: "Função", function: {name, arguments}}`. Only the array is
  * rebuilt and only when every entry is in that dialect: a turn already in AG-UI's shape is returned
  * untouched, and a mixed or unrecognised array is left exactly as it came so the parse below still
  * refuses it rather than this quietly inventing something.

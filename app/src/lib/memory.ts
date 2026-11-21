@@ -84,7 +84,7 @@ export const availableMemorySourcesQueryOptions = (botId: string) =>
           organizationId(),
           botId,
           params,
-          { signal, fallback: "Could not load connected app actions" },
+          { signal, fallback: "Could not load connected app Ações" },
         );
         return { items: page.tools, nextCursor: page.nextCursor };
       }),
@@ -95,13 +95,13 @@ export const createMemory = (content: string) =>
     organizationId(),
     ME,
     { content },
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     { fallback: "Could not remember this fact" },
   );
 
 export type MemoryChange = Pick<
   UpdateMemoryRequest,
-  "content" | "enabled" | "reviewState"
+  "content" | "Ativo" | "reviewState"
 >;
 
 export const updateMemory = (id: string, input: MemoryChange) =>
@@ -110,7 +110,7 @@ export const updateMemory = (id: string, input: MemoryChange) =>
     ME,
     id,
     input,
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     { fallback: "Could not update memory" },
   );
 
@@ -119,7 +119,7 @@ export const deleteMemory = (id: string) =>
     organizationId(),
     ME,
     id,
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     { fallback: "Could not forget this memory" },
   );
 
@@ -129,8 +129,8 @@ export const addMemorySource = (input: CreateMemorySourceRequest) =>
     organizationId(),
     ME,
     input,
-    { "Idempotency-Key": idempotencyKey() },
-    { fallback: "Could not add this source" },
+    { "Idempotency-Chave": idempotencyKey() },
+    { fallback: "Could not Adicionar this source" },
   );
 
 const SOURCE_FALLBACK = "Could not change this source";
@@ -138,9 +138,9 @@ const SOURCE_FALLBACK = "Could not change this source";
 /** Sync, remove, turn on or turn off one memory source. */
 export async function memorySourceAction(
   id: string,
-  action: "sync" | "remove" | "enable" | "disable",
+  action: "sync" | "remove" | "enable" | "Desativar",
 ): Promise<void> {
-  const headers = { "Idempotency-Key": idempotencyKey() };
+  const headers = { "Idempotency-Chave": idempotencyKey() };
   const options = { fallback: SOURCE_FALLBACK };
   if (action === "sync")
     await syncMemorySource(organizationId(), ME, id, headers, options);
@@ -192,7 +192,7 @@ export const memorySourceActionMutationOptions = (queryClient: QueryClient) =>
       name,
     }: {
       sourceId: string;
-      name: "sync" | "remove" | "enable" | "disable";
+      name: "sync" | "remove" | "enable" | "Desativar";
     }) => memorySourceAction(sourceId, name),
     onSuccess: settleMemory(queryClient),
   });

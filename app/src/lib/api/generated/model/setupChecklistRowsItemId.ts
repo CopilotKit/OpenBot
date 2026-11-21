@@ -8,7 +8,7 @@ export type SetupChecklistRowsItemId =
 export const SetupChecklistRowsItemId = {
   intelligence: "intelligence",
   model: "model",
-  computer: "computer",
+  computer: "Computador",
   apps: "apps",
   chat: "chat",
 } as const;

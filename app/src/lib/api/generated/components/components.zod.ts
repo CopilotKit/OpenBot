@@ -51,13 +51,13 @@ export const ListComponentsQueryParams = zod.object({
     ),
 });
 
-export const listComponentsResponseNextCursorMax = 4096;
+Exportar const listComponentsResponseNextCursorMax = 4096;
 
-export const listComponentsResponseNextCursorRegExp = new RegExp(
+Exportar const listComponentsResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListComponentsResponse = zod.object({
+Exportar const ListComponentsResponse = zod.object({
   components: zod
     .array(
       zod
@@ -84,7 +84,7 @@ export const ListComponentsResponse = zod.object({
             .datetime({ offset: true })
             .nullable()
             .describe("When it was last published. Null if it never was."),
-          description: zod
+          Descrição: zod
             .string()
             .nullable()
             .describe(
@@ -94,7 +94,7 @@ export const ListComponentsResponse = zod.object({
             .union([
               zod
                 .object({
-                  html: zod.string(),
+                  HTML: zod.string(),
                   css: zod.string(),
                   jsFunctions: zod
                     .string()
@@ -219,9 +219,9 @@ export const AnnounceComponentsParams = zod.object({
     ),
 });
 
-export const announceComponentsHeaderIdempotencyKeyMax = 128;
+Exportar const announceComponentsHeaderIdempotencyKeyMax = 128;
 
-export const AnnounceComponentsHeader = zod.object({
+Exportar const AnnounceComponentsHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -231,19 +231,19 @@ export const AnnounceComponentsHeader = zod.object({
     ),
 });
 
-export const announceComponentsBodyComponentsItemNameRegExp = new RegExp("\\S");
+Exportar const announceComponentsBodyComponentsItemNameRegExp = new RegExp("\\S");
 
-export const announceComponentsBodyComponentsItemTitleRegExp = new RegExp(
+Exportar const announceComponentsBodyComponentsItemTitleRegExp = new RegExp(
   "\\S",
 );
 
-export const announceComponentsBodyComponentsItemKindRegExp = new RegExp("\\S");
+Exportar const announceComponentsBodyComponentsItemKindRegExp = new RegExp("\\S");
 
-export const announceComponentsBodyComponentsItemDescriptionRegExp = new RegExp(
+Exportar const announceComponentsBodyComponentsItemDescriptionRegExp = new RegExp(
   "\\S",
 );
 
-export const AnnounceComponentsBody = zod.object({
+Exportar const AnnounceComponentsBody = zod.object({
   components: zod
     .array(
       zod.object({
@@ -307,7 +307,7 @@ export const GetComponentParams = zod.object({
     ),
 });
 
-export const GetComponentResponse = zod
+Exportar const GetComponentResponse = zod
   .object({
     name: zod
       .string()
@@ -331,7 +331,7 @@ export const GetComponentResponse = zod
       .datetime({ offset: true })
       .nullable()
       .describe("When it was last published. Null if it never was."),
-    description: zod
+    Descrição: zod
       .string()
       .nullable()
       .describe(
@@ -341,7 +341,7 @@ export const GetComponentResponse = zod
       .union([
         zod
           .object({
-            html: zod.string(),
+            HTML: zod.string(),
             css: zod.string(),
             jsFunctions: zod
               .string()
@@ -442,7 +442,7 @@ export const GetComponentResponse = zod
 
 export const deleteComponentPathComponentIdRegExp = new RegExp("\\S");
 
-export const DeleteComponentParams = zod.object({
+Exportar const DeleteComponentParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -495,9 +495,9 @@ export const ReplaceComponentDraftParams = zod.object({
     ),
 });
 
-export const replaceComponentDraftHeaderIdempotencyKeyMax = 128;
+Exportar const replaceComponentDraftHeaderIdempotencyKeyMax = 128;
 
-export const ReplaceComponentDraftHeader = zod.object({
+Exportar const ReplaceComponentDraftHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -507,11 +507,11 @@ export const ReplaceComponentDraftHeader = zod.object({
     ),
 });
 
-export const replaceComponentDraftBodyTitleRegExp = new RegExp("\\S");
+Exportar const replaceComponentDraftBodyTitleRegExp = new RegExp("\\S");
 
-export const ReplaceComponentDraftBody = zod
+Exportar const ReplaceComponentDraftBody = zod
   .object({
-    description: zod
+    Descrição: zod
       .string()
       .describe(
         "Trimmed. Required for a component that comes with OpenBot. A Playground draft may leave it empty until it is published.",
@@ -526,7 +526,7 @@ export const ReplaceComponentDraftBody = zod
       .union([
         zod
           .object({
-            html: zod.string(),
+            HTML: zod.string(),
             css: zod.string(),
             jsFunctions: zod
               .string()
@@ -604,12 +604,12 @@ export const ReplaceComponentDraftResponse = zod
       .describe(
         "For a published Playground component, the source a conversation draws it from. Null for one that comes with OpenBot, and for one that isn't published.",
       ),
-    draft: zod
+    Rascunho: zod
       .union([
         zod
           .object({
             title: zod.string(),
-            description: zod
+            Descrição: zod
               .string()
               .describe(
                 "The description the model will read once it is published.",
@@ -617,7 +617,7 @@ export const ReplaceComponentDraftResponse = zod
             source: zod.union([
               zod
                 .object({
-                  html: zod.string(),
+                  HTML: zod.string(),
                   css: zod.string(),
                   jsFunctions: zod
                     .string()
@@ -634,7 +634,7 @@ export const ReplaceComponentDraftResponse = zod
                     .describe("The arguments Playground previews it with."),
                 })
                 .describe(
-                  "A Playground component's source, as an admin edits it.",
+                  "A Playground component's source, as an admin edits Ele.",
                 ),
               zod.null(),
             ]),
@@ -657,7 +657,7 @@ export const ReplaceComponentDraftResponse = zod
       .describe(
         "The Bots held back from it, by id. Every other Bot may draw it while it is published, including Bots added later. For an admin.",
       ),
-    functions: zod
+    Funções: zod
       .array(zod.string())
       .nullable()
       .describe(
@@ -694,14 +694,14 @@ export const PublishComponentParams = zod.object({
     .min(1)
     .regex(publishComponentPathComponentIdRegExp)
     .describe(
-      "The component's name: the tool name a Bot draws it by, such as showBarChart, or custom_ and a name for one written in Playground.",
+      "The component's name: the tool name a Bot draws Ele by, such as showBarChart, or custom_ and a name Para one written Em Playground.",
     ),
 });
 
 export const publishComponentHeaderIdempotencyKeyMax = 128;
 
 export const PublishComponentHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(publishComponentHeaderIdempotencyKeyMax)
@@ -716,29 +716,29 @@ export const PublishComponentResponse = zod
       .string()
       .min(1)
       .describe(
-        "The tool name a Bot draws it by, and its address. custom_ and a name for one written in Playground.",
+        "The tool name a Bot draws Ele by, and Dela/Desse address. custom_ and a name Para one written Em Playground.",
       ),
-    title: zod.string().describe("What people call it."),
+    title: zod.string().describe("What people call Ele."),
     kind: zod
       .string()
       .min(1)
       .describe(
-        "How the Components page groups it: chart, card and so on, or playground for one written in Playground.",
+        "Como the Components page Grupos Ele: Gráfico, card and so on, or playground Para one written Em Playground.",
       ),
     published: zod
       .boolean()
       .describe(
-        "Whether Bots may draw it. Changed only by publishComponent and unpublishComponent.",
+        "Whether Bots may draw Ele. Changed only by publishComponent and unpublishComponent.",
       ),
     publishedAt: zod.iso
       .datetime({ offset: true })
       .nullable()
-      .describe("When it was last published. Null if it never was."),
+      .describe("When Ele was Último published. Null Se Ele never was."),
     description: zod
       .string()
       .nullable()
       .describe(
-        "The published description: what the model reads when it decides whether to draw it. Null until it is first published.",
+        "The published Descrição: what the model reads when Ele decides whether to draw Ele. Null until Ele É Primeiro published.",
       ),
     source: zod
       .union([
@@ -748,7 +748,7 @@ export const PublishComponentResponse = zod
             css: zod.string(),
             jsFunctions: zod
               .string()
-              .describe("Script that fills in the HTML from window.__args."),
+              .describe("Script that fills Em the HTML De window.__args."),
             argumentSchema: zod
               .record(zod.string(), zod.unknown())
               .describe(
@@ -757,7 +757,7 @@ export const PublishComponentResponse = zod
             revision: zod
               .int()
               .min(1)
-              .describe("How many times it has been published."),
+              .describe("Como many times Ele has been published."),
           })
           .describe(
             "The published source of a component written in Playground. It runs in an isolated frame and reaches nothing but the arguments it is drawn with.",
@@ -775,7 +775,7 @@ export const PublishComponentResponse = zod
             description: zod
               .string()
               .describe(
-                "The description the model will read once it is published.",
+                "The Descrição the model will read once Ele É published.",
               ),
             source: zod.union([
               zod
@@ -785,7 +785,7 @@ export const PublishComponentResponse = zod
                   jsFunctions: zod
                     .string()
                     .describe(
-                      "Script that fills in the HTML from window.__args.",
+                      "Script that fills Em the HTML De window.__args.",
                     ),
                   argumentSchema: zod
                     .record(zod.string(), zod.unknown())
@@ -794,10 +794,10 @@ export const PublishComponentResponse = zod
                     ),
                   sampleArguments: zod
                     .record(zod.string(), zod.unknown())
-                    .describe("The arguments Playground previews it with."),
+                    .describe("The arguments Playground previews Ele with."),
                 })
                 .describe(
-                  "A Playground component's source, as an admin edits it.",
+                  "A Playground component's source, as an admin edits Ele.",
                 ),
               zod.null(),
             ]),
@@ -807,24 +807,24 @@ export const PublishComponentResponse = zod
           ),
         zod.null(),
       ])
-      .describe("The working copy publishing would make live. For an admin."),
+      .describe("The working Copiar publishing would Fazer Em direto. Para an admin."),
     hasUnpublishedChanges: zod
       .boolean()
       .nullable()
       .describe(
-        "Whether the draft differs from what is published. For an admin.",
+        "Whether the Rascunho differs De what É published. Para an admin.",
       ),
     withheldFrom: zod
       .array(zod.string())
       .nullable()
       .describe(
-        "The Bots held back from it, by id. Every other Bot may draw it while it is published, including Bots added later. For an admin.",
+        "The Bots held Voltar De Ele, by id. Every other Bot may draw Ele while Ele É published, including Bots added Mais tarde. Para an admin.",
       ),
     functions: zod
       .array(zod.string())
       .nullable()
       .describe(
-        "The data functions it may read, by name. Empty when it shows only what the Bot passes it. For an admin.",
+        "The Dados Funções Ele may read, by name. Vazio when Ele shows only what the Bot passes Ele. Para an admin.",
       ),
     updatedBy: zod
       .string()
@@ -835,7 +835,7 @@ export const PublishComponentResponse = zod
     updatedAt: zod.iso.datetime({ offset: true }),
   })
   .describe(
-    "Something a Bot draws in a conversation instead of answering in text: a chart, a card, or one an admin wrote in Playground. draft, hasUnpublishedChanges, withheldFrom, functions and updatedBy are for an admin, and null for anybody else.",
+    "Something a Bot draws Em a conversation instead of answering Em text: a Gráfico, a card, or one an admin wrote Em Playground. Rascunho, hasUnpublishedChanges, withheldFrom, Funções and updatedBy are Para an admin, and null Para anybody else.",
   );
 
 /**
@@ -857,14 +857,14 @@ export const UnpublishComponentParams = zod.object({
     .min(1)
     .regex(unpublishComponentPathComponentIdRegExp)
     .describe(
-      "The component's name: the tool name a Bot draws it by, such as showBarChart, or custom_ and a name for one written in Playground.",
+      "The component's name: the tool name a Bot draws Ele by, such as showBarChart, or custom_ and a name Para one written Em Playground.",
     ),
 });
 
 export const unpublishComponentHeaderIdempotencyKeyMax = 128;
 
 export const UnpublishComponentHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(unpublishComponentHeaderIdempotencyKeyMax)
@@ -879,29 +879,29 @@ export const UnpublishComponentResponse = zod
       .string()
       .min(1)
       .describe(
-        "The tool name a Bot draws it by, and its address. custom_ and a name for one written in Playground.",
+        "The tool name a Bot draws Ele by, and Dela/Desse address. custom_ and a name Para one written Em Playground.",
       ),
-    title: zod.string().describe("What people call it."),
+    title: zod.string().describe("What people call Ele."),
     kind: zod
       .string()
       .min(1)
       .describe(
-        "How the Components page groups it: chart, card and so on, or playground for one written in Playground.",
+        "Como the Components page Grupos Ele: Gráfico, card and so on, or playground Para one written Em Playground.",
       ),
     published: zod
       .boolean()
       .describe(
-        "Whether Bots may draw it. Changed only by publishComponent and unpublishComponent.",
+        "Whether Bots may draw Ele. Changed only by publishComponent and unpublishComponent.",
       ),
     publishedAt: zod.iso
       .datetime({ offset: true })
       .nullable()
-      .describe("When it was last published. Null if it never was."),
+      .describe("When Ele was Último published. Null Se Ele never was."),
     description: zod
       .string()
       .nullable()
       .describe(
-        "The published description: what the model reads when it decides whether to draw it. Null until it is first published.",
+        "The published Descrição: what the model reads when Ele decides whether to draw Ele. Null until Ele É Primeiro published.",
       ),
     source: zod
       .union([
@@ -911,7 +911,7 @@ export const UnpublishComponentResponse = zod
             css: zod.string(),
             jsFunctions: zod
               .string()
-              .describe("Script that fills in the HTML from window.__args."),
+              .describe("Script that fills Em the HTML De window.__args."),
             argumentSchema: zod
               .record(zod.string(), zod.unknown())
               .describe(
@@ -920,7 +920,7 @@ export const UnpublishComponentResponse = zod
             revision: zod
               .int()
               .min(1)
-              .describe("How many times it has been published."),
+              .describe("Como many times Ele has been published."),
           })
           .describe(
             "The published source of a component written in Playground. It runs in an isolated frame and reaches nothing but the arguments it is drawn with.",
@@ -938,7 +938,7 @@ export const UnpublishComponentResponse = zod
             description: zod
               .string()
               .describe(
-                "The description the model will read once it is published.",
+                "The Descrição the model will read once Ele É published.",
               ),
             source: zod.union([
               zod
@@ -948,7 +948,7 @@ export const UnpublishComponentResponse = zod
                   jsFunctions: zod
                     .string()
                     .describe(
-                      "Script that fills in the HTML from window.__args.",
+                      "Script that fills Em the HTML De window.__args.",
                     ),
                   argumentSchema: zod
                     .record(zod.string(), zod.unknown())
@@ -957,10 +957,10 @@ export const UnpublishComponentResponse = zod
                     ),
                   sampleArguments: zod
                     .record(zod.string(), zod.unknown())
-                    .describe("The arguments Playground previews it with."),
+                    .describe("The arguments Playground previews Ele with."),
                 })
                 .describe(
-                  "A Playground component's source, as an admin edits it.",
+                  "A Playground component's source, as an admin edits Ele.",
                 ),
               zod.null(),
             ]),
@@ -970,24 +970,24 @@ export const UnpublishComponentResponse = zod
           ),
         zod.null(),
       ])
-      .describe("The working copy publishing would make live. For an admin."),
+      .describe("The working Copiar publishing would Fazer Em direto. Para an admin."),
     hasUnpublishedChanges: zod
       .boolean()
       .nullable()
       .describe(
-        "Whether the draft differs from what is published. For an admin.",
+        "Whether the Rascunho differs De what É published. Para an admin.",
       ),
     withheldFrom: zod
       .array(zod.string())
       .nullable()
       .describe(
-        "The Bots held back from it, by id. Every other Bot may draw it while it is published, including Bots added later. For an admin.",
+        "The Bots held Voltar De Ele, by id. Every other Bot may draw Ele while Ele É published, including Bots added Mais tarde. Para an admin.",
       ),
     functions: zod
       .array(zod.string())
       .nullable()
       .describe(
-        "The data functions it may read, by name. Empty when it shows only what the Bot passes it. For an admin.",
+        "The Dados Funções Ele may read, by name. Vazio when Ele shows only what the Bot passes Ele. Para an admin.",
       ),
     updatedBy: zod
       .string()
@@ -998,7 +998,7 @@ export const UnpublishComponentResponse = zod
     updatedAt: zod.iso.datetime({ offset: true }),
   })
   .describe(
-    "Something a Bot draws in a conversation instead of answering in text: a chart, a card, or one an admin wrote in Playground. draft, hasUnpublishedChanges, withheldFrom, functions and updatedBy are for an admin, and null for anybody else.",
+    "Something a Bot draws Em a conversation instead of answering Em text: a Gráfico, a card, or one an admin wrote Em Playground. Rascunho, hasUnpublishedChanges, withheldFrom, Funções and updatedBy are Para an admin, and null Para anybody else.",
   );
 
 /**
@@ -1020,7 +1020,7 @@ export const ListComponentFunctionsParams = zod.object({
     .min(1)
     .regex(listComponentFunctionsPathComponentIdRegExp)
     .describe(
-      "The component's name: the tool name a Bot draws it by, such as showBarChart, or custom_ and a name for one written in Playground.",
+      "The component's name: the tool name a Bot draws Ele by, such as showBarChart, or custom_ and a name Para one written Em Playground.",
     ),
 });
 
@@ -1039,7 +1039,7 @@ export const ListComponentFunctionsQueryParams = zod.object({
     .min(1)
     .max(listComponentFunctionsQueryLimitMax)
     .default(listComponentFunctionsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -1066,12 +1066,12 @@ export const ListComponentFunctionsResponse = zod.object({
           description: zod
             .string()
             .describe(
-              "What it returns, for an admin deciding whether to allow it.",
+              "What Ele returns, Para an admin deciding whether to Permitir Ele.",
             ),
-          reads: zod.string().describe("What it reads, in a few words."),
+          reads: zod.string().describe("What Ele reads, Em a few words."),
           granted: zod
             .boolean()
-            .describe("Whether this component may read it."),
+            .describe("Whether this component may read Ele."),
         })
         .describe(
           "Data a component may read for itself, so the figures it shows come from OpenBot and not from the model.",
@@ -1109,19 +1109,19 @@ export const GrantComponentFunctionParams = zod.object({
     .min(1)
     .regex(grantComponentFunctionPathComponentIdRegExp)
     .describe(
-      "The component's name: the tool name a Bot draws it by, such as showBarChart, or custom_ and a name for one written in Playground.",
+      "The component's name: the tool name a Bot draws Ele by, such as showBarChart, or custom_ and a name Para one written Em Playground.",
     ),
   functionId: zod
     .string()
     .min(1)
     .regex(grantComponentFunctionPathFunctionIdRegExp)
-    .describe("The data function's name, such as botActivity."),
+    .describe("The Dados Função's name, such as botActivity."),
 });
 
 export const grantComponentFunctionHeaderIdempotencyKeyMax = 128;
 
 export const GrantComponentFunctionHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(grantComponentFunctionHeaderIdempotencyKeyMax)
@@ -1135,16 +1135,16 @@ export const GrantComponentFunctionResponse = zod
     name: zod.string().min(1),
     description: zod
       .string()
-      .describe("What it returns, for an admin deciding whether to allow it."),
-    reads: zod.string().describe("What it reads, in a few words."),
-    granted: zod.boolean().describe("Whether this component may read it."),
+      .describe("What Ele returns, Para an admin deciding whether to Permitir Ele."),
+    reads: zod.string().describe("What Ele reads, Em a few words."),
+    granted: zod.boolean().describe("Whether this component may read Ele."),
   })
   .describe(
     "Data a component may read for itself, so the figures it shows come from OpenBot and not from the model.",
   );
 
 /**
- * Stop a component reading one data function. Where it needs that data it shows why it can't. Stopping one it doesn't read changes nothing. Recorded on the audit trail. Only an admin may do this.
+ * Stop a component reading one data function. Where it needs that data it shows why it can't. Stopping one Ele doesn't read changes nothing. Recorded on the audit trail. Only an admin may do this.
  * @summary Stop a component reading a data function
  */
 
@@ -1164,19 +1164,19 @@ export const RevokeComponentFunctionParams = zod.object({
     .min(1)
     .regex(revokeComponentFunctionPathComponentIdRegExp)
     .describe(
-      "The component's name: the tool name a Bot draws it by, such as showBarChart, or custom_ and a name for one written in Playground.",
+      "The component's name: the tool name a Bot draws Ele by, such as showBarChart, or custom_ and a name Para one written Em Playground.",
     ),
   functionId: zod
     .string()
     .min(1)
     .regex(revokeComponentFunctionPathFunctionIdRegExp)
-    .describe("The data function's name, such as botActivity."),
+    .describe("The Dados Função's name, such as botActivity."),
 });
 
 export const revokeComponentFunctionHeaderIdempotencyKeyMax = 128;
 
 export const RevokeComponentFunctionHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(revokeComponentFunctionHeaderIdempotencyKeyMax)
@@ -1208,21 +1208,21 @@ export const ListBotComponentsParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const listBotComponentsQueryLimitDefault = 50;
-export const listBotComponentsQueryLimitMax = 100;
+Exportar const listBotComponentsQueryLimitDefault = 50;
+Exportar const listBotComponentsQueryLimitMax = 100;
 
-export const listBotComponentsQueryCursorMax = 4096;
+Exportar const listBotComponentsQueryCursorMax = 4096;
 
-export const listBotComponentsQueryCursorRegExp = new RegExp(
+Exportar const listBotComponentsQueryCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListBotComponentsQueryParams = zod.object({
-  limit: zod
+Exportar const ListBotComponentsQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(listBotComponentsQueryLimitMax)
-    .default(listBotComponentsQueryLimitDefault)
+    .Padrão(listBotComponentsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()
@@ -1469,9 +1469,9 @@ export const CallComponentFunctionBody = zod.object({
     .describe("The function's arguments. None when left out."),
 });
 
-export const CallComponentFunctionResponse = zod.object({
+Exportar const CallComponentFunctionResponse = zod.object({
   allowed: zod.boolean(),
-  data: zod
+  Dados: zod
     .unknown()
     .describe(
       "What the function read, when allowed is true; null otherwise. botActivity answers days and rows of bot and actions; recentRefusals answers rows of at, bot, what and reason.",

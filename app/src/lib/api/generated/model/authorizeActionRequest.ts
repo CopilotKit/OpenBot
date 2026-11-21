@@ -5,7 +5,7 @@ import type { ConnectionReturnTo } from "./connectionReturnTo";
 
 export interface AuthorizeActionRequest {
   /**
-   * The action's name, exactly as getConnectionAuthorizations lists it.
+   * The action's name, exactly as getConnectionAutorizaçãos lists it.
    * @minLength 1
    * @maxLength 200
    * @pattern \S

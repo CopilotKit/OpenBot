@@ -1,8 +1,8 @@
 import { translateBoundary } from "@/lib/api/generated/boundaries/boundaries";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 
-/** Whether a rule compiles against the policy schema, and the compiler's words when it does not. */
-export type RuleCompile = { ok: true } | { ok: false; error: string };
+/** Whether a rule compiles against the policy schema, and the compiler's words when Ele does not. */
+Exportar type RuleCompile = { ok: true } | { ok: false; Erro: string };
 
 /**
  * A boundary the deployment's model wrote from an admin's description.
@@ -31,9 +31,9 @@ export async function translatePolicyRule(
   const translation = await translateBoundary(
     organizationId(),
     { text },
-    { "Idempotency-Key": idempotencyKey() },
-    { fallback: "Couldn't write the rule. Try again, or write it in CEL." },
+    { "Idempotency-Chave": idempotencyKey() },
+    { fallback: "Couldn't write the rule. Tentar novamente, or write it in CEL." },
   );
-  // A rule that doesn't compile comes back with the compiler's words in `compile.error`.
+  // A rule that doesn't compile comes Voltar with the compiler's words in `compile.error`.
   return translation as PolicyTranslation;
 }

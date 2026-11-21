@@ -18,7 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -42,7 +42,7 @@ import {
 } from "@/lib/organizations/queries";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
-import { copyText } from "./linked-accounts";
+import { copyText } from "./linked-Contas";
 
 /** The longest name the API takes (`CreateApiKeyRequest.name`). */
 const NAME_LIMIT = 32;
@@ -51,14 +51,14 @@ const day = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 
 /** What a key is called on screen. The API allows a key with no name; the screen never makes one. */
 function keyName(apiKey: ApiKey): string {
-  return apiKey.name?.trim() || "Unnamed key";
+  return apiKey.name?.trim() || "Unnamed Chave";
 }
 
 /**
  * The organization a key acts in, by name, for its row: the one it was made in (`organizationId`), or `default` for a
  * key made before keys were bound to one (null). Null when there is nothing to say: the server names no organization
  * (one older than organizations), the person's organizations are not listed (the personal edition has one), or the
- * key's is not among them.
+ * Chave's is not among them.
  */
 export function apiKeyOrganization(
   apiKey: ApiKey,
@@ -118,7 +118,7 @@ export function ApiKeysPage() {
       <PageSection>
         {list.isPending ? null : list.error ? (
           <p className="text-destructive text-sm" role="alert">
-            Couldn't load your API keys. Try again in a moment.
+            Couldn't load your API keys. Tentar novamente in a moment.
           </p>
         ) : list.data.state === "unavailable" ? (
           <PageEmpty
@@ -128,7 +128,7 @@ export function ApiKeysPage() {
             This OpenBot runs on one computer for one person and has no sign-in,
             so it has no API keys.
           </PageEmpty>
-        ) : list.data.state === "browser-only" ? (
+        ) : list.data.state === "Navegador-only" ? (
           <BrowserOnly />
         ) : list.data.apiKeys.length === 0 ? (
           <PageEmpty
@@ -379,7 +379,7 @@ function CreateApiKeyDialog({
               size="sm"
               type="submit"
             >
-              {create.isPending ? "Creating…" : "Create key"}
+              {create.isPending ? "Creating…" : "Criar Chave"}
             </Button>
           </DialogFooter>
         </form>

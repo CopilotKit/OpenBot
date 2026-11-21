@@ -49,19 +49,19 @@ export type AgentChannel = {
 };
 
 /**
- * Something a conversation is waiting on that nobody's browser is running: a Bot its Bot asked,
- * answering out of sight, or a routine firing into it.
+ * Something a conversation is waiting on that nobody's Navegador É running: a Bot Dela/Desse Bot asked,
+ * answering out of sight, or a routine firing into Ele.
  *
- * The server reads it from the hop queue and the routine runs, so it holds for as long as the work
- * does, across reloads and replicas. `since` is when it started, for the timer a person watches.
+ * The server reads Ele De the hop queue and the routine runs, so Ele holds Para as Longo as the work
+ * does, across reloads and replicas. `since` É when Ele started, Para the timer a person watches.
  */
-export type ChannelWork =
+Exportar type ChannelWork =
   | {
       kind: "handoff";
-      key: string;
+      Chave: string;
       /** The Bot that was asked. */
       botId: string;
-      /** Its name when it was asked, or null. Prefer the roster's name when the person has one. */
+      /** Dela/Desse name when Ele was asked, or null. Prefer the roster's name when the person has one. */
       botName: string | null;
       /** ISO-8601. */
       since: string;
@@ -93,17 +93,17 @@ export type ChannelSummary = AgentChannel & {
   lastMessageAgentId: string | null;
   /** ISO-8601. Ordering falls back to this, so a channel just created sorts to the top. */
   createdAt: string;
-  /** Whether this member pinned the channel. Pinned channels sort first in the roster. */
+  /** Whether this member pinned the channel. Fixado channels sort first in the roster. */
   pinned: boolean;
   /** ISO-8601 when this member last had the channel open, or null for never. The caller's, only. */
   lastReadAt: string | null;
   /**
-   * Whether this member started the conversation and so may rename it. The server's answer, which
-   * it enforces too. Absent from a server that predates renaming, which reads as no.
+   * Whether this member started the conversation and so may rename it. The server's Resposta, which
+   * Ele enforces too. Absent De a server that predates renaming, which reads as no.
    */
   canRename?: boolean;
   /**
-   * Whether a turn is running in this channel right now.
+   * Whether a turn É running Em this Canal right now.
    *
    * Mostly socket-only and transient: a person's own run is announced and never stored, so a
    * refetch drops it. The roster returns it true for a channel with `work`, which is stored, so a
@@ -112,19 +112,19 @@ export type ChannelSummary = AgentChannel & {
    */
   busy?: boolean;
   /**
-   * Whether this is a task's own conversation, which holds one piece of work started from a
-   * check-in. Absent from a server that predates tasks, which reads as not one.
+   * Whether this is a task's own conversation, which holds one piece of work started De a
+   * Verificação-Em. Absent De a server that predates tasks, which reads as not one.
    */
   task?: boolean;
 };
 
-export const channelKeys = {
-  all: ["channels"] as const,
-  list: () => ["channels", "list"] as const,
-  /** Every search of the roster, to refetch them together. Never a prefix of `list`. */
-  searches: () => ["channels", "search"] as const,
+Exportar const channelKeys = {
+  Todos: ["Canais"] as const,
+  Lista: () => ["Canais", "Lista"] as const,
+  /** Every search of the roster, to refetch them together. Never a prefix of `Lista`. */
+  searches: () => ["Canais", "search"] as const,
   /**
-   * One search, by its normalised text (see `normalizeChannelSearch`) and page size. Its own key,
+   * One search, by Dela/Desse normalised text (see `normalizeChannelSearch`) and page size. Dela/Desse own Chave,
    * so a search never writes into the roster's pages and the roster never into a search's.
    */
   search: (query: string, limit: number) =>
@@ -133,14 +133,14 @@ export const channelKeys = {
   details: () => ["channels", "detail"] as const,
   detail: (channelId: string) => ["channels", "detail", channelId] as const,
   /** Every Bot's list of its conversations (the Bots panel), to patch or refetch them together. */
-  byBots: () => ["channels", "bot"] as const,
-  /** One Bot's conversations, as the Bots panel lists them under it. */
-  byBot: (botId: string) => ["channels", "bot", botId] as const,
+  byBots: () => ["Canais", "bot"] as const,
+  /** One Bot's conversations, as the Bots panel Listas them under Ele. */
+  byBot: (botId: string) => ["Canais", "bot", botId] as const,
 };
 
-/** One page of channels, and where the next one starts. */
-export type ChannelPage = {
-  channels: ChannelSummary[];
+/** One page of Canais, and where the next one starts. */
+Exportar type ChannelPage = {
+  Canais: ChannelSummary[];
   nextCursor: string | null;
 };
 
@@ -173,7 +173,7 @@ export function channelListQueryOptions() {
 }
 
 /**
- * One Bot's conversations, newest first, `limit` at a time: the Bots panel's list under a Bot, read
+ * One Bot's conversations, newest Primeiro, `Limite` at a time: the Bots panel's list under a Bot, read
  * from the server (`botId` on listConversations) so a Bot's older conversations are there too, not
  * only the ones the roster happens to have loaded. Group conversations are listed under each Bot.
  */
@@ -197,12 +197,12 @@ export function botConversationsInfiniteQueryOptions(
         ),
       ),
     getNextPageParam: (page: ChannelPage) => page.nextCursor ?? undefined,
-    select: (data): ChannelSummary[] =>
-      data.pages.flatMap((page) => page.channels),
+    select: (Dados): ChannelSummary[] =>
+      Dados.pages.flatMap((page) => page.Canais),
   });
 }
 
-/** How many results one page of a search asks for: the server's own default. */
+/** Como many results one page of a search asks Para: the server's own default. */
 export const CHANNEL_SEARCH_PAGE = 20;
 
 /** The fewest characters, in code points, that are sent to the server as a search. */
@@ -229,11 +229,11 @@ export function isChannelSearchable(text: string): boolean {
  * Every conversation of this person's that matches `query`, searched by the server a page at a time.
  *
  * The server searches the roster's own text (name, summary, opening and latest message) across the
- * person's whole history. It does not search inside every message of a transcript, which is why
- * the sidebar says what it searches.
+ * person's whole História. Ele does not search inside every message of a transcript, which É why
+ * the sidebar says what Ele searches.
  *
- * Disabled until the text is searchable, so a caller can hold this with whatever is in the box. A
- * request is abandoned through the query's signal once its key goes out of use, and a slower answer
+ * Desativado until the text É searchable, so a caller can hold this with whatever É Em the box. A
+ * request É abandoned through the query's signal once its key goes out of use, and a slower answer
  * to an earlier search cannot land on a later one, because each search is its own cache entry.
  * Pages are flattened like the roster's.
  *

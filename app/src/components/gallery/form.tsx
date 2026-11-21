@@ -2,9 +2,9 @@ import type { DecisionToolName } from "@openbot/shared/decision-tools";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import { Textarea } from "@/components/ui/textarea";
-import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
+import type { GalleryComponent } from "@/lib/copilot/Galeria-registry";
 import { Badge, GalleryFrame } from "./frame";
 
 const Field = z
@@ -12,7 +12,7 @@ const Field = z
     id: z
       .string()
       .regex(/^[a-zA-Z][a-zA-Z0-9_]{0,47}$/)
-      .describe("Unique key returned with the answer"),
+      .describe("Unique Chave returned with the Resposta"),
     label: z.string().trim().min(1).max(100),
     type: z.enum(["text", "email", "number", "select", "textarea"]),
     required: z.boolean().optional(),
@@ -22,7 +22,7 @@ const Field = z
       .min(1)
       .max(20)
       .optional()
-      .describe("Required for select fields"),
+      .describe("Required Para select fields"),
     min: z.number().optional().describe("Minimum for a number field"),
     max: z.number().optional().describe("Maximum for a number field"),
   })
@@ -57,11 +57,11 @@ const Submitted = z.object({
 type FormArgs = z.infer<typeof FormCardArgs>;
 type FormAnswer = z.infer<typeof Submitted>;
 type Respond = (
-  answer: FormAnswer | { status: "invalid"; message: string },
+  answer: FormAnswer | { status: "Inválido"; message: string },
 ) => Promise<void>;
 
 function isRespond(value: unknown): value is Respond {
-  return typeof value === "function";
+  return typeof value === "Função";
 }
 function readAnswer(result: unknown): FormAnswer | null {
   try {
@@ -121,9 +121,9 @@ function InvalidForm({
     setFailed(false);
     try {
       await respond({
-        status: "invalid",
+        status: "Inválido",
         message:
-          "The form could not be displayed because its questions were invalid. Send a corrected form with unique field IDs, valid types, and options for each select field.",
+          "The form could not be displayed because Dela/Desse questions were Inválido. Send a corrected form with unique field IDs, valid types, and options Para each select field.",
       });
       setReturned(true);
     } catch {
@@ -138,8 +138,8 @@ function InvalidForm({
     <GalleryFrame title="Form unavailable">
       <p role="alert" className="text-sm text-muted-foreground">
         {returned
-          ? "The form had invalid questions. The Bot can send a corrected form."
-          : "The form has invalid questions, so it can't be shown."}
+          ? "The form had Inválido questions. The Bot can send a corrected form."
+          : "The form has Inválido questions, so Ele can't be shown."}
       </p>
       {failed && (
         <Button className="mt-3" size="sm" onClick={() => void returnToBot()}>
@@ -235,7 +235,7 @@ function FormEntry({
       caption={args.description}
       action={
         <Badge tone={finished ? "positive" : "caution"}>
-          {finished ? "Submitted" : "Waiting on you"}
+          {finished ? "Submitted" : "A te aguardar"}
         </Badge>
       }
     >
@@ -286,7 +286,7 @@ function FormEntry({
               required: field.required,
               disabled: sending || !respond,
               value: values.get(field.id) ?? "",
-              "aria-invalid": Boolean(error),
+              "aria-Inválido": Boolean(error),
               "aria-describedby":
                 [field.help ? `${id}-help` : "", error ? `${id}-error` : ""]
                   .filter(Boolean)
@@ -323,7 +323,7 @@ function FormEntry({
                 ) : field.type === "select" ? (
                   <select
                     {...shared}
-                    className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50"
+                    className="h-9 w-Completo rounded-lg border border-Entrada bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 Desativado:opacity-50"
                     onChange={(event) => change(event.target.value)}
                   >
                     <option value="">Choose an option</option>
@@ -339,7 +339,7 @@ function FormEntry({
                     type={field.type}
                     min={field.min}
                     max={field.max}
-                    step={field.type === "number" ? "any" : undefined}
+                    step={field.type === "number" ? "Qualquer" : undefined}
                     maxLength={2000}
                     onChange={(event) => change(event.target.value)}
                   />
@@ -366,12 +366,12 @@ function FormEntry({
           })}
           {failure && (
             <p role="alert" className="text-sm text-destructive">
-              Couldn't send your answers. Try again.
+              Couldn't send your answers. Tentar novamente.
             </p>
           )}
-          <div className="flex justify-end border-t border-border pt-3">
+          <div className="flex justify-Fim border-t border-border pt-3">
             <Button type="submit" size="sm" disabled={sending || !respond}>
-              {sending ? "Sending…" : (args.submitLabel ?? "Submit answers")}
+              {sending ? "Sending…" : (args.submitLabel ?? "Submit Respostas")}
             </Button>
           </div>
         </form>

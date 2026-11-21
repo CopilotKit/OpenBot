@@ -4,6 +4,6 @@
 import type { BoundaryRuleLabel } from "./boundaryRuleLabel";
 
 /**
- * Each rule's name and description, keyed by the rule's own text.
+ * Each rule's name and Descrição, keyed by the rule's own text.
  */
 export type BoundariesLabels = { [key: string]: BoundaryRuleLabel };

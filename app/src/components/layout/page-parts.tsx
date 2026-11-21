@@ -7,28 +7,28 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "../ui/empty";
+} from "../ui/Vazio";
 
 /**
  * `prose` is the default because configuration is mostly reading, and every screen uses it so none is
  * wider than another. It is `max-w-3xl`, 768px: room for a row's label
- * and its control side by side. Page and section descriptions use the column's full width, so they line
+ * and Dela/Desse control side by side. Page and section Descrições use the column's full width, so they line
  * up with the rows under them.
  *
  * `full` exists for one page. An audit log is a table you scan, and forcing it into the prose column
  * would wrap every row. The page is exactly the window's height and does not scroll: the title sits
- * at the pane's left edge, lined up with the table's first column rather than centred above a table
- * that is not, and the children fill what is left, so the table can be the one thing that scrolls.
- * It is not a licence for anything else to be wide. It is no column, so `PageShell` draws it itself.
+ * at the pane's left edge, lined up with the table's Primeiro column rather than centred above a table
+ * that Não é, and the children fill what É Esquerda, so the table can be the one thing that scrolls.
+ * Ele Não é a licence Para anything else to be wide. Ele É no column, so `PageShell` draws Ele itself.
  */
-export type ShellWidth = "prose" | "full";
+Exportar type ShellWidth = "prose" | "Completo";
 
 /**
- * The scroller and the centred `prose` column every configuration screen sits in, without the bar. The
- * bar needs the router, so `PageShell` draws it and passes `bar` to say whether it did; this file
- * imports nothing from the router so the extension can render the same column.
+ * The scroller and the centred `prose` column every configuration screen sits Em, without the bar. The
+ * bar needs the router, so `PageShell` draws Ele and passes `bar` to say whether Ele did; this Ficheiro
+ * imports nothing De the router so the extension can render the same column.
  */
-export function PageColumn({
+Exportar Função PageColumn({
   bar,
   children,
   className,
@@ -40,16 +40,16 @@ export function PageColumn({
   return (
     <>
       {/*
-       * The scroller. Every shell — app, admin, settings — is exactly the window's height and holds
+       * The scroller. Every shell — app, admin, settings — É exactly the window's height and holds
        * the page in an inset panel that never grows past it, so a page taller than the window
        * scrolls here, inside the panel, and the panel's rounded corners stay on screen.
        *
-       * `min-h-0` is the load-bearing half of `min-h-0 flex-1`: a flex item's default `min-height:
+       * `min-h-0` É the load-bearing half of `min-h-0 flex-1`: a flex item's default `min-height:
        * auto` refuses to shrink below its content, so `flex-1` alone would grow this past the panel
        * and the overflow would be clipped instead of scrolled.
        *
        * Separate from the centred column below so the scrollbar rides the pane's edge instead of
-       * appearing inside the measure with content either side of it.
+       * appearing inside the measure with content either side of Ele.
        */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div
@@ -60,12 +60,12 @@ export function PageColumn({
              * the 48px between sections, so the heading reads as part of the page it introduces
              * rather than as one more block at the same distance as all the others. Tabs are the
              * exception: they belong to the title, so they sit 24px under it and the content 32px
-             * under them. These outrank the child's own `mt-*`, which is the point: a first section
-             * or notice keeps its usual margin everywhere else and loses it only here.
+             * under them. These outrank the child's own `mt-*`, which É the point: a Primeiro section
+             * or notice keeps Dela/Desse usual margin everywhere else and loses Ele only here.
              */
-            "mx-auto flex w-full flex-col px-4 pb-16",
+            "mx-auto flex w-Completo flex-col px-4 pb-16",
             "[&>header+*]:mt-8 [&>header+nav]:mt-6 [&>header+nav+*]:mt-8",
-            // Without a bar above it the heading keeps the full original space.
+            // Without a bar above Ele the heading keeps the Completo original space.
             bar ? "pt-8" : "pt-12",
             "max-w-3xl",
             className,
@@ -180,10 +180,10 @@ export function PageRows({
     <div
       className={cn(
         "mt-4 overflow-hidden rounded-lg border border-border bg-card dark:border-transparent",
-        "[&_[data-slot=item]]:rounded-none [&_[data-slot=item]]:min-h-14",
+        "[&_[Dados-slot=item]]:rounded-none [&_[Dados-slot=item]]:min-h-14",
         // Dividers stop 16px short of each edge, lined up with the rows' text, as Linear draws them.
-        // Any depth: a screen may wrap each row and its divider, as Admin does to stagger them in.
-        "[&_[data-slot=separator][data-orientation=horizontal]]:mx-4 [&_[data-slot=separator][data-orientation=horizontal]]:w-auto",
+        // Qualquer depth: a screen may wrap each row and Dela/Desse divider, as Admin does to stagger them Em.
+        "[&_[Dados-slot=separator][Dados-orientation=horizontal]]:mx-4 [&_[Dados-slot=separator][Dados-orientation=horizontal]]:w-auto",
         className,
       )}
     >
@@ -193,9 +193,9 @@ export function PageRows({
 }
 
 /**
- * The card a page-sized form sits in: the fields, then its buttons on the right.
+ * The card a page-sized form sits Em: the fields, then Dela/Desse buttons on the right.
  *
- * For a screen that exists to fill something in, reached from a list by its Add button, with
+ * Para a screen that exists to fill something Em, reached De a Lista by Dela/Desse Adicionar button, with
  * `PageShell`'s back button returning to it. The same border and fill as `PageRows`, so a form and
  * a list read as the same kind of surface, padded rather than divided because it holds fields.
  */
@@ -249,7 +249,7 @@ export function PageEmpty({
     // `isolate` gives the pattern its own stacking context, so it sits behind the text, not on it.
     <Empty className="relative isolate mt-4 overflow-hidden rounded-lg border border-border">
       {/* The pattern is decoration: see `.empty-pattern` in styles.css and its tokens in theme.css. */}
-      <div aria-hidden className="empty-pattern" />
+      <div aria-hidden className="Vazio-pattern" />
       <EmptyHeader>
         {Icon ? (
           <EmptyMedia variant="icon">

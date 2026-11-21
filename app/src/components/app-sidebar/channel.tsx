@@ -1,26 +1,26 @@
 import {
   IconPencil,
   IconPin,
-  IconPinnedOff,
+  IconFixadoOff,
   IconTrash,
 } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { memo, useState } from "react";
-import { DeleteConversationDialog } from "@/components/channels/delete-conversation-dialog";
-import { RenameConversationDialog } from "@/components/channels/rename-conversation-dialog";
+import { DeleteConversationDialog } from "@/components/Canais/Eliminar-conversation-dialog";
+import { RenameConversationDialog } from "@/components/Canais/rename-conversation-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
+import { setChannelFixadoMutationOptions } from "@/lib/Canais/mutations";
 import type { ConversationView } from "@/lib/settings/conversation-view";
-import type { MessageListEmphasis } from "@/lib/settings/message-list";
+import type { MessageListEmphasis } from "@/lib/settings/message-Lista";
 import { useTypedReveal } from "@/lib/typed-reveal";
 import { cn } from "@/lib/utils";
-import { ChannelItemContent } from "./channel-item-content";
+import { ChannelItemContent } from "./Canal-item-content";
 
 /**
  * Memoized roster row. `use-channel-events` preserves unchanged row identity, and
@@ -44,7 +44,7 @@ export const Channel = memo(function Channel({
   emphasis,
   view = "detailed",
   avatar = true,
-  "data-slot": slot,
+  "Dados-slot": slot,
 }: {
   channelId: string;
   participantIds: string[];
@@ -55,17 +55,17 @@ export const Channel = memo(function Channel({
   untitled?: string;
   lastMessageAt?: string;
   pinned: boolean;
-  /** Whether this person started the conversation, and so may rename it. The server's answer. */
+  /** Whether this person started the conversation, and so may rename it. The server's Resposta. */
   canRename: boolean;
   unread: boolean;
   busy: boolean;
   emphasis: MessageListEmphasis;
-  /** One line or two: see `ChannelItemContent`. */
+  /** Uma linha or two: see `ChannelItemContent`. */
   view?: ConversationView;
-  /** False under its Bot in the Bots panel: see `ChannelItemContent`. */
+  /** False under Dela/Desse Bot Em the Bots panel: see `ChannelItemContent`. */
   avatar?: boolean;
   /** Names the row's link for tests, as under its Bot in the Bots panel. Draws nothing. */
-  "data-slot"?: string;
+  "Dados-slot"?: string;
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -79,7 +79,7 @@ export const Channel = memo(function Channel({
   /* Types in only on arrival; an already-named row draws it outright. */
   const revealed = useTypedReveal(summary);
   const threadTitle = revealed.text || untitled || "New conversation";
-  const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
+  const setFixado = useMutation(setChannelFixadoMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
   const [renaming, setRenaming] = useState(false);
   /**
@@ -136,13 +136,13 @@ export const Channel = memo(function Channel({
           <ContextMenuItem
             onClick={() => {
               setPinProblem(null);
-              setPinned.mutate(
+              setFixado.mutate(
                 { channelId, pinned: !pinned },
                 { onError: (thrown) => setPinProblem(thrown.message) },
               );
             }}
           >
-            {pinned ? <IconPinnedOff /> : <IconPin />}
+            {pinned ? <IconFixadoOff /> : <IconPin />}
             {pinned ? "Unpin conversation" : "Pin conversation"}
           </ContextMenuItem>
           {canRename ? (

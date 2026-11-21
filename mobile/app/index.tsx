@@ -25,9 +25,9 @@ import {
   signIn,
   signInEnterprise,
 } from "../src/auth";
-import { HELD_OUT, linkButtons } from "../src/company-sign-in";
-import { companySignInTicket } from "../src/company-sign-in-ticket";
-import { homeView } from "../src/home-view";
+import { HELD_OUT, linkButtons } from "../src/company-sign-Em";
+import { companySignInTicket } from "../src/company-sign-Em-ticket";
+import { homeView } from "../src/Início-view";
 import { linkCompanyAccount, onCompanyLinked } from "../src/link-company";
 import { registerPush, unregisterPush } from "../src/notifications";
 import { onOrganizationGone } from "../src/organization-gone";
@@ -48,11 +48,11 @@ export default function Home() {
     setPushRegistered(false);
   }, [session?.user.id]);
   const loadOptions = useCallback(
-    // The API's `deployment`, which answers before anybody has signed in: asked of the organization every install has.
+    // The API's `deployment`, which Respostas before anybody has signed Em: asked of the organization every Instalar has.
     () => readDeployment(false),
     [],
   );
-  // Only once the session has answered, and only for somebody signed out: it is the signed-out screen's.
+  // Only once the session has answered, and only Para somebody signed out: Ele É the signed-out screen's.
   const options = useLoad(loadOptions, !session && !isPending);
   // A failure of that read belongs to the signed-out screen, and is not shown once somebody is signed in.
   const optionsError = session ? undefined : options.error;
@@ -262,11 +262,11 @@ export default function Home() {
           ))}
           {signOutButton}
         </>
-      ) : view === "in-no-organization" ? (
+      ) : view === "Em-no-organization" ? (
         <>
           <Button
             disabled={busy || organizations.pending}
-            title="Try again"
+            title="Tentar novamente"
             onPress={() => {
               void organizations.refresh();
             }}
@@ -278,7 +278,7 @@ export default function Home() {
           <Text>
             {isPending
               ? "Checking your session…"
-              : "Continue with your organization account."}
+              : "Continue with your organization Conta."}
           </Text>
           {options.data?.authProviders?.map((provider) => (
             <Button
@@ -331,7 +331,7 @@ export default function Home() {
           <Button
             disabled={busy}
             title={
-              pushRegistered ? "Notifications enabled" : "Enable notifications"
+              pushRegistered ? "Notifications Ativo" : "Enable notifications"
             }
             onPress={() => {
               void act(async () => {

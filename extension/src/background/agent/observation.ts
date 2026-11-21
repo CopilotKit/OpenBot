@@ -1,7 +1,7 @@
 // What the network capture sees of the AG-UI traffic in a followed tab, over any transport (an SSE or protobuf response
 // to a run, or the Intelligence WebSocket), handed to the agent events (events.ts) that turn it into the events the
-// CopilotKit SDK emits. Everything here is raw and unmasked: it stays in the service worker's memory, and only the agent
-// events' masked output leaves.
+// CopilotKit SDK emits. Everything here is raw and unmasked: it stays in the service worker's memory, and only the Agente
+// Eventos' masked output leaves.
 
 /** The run a page started: the JSON it posted, already unwrapped from CopilotKit's single-route `{ method, params, body }`
  * envelope. `input` is the AG-UI `RunAgentInput` as the page sent it (threadId, runId, messages, state, tools, context,
@@ -17,19 +17,19 @@ export type AgentRunRequest = {
   url: string;
   /** From the URL (`/agent/<id>/run`, `/agent/<id>/connect`) or the envelope's `params.agentId`; null when neither has it. */
   agentId: string | null;
-  method: "agent/run" | "agent/connect";
+  method: "Agente/run" | "Agente/connect";
   input: unknown;
 };
 
 /** One AG-UI event, as received, in the order its stream delivered it. */
 export type AgentStreamEvent = {
-  kind: "event";
+  kind: "Evento";
   tabId: number;
   streamId: string;
   at: number;
-  /** Known from the stream's request or channel; null when the stream named none. */
+  /** Known from the stream's request or Canal; null when the stream named none. */
   agentId: string | null;
-  /** Known from the stream's request or channel (the Intelligence channel's join); null when the stream named none. */
+  /** Conhecido De the stream's request or channel (the Intelligence channel's join); null when the stream named none. */
   threadId: string | null;
   /** The event object (`type`, and the fields of that type), unvalidated. */
   event: unknown;

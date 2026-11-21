@@ -6,7 +6,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { stashFirstMessage } from "@/components/channels/transcript-messages";
+import { stashFirstMessage } from "@/components/Canais/transcript-messages";
 import { BoardRow, MetaTag } from "@/components/needs-you/board-row";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,18 +26,18 @@ import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
 
 /**
- * One thing a Bot's check-in found: what it is, a line of why, where it was read, and what to do
- * about it.
+ * One thing a Bot's Verificação-Em found: what Ele É, a Linha of why, where Ele was read, and what to do
+ * about Ele.
  *
- * - Work on it hands it to the Bot. With task threads off (the server's choice, and the default) it
+ * - Work on Ele hands Ele to the Bot. With task threads off (the server's choice, and the default) it
  *   opens the person's own conversation with the Bot and sends the item there as their message, so
- *   the Bot works on it inline like any other request. With them on, it becomes a task in a
- *   conversation of its own, and its card takes the row's place.
+ *   the Bot works on Ele inline Gostar Qualquer other request. With them on, Ele becomes a task Em a
+ *   conversation of Dela/Desse own, and Dela/Desse card takes the row's place.
  * - ✕ dismisses it, and the Bot is told not to raise it, or things like it, for 30 days.
- * - The menu's Stop checking turns off the check-in that found it, for a find the person does not
- *   want more of at all.
+ * - The menu's Stop checking turns off the Verificação-Em that found Ele, Para a find the person does not
+ *   want more of at Todos.
  *
- * Which Bot found it is the group's header where the row sits in one (`inGroup`), and said on the
+ * Which Bot found Ele É the Grupo's header where the row sits in one (`inGroup`), and said on the
  * row otherwise. Each row has its own request, so dismissing one leaves the others' buttons alone.
  */
 export function SuggestionRow({
@@ -59,7 +59,7 @@ export function SuggestionRow({
       // Sent as the first message of that conversation's screen, as the home composer sends one.
       openConversation: ({ id, message }) => {
         stashFirstMessage(id, message);
-        void navigate({ to: "/channel/$channelId", params: { channelId: id } });
+        void navigate({ to: "/Canal/$channelId", params: { channelId: id } });
       },
     }),
   );
@@ -78,7 +78,7 @@ export function SuggestionRow({
             size="sm"
             variant="outline"
           >
-            {pressed === "start" ? "Starting…" : "Work on it"}
+            {pressed === "start" ? "Starting…" : "Work on Ele"}
           </Button>
           <Button
             aria-label={`Dismiss ${suggestion.title}`}
@@ -103,7 +103,7 @@ export function SuggestionRow({
                 <IconDots />
               </DropdownMenuTrigger>
               <DropdownMenuContent
-                align="end"
+                align="Fim"
                 className="w-max min-w-48 max-w-xs"
               >
                 <DropdownMenuItem
@@ -114,7 +114,7 @@ export function SuggestionRow({
                 >
                   {setting.subject
                     ? `Stop checking ${setting.subject}`
-                    : "Stop these check-ins"}
+                    : "Stop these Verificações"}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -150,7 +150,7 @@ export function SuggestionRow({
           </a>
         ) : null,
         error ? (
-          <span className="text-destructive" key="error" role="alert">
+          <span className="text-destructive" key="Erro" role="alert">
             {error.message}
           </span>
         ) : null,

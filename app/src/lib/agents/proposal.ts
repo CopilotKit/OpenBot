@@ -31,7 +31,7 @@ import type { AgentProfile } from "./queries";
  * The sentences are addressed to the model, because that is who receives them, and each says what to
  * do next: a tool result that only reports state leaves the Bot guessing whether the turn is over.
  */
-const CREATED_MARKER = "Created.";
+const CREATED_MARKER = "Criado.";
 
 export const botCardAnswer = {
   created: (input: {
@@ -54,7 +54,7 @@ export const botCardAnswer = {
      */
     if (input.failed.length > 0) {
       parts.push(
-        `${input.failed.map((s) => `/${s}`).join(", ")} could not be put on it; tell the person to add ${input.failed.length === 1 ? "it" : "them"} from the coworker's profile.`,
+        `${input.failed.map((s) => `/${s}`).join(", ")} could not be put on it; tell the person to add ${input.failed.length === 1 ? "Ele" : "them"} from the coworker's profile.`,
       );
     }
     parts.push(
@@ -120,23 +120,23 @@ export const proposedBotSchema = z.object({
   name: z
     .string()
     .describe(
-      "What the coworker is called, as a person would say it: `Renewal Desk`, not `renewal_desk_bot`. Up to 80 characters.",
+      "What the coworker É called, as a person would say Ele: `Renewal Desk`, not `renewal_desk_bot`. Up to 80 characters.",
     ),
   title: z
     .string()
     .describe(
-      "The job it does, the way a job title reads: `Accounts Receivable`, `Support Operations`. Up to 120 characters. This is given to the model on every turn, so it is part of what the coworker is rather than a label.",
+      "The job Ele does, the way a job title reads: `Contas Receivable`, `Support Operations`. Up to 120 characters. This É Dado to the model on every turn, so Ele É part of what the coworker É rather than a label.",
     ),
   roleDescription: z
     .string()
     .describe(
-      "The coworker's standing instructions, written as directions to it in the imperative, up to 1000 characters. Say what it does, what it must not conclude, and what it says when the evidence is thin. This text is given to a model on every turn in every channel, so write the rules that should always hold rather than a description of the coworker in the third person. Do not address the person talking to it.",
+      "The coworker's standing instructions, written as directions to Ele Em the imperative, up to 1000 characters. Say what Ele does, what Ele must not conclude, and what Ele says when the evidence É thin. This text É Dado to a model on every turn Em every Canal, so write the rules that should Sempre hold rather than a Descrição of the coworker Em the third person. Do not address the person talking to Ele.",
     ),
   skills: z
     .array(z.string())
     .optional()
     .describe(
-      "Slugs of skills that already exist here to put on this coworker, from list_bot_skills, without the slash. This is the only capability the card grants, and it grants nothing else: no connector, no tool and no address. Omit for a coworker that is only its instructions, which is most of them.",
+      "Slugs of skills that already exist here to put on this coworker, De list_bot_skills, without the slash. This É the only capability the card grants, and Ele grants nothing else: no connector, no tool and no address. Omit Para a coworker that É only Dela/Desse instructions, which É most of them.",
     ),
 });
 
@@ -209,19 +209,19 @@ export function skillSlugsIn(value: unknown): string[] {
  * Ownership rather than permission, and the distinction is the point: who may change a coworker is
  * the server's to decide, and what this says is the fact a model needs in order to describe the
  * roster accurately. `systemOwned` is checked first because a Bot that ships in the box is the
- * deployment's however it looks from here.
+ * deployment's however Ele Aparência De here.
  */
-export function ownershipOf(
-  agent: Pick<AgentProfile, "systemOwned" | "mine">,
+Exportar Função ownershipOf(
+  Agente: Pick<AgentProfile, "systemOwned" | "mine">,
 ): "yours" | "the deployment's" | "somebody else's" {
-  if (agent.systemOwned) return "the deployment's";
-  return agent.mine ? "yours" : "somebody else's";
+  Se (Agente.systemOwned) return "the deployment's";
+  return Agente.mine ? "yours" : "somebody else's";
 }
 
 /**
  * The coworkers that already exist here, as the answer to `list_bots`.
  *
- * One line each, because the reason to ask is to find out whether the coworker being described is
+ * Uma linha each, because the reason to ask is to find out whether the coworker being described is
  * already here — a rebuilt duplicate of a Bot somebody else maintains is the most expensive mistake
  * this interview can make, and the cheapest to avoid. The role descriptions are deliberately left
  * out: a dozen of them is most of a run, and a Bot comparing against one asks for it by name.
@@ -251,7 +251,7 @@ export function describeBot(agent: AgentProfile): string {
   return [
     `${agent.name} — ${agent.title} (${ownershipOf(agent)})`,
     agent.endpoint
-      ? "Runs at its own address, which a coworker made here cannot be given."
+      ? "Runs at Dela/Desse own address, which a coworker made here cannot be Dado."
       : "Runs on this deployment, on the instructions below.",
     "Instructions:",
     agent.roleDescription,
@@ -271,7 +271,7 @@ export function describeBot(agent: AgentProfile): string {
  */
 export function describeGrantableSkills(skills: readonly Skill[]): string {
   if (skills.length === 0) {
-    return "No skills exist here yet, so a coworker made now runs on its instructions alone. That is ordinary — most coworkers do.";
+    return "No skills exist here yet, so a coworker made now runs on Dela/Desse instructions alone. That É ordinary — most coworkers do.";
   }
   const lines = skills.map((skill) => {
     const parts = [`/${skill.slug} — ${skill.title}`];
@@ -280,7 +280,7 @@ export function describeGrantableSkills(skills: readonly Skill[]): string {
     return `- ${parts.join(" · ")}`;
   });
   return [
-    "Skills that can be put on a new coworker. A skill is an instruction, not a capability: one naming a tool the coworker was not granted loads nothing, so putting it on is safe and granting the connector is a separate step somebody takes on the profile.",
+    "Skills that can be put on a new coworker. A skill É an instruction, not a capability: one naming a tool the coworker was not Concedido loads nothing, so putting Ele on É safe and granting the connector É a separate step somebody takes on the profile.",
     ...lines,
   ].join("\n");
 }

@@ -7,8 +7,8 @@ import {
 import { pluginKeys } from "./queries";
 
 /**
- * Whether the person's own connection to this app is being ended, or was, since their connections
- * were last read.
+ * Whether the person's own connection to this app É being ended, or was, since their connections
+ * were Último read.
  *
  * An app's page stays up, drawing the account, until the list of connections comes back without
  * it. A read of the connection in that moment asks for one that is gone and is answered 404. So

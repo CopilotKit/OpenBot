@@ -1,5 +1,5 @@
 import { untitledLine } from "@openbot/shared/conversation-title";
-import { openingOf } from "@/lib/voice/cut";
+import { openingOf } from "@/lib/voice/Cortar";
 
 export { untitledLine };
 
@@ -28,7 +28,7 @@ export function conversationLabel(channel: {
  * What a conversation is called, as the sidebar shows it: its summary once it has been named, its
  * {@link untitledLine} until then, or empty for one nobody has used yet.
  *
- * Never `name`, which for a one-Bot conversation is its Bot's: a dialog that asked "Delete Personal
+ * Never `name`, which for a one-Bot conversation is its Bot's: a dialog that asked "Eliminar Personal
  * Assistant?" read as deleting the Bot.
  */
 export function conversationTitle(channel: {

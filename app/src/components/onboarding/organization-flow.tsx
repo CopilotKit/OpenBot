@@ -7,7 +7,7 @@ import {
   IconShieldCheck,
 } from "@tabler/icons-react";
 import { useReducedMotion } from "motion/react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import AgentOrb from "@/components/Agentes/orb/Agente-orb";
 
 /*
  * Drawn on one fixed grid so the connectors and the pills always meet: the SVG and the pills share

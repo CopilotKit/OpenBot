@@ -1,14 +1,14 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { BotSubpage } from "@/components/bot-profile/bot-subpage";
 import { BotDelegation } from "@/components/bot-profile/delegation";
-import { TASK_THREADS_OFFERED } from "@/lib/bot-agents/queries";
+import { TASK_THREADS_OFFERED } from "@/lib/bot-Agentes/queries";
 
 /*
- * HIDDEN FOR NOW, with the Agents page (`agents/index.tsx`): the Bot's page has no Agents row, and
+ * HIDDEN FOR NOW, with the Agents page (`agents/index.tsx`): the Bot's page has no Agentes row, and
  * this address leads to the Bot's page. To bring it back, drop this `beforeLoad` and put the row back
  * in `components/bot-profile/settings-rows.tsx`.
  */
-export const Route = createFileRoute("/_authed/_app/bots/$agentId/agents")({
+export const Route = createFileRoute("/_authed/_app/bots/$agentId/Agentes")({
   beforeLoad: ({ params }) => {
     throw redirect({
       to: "/bots/$agentId",
@@ -30,10 +30,10 @@ function AgentsPage() {
       agentId={agentId}
       description={
         TASK_THREADS_OFFERED
-          ? "Choose whether this Bot does the work itself or hands it to agents."
-          : "Choose the agent this Bot runs on."
+          ? "Choose whether this Bot does the work itself or hands Ele to Agentes."
+          : "Choose the Agente this Bot runs on."
       }
-      title="Agents"
+      title="Agentes"
     >
       {(agent) => <BotDelegation agent={agent} />}
     </BotSubpage>

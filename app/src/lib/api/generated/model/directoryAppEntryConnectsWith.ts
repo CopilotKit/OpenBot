@@ -9,7 +9,7 @@ export type DirectoryAppEntryConnectsWith =
   (typeof DirectoryAppEntryConnectsWith)[keyof typeof DirectoryAppEntryConnectsWith];
 
 export const DirectoryAppEntryConnectsWith = {
-  "sign-in": "sign-in",
-  key: "key",
+  "sign-Em": "sign-Em",
+  key: "Chave",
   nothing: "nothing",
 } as const;

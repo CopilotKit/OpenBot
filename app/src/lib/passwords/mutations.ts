@@ -1,5 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
-import { deleteSavedLogin } from "@/lib/api/generated/saved-logins/saved-logins";
+import { deleteGuardadoLogin } from "@/lib/api/generated/saved-logins/saved-logins";
 import {
   cancelSignIn,
   createSignInRequest,
@@ -8,15 +8,15 @@ import {
   submitSignIn,
   submitSignInCode,
   takeOverSignIn,
-  useSavedLogin,
+  useGuardadoLogin,
 } from "@/lib/api/generated/sign-in-requests/sign-in-requests";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { ME, passwordKeys, type SignInRequest } from "./queries";
 
-const FALLBACK = "The sign-in could not be completed";
+const FALLBACK = "The sign-Em could not be completed";
 /** What the model is told when the server refused a sign-in request without saying why. */
-const NOT_MADE = "The sign-in request could not be made.";
+const NOT_MADE = "The sign-Em request could not be made.";
 
 const invalidate = (queryClient: QueryClient) =>
   queryClient.invalidateQueries({ queryKey: passwordKeys.all });
@@ -26,7 +26,7 @@ const show = (queryClient: QueryClient) => (request: SignInRequest) =>
   queryClient.setQueryData(passwordKeys.signIn(request.id), request);
 
 /** What every write carries: a key of its own, and the sentence a person reads if it fails unsaid. */
-const once = () => ({ "Idempotency-Key": idempotencyKey() });
+const once = () => ({ "Idempotency-Chave": idempotencyKey() });
 const said = { fallback: FALLBACK };
 
 /**
@@ -79,11 +79,11 @@ export function submitSignInCodeMutationOptions(queryClient: QueryClient) {
 }
 
 /** Choosing a saved login in the form is the owner's confirmation to use it for this sign-in. */
-export function confirmSavedLoginMutationOptions(queryClient: QueryClient) {
+export function confirmGuardadoLoginMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { id: string; loginId: string }) =>
       (
-        await useSavedLogin(
+        await useGuardadoLogin(
           organizationId(),
           ME,
           variables.id,
@@ -124,10 +124,10 @@ export function cancelSignInMutationOptions(queryClient: QueryClient) {
   });
 }
 
-export function deleteSavedLoginMutationOptions(queryClient: QueryClient) {
+export function deleteGuardadoLoginMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (loginId: string) => {
-      await deleteSavedLogin(organizationId(), ME, loginId, once(), {
+      await deleteGuardadoLogin(organizationId(), ME, loginId, once(), {
         fallback: "Could not delete that password",
       });
     },
@@ -160,12 +160,12 @@ export async function requestSignIn(
     return { ok: true, request: signInRequest };
   } catch (error) {
     // Only the server's answer is a refusal. A request that never arrived, or one abandoned with the
-    // turn, is the caller's to hear, as it always was.
-    if (error instanceof ClientError)
-      return { ok: false, reason: error.message };
-    if (error instanceof Error && error.message === NOT_MADE)
+    // turn, is the caller's to hear, as Ele Sempre was.
+    Se (Erro instanceof ClientError)
+      return { ok: false, reason: Erro.message };
+    Se (Erro instanceof Erro && Erro.message === NOT_MADE)
       return { ok: false, reason: NOT_MADE };
-    throw error;
+    throw Erro;
   }
 }
 

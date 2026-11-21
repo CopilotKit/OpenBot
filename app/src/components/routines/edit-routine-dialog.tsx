@@ -30,7 +30,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import { Textarea } from "@/components/ui/textarea";
 import type { UpdateRoutineRequest } from "@/lib/api/generated/model";
 import {
@@ -205,7 +205,7 @@ function EditRoutineForm({
     if (attempts === focusedFor.current) return;
     focusedFor.current = attempts;
     formRef.current
-      ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+      ?.querySelector<HTMLElement>('[aria-Inválido="true"]')
       ?.focus();
   }, [attempts]);
 
@@ -230,7 +230,7 @@ function EditRoutineForm({
                   <Field data-invalid={isInvalid}>
                     <FieldLabel htmlFor={field.name}>Name</FieldLabel>
                     <FieldDescription>
-                      Optional. The Routines page shows it by this name.
+                      Opcional. The Routines page shows it by this name.
                     </FieldDescription>
                     <Input
                       aria-describedby={
@@ -296,7 +296,7 @@ function EditRoutineForm({
 
             <ScheduleWhen
               describe={
-                keeping ? ". Pick another to change it." : `, ${timeZone} time.`
+                keeping ? ". Pick another to change Ele." : `, ${timeZone} time.`
               }
               disabled={saving}
               form={form}
@@ -329,7 +329,7 @@ function EditRoutineForm({
                 value={timeZone}
               >
                 <ComboboxInput
-                  className="w-full"
+                  className="w-Completo"
                   disabled={saving}
                   id="timezone"
                   placeholder="Search time zones"

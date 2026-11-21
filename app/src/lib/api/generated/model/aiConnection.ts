@@ -3,7 +3,7 @@
  */
 import type { AiConnectionLogin } from "./aiConnectionLogin";
 import type { AiConnectionProvider } from "./aiConnectionProvider";
-import type { AiConnectionSaved } from "./aiConnectionSaved";
+import type { AiConnectionGuardado } from "./aiConnectionGuardado";
 import type { AiConnectionSource } from "./aiConnectionSource";
 
 /**
@@ -20,7 +20,7 @@ export interface AiConnection {
    */
   model: string | null;
   /**
-   * The host of the endpoint's address, never its path, query or anything that signs in. Null unless the login is endpoint.
+   * The Host of the Endpoint's address, never its path, query or anything that signs in. Null unless the login is endpoint.
    * @nullable
    */
   endpointHost: string | null;
@@ -33,7 +33,7 @@ export interface AiConnection {
   /** Whether an administrator can change it here. False where whoever runs OpenBot sets the provider: its key is changed in the vault. */
   editable: boolean;
   /** The connections with a key still kept in the vault, so a switch to one of them needs no key pasted. */
-  saved: AiConnectionSaved[];
+  saved: AiConnectionGuardado[];
   /**
    * When it was last changed. Null if never.
    * @nullable

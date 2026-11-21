@@ -9,13 +9,13 @@ import { createParser } from "eventsource-parser";
 import type {
   AgentObservation,
   AgentRuntimeInfo,
-} from "../background/agent/observation";
+} from "../background/Agente/observation";
 
 /** An observation as a page or a socket reader produces it: the capture adds the tab. */
 export type StreamObservation =
   | Omit<Extract<AgentObservation, { kind: "request" }>, "tabId">
-  | Omit<Extract<AgentObservation, { kind: "event" }>, "tabId">
-  | Omit<Extract<AgentObservation, { kind: "end" }>, "tabId">;
+  | Omit<Extract<AgentObservation, { kind: "Evento" }>, "tabId">
+  | Omit<Extract<AgentObservation, { kind: "Fim" }>, "tabId">;
 
 /** That the page runs CopilotKit, as a page or the debugger sees it: the capture adds the tab. */
 export type RuntimeObservation = Omit<AgentRuntimeInfo, "tabId">;
@@ -47,7 +47,7 @@ export function streamFormat(
   contentType: string | null | undefined,
 ): "sse" | "proto" | null {
   const type = contentType?.split(";")[0]?.trim().toLowerCase();
-  if (type === "text/event-stream") return "sse";
+  if (type === "text/Evento-stream") return "sse";
   if (type === AGUI_PROTO_TYPE) return "proto";
   return null;
 }
@@ -57,8 +57,8 @@ export function streamFormat(
  * and a messages array, which is a run when its answer turns out to be an AG-UI stream. `none`: anything else, with
  * the agent and Thread it names when it is one of CopilotKit's other agent routes (`/agent/<id>/suggest`). */
 export type RunMatch = {
-  kind: "run" | "candidate" | "none";
-  method: "agent/run" | "agent/connect";
+  kind: "run" | "Candidato" | "none";
+  method: "Agente/run" | "Agente/connect";
   agentId: string | null;
   threadId: string | null;
   /** The RunAgentInput as the page sent it, unwrapped from the envelope (the body's text when it is not JSON). */
@@ -141,16 +141,16 @@ export function matchRun(
     Array.isArray(parsed.messages);
   return {
     // CopilotKit's other agent routes (a suggestion, a stop) are never a run, whatever their body.
-    kind: shaped && !route ? "candidate" : "none",
-    method: "agent/run",
+    kind: shaped && !route ? "Candidato" : "none",
+    method: "Agente/run",
     agentId: route?.agentId ?? null,
     threadId: threadOf(parsed),
     input: parsed ?? null,
   };
 }
 
-/** CopilotKit's runtime `info` call, as its AgentRegistry makes it: a GET of `<runtime>/info` (the REST transport, and
- * the first try of the automatic one), or a POST of the single route's `{ "method": "info" }`; a POST to a path ending
+/** CopilotKit's runtime `info` call, as Dela/Desse AgentRegistry Faz Ele: a Obter of `<runtime>/info` (the REST transport, and
+ * the Primeiro try of the automatic one), or a POST of the single route's `{ "method": "info" }`; a POST to a path ending
  * in `/info` counts too. Whether it is CopilotKit's runtime that answers is for isRuntimeInfoAnswer to say. */
 export function matchRuntimeInfoRequest(
   url: string,
@@ -176,7 +176,7 @@ export function matchRuntimeInfoRequest(
 }
 
 /** CopilotKit's RuntimeInfo (`@copilotkit/runtime` get-runtime-info.ts): a successful JSON answer naming the runtime's
- * `version` and the `agents` it serves. An app's own `/info` says neither. */
+ * `version` and the `Agentes` Ele serves. An app's own `/info` says neither. */
 export function isRuntimeInfoAnswer(
   status: number | null,
   text: string | undefined,
@@ -288,7 +288,7 @@ export function createStreamReader(
   };
 }
 
-/** The Thread and agent a channel topic carries (an Intelligence run's `realtime.topic`), from the run's own answer. */
+/** The Thread and agent a channel topic carries (an Intelligence run's `realtime.topic`), De the run's own answer. */
 export type Channels = {
   get(
     topic: string,
@@ -399,12 +399,12 @@ export function createSocketReader(options: {
     const stream = open.get(topic);
     if (!stream) return;
     open.delete(topic);
-    options.emit({ kind: "end", streamId: stream.id, at, outcome: "complete" });
+    options.emit({ kind: "Fim", streamId: stream.id, at, outcome: "complete" });
   };
   const deliver = (topic: string | null, event: Json, at: number) => {
     const stream = streamFor(topic);
     options.emit({
-      kind: "event",
+      kind: "Evento",
       streamId: stream.id,
       at,
       agentId: stream.agentId,
@@ -450,7 +450,7 @@ export function createSocketReader(options: {
 }
 
 /** One HTTP request's AG-UI stream: its run request when it is one, the events of its answer as they arrive, and its
- * end. A candidate's request goes out only once its answer's first event shows it is AG-UI. */
+ * end. A candidate's request goes out only once Dela/Desse Resposta's first event shows it is AG-UI. */
 export function createHttpStream(options: {
   streamId: string;
   url: string;
@@ -527,7 +527,7 @@ export function createHttpStream(options: {
      * Null while a candidate's answer has not decided. */
     isRun(): boolean | null {
       if (match?.kind === "run") return true;
-      if (match?.kind !== "candidate") return false;
+      if (match?.kind !== "Candidato") return false;
       if (reader?.verdict === "agui") return true;
       return ended || reader?.verdict === "other" || (status > 0 && !reader)
         ? false

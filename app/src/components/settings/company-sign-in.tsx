@@ -1,6 +1,6 @@
 import { IconBuildingBank } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { LinkCompanyAccount } from "@/components/auth/link-company-account";
+import { LinkCompanyAccount } from "@/components/auth/link-company-Conta";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import {
   Item,
@@ -12,18 +12,18 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import type { CompanySignIn } from "@/lib/api/generated/model";
-import { companySignInQueryOptions } from "@/lib/auth/company-sign-in";
+import { companySignInQueryOptions } from "@/lib/auth/company-sign-Em";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
-/** The row's second line: whether the person's company account is linked, and whether this organization requires it. */
+/** The row's second Linha: whether the person's company account is linked, and whether this organization requires it. */
 export function companySignInLine(
   signIn: Pick<CompanySignIn, "required" | "met">,
 ): string {
   if (signIn.met)
-    return "Linked. You sign in to this organization through your company.";
+    return "Linked. You sign Em to this organization through your company.";
   return signIn.required
-    ? "This organization requires it. Link it to keep working here."
-    : "Link it to sign in to this organization through your company.";
+    ? "This organization requires Ele. Link Ele to keep working here."
+    : "Link Ele to sign Em to this organization through your company.";
 }
 
 /**
@@ -60,8 +60,8 @@ export function CompanySignInSection() {
             </ItemActions>
           ) : (
             // On a line of its own under the row: the button's words are long, and beside them the row's own
-            // sentence was squeezed to a word a line in a narrow window.
-            // In line with the row's words, past the icon's tile and the gap after it.
+            // sentence was squeezed to a word a Linha Em a narrow window.
+            // Em Linha with the row's words, past the icon's tile and the gap after it.
             <ItemFooter className="pl-11">
               <LinkCompanyAccount
                 className="flex-row flex-wrap"

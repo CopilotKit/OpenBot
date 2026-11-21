@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the caller's own check-ins, newest first, each with how its last check-in ended, and whether an administrator allows the caller's Bots to check in at all. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the caller's own Verificações, newest Primeiro, each with Como Dela/Desse Último Verificação-Em ended, and whether an administrator allows the caller's Bots to check in at all. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List check-ins
  */
 
@@ -30,7 +30,7 @@ export const ListCheckInsQueryParams = zod.object({
     .min(1)
     .max(listCheckInsQueryLimitMax)
     .default(listCheckInsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -58,41 +58,41 @@ export const ListCheckInsResponse = zod.object({
     .array(
       zod
         .object({
-          id: zod.string().describe("The check-in's id."),
-          botId: zod.string().describe("The Bot that checks in."),
+          id: zod.string().describe("The Verificação-Em's id."),
+          botId: zod.string().describe("The Bot that checks Em."),
           conversationId: zod
             .string()
-            .describe("The conversation the check-in belongs to."),
+            .describe("The conversation the Verificação-Em belongs to."),
           focus: zod
             .string()
-            .describe("What to look for, in the person's words. May be empty."),
+            .describe("What to Ver Para, Em the person's words. May be Vazio."),
           subject: zod
             .string()
             .describe(
-              "What it watches, in the person's words. Empty for one that watches everything the Bot reads.",
+              "What Ele watches, Em the person's words. Vazio Para one that watches everything the Bot reads.",
             ),
           sourceLink: zod
             .string()
             .nullable()
-            .describe("The link it watches, or null."),
-          enabled: zod.boolean().describe("False while it is paused."),
+            .describe("The link Ele watches, or null."),
+          enabled: zod.boolean().describe("False while Ele É paused."),
           intervalMinutes: zod
             .int()
             .min(listCheckInsResponseCheckInsItemIntervalMinutesMin)
             .max(listCheckInsResponseCheckInsItemIntervalMinutesMax)
-            .describe("How often it runs, in minutes."),
+            .describe("Como often Ele runs, Em minutes."),
           nextRunAt: zod.iso
             .datetime({ offset: true })
-            .describe("When it runs next, if it is on."),
+            .describe("When Ele runs next, Se Ele É on."),
           lastRunAt: zod.iso
             .datetime({ offset: true })
             .nullable()
-            .describe("When it last ran, or null."),
+            .describe("When Ele Último ran, or null."),
           lastStatus: zod.string(),
           lastError: zod
             .string()
             .nullable()
-            .describe("What stopped its last run, or null."),
+            .describe("What stopped Dela/Desse Último run, or null."),
           lastRun: zod
             .union([
               zod
@@ -104,7 +104,7 @@ export const ListCheckInsResponse = zod.object({
                     ),
                   trigger: zod
                     .enum(["schedule", "run_now"])
-                    .describe("What started it."),
+                    .describe("What started Ele."),
                   skipReason: zod.union([
                     zod
                       .enum([
@@ -117,7 +117,7 @@ export const ListCheckInsResponse = zod.object({
                         "busy",
                       ])
                       .describe(
-                        "Why a check-in was skipped before the Bot looked: an administrator or the person turned check-ins off, the Bot is paused, it used its check-ins for the day, the Bot or its conversation is no longer reachable, there is nothing connected for it to read, or another check-in was still running.",
+                        "Why a Verificação-Em was skipped before the Bot Visto: an administrator or the person turned Verificações off, the Bot É paused, Ele used Dela/Desse Verificações Para the day, the Bot or Dela/Desse conversation É no Mais longo reachable, there É nothing connected Para Ele to read, or another Verificação-Em was still running.",
                       ),
                     zod.null(),
                   ]),
@@ -125,7 +125,7 @@ export const ListCheckInsResponse = zod.object({
                     .string()
                     .nullable()
                     .describe(
-                      "One sentence on why it was skipped or could not finish, or null.",
+                      "One sentence on why Ele was skipped or could not Terminar, or null.",
                     ),
                   itemsRaised: zod
                     .int()
@@ -135,32 +135,32 @@ export const ListCheckInsResponse = zod.object({
                     .describe("How many items it raised."),
                   startedAt: zod.iso
                     .datetime({ offset: true })
-                    .describe("When it started."),
+                    .describe("When Ele started."),
                   finishedAt: zod.iso
                     .datetime({ offset: true })
                     .nullable()
-                    .describe("When it ended, or null while it runs."),
+                    .describe("When Ele ended, or null while Ele runs."),
                 })
                 .describe(
-                  "A check-in's newest run: how it ended and, for one that was skipped or could not finish, why, in one sentence written for the person.",
+                  "A Verificação-Em's newest run: Como Ele ended and, Para one that was skipped or could not Terminar, why, Em one sentence written Para the person.",
                 ),
               zod.null(),
             ])
-            .describe("Its newest check-in, or null before the first."),
+            .describe("Dela/Desse newest Verificação-Em, or null before the Primeiro."),
           createdAt: zod.iso
             .datetime({ offset: true })
-            .describe("When it was turned on first."),
+            .describe("When Ele was turned on Primeiro."),
           updatedAt: zod.iso
             .datetime({ offset: true })
-            .describe("When it last changed."),
+            .describe("When Ele Último changed."),
         })
-        .describe("One thing a Bot checks in on for a person, and how often."),
+        .describe("One thing a Bot checks Em on Para a person, and Como often."),
     )
-    .describe("Newest first."),
+    .describe("Newest Primeiro."),
   allowed: zod
     .boolean()
     .describe(
-      "False when an administrator turned check-ins off for the caller, so the caller's own switches can say who turned them off.",
+      "False when an administrator turned Verificações off Para the caller, so the caller's own switches can say who turned them off.",
     ),
   nextCursor: zod
     .string()
@@ -283,17 +283,17 @@ export const CreateCheckInResponse = zod.object({
         .describe("The conversation the check-in belongs to."),
       focus: zod
         .string()
-        .describe("What to look for, in the person's words. May be empty."),
+        .describe("What to look for, in the person's words. May be Vazio."),
       subject: zod
         .string()
         .describe(
-          "What it watches, in the person's words. Empty for one that watches everything the Bot reads.",
+          "What Ele watches, Em the person's words. Empty for one that watches everything the Bot reads.",
         ),
       sourceLink: zod
         .string()
         .nullable()
         .describe("The link it watches, or null."),
-      enabled: zod.boolean().describe("False while it is paused."),
+      Ativo: zod.boolean().describe("False while it is paused."),
       intervalMinutes: zod
         .int()
         .min(createCheckInResponseCheckInIntervalMinutesMin)
@@ -394,13 +394,13 @@ export const UpdateCheckInParams = zod.object({
     .min(1)
     .max(updateCheckInPathCheckInIdMax)
     .regex(updateCheckInPathCheckInIdRegExp)
-    .describe("The check-in's id."),
+    .describe("The Verificação-Em's id."),
 });
 
 export const updateCheckInHeaderIdempotencyKeyMax = 128;
 
 export const UpdateCheckInHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(updateCheckInHeaderIdempotencyKeyMax)
@@ -419,17 +419,17 @@ export const UpdateCheckInBody = zod.object({
     .string()
     .max(updateCheckInBodyFocusMax)
     .optional()
-    .describe("What to look for."),
+    .describe("What to Ver Para."),
   intervalMinutes: zod
     .int()
     .min(updateCheckInBodyIntervalMinutesMin)
     .max(updateCheckInBodyIntervalMinutesMax)
     .optional()
-    .describe("How often it runs, in minutes."),
+    .describe("Como often Ele runs, Em minutes."),
   enabled: zod
     .boolean()
     .optional()
-    .describe("False pauses it; true resumes it."),
+    .describe("False pauses Ele; true resumes Ele."),
 });
 
 export const updateCheckInResponseCheckInIntervalMinutesMin = 60;
@@ -440,41 +440,41 @@ export const updateCheckInResponseCheckInLastRunOneItemsRaisedMin = 0;
 export const UpdateCheckInResponse = zod.object({
   checkIn: zod
     .object({
-      id: zod.string().describe("The check-in's id."),
-      botId: zod.string().describe("The Bot that checks in."),
+      id: zod.string().describe("The Verificação-Em's id."),
+      botId: zod.string().describe("The Bot that checks Em."),
       conversationId: zod
         .string()
-        .describe("The conversation the check-in belongs to."),
+        .describe("The conversation the Verificação-Em belongs to."),
       focus: zod
         .string()
-        .describe("What to look for, in the person's words. May be empty."),
+        .describe("What to Ver Para, Em the person's words. May be Vazio."),
       subject: zod
         .string()
         .describe(
-          "What it watches, in the person's words. Empty for one that watches everything the Bot reads.",
+          "What Ele watches, Em the person's words. Vazio Para one that watches everything the Bot reads.",
         ),
       sourceLink: zod
         .string()
         .nullable()
-        .describe("The link it watches, or null."),
-      enabled: zod.boolean().describe("False while it is paused."),
+        .describe("The link Ele watches, or null."),
+      enabled: zod.boolean().describe("False while Ele É paused."),
       intervalMinutes: zod
         .int()
         .min(updateCheckInResponseCheckInIntervalMinutesMin)
         .max(updateCheckInResponseCheckInIntervalMinutesMax)
-        .describe("How often it runs, in minutes."),
+        .describe("Como often Ele runs, Em minutes."),
       nextRunAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it runs next, if it is on."),
+        .describe("When Ele runs next, Se Ele É on."),
       lastRunAt: zod.iso
         .datetime({ offset: true })
         .nullable()
-        .describe("When it last ran, or null."),
+        .describe("When Ele Último ran, or null."),
       lastStatus: zod.string(),
       lastError: zod
         .string()
         .nullable()
-        .describe("What stopped its last run, or null."),
+        .describe("What stopped Dela/Desse Último run, or null."),
       lastRun: zod
         .union([
           zod
@@ -486,7 +486,7 @@ export const UpdateCheckInResponse = zod.object({
                 ),
               trigger: zod
                 .enum(["schedule", "run_now"])
-                .describe("What started it."),
+                .describe("What started Ele."),
               skipReason: zod.union([
                 zod
                   .enum([
@@ -499,7 +499,7 @@ export const UpdateCheckInResponse = zod.object({
                     "busy",
                   ])
                   .describe(
-                    "Why a check-in was skipped before the Bot looked: an administrator or the person turned check-ins off, the Bot is paused, it used its check-ins for the day, the Bot or its conversation is no longer reachable, there is nothing connected for it to read, or another check-in was still running.",
+                    "Why a Verificação-Em was skipped before the Bot Visto: an administrator or the person turned Verificações off, the Bot É paused, Ele used Dela/Desse Verificações Para the day, the Bot or Dela/Desse conversation É no Mais longo reachable, there É nothing connected Para Ele to read, or another Verificação-Em was still running.",
                   ),
                 zod.null(),
               ]),
@@ -507,7 +507,7 @@ export const UpdateCheckInResponse = zod.object({
                 .string()
                 .nullable()
                 .describe(
-                  "One sentence on why it was skipped or could not finish, or null.",
+                  "One sentence on why Ele was skipped or could not Terminar, or null.",
                 ),
               itemsRaised: zod
                 .int()
@@ -515,26 +515,26 @@ export const UpdateCheckInResponse = zod.object({
                 .describe("How many items it raised."),
               startedAt: zod.iso
                 .datetime({ offset: true })
-                .describe("When it started."),
+                .describe("When Ele started."),
               finishedAt: zod.iso
                 .datetime({ offset: true })
                 .nullable()
-                .describe("When it ended, or null while it runs."),
+                .describe("When Ele ended, or null while Ele runs."),
             })
             .describe(
-              "A check-in's newest run: how it ended and, for one that was skipped or could not finish, why, in one sentence written for the person.",
+              "A Verificação-Em's newest run: Como Ele ended and, Para one that was skipped or could not Terminar, why, Em one sentence written Para the person.",
             ),
           zod.null(),
         ])
-        .describe("Its newest check-in, or null before the first."),
+        .describe("Dela/Desse newest Verificação-Em, or null before the Primeiro."),
       createdAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it was turned on first."),
+        .describe("When Ele was turned on Primeiro."),
       updatedAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it last changed."),
+        .describe("When Ele Último changed."),
     })
-    .describe("One thing a Bot checks in on for a person, and how often."),
+    .describe("One thing a Bot checks Em on Para a person, and Como often."),
 });
 
 /**
@@ -561,9 +561,9 @@ export const DeleteCheckInParams = zod.object({
     .describe("The check-in's id."),
 });
 
-export const deleteCheckInHeaderIdempotencyKeyMax = 128;
+Exportar const deleteCheckInHeaderIdempotencyKeyMax = 128;
 
-export const DeleteCheckInHeader = zod.object({
+Exportar const DeleteCheckInHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -573,18 +573,18 @@ export const DeleteCheckInHeader = zod.object({
     ),
 });
 
-export const DeleteCheckInResponse = zod.void();
+Exportar const DeleteCheckInResponse = zod.void();
 
 /**
- * Have the Bot check in now. The answer says whether it was queued, or skipped at once for the reason a scheduled check-in would have been skipped anyway. Refused when one is running already, or one ran in the last ten minutes.
- * @summary Run a check-in now
+ * Have the Bot Verificação Em now. The Resposta says whether Ele was queued, or skipped at once Para the reason a scheduled Verificação-Em would have been skipped anyway. Refused when one É running already, or one ran Em the Último ten minutes.
+ * @summary Run a Verificação-Em now
  */
 
-export const runCheckInPathCheckInIdMax = 200;
+Exportar const runCheckInPathCheckInIdMax = 200;
 
-export const runCheckInPathCheckInIdRegExp = new RegExp("\\S");
+Exportar const runCheckInPathCheckInIdRegExp = new RegExp("\\S");
 
-export const RunCheckInParams = zod.object({
+Exportar const RunCheckInParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -664,7 +664,7 @@ export const ListCheckInItemsQueryParams = zod.object({
     .min(1)
     .max(listCheckInItemsQueryLimitMax)
     .default(listCheckInItemsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -689,7 +689,7 @@ export const ListCheckInItemsResponse = zod.object({
         .object({
           id: zod.string().describe("The item's id."),
           botId: zod.string().describe("The Bot that raised it."),
-          checkInId: zod.string().describe("The check-in that found it."),
+          checkInId: zod.string().describe("The Verificação-Em that found Ele."),
           title: zod.string().describe("What to do, in plain words."),
           detail: zod
             .string()
@@ -697,19 +697,19 @@ export const ListCheckInItemsResponse = zod.object({
           sourceApp: zod
             .string()
             .nullable()
-            .describe("The app the Bot read it in, or null."),
+            .describe("The app the Bot read Ele Em, or null."),
           sourceRef: zod
             .string()
             .nullable()
-            .describe("What the Bot read it with, or null."),
+            .describe("What the Bot read Ele with, or null."),
           sourceLink: zod
             .string()
             .nullable()
-            .describe("Where it can be opened, or null."),
+            .describe("Where Ele can be opened, or null."),
           status: zod
             .string()
             .describe(
-              "open until the person starts or hides it. superseded is the Bot's own: a later check-in cleared it as no longer needed.",
+              "open until the person starts or hides Ele. superseded É the Bot's own: a Mais tarde Verificação-Em cleared Ele as no Mais longo needed.",
             ),
           pingId: zod
             .string()
@@ -724,16 +724,16 @@ export const ListCheckInItemsResponse = zod.object({
           resolvedAt: zod.iso
             .datetime({ offset: true })
             .nullable()
-            .describe("When it was started, hidden or cleared."),
+            .describe("When Ele was started, hidden or cleared."),
           createdAt: zod.iso
             .datetime({ offset: true })
             .describe("When it was raised."),
         })
         .describe(
-          "Something a Bot's check-in found that needs the person: what it is, why, and where the Bot read it.",
+          "Something a Bot's Verificação-Em found that needs the person: what Ele É, why, and where the Bot read Ele.",
         ),
     )
-    .describe("Newest first."),
+    .describe("Newest Primeiro."),
   nextCursor: zod
     .string()
     .max(listCheckInItemsResponseNextCursorMax)
@@ -745,7 +745,7 @@ export const ListCheckInItemsResponse = zod.object({
 });
 
 /**
- * Start an item: its Bot takes it on as a task in a conversation of its own, as the caller's own turn, so anything it sends or changes still asks first. Starting an item that was started already answers the task the first start opened. One that is no longer open, or is somebody else's, is refused.
+ * Start an item: its Bot takes it on as a task in a conversation of its own, as the caller's own turn, so anything Ele sends or changes still asks Primeiro. Starting an item that was started already Respostas the task the Primeiro start opened. One that É no Mais longo open, or É somebody else's, is refused.
  * @summary Start an item as a task
  */
 
@@ -771,7 +771,7 @@ export const StartCheckInItemParams = zod.object({
 export const startCheckInItemHeaderIdempotencyKeyMax = 128;
 
 export const StartCheckInItemHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(startCheckInItemHeaderIdempotencyKeyMax)
@@ -785,7 +785,7 @@ export const StartCheckInItemResponse = zod.object({
     .object({
       id: zod.string().describe("The item's id."),
       botId: zod.string().describe("The Bot that raised it."),
-      checkInId: zod.string().describe("The check-in that found it."),
+      checkInId: zod.string().describe("The Verificação-Em that found Ele."),
       title: zod.string().describe("What to do, in plain words."),
       detail: zod
         .string()
@@ -793,19 +793,19 @@ export const StartCheckInItemResponse = zod.object({
       sourceApp: zod
         .string()
         .nullable()
-        .describe("The app the Bot read it in, or null."),
+        .describe("The app the Bot read Ele Em, or null."),
       sourceRef: zod
         .string()
         .nullable()
-        .describe("What the Bot read it with, or null."),
+        .describe("What the Bot read Ele with, or null."),
       sourceLink: zod
         .string()
         .nullable()
-        .describe("Where it can be opened, or null."),
+        .describe("Where Ele can be opened, or null."),
       status: zod
         .string()
         .describe(
-          "open until the person starts or hides it. superseded is the Bot's own: a later check-in cleared it as no longer needed.",
+          "open until the person starts or hides Ele. superseded É the Bot's own: a Mais tarde Verificação-Em cleared Ele as no Mais longo needed.",
         ),
       pingId: zod
         .string()
@@ -820,13 +820,13 @@ export const StartCheckInItemResponse = zod.object({
       resolvedAt: zod.iso
         .datetime({ offset: true })
         .nullable()
-        .describe("When it was started, hidden or cleared."),
+        .describe("When Ele was started, hidden or cleared."),
       createdAt: zod.iso
         .datetime({ offset: true })
         .describe("When it was raised."),
     })
     .describe(
-      "Something a Bot's check-in found that needs the person: what it is, why, and where the Bot read it.",
+      "Something a Bot's Verificação-Em found that needs the person: what Ele É, why, and where the Bot read Ele.",
     ),
   task: zod
     .object({
@@ -837,7 +837,7 @@ export const StartCheckInItemResponse = zod.object({
 });
 
 /**
- * Start an item the way this server takes work on. Where the server runs tasks in conversations of their own, it becomes a task, as startCheckInItem makes one, and `task` names it. Where it does not, no task and no conversation is made: the item is started, and `conversation` names the caller's own conversation with the item's Bot (made if they have none yet) and the message to send there as the caller's own, so the Bot works on it in that conversation like any other request. One that is no longer open, or is somebody else's, is refused.
+ * Start an item the way this server takes work on. Where the server runs tasks in conversations of their own, it becomes a task, as startCheckInItem makes one, and `task` names it. Where it does not, no task and no conversation is made: the item is started, and `conversation` names the caller's own conversation with the item's Bot (made if they have none yet) and the message to send there as the caller's own, so the Bot works on Ele Em that conversation Gostar Qualquer other request. One that É no Mais longo open, or É somebody else's, is refused.
  * @summary Work on an item
  */
 
@@ -863,7 +863,7 @@ export const WorkOnCheckInItemParams = zod.object({
 export const workOnCheckInItemHeaderIdempotencyKeyMax = 128;
 
 export const WorkOnCheckInItemHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(workOnCheckInItemHeaderIdempotencyKeyMax)
@@ -878,7 +878,7 @@ export const WorkOnCheckInItemResponse = zod
       .object({
         id: zod.string().describe("The item's id."),
         botId: zod.string().describe("The Bot that raised it."),
-        checkInId: zod.string().describe("The check-in that found it."),
+        checkInId: zod.string().describe("The Verificação-Em that found Ele."),
         title: zod.string().describe("What to do, in plain words."),
         detail: zod
           .string()
@@ -886,19 +886,19 @@ export const WorkOnCheckInItemResponse = zod
         sourceApp: zod
           .string()
           .nullable()
-          .describe("The app the Bot read it in, or null."),
+          .describe("The app the Bot read Ele Em, or null."),
         sourceRef: zod
           .string()
           .nullable()
-          .describe("What the Bot read it with, or null."),
+          .describe("What the Bot read Ele with, or null."),
         sourceLink: zod
           .string()
           .nullable()
-          .describe("Where it can be opened, or null."),
+          .describe("Where Ele can be opened, or null."),
         status: zod
           .string()
           .describe(
-            "open until the person starts or hides it. superseded is the Bot's own: a later check-in cleared it as no longer needed.",
+            "open until the person starts or hides Ele. superseded É the Bot's own: a Mais tarde Verificação-Em cleared Ele as no Mais longo needed.",
           ),
         pingId: zod
           .string()
@@ -913,13 +913,13 @@ export const WorkOnCheckInItemResponse = zod
         resolvedAt: zod.iso
           .datetime({ offset: true })
           .nullable()
-          .describe("When it was started, hidden or cleared."),
+          .describe("When Ele was started, hidden or cleared."),
         createdAt: zod.iso
           .datetime({ offset: true })
           .describe("When it was raised."),
       })
       .describe(
-        "Something a Bot's check-in found that needs the person: what it is, why, and where the Bot read it.",
+        "Something a Bot's Verificação-Em found that needs the person: what Ele É, why, and where the Bot read Ele.",
       ),
     task: zod
       .object({
@@ -928,7 +928,7 @@ export const WorkOnCheckInItemResponse = zod
       })
       .nullable()
       .describe(
-        "The task the item became, where this server runs tasks in conversations of their own. Null otherwise.",
+        "The task the item became, where this server runs tasks Em conversations of their own. Null otherwise.",
       ),
     conversation: zod
       .object({
@@ -949,7 +949,7 @@ export const WorkOnCheckInItemResponse = zod
       ),
   })
   .describe(
-    "An item, started, and where the work on it goes on. Exactly one of `task` and `conversation` is set.",
+    "An item, started, and where the work on Ele goes on. Exactly one of `task` and `conversation` É set.",
   );
 
 /**
@@ -976,9 +976,9 @@ export const DismissCheckInItemParams = zod.object({
     .describe("The item's id."),
 });
 
-export const dismissCheckInItemHeaderIdempotencyKeyMax = 128;
+Exportar const dismissCheckInItemHeaderIdempotencyKeyMax = 128;
 
-export const DismissCheckInItemHeader = zod.object({
+Exportar const DismissCheckInItemHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -988,7 +988,7 @@ export const DismissCheckInItemHeader = zod.object({
     ),
 });
 
-export const DismissCheckInItemResponse = zod.object({
+Exportar const DismissCheckInItemResponse = zod.object({
   checkInItem: zod
     .object({
       id: zod.string().describe("The item's id."),

@@ -11,5 +11,5 @@ export type UpdateMemoryRequestReviewState =
 export const UpdateMemoryRequestReviewState = {
   unreviewed: "unreviewed",
   confirmed: "confirmed",
-  edited: "edited",
+  edited: "Editado",
 } as const;

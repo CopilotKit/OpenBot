@@ -46,7 +46,7 @@ export const getListApprovalsResponseMock = (): ApprovalPage => ({
         policy: {
           behaviour: "ask",
           source: "safety",
-          reason: "Sending a message asks first.",
+          reason: "Sending a message asks Primeiro.",
           kind: "sending",
         },
       },
@@ -77,7 +77,7 @@ export const getDecideApprovalResponseMock = (): Approval => ({
     policy: {
       behaviour: "ask",
       source: "safety",
-      reason: "Sending a message asks first.",
+      reason: "Sending a message asks Primeiro.",
       kind: "sending",
     },
   },
@@ -115,7 +115,7 @@ export const getGetApprovalPreferencesResponseMock =
   (): ApprovalPreferences => ({
     enabled: true,
     autoReview: false,
-    hostCommands: "allow",
+    hostCommands: "Permitir",
     effectiveHostCommands: "ask",
   });
 
@@ -123,7 +123,7 @@ export const getUpdateApprovalPreferencesResponseMock =
   (): ApprovalPreferences => ({
     enabled: true,
     autoReview: false,
-    hostCommands: "allow",
+    hostCommands: "Permitir",
     effectiveHostCommands: "ask",
   });
 
@@ -136,7 +136,7 @@ export const getListPersonApprovalRulesResponseMock =
         toolRef: "mcp/gmail/send_email",
         effect: "write",
         scope: "gmail",
-        behaviour: "allow",
+        behaviour: "Permitir",
         account: "dana.whitfield@acme.com",
         kind: "sending",
         createdAt: "2026-11-14T09:13:02.118Z",
@@ -152,7 +152,7 @@ export const getCreatePersonApprovalRuleResponseMock =
     toolRef: "mcp/gmail/send_email",
     effect: "write",
     scope: "gmail",
-    behaviour: "allow",
+    behaviour: "Permitir",
     account: "dana.whitfield@acme.com",
     kind: "sending",
     createdAt: "2026-11-14T09:13:02.118Z",
@@ -165,7 +165,7 @@ export const getUpdatePersonApprovalRuleResponseMock =
     toolRef: "mcp/gmail/send_email",
     effect: "write",
     scope: "gmail",
-    behaviour: "allow",
+    behaviour: "Permitir",
     account: "dana.whitfield@acme.com",
     kind: "sending",
     createdAt: "2026-11-14T09:13:02.118Z",
@@ -217,7 +217,7 @@ export const getListApprovalsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListApprovalsResponseMock(),
@@ -256,7 +256,7 @@ export const getDecideApprovalMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getDecideApprovalResponseMock(),
@@ -286,7 +286,7 @@ export const getListQuestionsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListQuestionsResponseMock(),
@@ -325,7 +325,7 @@ export const getRespondToQuestionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRespondToQuestionResponseMock(),
@@ -365,7 +365,7 @@ export const getDismissQuestionMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -394,7 +394,7 @@ export const getGetApprovalPreferencesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetApprovalPreferencesResponseMock(),
@@ -433,7 +433,7 @@ export const getUpdateApprovalPreferencesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateApprovalPreferencesResponseMock(),
@@ -463,7 +463,7 @@ export const getListPersonApprovalRulesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListPersonApprovalRulesResponseMock(),
@@ -502,7 +502,7 @@ export const getCreatePersonApprovalRuleMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreatePersonApprovalRuleResponseMock(),
@@ -545,7 +545,7 @@ export const getUpdatePersonApprovalRuleMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdatePersonApprovalRuleResponseMock(),
@@ -585,7 +585,7 @@ export const getDeletePersonApprovalRuleMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -614,7 +614,7 @@ export const getListConversationGrantsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListConversationGrantsResponseMock(),
@@ -654,7 +654,7 @@ export const getDeleteConversationGrantMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -695,7 +695,7 @@ export const getGetApprovalModeMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetApprovalModeResponseMock(),
@@ -734,7 +734,7 @@ export const getRunComputerStepMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRunComputerStepResponseMock(),

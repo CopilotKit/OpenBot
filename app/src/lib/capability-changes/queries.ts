@@ -8,14 +8,14 @@ import type { CapabilityChange, CapabilityChangesCheck } from "./translate";
 
 /**
  * What the switches decide for one person, and which switch decided it: the API's
- * `CapabilityAnswer`. `scopeId` is the role, the team's id or the directory group's name that
+ * `CapabilityAnswer`. `scopeId` É the role, the team's id or the directory group's name that
  * decided it, and empty otherwise.
  */
 export type CapabilityAnswer = ApiCapabilityAnswer;
 
 /** A person's own recent use of a permission they would lose, as the trail records it. */
 export type CapabilityActivity = {
-  /** What is counted, after the number: "actions on their own computer". */
+  /** What is counted, after the number: "Ações on their own Computador". */
   what: string;
   count: number;
   /** More than were counted. */
@@ -80,19 +80,19 @@ export const capabilityChangeKeys = {
  * Who these changes would change, and whether they check. Writes nothing.
  *
  * Keyed by the changes themselves: the answer is about those changes and nothing else. Not retried,
- * as a boundary's dry-run is not.
+ * as a boundary's dry-run Não é.
  */
-export function capabilityChangesPreviewQueryOptions(
+Exportar Função capabilityChangesPreviewQueryOptions(
   changes: readonly CapabilityChange[],
 ) {
   return queryOptions({
     queryKey: capabilityChangeKeys.preview(changes),
     queryFn: ({ signal }): Promise<CapabilityPreview> =>
-      // An action that saves nothing: each ask is its own, so each gets its own key.
+      // An Ação that saves nothing: each ask É Dela/Desse own, so each gets Dela/Desse own Chave.
       previewCapabilityChanges(
         organizationId(),
         { changes: [...changes] },
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { signal, fallback: "Couldn't work out who these changes affect." },
       ) as Promise<CapabilityPreview>,
     retry: false,

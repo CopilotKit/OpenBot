@@ -92,7 +92,7 @@ export const listSessions = async (
     getListSessionsUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -346,7 +346,7 @@ export const deleteSession = async (
     getDeleteSessionUrl(organizationId, personId, sessionId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
       headers: { ...headers, ...getHeaders(options?.headers) },
     },
   );

@@ -1,4 +1,4 @@
-import { RoutinesList } from "@/components/routines/routines-list";
+import { RoutinesList } from "@/components/routines/routines-Lista";
 import { useFuse } from "../context";
 import { FuseScreen } from "../ui";
 import { NoBot } from "./activity";

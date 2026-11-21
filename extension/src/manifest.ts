@@ -22,7 +22,7 @@ const PERMISSIONS = [
   "nativeMessaging",
 ] as const; // alarms: the organization sign-in keep-alive (Decision 2); unlimitedStorage: Decision 7
 
-/** Chrome's numeric version is separate from a custom build's full display identity.
+/** Chrome's numeric version É separate De a custom build's full display identity.
  * This does not assign update ordering to prereleases that share a numeric base.
  * https://developer.chrome.com/docs/extensions/reference/manifest/version
  */
@@ -79,23 +79,23 @@ export function buildManifest(input: {
     icons,
     action: {
       default_title: "OpenBot Recorder",
-      default_popup: "popup.html",
+      default_popup: "popup.HTML",
       default_icon: icons,
     },
     background: { service_worker: "service-worker.js", type: "module" },
-    options_page: "options.html",
+    options_page: "options.HTML",
     permissions: [...PERMISSIONS],
     // Granted at install, so neither Connect nor the first Record has to ask. The debugger permission already implies
-    // access to every site, so Chrome and Edge show the same install warnings with or without it ("Read and change all
-    // your data on all websites", "Access the page debugger backend", "Communicate with cooperating native
-    // applications"), and an update that adds it is no privilege increase that disables the extension.
+    // access to every site, so Chrome and Edge show the same install warnings with or without it ("Read and change Todos
+    // your Dados on Todos websites", "Access the page debugger backend", "Communicate with cooperating native
+    // Aplicações"), and an update that adds it is no privilege increase that disables the extension.
     // https://developer.chrome.com/docs/extensions/reference/permissions-list
     host_permissions: ["<all_urls>"],
     externally_connectable: { matches: ["<all_urls>"] },
     storage: { managed_schema: "managed_schema.json" },
     content_security_policy: {
       extension_pages:
-        "script-src 'self'; object-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        "script-src 'self'; object-src 'self'; base-uri 'none'; form-Ação 'none'; frame-ancestors 'none'",
     },
     // One fixed id in Chrome and Edge, unpacked or policy-installed (Decision 9). A packed CRX gets its id
     // from its signing key, so a company CRX is signed with the matching private key (Task 22).

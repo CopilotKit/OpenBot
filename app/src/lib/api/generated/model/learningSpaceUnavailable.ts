@@ -9,5 +9,5 @@ export type LearningSpaceUnavailable =
   (typeof LearningSpaceUnavailable)[keyof typeof LearningSpaceUnavailable];
 
 export const LearningSpaceUnavailable = {
-  "learning-off": "learning-off",
+  "A aprendizagem-off": "A aprendizagem-off",
 } as const;

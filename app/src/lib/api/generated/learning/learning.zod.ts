@@ -100,17 +100,17 @@ export const GetLearningSettingsResponse = zod.object({
                 .max(getLearningSettingsResponseSettingsBotsOneRevisionMax)
                 .optional()
                 .describe(
-                  "A published revision to hold the space's skills at. Absent follows the latest.",
+                  "A published revision to hold the space's skills at. Absent follows the Mais recente.",
                 ),
             })
             .describe(
-              "A Learning space, by its id in the organization's backend.",
+              "A A aprendizagem space, by Dela/Desse id Em the organization's backend.",
             ),
           zod.null(),
         ]),
       )
       .describe(
-        "Each Bot's own space, by Bot id. A Bot not named learns into the default; null keeps one out of Learning.",
+        "Each Bot's own space, by Bot id. A Bot not named learns into the Padrão; null keeps one out of A aprendizagem.",
       ),
     personalReview: zod
       .enum(["admins", "people"])
@@ -233,10 +233,10 @@ export const UpdateLearningSettingsBody = zod.object({
             .max(updateLearningSettingsBodyDefaultTargetOneRevisionMax)
             .optional()
             .describe(
-              "A published revision to hold the space's skills at. Absent follows the latest.",
+              "A published revision to hold the space's skills at. Absent follows the Mais recente.",
             ),
         })
-        .describe("A Learning space, by its id in the organization's backend."),
+        .describe("A A aprendizagem space, by Dela/Desse id Em the organization's backend."),
       zod.null(),
     ])
     .optional(),
@@ -290,14 +290,14 @@ export const updateLearningSettingsResponseAutomaticOneContainerIdMax = 64;
 
 export const updateLearningSettingsResponseAutomaticOneContainerIdRegExp =
   new RegExp("^[a-z0-9]+(?:-[a-z0-9]+)*$");
-export const updateLearningSettingsResponseOrganizationSpaceIdOneMax = 64;
+Exportar const updateLearningSettingsResponseOrganizationSpaceIdOneMax = 64;
 
-export const updateLearningSettingsResponseOrganizationSpaceIdOneRegExp =
+Exportar const updateLearningSettingsResponseOrganizationSpaceIdOneRegExp =
   new RegExp("^[a-z0-9]+(?:-[a-z0-9]+)*$");
 
-export const UpdateLearningSettingsResponse = zod.object({
+Exportar const UpdateLearningSettingsResponse = zod.object({
   settings: zod.object({
-    enabled: zod
+    Ativo: zod
       .boolean()
       .describe(
         "Whether Bots' conversations are learned from and their skills delivered.",
@@ -326,11 +326,11 @@ export const UpdateLearningSettingsResponse = zod.object({
               )
               .optional()
               .describe(
-                "A published revision to hold the space's skills at. Absent follows the latest.",
+                "A published revision to hold the space's skills at. Absent follows the Mais recente.",
               ),
           })
           .describe(
-            "A Learning space, by its id in the organization's backend.",
+            "A A aprendizagem space, by Dela/Desse id Em the organization's backend.",
           ),
         zod.null(),
       ])
@@ -431,7 +431,7 @@ export const UpdateLearningSettingsResponse = zod.object({
     ])
     .optional()
     .describe(
-      "The space OpenBot keeps for this organization alone, which its Bots learn into unless an administrator chooses another. Another space of the organization's is named after it: this id, a hyphen, then a name of the administrator's choosing. The id says nothing a person can read, so a screen names the space by the organization and never shows it. Null, or absent, where OpenBot keeps no space for the organization alone and its default is whichever space is assigned or chosen.",
+      "The space OpenBot keeps for this organization alone, which its Bots learn into unless an administrator chooses another. Another space of the organization's É named after Ele: this id, a hyphen, then a name of the administrator's choosing. The id says nothing a person can read, so a screen names the space by the organization and never shows it. Null, or absent, where OpenBot keeps no space for the organization alone and its default is whichever space is assigned or chosen.",
     ),
 });
 
@@ -449,9 +449,9 @@ export const CreateAutomaticLearningSpaceParams = zod.object({
     ),
 });
 
-export const createAutomaticLearningSpaceHeaderIdempotencyKeyMax = 128;
+Exportar const createAutomaticLearningSpaceHeaderIdempotencyKeyMax = 128;
 
-export const CreateAutomaticLearningSpaceHeader = zod.object({
+Exportar const CreateAutomaticLearningSpaceHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -466,7 +466,7 @@ export const createAutomaticLearningSpaceResponseAutomaticContainerIdMax = 64;
 export const createAutomaticLearningSpaceResponseAutomaticContainerIdRegExp =
   new RegExp("^[a-z0-9]+(?:-[a-z0-9]+)*$");
 
-export const CreateAutomaticLearningSpaceResponse = zod.object({
+Exportar const CreateAutomaticLearningSpaceResponse = zod.object({
   automatic: zod
     .object({
       state: zod.enum([
@@ -522,9 +522,9 @@ export const GetLearningOverviewParams = zod.object({
     ),
 });
 
-export const getLearningOverviewQueryBotIdMax = 128;
+Exportar const getLearningOverviewQueryBotIdMax = 128;
 
-export const GetLearningOverviewQueryParams = zod.object({
+Exportar const GetLearningOverviewQueryParams = zod.object({
   botId: zod
     .string()
     .min(1)
@@ -582,12 +582,12 @@ export const GetLearningOverviewResponse = zod.object({
     .string()
     .optional()
     .describe(
-      "Why Learning can't run on this machine's model, and what to do. Absent when it can.",
+      "Why Learning can't run on this machine's model, and what to do. Absent when Ele can.",
     ),
 });
 
 /**
- * Return one page of the skills Learning published to the space every Bot learns into, or to one Bot's own, by name, as OpenBot delivers them to Bots. containerId is null, and the list empty, where no space is assigned. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the skills A aprendizagem published to the space every Bot learns into, or to one Bot's own, by name, as OpenBot delivers them to Bots. containerId is null, and the list empty, where no space is assigned. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the skills published to a space
  */
 
@@ -618,14 +618,14 @@ export const ListPublishedSkillsQueryParams = zod.object({
     .max(listPublishedSkillsQueryBotIdMax)
     .optional()
     .describe(
-      "One Bot's own Learning space. Without it, the space every Bot learns into.",
+      "One Bot's own A aprendizagem space. Without Ele, the space every Bot learns into.",
     ),
   limit: zod
     .int()
     .min(1)
     .max(listPublishedSkillsQueryLimitMax)
     .default(listPublishedSkillsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -702,30 +702,30 @@ export const GetPublishedSkillParams = zod.object({
     ),
 });
 
-export const getPublishedSkillQueryBotIdMax = 128;
+Exportar const getPublishedSkillQueryBotIdMax = 128;
 
-export const GetPublishedSkillQueryParams = zod.object({
+Exportar const GetPublishedSkillQueryParams = zod.object({
   botId: zod
     .string()
     .min(1)
     .max(getPublishedSkillQueryBotIdMax)
     .optional()
     .describe(
-      "One Bot's own Learning space. Without it, the space every Bot learns into.",
+      "One Bot's own A aprendizagem space. Without Ele, the space every Bot learns into.",
     ),
 });
 
-export const GetPublishedSkillResponse = zod.object({
+Exportar const GetPublishedSkillResponse = zod.object({
   name: zod.string(),
-  description: zod.string(),
-  files: zod
+  Descrição: zod.string(),
+  Ficheiros: zod
     .array(
       zod.object({
         path: zod.string(),
         text: zod
           .string()
           .nullable()
-          .describe("The file's text, or null for a binary file."),
+          .describe("The Ficheiro's text, or null for a binary file."),
       }),
     )
     .describe("Every file the skill holds, SKILL.md first."),
@@ -774,7 +774,7 @@ export const ListPersonalLearningProposalsQueryParams = zod.object({
     .min(1)
     .max(listPersonalLearningProposalsQueryLimitMax)
     .default(listPersonalLearningProposalsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -812,16 +812,16 @@ export const ListPersonalLearningProposalsResponse = zod.object({
           zod
             .object({
               id: zod.uuid(),
-              runId: zod.uuid().describe("The run that proposed it."),
+              runId: zod.uuid().describe("The run that proposed Ele."),
               operation: zod
-                .enum(["add", "update", "remove"])
+                .enum(["Adicionar", "update", "remove"])
                 .describe(
-                  "Whether it adds a skill, changes one, or removes one.",
+                  "Whether Ele adds a skill, changes one, or removes one.",
                 ),
               status: zod.string(),
               title: zod.string().describe("The skill's name."),
               description: zod.string(),
-              reason: zod.string().describe("Why Learning proposes it."),
+              reason: zod.string().describe("Why A aprendizagem proposes Ele."),
               createdAt: zod.iso.datetime({ offset: true }),
               reviewedAt: zod.iso.datetime({ offset: true }).nullable(),
               publishedSkillId: zod
@@ -917,7 +917,7 @@ export const ListSkillSharingRequestsQueryParams = zod.object({
     .min(1)
     .max(listSkillSharingRequestsQueryLimitMax)
     .default(listSkillSharingRequestsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -940,14 +940,14 @@ export const ListSkillSharingRequestsResponse = zod.object({
     zod.object({
       id: zod
         .string()
-        .describe("The request's id, which approve and decline address it by."),
+        .describe("The request's id, which approve and decline address Ele by."),
       personId: zod.string(),
       name: zod.string().describe("The person's name."),
       skillName: zod.string(),
       requestedAt: zod
         .string()
         .describe(
-          "When the request was made, as approve and decline take it back.",
+          "When the request was made, as approve and decline take Ele Voltar.",
         ),
     }),
   ),
@@ -1068,7 +1068,7 @@ export const DeclineSkillSharingResponse = zod.object({
 });
 
 /**
- * Return who else's Bots use the skills learned in a person's own Learning space, whether an administrator lets people open skills to every Bot, and the skills published in the person's spaces with what they chose for each. skills is null, and unavailable says why, when they could not be read. Only the person themselves may read it.
+ * Return who else's Bots use the skills learned in a person's own A aprendizagem space, whether an administrator lets people open skills to every Bot, and the skills published Em the person's spaces with what they chose for each. skills is null, and unavailable says why, when they could not be read. Only the person themselves may read it.
  * @summary Read a person's Learning choices and skills
  */
 
@@ -1155,7 +1155,7 @@ export const updatePersonLearningSettingsPathPersonIdMax = 200;
 
 export const updatePersonLearningSettingsPathPersonIdRegExp = new RegExp("\\S");
 
-export const UpdatePersonLearningSettingsParams = zod.object({
+Exportar const UpdatePersonLearningSettingsParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1172,9 +1172,9 @@ export const UpdatePersonLearningSettingsParams = zod.object({
     ),
 });
 
-export const updatePersonLearningSettingsHeaderIdempotencyKeyMax = 128;
+Exportar const updatePersonLearningSettingsHeaderIdempotencyKeyMax = 128;
 
-export const UpdatePersonLearningSettingsHeader = zod.object({
+Exportar const UpdatePersonLearningSettingsHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1184,12 +1184,12 @@ export const UpdatePersonLearningSettingsHeader = zod.object({
     ),
 });
 
-export const UpdatePersonLearningSettingsBody = zod.object({
+Exportar const UpdatePersonLearningSettingsBody = zod.object({
   mode: zod
     .enum(["closed", "open", "choose"])
     .optional()
     .describe(
-      "Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot in the organization. choose: every Bot in the organization, for the skills they open one by one. Never a Bot in another organization.",
+      "Who else's Bots use the skills Aprendido Em a person's own space. closed: only their own Bots. open: every Bot in the organization. choose: every Bot in the organization, for the skills they open one by one. Never a Bot in another organization.",
     ),
   autoApprove: zod
     .boolean()
@@ -1197,11 +1197,11 @@ export const UpdatePersonLearningSettingsBody = zod.object({
     .describe("Only in a single-person OpenBot."),
 });
 
-export const UpdatePersonLearningSettingsResponse = zod.object({
+Exportar const UpdatePersonLearningSettingsResponse = zod.object({
   mode: zod
     .enum(["closed", "open", "choose"])
     .describe(
-      "Who else's Bots use the skills learned in a person's own space. closed: only their own Bots. open: every Bot in the organization. choose: every Bot in the organization, for the skills they open one by one. Never a Bot in another organization.",
+      "Who else's Bots use the skills Aprendido Em a person's own space. closed: only their own Bots. open: every Bot in the organization. choose: every Bot in the organization, for the skills they open one by one. Never a Bot in another organization.",
     ),
   autoApprove: zod.boolean().nullable(),
 });
@@ -1215,7 +1215,7 @@ export const getPersonLearningReviewPathPersonIdMax = 200;
 
 export const getPersonLearningReviewPathPersonIdRegExp = new RegExp("\\S");
 
-export const GetPersonLearningReviewParams = zod.object({
+Exportar const GetPersonLearningReviewParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1238,11 +1238,11 @@ export const getPersonLearningReviewResponseSpacesItemContainerIdMax = 64;
 
 export const getPersonLearningReviewResponseSpacesItemContainerIdRegExp =
   new RegExp("^[a-z0-9]+(?:-[a-z0-9]+)*$");
-export const getPersonLearningReviewResponseSpacesItemLatestRunOneProposalCountMin = 0;
+Exportar const getPersonLearningReviewResponseSpacesItemLatestRunOneProposalCountMin = 0;
 
-export const getPersonLearningReviewResponseSpacesItemLatestRunOneInsightCountMin = 0;
+Exportar const getPersonLearningReviewResponseSpacesItemLatestRunOneInsightCountMin = 0;
 
-export const GetPersonLearningReviewResponse = zod.object({
+Exportar const GetPersonLearningReviewResponse = zod.object({
   canReview: zod
     .boolean()
     .describe("Whether the person decides on proposals themselves."),
@@ -1400,11 +1400,11 @@ export const ListPersonLearningProposalsQueryParams = zod.object({
     .int()
     .min(listPersonLearningProposalsQuerySinceMin)
     .describe("When the recording stopped, in milliseconds since 1970."),
-  limit: zod
+  Limite: zod
     .int()
     .min(1)
     .max(listPersonLearningProposalsQueryLimitMax)
-    .default(listPersonLearningProposalsQueryLimitDefault)
+    .Padrão(listPersonLearningProposalsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()
@@ -1505,7 +1505,7 @@ export const GetRecordingTitlesQueryParams = zod.object({
     .describe("The recordings, by the backend's id, at most 50."),
 });
 
-export const GetRecordingTitlesResponse = zod.object({
+Exportar const GetRecordingTitlesResponse = zod.object({
   recordings: zod.array(
     zod.object({
       id: zod.string(),
@@ -1515,20 +1515,20 @@ export const GetRecordingTitlesResponse = zod.object({
 });
 
 /**
- * Return one skill published in a person's Learning spaces, with its files, and, for the person themselves, the recordings of theirs it was learned from where those can be read. The person themselves or an administrator may read it.
- * @summary Read a skill learned in a person's spaces
+ * Return one skill published Em a person's A aprendizagem spaces, with Dela/Desse Ficheiros, and, Para the person themselves, the recordings of theirs Ele was Aprendido De where those can be read. The person themselves or an administrator may read Ele.
+ * @summary Read a skill Aprendido Em a person's spaces
  */
 
-export const getLearnedSkillPathPersonIdMax = 200;
+Exportar const getLearnedSkillPathPersonIdMax = 200;
 
-export const getLearnedSkillPathPersonIdRegExp = new RegExp("\\S");
-export const getLearnedSkillPathSkillNameMax = 200;
+Exportar const getLearnedSkillPathPersonIdRegExp = new RegExp("\\S");
+Exportar const getLearnedSkillPathSkillNameMax = 200;
 
-export const getLearnedSkillPathSkillNameRegExp = new RegExp(
+Exportar const getLearnedSkillPathSkillNameRegExp = new RegExp(
   "^[^/\\\\\\x00-\\x1F\\x7F]+$",
 );
 
-export const GetLearnedSkillParams = zod.object({
+Exportar const GetLearnedSkillParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1625,7 +1625,7 @@ export const UpdateLearnedSkillParams = zod.object({
 export const updateLearnedSkillHeaderIdempotencyKeyMax = 128;
 
 export const UpdateLearnedSkillHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(updateLearnedSkillHeaderIdempotencyKeyMax)
@@ -1700,11 +1700,11 @@ export const RequestSkillSharingResponse = zod.object({
 });
 
 /**
- * Return one page of the skill changes Learning proposed in the space every Bot learns into, or in one Bot's own, newest first, reviewed ones included. The list is empty where no space is assigned. Only an administrator may list them. A missing cursor starts at the first page and nextCursor null ends the list.
- * @summary List what Learning proposed in a space
+ * Return one page of the skill changes A aprendizagem proposed Em the space every Bot learns into, or Em one Bot's own, newest Primeiro, reviewed ones included. The Lista É Vazio where no space É assigned. Only an administrator may Lista them. A missing cursor starts at the Primeiro page and nextCursor null ends the Lista.
+ * @summary Lista what A aprendizagem proposed Em a space
  */
 
-export const ListLearningProposalsParams = zod.object({
+Exportar const ListLearningProposalsParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1713,32 +1713,32 @@ export const ListLearningProposalsParams = zod.object({
     ),
 });
 
-export const listLearningProposalsQueryBotIdMax = 128;
+Exportar const listLearningProposalsQueryBotIdMax = 128;
 
-export const listLearningProposalsQueryLimitDefault = 50;
-export const listLearningProposalsQueryLimitMax = 100;
+Exportar const listLearningProposalsQueryLimitDefault = 50;
+Exportar const listLearningProposalsQueryLimitMax = 100;
 
-export const listLearningProposalsQueryCursorMax = 4096;
+Exportar const listLearningProposalsQueryCursorMax = 4096;
 
-export const listLearningProposalsQueryCursorRegExp = new RegExp(
+Exportar const listLearningProposalsQueryCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListLearningProposalsQueryParams = zod.object({
+Exportar const ListLearningProposalsQueryParams = zod.object({
   botId: zod
     .string()
     .min(1)
     .max(listLearningProposalsQueryBotIdMax)
     .optional()
     .describe(
-      "One Bot's own Learning space. Without it, the space every Bot learns into.",
+      "One Bot's own A aprendizagem space. Without Ele, the space every Bot learns into.",
     ),
-  limit: zod
+  Limite: zod
     .int()
     .min(1)
     .max(listLearningProposalsQueryLimitMax)
-    .default(listLearningProposalsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .Padrão(listLearningProposalsQueryLimitDefault)
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -1746,13 +1746,13 @@ export const ListLearningProposalsQueryParams = zod.object({
     .regex(listLearningProposalsQueryCursorRegExp)
     .optional()
     .describe(
-      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
+      "Opaque continuation De the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
     ),
 });
 
-export const listLearningProposalsResponseNextCursorMax = 4096;
+Exportar const listLearningProposalsResponseNextCursorMax = 4096;
 
-export const listLearningProposalsResponseNextCursorRegExp = new RegExp(
+Exportar const listLearningProposalsResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
@@ -1807,9 +1807,9 @@ export const GetLearningProposalParams = zod.object({
   proposalId: zod.uuid().describe("The proposal's id."),
 });
 
-export const getLearningProposalQueryBotIdMax = 128;
+Exportar const getLearningProposalQueryBotIdMax = 128;
 
-export const GetLearningProposalQueryParams = zod.object({
+Exportar const GetLearningProposalQueryParams = zod.object({
   botId: zod
     .string()
     .min(1)
@@ -1829,7 +1829,7 @@ export const GetLearningProposalResponse = zod
       .describe("Whether it adds a skill, changes one, or removes one."),
     status: zod.string(),
     title: zod.string().describe("The skill's name."),
-    description: zod.string(),
+    Descrição: zod.string(),
     reason: zod.string().describe("Why Learning proposes it."),
     createdAt: zod.iso.datetime({ offset: true }),
     reviewedAt: zod.iso.datetime({ offset: true }).nullable(),
@@ -1843,7 +1843,7 @@ export const GetLearningProposalResponse = zod
   )
   .and(
     zod.object({
-      files: zod
+      Ficheiros: zod
         .array(
           zod.object({
             path: zod.string(),
@@ -1863,11 +1863,11 @@ export const GetLearningProposalResponse = zod
     }),
   )
   .describe(
-    "One proposal with every file it would publish and the insights behind it. Read each insight's evidence on its own.",
+    "One proposal with every file it would publish and the insights behind it. Read each insight's evidence on Dela/Desse own.",
   );
 
 /**
- * Approve a proposal in the space every Bot learns into, or in one Bot's own, which publishes the skill change to every Bot that learns there. Approving it again answers the same review. Only an administrator may. Recorded on the audit trail.
+ * Approve a proposal Em the space every Bot learns into, or Em one Bot's own, which publishes the skill change to every Bot that learns there. Approving it again answers the same review. Only an administrator may. Recorded on the audit trail.
  * @summary Approve a proposal in a space
  */
 
@@ -1890,14 +1890,14 @@ export const ApproveLearningProposalQueryParams = zod.object({
     .max(approveLearningProposalQueryBotIdMax)
     .optional()
     .describe(
-      "One Bot's own Learning space. Without it, the space every Bot learns into.",
+      "One Bot's own A aprendizagem space. Without Ele, the space every Bot learns into.",
     ),
 });
 
 export const approveLearningProposalHeaderIdempotencyKeyMax = 128;
 
 export const ApproveLearningProposalHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(approveLearningProposalHeaderIdempotencyKeyMax)
@@ -1909,11 +1909,11 @@ export const ApproveLearningProposalHeader = zod.object({
 export const ApproveLearningProposalResponse = zod
   .object({
     proposalId: zod.uuid(),
-    operation: zod.enum(["add", "update", "remove"]),
+    operation: zod.enum(["Adicionar", "update", "remove"]),
     status: zod.enum(["approved", "rejected"]),
     publishedSkillId: zod.string().nullable(),
   })
-  .describe("A proposal as a review left it.");
+  .describe("A proposal as a review Esquerda Ele.");
 
 /**
  * Reject a proposal in the space every Bot learns into, or in one Bot's own: nothing is published. Rejecting it again answers the same review; rejecting an approved one is refused. Only an administrator may. Recorded on the audit trail.
@@ -1930,9 +1930,9 @@ export const RejectLearningProposalParams = zod.object({
   proposalId: zod.uuid().describe("The proposal's id."),
 });
 
-export const rejectLearningProposalQueryBotIdMax = 128;
+Exportar const rejectLearningProposalQueryBotIdMax = 128;
 
-export const RejectLearningProposalQueryParams = zod.object({
+Exportar const RejectLearningProposalQueryParams = zod.object({
   botId: zod
     .string()
     .min(1)
@@ -1976,7 +1976,7 @@ export const GetLearningEvidenceParams = zod.object({
     .describe(
       "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
     ),
-  insightId: zod.uuid().describe("The insight's id, as a proposal lists it."),
+  insightId: zod.uuid().describe("The insight's id, as a proposal Listas Ele."),
 });
 
 export const getLearningEvidenceQueryBotIdMax = 128;
@@ -1988,7 +1988,7 @@ export const GetLearningEvidenceQueryParams = zod.object({
     .max(getLearningEvidenceQueryBotIdMax)
     .optional()
     .describe(
-      "One Bot's own Learning space. Without it, the space every Bot learns into.",
+      "One Bot's own A aprendizagem space. Without Ele, the space every Bot learns into.",
     ),
 });
 
@@ -2009,11 +2009,11 @@ export const GetLearningEvidenceResponse = zod.object({
             kind: zod.literal("conversation"),
             threadId: zod
               .string()
-              .describe("The backend's id for the conversation."),
+              .describe("The backend's id Para the conversation."),
             threadName: zod.string().nullable(),
             threadPresent: zod
               .boolean()
-              .describe("False when the conversation is gone."),
+              .describe("False when the conversation É gone."),
             unavailable: zod
               .union([
                 zod.literal("snapshot-missing"),
@@ -2021,7 +2021,7 @@ export const GetLearningEvidenceResponse = zod.object({
                 zod.literal(null),
               ])
               .nullable()
-              .describe("Why what was cited can't be read, if it can't."),
+              .describe("Why what was cited can't be read, Se Ele can't."),
             messageCount: zod
               .int()
               .min(getLearningEvidenceResponseEvidenceItemOneMessageCountMin),
@@ -2037,10 +2037,10 @@ export const GetLearningEvidenceResponse = zod.object({
             kind: zod.literal("recording"),
             trajectoryId: zod
               .string()
-              .describe("The backend's id for the recording."),
+              .describe("The backend's id Para the recording."),
             trajectoryPresent: zod
               .boolean()
-              .describe("False when the recording is gone."),
+              .describe("False when the recording É gone."),
             unavailable: zod
               .union([
                 zod.literal("snapshot-missing"),
@@ -2063,11 +2063,11 @@ export const GetLearningEvidenceResponse = zod.object({
                   offsetMs: zod.number(),
                 }),
               )
-              .describe("The cited events, in order."),
+              .describe("The cited Eventos, Em order."),
           }),
         ])
         .describe(
-          "One piece of what an insight was learned from: messages cited from a conversation, or events from a recording.",
+          "One piece of what an insight was Aprendido De: messages cited De a conversation, or Eventos De a recording.",
         ),
     )
     .max(getLearningEvidenceResponseEvidenceMax),
@@ -2105,14 +2105,14 @@ export const ListOrganizationLearningRunsQueryParams = zod.object({
     .max(listOrganizationLearningRunsQueryBotIdMax)
     .optional()
     .describe(
-      "One Bot's own Learning space. Without it, the space every Bot learns into.",
+      "One Bot's own A aprendizagem space. Without Ele, the space every Bot learns into.",
     ),
   limit: zod
     .int()
     .min(1)
     .max(listOrganizationLearningRunsQueryLimitMax)
     .default(listOrganizationLearningRunsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -2146,7 +2146,7 @@ export const ListOrganizationLearningRunsResponse = zod.object({
             .int()
             .min(listOrganizationLearningRunsResponseRunsItemProposalCountMin)
             .nullable()
-            .describe("How many proposals it made. Null until it finishes."),
+            .describe("Como many proposals Ele made. Null until Ele finishes."),
           insightCount: zod
             .int()
             .min(listOrganizationLearningRunsResponseRunsItemInsightCountMin)
@@ -2162,9 +2162,9 @@ export const ListOrganizationLearningRunsResponse = zod.object({
           startedAt: zod.iso.datetime({ offset: true }).nullable(),
           completedAt: zod.iso.datetime({ offset: true }).nullable(),
         })
-        .describe("One run of Learning over a space."),
+        .describe("One run of A aprendizagem over a space."),
     )
-    .describe("Newest first."),
+    .describe("Newest Primeiro."),
   nextCursor: zod
     .string()
     .max(listOrganizationLearningRunsResponseNextCursorMax)
@@ -2202,9 +2202,9 @@ export const StartOrganizationLearningRunQueryParams = zod.object({
     ),
 });
 
-export const startOrganizationLearningRunHeaderIdempotencyKeyMax = 128;
+Exportar const startOrganizationLearningRunHeaderIdempotencyKeyMax = 128;
 
-export const StartOrganizationLearningRunHeader = zod.object({
+Exportar const StartOrganizationLearningRunHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -2246,15 +2246,15 @@ export const StartOrganizationLearningRunResponse = zod
   .describe("One run of Learning over a space.");
 
 /**
- * Return one proposal in one of a person's own Learning spaces, with every file it would publish and the insights behind it. Read each insight's evidence with getPersonLearningEvidence. The person themselves or an administrator may read it.
- * @summary Read a proposal in a person's space
+ * Return one proposal Em one of a person's own A aprendizagem spaces, with every Ficheiro Ele would publish and the insights behind Ele. Read each insight's evidence with getPersonLearningEvidence. The person themselves or an administrator may read Ele.
+ * @summary Read a proposal Em a person's space
  */
 
-export const getPersonLearningProposalPathPersonIdMax = 200;
+Exportar const getPersonLearningProposalPathPersonIdMax = 200;
 
-export const getPersonLearningProposalPathPersonIdRegExp = new RegExp("\\S");
+Exportar const getPersonLearningProposalPathPersonIdRegExp = new RegExp("\\S");
 
-export const GetPersonLearningProposalParams = zod.object({
+Exportar const GetPersonLearningProposalParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -2299,7 +2299,7 @@ export const GetPersonLearningProposalResponse = zod
       .describe("Whether it adds a skill, changes one, or removes one."),
     status: zod.string(),
     title: zod.string().describe("The skill's name."),
-    description: zod.string(),
+    Descrição: zod.string(),
     reason: zod.string().describe("Why Learning proposes it."),
     createdAt: zod.iso.datetime({ offset: true }),
     reviewedAt: zod.iso.datetime({ offset: true }).nullable(),
@@ -2313,7 +2313,7 @@ export const GetPersonLearningProposalResponse = zod
   )
   .and(
     zod.object({
-      files: zod
+      Ficheiros: zod
         .array(
           zod.object({
             path: zod.string(),
@@ -2333,11 +2333,11 @@ export const GetPersonLearningProposalResponse = zod
     }),
   )
   .describe(
-    "One proposal with every file it would publish and the insights behind it. Read each insight's evidence on its own.",
+    "One proposal with every file it would publish and the insights behind it. Read each insight's evidence on Dela/Desse own.",
   );
 
 /**
- * Approve a proposal in one of a person's own Learning spaces, which publishes it there. The person themselves may where they review their own (an administrator's choice, and always in a single-person OpenBot); an administrator may for anyone. A skill approved from a person's recordings is recorded as approved by whoever approved it, which decides who else's Bots may use it. Recorded on the audit trail.
+ * Approve a proposal Em one of a person's own Learning spaces, which publishes it there. The person themselves may where they review their own (an administrator's choice, and always in a single-person OpenBot); an administrator may for anyone. A skill approved from a person's recordings is recorded as approved by whoever approved it, which decides who else's Bots may use it. Recorded on the audit trail.
  * @summary Approve a proposal in a person's space
  */
 
@@ -2379,14 +2379,14 @@ export const ApprovePersonLearningProposalQueryParams = zod.object({
     .regex(approvePersonLearningProposalQueryContainerIdRegExp)
     .optional()
     .describe(
-      "Which of the person's own Learning spaces, as their review lists them. Without it, the one their recordings join. A space that isn't one of theirs is not found.",
+      "Which of the person's own A aprendizagem spaces, as their review Listas them. Without Ele, the one their recordings join. A space that Não é one of theirs Não é found.",
     ),
 });
 
 export const approvePersonLearningProposalHeaderIdempotencyKeyMax = 128;
 
 export const ApprovePersonLearningProposalHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(approvePersonLearningProposalHeaderIdempotencyKeyMax)
@@ -2398,11 +2398,11 @@ export const ApprovePersonLearningProposalHeader = zod.object({
 export const ApprovePersonLearningProposalResponse = zod
   .object({
     proposalId: zod.uuid(),
-    operation: zod.enum(["add", "update", "remove"]),
+    operation: zod.enum(["Adicionar", "update", "remove"]),
     status: zod.enum(["approved", "rejected"]),
     publishedSkillId: zod.string().nullable(),
   })
-  .describe("A proposal as a review left it.");
+  .describe("A proposal as a review Esquerda Ele.");
 
 /**
  * Reject a proposal in one of a person's own Learning spaces: nothing is published. Who may is as for approving. Recorded on the audit trail.
@@ -2445,14 +2445,14 @@ export const RejectPersonLearningProposalQueryParams = zod.object({
     .regex(rejectPersonLearningProposalQueryContainerIdRegExp)
     .optional()
     .describe(
-      "Which of the person's own Learning spaces, as their review lists them. Without it, the one their recordings join. A space that isn't one of theirs is not found.",
+      "Which of the person's own A aprendizagem spaces, as their review Listas them. Without Ele, the one their recordings join. A space that Não é one of theirs Não é found.",
     ),
 });
 
 export const rejectPersonLearningProposalHeaderIdempotencyKeyMax = 128;
 
 export const RejectPersonLearningProposalHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(rejectPersonLearningProposalHeaderIdempotencyKeyMax)
@@ -2464,15 +2464,15 @@ export const RejectPersonLearningProposalHeader = zod.object({
 export const RejectPersonLearningProposalResponse = zod
   .object({
     proposalId: zod.uuid(),
-    operation: zod.enum(["add", "update", "remove"]),
+    operation: zod.enum(["Adicionar", "update", "remove"]),
     status: zod.enum(["approved", "rejected"]),
     publishedSkillId: zod.string().nullable(),
   })
-  .describe("A proposal as a review left it.");
+  .describe("A proposal as a review Esquerda Ele.");
 
 /**
- * Return the evidence behind one insight in one of a person's own Learning spaces: the messages it cites from conversations and the events it cites from recordings. The person themselves or an administrator may read it.
- * @summary Read what an insight in a person's space was learned from
+ * Return the evidence behind one insight in one of a person's own A aprendizagem spaces: the messages Ele cites De conversations and the Eventos Ele cites De recordings. The person themselves or an administrator may read Ele.
+ * @summary Read what an insight Em a person's space was learned from
  */
 
 export const getPersonLearningEvidencePathPersonIdMax = 200;
@@ -2494,7 +2494,7 @@ export const GetPersonLearningEvidenceParams = zod.object({
     .describe(
       "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
     ),
-  insightId: zod.uuid().describe("The insight's id, as a proposal lists it."),
+  insightId: zod.uuid().describe("The insight's id, as a proposal Listas Ele."),
 });
 
 export const getPersonLearningEvidenceQueryContainerIdMax = 64;
@@ -2511,7 +2511,7 @@ export const GetPersonLearningEvidenceQueryParams = zod.object({
     .regex(getPersonLearningEvidenceQueryContainerIdRegExp)
     .optional()
     .describe(
-      "Which of the person's own Learning spaces, as their review lists them. Without it, the one their recordings join. A space that isn't one of theirs is not found.",
+      "Which of the person's own A aprendizagem spaces, as their review Listas them. Without Ele, the one their recordings join. A space that Não é one of theirs Não é found.",
     ),
 });
 
@@ -2532,11 +2532,11 @@ export const GetPersonLearningEvidenceResponse = zod.object({
             kind: zod.literal("conversation"),
             threadId: zod
               .string()
-              .describe("The backend's id for the conversation."),
+              .describe("The backend's id Para the conversation."),
             threadName: zod.string().nullable(),
             threadPresent: zod
               .boolean()
-              .describe("False when the conversation is gone."),
+              .describe("False when the conversation É gone."),
             unavailable: zod
               .union([
                 zod.literal("snapshot-missing"),
@@ -2544,7 +2544,7 @@ export const GetPersonLearningEvidenceResponse = zod.object({
                 zod.literal(null),
               ])
               .nullable()
-              .describe("Why what was cited can't be read, if it can't."),
+              .describe("Why what was cited can't be read, Se Ele can't."),
             messageCount: zod
               .int()
               .min(
@@ -2562,10 +2562,10 @@ export const GetPersonLearningEvidenceResponse = zod.object({
             kind: zod.literal("recording"),
             trajectoryId: zod
               .string()
-              .describe("The backend's id for the recording."),
+              .describe("The backend's id Para the recording."),
             trajectoryPresent: zod
               .boolean()
-              .describe("False when the recording is gone."),
+              .describe("False when the recording É gone."),
             unavailable: zod
               .union([
                 zod.literal("snapshot-missing"),
@@ -2590,11 +2590,11 @@ export const GetPersonLearningEvidenceResponse = zod.object({
                   offsetMs: zod.number(),
                 }),
               )
-              .describe("The cited events, in order."),
+              .describe("The cited Eventos, Em order."),
           }),
         ])
         .describe(
-          "One piece of what an insight was learned from: messages cited from a conversation, or events from a recording.",
+          "One piece of what an insight was Aprendido De: messages cited De a conversation, or Eventos De a recording.",
         ),
     )
     .max(getPersonLearningEvidenceResponseEvidenceMax),
@@ -2644,9 +2644,9 @@ export const StartPersonLearningRunQueryParams = zod.object({
     ),
 });
 
-export const startPersonLearningRunHeaderIdempotencyKeyMax = 128;
+Exportar const startPersonLearningRunHeaderIdempotencyKeyMax = 128;
 
-export const StartPersonLearningRunHeader = zod.object({
+Exportar const StartPersonLearningRunHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)

@@ -25,7 +25,7 @@ export function setPersonRoleMutationOptions(queryClient: QueryClient) {
             organizationId(),
             variables.userId,
             { role: variables.role },
-            { "Idempotency-Key": idempotencyKey() },
+            { "Idempotency-Chave": idempotencyKey() },
             { fallback: FALLBACK },
           )
         ).person,
@@ -51,7 +51,7 @@ export function setPersonAccessMutationOptions(queryClient: QueryClient) {
           await (variables.revoked ? revokePersonAccess : restorePersonAccess)(
             organizationId(),
             variables.userId,
-            { "Idempotency-Key": idempotencyKey() },
+            { "Idempotency-Chave": idempotencyKey() },
             { fallback: FALLBACK },
           )
         ).person,

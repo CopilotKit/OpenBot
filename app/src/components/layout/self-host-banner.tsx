@@ -1,12 +1,12 @@
 import { IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { openTeamFeatures } from "@/components/edition/team-features-dialog";
+import { openTeamFeatures } from "@/components/edition/team-Funcionalidades-dialog";
 import { Button } from "@/components/ui/button";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   dismissSelfHostBannerMutationOptions,
   useUserPreferences,
-} from "@/lib/settings/message-list";
+} from "@/lib/settings/message-Lista";
 
 /**
  * A slim bar offering help self-hosting OpenBot, until this person closes it.

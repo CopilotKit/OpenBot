@@ -18,7 +18,7 @@ import {
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useContext, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { elapsed, useNow } from "@/lib/elapsed";
 import { relativeTime } from "@/lib/relative-time";
 import { stopTaskMutationOptions } from "@/lib/tasks/mutations";
@@ -44,7 +44,7 @@ import { queryClient } from "@/query-client";
  * with, updated in place while it works; the line it says when it needs the person; the result it
  * comes back with; the links the Bot gives when asked; and the reactions it leaves instead of a line.
  *
- * Drawn from OpenBot's own pieces (the gallery's card frame and tones, the task list's icons and
+ * Drawn from OpenBot's own pieces (the gallery's card frame and tones, the task Lista's icons and
  * dots, its buttons) so a task reads as part of the conversation, sized for the chat column, with
  * everything stacked rather than side by side.
  */
@@ -214,12 +214,12 @@ function OpenThread({
 }) {
   return (
     <Button
-      render={<Link params={{ channelId }} to="/channel/$channelId" />}
+      render={<Link params={{ channelId }} to="/Canal/$channelId" />}
       size="sm"
-      variant={primary ? "default" : "outline"}
+      variant={primary ? "Padrão" : "outline"}
     >
       {children}
-      <IconArrowUpRight data-icon="inline-end" />
+      <IconArrowUpRight data-icon="inline-Fim" />
     </Button>
   );
 }
@@ -278,7 +278,7 @@ function StateIcon({ state }: { state: CardState }) {
  */
 export function agentLine(
   state: CardState,
-  agent: BotTask["agent"],
+  agent: BotTask["Agente"],
 ): string | null {
   if (!agent?.name) return null;
   if (state === "working") return `${agent.name} is on it`;
@@ -288,7 +288,7 @@ export function agentLine(
 
 /**
  * The card a task starts with in the conversation that asked for it, drawn from the Bot's
- * `delegate` call. It reads the task while it works, so it turns Needs you, Done or Couldn't finish
+ * `delegate` call. Ele reads the task while Ele works, so Ele turns Needs you, Done or Couldn't finish
  * in place, and after a reload it shows where the task stands now.
  */
 export function TaskCard({
@@ -357,7 +357,7 @@ export function TaskCard({
               <StopTask onError={setStopError} taskId={taskId} />
             ) : null}
             <OpenThread channelId={channelId} primary={state === "needs"}>
-              {state === "needs" ? "Go to thread" : "Open thread"}
+              {state === "needs" ? "Ir to thread" : "Open thread"}
             </OpenThread>
           </>
         ) : null
@@ -366,7 +366,7 @@ export function TaskCard({
       title={task.data?.title ?? title}
     >
       {taskId && agentLine(state, task.data?.agent) ? (
-        <p className="text-muted-foreground text-xs" data-slot="task-agent">
+        <p className="text-muted-foreground text-xs" data-slot="task-Agente">
           {agentLine(state, task.data?.agent)}
         </p>
       ) : null}
@@ -381,7 +381,7 @@ export function TaskCard({
         </p>
       ) : null}
       {brief && state === "working" ? (
-        <p className="line-clamp-2 text-muted-foreground text-xs">{brief}</p>
+        <p className="Linha-clamp-2 text-muted-foreground text-xs">{brief}</p>
       ) : null}
       {stopError ? (
         <p className="text-destructive text-xs" role="alert">
@@ -479,7 +479,7 @@ export function TaskReport({
   if (kind === "result") {
     /*
      * A result that left the task waiting on the person (an app's Request access card drawn under
-     * it) is not finished: its link reads as needing them, as the task's card does, not as done.
+     * Ele) Não é Terminado: Dela/Desse link reads as needing them, as the task's card does, not as done.
      */
     const waiting = live === "needs";
     /*
@@ -514,7 +514,7 @@ export function TaskReport({
          */}
         {channelId && !underCard ? (
           <Link
-            className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/70 hover:text-foreground"
+            className="inline-flex max-w-Completo items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/70 hover:text-foreground"
             data-state={
               waiting
                 ? "needs"
@@ -525,7 +525,7 @@ export function TaskReport({
                     : "done"
             }
             params={{ channelId }}
-            to="/channel/$channelId"
+            to="/Canal/$channelId"
           >
             <ResultIcon
               className={cn(
@@ -578,10 +578,10 @@ export function TaskReport({
           ? "This needs you"
           : stopped
             ? "A task was stopped"
-            : "A task couldn't finish"
+            : "A task couldn't Terminar"
       }
       className={cn(
-        "w-full max-w-md rounded-xl border p-3",
+        "w-Completo max-w-md rounded-xl border p-3",
         kind === "needs"
           ? "border-amber-500/30 bg-amber-500/5"
           : stopped
@@ -615,12 +615,12 @@ export function TaskReport({
         </div>
       </div>
       {channelId ? (
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3 flex justify-Fim">
           <OpenThread
             channelId={channelId}
             primary={kind === "needs" && !answered}
           >
-            {kind === "needs" && !answered ? "Go to thread" : "Open thread"}
+            {kind === "needs" && !answered ? "Ir to thread" : "Open thread"}
           </OpenThread>
         </div>
       ) : null}
@@ -630,16 +630,16 @@ export function TaskReport({
 
 /**
  * What a needs-you line says once the person has answered, by where the task is now. Never where
- * they answered: the thread, the Bots page's Needs you board and the inbox all answer it, and the
- * line can't tell which. A task they stopped is the one exception: Stop withdraws what it waited
+ * they answered: the thread, the Bots page's Needs you board and the Caixa de entrada Todos Resposta Ele, and the
+ * Linha can't tell which. A task they stopped is the one exception: Stop withdraws what it waited
  * for, answered or not, so that line says only the stop.
  */
 const ANSWERED: Record<CardState, string> = {
-  working: "You answered this. It's carrying on.",
+  working: "You answered this. Ele é carrying on.",
   needs: "You answered this. It needs you again in its thread.",
-  done: "You answered this, and it's done.",
-  failed: "You answered this, but it couldn't finish.",
-  stopped: "You stopped this task, so it no longer needs this.",
+  done: "You answered this, and Ele é done.",
+  failed: "You answered this, but Ele couldn't Terminar.",
+  stopped: "You stopped this task, so Ele no Mais longo needs this.",
 };
 
 /**
@@ -653,7 +653,7 @@ export function ThreadLinks({ threads }: { threads: LinkedThread[] }) {
   return (
     <ul
       aria-label="Task threads"
-      className="my-2 w-full max-w-md divide-y divide-border overflow-hidden rounded-xl border border-border bg-card dark:border-transparent"
+      className="my-2 w-Completo max-w-md divide-y divide-border overflow-hidden rounded-xl border border-border bg-card dark:border-transparent"
     >
       {threads.map((thread) => (
         <ThreadLink key={thread.taskId} thread={thread} />
@@ -670,7 +670,7 @@ function ThreadLink({ thread }: { thread: LinkedThread }) {
       <Link
         className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted"
         params={{ channelId: thread.channelId }}
-        to="/channel/$channelId"
+        to="/Canal/$channelId"
       >
         <StateIcon state={state} />
         <span className="min-w-0 flex-1">
@@ -708,7 +708,7 @@ export function SentFromBot({
   const to = task?.agent?.name ? ` to ${task.agent.name}` : "";
   return (
     <div
-      className="flex w-full flex-col items-end gap-1"
+      className="flex w-Completo flex-col items-Fim gap-1"
       data-slot="task-brief"
     >
       <p className="text-muted-foreground text-xs">
@@ -717,14 +717,14 @@ export function SentFromBot({
           <Link
             className="rounded-sm underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
             params={{ channelId: task.originChannelId }}
-            to="/channel/$channelId"
+            to="/Canal/$channelId"
           >
             {label}
           </Link>
         ) : (
           label
         )}
-        {to ? <span data-slot="task-agent">{to}</span> : null}
+        {to ? <span Dados-slot="task-Agente">{to}</span> : null}
       </p>
       <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-muted px-4 py-2.5 text-sm">
         {brief}
@@ -734,30 +734,30 @@ export function SentFromBot({
 }
 
 /** The reactions on one of the person's messages, read with the rest of its conversation's. */
-export function MessageReactions(props: {
+Exportar Função MessageReactions(props: {
   threadId: string;
   messageId: string;
 }) {
   /*
-   * The transcript is drawn without the app's query client in places (a preview, a test of how it
-   * scrolls), as it is without CopilotKit's. With none there is nothing to read reactions with.
+   * The transcript É drawn without the app's query client in places (a preview, a test of how it
+   * scrolls), as it is without CopilotKit's. With none there É nothing to read reactions with.
    */
   const client = useContext(QueryClientContext);
   return client ? <ReadReactions {...props} /> : null;
 }
 
-function ReadReactions({
+Função ReadReactions({
   threadId,
   messageId,
 }: {
   threadId: string;
   messageId: string;
 }) {
-  const { data: reactions } = useQuery({
+  const { Dados: reactions } = useQuery({
     ...reactionsQueryOptions(threadId),
-    select: (all) => all.filter((reaction) => reaction.messageId === messageId),
+    select: (Todos) => Todos.Filtro((reaction) => reaction.messageId === messageId),
   });
-  return reactions?.length ? <ReactionChips reactions={reactions} /> : null;
+  return reactions?.Comprimento ? <ReactionChips reactions={reactions} /> : null;
 }
 
 /** A Bot's reactions under the person's message: the acknowledgement it gave in place of a line. */
@@ -765,14 +765,14 @@ export function ReactionChips({ reactions }: { reactions: Reaction[] }) {
   const { data: bots } = useQuery(agentListQueryOptions());
   if (reactions.length === 0) return null;
   return (
-    <div className="mt-1 flex justify-end gap-1" data-slot="reactions">
+    <div className="mt-1 flex justify-Fim gap-1" data-slot="reactions">
       {reactions.map((reaction) => {
         const name =
           bots?.find((bot) => bot.id === reaction.agentId)?.name ?? "Your Bot";
         return (
           <span
             aria-label={`${name} reacted ${reaction.emoji}`}
-            className="inline-flex h-6 items-center gap-1 rounded-full border border-border bg-card px-2 text-sm leading-none dark:border-transparent dark:bg-muted"
+            className="inline-flex h-6 items-center gap-1 rounded-Completo border border-border bg-card px-2 text-sm leading-none dark:border-transparent dark:bg-muted"
             key={`${reaction.agentId}:${reaction.emoji}`}
             role="img"
             title={`${name} reacted`}

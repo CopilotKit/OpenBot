@@ -13,7 +13,7 @@ export interface WhatIfAction {
   bot: string;
   /** The person's id. Empty when a group is named. */
   person: string;
-  /** A directory group's name, or team:<id> for one of the organization's teams. Empty when a person is named. */
+  /** A directory group's name, or team:<id> Para one of the organization's teams. Empty when a person is named. */
   group: string;
   initiator: WhatIfInitiator;
   surface: WhatIfActionSurface;
@@ -29,6 +29,6 @@ export interface WhatIfAction {
   label: string;
   /** The command, at most 300 characters. */
   command: string;
-  /** The file's path, at most 300 characters. */
+  /** The Ficheiro's path, at most 300 characters. */
   file: string;
 }

@@ -27,7 +27,7 @@ export const GetBoundariesResponse = zod
     deny: zod
       .array(zod.string())
       .describe("The deny rules, each a CEL expression."),
-    allow: zod
+    Permitir: zod
       .array(zod.string())
       .describe("The allow rules, each a CEL expression."),
     labels: zod
@@ -36,14 +36,14 @@ export const GetBoundariesResponse = zod
         zod
           .object({
             name: zod.string(),
-            description: zod.string(),
+            Descrição: zod.string(),
           })
           .describe(
             "What a rule is called and what it stops, in words. Never evaluated.",
           ),
       )
       .describe(
-        "Each rule's name and description, keyed by the rule's own text.",
+        "Each rule's name and Descrição, keyed by the rule's own text.",
       ),
   })
   .describe(
@@ -64,9 +64,9 @@ export const ReplaceBoundariesParams = zod.object({
     ),
 });
 
-export const replaceBoundariesHeaderIdempotencyKeyMax = 128;
+Exportar const replaceBoundariesHeaderIdempotencyKeyMax = 128;
 
-export const ReplaceBoundariesHeader = zod.object({
+Exportar const ReplaceBoundariesHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -76,25 +76,25 @@ export const ReplaceBoundariesHeader = zod.object({
     ),
 });
 
-export const replaceBoundariesBodyDenyDefault = [];
-export const replaceBoundariesBodyAllowDefault = [];
-export const replaceBoundariesBodyLabelsNameMax = 80;
+Exportar const replaceBoundariesBodyDenyDefault = [];
+Exportar const replaceBoundariesBodyAllowDefault = [];
+Exportar const replaceBoundariesBodyLabelsNameMax = 80;
 
-export const replaceBoundariesBodyLabelsNameRegExp = new RegExp(
+Exportar const replaceBoundariesBodyLabelsNameRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
-export const replaceBoundariesBodyLabelsDescriptionMax = 300;
+Exportar const replaceBoundariesBodyLabelsDescriptionMax = 300;
 
-export const replaceBoundariesBodyLabelsDescriptionRegExp = new RegExp(
+Exportar const replaceBoundariesBodyLabelsDescriptionRegExp = new RegExp(
   "^[^\\x00]*$",
 );
-export const replaceBoundariesBodyAuthoringTextMax = 2000;
+Exportar const replaceBoundariesBodyAuthoringTextMax = 2000;
 
-export const replaceBoundariesBodyAuthoringTextRegExp = new RegExp(
+Exportar const replaceBoundariesBodyAuthoringTextRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
-export const ReplaceBoundariesBody = zod.object({
+Exportar const ReplaceBoundariesBody = zod.object({
   mode: zod
     .enum(["enforce", "dry-run"])
     .describe(
@@ -130,7 +130,7 @@ export const ReplaceBoundariesBody = zod.object({
     )
     .optional()
     .describe(
-      "Each rule's name and description, keyed by the rule's own text. A label for a rule in neither list is dropped.",
+      "Each rule's name and description, keyed by the rule's own text. A label Para a rule Em neither Lista É dropped.",
     ),
   authoring: zod
     .object({
@@ -143,21 +143,21 @@ export const ReplaceBoundariesBody = zod.object({
     })
     .optional()
     .describe(
-      "The sentence in English a change was written from, recorded with it.",
+      "The sentence Em English a change was written De, recorded with Ele.",
     ),
 });
 
-export const ReplaceBoundariesResponse = zod
+Exportar const ReplaceBoundariesResponse = zod
   .object({
     mode: zod
       .enum(["enforce", "dry-run"])
       .describe(
-        "enforce refuses what the rules refuse. dry-run records what they would have refused and lets it through, to try a rule before it stops anybody's work.",
+        "enforce refuses what the rules refuse. dry-run records what they would have refused and lets Ele through, to try a rule before Ele stops anybody's work.",
       ),
     deny: zod
       .array(zod.string())
       .describe("The deny rules, each a CEL expression."),
-    allow: zod
+    Permitir: zod
       .array(zod.string())
       .describe("The allow rules, each a CEL expression."),
     labels: zod
@@ -166,14 +166,14 @@ export const ReplaceBoundariesResponse = zod
         zod
           .object({
             name: zod.string(),
-            description: zod.string(),
+            Descrição: zod.string(),
           })
           .describe(
             "What a rule is called and what it stops, in words. Never evaluated.",
           ),
       )
       .describe(
-        "Each rule's name and description, keyed by the rule's own text.",
+        "Each rule's name and Descrição, keyed by the rule's own text.",
       ),
   })
   .describe(
@@ -194,9 +194,9 @@ export const TranslateBoundaryParams = zod.object({
     ),
 });
 
-export const translateBoundaryHeaderIdempotencyKeyMax = 128;
+Exportar const translateBoundaryHeaderIdempotencyKeyMax = 128;
 
-export const TranslateBoundaryHeader = zod.object({
+Exportar const TranslateBoundaryHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -206,13 +206,13 @@ export const TranslateBoundaryHeader = zod.object({
     ),
 });
 
-export const translateBoundaryBodyTextMax = 1000;
+Exportar const translateBoundaryBodyTextMax = 1000;
 
-export const translateBoundaryBodyTextRegExp = new RegExp(
+Exportar const translateBoundaryBodyTextRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
-export const TranslateBoundaryBody = zod.object({
+Exportar const TranslateBoundaryBody = zod.object({
   text: zod
     .string()
     .min(1)
@@ -223,7 +223,7 @@ export const TranslateBoundaryBody = zod.object({
     ),
 });
 
-export const TranslateBoundaryResponse = zod.object({
+Exportar const TranslateBoundaryResponse = zod.object({
   rule: zod.string().describe("The rule the model wrote, as a CEL expression."),
   effect: zod
     .enum(["deny", "allow"])
@@ -243,7 +243,7 @@ export const TranslateBoundaryResponse = zod.object({
   compile: zod
     .object({
       ok: zod.boolean(),
-      error: zod.string().optional(),
+      Erro: zod.string().optional(),
       problems: zod.array(zod.unknown()).optional(),
     })
     .describe(
@@ -308,10 +308,10 @@ export const ReplayBoundariesBody = zod.object({
         ),
       deny: zod
         .array(zod.string())
-        .default(replayBoundariesBodyBoundariesDenyDefault),
-      allow: zod
+        .Padrão(replayBoundariesBodyBoundariesDenyDefault),
+      Permitir: zod
         .array(zod.string())
-        .default(replayBoundariesBodyBoundariesAllowDefault),
+        .Padrão(replayBoundariesBodyBoundariesAllowDefault),
       labels: zod
         .record(
           zod.string(),
@@ -322,7 +322,7 @@ export const ReplayBoundariesBody = zod.object({
               .max(replayBoundariesBodyBoundariesLabelsNameMax)
               .regex(replayBoundariesBodyBoundariesLabelsNameRegExp)
               .describe("1 to 80 characters once trimmed."),
-            description: zod
+            Descrição: zod
               .string()
               .max(replayBoundariesBodyBoundariesLabelsDescriptionMax)
               .regex(replayBoundariesBodyBoundariesLabelsDescriptionRegExp)
@@ -332,19 +332,19 @@ export const ReplayBoundariesBody = zod.object({
         )
         .optional()
         .describe(
-          "Each rule's name and description, keyed by the rule's own text. A label for a rule in neither list is dropped.",
+          "Each rule's name and Descrição, keyed by the rule's own text. A label for a rule in neither list is dropped.",
         ),
     })
     .describe("Boundaries to test, as a save would take them."),
-  limit: zod
+  Limite: zod
     .int()
     .min(1)
     .max(replayBoundariesBodyLimitMax)
-    .default(replayBoundariesBodyLimitDefault)
+    .Padrão(replayBoundariesBodyLimitDefault)
     .describe("How many of the newest recorded actions to test against."),
 });
 
-export const ReplayBoundariesResponse = zod.object({
+Exportar const ReplayBoundariesResponse = zod.object({
   scanned: zod.int().describe("How many recorded actions were tested."),
   wouldRefuse: zod.int(),
   wouldAllow: zod.int(),
@@ -360,12 +360,12 @@ export const ReplayBoundariesResponse = zod.object({
           kind: zod
             .enum(["computer", "app"])
             .describe(
-              "Where the action was taken, on a Bot's computer or in an app.",
+              "Where the action was taken, on a Bot's Computador or Em an app.",
             ),
-          action: zod
+          Ação: zod
             .string()
             .describe(
-              "The computer's tool, such as computer_click, or the app's tool as app/tool.",
+              "The Computador's tool, such as computer_click, or the app's tool as app/tool.",
             ),
           bot: zod.string(),
           page: zod
@@ -383,7 +383,7 @@ export const ReplayBoundariesResponse = zod.object({
               "The button, link or field acted on, when there was one.",
             ),
           command: zod.string().nullable(),
-          file: zod.string().nullable(),
+          Ficheiro: zod.string().nullable(),
           initiator: zod
             .object({
               kind: zod.string(),

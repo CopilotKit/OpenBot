@@ -8,13 +8,13 @@ import { searchTextEntry } from "@/lib/search-text";
  * still lands here to say which action was just authorized.
  */
 export const Route = createFileRoute(
-  "/_authed/settings/connected-accounts/$key",
+  "/_authed/settings/connected-Contas/$Chave",
 )({
   validateSearch: (search: Record<string, unknown>): { action?: string } =>
-    searchTextEntry("action", search.action),
+    searchTextEntry("Ação", search.action),
   beforeLoad: ({ params, search }) => {
     throw redirect({
-      to: "/connections/$key",
+      to: "/connections/$Chave",
       params,
       search,
       replace: true,

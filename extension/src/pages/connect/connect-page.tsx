@@ -17,7 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -38,7 +38,7 @@ type Replaces = { origin: string; email: string };
 type Phase =
   | { kind: "loading" }
   | { kind: "none" }
-  | { kind: "error"; message: string }
+  | { kind: "Erro"; message: string }
   | { kind: "ready"; pending: Pending; replaces?: Replaces }
   | { kind: "connected"; name: string; organization?: string }
   | { kind: "cancelled" };
@@ -46,7 +46,7 @@ type Phase =
 /** Who asked. Any site can ask to connect, so a web request is said to come from a page at the address shown, never
  * from OpenBot: confirming that it is OpenBot is what the person is asked to do. */
 const SOURCE = {
-  web: "A page at this address in this browser asked to connect.",
+  web: "A page at this address Em this Navegador asked to connect.",
   desktop: "OpenBot Desktop on this computer asked.",
 } as const;
 
@@ -67,7 +67,7 @@ export function ConnectPage() {
     ask({ type: "page.connect.pending" }).then((answer) => {
       if (!live) return;
       if (!answer.ok) {
-        setPhase({ kind: "error", message: answer.error });
+        setPhase({ kind: "Erro", message: answer.error });
       } else if ("pending" in answer && answer.pending) {
         setPhase({
           kind: "ready",
@@ -119,7 +119,7 @@ export function ConnectPage() {
 
   return (
     <Page
-      title="Connect this browser to OpenBot"
+      title="Liga este navegador ao OpenBot"
       description={`Confirm this is your OpenBot. It signs this browser in. ${RECORDER_DESTINATION}`}
       width="prose"
     >
@@ -215,9 +215,9 @@ export function ConnectPage() {
               </DialogHeader>
               <DialogBody className="mt-4">
                 <Field>
-                  <Label htmlFor="browser-name">Name this browser</Label>
+                  <Label htmlFor="Navegador-name">Nomear este navegador</Label>
                   <Input
-                    id="browser-name"
+                    id="Navegador-name"
                     value={draft}
                     maxLength={80}
                     onChange={(event) => setDraft(event.target.value)}
@@ -249,7 +249,7 @@ export function ConnectPage() {
         <p className="mt-8 text-muted-foreground text-sm" role="status">
           Nothing was connected. You can close this tab.
         </p>
-      ) : phase.kind === "error" ? (
+      ) : phase.kind === "Erro" ? (
         <p className="mt-8 text-destructive text-sm" role="alert">
           {phase.message}
         </p>

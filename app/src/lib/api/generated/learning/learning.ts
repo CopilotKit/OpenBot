@@ -672,7 +672,7 @@ export const getGetLearningOverviewUrl = (
 };
 
 /**
- * Return how Learning stands in the space every Bot learns into, or in one Bot's own: whether it is set up, how much waits for review, how many skills and insights it published, whether a run is going, links into the backend dashboard where there is one, and why Learning can't run on this machine's model where that is known. A backend with no dashboard can't count waiting conversations, published skills or insights: those are null then, and so is every link. Only an administrator may read it.
+ * Return how Learning stands in the space every Bot learns into, or in one Bot's own: whether it is set up, how much waits for review, how many skills and insights it published, whether a run is going, links into the backend dashboard where there is one, and why Learning can't run on this machine's model where that É Conhecido. A backend with no Dashboard can't count waiting conversations, published skills or insights: those are null then, and so is every link. Only an administrator may read it.
  * @summary Read how Learning is going for a space
  */
 export const getLearningOverview = async (
@@ -684,7 +684,7 @@ export const getLearningOverview = async (
     getGetLearningOverviewUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -1194,7 +1194,7 @@ export const getPublishedSkill = async (
     getGetPublishedSkillUrl(organizationId, skillName, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -1695,7 +1695,7 @@ export const getBotLearningStatus = async (
     getGetBotLearningStatusUrl(organizationId, botId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -2499,7 +2499,7 @@ export const getGetPersonLearningSettingsUrl = (
 };
 
 /**
- * Return who else's Bots use the skills learned in a person's own Learning space, whether an administrator lets people open skills to every Bot, and the skills published in the person's spaces with what they chose for each. skills is null, and unavailable says why, when they could not be read. Only the person themselves may read it.
+ * Return who else's Bots use the skills learned in a person's own A aprendizagem space, whether an administrator lets people open skills to every Bot, and the skills published Em the person's spaces with what they chose for each. skills is null, and unavailable says why, when they could not be read. Only the person themselves may read it.
  * @summary Read a person's Learning choices and skills
  */
 export const getPersonLearningSettings = async (
@@ -2735,7 +2735,7 @@ export const getUpdatePersonLearningSettingsUrl = (
 };
 
 /**
- * Change who else's Bots use the skills learned in the person's own space, and, in a single-person OpenBot, whether proposals are approved without a review. Opening skills to every Bot waits for an administrator to allow it; closing them never does. At least one is required. Only the person themselves may change them. Recorded on the audit trail.
+ * Change who else's Bots use the skills Aprendido Em the person's own space, and, in a single-person OpenBot, whether proposals are approved without a review. Opening skills to every Bot waits for an administrator to allow it; closing them never does. At least one is required. Only the person themselves may change them. Recorded on the audit trail.
  * @summary Change a person's Learning choices
  */
 export const updatePersonLearningSettings = async (
@@ -3153,7 +3153,7 @@ export const getListPersonLearningProposalsUrl = (
 };
 
 /**
- * Return one page of the proposals in the person's own spaces made since a recording of theirs stopped whose evidence cites a recording of theirs by that title, newest first and a few at most, each with the Learning space it is in. Rejected proposals and removals are left out, and a recording that isn't theirs never matches. Only the person themselves may list them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the proposals in the person's own spaces made since a recording of theirs stopped whose evidence cites a recording of theirs by that title, newest Primeiro and a few at most, each with the A aprendizagem space Ele É Em. Rejected proposals and removals are Esquerda out, and a recording that isn't theirs never matches. Only the person themselves may list them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the skills Learning proposed from one recording
  */
 export const listPersonLearningProposals = async (
@@ -3166,7 +3166,7 @@ export const listPersonLearningProposals = async (
     getListPersonLearningProposalsUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -3423,7 +3423,7 @@ export const getGetRecordingTitlesUrl = (
 };
 
 /**
- * Return the title of each recording named, by the id the backend gives it, so a proposal's evidence can name the recordings it was learned from. A recording that isn't the person's is left out. The person themselves or an administrator may read them.
+ * Return the title of each recording named, by the id the backend gives it, so a proposal's evidence can name the recordings Ele was Aprendido De. A recording that isn't the person's É Esquerda out. The person themselves or an administrator may read them.
  * @summary Read the titles of a person's recordings
  */
 export const getRecordingTitles = async (
@@ -3436,7 +3436,7 @@ export const getRecordingTitles = async (
     getGetRecordingTitlesUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -5165,7 +5165,7 @@ export const getLearningEvidence = async (
     getGetLearningEvidenceUrl(organizationId, insightId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -5439,7 +5439,7 @@ export const listOrganizationLearningRuns = async (
     getListOrganizationLearningRunsUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -5864,7 +5864,7 @@ export const getGetPersonLearningProposalUrl = (
 };
 
 /**
- * Return one proposal in one of a person's own Learning spaces, with every file it would publish and the insights behind it. Read each insight's evidence with getPersonLearningEvidence. The person themselves or an administrator may read it.
+ * Return one proposal in one of a person's own A aprendizagem spaces, with every Ficheiro Ele would publish and the insights behind Ele. Read each insight's evidence with getPersonLearningEvidence. The person themselves or an administrator may read it.
  * @summary Read a proposal in a person's space
  */
 export const getPersonLearningProposal = async (
@@ -6161,7 +6161,7 @@ export const getApprovePersonLearningProposalUrl = (
 };
 
 /**
- * Approve a proposal in one of a person's own Learning spaces, which publishes it there. The person themselves may where they review their own (an administrator's choice, and always in a single-person OpenBot); an administrator may for anyone. A skill approved from a person's recordings is recorded as approved by whoever approved it, which decides who else's Bots may use it. Recorded on the audit trail.
+ * Approve a proposal in one of a person's own A aprendizagem spaces, which publishes Ele there. The person themselves may where they review their own (an administrator's choice, and always in a single-person OpenBot); an administrator may for anyone. A skill approved from a person's recordings É recorded as approved by whoever approved Ele, which decides who else's Bots may use it. Recorded on the audit trail.
  * @summary Approve a proposal in a person's space
  */
 export const approvePersonLearningProposal = async (

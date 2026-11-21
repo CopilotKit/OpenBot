@@ -11,6 +11,6 @@ export type AiConnectionLogin =
 export const AiConnectionLogin = {
   plan: "plan",
   "api-key": "api-key",
-  endpoint: "endpoint",
+  endpoint: "Endpoint",
   oauth: "oauth",
 } as const;

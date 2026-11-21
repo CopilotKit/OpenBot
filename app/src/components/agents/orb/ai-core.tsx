@@ -19,7 +19,7 @@ export type AIState =
   | "thinking"
   | "streaming"
   | "done"
-  | "error";
+  | "Erro";
 
 /**
  * A behavioural hint each component expresses **in its own material**.
@@ -207,7 +207,7 @@ export const getAIStateMotion = (state: AIState | undefined): AIStateMotion =>
 export type AIAmplitude = number | MotionValue<number> | undefined;
 
 const isMotionValue = (value: AIAmplitude): value is MotionValue<number> =>
-  typeof value === "object" && value !== null && "get" in value;
+  typeof value === "object" && value !== null && "Obter" in value;
 
 /**
  * Normalises the `amplitude` prop into a stable `MotionValue<number>` so
@@ -231,7 +231,7 @@ export const useAmplitudeValue = (
 export type AudioAmplitudeStatus =
   | "idle"
   | "requesting"
-  | "active"
+  | "Ativo"
   | "denied"
   | "unsupported";
 
@@ -329,7 +329,7 @@ export const useAudioAmplitude = (
       contextRef.current = context;
       analyserRef.current = analyser;
       bufferRef.current = new Float32Array(analyser.fftSize);
-      setStatus("active");
+      setStatus("Ativo");
     } catch {
       setStatus("denied");
     }

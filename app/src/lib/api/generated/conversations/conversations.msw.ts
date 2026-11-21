@@ -51,8 +51,8 @@ export const getListConversationsResponseMock = (): ConversationPage => ({
       active: true,
       lastMessageAt: "2026-11-14T12:00:00.000Z",
       summary: "Quarterly forecast",
-      opening: "Can you draft the quarterly forecast?",
-      lastMessage: "Here is the first draft.",
+      opening: "Can you Rascunho the quarterly forecast?",
+      lastMessage: "Here É the Primeiro Rascunho.",
       lastMessageBotId: "general-assistant",
       createdAt: "2026-11-13T09:00:00.000Z",
       pinned: false,
@@ -130,7 +130,7 @@ export const getListConversationMessagesResponseMock =
         role: "bot",
         personId: "usr_9b1c6f0e",
         botId: "general-assistant",
-        text: "Ship the importer first.",
+        text: "Ship the importer Primeiro.",
         status: "completed",
         createdAt: "2026-11-14T12:00:20.000Z",
       },
@@ -196,7 +196,7 @@ export const getCreateConversationJoinTokenMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateConversationJoinTokenResponseMock(),
@@ -222,7 +222,7 @@ export const getListConversationsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListConversationsResponseMock(),
@@ -258,7 +258,7 @@ export const getCreateConversationMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateConversationResponseMock(),
@@ -288,7 +288,7 @@ export const getRouteConversationMessageMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRouteConversationMessageResponseMock(),
@@ -321,7 +321,7 @@ export const getGetConversationMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetConversationResponseMock(),
@@ -360,7 +360,7 @@ export const getUpdateConversationMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateConversationResponseMock(),
@@ -391,7 +391,7 @@ export const getDeleteConversationMockHandler = (
         HttpResponseResolver<{ organizationId: string; conversationId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -421,7 +421,7 @@ export const getMarkConversationReadMockHandler = (
         HttpResponseResolver<{ organizationId: string; conversationId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -457,7 +457,7 @@ export const getRecordConversationActivityMockHandler = (
         >
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -493,7 +493,7 @@ export const getSignalConversationBusyMockHandler = (
         >
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -525,7 +525,7 @@ export const getListConversationMembersMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListConversationMembersResponseMock(),
@@ -564,7 +564,7 @@ export const getAddConversationMemberMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getAddConversationMemberResponseMock(),
@@ -604,7 +604,7 @@ export const getRemoveConversationMemberMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -636,7 +636,7 @@ export const getListConversationMessagesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListConversationMessagesResponseMock(),
@@ -675,7 +675,7 @@ export const getSendConversationMessageMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getSendConversationMessageResponseMock(),
@@ -714,7 +714,7 @@ export const getUploadConversationAttachmentMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUploadConversationAttachmentResponseMock(),
@@ -742,7 +742,7 @@ export const getGetAttachmentMockHandler = (
         HttpResponseResolver<{ organizationId: string; attachmentId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -769,7 +769,7 @@ export const getDeleteAttachmentMockHandler = (
         HttpResponseResolver<{ organizationId: string; attachmentId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -794,7 +794,7 @@ export const getCreateConversationThreadMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateConversationThreadResponseMock(),
@@ -824,7 +824,7 @@ export const getGetConversationThreadMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetConversationThreadResponseMock(),
@@ -854,7 +854,7 @@ export const getCreateTranscriptionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateTranscriptionResponseMock(),

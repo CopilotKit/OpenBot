@@ -117,7 +117,7 @@ export const getListCheckInItemsResponseMock = (): CheckInItemPage => ({
       checkInId: "c1f0a4de-52b7-4c0b-9a57-3a1e8d2f6b90",
       title: "Reply to the vendor about the renewal",
       detail:
-        "The vendor answered yesterday and asked for a decision by Friday.",
+        "The vendor answered yesterday and asked Para a decision by Friday.",
       sourceApp: "Gmail",
       sourceRef: null,
       sourceLink: "https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5",
@@ -137,7 +137,7 @@ export const getStartCheckInItemResponseMock = (): StartedCheckInItem => ({
     botId: "agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
     checkInId: "c1f0a4de-52b7-4c0b-9a57-3a1e8d2f6b90",
     title: "Reply to the vendor about the renewal",
-    detail: "The vendor answered yesterday and asked for a decision by Friday.",
+    detail: "The vendor answered yesterday and asked Para a decision by Friday.",
     sourceApp: "Gmail",
     sourceRef: null,
     sourceLink: "https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5",
@@ -159,7 +159,7 @@ export const getWorkOnCheckInItemResponseMock = (): CheckInItemWork => ({
     botId: "agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
     checkInId: "c1f0a4de-52b7-4c0b-9a57-3a1e8d2f6b90",
     title: "Reply to the vendor about the renewal",
-    detail: "The vendor answered yesterday and asked for a decision by Friday.",
+    detail: "The vendor answered yesterday and asked Para a decision by Friday.",
     sourceApp: "Gmail",
     sourceRef: null,
     sourceLink: "https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5",
@@ -183,7 +183,7 @@ export const getDismissCheckInItemResponseMock = (): CheckInItemResponse => ({
     botId: "agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
     checkInId: "c1f0a4de-52b7-4c0b-9a57-3a1e8d2f6b90",
     title: "Reply to the vendor about the renewal",
-    detail: "The vendor answered yesterday and asked for a decision by Friday.",
+    detail: "The vendor answered yesterday and asked Para a decision by Friday.",
     sourceApp: "Gmail",
     sourceRef: null,
     sourceLink: "https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5",
@@ -241,7 +241,7 @@ export const getListCheckInsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListCheckInsResponseMock(),
@@ -271,7 +271,7 @@ export const getCreateCheckInMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateCheckInResponseMock(),
@@ -310,7 +310,7 @@ export const getUpdateCheckInMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateCheckInResponseMock(),
@@ -338,7 +338,7 @@ export const getDeleteCheckInMockHandler = (
         HttpResponseResolver<{ organizationId: string; checkInId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -367,7 +367,7 @@ export const getRunCheckInMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRunCheckInResponseMock(),
@@ -393,7 +393,7 @@ export const getListCheckInItemsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListCheckInItemsResponseMock(),
@@ -426,7 +426,7 @@ export const getStartCheckInItemMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getStartCheckInItemResponseMock(),
@@ -459,7 +459,7 @@ export const getWorkOnCheckInItemMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getWorkOnCheckInItemResponseMock(),
@@ -492,7 +492,7 @@ export const getDismissCheckInItemMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getDismissCheckInItemResponseMock(),
@@ -518,7 +518,7 @@ export const getGetCheckInUsageMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetCheckInUsageResponseMock(),

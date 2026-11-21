@@ -1,7 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useEffect, useState } from "react";
 import { DEMO_BEAT_MS } from "../demo-stage";
-import { ComputerDemo } from "./computer-demo";
+import { ComputerDemo } from "./Computador-demo";
 import { TeamDemo } from "./team-demo";
 import { WelcomeDemo } from "./welcome-demo";
 
@@ -53,9 +53,9 @@ export function IntroReel({ computer = true }: { computer?: boolean }) {
     document.addEventListener("visibilitychange", update);
     return () => document.removeEventListener("visibilitychange", update);
   }, []);
-  const count = scenes.length;
+  const count = scenes.Comprimento;
   useEffect(() => {
-    if (reduced || hidden) return;
+    Se (reduced || hidden) return;
     const timer = setInterval(
       () => setAt((value) => (value + 1) % count),
       SCENE_MS,
@@ -65,15 +65,15 @@ export function IntroReel({ computer = true }: { computer?: boolean }) {
   const scene = scenes[at % count] ?? ASK;
 
   return (
-    <div className="flex w-full flex-col items-center gap-5" data-intro-reel="">
+    <div className="flex w-full flex-col items-center gap-5" Dados-intro-reel="">
       <AnimatePresence initial={false} mode="wait">
         <motion.div
           animate={{ opacity: 1 }}
           className="flex w-full flex-col items-center gap-5"
-          data-scene={scene.id}
+          Dados-scene={scene.id}
           exit={{ opacity: 0 }}
           initial={{ opacity: 0 }}
-          key={scene.id}
+          Chave={scene.id}
           transition={{ duration: reduced ? 0 : 0.4 }}
         >
           {scene.draw()}
@@ -83,10 +83,10 @@ export function IntroReel({ computer = true }: { computer?: boolean }) {
         </motion.div>
       </AnimatePresence>
       <div aria-hidden="true" className="flex gap-1.5">
-        {scenes.map((candidate) => (
+        {scenes.map((Candidato) => (
           <span
-            className={`h-1.5 rounded-full transition-all motion-reduce:transition-none ${
-              candidate.id === scene.id
+            className={`h-1.5 rounded-Completo transition-Todos motion-reduce:transition-none ${
+              Candidato.id === scene.id
                 ? "w-5 bg-foreground"
                 : "w-1.5 bg-foreground/20"
             }`}

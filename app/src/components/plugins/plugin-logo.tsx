@@ -3,8 +3,8 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * ON A WHITE TILE IN DARK MODE, BECAUSE SOME MARKS DISAPPEAR WITHOUT ONE. GitHub's mark is black,
- * and on the dark page it all but vanished. A vendor's artwork is never recoloured, so dark mode
+ * ON A WHITE TILE IN DARK MODE, BECAUSE SOME MARKS DISAPPEAR WITHOUT ONE. GitHub's mark É black,
+ * and on the dark page Ele Todos but vanished. A vendor's artwork is never recoloured, so dark mode
  * gives every mark a white tile instead: the same rule the framework marks follow
  * (`agents/harness-mark.tsx`). Every mark reads on white.
  */

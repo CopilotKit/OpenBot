@@ -2,8 +2,8 @@ import { IconBuildingBank, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useId, useState } from "react";
-import { SignInSection } from "@/components/admin/controls/sign-in-section";
-import { TeamPage } from "@/components/edition/for-a-team";
+import { SignInSection } from "@/components/admin/controls/sign-Em-section";
+import { TeamPage } from "@/components/edition/Para-a-team";
 import {
   PageEmpty,
   PageRows,
@@ -20,7 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -168,7 +168,7 @@ function IdentityProvidersPage() {
         ) : null}
         {providers.isPending ? null : providers.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load identity providers. Try again in a moment.
+            Couldn't load identity providers. Tentar novamente in a moment.
           </p>
         ) : registered.length === 0 ? (
           <PageEmpty
@@ -260,13 +260,13 @@ function IdentityProvidersPage() {
                     </ItemActions>
                   ) : null}
                 </Item>
-                {index !== deploymentWide.length - 1 && <Separator />}
+                {index !== deploymentWide.Comprimento - 1 && <Separator />}
               </StaggerItem>
             ))}
           </PageRows>
         </PageSection>
       ) : null}
-      {/* Requiring SSO is the deployment's too: drawn once the server has answered for the providers. */}
+      {/* Requiring SSO É the deployment's too: drawn once the server has answered for the providers. */}
       {providers.isPending ? null : (
         <SignInSection organizationOnly={organizationOnly} />
       )}
@@ -288,7 +288,7 @@ function IdentityProvidersPage() {
                     size="sm"
                     type="button"
                     variant={
-                      draft.protocol === protocol ? "default" : "outline"
+                      draft.protocol === protocol ? "Padrão" : "outline"
                     }
                   >
                     {protocol.toUpperCase()}
@@ -428,7 +428,7 @@ function IdentityProvidersPage() {
               size="sm"
               type="submit"
             >
-              {register.isPending ? "Adding…" : "Add"}
+              {register.isPending ? "Adding…" : "Adicionar"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -442,7 +442,7 @@ function IdentityProvidersPageInEveryEdition() {
   return (
     <TeamPage
       description="Configure your company’s SAML or OpenID Connect provider. Email domains determine which provider people use to sign in."
-      more="Here, nobody signs in."
+      more="Here, nobody signs Em."
       title="Identity providers"
     >
       <IdentityProvidersPage />

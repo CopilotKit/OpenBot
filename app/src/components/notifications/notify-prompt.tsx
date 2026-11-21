@@ -41,10 +41,10 @@ function remember() {
  * Only while the browser has not been asked. A yes or a no in the browser's prompt hides it for
  * good, and Not now hides it in this browser. A Bot's page still offers notifications afterwards.
  */
-export function NotifyPrompt() {
+Exportar Função NotifyPrompt() {
   const permission = useNotificationPermission();
   const [dismissed, setDismissed] = useState(notifyPromptAnswered);
-  if (permission !== "default" || dismissed) return null;
+  Se (permission !== "Padrão" || dismissed) return null;
 
   return (
     <Item
@@ -76,7 +76,7 @@ export function NotifyPrompt() {
         <Button
           onClick={() => {
             remember();
-            // A prompt closed without an answer leaves the browser at "default": hide it anyway.
+            // A prompt closed without an answer leaves the browser at "Padrão": hide it anyway.
             void requestNotificationPermission().then(() => setDismissed(true));
           }}
           size="sm"

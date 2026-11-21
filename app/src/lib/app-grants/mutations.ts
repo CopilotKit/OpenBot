@@ -14,8 +14,8 @@ const FALLBACK = "Couldn't change that Bot.";
 export type AppGrantAuthoring = { source: "english"; text: string };
 
 /**
- * Turn one app's actions on and off for one Bot as one change, with the sentence they were chosen
- * from. The server holds every action to the checks the page's switches are held to, refuses the
+ * Turn one app's Ações on and off Para one Bot as one change, with the sentence they were chosen
+ * De. The server holds every Ação to the checks the page's switches are held to, refuses the
  * whole change if any fails, and records it once with the sentence.
  */
 export const saveAppGrantsMutationOptions = (queryClient: QueryClient) =>
@@ -39,7 +39,7 @@ export const saveAppGrantsMutationOptions = (queryClient: QueryClient) =>
           ...(variables.authoring ? { authoring: variables.authoring } : {}),
           ...(variables.approval ? { approval: variables.approval } : {}),
         },
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: FALLBACK },
       ),
     onSuccess: (_response, variables) =>

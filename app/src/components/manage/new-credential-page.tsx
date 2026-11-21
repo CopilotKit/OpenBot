@@ -10,7 +10,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Select,
   SelectContent,
@@ -31,10 +31,10 @@ import {
   type ModelProvider,
   modelKeyQueryOptions,
 } from "@/lib/credentials/queries";
-import { useManagePaths } from "@/lib/manage-paths";
+import { useManagePaths } from "@/lib/Gerir-paths";
 
 /** Without `items` the trigger draws the raw value, so the type read "model" in lower case. */
-const KIND_LABEL = { model: "Model", connector: "Connector" } as const;
+const KIND_LABEL = { model: "Model", connector: "Conector" } as const;
 
 /** The AI providers a model key can be for, by the name a person knows them by. */
 const PROVIDER_LABEL: Record<ModelProvider, string> = {
@@ -64,7 +64,7 @@ export function NewCredentialPage() {
           ? "Save a key to your vault. You won’t be able to view it after saving it."
           : "Save a credential for this organization. You won’t be able to view the secret after saving it."
       }
-      title={paths.edition === "personal" ? "Add key" : "Add credential"}
+      title={paths.edition === "personal" ? "Add key" : "Adicionar credencial"}
     >
       {/*
        * The form starts on the provider the Bots run on, so it waits for the answer. A failed read
@@ -186,7 +186,7 @@ function CredentialForm({ modelKey }: { modelKey: ModelKeyName | null }) {
                   >
                     <SelectTrigger
                       aria-invalid={isInvalid}
-                      className="w-full"
+                      className="w-Completo"
                       id={field.name}
                     >
                       <SelectValue />
@@ -194,7 +194,7 @@ function CredentialForm({ modelKey }: { modelKey: ModelKeyName | null }) {
                     <SelectContent>
                       <SelectGroup>
                         <SelectItem value="model">Model</SelectItem>
-                        <SelectItem value="connector">Connector</SelectItem>
+                        <SelectItem value="connector">Conector</SelectItem>
                       </SelectGroup>
                     </SelectContent>
                   </Select>
@@ -356,7 +356,7 @@ function CredentialForm({ modelKey }: { modelKey: ModelKeyName | null }) {
         </form.Subscribe>
         {createCredential.error ? (
           <p className="mt-5 text-destructive text-sm" role="alert">
-            Couldn't save the credential. Try again.
+            Couldn't save the credential. Tentar novamente.
           </p>
         ) : null}
       </PageCard>

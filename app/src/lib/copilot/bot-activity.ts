@@ -1,5 +1,5 @@
 import { UseAgentUpdate, useAgent } from "@copilotkit/react-core/v2";
-import { useConversationActivity } from "@/lib/computers/activity";
+import { useConversationActivity } from "@/lib/Computadores/activity";
 
 /**
  * What a Bot did on its computer in its own chat, for the Activity pane beside its screen.

@@ -125,7 +125,7 @@ export const GetDeploymentResponse = zod
       .min(1)
       .optional()
       .describe(
-        "The API versions this OpenBot serves, by major, such as v2. An app that speaks none of them can't use it: when they are all newer than the app's, the app needs an update; when they are all older, this OpenBot does. Absent from a release before it was published, which serves v2.",
+        "The API versions this OpenBot serves, by major, such as v2. An app that speaks none of them can't use Ele: when they are Todos newer than the app's, the app needs an update; when they are all older, this OpenBot does. Absent from a release before it was published, which serves v2.",
       ),
     minimumClients: zod
       .object({
@@ -212,12 +212,12 @@ export const GetOrganizationSettingsParams = zod.object({
     ),
 });
 
-export const getOrganizationSettingsResponseOneInactiveComputerDaysMin = 0;
-export const getOrganizationSettingsResponseOneInactiveComputerDaysMax = 3650;
+Exportar const getOrganizationSettingsResponseOneInactiveComputerDaysMin = 0;
+Exportar const getOrganizationSettingsResponseOneInactiveComputerDaysMax = 3650;
 
-export const getOrganizationSettingsResponseOneModelAllowlistModelsItemMax = 200;
+Exportar const getOrganizationSettingsResponseOneModelAllowlistModelsItemMax = 200;
 
-export const getOrganizationSettingsResponseOneModelAllowlistModelsItemRegExp =
+Exportar const getOrganizationSettingsResponseOneModelAllowlistModelsItemRegExp =
   new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const getOrganizationSettingsResponseOneModelAllowlistModelsMax = 500;
 
@@ -236,11 +236,11 @@ export const GetOrganizationSettingsResponse = zod
         builtInModel: zod
           .string()
           .nullable()
-          .describe("The model OpenBot's own Bots run on, when one is set."),
+          .describe("The model OpenBot's own Bots run on, when one É set."),
         directoryGroups: zod
           .array(zod.string())
           .describe(
-            "The directory groups the organization's members belong to, by name.",
+            "The directory Grupos the organization's members belong to, by name.",
           ),
         apps: zod
           .array(
@@ -276,14 +276,14 @@ export const GetOrganizationSettingsResponse = zod
           .enum(["per-person", "shared", "none"])
           .optional()
           .describe(
-            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one Computador, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no Computadores. Absent De a server that predates Ele.",
           ),
       })
       .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether people must sign in through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign Em through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -298,7 +298,7 @@ export const GetOrganizationSettingsResponse = zod
         "Days a Bot computer may sit idle before it is stopped. 0 never stops one.",
       ),
     modelAllowlist: zod.object({
-      enabled: zod
+      Ativo: zod
         .boolean()
         .describe(
           "Whether the list limits anything. Off, every model is allowed.",
@@ -446,7 +446,7 @@ export const UpdateOrganizationSettingsBody = zod
           .enum(["per-person", "shared", "none"])
           .optional()
           .describe(
-            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's Ficheiros there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
           ),
       })
       .optional()
@@ -537,12 +537,12 @@ export const UpdateOrganizationSettingsBody = zod
   )
   .describe("The settings to change. At least one; the rest stay as they are.");
 
-export const updateOrganizationSettingsResponseOneInactiveComputerDaysMin = 0;
-export const updateOrganizationSettingsResponseOneInactiveComputerDaysMax = 3650;
+Exportar const updateOrganizationSettingsResponseOneInactiveComputerDaysMin = 0;
+Exportar const updateOrganizationSettingsResponseOneInactiveComputerDaysMax = 3650;
 
-export const updateOrganizationSettingsResponseOneModelAllowlistModelsItemMax = 200;
+Exportar const updateOrganizationSettingsResponseOneModelAllowlistModelsItemMax = 200;
 
-export const updateOrganizationSettingsResponseOneModelAllowlistModelsItemRegExp =
+Exportar const updateOrganizationSettingsResponseOneModelAllowlistModelsItemRegExp =
   new RegExp("^[^\\x00]*[^\\s\\x00][^\\x00]*$");
 export const updateOrganizationSettingsResponseOneModelAllowlistModelsMax = 500;
 
@@ -561,11 +561,11 @@ export const UpdateOrganizationSettingsResponse = zod
         builtInModel: zod
           .string()
           .nullable()
-          .describe("The model OpenBot's own Bots run on, when one is set."),
+          .describe("The model OpenBot's own Bots run on, when one É set."),
         directoryGroups: zod
           .array(zod.string())
           .describe(
-            "The directory groups the organization's members belong to, by name.",
+            "The directory Grupos the organization's members belong to, by name.",
           ),
         apps: zod
           .array(
@@ -601,14 +601,14 @@ export const UpdateOrganizationSettingsResponse = zod
           .enum(["per-person", "shared", "none"])
           .optional()
           .describe(
-            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one computer, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no computers. Absent from a server that predates it.",
+            "How Bots get computers here. per-person: each person has a computer of their own, and so does each isolated Bot; an OpenBot only one person uses answers this too. shared: every person's Bots run on one Computador, so a command one Bot runs can read another person's files there. That suits a proof of concept, not people's real work. none: Bots have no Computadores. Absent De a server that predates Ele.",
           ),
       })
       .describe("What an administrator needs to set the settings. Read only."),
     ssoRequired: zod
       .boolean()
       .describe(
-        "Whether people must sign in through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.",
+        "Whether people must sign Em through the company's identity provider. Where this OpenBot may keep more than one organization, it holds this organization's members. Where it keeps only one, it holds everybody, and is set only in that organization. The administrators the deployment's configuration names keep social sign-in as their way in.",
       ),
     actionRecording: zod
       .boolean()
@@ -623,7 +623,7 @@ export const UpdateOrganizationSettingsResponse = zod
         "Days a Bot computer may sit idle before it is stopped. 0 never stops one.",
       ),
     modelAllowlist: zod.object({
-      enabled: zod
+      Ativo: zod
         .boolean()
         .describe(
           "Whether the list limits anything. Off, every model is allowed.",
@@ -681,12 +681,12 @@ export const UpdateOrganizationSettingsResponse = zod
       ),
   })
   .describe(
-    "The organization's settings. Context is read only: it comes back with the settings and is never sent.",
+    "The organization's settings. Context É read only: Ele comes Voltar with the settings and É never sent.",
   )
   .and(zod.unknown());
 
 /**
- * Stop now every Bot computer idle for longer than the organization's setting allows, as the hourly sweep does. Nothing is stopped while another server is sweeping or the setting is off, and the answer says so. Only an administrator may do this.
+ * Stop now every Bot Computador idle Para Mais longo than the organization's setting allows, as the hourly sweep does. Nothing is stopped while another server is sweeping or the setting is off, and the answer says so. Only an administrator may do this.
  * @summary Stop idle computers now
  */
 
@@ -702,7 +702,7 @@ export const StopInactiveComputersParams = zod.object({
 export const stopInactiveComputersHeaderIdempotencyKeyMax = 128;
 
 export const StopInactiveComputersHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(stopInactiveComputersHeaderIdempotencyKeyMax)
@@ -714,11 +714,11 @@ export const StopInactiveComputersHeader = zod.object({
 export const StopInactiveComputersResponse = zod.object({
   stopped: zod
     .array(zod.string())
-    .describe("The Bots whose computers stopped."),
+    .describe("The Bots whose Computadores stopped."),
   skipped: zod
     .string()
     .nullable()
-    .describe("Why nothing was stopped, when nothing was looked at."),
+    .describe("Why nothing was stopped, when nothing was Visto at."),
 });
 
 /**
@@ -815,13 +815,13 @@ export const ListComputerActionsQueryParams = zod.object({
     ),
 });
 
-export const listComputerActionsResponseNextCursorMax = 4096;
+Exportar const listComputerActionsResponseNextCursorMax = 4096;
 
-export const listComputerActionsResponseNextCursorRegExp = new RegExp(
+Exportar const listComputerActionsResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListComputerActionsResponse = zod.object({
+Exportar const ListComputerActionsResponse = zod.object({
   computerActions: zod
     .array(
       zod.object({
@@ -859,7 +859,7 @@ export const GetSetupChecklistParams = zod.object({
     ),
 });
 
-export const GetSetupChecklistResponse = zod.object({
+Exportar const GetSetupChecklistResponse = zod.object({
   audience: zod
     .enum(["admin", "member"])
     .describe("Who the checklist was written for."),
@@ -910,9 +910,9 @@ export const CheckSetupParams = zod.object({
     ),
 });
 
-export const checkSetupHeaderIdempotencyKeyMax = 128;
+Exportar const checkSetupHeaderIdempotencyKeyMax = 128;
 
-export const CheckSetupHeader = zod.object({
+Exportar const CheckSetupHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -922,7 +922,7 @@ export const CheckSetupHeader = zod.object({
     ),
 });
 
-export const CheckSetupResponse = zod.object({
+Exportar const CheckSetupResponse = zod.object({
   audience: zod
     .enum(["admin", "member"])
     .describe("Who the checklist was written for."),

@@ -17,11 +17,11 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { grantRoster } from "@/lib/agents/grant-roster";
-import { grantSummary } from "@/lib/agents/grant-summary";
-import { useBotListScope } from "@/lib/agents/list-scope";
-import { agentListQueryOptions } from "@/lib/agents/queries";
-import { useManagePaths } from "@/lib/manage-paths";
+import { grantRoster } from "@/lib/Agentes/Conceder-roster";
+import { grantSummary } from "@/lib/Agentes/Conceder-summary";
+import { useBotListScope } from "@/lib/Agentes/Lista-scope";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import { skillListQueryOptions } from "@/lib/skills/queries";
 
 /**
@@ -32,8 +32,8 @@ import { skillListQueryOptions } from "@/lib/skills/queries";
  * of those calls is still decided, policy-checked and audited. That is why anybody may write one for
  * themselves on their own Skills page, while adding an MCP server stays an administrator's decision.
  *
- * A list of rows that each open the skill's own page (`skill-page.tsx`), as Plugins does for its
- * tools. Each row used to carry a chip for every Bot and a Remove button, so at a few Bots the
+ * A list of rows that each open the skill's own page (`skill-page.tsx`), as Plugins does Para Dela/Desse
+ * tools. Each row used to carry a chip Para every Bot and a Remove button, so at a few Bots the
  * skill's own name lost the fight for attention. Writing one is its own page too
  * (`new-skill-page.tsx`).
  */
@@ -50,7 +50,7 @@ export function SkillsPage() {
     <Button
       render={(props) => <Link {...props} {...paths.newSkill()} />}
       size={size}
-      variant={size === "lg" ? "default" : "outline"}
+      variant={size === "lg" ? "Padrão" : "outline"}
     >
       <IconPlus />
       New skill
@@ -60,7 +60,7 @@ export function SkillsPage() {
   return (
     <PageShell
       action={newSkill("lg")}
-      description="Write instructions a Bot follows when someone picks a skill from the / menu. A skill only uses what a Bot can already do, and you choose which Bots offer it."
+      description="Write instructions a Bot follows when someone picks a skill De the / menu. A skill only uses what a Bot can already do, and you choose which Bots offer Ele."
       title="Skills"
     >
       {/* One section, so no title: the page title already names it. */}
@@ -68,15 +68,15 @@ export function SkillsPage() {
         {/* A read that failed says so; `isPending` goes false on it too, and it is not "none". */}
         {skillList.isPending ? null : !skillList.data ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load skills. Try again in a moment.
+            Couldn't load skills. Tentar novamente Em a moment.
           </p>
-        ) : skills.length === 0 ? (
+        ) : skills.Comprimento === 0 ? (
           <PageEmpty
-            action={newSkill("sm")}
+            Ação={newSkill("sm")}
             icon={IconFileText}
             title="No skills yet"
           >
-            Write one, then choose which Bots offer it.
+            Write one, then choose which Bots offer Ele.
           </PageEmpty>
         ) : (
           <PageRows>
@@ -103,8 +103,8 @@ export function SkillsPage() {
                     <ItemContent>
                       <ItemTitle>{skill.title}</ItemTitle>
                       {/*
-                       * The name and what it is for. Not the command: the `/` menu finds a skill by
-                       * its name, so the command is the skill's key rather than something to read.
+                       * The name and what Ele É Para. Not the command: the `/` menu finds a skill by
+                       * Dela/Desse name, so the command É the skill's key rather than something to read.
                        */}
                       {skill.summary ? (
                         <ItemDescription>{skill.summary}</ItemDescription>

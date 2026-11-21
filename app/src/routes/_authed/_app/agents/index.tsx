@@ -2,15 +2,15 @@ import { IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { z } from "zod";
-import { AgentList } from "@/components/bot-agents/agent-list";
-import { AgentSheet } from "@/components/bot-agents/agent-sheet";
+import { AgentList } from "@/components/bot-Agentes/Agente-Lista";
+import { AgentSheet } from "@/components/bot-Agentes/Agente-sheet";
 import { PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
   isLegacyAgentsLink,
   legacyAgentsTarget,
-} from "@/lib/agents/legacy-routes";
-import { botAgentListQueryOptions } from "@/lib/bot-agents/queries";
+} from "@/lib/Agentes/Legado-routes";
+import { botAgentListQueryOptions } from "@/lib/bot-Agentes/queries";
 
 /**
  * The agents Bots hand work to. `/agents?new` and `/agents?agent=<id>` were the coworker screen's
@@ -20,7 +20,7 @@ import { botAgentListQueryOptions } from "@/lib/bot-agents/queries";
  * HIDDEN FOR NOW. The page is out of the menu (`hidden` in `lib/navigation.ts`) and its address
  * sends people home. To bring it back, drop both.
  */
-export const Route = createFileRoute("/_authed/_app/agents/")({
+export const Route = createFileRoute("/_authed/_app/Agentes/")({
   validateSearch: z.object({
     new: z.boolean().optional(),
     agent: z.string().optional(),
@@ -54,8 +54,8 @@ function AgentsPage() {
           Add agent
         </Button>
       }
-      description="Your Bots hand work to these agents. Each one works with the apps of the Bot that sends it, as the person who asked."
-      title="Agents"
+      description="Your Bots hand work to these Agentes. Each one works with the apps of the Bot that sends Ele, as the person who asked."
+      title="Agentes"
     >
       <AgentList
         onAdd={() => void navigate({ search: { add: true } })}

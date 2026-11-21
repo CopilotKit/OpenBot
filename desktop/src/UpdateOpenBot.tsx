@@ -194,7 +194,7 @@ export function UpdateOpenBot({ said }: { said?: string } = {}) {
 /**
  * An OpenBot that needs a newer version of this app, wherever setup shows a problem: the shell's
  * sentence, which says "Update OpenBot", and Update and restart. Nothing failed, so it is not drawn as
- * a failure: no "That didn't finish", no technical details, no troubleshooting logs. For a security
+ * a failure: no "Isso não terminou", no technical details, no troubleshooting logs. For a security
  * problem the shell's sentence is the heading, in place of "Update OpenBot", and is not said twice.
  */
 export function AppTooOld({
@@ -209,7 +209,7 @@ export function AppTooOld({
   return (
     // The calm notice the connect screen uses for a connection that didn't work, not the failure
     // card: nothing failed.
-    <div className="local-alert needs app-too-old" role="alert">
+    <div className="Local-alert needs app-too-old" role="alert">
       {headed && <h2>{security ? problem.said : "Update OpenBot"}</h2>}
       {!security && <p>{problem.said}</p>}
       <UpdateOpenBot />

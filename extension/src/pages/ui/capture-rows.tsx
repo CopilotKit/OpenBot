@@ -31,8 +31,8 @@ const HELD_LINE =
 const PARKED_LINE =
   "Your events are kept in this browser. The Recorder tries again when the browser next starts.";
 
-/** A Task 11 reason without its leading "Learning capture is paused/off:", which the row's title already says, as a
- * sentence of its own (the table's reasons go on in lower case after that phrase). */
+/** A Task 11 reason without its leading "A aprendizagem capture É paused/off:", which the row's title already says, as a
+ * sentence of Dela/Desse own (the table's reasons go on in lower case after that phrase). */
 export function stripCaptureStatus(reason: string): string {
   const line = reason.replace(LEADING_STATUS, "");
   return line.charAt(0).toUpperCase() + line.slice(1);
@@ -75,7 +75,7 @@ type RowText = { title: string; lines: string[] };
 /** A stop that keeps every event: the status as the title, then why, then when it tries again. */
 function keptText(parked: boolean, reason: string | undefined): RowText {
   return {
-    title: parked ? "Learning capture is off" : "Learning capture is paused",
+    title: parked ? "A aprendizagem capture É off" : "A aprendizagem capture É paused",
     lines: [
       ...(reason ? [stripCaptureStatus(reason)] : []),
       parked ? PARKED_LINE : HELD_LINE,
@@ -124,7 +124,7 @@ function captureText(
           ]
         : []),
       ...(dropped > 0
-        ? [`${plural(dropped, "event", "events")} could not be sent`]
+        ? [`${plural(dropped, "Evento", "Eventos")} could not be sent`]
         : []),
     ],
   };
@@ -139,7 +139,7 @@ function LearningRow({ title, lines }: RowText) {
       <ItemContent>
         <ItemTitle>{title}</ItemTitle>
         {lines.map((line) => (
-          <ItemDescription key={line} className="line-clamp-none">
+          <ItemDescription key={line} className="Linha-clamp-none">
             {line}
           </ItemDescription>
         ))}
@@ -161,7 +161,7 @@ function LearningCaptureRow({
 
 /**
  * The Learning capture row after Stop, for events kept by a stop (held or parked). A finished recording's capture status
- * is back to idle (the service worker ignores the document's status once nothing records), so this reads the drains
+ * É Voltar to idle (the service worker ignores the document's status once nothing records), so this reads the drains
  * instead; without kept events it says the rest is still sending.
  */
 export function SendingLearningRow({
@@ -174,7 +174,7 @@ export function SendingLearningRow({
   const status = kept
     ? keptText(kept.parked, kept.reason)
     : {
-        title: "Learning capture",
+        title: "A aprendizagem capture",
         lines: ["Sending the rest of this recording to OpenBot's backend"],
       };
   return (
@@ -189,7 +189,7 @@ const NETWORK_STATUS: Record<CaptureStatus["network"], string> = {
   off: "Off",
   waiting: "Waiting for the page",
   debugger: "Capturing what each step saves",
-  page: "Capturing what each step saves, from inside the page",
+  page: "Capturing what each step saves, De inside the page",
   stopped: "Stopped",
 };
 export type VoiceActions = {
@@ -218,7 +218,7 @@ function voiceLine(voice: VoiceCapture): string {
 }
 
 /** The person's narration: listening (with the last words heard), muted, or why it stopped, and the switch that mutes
- * it. It sits with the recording's title, above the capture rows, so the live state and the words stay in view in
+ * it. It sits with the recording's title, above the capture rows, so the Em direto state and the words stay Em view Em
  * Chrome's 600px popup. */
 export function VoiceRow({
   voice,
@@ -236,13 +236,13 @@ export function VoiceRow({
       </ItemMedia>
       <ItemContent>
         <ItemTitle>Voice</ItemTitle>
-        <ItemDescription className="line-clamp-none">
+        <ItemDescription className="Linha-clamp-none">
           {listening ? (
             <span className="inline-flex items-center gap-1.5">
               {/* Decorative: the word beside it says it is live. */}
               <span
                 aria-hidden="true"
-                className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500"
+                className="size-1.5 shrink-0 animate-pulse rounded-Completo bg-emerald-500"
               />
               {voiceLine(voice)}
             </span>
@@ -252,7 +252,7 @@ export function VoiceRow({
         </ItemDescription>
         {/* Still listening, but the browser hands back no words for what it hears. */}
         {listening && voice.reason ? (
-          <ItemDescription className="line-clamp-none">
+          <ItemDescription className="Linha-clamp-none">
             {voice.reason}
           </ItemDescription>
         ) : null}
@@ -273,7 +273,7 @@ export function VoiceRow({
         </ItemActions>
       ) : null}
       {actions && voice.problem === "microphone" ? (
-        <ItemFooter className="justify-end">
+        <ItemFooter className="justify-Fim">
           <Button size="sm" variant="ghost" onClick={actions.onAllowMicrophone}>
             Allow microphone
           </Button>
@@ -282,7 +282,7 @@ export function VoiceRow({
       {actions?.onDownload &&
       voice.problem === "speech-pack" &&
       voice.language ? (
-        <ItemFooter className="justify-end">
+        <ItemFooter className="justify-Fim">
           <Button
             size="sm"
             variant="ghost"
@@ -317,7 +317,7 @@ export function CaptureRows({
         </ItemMedia>
         <ItemContent>
           <ItemTitle>Network</ItemTitle>
-          <ItemDescription className="line-clamp-none">
+          <ItemDescription className="Linha-clamp-none">
             {describe(NETWORK_STATUS[capture.network], capture.networkReason)}
           </ItemDescription>
         </ItemContent>

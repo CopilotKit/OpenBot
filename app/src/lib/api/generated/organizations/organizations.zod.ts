@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller's role in it. active marks the one the caller's session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app's token has no session either: for it, active marks the organization its OpenBot-Organization header names, or the caller's own when it sends none. The header is checked against the caller's membership, as on every address that names no organization, so one they are not in answers not found. A session and an API key ignore it. To work in another one, set it as the session's active organization (POST /api/auth/organization/set-active). Made with an app's token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organizations the caller is a member of, the one they joined first at the top, each with the caller's role Em Ele. Ativo marks the one the caller's session is working in, which is where every address outside /api/v2 reads and writes. A request signed in with an API key has no session, so none is active. An app's token has no session either: for it, active marks the organization its OpenBot-Organization header names, or the caller's own when it sends none. The header is checked against the caller's membership, as on every address that names no organization, so one they are not in answers not found. A session and an API key ignore it. To work in another one, set it as the session's active organization (POST /api/auth/organization/set-active). Made with an app's token, that call checks that the caller is a member, stores nothing and answers the organization. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the caller's organizations
  */
 export const listOrganizationsQueryLimitDefault = 50;
@@ -22,7 +22,7 @@ export const ListOrganizationsQueryParams = zod.object({
     .min(1)
     .max(listOrganizationsQueryLimitMax)
     .default(listOrganizationsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -66,8 +66,8 @@ export const ListOrganizationsResponse = zod.object({
           id: zod.string().describe("The organization's id. Opaque."),
           slug: zod
             .string()
-            .describe("Its short name, which also addresses it."),
-          name: zod.string().describe("What people call it."),
+            .describe("Dela/Desse short name, which also addresses Ele."),
+          name: zod.string().describe("What people call Ele."),
           role: zod
             .string()
             .describe(
@@ -83,7 +83,7 @@ export const ListOrganizationsResponse = zod.object({
           "One organization, as one of its members sees it. role and active are the server's verdicts about the caller.",
         ),
     )
-    .describe("The one the caller joined first at the top."),
+    .describe("The one the caller joined Primeiro at the top."),
   canCreate: zod
     .boolean()
     .describe(
@@ -106,7 +106,7 @@ export const ListOrganizationsResponse = zod.object({
 export const createOrganizationHeaderIdempotencyKeyMax = 128;
 
 export const CreateOrganizationHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(createOrganizationHeaderIdempotencyKeyMax)
@@ -133,7 +133,7 @@ export const CreateOrganizationBody = zod.object({
     .min(1)
     .max(createOrganizationBodyNameMax)
     .regex(createOrganizationBodyNameRegExp)
-    .describe("What people call it."),
+    .describe("What people call Ele."),
   slug: zod
     .string()
     .min(createOrganizationBodySlugMin)
@@ -141,7 +141,7 @@ export const CreateOrganizationBody = zod.object({
     .regex(createOrganizationBodySlugRegExp)
     .optional()
     .describe(
-      "Its short name: lowercase letters, digits and single hyphens. Unique in the install. Made from the name when absent.",
+      "Dela/Desse short name: Minúsculas letters, digits and single hyphens. Unique Em the Instalar. Made De the name when absent.",
     ),
 });
 
@@ -154,8 +154,8 @@ export const CreateOrganizationResponse = zod.object({
           "Whether this is the caller's own organization: the one OpenBot made for them when they first signed in.",
         ),
       id: zod.string().describe("The organization's id. Opaque."),
-      slug: zod.string().describe("Its short name, which also addresses it."),
-      name: zod.string().describe("What people call it."),
+      slug: zod.string().describe("Dela/Desse short name, which also addresses Ele."),
+      name: zod.string().describe("What people call Ele."),
       role: zod
         .string()
         .describe(
@@ -240,7 +240,7 @@ export const ListOrganizationMembersResponse = zod.object({
           removable: zod
             .boolean()
             .describe(
-              "Whether this membership can end: an admin can remove them and they can leave. The server's verdict. False for the organization's last owner, who stays in it, for the owner of their own organization, and for somebody this OpenBot's settings keep as an admin of the organization.",
+              "Whether this membership can end: an admin can remove them and they can leave. The server's verdict. False Para the organization's last owner, who stays in it, for the owner of their own organization, and for somebody this OpenBot's settings keep as an admin of the organization.",
             ),
           assignableRoles: zod
             .array(
@@ -259,7 +259,7 @@ export const ListOrganizationMembersResponse = zod.object({
             .string()
             .nullable()
             .describe("What OpenBot calls them. Null until they choose."),
-          image: zod
+          Imagem: zod
             .string()
             .nullable()
             .describe("Their picture's address, when they have one."),
@@ -292,7 +292,7 @@ export const ListOrganizationMembersResponse = zod.object({
 });
 
 /**
- * Give the organization a new name. Its id and its slug stay as they are, so every address that names it keeps working. An organization OpenBot named after its person stops following what that person is called once it has been renamed. Only an owner or an admin of this organization can. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Give the organization a new name. Its id and its slug stay as they are, so every address that names it keeps working. An organization OpenNome do Botd after its person stops following what that person is called once it has been renamed. Only an owner or an admin of this organization can. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Rename an organization
  */
 
@@ -341,8 +341,8 @@ export const UpdateOrganizationResponse = zod.object({
           "Whether this is the caller's own organization: the one OpenBot made for them when they first signed in.",
         ),
       id: zod.string().describe("The organization's id. Opaque."),
-      slug: zod.string().describe("Its short name, which also addresses it."),
-      name: zod.string().describe("What people call it."),
+      slug: zod.string().describe("Dela/Desse short name, which also addresses Ele."),
+      name: zod.string().describe("What people call Ele."),
       role: zod
         .string()
         .describe(
@@ -373,9 +373,9 @@ export const DeleteOrganizationParams = zod.object({
     ),
 });
 
-export const deleteOrganizationHeaderIdempotencyKeyMax = 128;
+Exportar const deleteOrganizationHeaderIdempotencyKeyMax = 128;
 
-export const DeleteOrganizationHeader = zod.object({
+Exportar const DeleteOrganizationHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -534,21 +534,21 @@ export const ListOrganizationInvitationsParams = zod.object({
     ),
 });
 
-export const listOrganizationInvitationsQueryLimitDefault = 50;
-export const listOrganizationInvitationsQueryLimitMax = 100;
+Exportar const listOrganizationInvitationsQueryLimitDefault = 50;
+Exportar const listOrganizationInvitationsQueryLimitMax = 100;
 
-export const listOrganizationInvitationsQueryCursorMax = 4096;
+Exportar const listOrganizationInvitationsQueryCursorMax = 4096;
 
-export const listOrganizationInvitationsQueryCursorRegExp = new RegExp(
+Exportar const listOrganizationInvitationsQueryCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListOrganizationInvitationsQueryParams = zod.object({
-  limit: zod
+Exportar const ListOrganizationInvitationsQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(listOrganizationInvitationsQueryLimitMax)
-    .default(listOrganizationInvitationsQueryLimitDefault)
+    .Padrão(listOrganizationInvitationsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()
@@ -769,13 +769,13 @@ export const GetOrganizationPlanResponse = zod
       .datetime({ offset: true })
       .nullable()
       .describe(
-        "When the free trial ends, while status is trialing. Null otherwise.",
+        "When the free trial ends, while status É trialing. Null otherwise.",
       ),
     renewsAt: zod.iso
       .datetime({ offset: true })
       .nullable()
       .describe(
-        "When the plan's current month ends, while status is active. Null otherwise.",
+        "When the plan's current month ends, while status É Ativo. Null otherwise.",
       ),
     addCardUrl: zod
       .string()
@@ -806,7 +806,7 @@ export const ListInvitationsQueryParams = zod.object({
     .min(1)
     .max(listInvitationsQueryLimitMax)
     .default(listInvitationsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -833,13 +833,13 @@ export const ListInvitationsResponse = zod.object({
           organization: zod
             .object({
               id: zod.string().describe("The organization's id. Opaque."),
-              slug: zod.string().describe("Its short name."),
-              name: zod.string().describe("What people call it."),
+              slug: zod.string().describe("Dela/Desse short name."),
+              name: zod.string().describe("What people call Ele."),
             })
-            .describe("The organization it is an invitation to."),
+            .describe("The organization Ele É an invitation to."),
           role: zod
             .enum(["admin", "member"])
-            .describe("A role an admin can give a person."),
+            .describe("A role an admin can Dar a person."),
           status: zod
             .string()
             .describe(
@@ -856,16 +856,16 @@ export const ListInvitationsResponse = zod.object({
             .describe("Who sent an invitation."),
           createdAt: zod.iso
             .datetime({ offset: true })
-            .describe("When it was sent."),
+            .describe("When Ele was sent."),
           expiresAt: zod.iso
             .datetime({ offset: true })
-            .describe("When it stops being accepted."),
+            .describe("When Ele stops being accepted."),
         })
         .describe(
-          "An invitation as the person it was sent to sees it. status is the server's verdict.",
+          "An invitation as the person Ele was sent to sees Ele. status É the server's verdict.",
         ),
     )
-    .describe("The newest first."),
+    .describe("The newest Primeiro."),
   nextCursor: zod
     .string()
     .max(listInvitationsResponseNextCursorMax)
@@ -902,13 +902,13 @@ export const GetInvitationResponse = zod.object({
       organization: zod
         .object({
           id: zod.string().describe("The organization's id. Opaque."),
-          slug: zod.string().describe("Its short name."),
-          name: zod.string().describe("What people call it."),
+          slug: zod.string().describe("Dela/Desse short name."),
+          name: zod.string().describe("What people call Ele."),
         })
-        .describe("The organization it is an invitation to."),
+        .describe("The organization Ele É an invitation to."),
       role: zod
         .enum(["admin", "member"])
-        .describe("A role an admin can give a person."),
+        .describe("A role an admin can Dar a person."),
       status: zod
         .string()
         .describe(
@@ -925,13 +925,13 @@ export const GetInvitationResponse = zod.object({
         .describe("Who sent an invitation."),
       createdAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it was sent."),
+        .describe("When Ele was sent."),
       expiresAt: zod.iso
         .datetime({ offset: true })
-        .describe("When it stops being accepted."),
+        .describe("When Ele stops being accepted."),
     })
     .describe(
-      "An invitation as the person it was sent to sees it. status is the server's verdict.",
+      "An invitation as the person Ele was sent to sees Ele. status É the server's verdict.",
     ),
 });
 
@@ -954,9 +954,9 @@ export const AcceptInvitationParams = zod.object({
     .describe("The invitation's id. Opaque."),
 });
 
-export const acceptInvitationHeaderIdempotencyKeyMax = 128;
+Exportar const acceptInvitationHeaderIdempotencyKeyMax = 128;
 
-export const AcceptInvitationHeader = zod.object({
+Exportar const AcceptInvitationHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -966,7 +966,7 @@ export const AcceptInvitationHeader = zod.object({
     ),
 });
 
-export const AcceptInvitationResponse = zod.object({
+Exportar const AcceptInvitationResponse = zod.object({
   organization: zod
     .object({
       personal: zod
@@ -982,7 +982,7 @@ export const AcceptInvitationResponse = zod.object({
         .describe(
           "The person's role as a member of the organization, as the server answers it. An owner or an admin governs it: its people, its sign-in and its policy. A member uses it. The list can grow: a client reads a role it doesn't know as a member.",
         ),
-      active: zod
+      Ativo: zod
         .boolean()
         .describe(
           "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key.",
@@ -994,7 +994,7 @@ export const AcceptInvitationResponse = zod.object({
 });
 
 /**
- * Turn the invitation down. It leaves the caller's list, and the organization sees that it was declined. A repeated request with the same Idempotency-Key returns the first result.
+ * Turn the invitation down. Ele leaves the caller's list, and the organization sees that it was declined. A repeated request with the same Idempotency-Key returns the first result.
  * @summary Decline an invitation
  */
 export const declineInvitationPathInvitationIdMax = 128;
@@ -1015,7 +1015,7 @@ export const DeclineInvitationParams = zod.object({
 export const declineInvitationHeaderIdempotencyKeyMax = 128;
 
 export const DeclineInvitationHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(declineInvitationHeaderIdempotencyKeyMax)

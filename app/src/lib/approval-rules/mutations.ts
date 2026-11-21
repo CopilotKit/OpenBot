@@ -24,7 +24,7 @@ export const saveTeamRulesMutationOptions = (queryClient: QueryClient) =>
       batchCreateApprovalRules(
         organizationId(),
         variables,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: FALLBACK },
       ),
     onSuccess: () =>

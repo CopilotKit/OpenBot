@@ -116,7 +116,7 @@ export const getCreateConversationJoinTokenUrl = (
 };
 
 /**
- * Make a join token for the conversation's thread, and say where to use it. The token opens the threadStream channel of api/asyncapi.yaml: a WebSocket that replays the Bot's runs in the conversation, a run in progress from its start, and then carries on live. The token works once and for about half a minute, so ask for a new one for every connection, and again to reconnect. Only a person in the conversation may have one, and it opens the thread they see there and no other. A conversation no Bot has run in yet has nothing to join (409). Where realtime.clientUrl is on this server, open it with the same credential that made the token: the session, an app's access token, or an API key, as Authorization: Bearer or x-api-key. So a script that holds only an API key can watch a conversation live.
+ * Make a join token for the conversation's thread, and say where to use it. The token opens the threadStream channel of api/asyncapi.yaml: a WebSocket that replays the Bot's runs in the conversation, a run in progress from its start, and then carries on live. The token works once and for about half a minute, so ask for a new one for every connection, and again to reconnect. Only a person in the conversation may have one, and it opens the thread they see there and no other. A conversation no Bot has run in yet has nothing to join (409). Where realtime.clientUrl is on this server, open it with the same credential that made the token: the session, an app's access token, or an API key, as Autorização: Bearer or x-api-key. So a script that holds only an API key can watch a conversation live.
  * @summary Get a token to watch a conversation live
  */
 export const createConversationJoinToken = async (
@@ -297,7 +297,7 @@ export const listConversations = async (
     getListConversationsUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -663,7 +663,7 @@ export const getRouteConversationMessageUrl = (organizationId: string) => {
 };
 
 /**
- * Say which of the caller's Bots should answer a message that names none: the Bot the message mentions, the one whose role fits it, or the caller's default when nothing decides. With botId it only confirms that Bot is one the caller can use. With skillSlugs only a Bot that offers every one of them is chosen. Nothing is sent and no conversation is made.
+ * Say which of the caller's Bots should Resposta a message that names none: the Bot the message mentions, the one whose role fits Ele, or the caller's default when nothing decides. With botId it only confirms that Bot is one the caller can use. With skillSlugs only a Bot that offers every one of them is chosen. Nothing is sent and no conversation is made.
  * @summary Choose the Bot for a message
  */
 export const routeConversationMessage = async (
@@ -1894,7 +1894,7 @@ export const listConversationMembers = async (
     getListConversationMembersUrl(organizationId, conversationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -2324,7 +2324,7 @@ export const removeConversationMember = async (
     getRemoveConversationMemberUrl(organizationId, conversationId, memberId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
       headers: { ...headers, ...getHeaders(options?.headers) },
     },
   );
@@ -2459,7 +2459,7 @@ export const getListConversationMessagesUrl = (
 };
 
 /**
- * Return one page of what was said in the conversation, newest first. A group conversation answers its shared transcript, with each Bot's reply and where it stands. Any other conversation answers the caller's own exchange with one of its Bots, named by botId. A reply still being written is empty to everybody but the person whose Bot is writing it. A missing cursor starts at the newest page and nextCursor null ends the list.
+ * Return one page of what was said in the conversation, newest first. A group conversation answers its shared transcript, with each Bot's reply and where Ele stands. Qualquer other conversation Respostas the caller's own exchange with one of its Bots, named by botId. A reply still being written is empty to everybody but the person whose Bot is writing it. A missing cursor starts at the newest page and nextCursor null ends the list.
  * @summary List the messages in a conversation
  */
 export const listConversationMessages = async (
@@ -2472,7 +2472,7 @@ export const listConversationMessages = async (
     getListConversationMessagesUrl(organizationId, conversationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -2710,7 +2710,7 @@ export const getSendConversationMessageUrl = (
 };
 
 /**
- * Send the caller's message and have the server run the Bots that answer it, with no window left open. In a group conversation every Bot answers in turn, or only the ones the message names, or the one given as botId. In any other conversation botId says which of its Bots answers. The message's id is the caller's own, so the same id sent again is the same message, not a second one.
+ * Send the caller's message and have the server run the Bots that Resposta Ele, with no window Esquerda open. Em a Grupo conversation every Bot Respostas Em turn, or only the ones the message names, or the one Dado as botId. Em Qualquer other conversation botId says which of Dela/Desse Bots Respostas. The message's id is the caller's own, so the same id sent again is the same message, not a second one.
  * @summary Send a message for the server to answer
  */
 export const sendConversationMessage = async (
@@ -3061,7 +3061,7 @@ export const getAttachment = async (
     getGetAttachmentUrl(organizationId, attachmentId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -3308,7 +3308,7 @@ export const deleteAttachment = async (
     getDeleteAttachmentUrl(organizationId, attachmentId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
       headers: { ...headers, ...getHeaders(options?.headers) },
     },
   );
@@ -3584,7 +3584,7 @@ export const getConversationThread = async (
     getGetConversationThreadUrl(organizationId, threadId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

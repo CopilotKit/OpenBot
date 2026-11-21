@@ -8,7 +8,7 @@
 export interface AppWithdrawnGrant {
   /** The app's id and the action's name, joined by a slash. */
   ref: string;
-  /** The action's name. */
+  /** The Ação's name. */
   name: string;
   /** The ids of the Bots that were given it. */
   grantedTo: string[];

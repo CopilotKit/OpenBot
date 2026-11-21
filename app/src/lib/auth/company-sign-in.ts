@@ -4,8 +4,8 @@ import { getCompanySignIn } from "@/lib/api/generated/people/people";
 import { organizationId } from "@/lib/api/request";
 
 export const companySignInKeys = {
-  all: ["company-sign-in"] as const,
-  mine: () => ["company-sign-in", "me"] as const,
+  all: ["company-sign-Em"] as const,
+  mine: () => ["company-sign-Em", "me"] as const,
 };
 
 /**
@@ -19,7 +19,7 @@ export function companySignInQueryOptions() {
     queryFn: ({ signal }): Promise<CompanySignIn> =>
       getCompanySignIn(organizationId(), "me", {
         signal,
-        fallback: "Couldn't check your company sign-in.",
+        fallback: "Couldn't Verificação your company sign-Em.",
       }),
   });
 }

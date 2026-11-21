@@ -14,11 +14,11 @@ const task = (status: string, updatedAt: string): Task =>
 
 test("a task status the phone doesn't know leaves the Bot's name alone on the card", () => {
   expect(taskLine("Ada", "paused")).toBe("Ada");
-  expect(taskLine("Ada", "needs_input")).toBe("Ada · Needs input");
-  expect(taskLine("Ada", "ready_for_review")).toBe("Ada · Ready for review");
+  expect(taskLine("Ada", "needs_input")).toBe("Ada · Needs Entrada");
+  expect(taskLine("Ada", "ready_for_review")).toBe("Ada · Ready Para review");
 });
 
-test("a task in a status the phone doesn't know is not listed as waiting on the person", () => {
+test("a task Em a status the phone doesn't know is not listed as waiting on the person", () => {
   const waiting = waitingTasks([
     task("paused", "2026-11-17T10:00:00Z"),
     task("failed", "2026-11-17T09:00:00Z"),
@@ -35,7 +35,7 @@ test("a run status the phone doesn't know shows no label, and a muted colour", (
   expect(runColor("cancelled")).toBe(colors.muted);
   expect(lastRunLine("cancelled")).toBeNull();
   expect(runLabel("succeeded")).toBe("Succeeded");
-  expect(runColor("failed")).toBe(colors.error);
+  expect(runColor("failed")).toBe(colors.Erro);
   expect(lastRunLine("waiting")).toBe("Last run: Waiting for you");
   expect(lastRunLine(null)).toBeNull();
 });

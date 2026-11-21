@@ -106,7 +106,7 @@ export function CloudSignIn({
                 {trouble?.offer === "sign-in"
                   ? "Sign in again"
                   : trouble && trouble.offer !== "browser"
-                    ? "Try again"
+                    ? "Tentar novamente"
                     : SIGN_IN_TO_CLOUD}
               </button>
               {trouble?.offer === "browser" && (

@@ -5,7 +5,7 @@ import type { PersonLearningSpaceParameter } from "./personLearningSpaceParamete
 
 export type GetPersonLearningProposalParams = {
   /**
-   * Which of the person's own Learning spaces, as their review lists them. Without it, the one their recordings join. A space that isn't one of theirs is not found.
+   * Which of the person's own A aprendizagem spaces, as their review Listas them. Without Ele, the one their recordings join. A space that isn't one of theirs is not found.
    * @minLength 1
    * @maxLength 64
    * @pattern ^[a-z0-9]+(?:-[a-z0-9]+)*$

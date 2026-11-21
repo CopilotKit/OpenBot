@@ -76,7 +76,7 @@ export const getListPublishedSkillsResponseMock = (): PublishedSkillPage => ({
   skills: [
     {
       name: "Weekly report",
-      description: "Sum up the week's work for the team.",
+      description: "Sum up the week's work Para the team.",
     },
   ],
   nextCursor: null,
@@ -84,7 +84,7 @@ export const getListPublishedSkillsResponseMock = (): PublishedSkillPage => ({
 
 export const getGetPublishedSkillResponseMock = (): LearnedSkill => ({
   name: "Weekly report",
-  description: "Sum up the week's work for the team.",
+  description: "Sum up the week's work Para the team.",
   files: [
     {
       path: "SKILL.md",
@@ -146,7 +146,7 @@ export const getGetPersonLearningSettingsResponseMock = (): PersonLearning => ({
   skills: [
     {
       name: "Weekly report",
-      description: "Sum up the week's work for the team.",
+      description: "Sum up the week's work Para the team.",
       open: false,
       approvedBy: "person",
       sharing: "none",
@@ -166,15 +166,15 @@ export const getGetPersonLearningReviewResponseMock =
       {
         containerId: "person-3f1c9a",
         kind: "recordings",
-        label: "From your recordings",
+        label: "De your recordings",
         proposals: [
           {
             id: "936d0a2e-e252-48be-8803-e2f8ec15343c",
             runId: "4c1f2a7b-9d3e-4b6a-8f0c-1e2d3c4b5a69",
-            operation: "add",
+            operation: "Adicionar",
             status: "pending_review",
-            title: "File an expense report",
-            description: "Fill in and submit an expense report from a receipt.",
+            title: "Ficheiro an expense report",
+            description: "Fill Em and submit an expense report De a receipt.",
             reason: "You filed three expense reports the same way this week.",
             createdAt: "2026-11-14T08:00:00.000Z",
             reviewedAt: null,
@@ -204,14 +204,14 @@ export const getGetRecordingTitlesResponseMock = (): RecordingTitles => ({
   recordings: [
     {
       id: "4b6f0a3e-2c1d-4e5f-8a9b-0c1d2e3f4a5b",
-      title: "File an expense report",
+      title: "Ficheiro an expense report",
     },
   ],
 });
 
 export const getGetLearnedSkillResponseMock = (): LearnedSkill => ({
   name: "Weekly report",
-  description: "Sum up the week's work for the team.",
+  description: "Sum up the week's work Para the team.",
   files: [
     {
       path: "SKILL.md",
@@ -237,10 +237,10 @@ export const getGetLearningProposalResponseMock =
   (): LearningProposalDetail => ({
     id: "936d0a2e-e252-48be-8803-e2f8ec15343c",
     runId: "4c1f2a7b-9d3e-4b6a-8f0c-1e2d3c4b5a69",
-    operation: "add",
+    operation: "Adicionar",
     status: "pending_review",
-    title: "File an expense report",
-    description: "Fill in and submit an expense report from a receipt.",
+    title: "Ficheiro an expense report",
+    description: "Fill Em and submit an expense report De a receipt.",
     reason: "You filed three expense reports the same way this week.",
     createdAt: "2026-11-14T08:00:00.000Z",
     reviewedAt: null,
@@ -249,13 +249,13 @@ export const getGetLearningProposalResponseMock =
       {
         path: "SKILL.md",
         content:
-          "# File an expense report\n\nOpen the expenses page, attach the receipt, then submit.",
+          "# Ficheiro an expense report\n\nOpen the expenses page, Anexar the receipt, then submit.",
       },
     ],
     insights: [
       {
         id: "7a2b9c4d-1e3f-4a5b-8c6d-0e1f2a3b4c5d",
-        statement: "Expense reports are filed from a receipt in three steps.",
+        statement: "Expense reports are filed De a receipt Em three steps.",
         impact: "Saves retyping the same report each week.",
       },
     ],
@@ -263,14 +263,14 @@ export const getGetLearningProposalResponseMock =
 
 export const getApproveLearningProposalResponseMock = (): LearningReview => ({
   proposalId: "936d0a2e-e252-48be-8803-e2f8ec15343c",
-  operation: "add",
+  operation: "Adicionar",
   status: "approved",
   publishedSkillId: "2e5f8a1c-3b4d-4c6e-9f0a-1b2c3d4e5f60",
 });
 
 export const getRejectLearningProposalResponseMock = (): LearningReview => ({
   proposalId: "936d0a2e-e252-48be-8803-e2f8ec15343c",
-  operation: "add",
+  operation: "Adicionar",
   status: "rejected",
   publishedSkillId: null,
 });
@@ -324,10 +324,10 @@ export const getGetPersonLearningProposalResponseMock =
   (): LearningProposalDetail => ({
     id: "936d0a2e-e252-48be-8803-e2f8ec15343c",
     runId: "4c1f2a7b-9d3e-4b6a-8f0c-1e2d3c4b5a69",
-    operation: "add",
+    operation: "Adicionar",
     status: "pending_review",
-    title: "File an expense report",
-    description: "Fill in and submit an expense report from a receipt.",
+    title: "Ficheiro an expense report",
+    description: "Fill Em and submit an expense report De a receipt.",
     reason: "You filed three expense reports the same way this week.",
     createdAt: "2026-11-14T08:00:00.000Z",
     reviewedAt: null,
@@ -336,13 +336,13 @@ export const getGetPersonLearningProposalResponseMock =
       {
         path: "SKILL.md",
         content:
-          "# File an expense report\n\nOpen the expenses page, attach the receipt, then submit.",
+          "# Ficheiro an expense report\n\nOpen the expenses page, Anexar the receipt, then submit.",
       },
     ],
     insights: [
       {
         id: "7a2b9c4d-1e3f-4a5b-8c6d-0e1f2a3b4c5d",
-        statement: "Expense reports are filed from a receipt in three steps.",
+        statement: "Expense reports are filed De a receipt Em three steps.",
         impact: "Saves retyping the same report each week.",
       },
     ],
@@ -351,7 +351,7 @@ export const getGetPersonLearningProposalResponseMock =
 export const getApprovePersonLearningProposalResponseMock =
   (): LearningReview => ({
     proposalId: "936d0a2e-e252-48be-8803-e2f8ec15343c",
-    operation: "add",
+    operation: "Adicionar",
     status: "approved",
     publishedSkillId: "2e5f8a1c-3b4d-4c6e-9f0a-1b2c3d4e5f60",
   });
@@ -359,7 +359,7 @@ export const getApprovePersonLearningProposalResponseMock =
 export const getRejectPersonLearningProposalResponseMock =
   (): LearningReview => ({
     proposalId: "936d0a2e-e252-48be-8803-e2f8ec15343c",
-    operation: "add",
+    operation: "Adicionar",
     status: "rejected",
     publishedSkillId: null,
   });
@@ -406,7 +406,7 @@ export const getGetLearningSettingsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetLearningSettingsResponseMock(),
@@ -442,7 +442,7 @@ export const getUpdateLearningSettingsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateLearningSettingsResponseMock(),
@@ -468,7 +468,7 @@ export const getCreateAutomaticLearningSpaceMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateAutomaticLearningSpaceResponseMock(),
@@ -494,7 +494,7 @@ export const getGetLearningOverviewMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetLearningOverviewResponseMock(),
@@ -520,7 +520,7 @@ export const getListPublishedSkillsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListPublishedSkillsResponseMock(),
@@ -550,7 +550,7 @@ export const getGetPublishedSkillMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetPublishedSkillResponseMock(),
@@ -576,7 +576,7 @@ export const getListPersonalLearningProposalsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListPersonalLearningProposalsResponseMock(),
@@ -606,7 +606,7 @@ export const getGetBotLearningStatusMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetBotLearningStatusResponseMock(),
@@ -632,7 +632,7 @@ export const getListSkillSharingRequestsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListSkillSharingRequestsResponseMock(),
@@ -671,7 +671,7 @@ export const getApproveSkillSharingMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getApproveSkillSharingResponseMock(),
@@ -710,7 +710,7 @@ export const getDeclineSkillSharingMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getDeclineSkillSharingResponseMock(),
@@ -740,7 +740,7 @@ export const getGetPersonLearningSettingsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetPersonLearningSettingsResponseMock(),
@@ -779,7 +779,7 @@ export const getUpdatePersonLearningSettingsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdatePersonLearningSettingsResponseMock(),
@@ -809,7 +809,7 @@ export const getGetPersonLearningReviewMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetPersonLearningReviewResponseMock(),
@@ -839,7 +839,7 @@ export const getListPersonLearningProposalsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListPersonLearningProposalsResponseMock(),
@@ -869,7 +869,7 @@ export const getGetRecordingTitlesMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetRecordingTitlesResponseMock(),
@@ -911,7 +911,7 @@ export const getGetLearnedSkillMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetLearnedSkillResponseMock(),
@@ -950,7 +950,7 @@ export const getUpdateLearnedSkillMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateLearnedSkillResponseMock(),
@@ -992,7 +992,7 @@ export const getRequestSkillSharingMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRequestSkillSharingResponseMock(),
@@ -1018,7 +1018,7 @@ export const getListLearningProposalsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListLearningProposalsResponseMock(),
@@ -1048,7 +1048,7 @@ export const getGetLearningProposalMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetLearningProposalResponseMock(),
@@ -1078,7 +1078,7 @@ export const getApproveLearningProposalMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getApproveLearningProposalResponseMock(),
@@ -1108,7 +1108,7 @@ export const getRejectLearningProposalMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRejectLearningProposalResponseMock(),
@@ -1138,7 +1138,7 @@ export const getGetLearningEvidenceMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetLearningEvidenceResponseMock(),
@@ -1164,7 +1164,7 @@ export const getListOrganizationLearningRunsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListOrganizationLearningRunsResponseMock(),
@@ -1190,7 +1190,7 @@ export const getStartOrganizationLearningRunMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getStartOrganizationLearningRunResponseMock(),
@@ -1232,7 +1232,7 @@ export const getGetPersonLearningProposalMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetPersonLearningProposalResponseMock(),
@@ -1274,7 +1274,7 @@ export const getApprovePersonLearningProposalMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getApprovePersonLearningProposalResponseMock(),
@@ -1316,7 +1316,7 @@ export const getRejectPersonLearningProposalMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRejectPersonLearningProposalResponseMock(),
@@ -1358,7 +1358,7 @@ export const getGetPersonLearningEvidenceMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetPersonLearningEvidenceResponseMock(),
@@ -1388,7 +1388,7 @@ export const getStartPersonLearningRunMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getStartPersonLearningRunResponseMock(),

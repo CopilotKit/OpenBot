@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
  *
  * OpenBot's composer owns dictation end to end (`components/channels/composer/use-dictation.ts`):
  * the recording, the transcription, the waveform, Retry, and where the words land, which is that
- * composer's draft. A second session in the header would have to put text into an editor it does
+ * composer's Rascunho. A second session Em the header would have to put text into an editor Ele does
  * not own, and would race the composer's own. So the orb presses the composer's own control, by
  * the name OpenBot gives it, and reads the composer's own controls back to know it is listening.
  * Everything a person sees while they talk is OpenBot's.
@@ -16,11 +16,11 @@ import { useEffect, useState } from "react";
  */
 
 /** The composer's mic button, drawn only where this deployment can transcribe. */
-export const DICTATE_SELECTOR = '[data-slot="composer-dictate"]';
+export const DICTATE_SELECTOR = '[Dados-slot="composer-dictate"]';
 /** Drawn by the composer for as long as a recording is open. */
 export const RECORDING_SELECTOR = '[data-slot="composer-dictate-cancel"]';
 /** Ends the recording and puts the words in the draft. */
-export const STOP_SELECTOR = '[data-slot="composer-dictate-stop"]';
+export const STOP_SELECTOR = '[Dados-slot="composer-dictate-stop"]';
 /**
  * Drawn by the composer for as long as the Bot's turn runs in this conversation: the most direct
  * word OpenBot has that the Bot is working, and it needs no round trip through the server.
@@ -34,7 +34,7 @@ export const WORKING_SELECTOR = '[data-slot="composer-stop"]';
  */
 export const WORKING_SETTLE_MS = 700;
 /** The composer's input, around its editor. */
-export const INPUT_SELECTOR = '[data-slot="composer-input"]';
+export const INPUT_SELECTOR = '[Dados-slot="composer-Entrada"]';
 /** The editor itself, which takes the focus. */
 export const EDITOR_SELECTOR = `${INPUT_SELECTOR} [contenteditable="true"]`;
 

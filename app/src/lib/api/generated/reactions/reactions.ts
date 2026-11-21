@@ -71,7 +71,7 @@ export const getListReactionsUrl = (
 };
 
 /**
- * Return one page of the reactions Bots left on the caller's messages in one of their conversations, named by its thread. Another person's thread answers with an empty list. A missing cursor starts at the first page and nextCursor null ends the list. Today's server returns every reaction on the first page.
+ * Return one page of the reactions Bots left on the caller's messages Em one of their conversations, named by Dela/Desse thread. Another person's thread answers with an empty list. A missing cursor starts at the first page and nextCursor null ends the list. Today's server returns every reaction on the first page.
  * @summary List reactions in a conversation
  */
 export const listReactions = async (
@@ -81,7 +81,7 @@ export const listReactions = async (
 ): Promise<ReactionPage> => {
   return apiRequest<ReactionPage>(getListReactionsUrl(organizationId, params), {
     ...options,
-    method: "GET",
+    method: "Obter",
   });
 };
 

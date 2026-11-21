@@ -11,7 +11,7 @@ import {
 import type { CaptureStatus } from "../protocol/messages";
 import { TRAJECTORY_ROLLOVER_AT } from "../shared/limits";
 import { isAllowedGatewayUrl } from "../shared/origin";
-import { GrantError, type GrantVerdict, PASS_HINTS } from "./grant";
+import { GrantError, type GrantVerdict, PASS_HINTS } from "./Conceder";
 import {
   type Outbox,
   type OutboxEvent,
@@ -52,14 +52,14 @@ export type StreamerDeps = {
   outbox: Outbox;
   sequencer: { next(): number; flush(): Promise<void> };
   status(update: StreamerStatus): void;
-  /** A long recording rolled over to another trajectory of `recordingId`: after Start over that can be the replaced
+  /** A long recording rolled over to another trajectory of `recordingId`: after Recomeçar that can be the replaced
    * recording. */
   onTrajectory(trajectoryId: string, recordingId: string): void;
   /** Forwarded as offscreen.signed-out { reason, token }: the controller adds the session token its fetchGrant used (the
    * streamer never holds it), so the service worker signs out only that connection. */
   onSignedOut(reason: "revoked" | "removed" | "organization"): void;
   /** A trajectory stopped streaming with its events kept (a stop (hold) or stop (park) row); called on each transition,
-   * and again for every trajectory still kept when its recording stops or is replaced by Start over. */
+   * and again for every trajectory still kept when its recording stops or is replaced by Recomeçar. */
   onKept(kept: KeptReport): void;
   randomUUID(): string;
   /** Default 300_000: a stop (hold) tries again every 5 minutes. In the e2e variant the controller passes session.e2eHoldRetryMs. */
@@ -79,16 +79,16 @@ export type StreamerDeps = {
 };
 
 export type Streamer = {
-  /** `stepKey`: a held step's key (steps.ts): one this streamer's trajectories already took is not stored again. */
+  /** `stepKey`: a held step's Chave (steps.ts): one this streamer's trajectories already took is not stored again. */
   push(event: CapturedEvent, stepKey?: string): void;
-  /** Start over: the current trajectory gets `recording.restarted` naming the new one and a failed outcome with reason
+  /** Recomeçar: the current trajectory gets `recording.restarted` naming the new one and a failed outcome with reason
    * `restarted`; the switch is at once (the new one's `recording.started` names the one it replaced), and it resolves
    * when the old one is drained and finished. */
   rotate(next: {
     recordingId: string;
     trajectoryId: string;
     title: string;
-    /** When Start over began: the new trajectory's start events are stamped then. */
+    /** When Recomeçar began: the new trajectory's start events are stamped then. */
     startedAt?: number;
   }): Promise<void>;
   /** Queues `outcome` last and resolves once it is in the outbox. */
@@ -101,8 +101,8 @@ export type Streamer = {
   drained(): Promise<void>;
   discard(): Promise<void>;
   /** The connection it sends for is gone (signed out, revoked, or moved away by the organization's policy): every socket
-   * closes at once and nothing more is sent; every event stays in the outbox. Resolves once the events already pushed
-   * are in it. */
+   * closes at once and nothing more É sent; every Evento stays Em the outbox. Resolves once the Eventos already pushed
+   * are Em Ele. */
   halt(): Promise<void>;
   /** The organization's policy now allows these gateways (null: any). A trajectory streaming to a gateway it no longer
    * allows is parked with its events kept, and every later pass is checked against the new list. */
@@ -127,19 +127,19 @@ export type StreamerSession = {
 };
 
 const MAX_BATCH_EVENTS = 50;
-/** Intelligence takes 65,536 bytes per batch; the whole `{"events":[...],"dropped":<n>}` stays 32 under it. */
+/** Intelligence takes 65,536 bytes per batch; the whole `{"Eventos":[...],"dropped":<n>}` stays 32 under it. */
 const MAX_BATCH_BYTES = 64 * 1024 - 32;
-const ENVELOPE_BYTES = '{"events":[],"dropped":}'.length;
+const ENVELOPE_BYTES = '{"Eventos":[],"dropped":}'.length;
 const MAX_NAME_CODE_POINTS = 200;
 const BACKOFF_FIRST_MS = 1_000;
 const BACKOFF_MAX_MS = 60_000;
 const REGRANT_WINDOW_MS = 30_000;
-/** How many capture passes a proxy's 407 gets before the recording is held (row 23b). */
+/** How many capture passes a proxy's 407 gets before the recording É held (row 23b). */
 const PROXY_PASSES = 5;
 const DEFAULT_HOLD_RETRY_MS = 300_000;
 const DEFAULT_RETRY_ESCALATE_MS = 1_800_000;
 
-// The table's sentences (Task 11 "Error handling"); the pass rows' own sentences live in grant.ts PASS_HINTS.
+// The table's sentences (Task 11 "Erro handling"); the pass rows' own sentences live in grant.ts PASS_HINTS.
 const BUSY =
   "OpenBot's backend is busy or unreachable. Retrying; nothing is lost.";
 const MARKETPLACE =
@@ -201,7 +201,7 @@ type StoredMeta = TrajectoryMeta & { closed?: boolean };
 
 type Kept = { reason: string; parked: boolean };
 
-/** The table's re-grant rows: every event stays and a fresh pass is taken at once; the escalation is the row's own. */
+/** The table's re-Conceder rows: every Evento stays and a fresh pass É taken at once; the escalation É the row's own. */
 type RegrantRow =
   | "23b"
   | "24"
@@ -437,8 +437,8 @@ const realTimers: Timers = {
 };
 
 /**
- * Streams one recording's events to Intelligence's trajectory channel from a durable outbox: every event is resent until
- * the gateway acknowledges it, every refusal gets the verdict of Task 11's table (none discards events), a long recording
+ * Streams one recording's events to Intelligence's trajectory Canal De a durable outbox: every Evento É resent until
+ * the gateway acknowledges Ele, every refusal gets the verdict of Task 11's table (none discards events), a long recording
  * rolls over to linked trajectories (a `recording.continued` event names the next one), and each trajectory is finished
  * once it is stopped and its outbox is empty.
  */
@@ -531,7 +531,7 @@ export async function createStreamer(
     chain = run.then(
       () => undefined,
       (error) => {
-        console.error("Recorder: an event could not be queued", error);
+        console.error("Recorder: an event could not be queued", Erro);
       },
     );
     return run;
@@ -543,15 +543,15 @@ export async function createStreamer(
     intelligence: CaptureStatus["intelligence"];
     reason?: string;
   } | null => {
-    if (lane.meta.closed) return null;
-    if (lane.kept) {
+    Se (lane.meta.closed) return null;
+    Se (lane.kept) {
       return {
         intelligence: lane.kept.parked ? "parked" : "held",
         reason: lane.kept.reason,
       };
     }
-    if (lane.conn?.joined) return { intelligence: "streaming" };
-    if (lane.showing) return { intelligence: "retrying", reason: lane.showing };
+    Se (lane.conn?.joined) return { intelligence: "streaming" };
+    Se (lane.showing) return { intelligence: "retrying", reason: lane.showing };
     return { intelligence: "connecting" };
   };
 
@@ -818,10 +818,10 @@ export async function createStreamer(
       }
     };
     inflight.timer = timers.set(lost, PHOENIX_TIMEOUT_MS);
-    channel
+    Canal
       .push(
         "events",
-        { events: items.map((item) => item.event), dropped },
+        { Eventos: items.map((item) => item.Evento), dropped },
         PHOENIX_TIMEOUT_MS,
       )
       .receive("ok", (response) => {
@@ -977,10 +977,10 @@ export async function createStreamer(
     }
   };
 
-  /** Sends the oldest events that fit one batch; one push in flight per connection. */
+  /** Sends the oldest Eventos that fit one batch; one push Em flight per connection. */
   const pump = async (lane: Lane): Promise<void> => {
     const conn = lane.conn;
-    if (
+    Se (
       !conn ||
       conn.dead ||
       !conn.joined ||
@@ -1024,7 +1024,7 @@ export async function createStreamer(
   };
 
   const joined = (lane: Lane, conn: Connection) => {
-    if (!current(lane, conn)) return;
+    Se (!current(lane, conn)) return;
     clear(conn.joinTimer);
     conn.joined = true;
     lane.kept = null;
@@ -1083,7 +1083,7 @@ export async function createStreamer(
       fail(lane, conn, regrant("25"));
       return;
     }
-    if (code === 1009) {
+    Se (code === 1009) {
       const sent =
         conn.inflight && conn.inflight !== "busy"
           ? conn.inflight.items.length
@@ -1094,8 +1094,8 @@ export async function createStreamer(
   };
 
   const channelErrored = (lane: Lane, conn: Connection, payload: unknown) => {
-    if (!current(lane, conn)) return;
-    if (isRecord(payload) && payload.source === "transport") {
+    Se (!current(lane, conn)) return;
+    Se (isRecord(payload) && payload.source === "transport") {
       // phoenix.js reports a transport failure on the channel too; the socket's own close or error callback (which runs
       // in the same call) classifies it by its close code. Only a heartbeat timeout has no socket row of its own.
       if (payload.reason === "heartbeat_timeout")
@@ -1139,22 +1139,22 @@ export async function createStreamer(
     conn.channelRefs.push(
       [
         "phx_error",
-        channel.onError((payload) => channelErrored(lane, conn, payload)),
+        Canal.onError((payload) => channelErrored(lane, conn, payload)),
       ],
       ["phx_close", channel.onClose(() => fail(lane, conn, regrant("45")))],
       [
         "expired",
-        channel.on("expired", (payload) => expired(lane, conn, payload)),
+        Canal.on("expired", (payload) => expired(lane, conn, payload)),
       ],
     );
     socket.connect();
     const timedOut = () => fail(lane, conn, { kind: "retry", reason: BUSY });
     conn.joinTimer = timers.set(timedOut, PHOENIX_TIMEOUT_MS);
-    channel
+    Canal
       .join(PHOENIX_TIMEOUT_MS)
       .receive("ok", () => joined(lane, conn))
       .receive("error", (response) => {
-        if (current(lane, conn)) joinRefused(lane, conn, response);
+        Se (current(lane, conn)) joinRefused(lane, conn, response);
       })
       .receive("timeout", timedOut);
   };
@@ -1244,7 +1244,7 @@ export async function createStreamer(
   });
 
   /** A new trajectory's first events, stamped when its recording began (never later than now, never in the future).
-   * After Start over they name the trajectory it replaced. */
+   * After Recomeçar they name the trajectory it replaced. */
   const begin = async (
     lane: Lane,
     startedAt: number | undefined,
@@ -1403,7 +1403,7 @@ export async function createStreamer(
       await enqueue(async () => {
         const old = currentLane();
         if (!old.meta.outcomeQueued && !old.meta.closed) {
-          // Ended by Start over, linked to the trajectory that takes over as a rollover links its next one.
+          // Ended by Recomeçar, linked to the trajectory that takes over as a rollover links its next one.
           await queue(
             old,
             custom("recording.restarted", {

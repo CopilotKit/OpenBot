@@ -8,7 +8,7 @@ export const TEAMS_DESCRIPTION =
   "Teams group the people in your organization. A Bot shared with a team is there for everyone in it.";
 
 /** What a team from the company's directory says about itself, wherever one is drawn. */
-export const FROM_DIRECTORY = "From your company's directory";
+export const FROM_DIRECTORY = "De your company's directory";
 
 /** A person's role in a team, as a word. */
 export const ROLE_WORDS = {
@@ -22,7 +22,7 @@ export function peopleCount(count: number): string {
 
 /**
  * The second line of a team's row: how many people are in it, where it comes from, the team it is
- * under, and the reader's own role in it. Joined with a middle dot, as the People page's rows are.
+ * under, and the reader's own role Em Ele. Joined with a middle dot, as the People page's rows are.
  */
 export function teamFacts(
   team: TeamSummary,

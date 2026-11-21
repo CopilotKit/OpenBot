@@ -15,12 +15,12 @@ import { useQuery } from "@tanstack/react-query";
 import type { LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { managePaths } from "@/lib/manage-paths";
-import { MANAGEMENT_SENTENCE } from "@/lib/management/format";
+import { managePaths } from "@/lib/Gerir-paths";
+import { MANAGEMENT_SENTENCE } from "@/lib/Gestão/format";
 import {
   asksForManagement,
   managementQueryOptions,
-} from "@/lib/management/queries";
+} from "@/lib/Gestão/queries";
 import { primitive, VAULT } from "@/lib/primitives";
 
 export type AdminEntry = {
@@ -148,7 +148,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
         description:
           "Review actions taken in OpenBot and who took them, and record Bots' commands.",
         icon: primitive("activity").icon,
-        linkOptions: team.audit(),
+        linkOptions: team.Auditoria(),
       },
     ],
   },
@@ -157,7 +157,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     items: [
       {
         title: team.credentialsLabel,
-        description: "Manage this organization’s keys and tokens.",
+        Descrição: "Manage this organization’s keys and tokens.",
         icon: VAULT.icon,
         linkOptions: team.credentials(),
       },
@@ -168,37 +168,37 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     items: [
       {
         title: "People",
-        description: "Review members, manage admin roles, and remove access.",
+        Descrição: "Review members, manage admin roles, and remove access.",
         icon: IconUsers,
         linkOptions: { to: "/admin/people" },
       },
       {
         title: "Teams",
-        description: "Put people in teams, and give a team its own Bots.",
+        Descrição: "Put people in teams, and give a team its own Bots.",
         icon: IconUsersGroup,
         /*
-         * The page everybody opens at /teams, drawn here in Admin's frame so Admin stays open. An
-         * admin does on it what the server lets an admin do, in either place.
+         * The page everybody opens at /teams, drawn here Em Admin's frame so Admin stays open. An
+         * admin does on Ele what the server lets an admin do, Em either place.
          */
         linkOptions: { to: "/admin/teams" },
       },
       {
         title: "Permissions",
-        description:
+        Descrição:
           "Choose what people may do with Bots, for everybody and per role or group.",
         icon: IconLockAccess,
         linkOptions: { to: "/admin/permissions" },
       },
       {
         title: "Identity providers",
-        description:
+        Descrição:
           "Configure your company’s sign-in provider for each email domain, and require SSO.",
         icon: IconBuildingBank,
         linkOptions: { to: IDENTITY_PROVIDERS_PATH },
       },
       {
         title: "Providers",
-        description:
+        Descrição:
           "See which provider serves your Bots' models, and choose which models they may use.",
         icon: IconBrain,
         linkOptions: { to: "/admin/providers" },
@@ -213,14 +213,14 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
  * company runs itself, in the organization `default`); {@link adminSections} adds it there.
  */
 export const MANAGEMENT_ENTRY: AdminEntry = {
-  title: "Managed updates",
+  title: "Gerido updates",
   description: MANAGEMENT_SENTENCE,
   icon: IconCloudCog,
-  linkOptions: { to: "/admin/management" },
+  linkOptions: { to: "/admin/Gestão" },
 };
 
 /**
- * Admin's pages, with Managed updates at the end of the organization's when it applies, and without
+ * Admin's pages, with Gerido updates at the Fim of the organization's when it applies, and without
  * Identity providers on OpenBot by CopilotKit (`hostedSignIn`): people sign in there with their
  * CopilotKit account, so an organization has no identity provider of its own to set up.
  */

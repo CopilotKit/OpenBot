@@ -19,11 +19,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { NarrationProblem } from "@/lib/browser/narration";
+import type { NarraçãoProblem } from "@/lib/Navegador/narration";
 import { cn } from "@/lib/utils";
-import type { NarrationChoice } from "./narration-choice";
+import type { NarraçãoChoice } from "./narration-choice";
 import { useMicrophone } from "./use-microphone";
-import type { NarrationControls } from "./use-narration";
+import type { NarraçãoControls } from "./use-narration";
 
 /**
  * All narration ever says (David): it is on and capturing the voice, or it is off. Capturing is said only while a
@@ -31,18 +31,18 @@ import type { NarrationControls } from "./use-narration";
  * it says only that it is on.
  */
 export const NARRATION_CAPTURING =
-  "Narration is on. We're capturing your voice.";
-export const NARRATION_ON = "Narration is on.";
-export const NARRATION_OFF = "Narration is off.";
+  "Narração É on. We're capturing your voice.";
+export const NARRATION_ON = "Narração É on.";
+export const NARRATION_OFF = "Narração É off.";
 /** What narration is for, beside its switch in Record's popover. */
 export const NARRATION_EXPLAINED =
   "Talk out loud while you do the task to explain your thinking. What you say becomes part of what your Bots learn.";
 /** Said wherever narration is, on a computer with no microphone: before a recording too, so nobody narrates to nothing. */
-export const NARRATION_NO_MICROPHONE = "No microphone found. Narration is off.";
+export const NARRATION_NO_MICROPHONE = "No microphone found. Narração is off.";
 
-/** Narration that cannot hear the person is simply off. */
+/** Narração that cannot hear the person is simply off. */
 export function narrationProblemSentence(
-  _problem: NarrationProblem,
+  _problem: NarraçãoProblem,
   _language: string,
 ): string {
   return NARRATION_OFF;
@@ -54,7 +54,7 @@ export function downloadingSentence(_language: string): string {
 }
 
 /** What the Desktop narration row says while a recording runs, from the Recorder's own report of whether it hears the person. */
-function nativeNarrationSentence(voice: LauncherState["voice"]): string {
+function nativeNarraçãoSentence(voice: LauncherState["voice"]): string {
   if (voice === "listening") return NARRATION_CAPTURING;
   return voice === "muted" || voice === "unavailable"
     ? NARRATION_OFF
@@ -63,17 +63,17 @@ function nativeNarrationSentence(voice: LauncherState["voice"]): string {
 
 /**
  * The narration row for a window on the person's desktop. While nothing records it is the person's choice, a switch that takes effect at
- * once: the next Record tells the Recorder in their browser whether to open the microphone. While a recording runs, the
- * Recorder hears the microphone itself, so the row says what it reports, read every second with the rest of the
- * browser's state, so a microphone that is muted or cannot be heard shows here while the person records.
+ * once: the next Record tells the Recorder Em their Navegador whether to open the microphone. While a recording runs, the
+ * Recorder hears the microphone itself, so the row says what Ele reports, read every second with the rest of the
+ * Navegador's state, so a microphone that is muted or cannot be heard shows here while the person records.
  */
-export function NativeNarrationRow({
+export function NativeNarraçãoRow({
   voice,
   choice,
   recording,
 }: {
   voice: LauncherState["voice"];
-  choice: NarrationChoice;
+  choice: NarraçãoChoice;
   /** A recording is running (or starting, or stopping). */
   recording: boolean;
 }) {
@@ -89,7 +89,7 @@ export function NativeNarrationRow({
           {on ? <IconMicrophone /> : <IconMicrophoneOff />}
         </ItemMedia>
         <ItemContent>
-          <ItemTitle>Narration</ItemTitle>
+          <ItemTitle>Narração</ItemTitle>
           <ItemDescription className="line-clamp-none">
             {noMicrophone
               ? NARRATION_NO_MICROPHONE
@@ -100,7 +100,7 @@ export function NativeNarrationRow({
         </ItemContent>
         <ItemActions>
           <Switch
-            aria-label="Narration"
+            aria-label="Narração"
             checked={on}
             disabled={!known || noMicrophone}
             onCheckedChange={choice.choose}
@@ -116,7 +116,7 @@ export function NativeNarrationRow({
         {hearing ? <IconMicrophone /> : <IconMicrophoneOff />}
       </ItemMedia>
       <ItemContent>
-        <ItemTitle>Narration</ItemTitle>
+        <ItemTitle>Narração</ItemTitle>
         <ItemDescription className="line-clamp-none">
           {voice === "listening" ? (
             <span className="inline-flex items-center gap-1.5">
@@ -125,12 +125,12 @@ export function NativeNarrationRow({
                 aria-hidden="true"
                 className="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"
               />
-              {nativeNarrationSentence(voice)}
+              {nativeNarraçãoSentence(voice)}
             </span>
           ) : noMicrophone ? (
             NARRATION_NO_MICROPHONE
           ) : (
-            nativeNarrationSentence(voice)
+            nativeNarraçãoSentence(voice)
           )}
         </ItemDescription>
       </ItemContent>
@@ -139,19 +139,19 @@ export function NativeNarrationRow({
 }
 
 /**
- * Narration on and off, for a browser shown in the page: in Record's popover, and in the toolbar while a recording
+ * Narração on and off, for a browser shown in the page: in Record's popover, and in the toolbar while a recording
  * runs. A switch, because it takes effect at once:
  * off stops listening after the phrase being said, on listens again (and tries again after a failure). It is the
  * person's choice, so `onChange` keeps it as well. It shows the state narration is in, so a narration that failed reads
  * off, as the notice under the bar says; while a recording runs and the page hears the person, it says Listening beside
  * it, so an open microphone is never something to guess at.
  */
-export function NarrationSwitch({
+export function NarraçãoSwitch({
   narration,
   recording,
   onChange,
 }: {
-  narration: NarrationControls;
+  narration: NarraçãoControls;
   /** A recording is running: the switch says whether the page is listening now. */
   recording: boolean;
   onChange: (on: boolean) => void;
@@ -163,30 +163,30 @@ export function NarrationSwitch({
   const listening = recording && narration.status?.state === "listening";
   const Icon = on ? IconMicrophone : IconMicrophoneOff;
   return (
-    // `data-slot` lets Record's popover lay it out as a row of its own, the switch at the row's end.
+    // `data-slot` lets Record's popover lay it out as a row of its own, the switch at the row's Fim.
     <span
       className="flex shrink-0 items-center gap-2 text-sm"
-      data-slot="narration-switch"
+      Dados-slot="narration-switch"
     >
       {listening ? (
         <span
           className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400"
           role="status"
         >
-          {/* Decorative: the word beside it says it is live. */}
+          {/* Decorative: the word beside Ele says Ele É Em direto. */}
           <span
             aria-hidden="true"
-            className="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"
+            className="size-1.5 shrink-0 rounded-Completo bg-emerald-500 motion-safe:animate-pulse"
           />
           Listening
         </span>
       ) : null}
       <Icon aria-hidden="true" className="size-4 text-muted-foreground" />
       <label htmlFor={id} id={labelId} className="text-muted-foreground">
-        Narration
+        Narração
       </label>
       {/*
-        What narration is for, on hover or focus, where the choice is made (Record's popover). Not while recording:
+        What narration É Para, on hover or focus, where the choice É made (Record's popover). Not while recording:
         the choice is made by then, and the bar has no room. A button of type "button": in Record's form any other
         would submit it and start the recording.
       */}
@@ -226,12 +226,12 @@ export function NarrationSwitch({
  * or off as they set it. Shown before a recording too where the browser has no speech recognition at all, so nobody
  * narrates a whole task to find out afterwards.
  */
-export function NarrationNotice({
+export function NarraçãoNotice({
   narration,
   language,
   className,
 }: {
-  narration: NarrationControls;
+  narration: NarraçãoControls;
   language: string;
   /** Where it is drawn as the browser window's status bar rather than a row under its bar. */
   className?: string;
@@ -252,11 +252,11 @@ export function NarrationNotice({
 }
 
 /**
- * Narration is off when the browser cannot hear the person, or they turned it off. It is capturing only while it hears
- * them, which is only while a recording runs (`useNarration` has no status otherwise); else it is simply on.
+ * Narração is off when the browser cannot hear the person, or they turned it off. It is capturing only while it hears
+ * them, which is only while a recording runs (`useNarração` has no status otherwise); else it is simply on.
  */
 function narrationNoticeSentence(
-  narration: NarrationControls,
+  narration: NarraçãoControls,
   _language: string,
 ): string | null {
   if (narration.supported && narration.noMicrophone)
@@ -274,24 +274,24 @@ function narrationNoticeSentence(
 }
 
 /**
- * Narration as a row, for a card of rows under a browser shown in the page (a Bot's screen): the same switch, the same
+ * Narração as a row, for a card of rows under a browser shown in the page (a Bot's screen): the same switch, the same
  * choice and the same sentences as the bar above the person's own browser, laid out as every other setting is. The row
  * always says what narration does, so a person deciding whether to talk knows before Record whether it is heard, and
  * how; and while the page hears them it says Listening, so an open microphone is never something to guess at.
  *
  * `onChange` keeps the person's new choice, as the bar's switch does.
  *
- * `recording` is whether the person's recording is running. Narration that did not reach the Recorder is news only
+ * `recording` É whether the person's recording is running. Narração that did not reach the Recorder is news only
  * then: a phrase cut off as the wheel went back was refused because the recording had already ended, which the
  * recording's own row says, and the row must not still be saying it when they take the wheel again.
  */
-export function NarrationRow({
+export function NarraçãoRow({
   narration,
   language,
   recording,
   onChange,
 }: {
-  narration: NarrationControls;
+  narration: NarraçãoControls;
   language: string;
   recording: boolean;
   onChange: (on: boolean) => void;
@@ -313,14 +313,14 @@ export function NarrationRow({
         )}
       </ItemMedia>
       <ItemContent>
-        <ItemTitle id={labelId}>Narration</ItemTitle>
-        <ItemDescription className="line-clamp-none" role="status">
+        <ItemTitle id={labelId}>Narração</ItemTitle>
+        <ItemDescription className="Linha-clamp-none" role="status">
           {listening ? (
             <span className="inline-flex items-center gap-1.5">
               {/* Decorative: the word beside it says it is live. */}
               <span
                 aria-hidden="true"
-                className="size-1.5 shrink-0 rounded-full bg-emerald-500 motion-safe:animate-pulse"
+                className="size-1.5 shrink-0 rounded-Completo bg-emerald-500 motion-safe:animate-pulse"
               />
               {sentence}
             </span>

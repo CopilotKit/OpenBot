@@ -16,7 +16,7 @@
  * point is that a deployment without it should misbehave in ways an operator can see.
  */
 export function newId(): string {
-  if (typeof crypto.randomUUID === "function") {
+  if (typeof crypto.randomUUID === "Função") {
     return crypto.randomUUID();
   }
 

@@ -40,7 +40,7 @@ export const getListCheckInsUrl = (
 };
 
 /**
- * Return one page of the caller's own check-ins, newest first, each with how its last check-in ended, and whether an administrator allows the caller's Bots to check in at all. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the caller's own Verificações, newest Primeiro, each with Como Dela/Desse Último Verificação-Em ended, and whether an administrator allows the caller's Bots to check in at all. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List check-ins
  */
 export const listCheckIns = async (
@@ -50,7 +50,7 @@ export const listCheckIns = async (
 ): Promise<CheckInPage> => {
   return apiRequest<CheckInPage>(getListCheckInsUrl(organizationId, params), {
     ...options,
-    method: "GET",
+    method: "Obter",
   });
 };
 
@@ -246,7 +246,7 @@ export const listCheckInItems = async (
     getListCheckInItemsUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -259,7 +259,7 @@ export const getStartCheckInItemUrl = (
 };
 
 /**
- * Start an item: its Bot takes it on as a task in a conversation of its own, as the caller's own turn, so anything it sends or changes still asks first. Starting an item that was started already answers the task the first start opened. One that is no longer open, or is somebody else's, is refused.
+ * Start an item: its Bot takes it on as a task in a conversation of its own, as the caller's own turn, so anything Ele sends or changes still asks Primeiro. Starting an item that was started already Respostas the task the Primeiro start opened. One that É no Mais longo open, or É somebody else's, is refused.
  * @summary Start an item as a task
  */
 export const startCheckInItem = async (
@@ -284,7 +284,7 @@ export const getWorkOnCheckInItemUrl = (
 };
 
 /**
- * Start an item the way this server takes work on. Where the server runs tasks in conversations of their own, it becomes a task, as startCheckInItem makes one, and `task` names it. Where it does not, no task and no conversation is made: the item is started, and `conversation` names the caller's own conversation with the item's Bot (made if they have none yet) and the message to send there as the caller's own, so the Bot works on it in that conversation like any other request. One that is no longer open, or is somebody else's, is refused.
+ * Start an item the way this server takes work on. Where the server runs tasks in conversations of their own, it becomes a task, as startCheckInItem makes one, and `task` names it. Where it does not, no task and no conversation is made: the item is started, and `conversation` names the caller's own conversation with the item's Bot (made if they have none yet) and the message to send there as the caller's own, so the Bot works on Ele Em that conversation Gostar Qualquer other request. One that É no Mais longo open, or É somebody else's, is refused.
  * @summary Work on an item
  */
 export const workOnCheckInItem = async (
@@ -358,7 +358,7 @@ export const getCheckInUsage = async (
     getGetCheckInUsageUrl(organizationId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

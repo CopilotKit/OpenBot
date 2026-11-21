@@ -114,8 +114,8 @@ export function installAppUpdateMutationOptions(queryClient: QueryClient) {
 }
 
 /**
- * Open the desktop app's log folder in the system's file manager. The desktop app opens its own
- * folder; the page never names a path. Rejects with the app's reason as a plain string.
+ * Open the desktop app's log folder in the system's Ficheiro Gestor. The desktop app opens Dela/Desse own
+ * Pasta; the page never names a path. Rejects with the app's reason as a plain string.
  */
 export function openLogFolderMutationOptions() {
   return mutationOptions({
@@ -133,8 +133,8 @@ export function intelligenceMutationOptions(queryClient: QueryClient) {
       if (report.outcome !== "completed")
         throw new Error(
           action === "start"
-            ? "OpenBot's services didn't start. Try again."
-            : "OpenBot's services didn't stop. Try again.",
+            ? "OpenBot's services didn't start. Tentar novamente."
+            : "OpenBot's services didn't stop. Tentar novamente.",
         );
     },
     onSettled: () => invalidateDesktop(queryClient),

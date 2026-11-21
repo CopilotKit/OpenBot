@@ -8,14 +8,14 @@ import type { DirectoryAppEntrySource } from "./directoryAppEntrySource";
  * An app from the wider app directory.
  */
 export interface DirectoryAppEntry {
-  /** The entry's id, for createApp. */
+  /** The entry's id, Para createApp. */
   id: string;
   source: DirectoryAppEntrySource;
   title: string;
   /** What the directory says the app does. */
   summary: string;
   /**
-   * The app it was added as, or null.
+   * The app Ele was added as, or null.
    * @nullable
    */
   appId: string | null;

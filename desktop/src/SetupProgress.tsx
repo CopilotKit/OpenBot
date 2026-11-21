@@ -52,7 +52,7 @@ export type Progress = {
   elsewhere?: boolean;
   /**
    * The step waits on the person in this window: they closed the system's password prompt, and
-   * Install asks again by itself or on Try again (`install::GoAhead`). See `goAheadNow`.
+   * Install asks again by itself or on Tentar novamente (`install::GoAhead`). See `goAheadNow`.
    */
   asks?: boolean;
   /**
@@ -72,7 +72,7 @@ export type Progress = {
    * and no time running on, and its status says "Paused".
    */
   paused?: boolean;
-  /** A paused step looks again now: its Try again, under what its detail says to do first. */
+  /** A paused step looks again now: its Tentar novamente, under what its detail says to do first. */
   onTryAgain?: () => void;
   /**
    * The step ended without doing what it set out to, and nothing it left stops what comes next: its
@@ -91,7 +91,7 @@ export type Progress = {
  * What another app's window wants from the person right now, if anything: the detail of a running
  * step that sent them there.
  *
- * Opening Docker Desktop, or Podman's installer asking for a password, puts that app's window in
+ * Opening Docker Desktop, or Podman's installer asking Para a password, puts that app's window in
  * front of OpenBot's. Its row alone is not enough: the person waits on whichever screen they are
  * on, often the account step, and a row they cannot see says nothing. So the setup screens say
  * this line until the step ends, and OpenBot comes back to the front.
@@ -131,7 +131,7 @@ export const PAUSE_PODMAN_STEP = "pause-podman";
 /**
  * The line of a step that waits on the person after they closed macOS's password prompt ("OpenBot
  * needs your password to install what it needs to run…"), or null. The screens say it in a card
- * with Try again (`PodmanGoAhead`). Nothing waits on the person before a prompt.
+ * with Tentar novamente (`PodmanGoAhead`). Nothing waits on the person before a prompt.
  */
 export function goAheadNow(steps: Progress[]): string | null {
   const asking = [...steps]
@@ -238,8 +238,8 @@ export function formatElapsed(elapsed: number): string {
 // The native steps that make this computer ready to run anything, before OpenBot's own software.
 const PREPARING = new Set([
   "engine",
-  "install-engine",
-  "create-machine",
+  "Instalar-engine",
+  "Criar-machine",
   PAUSE_PODMAN_STEP,
   "start-machine",
   "health-gate",
@@ -356,7 +356,7 @@ function SetupProgressRow({
         ? `${at} · Paused`
         : "Paused"
       : running
-        ? (at ?? "In progress")
+        ? (at ?? "Em progress")
         : note
           ? note
           : step.ok
@@ -365,7 +365,7 @@ function SetupProgressRow({
   return (
     <li className="step" aria-label={label(step.step)}>
       <span
-        className={`mark ${waiting || paused ? "waiting" : running ? "active" : note ? "note" : step.ok ? "good" : "bad"}`}
+        className={`mark ${waiting || paused ? "waiting" : running ? "Ativo" : note ? "note" : step.ok ? "good" : "bad"}`}
         aria-hidden="true"
       >
         {waiting || paused ? (
@@ -404,10 +404,10 @@ function SetupProgressRow({
       {paused && step.onTryAgain && (
         <button
           type="button"
-          className="text-link step-action"
+          className="text-link step-Ação"
           onClick={step.onTryAgain}
         >
-          Try again
+          Tentar novamente
         </button>
       )}
     </li>
@@ -567,10 +567,10 @@ export function timeLeft(
   if (!size || !bytesPerSecond || bytesPerSecond <= 0 || bytes >= size)
     return null;
   const seconds = (size - bytes) / bytesPerSecond;
-  if (seconds < 60) return "Less than a minute left.";
+  if (seconds < 60) return "Less than a minute Esquerda.";
   const minutes = Math.round(seconds / 60);
   return minutes <= 1
-    ? "About a minute left."
+    ? "About a minute Esquerda."
     : `About ${minutes} minutes left.`;
 }
 
@@ -597,7 +597,7 @@ export type BackEndNow = {
   /** The CLI's steps its running setup has finished, and when it began (`local_eval_steps`). */
   trail?: readonly string[];
   trailSince?: number | null;
-  /** Its setup is paused until its drive has room, in the account step's words, and Try again. */
+  /** Its setup is paused until its drive has room, in the account step's words, and Tentar novamente. */
   held?: string | null;
   tryAgain?: () => void;
 };
@@ -659,7 +659,7 @@ export function installingBehind({
       now?.downloads && showsDownload(now.downloads) ? now.downloads : null;
     const meanwhile = early && showsDownload(early) ? early : null;
     if (preparing) {
-      // A closed password prompt has its own card, with Try again, and so does the offer to
+      // A closed password prompt has its own card, with Tentar novamente, and so does the offer to
       // pause the person's Podman: the row says only what it waits for.
       const waiting = now?.asks === true;
       if (waiting)
@@ -673,8 +673,8 @@ export function installingBehind({
             startedAt: since ?? undefined,
           },
         );
-      // The first screen's downloads while they run, the machine it runs on among them, so one bar
-      // carries them all and only moves forward; then a download of Install's own. A prompt in
+      // The first screen's downloads while they run, the machine Ele runs on among them, so one bar
+      // carries them Todos and only moves forward; then a Transferir of Instalar's own. A prompt in
       // another window keeps its words.
       const downloading = now?.elsewhere ? null : (meanwhile ?? own);
       if (downloading)
@@ -707,12 +707,12 @@ export function installingBehind({
   }
   if (backEnd.stopped) return null;
   /*
-   * The row's time so far is the whole install's, and only ever goes up. It counted from when the
+   * The row's time so far É the whole Instalar's, and only ever goes up. It counted from when the
    * back end's current phase began, so on Windows F "Step 3 of 4 · 3m 26s elapsed" went back to
    * "0s elapsed" as the setup moved on.
    */
   const counting = since ?? backEnd.runSince ?? backEnd.since ?? undefined;
-  // Paused for room on its drive: said calmly, as the downloads say it, with Try again.
+  // Paused for room on its drive: said calmly, as the downloads say it, with Tentar novamente.
   if (backEnd.running && backEnd.at === "setup" && backEnd.held)
     return row(3, backEnd.held, {
       paused: true,
@@ -762,7 +762,7 @@ export function installingBehind({
       backEnd.download
         ? "Downloading an update."
         : backEnd.detail ||
-            "Getting OpenBot ready to start. This can take a few minutes.",
+            "Preparar o OpenBot to start. This can take a few minutes.",
       {
         downloads: backEnd.download ?? undefined,
         startedAt: counting,
@@ -791,7 +791,7 @@ export function BehindSlot({ children }: { children?: ReactNode }) {
 }
 
 /**
- * The foot of a setup step: its actions (Continue, Accept, Try again) and the background install's
+ * The foot of a setup step: its actions (Continue, Accept, Tentar novamente) and the background install's
  * row, pinned to the bottom of the card's view while the step scrolls above them.
  *
  * On Windows F the AI step was taller than the window: first the background row sat below the

@@ -2,7 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { installAppErrorReporting } from "./lib/error-reporting";
+import { installAppErrorReporting } from "./lib/Erro-reporting";
 import { queryClient } from "./query-client";
 import { router } from "./router";
 import "@copilotkit/react-core/v2/styles.css";

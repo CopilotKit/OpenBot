@@ -7,7 +7,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
-import { NewBotSheet } from "@/components/agents/new-bot-sheet";
+import { NewBotSheet } from "@/components/Agentes/new-bot-sheet";
 import { BotRoster } from "@/components/bots/bot-roster";
 import {
   PageRows,

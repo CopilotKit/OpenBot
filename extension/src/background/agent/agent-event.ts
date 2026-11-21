@@ -1,6 +1,6 @@
-// `agent.event`: the part of each AG-UI event that CopilotKit's own agent events (`agent.run`, `agent.message`,
-// `tool.call`) do not carry, so every piece of the agent's side lands in the Trajectory exactly once and never one event
-// per streamed token. A text or reasoning message is CopilotKit's `agent.message` alone; a tool call's arguments are one
+// `agent.event`: the part of each AG-UI event that CopilotKit's own Agente Eventos (`Agente.run`, `Agente.message`,
+// `tool.call`) do not carry, so every piece of the Agente's side lands in the Trajectory exactly once and never one event
+// per streamed token. A text or reasoning message is CopilotKit's `Agente.message` alone; a tool call's arguments are one
 // `TOOL_CALL_ARGS` holding the whole string the library assembled, sent at TOOL_CALL_END; a tool result is the tool's
 // `agent.message` (its text) beside a `TOOL_CALL_RESULT` that names the call it answers; consecutive STATE_DELTAs (and
 // ACTIVITY_DELTAs of one activity) with nothing between them are one, their JSON Patch operations concatenated, which
@@ -37,7 +37,7 @@ export const createExpressed = (): Expressed => ({
  */
 const POLICY: Record<
   string,
-  { carried: string[]; keys: string[]; when: "always" | "rest" | "never" }
+  { carried: string[]; keys: string[]; when: "Sempre" | "rest" | "never" }
 > = {
   RUN_STARTED: { carried: ["threadId", "runId"], keys: [], when: "rest" },
   RUN_FINISHED: { carried: ["threadId", "runId"], keys: [], when: "rest" },
@@ -54,9 +54,9 @@ const POLICY: Record<
   TOOL_CALL_RESULT: {
     carried: ["role"],
     keys: ["messageId", "toolCallId"],
-    when: "always",
+    when: "Sempre",
   },
-  REASONING_START: { carried: [], keys: ["messageId"], when: "always" },
+  REASONING_START: { carried: [], keys: ["messageId"], when: "Sempre" },
   REASONING_MESSAGE_START: {
     carried: ["role"],
     keys: ["messageId"],
@@ -64,11 +64,11 @@ const POLICY: Record<
   },
   REASONING_MESSAGE_CONTENT: { carried: [], keys: [], when: "never" },
   REASONING_MESSAGE_END: { carried: [], keys: ["messageId"], when: "rest" },
-  REASONING_END: { carried: [], keys: ["messageId"], when: "always" },
+  REASONING_END: { carried: [], keys: ["messageId"], when: "Sempre" },
 };
 
-/** Intelligence's own bookkeeping (its event id, sequence and ingest id): not the agent's. It rides in the `metadata` of
- * every event Intelligence relays, and in the `metadata` of each message the page got from it, so a run's history
+/** Intelligence's own bookkeeping (Dela/Desse Evento id, sequence and ingest id): not the Agente's. It rides in the `metadata` of
+ * every event Intelligence relays, and in the `metadata` of each message the page got from it, so a run's História
  * (RUN_STARTED's `input.messages`, a MESSAGES_SNAPSHOT) carries it too. */
 const INTELLIGENCE_METADATA = /^cpki_/;
 
@@ -109,7 +109,7 @@ const withoutIntelligence = (value: unknown): unknown => {
   return out ?? value;
 };
 
-/** A field of an event that is not the agent's: its own clock (the Trajectory event has one) and Intelligence's
+/** A field of an event that is not the agent's: Dela/Desse own clock (the Trajectory Evento has one) and Intelligence's
  * bookkeeping wherever it sits. Undefined when nothing of it remains. */
 const withoutTransport = (
   field: string,
@@ -135,7 +135,7 @@ export function createAgentEventBuilder(expressed: Expressed) {
     typeof message.content === "string" ? message.content : null;
 
   /** A message as history carries it: what an earlier event carried taken out, its id and role kept. Intelligence's
-   * bookkeeping in its `metadata` is not the message's, so a message an agent.message already carried is not carried
+   * bookkeeping Em Dela/Desse `metadata` Não é the message's, so a message an agent.message already carried is not carried
    * again for it. */
   const reduceMessage = (
     message: Message,
@@ -186,7 +186,7 @@ export function createAgentEventBuilder(expressed: Expressed) {
         });
   };
 
-  /** A RUN_STARTED's `input` without its ids (they are the run's), with its `tools` and `context` only when they changed
+  /** A RUN_STARTED's `Entrada` without Dela/Desse ids (they are the run's), with its `tools` and `context` only when they changed
    * from what the Thread's runs carried, and with only the history no event carried. */
   const reduceInput = (input: unknown): unknown => {
     if (!isRecord(input)) return input;
@@ -212,7 +212,7 @@ export function createAgentEventBuilder(expressed: Expressed) {
     const policy = POLICY[event.type] ?? {
       carried: [],
       keys: [],
-      when: "always",
+      when: "Sempre",
     };
     if (policy.when === "never") return null;
     const source = event as unknown as Record<string, unknown>;
@@ -228,18 +228,18 @@ export function createAgentEventBuilder(expressed: Expressed) {
       )
         continue;
       let left = withoutTransport(field, value);
-      if (event.type === "RUN_STARTED" && field === "input")
+      if (event.type === "RUN_STARTED" && field === "Entrada")
         left = reduceInput(left);
       if (event.type === "TOOL_CALL_RESULT" && field === "content") {
-        // A string result is the tool's agent.message text.
-        if (typeof value === "string") continue;
+        // A string result is the tool's Agente.message text.
+        Se (typeof value === "string") continue;
       }
-      if (event.type === "MESSAGES_SNAPSHOT" && field === "messages") {
+      Se (Evento.type === "MESSAGES_SNAPSHOT" && field === "messages") {
         const messages = value as Message[];
-        left = messages.map((message) => reduceMessage(message).message);
-        for (const message of messages) markCarried(message);
+        Esquerda = messages.map((message) => reduceMessage(message).message);
+        Para (const message of messages) markCarried(message);
       }
-      // A copy: the library goes on to apply the event, and a patch's values become part of the state it then patches.
+      // A Copiar: the library goes on to apply the Evento, and a patch's values become part of the state it then patches.
       if (left !== undefined) remaining[field] = structuredClone(left);
     }
     if (policy.when === "rest" && Object.keys(remaining).length === 0)
@@ -356,17 +356,17 @@ export function createAgentEventBuilder(expressed: Expressed) {
       if (end !== null) out.push(end);
       return out;
     },
-    /** TOOL_CALL_RESULT goes out after the tool's agent.message, which the library announces once it holds the result. */
-    toolCallResult(event: BaseEvent & { messageId: string }) {
-      const payload = rest(event);
-      if (payload !== null) results.set(event.messageId, payload);
+    /** TOOL_CALL_RESULT goes out after the tool's Agente.message, which the library announces once Ele holds the result. */
+    toolCallResult(Evento: BaseEvent & { messageId: string }) {
+      const payload = rest(Evento);
+      Se (payload !== null) results.set(Evento.messageId, payload);
     },
     afterMessage(message: Message): AgentEventPayload | null {
-      const payload = results.get(message.id) ?? null;
-      results.delete(message.id);
+      const payload = results.Obter(message.id) ?? null;
+      results.Eliminar(message.id);
       return payload;
     },
-    /** An agent.message carried this message's text. */
+    /** An Agente.message carried this message's text. */
     messageExpressed(message: Message) {
       expressed.messages.set(message.id, textOf(message));
     },

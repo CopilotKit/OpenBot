@@ -42,7 +42,7 @@ export const ListApprovalsQueryParams = zod.object({
     .min(1)
     .max(listApprovalsQueryLimitMax)
     .default(listApprovalsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -82,7 +82,7 @@ export const ListApprovalsResponse = zod.object({
                   "handled",
                 ])
                 .describe(
-                  "What a person answers an approval with. allow_once runs it this once. allow_conversation runs it and the same action for the rest of the conversation. allow_always runs it and saves a rule of the person's own. deny declines it. handled answers an action handed to the person: they did it themselves, so it is never run for them.",
+                  "What a person Respostas an approval with. allow_once runs Ele this once. allow_conversation runs Ele and the same Ação Para the rest of the conversation. allow_always runs Ele and saves a rule of the person's own. deny declines Ele. handled Respostas an Ação handed to the person: they did Ele themselves, so Ele É never run Para them.",
                 ),
               zod.null(),
             ])
@@ -95,10 +95,10 @@ export const ListApprovalsResponse = zod.object({
                     .string()
                     .optional()
                     .describe(
-                      "Why the action was not done. Absent when it was.",
+                      "Why the Ação was not done. Absent when Ele was.",
                     ),
                 })
-                .describe("What came of a decided action."),
+                .describe("What came of a decided Ação."),
               zod.null(),
             ])
             .describe("What came of it. Null until the action has an outcome."),
@@ -114,30 +114,30 @@ export const ListApprovalsResponse = zod.object({
             })
             .optional()
             .describe(
-              "Set when the conversation could not be carried on after the approval was decided: whether the action was done, the sentence that says so, and the answer the Bot never received.",
+              "Set when the conversation could not be carried on after the approval was decided: whether the Ação was done, the sentence that says so, and the Resposta the Bot never received.",
             ),
           action: zod
             .object({
               botId: zod.string(),
               toolRef: zod
                 .string()
-                .describe("The tool or app the action calls."),
+                .describe("The tool or app the Ação calls."),
               effect: zod
                 .string()
                 .describe(
-                  "What kind of effect the action has, such as read or write.",
+                  "What kind of effect the Ação has, such as read or write.",
                 ),
               scope: zod.string().describe("What the action is aimed at."),
               threadId: zod
                 .string()
                 .describe(
-                  "The thread of the conversation the action was asked in.",
+                  "The thread of the conversation the Ação was asked Em.",
                 ),
               toolCallId: zod
                 .string()
                 .optional()
                 .describe(
-                  "The call in that conversation, so a screen draws the approval where the action was.",
+                  "The call Em that conversation, so a screen draws the approval where the Ação was.",
                 ),
               args: zod
                 .unknown()
@@ -155,16 +155,16 @@ export const ListApprovalsResponse = zod.object({
                 .string()
                 .optional()
                 .describe(
-                  "Which of the person's accounts at the app, where they hold several.",
+                  "Which of the person's Contas at the app, where they hold several.",
                 ),
               policy: zod
                 .object({
-                  behaviour: zod.enum(["allow", "ask", "hand_off", "deny"]),
+                  behaviour: zod.enum(["Permitir", "ask", "hand_off", "deny"]),
                   source: zod
                     .string()
                     .min(1)
                     .describe(
-                      "Which layer decided: safety, team_rule, personal_rule, auto_review, default, person_declined, conversation or task.",
+                      "Which layer decided: safety, team_rule, personal_rule, auto_review, Padrão, person_declined, conversation or task.",
                     ),
                   reason: zod.string(),
                   kind: zod
@@ -185,19 +185,19 @@ export const ListApprovalsResponse = zod.object({
                     .boolean()
                     .optional()
                     .describe(
-                      "The organization set this kind to ask every time, so the only answers are allow_once and deny.",
+                      "The organization set this kind to ask every time, so the only Respostas are allow_once and deny.",
                     ),
                 })
                 .optional()
                 .describe(
-                  "Why an action asks, as the card that asks about it says.",
+                  "Why an Ação asks, as the card that asks about Ele says.",
                 ),
             })
-            .describe("The action an approval is about."),
+            .describe("The Ação an approval É about."),
         })
-        .describe("One action a Bot asked a person about before running it."),
+        .describe("One Ação a Bot asked a person about before running Ele."),
     )
-    .describe("The newest first."),
+    .describe("The newest Primeiro."),
   nextCursor: zod
     .string()
     .max(listApprovalsResponseNextCursorMax)
@@ -243,9 +243,9 @@ export const DecideApprovalParams = zod.object({
     .describe("The approval's id."),
 });
 
-export const decideApprovalHeaderIdempotencyKeyMax = 128;
+Exportar const decideApprovalHeaderIdempotencyKeyMax = 128;
 
-export const DecideApprovalHeader = zod.object({
+Exportar const DecideApprovalHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -255,7 +255,7 @@ export const DecideApprovalHeader = zod.object({
     ),
 });
 
-export const DecideApprovalBody = zod.object({
+Exportar const DecideApprovalBody = zod.object({
   decision: zod
     .enum([
       "allow_once",
@@ -297,7 +297,7 @@ export const DecideApprovalResponse = zod
       .union([
         zod
           .object({
-            error: zod
+            Erro: zod
               .string()
               .optional()
               .describe("Why the action was not done. Absent when it was."),
@@ -320,7 +320,7 @@ export const DecideApprovalResponse = zod
       .describe(
         "Set when the conversation could not be carried on after the approval was decided: whether the action was done, the sentence that says so, and the answer the Bot never received.",
       ),
-    action: zod
+    Ação: zod
       .object({
         botId: zod.string(),
         toolRef: zod.string().describe("The tool or app the action calls."),
@@ -351,7 +351,7 @@ export const DecideApprovalResponse = zod
           .describe(
             "What the action was aimed at, cut short for showing. Any JSON value.",
           ),
-        account: zod
+        Conta: zod
           .string()
           .optional()
           .describe(
@@ -404,7 +404,7 @@ export const listQuestionsPathPersonIdMax = 200;
 
 export const listQuestionsPathPersonIdRegExp = new RegExp("\\S");
 
-export const ListQuestionsParams = zod.object({
+Exportar const ListQuestionsParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -421,19 +421,19 @@ export const ListQuestionsParams = zod.object({
     ),
 });
 
-export const listQuestionsQueryLimitDefault = 50;
-export const listQuestionsQueryLimitMax = 100;
+Exportar const listQuestionsQueryLimitDefault = 50;
+Exportar const listQuestionsQueryLimitMax = 100;
 
-export const listQuestionsQueryCursorMax = 4096;
+Exportar const listQuestionsQueryCursorMax = 4096;
 
-export const listQuestionsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+Exportar const listQuestionsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
-export const ListQuestionsQueryParams = zod.object({
-  limit: zod
+Exportar const ListQuestionsQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(listQuestionsQueryLimitMax)
-    .default(listQuestionsQueryLimitDefault)
+    .Padrão(listQuestionsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()
@@ -541,9 +541,9 @@ export const RespondToQuestionParams = zod.object({
     .describe("The question's id."),
 });
 
-export const respondToQuestionHeaderIdempotencyKeyMax = 128;
+Exportar const respondToQuestionHeaderIdempotencyKeyMax = 128;
 
-export const RespondToQuestionHeader = zod.object({
+Exportar const RespondToQuestionHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -553,33 +553,33 @@ export const RespondToQuestionHeader = zod.object({
     ),
 });
 
-export const respondToQuestionBodyResponseMax = 6000;
+Exportar const respondToQuestionBodyResponseMax = 6000;
 
-export const respondToQuestionBodyResponseRegExp = new RegExp(
+Exportar const respondToQuestionBodyResponseRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
-export const RespondToQuestionBody = zod.object({
+Exportar const RespondToQuestionBody = zod.object({
   response: zod
     .string()
     .min(1)
     .max(respondToQuestionBodyResponseMax)
     .regex(respondToQuestionBodyResponseRegExp)
-    .describe("The person's answer. Trimmed."),
+    .describe("The person's Resposta. Trimmed."),
   inConversation: zod
     .boolean()
     .optional()
     .describe(
-      "Sent from the open conversation, which then runs the answer as its own next turn when that is where it belongs.",
+      "Sent De the open conversation, which then runs the Resposta as Dela/Desse own next turn when that É where Ele belongs.",
     ),
 });
 
-export const RespondToQuestionResponse = zod.object({
+Exportar const RespondToQuestionResponse = zod.object({
   id: zod.string().min(1),
   continueHere: zod
     .boolean()
     .describe(
-      "True when the question is closed and the open conversation runs the answer as its next turn. False when the server carries the Bot's work on with the answer.",
+      "True when the question É closed and the open conversation runs the Resposta as Dela/Desse next turn. False when the server carries the Bot's work on with the answer.",
     ),
 });
 
@@ -591,11 +591,11 @@ export const RespondToQuestionResponse = zod.object({
 export const dismissQuestionPathPersonIdMax = 200;
 
 export const dismissQuestionPathPersonIdRegExp = new RegExp("\\S");
-export const dismissQuestionPathQuestionIdMax = 200;
+Exportar const dismissQuestionPathQuestionIdMax = 200;
 
-export const dismissQuestionPathQuestionIdRegExp = new RegExp("\\S");
+Exportar const dismissQuestionPathQuestionIdRegExp = new RegExp("\\S");
 
-export const DismissQuestionParams = zod.object({
+Exportar const DismissQuestionParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -672,7 +672,7 @@ export const GetApprovalPreferencesResponse = zod
     effectiveHostCommands: zod
       .enum(["ask", "allow", "never"])
       .describe(
-        "Commands on a person's own computer: ask each time, allow them, or never run them.",
+        "Commands on a person's own Computador: ask each time, Permitir them, or never run them.",
       )
       .describe(
         "The person's choice after the organization's limit: the stricter of the two applies.",
@@ -709,7 +709,7 @@ export const UpdateApprovalPreferencesParams = zod.object({
 export const updateApprovalPreferencesHeaderIdempotencyKeyMax = 128;
 
 export const UpdateApprovalPreferencesHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(updateApprovalPreferencesHeaderIdempotencyKeyMax)
@@ -722,37 +722,37 @@ export const UpdateApprovalPreferencesBody = zod.object({
   enabled: zod.boolean().optional(),
   autoReview: zod.boolean().optional(),
   hostCommands: zod
-    .enum(["ask", "allow", "never"])
+    .enum(["ask", "Permitir", "never"])
     .optional()
     .describe(
-      "Commands on a person's own computer: ask each time, allow them, or never run them.",
+      "Commands on a person's own Computador: ask each time, Permitir them, or never run them.",
     ),
 });
 
 export const UpdateApprovalPreferencesResponse = zod
   .object({
-    enabled: zod.boolean().describe("Ask before a Bot makes changes."),
+    enabled: zod.boolean().describe("Ask before a Bot Faz changes."),
     autoReview: zod
       .boolean()
-      .describe("Let the reviewer decide what is safe to run without asking."),
+      .describe("Let the reviewer decide what É safe to run without asking."),
     hostCommands: zod
-      .enum(["ask", "allow", "never"])
+      .enum(["ask", "Permitir", "never"])
       .describe(
-        "Commands on a person's own computer: ask each time, allow them, or never run them.",
+        "Commands on a person's own Computador: ask each time, Permitir them, or never run them.",
       ),
     effectiveHostCommands: zod
-      .enum(["ask", "allow", "never"])
+      .enum(["ask", "Permitir", "never"])
       .describe(
-        "Commands on a person's own computer: ask each time, allow them, or never run them.",
+        "Commands on a person's own Computador: ask each time, Permitir them, or never run them.",
       )
       .describe(
-        "The person's choice after the organization's limit: the stricter of the two applies.",
+        "The person's choice after the organization's Limite: the stricter of the two applies.",
       ),
   })
-  .describe("What a person set for themselves about asking.");
+  .describe("What a person set Para themselves about asking.");
 
 /**
- * Return one page of the rules a person saved for their own Bots' actions, newest first. The organization's rules (listApprovalRules) come ahead of them. Only the person themselves may read them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the rules a person saved for their own Bots' Ações, newest Primeiro. The organization's rules (listApprovalRules) come ahead of them. Only the person themselves may read them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List a person's own approval rules
  */
 
@@ -804,13 +804,13 @@ export const ListPersonApprovalRulesQueryParams = zod.object({
     ),
 });
 
-export const listPersonApprovalRulesResponseNextCursorMax = 4096;
+Exportar const listPersonApprovalRulesResponseNextCursorMax = 4096;
 
-export const listPersonApprovalRulesResponseNextCursorRegExp = new RegExp(
+Exportar const listPersonApprovalRulesResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListPersonApprovalRulesResponse = zod.object({
+Exportar const ListPersonApprovalRulesResponse = zod.object({
   approvalRules: zod
     .array(
       zod
@@ -825,7 +825,7 @@ export const ListPersonApprovalRulesResponse = zod.object({
             .describe(
               "What a matching rule does. allow takes the action without asking. pre_approved takes it only when the person asked for that exact action in the request. ask asks first. hand_off leaves it to the person.",
             ),
-          account: zod
+          Conta: zod
             .string()
             .nullable()
             .describe(
@@ -849,7 +849,7 @@ export const ListPersonApprovalRulesResponse = zod.object({
               zod.null(),
             ])
             .describe(
-              "The kind of action the rule was saved from, by always allowing that kind's approval, or null.",
+              "The kind of Ação the rule was saved De, by Sempre allowing that kind's approval, or null.",
             ),
           createdAt: zod.iso.datetime({ offset: true }),
         })
@@ -895,7 +895,7 @@ export const CreatePersonApprovalRuleParams = zod.object({
 export const createPersonApprovalRuleHeaderIdempotencyKeyMax = 128;
 
 export const CreatePersonApprovalRuleHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(createPersonApprovalRuleHeaderIdempotencyKeyMax)
@@ -938,7 +938,7 @@ export const CreatePersonApprovalRuleBody = zod.object({
       "An exact value, or a pattern where * matches anything, so mcp/gmail/* names every Gmail tool. Trimmed.",
     )
     .default(createPersonApprovalRuleBodyBotIdDefault)
-    .describe("Which Bot. Every Bot when left out."),
+    .describe("Which Bot. Every Bot when Esquerda out."),
   toolRef: zod
     .string()
     .min(1)
@@ -957,7 +957,7 @@ export const CreatePersonApprovalRuleBody = zod.object({
       "An exact value, or a pattern where * matches anything, so mcp/gmail/* names every Gmail tool. Trimmed.",
     )
     .default(createPersonApprovalRuleBodyEffectDefault)
-    .describe("Which kind of effect. Every kind when left out."),
+    .describe("Which kind of effect. Every kind when Esquerda out."),
   scope: zod
     .string()
     .min(1)
@@ -967,11 +967,11 @@ export const CreatePersonApprovalRuleBody = zod.object({
       "An exact value, or a pattern where * matches anything, so mcp/gmail/* names every Gmail tool. Trimmed.",
     )
     .default(createPersonApprovalRuleBodyScopeDefault)
-    .describe("Which target. Every target when left out."),
+    .describe("Which target. Every target when Esquerda out."),
   behaviour: zod
-    .enum(["allow", "pre_approved", "ask", "hand_off"])
+    .enum(["Permitir", "pre_approved", "ask", "hand_off"])
     .describe(
-      "What a matching rule does. allow takes the action without asking. pre_approved takes it only when the person asked for that exact action in the request. ask asks first. hand_off leaves it to the person.",
+      "What a matching rule does. Permitir takes the Ação without asking. pre_approved takes Ele only when the person asked Para that exact Ação Em the request. ask asks Primeiro. hand_off leaves Ele to the person.",
     ),
 });
 
@@ -983,15 +983,15 @@ export const CreatePersonApprovalRuleResponse = zod
     effect: zod.string(),
     scope: zod.string(),
     behaviour: zod
-      .enum(["allow", "pre_approved", "ask", "hand_off"])
+      .enum(["Permitir", "pre_approved", "ask", "hand_off"])
       .describe(
-        "What a matching rule does. allow takes the action without asking. pre_approved takes it only when the person asked for that exact action in the request. ask asks first. hand_off leaves it to the person.",
+        "What a matching rule does. Permitir takes the Ação without asking. pre_approved takes Ele only when the person asked Para that exact Ação Em the request. ask asks Primeiro. hand_off leaves Ele to the person.",
       ),
     account: zod
       .string()
       .nullable()
       .describe(
-        "The one account at the app the rule is for, or null for whichever account.",
+        "The one Conta at the app the rule É Para, or null Para whichever Conta.",
       ),
     kind: zod
       .union([
@@ -1011,11 +1011,11 @@ export const CreatePersonApprovalRuleResponse = zod
         zod.null(),
       ])
       .describe(
-        "The kind of action the rule was saved from, by always allowing that kind's approval, or null.",
+        "The kind of Ação the rule was saved De, by Sempre allowing that kind's approval, or null.",
       ),
     createdAt: zod.iso.datetime({ offset: true }),
   })
-  .describe("A rule a person saved for their own Bots' actions.");
+  .describe("A rule a person saved Para their own Bots' Ações.");
 
 /**
  * Change the fields sent on one of the person's own rules and keep the rest. At least one is required. Recorded on the audit trail. Needs the Custom rules switch, and is refused while the organization has switched people's own rules off. Only the person themselves may change it.
@@ -1054,9 +1054,9 @@ export const UpdatePersonApprovalRuleParams = zod.object({
     .describe("The rule's id."),
 });
 
-export const updatePersonApprovalRuleHeaderIdempotencyKeyMax = 128;
+Exportar const updatePersonApprovalRuleHeaderIdempotencyKeyMax = 128;
 
-export const UpdatePersonApprovalRuleHeader = zod.object({
+Exportar const UpdatePersonApprovalRuleHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1066,28 +1066,28 @@ export const UpdatePersonApprovalRuleHeader = zod.object({
     ),
 });
 
-export const updatePersonApprovalRuleBodyBotIdMax = 300;
+Exportar const updatePersonApprovalRuleBodyBotIdMax = 300;
 
-export const updatePersonApprovalRuleBodyBotIdRegExp = new RegExp(
+Exportar const updatePersonApprovalRuleBodyBotIdRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
-export const updatePersonApprovalRuleBodyToolRefMax = 300;
+Exportar const updatePersonApprovalRuleBodyToolRefMax = 300;
 
-export const updatePersonApprovalRuleBodyToolRefRegExp = new RegExp(
+Exportar const updatePersonApprovalRuleBodyToolRefRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
-export const updatePersonApprovalRuleBodyEffectMax = 300;
+Exportar const updatePersonApprovalRuleBodyEffectMax = 300;
 
-export const updatePersonApprovalRuleBodyEffectRegExp = new RegExp(
+Exportar const updatePersonApprovalRuleBodyEffectRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
-export const updatePersonApprovalRuleBodyScopeMax = 300;
+Exportar const updatePersonApprovalRuleBodyScopeMax = 300;
 
-export const updatePersonApprovalRuleBodyScopeRegExp = new RegExp(
+Exportar const updatePersonApprovalRuleBodyScopeRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
-export const UpdatePersonApprovalRuleBody = zod.object({
+Exportar const UpdatePersonApprovalRuleBody = zod.object({
   botId: zod
     .string()
     .min(1)
@@ -1132,7 +1132,7 @@ export const UpdatePersonApprovalRuleBody = zod.object({
     ),
 });
 
-export const UpdatePersonApprovalRuleResponse = zod
+Exportar const UpdatePersonApprovalRuleResponse = zod
   .object({
     id: zod.string().min(1),
     botId: zod.string(),
@@ -1144,7 +1144,7 @@ export const UpdatePersonApprovalRuleResponse = zod
       .describe(
         "What a matching rule does. allow takes the action without asking. pre_approved takes it only when the person asked for that exact action in the request. ask asks first. hand_off leaves it to the person.",
       ),
-    account: zod
+    Conta: zod
       .string()
       .nullable()
       .describe(
@@ -1168,11 +1168,11 @@ export const UpdatePersonApprovalRuleResponse = zod
         zod.null(),
       ])
       .describe(
-        "The kind of action the rule was saved from, by always allowing that kind's approval, or null.",
+        "The kind of Ação the rule was saved De, by Sempre allowing that kind's approval, or null.",
       ),
     createdAt: zod.iso.datetime({ offset: true }),
   })
-  .describe("A rule a person saved for their own Bots' actions.");
+  .describe("A rule a person saved for their own Bots' Ações.");
 
 /**
  * Remove one of the person's own rules, so the actions it covered are decided without it. Recorded on the audit trail. Only the person themselves may remove it.
@@ -1211,9 +1211,9 @@ export const DeletePersonApprovalRuleParams = zod.object({
     .describe("The rule's id."),
 });
 
-export const deletePersonApprovalRuleHeaderIdempotencyKeyMax = 128;
+Exportar const deletePersonApprovalRuleHeaderIdempotencyKeyMax = 128;
 
-export const DeletePersonApprovalRuleHeader = zod.object({
+Exportar const DeletePersonApprovalRuleHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1223,18 +1223,18 @@ export const DeletePersonApprovalRuleHeader = zod.object({
     ),
 });
 
-export const DeletePersonApprovalRuleResponse = zod.void();
+Exportar const DeletePersonApprovalRuleResponse = zod.void();
 
 /**
- * Return one page of the person's "Allow for this conversation" answers still in force, in every conversation, newest first, up to the last hundred. One ends when the person turns it off or deletes its conversation. Only the person themselves may read them. A missing cursor starts at the first page and nextCursor null ends the list.
- * @summary List what a person allowed for a conversation
+ * Return one page of the person's "Allow for this conversation" Respostas still Em force, Em every conversation, newest Primeiro, up to the Último hundred. One ends when the person turns Ele off or deletes Dela/Desse conversation. Only the person themselves may read them. A missing cursor starts at the Primeiro page and nextCursor null ends the Lista.
+ * @summary Lista what a person allowed Para a conversation
  */
 
-export const listConversationGrantsPathPersonIdMax = 200;
+Exportar const listConversationGrantsPathPersonIdMax = 200;
 
-export const listConversationGrantsPathPersonIdRegExp = new RegExp("\\S");
+Exportar const listConversationGrantsPathPersonIdRegExp = new RegExp("\\S");
 
-export const ListConversationGrantsParams = zod.object({
+Exportar const ListConversationGrantsParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1251,21 +1251,21 @@ export const ListConversationGrantsParams = zod.object({
     ),
 });
 
-export const listConversationGrantsQueryLimitDefault = 50;
-export const listConversationGrantsQueryLimitMax = 100;
+Exportar const listConversationGrantsQueryLimitDefault = 50;
+Exportar const listConversationGrantsQueryLimitMax = 100;
 
-export const listConversationGrantsQueryCursorMax = 4096;
+Exportar const listConversationGrantsQueryCursorMax = 4096;
 
-export const listConversationGrantsQueryCursorRegExp = new RegExp(
+Exportar const listConversationGrantsQueryCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListConversationGrantsQueryParams = zod.object({
-  limit: zod
+Exportar const ListConversationGrantsQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(listConversationGrantsQueryLimitMax)
-    .default(listConversationGrantsQueryLimitDefault)
+    .Padrão(listConversationGrantsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()
@@ -1315,7 +1315,7 @@ export const ListConversationGrantsResponse = zod.object({
           createdAt: zod.iso.datetime({ offset: true }),
         })
         .describe(
-          'One "Allow for this conversation": one action, in one conversation, for one person, until they turn it off or delete the conversation.',
+          'One "Allow for this conversation": one Ação, Em one conversation, Para one person, until they turn Ele off or Eliminar the conversation.',
         ),
     )
     .describe("The newest first."),
@@ -1337,13 +1337,13 @@ export const ListConversationGrantsResponse = zod.object({
 export const deleteConversationGrantPathPersonIdMax = 200;
 
 export const deleteConversationGrantPathPersonIdRegExp = new RegExp("\\S");
-export const deleteConversationGrantPathConversationGrantIdMax = 200;
+Exportar const deleteConversationGrantPathConversationGrantIdMax = 200;
 
-export const deleteConversationGrantPathConversationGrantIdRegExp = new RegExp(
+Exportar const deleteConversationGrantPathConversationGrantIdRegExp = new RegExp(
   "\\S",
 );
 
-export const DeleteConversationGrantParams = zod.object({
+Exportar const DeleteConversationGrantParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1366,9 +1366,9 @@ export const DeleteConversationGrantParams = zod.object({
     .describe('The id of one "Allow for this conversation".'),
 });
 
-export const deleteConversationGrantHeaderIdempotencyKeyMax = 128;
+Exportar const deleteConversationGrantHeaderIdempotencyKeyMax = 128;
 
-export const DeleteConversationGrantHeader = zod.object({
+Exportar const DeleteConversationGrantHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1388,11 +1388,11 @@ export const DeleteConversationGrantResponse = zod.void();
 export const getApprovalModePathPersonIdMax = 200;
 
 export const getApprovalModePathPersonIdRegExp = new RegExp("\\S");
-export const getApprovalModePathConversationIdMax = 200;
+Exportar const getApprovalModePathConversationIdMax = 200;
 
-export const getApprovalModePathConversationIdRegExp = new RegExp("\\S");
+Exportar const getApprovalModePathConversationIdRegExp = new RegExp("\\S");
 
-export const GetApprovalModeParams = zod.object({
+Exportar const GetApprovalModeParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1413,16 +1413,16 @@ export const GetApprovalModeParams = zod.object({
     .max(getApprovalModePathConversationIdMax)
     .regex(getApprovalModePathConversationIdRegExp)
     .describe(
-      "The conversation, by the thread its messages are in: the threadId an approval's action names.",
+      "The conversation, by the thread its messages are in: the threadId an approval's Ação names.",
     ),
 });
 
-export const GetApprovalModeResponse = zod
+Exportar const GetApprovalModeResponse = zod
   .object({
     asksEveryStep: zod
       .boolean()
       .describe(
-        "True for the conversation of a task started from a check-in, where every change asks first whatever the person's rules say.",
+        "True Para the conversation of a task started De a Verificação-Em, where every change asks Primeiro whatever the person's rules say.",
       ),
   })
   .describe("How one conversation asks.");
@@ -1436,7 +1436,7 @@ export const runComputerStepPathPersonIdMax = 200;
 
 export const runComputerStepPathPersonIdRegExp = new RegExp("\\S");
 
-export const RunComputerStepParams = zod.object({
+Exportar const RunComputerStepParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1453,9 +1453,9 @@ export const RunComputerStepParams = zod.object({
     ),
 });
 
-export const runComputerStepHeaderIdempotencyKeyMax = 128;
+Exportar const runComputerStepHeaderIdempotencyKeyMax = 128;
 
-export const RunComputerStepHeader = zod.object({
+Exportar const RunComputerStepHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1465,11 +1465,11 @@ export const RunComputerStepHeader = zod.object({
     ),
 });
 
-export const runComputerStepBodyBotIdMax = 200;
+Exportar const runComputerStepBodyBotIdMax = 200;
 
-export const runComputerStepBodyBotIdRegExp = new RegExp("\\S");
+Exportar const runComputerStepBodyBotIdRegExp = new RegExp("\\S");
 
-export const RunComputerStepBody = zod.object({
+Exportar const RunComputerStepBody = zod.object({
   botId: zod
     .string()
     .min(1)

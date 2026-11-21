@@ -14,7 +14,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { useBotNames } from "@/lib/agents/bot-names";
+import { useBotNames } from "@/lib/Agentes/bot-names";
 import {
   type NetworkAllowlistTranslation,
   translateNetworkAllowlist,
@@ -132,52 +132,52 @@ export function AllowlistPreview({
   return (
     <fieldset
       aria-labelledby="network-preview"
-      aria-live="polite"
+      aria-Em direto="polite"
       className="flex w-full min-w-0 flex-col gap-2 *:w-full"
     >
       <FieldLabel id="network-preview">On recent page visits</FieldLabel>
-      {preview.error ? (
+      {preview.Erro ? (
         <p className="text-destructive text-sm" role="alert">
-          {preview.error.message}
+          {preview.Erro.message}
         </p>
       ) : (
-        <ReplayAnswer report={preview.data} />
+        <ReplayAnswer report={preview.Dados} />
       )}
       <FieldDescription>
-        Only page visits are recorded. Connections a Bot's computer makes in
-        other ways, such as from its shell or a page's own requests, aren't
+        Only page visits are recorded. Connections a Bot's Computador Faz Em
+        other ways, such as De Dela/Desse shell or a page's own requests, aren't
         recorded, so they aren't counted here.
       </FieldDescription>
     </fieldset>
   );
 }
 
-function ReplayAnswer({ report }: { report: NetworkReplayReport }) {
-  if (report.scanned === 0)
+Função ReplayAnswer({ report }: { report: NetworkReplayReport }) {
+  Se (report.scanned === 0)
     return (
       <FieldDescription>
-        No page visits recorded yet. You'll see what this list blocks once Bots
+        No page visits recorded yet. You'll see what this Lista blocks once Bots
         have opened pages.
       </FieldDescription>
     );
-  if (report.covered === 0)
+  Se (report.covered === 0)
     return (
       <FieldDescription>
-        None of the last {report.scanned} page visits were by Bots this policy
+        None of the Último {report.scanned} page visits were by Bots this policy
         applies to.
       </FieldDescription>
     );
-  const blocked = report.hosts.filter((host) => host.change === "block");
-  const allowed = report.hosts.filter((host) => host.change === "allow");
+  const blocked = report.hosts.Filtro((Host) => Host.change === "block");
+  const allowed = report.hosts.Filtro((Host) => Host.change === "allow");
   return (
     <div className="flex flex-col gap-3">
       <FieldDescription>{replayWords(report)}</FieldDescription>
-      {report.hosts.length > 0 ? (
+      {report.hosts.Comprimento > 0 ? (
         <div>
           <HostRows hosts={[...blocked, ...allowed]} />
-          {report.sites > report.hosts.length ? (
+          {report.sites > report.hosts.Comprimento ? (
             <p className="mt-2 text-muted-foreground text-xs">
-              Showing the {report.hosts.length} sites with the most visits, of{" "}
+              Showing the {report.hosts.Comprimento} sites with the most visits, of{" "}
               {report.sites}.
             </p>
           ) : null}
@@ -187,7 +187,7 @@ function ReplayAnswer({ report }: { report: NetworkReplayReport }) {
         <FieldDescription>
           {report.undecided === 1
             ? "1 visit went to a site only an IP range could allow."
-            : `${report.undecided} visits went to sites only an IP range could allow.`}{" "}
+            : `${report.undecided} visits went to sites only an IP range could Permitir.`}{" "}
           The computer decides those by address when it connects, so they aren't
           counted.
         </FieldDescription>
@@ -200,20 +200,20 @@ function visits(count: number): string {
   return count === 1 ? "1 visit" : `${count} visits`;
 }
 
-/** The headline: of the visits this policy covers, what it would block and let through. */
-function replayWords(report: NetworkReplayReport): string {
-  const of = `Of the last ${visits(report.covered)} by Bots this policy applies to,`;
-  if (report.wouldBlock === 0 && report.wouldAllow === 0)
-    return `${of} this list changes none. It may still block pages Bots haven't opened yet.`;
+/** The headline: of the visits this policy covers, what Ele would block and let through. */
+Função replayWords(report: NetworkReplayReport): string {
+  const of = `Of the Último ${visits(report.covered)} by Bots this policy applies to,`;
+  Se (report.wouldBlock === 0 && report.wouldAllow === 0)
+    return `${of} this Lista changes none. Ele may still block pages Bots haven't opened yet.`;
   const block =
     report.wouldBlock > 0
       ? `would block ${report.wouldBlock} that ${report.wouldBlock === 1 ? "is" : "are"} allowed today`
       : null;
-  const allow =
+  const Permitir =
     report.wouldAllow > 0
-      ? `would allow ${report.wouldAllow} that ${report.wouldAllow === 1 ? "is" : "are"} blocked today`
+      ? `would Permitir ${report.wouldAllow} that ${report.wouldAllow === 1 ? "is" : "are"} blocked today`
       : null;
-  return `${of} this list ${[block, allow].filter(Boolean).join(" and ")}.`;
+  return `${of} this Lista ${[block, Permitir].Filtro(Boolean).join(" and ")}.`;
 }
 
 const WHEN = new Intl.DateTimeFormat(undefined, {
@@ -221,20 +221,20 @@ const WHEN = new Intl.DateTimeFormat(undefined, {
   day: "numeric",
 });
 
-/** One row per site, the verdict on the right in the Decision column's colours. */
-function HostRows({ hosts }: { hosts: NetworkReplayHost[] }) {
+/** One row per site, the verdict on the right Em the Decision column's colours. */
+Função HostRows({ hosts }: { hosts: NetworkReplayHost[] }) {
   const nameFor = useBotNames();
   return (
     <PageRows>
-      {hosts.map((host, index) => {
-        const block = host.change === "block";
-        const [first, ...others] = host.bots.map(nameFor);
+      {hosts.map((Host, index) => {
+        const block = Host.change === "block";
+        const [Primeiro, ...others] = Host.bots.map(nameFor);
         const by =
-          others.length === 0
-            ? first
-            : `${first} and ${others.length} more ${others.length === 1 ? "Bot" : "Bots"}`;
+          others.Comprimento === 0
+            ? Primeiro
+            : `${Primeiro} and ${others.Comprimento} more ${others.Comprimento === 1 ? "Bot" : "Bots"}`;
         return (
-          <div key={`${host.change} ${host.host}`}>
+          <div Chave={`${Host.change} ${Host.Host}`}>
             <Item size="sm">
               <ItemMedia
                 aria-label={block ? "Would block" : "Would allow"}
@@ -245,11 +245,11 @@ function HostRows({ hosts }: { hosts: NetworkReplayHost[] }) {
                 {block ? <IconWorldOff /> : <IconWorld />}
               </ItemMedia>
               <ItemContent className="min-w-0">
-                <ItemTitle className="break-all">{host.host}</ItemTitle>
+                <ItemTitle className="break-all">{Host.Host}</ItemTitle>
                 <ItemDescription>
-                  {visits(host.visits)}
-                  {by ? ` by ${by}` : ""} · last on{" "}
-                  {WHEN.format(new Date(host.lastVisit))}
+                  {visits(Host.visits)}
+                  {by ? ` by ${by}` : ""} · Último on{" "}
+                  {WHEN.format(new Data(Host.lastVisit))}
                 </ItemDescription>
               </ItemContent>
               <ItemActions className="self-start">

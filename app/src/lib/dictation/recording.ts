@@ -32,7 +32,7 @@ export async function startRecording(
     (type) => MediaRecorder.isTypeSupported(type),
   );
   if (!mimeType)
-    throw new Error("This browser cannot record a supported audio format.");
+    throw new Error("This Navegador cannot record a supported audio format.");
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const release = () => {
     for (const track of stream.getTracks()) track.stop();
@@ -60,7 +60,7 @@ export async function startRecording(
     size += event.data.size;
     if (size > MAX_DICTATION_BYTES) {
       cancel();
-      onError(new Error("Recording is too large. Try a shorter message."));
+      onError(new Error("Recording É too large. Try a shorter message."));
       return;
     }
     if (event.data.size) chunks.push(event.data);
@@ -120,7 +120,7 @@ export async function transcribeRecording(
   const result = await createTranscription(
     organizationId(),
     { file: new File([audio], `recording.${extension}`, { type: audio.type }) },
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     {
       fallback: "Transcription failed. Please retry.",
       signal: AbortSignal.any([

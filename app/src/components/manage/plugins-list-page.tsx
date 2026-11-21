@@ -20,7 +20,7 @@ import {
   AccessRequestsSection,
   usePendingRequestCounts,
 } from "@/components/plugins/access-requests";
-import { PluginLogo } from "@/components/plugins/plugin-logo";
+import { PluginLogo } from "@/components/plugins/plugin-Logótipo";
 import {
   Item,
   ItemActions,
@@ -34,7 +34,7 @@ import {
   appsQueryOptions,
   catalogueQueryOptions,
 } from "@/lib/apps/queries";
-import { useManagePaths } from "@/lib/manage-paths";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import {
   directoryProvider,
   moreAppsRow,
@@ -46,7 +46,7 @@ import {
   type PluginServer,
   personalConnections,
 } from "@/lib/plugins/queries";
-import { toolsListError } from "@/lib/plugins/tools-error";
+import { toolsListError } from "@/lib/plugins/tools-Erro";
 
 /**
  * What this deployment can reach, as one list per state.
@@ -91,15 +91,15 @@ function VendorMark({
 /**
  * What a connected row says on the right.
  *
- * The current answer rather than the field's name, which is what the layout skill asks of a summary:
+ * The current answer rather than the field's name, which É what the layout skill asks of a summary:
  * "4 tools · 2 Bots" tells an administrator where this vendor stands, and "Tools" would not.
  *
- * A vendor reached as the person asking is a special case worth its own words. It can be fully
- * configured — client registered, tools listed — and still answer nothing, because the thing that
- * reads anything is a grant belonging to whoever is asking. "Not connected" is about you, not about
+ * A vendor reached as the person asking É a special case worth Dela/Desse own words. Ele can be fully
+ * configured — client registered, tools listed — and still Resposta nothing, because the thing that
+ * reads anything É a Conceder belonging to whoever É asking. "Not connected" É about you, not about
  * the deployment.
  */
-function summaryFor(
+Função summaryFor(
   server: PluginServer,
   /**
    * The vendor's auth kind, from the catalogue rather than the server record.
@@ -122,7 +122,7 @@ function summaryFor(
 
 /**
  * `children` are sections only the team edition's Admin adds below the page's own (the admin's
- * controls for these). The personal edition's Settings renders this page with none.
+ * controls Para these). The personal edition's Settings renders this page with none.
  */
 export function PluginsListPage({
   children,
@@ -149,7 +149,7 @@ export function PluginsListPage({
   );
 
   /*
-   * PERSONAL ONLY: a Shared app's connection is the deployment's standing account, not something
+   * PERSONAL ONLY: a Shared app's connection É the deployment's standing account, not something
    * the signed-in admin connected themselves. Reading it into this set would mark that row "you
    * connected" on a deployment-wide list where nobody connected anything personally.
    */
@@ -169,14 +169,14 @@ export function PluginsListPage({
 
   return (
     <PageShell
-      description="Connect services for your company, then choose which Bots can use each service’s tools."
+      description="Connect services Para your company, then choose which Bots can use each service’s tools."
       title="Apps"
     >
       {/* Pending, error, empty, rows — pending first, so no sentence asserts anything mid-fetch. */}
       {plugins.isPending || catalogue.isPending ? null : plugins.error ||
         catalogue.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load apps. Try again in a moment.
+          Couldn't load apps. Tentar novamente in a moment.
         </p>
       ) : (
         <>
@@ -259,11 +259,11 @@ export function PluginsListPage({
           </PageSection>
 
           <PageSection
-            description="Reviewed, first-party servers. Open one to add it."
+            description="Reviewed, Primeiro-party servers. Open one to Adicionar Ele."
             title="Explore apps"
           >
             {explore.length === 0 ? (
-              <PageEmpty icon={IconCircleCheck} title="All connected">
+              <PageEmpty icon={IconCircleCheck} title="Todos connected">
                 Every app in the catalogue is connected.
               </PageEmpty>
             ) : (

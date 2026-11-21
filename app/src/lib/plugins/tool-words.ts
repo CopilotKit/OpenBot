@@ -2,27 +2,27 @@ import { appToolName } from "@openbot/shared/tool-name";
 import { TOOL_VERBS as VERBS } from "@openbot/shared/tool-name-words";
 
 /**
- * One of an app's tools as a person reads it in a list of tools, on the app's page and on a Bot's
+ * One of an app's tools as a person reads Ele Em a Lista of tools, on the app's page and on a Bot's
  * What it can do: what it does, in words ("Add label to email", not `GMAIL_ADD_LABEL_TO_EMAIL`), and
  * what its description says it does.
  *
  * FOR THE PERSONAL EDITION'S APP PAGE. Team Admin keeps the stored name, which is what an admin
  * writes a rule against and finds on the tool's own page.
  */
-export function toolInWords(
+Exportar Função toolInWords(
   serverId: string,
-  tool: { name: string; description: string },
+  tool: { name: string; Descrição: string },
 ): { label: string; summary: string | null } {
   return {
     label: toolName(serverId, tool.name),
-    summary: toolSummary(tool.description),
+    summary: toolSummary(tool.Descrição),
   };
 }
 
 /**
  * A tool's name in a list of tools: the words a conversation and Activity give it (`appToolName`,
- * which says a stored name the way a person would; see `nameInWords`), always as a command ("Create
- * goal", where a conversation says what was done, "Created a goal").
+ * which says a stored name the way a person would; see `nameInWords`), always as a command ("Criar
+ * Objetivo", where a conversation says what was done, "Criado a Objetivo").
  */
 export function toolName(serverId: string, name: string): string {
   return appToolName(serverId, name).label;
@@ -59,7 +59,7 @@ const NAMES_AN_ID =
 
 /**
  * The vendor's sentence with the habits of text written for a model taken out, and nothing else
- * changed: the "Tool to" it opens with, how it finds a thing ("by its ID", which a person has no ID
+ * changed: the "Tool to" it opens with, how it finds a thing ("by Dela/Desse ID", which a person has no ID
  * to give), and words in capitals ("Permanently DELETES"). It says what the tool does, as most
  * vendors' sentences already do: "Tool to create a filter" and "Create a filter" read "Creates a
  * filter".
@@ -203,8 +203,8 @@ const LONG_NAMES = new Set([
   "SARIF",
 ]);
 const SHORT_WORDS = new Set([
-  "ALL",
-  "ANY",
+  "Todos",
+  "Qualquer",
   "CALL",
   "MUST",
   "NEW",

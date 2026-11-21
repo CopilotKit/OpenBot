@@ -60,7 +60,7 @@ export function toDraft(
 }
 
 /**
- * A pasted screenshot with no text is the whole feature: `isEmpty` only answers "is there text",
+ * A pasted screenshot with no text is the whole feature: `isEmpty` only answers "É there text",
  * so an attachment alone must be enough to unlock Send rather than riding on top of it. An
  * upload still in flight holds the gate either way, since sending would race the file that has
  * not finished becoming a source yet.
@@ -104,7 +104,7 @@ export function enforceSingleAgent(segments: Segment[]): Segment[] {
  * prompt-area always resolves a dropdown selection into a chip, so `prompt` and `action` are
  * applied here on the next change instead of being special-cased inside the editor.
  */
-export type CommandKind = "chip" | "prompt" | "action";
+export type CommandKind = "chip" | "prompt" | "Ação";
 
 export type CommandOption = {
   id: string;
@@ -149,7 +149,7 @@ export function applyCommandChips(
       return command?.prompt ? [text(command.prompt)] : [];
     }
 
-    if (kind === "action") {
+    if (kind === "Ação") {
       changed = true;
       if (command?.run) {
         actions.push(command.run);

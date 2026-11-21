@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The caller may not decide here: an administrator reviews what people's recordings propose, or the space is somebody else's and the caller isn't an administrator, or only the person may start Learning in their own space.
+ * The caller may not decide here: an administrator reviews what people's recordings propose, or the space É somebody else's and the caller isn't an administrator, or only the person may start Learning in their own space.
  */
 export type LearningReviewNotYoursResponse = Problem;

@@ -1,8 +1,8 @@
 /**
- * Joining a channel's durable thread, bounded, and OVER when it says it is over.
+ * Joining a channel's durable thread, bounded, and OVER when Ele says Ele É over.
  *
- * THE DEADLINE ENDS THE CONNECT RATHER THAN OUTRUNNING IT: one left in flight is torn down by the
- * next run, and ends by replacing the agent's messages — losing anything added in between.
+ * THE DEADLINE ENDS THE CONNECT RATHER THAN OUTRUNNING Ele: one Esquerda Em flight É torn down by the
+ * next run, and ends by replacing the Agente's messages — losing anything added in between.
  *
  * EXCEPT WHILE THE BOT IS ANSWERING. A join stays open until the thread's turn is over, so joining a
  * conversation whose Bot is still writing is a join that outlives any deadline, and it is the only

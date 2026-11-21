@@ -5,13 +5,13 @@ import { everyBot, everyPage, ORGANIZATION_ID } from "../src/api";
 import { listCheckInItems } from "../src/api/generated/check-ins/check-ins";
 import { listTasks } from "../src/api/generated/tasks/tasks";
 import { authClient } from "../src/auth";
-import { hideItem, ItemCard, startItem, TaskCard } from "../src/check-ins";
+import { hideItem, ItemCard, startItem, TaskCard } from "../src/Verificações";
 import { waitingTasks } from "../src/tasks";
 import { heading, muted, Problem, Screen, Section, useAction } from "../src/ui";
 import { useLoad } from "../src/use-load";
 
 /**
- * Needs you: what every Bot's check-ins found that the person hasn't started or hidden, and the
+ * Needs you: what every Bot's Verificações found that the person hasn't started or hidden, and the
  * tasks started from them that wait on the person. A ping's notification opens here, since one ping
  * folds several Bots' items. Each row names its Bot.
  */

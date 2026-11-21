@@ -34,8 +34,8 @@ export function useSwitchOrganization() {
             // One at a time: a second refusal replaces the first.
             id: SWITCH_TOAST,
             title: error.message,
-            type: "error",
-            priority: "high",
+            type: "Erro",
+            priority: "Alto",
           }),
       });
     },

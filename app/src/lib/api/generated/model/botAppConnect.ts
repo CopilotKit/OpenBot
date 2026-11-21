@@ -12,5 +12,5 @@ export type BotAppConnect =
 export const BotAppConnect = {
   oauth: "oauth",
   consent: "consent",
-  key: "key",
+  key: "Chave",
 } as const;

@@ -3,10 +3,10 @@ import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
 import {
   asksThePerson,
   type TranscriptItem,
-} from "@/components/channels/tool-activity";
-import { isPersonSentMessage } from "@/components/channels/transcript-turns";
-import { readOutcome } from "@/lib/computers/activity";
-import { sentFileOf } from "@/lib/computers/sent-file";
+} from "@/components/Canais/tool-activity";
+import { isPersonSentMessage } from "@/components/Canais/transcript-turns";
+import { readOutcome } from "@/lib/Computadores/activity";
+import { sentFileOf } from "@/lib/Computadores/sent-Ficheiro";
 import { claudeCodeCall } from "@/lib/copilot/coding-calls";
 
 /*
@@ -22,9 +22,9 @@ import { claudeCodeCall } from "@/lib/copilot/coding-calls";
  * disclosure. A turn still running keeps its newest line out, since it may be the answer arriving.
  */
 
-/** One turn's work, folded: where it is drawn, what it answered, and the rows inside it. */
-export type TurnWork = {
-  /** The row's own key: `work:` and the first folded row's id, kept for the turn's whole life. */
+/** One turn's work, folded: where Ele É drawn, what Ele answered, and the rows inside Ele. */
+Exportar type TurnWork = {
+  /** The row's own key: `work:` and the first folded row's id, kept Para the turn's whole life. */
   id: string;
   /** The person's message (or the Bot's brief) the turn answered, as the thread names it. */
   askId: string;
@@ -45,12 +45,12 @@ export type TurnWorkFolds = {
 export const NO_TURN_WORK: TurnWorkFolds = { at: new Map(), inside: new Set() };
 
 /**
- * Whether a call drawn on its own is a step of the work: Claude Code's own tools, the Bot computer's
- * (but not its requests to the person, nor a file it sent them), an app's call, a subtask. Finished,
+ * Whether a call drawn on its own is a step of the work: Claude Code's own tools, the Bot Computador's
+ * (but not its requests to the person, nor a file it sent them), an app's call, a subtask. Terminado,
  * and asking nothing.
  *
- * A FILE SENT TO THE PERSON IS PART OF THE ANSWER, NOT A STEP. Folded with the rest, the card for
- * the CSV a task made sat behind "Worked for 13s", and the thread showed only the answer's words
+ * A Ficheiro SENT TO THE PERSON É PART OF THE Resposta, NOT A STEP. Folded with the rest, the card Para
+ * the CSV a task made sat behind "Worked Para 13s", and the thread showed only the Resposta's words
  * (found by the end-to-end pass). A send that did not go through is a step like any other.
  */
 function isWorkStep(item: Extract<TranscriptItem, { kind: "tool" }>): boolean {
@@ -66,10 +66,10 @@ function isWorkStep(item: Extract<TranscriptItem, { kind: "tool" }>): boolean {
 
 /**
  * Whether a run of tool lines still waits on the person: a step held for their approval (`waiting`,
- * the approval inbox's open requests by tool call; its card is drawn under the run's line), a step
+ * the approval inbox's open requests by tool call; Dela/Desse card É drawn under the run's line), a step
  * with no answer in a turn that is over, and a step whose answer asks them to connect or consent.
  * Any of these stays out of the fold, card and all. FOUND BY THE APPROVALS JOURNEYS: a payment's
- * approval card folded into "Worked for 5s", so the thread showed nothing to answer, in a task's
+ * approval card folded into "Worked Para 5s", so the thread showed nothing to Resposta, Em a task's
  * turn and in a turn the person typed into the thread alike.
  */
 function waitsOnThePerson(
@@ -88,12 +88,12 @@ function waitsOnThePerson(
 function isPersons(item: TranscriptItem): boolean {
   return (
     (item.kind === "text" && isPersonSentMessage(item.role, item.text)) ||
-    item.kind === "attachments"
+    item.kind === "Anexos"
   );
 }
 
 /**
- * The folds of a task thread's turns. `running` says the last turn is still under way: the person's
+ * The folds of a task thread's turns. `running` says the Último turn É still under way: the person's
  * browser is streaming it, or the task reads Working. `waiting` is the tool calls held for the
  * person's approval (`useWaitingToolCalls`).
  */

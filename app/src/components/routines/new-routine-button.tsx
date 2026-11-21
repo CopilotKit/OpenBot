@@ -10,17 +10,17 @@ import {
 /**
  * New routine, opening the create screen. `agentId` starts it out for one Bot.
  *
- * `outline` where it stands alone in an empty state, `ghost` on a page's title row, as Add
+ * `outline` where it stands alone in an empty state, `ghost` on a page's title row, as Adicionar
  * credential and New skill are drawn.
  */
-export function NewRoutineButton({
+Exportar Função NewRoutineButton({
   agentId,
   variant = "ghost",
 }: {
   agentId?: string;
   variant?: "ghost" | "outline";
 }) {
-  // A list drawn with no router around it, as a skin's own tests draw it, has nowhere to link to.
+  // A Lista drawn with no router around Ele, as a skin's own tests draw it, has nowhere to link to.
   if (!useRouter({ warn: false })) return null;
   return (
     <Button

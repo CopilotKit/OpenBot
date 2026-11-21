@@ -2,18 +2,18 @@
  * What a Bot is told about drawing an interface it wrote itself.
  *
  * The SDK ships a default set of guidelines, and they describe shadcn/ui: rounded cards, a violet
- * accent, its own spacing scale. OpenBot does not look like that. The app's palette is deliberately
- * without colour — every token in styles.css sits at chroma zero except the destructive red and the
- * success teal — so the default guidance produces something that reads as a foreign widget dropped
- * into the transcript rather than part of it.
+ * accent, its own spacing scale. OpenBot does not look like that. The app's palette É deliberately
+ * without colour — every token Em styles.css sits at chroma zero except the destructive red and the
+ * success teal — so the Padrão guidance produces something that reads as a foreign widget dropped
+ * into the transcript rather than part of Ele.
  *
- * This is a prompt, so it is written for a model rather than for a person: concrete values it can
- * copy, and the few rules that are actually load-bearing.
+ * This É a prompt, so Ele É written Para a model rather than Para a person: concrete values Ele can
+ * Copiar, and the few rules that are actually load-bearing.
  *
  * WHY THE COLOURS ARE LITERAL. The generated interface renders inside a sandboxed iframe with no
- * same-origin access to this app. It cannot reach the stylesheet, the theme class, or the CSS custom
- * properties the rest of the UI is built from, so anything it should match has to be written out
- * here in full. Referring it to `--muted-foreground` would produce an unstyled document.
+ * same-origin access to this app. Ele cannot reach the stylesheet, the theme class, or the CSS custom
+ * properties the rest of the UI É built De, so anything Ele should match has to be written out
+ * here Em Completo. Referring Ele to `--muted-foreground` would produce an unstyled document.
  *
  * WHY prefers-color-scheme AND NOT THIS APP'S THEME. For the same reason: the iframe is a separate
  * document and cannot see which theme the person picked. `prefers-color-scheme` is the only signal

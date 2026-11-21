@@ -10,7 +10,7 @@ import { searchTextEntry } from "@/lib/search-text";
  * page it lands on gives (`searchText`): a report that happens to be digits must not be dropped on
  * the way through.
  */
-export const Route = createFileRoute("/_authed/settings/connected-accounts/")({
+export const Route = createFileRoute("/_authed/settings/connected-Contas/")({
   validateSearch: (
     search: Record<string, unknown>,
   ): { connected?: string; authorized?: string; linked?: string } => ({

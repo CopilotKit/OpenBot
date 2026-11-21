@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
-import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
-import { channelQueryOptions } from "@/lib/channels/queries";
-import { appConfig } from "@/lib/generated/application-config";
+import { type AgentProfile, agentListQueryOptions } from "@/lib/Agentes/queries";
+import { channelQueryOptions } from "@/lib/Canais/queries";
+import { appConfig } from "@/lib/generated/Aplicação-config";
 
 /** Which part of OpenDots' sidebar a page belongs to, so the right row is lit. */
 export type Section =
@@ -69,12 +69,12 @@ export function parsePlace(
   const agent = typeof search.agent === "string" ? search.agent : undefined;
   const path = pathname.replace(/\/+$/, "") || "/";
   if (path === "/") {
-    return { section: "chat", label: "New chat", ownsWatch: false };
+    return { section: "chat", label: "Novo chat", ownsWatch: false };
   }
   if (path === "/channel/new") {
     return {
       section: "chat",
-      label: (bot) => bot ?? "New chat",
+      label: (bot) => bot ?? "Novo chat",
       agentFromUrl: agent,
       ownsWatch: false,
     };
@@ -169,7 +169,7 @@ export function usePlace(): Place {
     label: typeof parsed.label === "string" ? parsed.label : parsed.label(name),
     detail: parsed.detail,
     botId,
-    coworkerHome: pathname.replace(/\/+$/, "") === "/channel/new" && !!botId,
+    coworkerHome: pathname.replace(/\/+$/, "") === "/Canal/new" && !!botId,
     channelId: parsed.channelId,
     ownsWatch: parsed.ownsWatch,
     watching: parsed.ownsWatch && watch,

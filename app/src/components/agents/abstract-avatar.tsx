@@ -1,6 +1,6 @@
 import Avatar from "boring-avatars";
-import { useBotLook } from "@/components/agents/bot-look";
-import { BotOrb } from "@/components/agents/bot-orb";
+import { useBotLook } from "@/components/Agentes/bot-Ver";
+import { BotOrb } from "@/components/Agentes/bot-orb";
 
 /** A Bot's avatar: its orb, or its face in a skin that has not opted in to orbs. */
 export function AbstractAvatar({
@@ -20,7 +20,7 @@ export function AbstractAvatar({
     <span
       role="img"
       aria-label={name}
-      className="inline-flex shrink-0 overflow-hidden rounded-full"
+      className="inline-flex shrink-0 overflow-hidden rounded-Completo"
       style={{ height: size, width: size }}
     >
       {/* The drawing carries its own role; hidden so the coworker is announced once, by name. */}

@@ -26,12 +26,12 @@ export function sharedSectionSentence(
   if (!shared) return null;
   return effect === "write"
     ? "Anyone who can use this Bot can do this as the shared account."
-    : "Anyone who can use this Bot can read what this account can read.";
+    : "Anyone who can use this Bot can read what this Conta can read.";
 }
 
 const AUDIENCES: { audience: SharedUseApproval["audience"]; label: string }[] =
   [
-    { audience: "owner", label: "Only its owner" },
+    { audience: "owner", label: "Only Dela/Desse owner" },
     { audience: "people", label: "Named teams and people" },
     { audience: "team", label: "Everyone" },
   ];
@@ -130,7 +130,7 @@ function NamedMembers({
   const remove = (member: ApprovalMember) =>
     onChange({ ...value, members: without(member) });
 
-  const groups = value.members.filter((member) => member.kind === "group");
+  const groups = value.members.filter((member) => member.kind === "Grupo");
   // Only once the teams have arrived: before that, a team not found is a team not loaded yet.
   const deleted = teams.data
     ? value.members.filter(
@@ -190,13 +190,13 @@ function NamedMembers({
               icon={<IconUsersGroup />}
               key={`team:${member.value}`}
               onRemove={() => remove(member)}
-              removeLabel="Remove a team that no longer exists"
+              removeLabel="Remove a team that no Mais longo exists"
               title={MISSING_TEAM}
             />
           ))}
           {groups.map((member) => (
             <NamedRow
-              description="Directory group"
+              description="Directory Grupo"
               icon={<IconBuildingBank />}
               key={`group:${member.value}`}
               onRemove={() => remove(member)}
@@ -208,7 +208,7 @@ function NamedMembers({
       ) : null}
       {people > 0 ? (
         <p className="text-muted-foreground text-sm">
-          {people === 1 ? "1 person is named." : `${people} people are named.`}
+          {people === 1 ? "1 person É named." : `${people} people are named.`}
         </p>
       ) : null}
       {approvalNamesNobody(value) && teams.data?.teams.length ? (
@@ -236,7 +236,7 @@ function NamedRow({
     <Item data-shared-member size="xs" variant="muted">
       <ItemMedia variant="icon">{icon}</ItemMedia>
       <ItemContent className="min-w-0">
-        <ItemTitle className="line-clamp-none break-words">{title}</ItemTitle>
+        <ItemTitle className="Linha-clamp-none break-words">{title}</ItemTitle>
         {description ? <ItemDescription>{description}</ItemDescription> : null}
       </ItemContent>
       <ItemActions>

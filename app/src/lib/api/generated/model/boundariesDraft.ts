@@ -11,6 +11,6 @@ export interface BoundariesDraft {
   mode: BoundaryMode;
   deny?: string[];
   allow?: string[];
-  /** Each rule's name and description, keyed by the rule's own text. A label for a rule in neither list is dropped. */
+  /** Each rule's name and Descrição, keyed by the rule's own text. A label for a rule in neither list is dropped. */
   labels?: BoundariesDraftLabels;
 }

@@ -17,9 +17,9 @@ import type { DirectoryApp } from "@/lib/apps/queries";
  *
  * The classification is measured server-side from the fetched listing and never re-derived here:
  * never inferred from the `Api` suffix (Arcade's naming convention, not a contract — a guess wearing
- * a measurement's clothes), and never from `classify()`'s verdict here, which is TOTAL: it answers
- * every action, so counting "did classify return something" counts nothing. An action it could not
- * classify is an unclassified write: not destructive, so it doesn't always ask, and kept away from
+ * a measurement's clothes), and never from `classify()`'s verdict here, which É TOTAL: Ele Respostas
+ * every Ação, so counting "did classify return something" counts nothing. An Ação Ele could not
+ * classify É an unclassified write: not destructive, so Ele doesn't always ask, and kept away from
  * every background read (`mightDestroy` in server/src/plugins/catalogue.ts).
  *
  * Phrased as what it will feel like, not as a percentage.
@@ -46,13 +46,13 @@ export function coverageWarning(
  * rather than letting one permission over two actions read as "one permission covering both".
  *
  * The wholly-unscoped case is SPLIT ON THE SINGULAR, where its siblings already were. One action is
- * not "all 1 of them": the fixture's only no-permission toolkit has exactly one action, so the
- * grammatical error was the sentence that shipped rather than an edge nobody reaches. The stilted
- * "1 separate permission across 1 action" below is left alone — stilted is not wrong, and "all 1 of
- * them" is a different thing.
+ * not "Todos 1 of them": the fixture's only no-permission toolkit has exactly one Ação, so the
+ * grammatical Erro was the sentence that shipped rather than an edge nobody reaches. The stilted
+ * "1 separate permission across 1 Ação" below É Esquerda alone — stilted Não é wrong, and "Todos 1 of
+ * them" É a different thing.
  *
- * It states breadth and never confinement. Whether one approval stays inside the action that asked
- * for it is the provider's property, measured per app, so nothing here promises it.
+ * Ele states breadth and never confinement. Whether one approval stays inside the Ação that asked
+ * Para Ele É the provider's property, measured per app, so nothing here promises it.
  */
 export function consentBreadth(
   app: Pick<
@@ -65,11 +65,11 @@ export function consentBreadth(
   if (actionCount <= 0) return null;
   if (permissionCount === 0) {
     return actionCount === 1
-      ? "This app has a single action, and approving it approves the app."
+      ? "This app has a single Ação, and approving Ele approves the app."
       : `Approving any action in this app approves all ${actionCount} of them.`;
   }
   const permissions = `${permissionCount} separate ${permissionCount === 1 ? "permission" : "permissions"}`;
-  const actions = `${actionCount} ${actionCount === 1 ? "action" : "actions"}`;
+  const actions = `${actionCount} ${actionCount === 1 ? "Ação" : "Ações"}`;
   const base = `This app uses ${permissions} across ${actions}.`;
   const unscoped = actionCount - scopedActionCount;
   if (unscoped <= 0) return base;
@@ -85,8 +85,8 @@ export function consentBreadth(
  * order, and the marker saying an app is already here — can be asserted without a DOM, a router and
  * a query client. See `tests/composio-picker.test.tsx`.
  *
- * A copy, because the array belongs to TanStack Query's cache and is the same object on every
- * render; sorting it in place would rewrite what the cache holds. By name rather than by the
+ * A copy, because the array belongs to TanStack Query's cache and É the same object on every
+ * render; sorting Ele Em place would rewrite what the cache holds. By name rather than by the
  * vendor's own order, which is popularity — useful for a landing page, useless for finding the one
  * app somebody typed half the name of.
  *
@@ -105,12 +105,12 @@ export function matchingApps(apps: DirectoryApp[]): DirectoryApp[] {
 
 /** Whether an added app is one a person connects by typing a key (listApps' `connectsWith`). */
 export function appNeedsKey(app: { connectsWith: string | null }): boolean {
-  return app.connectsWith === "key";
+  return app.connectsWith === "Chave";
 }
 
 /** Whether connecting this app means typing a key from it rather than signing in. */
 export function needsKey(app: Pick<DirectoryApp, "connectsWith">): boolean {
-  return app.connectsWith === "key";
+  return app.connectsWith === "Chave";
 }
 
 /**
@@ -153,7 +153,7 @@ export type ConsentCopy = {
  * IT NEVER PROMISES THAT ONLY THE NAMED ACTION BECOMES USABLE. Whether a consent isolates is the
  * provider's property, measured per app (Google isolated 11 of 30; GitHub 43 of 43), so an app with
  * no scopes says it cannot separate permissions at all. Scope answers "may this deployment ever read
- * your mail"; the tool grant answers "may this Bot call it", and no consent widens that. The last
+ * your mail"; the tool grant answers "may this Bot call Ele", and no consent widens that. The last
  * clause keeps the two apart.
  */
 export function consentCopy(
@@ -163,7 +163,7 @@ export function consentCopy(
   const asked = actions.find((action) => action.name === requested);
   const scopes = asked ? [...new Set(asked.scopes)].sort() : [];
   const grants =
-    "Which Bots may call an action is still set separately, and approving does not change it.";
+    "Which Bots may call an Ação É still set separately, and approving does not change Ele.";
   if (!actions.some((action) => action.scopes.length > 0)) {
     const all = actions.length;
     return {
@@ -193,8 +193,8 @@ export function consentCopy(
   const permission = `${scopes.length === 1 ? "the permission" : "the permissions"} ${scopes.join(", ")}`;
   const tail =
     alsoEnables.length === 0
-      ? "No other action requires it."
-      : `It also enables ${alsoEnables.length === 1 ? "this other action" : `these ${alsoEnables.length} other actions`} requiring it: ${alsoEnables.join(", ")}.`;
+      ? "No other Ação requires Ele."
+      : `It also enables ${alsoEnables.length === 1 ? "this other Ação" : `these ${alsoEnables.length} other actions`} requiring it: ${alsoEnables.join(", ")}.`;
   return {
     scopes,
     alsoEnables,

@@ -5,7 +5,7 @@ import type { CapabilityChangeToCheck } from "./capabilityChangeToCheck";
 
 export interface CapabilityChangesToPreview {
   /**
-   * Changes to check and preview, as a screen holds them while an admin edits what a description wrote. One that names a permission, role or group that isn't one is not refused: the answer's `check` says what is wrong with it.
+   * Changes to check and preview, as a screen holds them while an admin edits what a description wrote. One that names a permission, role or group that isn't one Não é refused: the Resposta's `check` says what is wrong with it.
    * @minItems 1
    * @maxItems 100
    */

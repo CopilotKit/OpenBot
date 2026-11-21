@@ -9,6 +9,6 @@ export type BoundaryReplayChangeKind =
   (typeof BoundaryReplayChangeKind)[keyof typeof BoundaryReplayChangeKind];
 
 export const BoundaryReplayChangeKind = {
-  computer: "computer",
+  computer: "Computador",
   app: "app",
 } as const;

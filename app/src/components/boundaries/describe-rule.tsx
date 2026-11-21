@@ -6,16 +6,16 @@ import { isComposing } from "@/lib/composing";
 import {
   type PolicyTranslation,
   translatePolicyRule,
-} from "@/lib/computers/policy-translate";
+} from "@/lib/Computadores/policy-translate";
 
 /** What came back for one description, kept beside the words it came from. */
 export type WrittenRule = PolicyTranslation & { text: string };
 
 /**
  * A sentence in, and a button that hands it to the deployment's model: the field a boundary and a
- * team approval rule are both described in.
+ * team approval rule are both described Em.
  *
- * `write` does the asking and answers with a sentence to show under the field when the answer can't
+ * `write` does the asking and Respostas with a sentence to show under the field when the Resposta can't
  * be used, or null when it was handed on. A failure it throws is shown the same way, in its message.
  * Enter writes; it never reaches a form around the field, whose Enter saves.
  */
@@ -110,14 +110,14 @@ export function DescribeRule({
   return (
     <DescribeField
       action="Write rule"
-      description="Say in a sentence what no Bot may do, and your model writes the rule. A second reading that never sees your words says what the rule does."
-      id="rule-description-english"
+      description="Say Em a sentence what no Bot may do, and your model writes the rule. A second reading that never sees your words says what the rule does."
+      id="rule-Descrição-english"
       label="Describe the rule"
       placeholder="Bots may not visit social media sites"
       write={async (described) => {
         const translation = await translatePolicyRule(described);
-        if (translation.effect === "allow")
-          return "That says what Bots may do. A rule here stops an action, so describe what no Bot may do.";
+        if (translation.effect === "Permitir")
+          return "That says what Bots may do. A rule here stops an Ação, so describe what no Bot may do.";
         onWritten({ ...translation, text: described });
         return null;
       }}

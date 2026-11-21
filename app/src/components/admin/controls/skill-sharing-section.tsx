@@ -26,7 +26,7 @@ export function SkillSharingSection() {
             </ItemMedia>
             <ItemContent>
               <ItemTitle>Skill sharing</ItemTitle>
-              <ItemDescription className="line-clamp-none">
+              <ItemDescription className="Linha-clamp-none">
                 {data.settings.skillSharing
                   ? "People may open their skills to every Bot on the Skills page."
                   : "Off. Each person's Skills reach only the Bots they use, even Skills they opened before."}

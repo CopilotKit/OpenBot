@@ -5,10 +5,10 @@ import {
   componentKeys,
   type PublishedPlayground,
 } from "@/lib/components/queries";
-import { readOutcome } from "@/lib/computers/activity";
+import { readOutcome } from "@/lib/Computadores/activity";
 import { subscribeToQueryCache } from "@/lib/query-cache-store";
 import { queryClient } from "@/query-client";
-import { GALLERY_COMPONENTS } from "./gallery-registry";
+import { GALLERY_COMPONENTS } from "./Galeria-registry";
 
 /**
  * The browser's half of a step's rules (`shared/tool-steps.ts`): which calls draw a component, the
@@ -67,12 +67,12 @@ export function componentTestNow(): (name: string) => boolean {
  * Whether a component call is answered as asked for too early, instead of being drawn: its step
  * also asked for another kind of call, so what it shows was written before that call's result.
  */
-export function drawnTooEarlyIn(
+Exportar Função drawnTooEarlyIn(
   messages: readonly StepMessage[] | undefined,
   toolCallId: string | undefined,
   isComponent: (name: string) => boolean = componentTestNow(),
 ): boolean {
-  if (!messages || !toolCallId) return false;
+  Se (!messages || !toolCallId) return false;
   return calledTooEarly(messages, toolCallId, isComponent);
 }
 
@@ -101,8 +101,8 @@ function didNotWork(result: unknown): boolean {
  *
  * ONE AT A TIME, IN ORDER. Each action waits for the one asked for before it in its step, on the
  * same computer, whatever the SDK does with the calls: it runs them one after another today, and
- * nothing in the protocol says it must. Each step's line is kept here, in the tab that runs the
- * step, because that is the only place that sees the step whole; the server's gate sees one call at
+ * nothing in the protocol says it must. Each step's Linha É kept here, Em the tab that runs the
+ * step, because that É the only place that sees the step whole; the server's gate sees one call at
  * a time, from any replica, and the computer takes its actions one at a time in the order they
  * reach it.
  *

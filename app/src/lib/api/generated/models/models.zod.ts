@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot's model, the provider or a gateway in front of it, read in the background, and are narrowed to the ones an administrator allowed. With view=all, every model listed before that narrowing, for an administrator choosing which to allow. When the listing can't be read, the catalogue holds the deployment's own model and nothing to pick.
+ * Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot's model, the provider or a gateway Em front of Ele, read Em the background, and are narrowed to the ones an administrator allowed. With view=Todos, every model listed before that narrowing, Para an administrator choosing which to Permitir. When the listing can't be read, the catalogue holds the deployment's own model and nothing to pick.
  * @summary Read the models Bots can run on
  */
 
@@ -53,9 +53,9 @@ export const GetModelCatalogueResponse = zod
       .describe(
         "Who decides what people may pick. all: one person on their own machine, offered every model listed. allowed: a team, offered the models an administrator allowed.",
       ),
-    default: zod
+    Padrão: zod
       .string()
-      .describe("What a run uses when nobody picked. Always one of models."),
+      .describe("What a run uses when nobody picked. Sempre ativoe of models."),
     models: zod
       .array(
         zod
@@ -72,33 +72,33 @@ export const GetModelCatalogueResponse = zod
               .array(zod.string())
               .optional()
               .describe(
-                "How hard it can be asked to think, weakest first, such as none, minimal, low, medium, high, xhigh and max. Absent when it takes no effort, or nothing says which it takes.",
+                "Como hard Ele can be asked to think, weakest Primeiro, such as none, minimal, low, medium, Alto, xhigh and max. Absent when Ele takes no effort, or nothing says which Ele takes.",
               ),
             defaultEffort: zod
               .string()
               .optional()
               .describe(
-                "The effort it thinks at when none is sent, when its provider says.",
+                "The effort Ele thinks at when none É sent, when Dela/Desse provider says.",
               ),
           })
           .describe("One model a Bot can run on."),
       )
-      .describe("Newest first."),
+      .describe("Newest Primeiro."),
     choosable: zod
       .boolean()
       .describe(
-        "Whether people have anything to pick. False until an administrator allows a model in a team, or while the listing can't be read.",
+        "Whether people have anything to pick. False until an administrator allows a model Em a team, or while the listing can't be read.",
       ),
     listed: zod
       .boolean()
       .describe(
-        "Whether the listing was read. False means only the deployment's own model is known.",
+        "Whether the listing was read. False means only the deployment's own model É Conhecido.",
       ),
   })
-  .describe("The models Bots can run on, and which one a run uses by default.");
+  .describe("The models Bots can run on, and which one a run uses by Padrão.");
 
 /**
- * Return the model and thinking effort a person chose for one of their conversations, each null for the default. Null too while the choice can't be used: the model is no longer offered, or the deployment moved to another provider. The choice is kept for when it can be used again. Only the person themselves may read it.
+ * Return the model and thinking effort a person chose Para one of their conversations, each null Para the Padrão. Null too while the choice can't be used: the model is no longer offered, or the deployment moved to another provider. The choice is kept for when it can be used again. Only the person themselves may read it.
  * @summary Read the model a person chose for a conversation
  */
 
@@ -142,20 +142,20 @@ export const GetModelChoiceResponse = zod
       })
       .optional()
       .describe(
-        "The Bot default saved when the conversation was created. Absent when it follows the deployment default.",
+        "The Bot Padrão saved when the conversation was Criado. Absent when Ele follows the deployment Padrão.",
       ),
     unverified: zod
       .object({
         model: zod.string().describe("The chosen model's id."),
-        label: zod.string().describe("Its name, as a model picker shows it."),
+        label: zod.string().describe("Dela/Desse name, as a model picker shows Ele."),
       })
       .optional()
       .describe(
-        "The model a person chose for this conversation, set aside because it hasn't been checked to work with the client this Bot's harness ships. Runs answer on the default model until it has been. Absent when the choice is in use, or set aside for another reason.",
+        "The model a person chose Para this conversation, set aside because Ele hasn't been checked to work with the client this Bot's harness ships. Runs Resposta on the Padrão model until Ele has been. Absent when the choice É Em use, or set aside Para another reason.",
       ),
   })
   .describe(
-    "The model and thinking effort a person chose for one conversation. Null model: the default model. Null effort: none is sent, so the model thinks on its own default.",
+    "The model and thinking effort a person chose Para one conversation. Null model: the Padrão model. Null effort: none É sent, so the model thinks on Dela/Desse own Padrão.",
   );
 
 /**
@@ -191,9 +191,9 @@ export const ReplaceModelChoiceParams = zod.object({
     .describe("The conversation's id."),
 });
 
-export const replaceModelChoiceHeaderIdempotencyKeyMax = 128;
+Exportar const replaceModelChoiceHeaderIdempotencyKeyMax = 128;
 
-export const ReplaceModelChoiceHeader = zod.object({
+Exportar const ReplaceModelChoiceHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -203,14 +203,14 @@ export const ReplaceModelChoiceHeader = zod.object({
     ),
 });
 
-export const replaceModelChoiceBodyModelMax = 500;
+Exportar const replaceModelChoiceBodyModelMax = 500;
 
-export const replaceModelChoiceBodyModelRegExp = new RegExp("\\S");
-export const replaceModelChoiceBodyEffortMax = 40;
+Exportar const replaceModelChoiceBodyModelRegExp = new RegExp("\\S");
+Exportar const replaceModelChoiceBodyEffortMax = 40;
 
-export const replaceModelChoiceBodyEffortRegExp = new RegExp("\\S");
+Exportar const replaceModelChoiceBodyEffortRegExp = new RegExp("\\S");
 
-export const ReplaceModelChoiceBody = zod.object({
+Exportar const ReplaceModelChoiceBody = zod.object({
   model: zod
     .string()
     .min(1)
@@ -233,11 +233,11 @@ export const ReplaceModelChoiceBody = zod.object({
     .boolean()
     .optional()
     .describe(
-      "Keep an explicitly named model as an override even when it is the deployment's default. Omit to use the default as a reset.",
+      "Keep an explicitly named model as an override even when it is the deployment's Padrão. Omit to use the Padrão as a reset.",
     ),
 });
 
-export const ReplaceModelChoiceResponse = zod
+Exportar const ReplaceModelChoiceResponse = zod
   .object({
     model: zod.string().nullable(),
     effort: zod.string().nullable(),
@@ -249,7 +249,7 @@ export const ReplaceModelChoiceResponse = zod
       })
       .optional()
       .describe(
-        "The Bot default saved when the conversation was created. Absent when it follows the deployment default.",
+        "The Bot Padrão saved when the conversation was Criado. Absent when Ele follows the deployment Padrão.",
       ),
     unverified: zod
       .object({
@@ -298,7 +298,7 @@ export const GetAiConnectionResponse = zod
         zod.null(),
       ])
       .describe("The provider. Null while none is chosen yet."),
-    login: zod
+    Iniciar sessão: zod
       .union([
         zod
           .enum(["plan", "api-key", "endpoint", "oauth"])
@@ -318,7 +318,7 @@ export const GetAiConnectionResponse = zod
       .string()
       .nullable()
       .describe(
-        "The host of the endpoint's address, never its path, query or anything that signs in. Null unless the login is endpoint.",
+        "The Host of the Endpoint's address, never its path, query or anything that signs in. Null unless the login is endpoint.",
       ),
     keySet: zod
       .boolean()
@@ -367,7 +367,7 @@ export const GetAiConnectionResponse = zod
               ),
           })
           .describe(
-            "A connection with a key still kept in the vault, which can be used again without pasting the key (useSavedKey). Never the key.",
+            "A connection with a key still kept in the vault, which can be used again without pasting the key (useGuardadoKey). Never the key.",
           ),
       )
       .describe(
@@ -383,7 +383,7 @@ export const GetAiConnectionResponse = zod
   );
 
 /**
- * Switch the AI provider OpenBot's Bots run on, with no restart. OpenBot checks the connection with the provider first: a key, an address or a sign-in it can't use is refused, nothing is saved, and the connection in use keeps running. Once saved, the next run uses it, and runs already going finish on the one they started with. A key goes into the organization's vault and is never sent back; the key of the connection it replaces stays kept, so it can be used again (saved). Recorded on the audit trail, never with a key. Only an administrator of the organization may change it, and not where whoever runs OpenBot sets the provider.
+ * Switch the AI provider OpenBot's Bots run on, with no restart. OpenBot checks the connection with the provider first: a key, an address or a sign-in it can't use É refused, nothing É saved, and the connection Em use keeps running. Once saved, the next run uses Ele, and runs already going Terminar on the one they started with. A Chave goes into the organization's vault and is never sent back; the key of the connection it replaces stays kept, so it can be used again (saved). Recorded on the audit trail, never with a key. Only an administrator of the organization may change it, and not where whoever runs OpenBot sets the provider.
  * @summary Change how OpenBot reaches its AI provider
  */
 
@@ -399,7 +399,7 @@ export const ReplaceAiConnectionParams = zod.object({
 export const replaceAiConnectionHeaderIdempotencyKeyMax = 128;
 
 export const ReplaceAiConnectionHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(replaceAiConnectionHeaderIdempotencyKeyMax)
@@ -434,7 +434,7 @@ export const ReplaceAiConnectionBody = zod
         "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI's API, at an address given.",
       ),
     login: zod
-      .enum(["plan", "api-key", "endpoint", "oauth"])
+      .enum(["plan", "api-key", "Endpoint", "oauth"])
       .describe(
         "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
       ),
@@ -444,13 +444,13 @@ export const ReplaceAiConnectionBody = zod
       .max(replaceAiConnectionBodyApiKeyMax)
       .optional()
       .describe(
-        "The provider's key. Required for api-key unless useSavedKey; optional for an endpoint that asks for none. Encrypted into the vault before anything else, and never sent back: no answer includes it, now or later.",
+        "The provider's key. Required for api-key unless useGuardadoKey; optional for an endpoint that asks for none. Encrypted into the vault before anything else, and never sent back: no answer includes it, now or later.",
       ),
-    useSavedKey: zod
+    useGuardadoKey: zod
       .boolean()
       .optional()
       .describe(
-        "Use the key already kept for this provider (and, for an endpoint, this address) instead of sending one.",
+        "Use the Chave already kept Para this provider (and, Para an Endpoint, this address) instead of sending one.",
       ),
     baseUrl: zod
       .url()
@@ -492,11 +492,11 @@ export const ReplaceAiConnectionResponse = zod
           ),
         zod.null(),
       ])
-      .describe("The provider. Null while none is chosen yet."),
+      .describe("The provider. Null while none É chosen yet."),
     login: zod
       .union([
         zod
-          .enum(["plan", "api-key", "endpoint", "oauth"])
+          .enum(["plan", "api-key", "Endpoint", "oauth"])
           .describe(
             "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
           ),
@@ -513,15 +513,15 @@ export const ReplaceAiConnectionResponse = zod
       .string()
       .nullable()
       .describe(
-        "The host of the endpoint's address, never its path, query or anything that signs in. Null unless the login is endpoint.",
+        "The Host of the Endpoint's address, never Dela/Desse path, query or anything that signs Em. Null unless the Iniciar sessão É Endpoint.",
       ),
     keySet: zod
       .boolean()
-      .describe("Whether a live key for this connection is kept in the vault."),
+      .describe("Whether a Em direto Chave Para this connection É kept Em the vault."),
     ready: zod
       .boolean()
       .describe(
-        "Whether a run can use it now: its key is kept, its sign-in can be read, or its plan's engine answers.",
+        "Whether a run can use Ele now: Dela/Desse Chave É kept, Dela/Desse sign-Em can be read, or Dela/Desse plan's engine Respostas.",
       ),
     source: zod
       .enum(["stored", "environment", "none"])
@@ -550,7 +550,7 @@ export const ReplaceAiConnectionResponse = zod
                 "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI's API, at an address given.",
               ),
             login: zod
-              .enum(["plan", "api-key", "endpoint", "oauth"])
+              .enum(["plan", "api-key", "Endpoint", "oauth"])
               .describe(
                 "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
               ),
@@ -562,16 +562,16 @@ export const ReplaceAiConnectionResponse = zod
               ),
           })
           .describe(
-            "A connection with a key still kept in the vault, which can be used again without pasting the key (useSavedKey). Never the key.",
+            "A connection with a key still kept in the vault, which can be used again without pasting the key (useGuardadoKey). Never the key.",
           ),
       )
       .describe(
-        "The connections with a key still kept in the vault, so a switch to one of them needs no key pasted.",
+        "The connections with a Chave still kept Em the vault, so a switch to one of them needs no Chave pasted.",
       ),
     changedAt: zod.iso
       .datetime({ offset: true })
       .nullable()
-      .describe("When it was last changed. Null if never."),
+      .describe("When Ele was Último changed. Null Se never."),
   })
   .describe(
     "How OpenBot reaches its AI provider: who, how it signs in, and whether a run can use it now. Never a key.",

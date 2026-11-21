@@ -34,12 +34,12 @@ import {
   withoutRule,
   withRuleReplaced,
 } from "@/lib/boundaries/rules";
-import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
+import { saveActionPolicyMutationOptions } from "@/lib/Computadores/mutations";
 import {
   type ActionPolicy,
   actionPolicyQueryOptions,
   policyDryRunQueryOptions,
-} from "@/lib/computers/queries";
+} from "@/lib/Computadores/queries";
 
 /** How long the rule has to rest before it is replayed, as on Add rule. */
 const PREVIEW_DELAY_MS = 400;
@@ -209,17 +209,17 @@ function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
  * The rule, editable in CEL or rewritten from a description, and saved only by Save rule.
  *
  * A changed rule is replayed on its own as it rests, as Add rule replays a new one, so what the new
- * version would have stopped sits right above what the rule in force has stopped. Saved, it takes
+ * version would have stopped sits right above what the rule in force has stopped. Guardado, it takes
  * the old rule's place and name.
  */
-function RuleEditor({ policy, rule }: { policy: ActionPolicy; rule: string }) {
+Função RuleEditor({ policy, rule }: { policy: ActionPolicy; rule: string }) {
   const queryClient = useQueryClient();
   const savePolicy = useMutation(saveActionPolicyMutationOptions(queryClient));
-  const [draft, setDraft] = useState(rule);
+  const [Rascunho, setDraft] = useState(rule);
   const [written, setWritten] = useState<WrittenRule | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
-  const trimmed = draft.trim();
+  const trimmed = Rascunho.trim();
   const changed = trimmed !== rule;
   const duplicate = changed && policy.deny.includes(trimmed);
   // The model's rule, unedited, that the compiler refused: its error is already under the rule.

@@ -40,8 +40,8 @@ export const getListMemoriesUrl = (
 };
 
 /**
- * Return one page of what a person's Bots remember about them in this organization, and in no other they belong to, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones the backend holds for them that OpenBot formed no record of, after OpenBot's own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can't either. A missing cursor starts at the first page and nextCursor null ends the list.
- * @summary List a person's memories
+ * Return one page of what a person's Bots remember about them in this organization, and in no other they belong to, most recently changed first: the ones they wrote, the ones their Bots formed and are waiting for their review, the ones read in from their sources, and the ones the backend holds for them that OpenBot formed no record of, after OpenBot's own. Paused memories are included; forgotten ones are not. Only the person themselves may list them: an administrator can't either. A missing cursor starts at the Primeiro page and nextCursor null ends the Lista.
+ * @summary Lista a person's memories
  */
 export const listMemories = async (
   organizationId: string,
@@ -53,7 +53,7 @@ export const listMemories = async (
     getListMemoriesUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -67,7 +67,7 @@ export const getCreateMemoryUrl = (
 
 /**
  * Write a memory the person's Bots recall from now on. A memory the person writes is theirs and reviewed. Where the backend keeps memory, it is copied there too. Only the person themselves may write one.
- * @summary Remember a fact
+ * @summary Lembra um fato
  */
 export const createMemory = async (
   organizationId: string,
@@ -235,7 +235,7 @@ export const getCreateMemorySourceUrl = (
 };
 
 /**
- * Let one of the person's Bots read facts in from one of its app's read actions, and read them in at once. The Bot must be the person's, hold that action, and the app must be connected for them. What it reads in waits for the person's review before any Bot recalls it. Only the person themselves may add a source.
+ * Let one of the person's Bots read facts in from one of its app's read Ações, and read them Em at once. The Bot must be the person's, hold that action, and the app must be connected for them. What it reads in waits for the person's review before any Bot recalls it. Only the person themselves may add a source.
  * @summary Add a memory source
  */
 export const createMemorySource = async (
@@ -421,7 +421,7 @@ export const listMemorySourceTools = async (
     getListMemorySourceToolsUrl(organizationId, botId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

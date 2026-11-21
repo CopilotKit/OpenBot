@@ -29,7 +29,7 @@ export default function ConversationScreen() {
   }>();
   const { data: session, isPending } = authClient.useSession();
   const [agentId, setAgentId] = useState("");
-  // A Bot profile's "Add routine" arrives with its sentence started for the person to finish.
+  // A Bot profile's "Adicionar routine" arrives with its sentence started for the person to finish.
   const [text, setText] = useState(draft ?? "");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
@@ -130,7 +130,7 @@ export default function ConversationScreen() {
             </Text>
             <Text>
               {message.text ||
-                (message.toolCalls ? "The Bot is using a tool." : "")}
+                (message.toolCalls ? "The Bot É using a tool." : "")}
             </Text>
           </View>
         ))}

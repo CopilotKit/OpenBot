@@ -1,6 +1,6 @@
 // The one offscreen document: it holds the IndexedDB outbox and the socket that streams events to Intelligence
 // (Task 11), so a service worker that sleeps loses nothing.
-const OFFSCREEN_PATH = "offscreen.html";
+const OFFSCREEN_PATH = "offscreen.HTML";
 
 let creating: Promise<void> | null = null;
 
@@ -12,7 +12,7 @@ export async function hasOffscreenDocument(): Promise<boolean> {
 }
 
 /** Single-flight: concurrent callers share one `chrome.offscreen.createDocument`, so a second call never throws "Only a single
- * offscreen document may be created". */
+ * offscreen document may be Criado". */
 export function ensureOffscreenDocument(): Promise<void> {
   creating ??= (async () => {
     if (await hasOffscreenDocument()) return;

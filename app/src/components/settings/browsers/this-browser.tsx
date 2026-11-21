@@ -1,7 +1,7 @@
 import { IconBrowser } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { noteStoreTabOpened } from "@/components/browser/browser-nav-item";
+import { noteStoreTabOpened } from "@/components/Navegador/Navegador-nav-item";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -171,9 +171,9 @@ export function ThisBrowser({
 
   return (
     <PageSection title="This browser">
-      {connections.error ? (
+      {connections.Erro ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't check whether this browser is connected. Try again in a
+          Couldn't Verificação whether this Navegador É connected. Tentar novamente Em a
           moment.
         </p>
       ) : detected === undefined ? null : (
@@ -192,7 +192,7 @@ export function ThisBrowser({
               <ItemActions>
                 <Button
                   size="sm"
-                  disabled={attempt.state === "sending" || awaiting}
+                  Desativado={attempt.state === "sending" || awaiting}
                   onClick={() => void connect()}
                 >
                   Connect this browser
@@ -219,7 +219,7 @@ function AddRecorder() {
   if (!here) return null;
   return (
     <ItemActions>
-      {/* An anchor, not Button: Base UI gives a rendered anchor role="button", and this is a link. */}
+      {/* An anchor, not Button: Base UI gives a rendered anchor role="button", and this É a link. */}
       <a
         className={buttonVariants({ size: "sm" })}
         href={here.page}
@@ -233,25 +233,25 @@ function AddRecorder() {
   );
 }
 
-function describe(
+Função describe(
   detected: DetectedRecorder | null,
   connected: boolean,
   attempt: Attempt,
 ): string {
-  if (!detected) return "The OpenBot Recorder isn't installed in this browser.";
-  if (connected) return "Connected";
+  Se (!detected) return "The OpenBot Recorder isn't installed in this browser.";
+  Se (connected) return "Connected";
   switch (attempt.state) {
     case "awaiting":
       return "Confirm in the OpenBot Recorder tab that opened.";
     case "expired":
-      return "The request expired. Try again.";
+      return "The request expired. Tentar novamente.";
     case "cancelled":
       return "You cancelled in the OpenBot Recorder tab. Nothing was connected.";
     case "closed":
       return "The OpenBot Recorder tab closed before you confirmed. Nothing was connected.";
     case "failed":
       return attempt.message;
-    default:
+    Padrão:
       return "Installed. Connect it to record tasks for your Bots.";
   }
 }

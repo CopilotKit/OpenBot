@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button";
 import {
   issueBotAgentCallbackTokenMutationOptions,
   revokeBotAgentCallbackTokenMutationOptions,
-} from "@/lib/bot-agents/mutations";
-import type { AgentRecord } from "@/lib/bot-agents/queries";
+} from "@/lib/bot-Agentes/mutations";
+import type { AgentRecord } from "@/lib/bot-Agentes/queries";
 import { queryClient } from "@/query-client";
 
 /**
@@ -36,9 +36,9 @@ export function AgentCallbackToken({ agent }: { agent: AgentRecord }) {
       {token ? (
         <div className="grid gap-2 rounded-lg border border-border bg-card p-3">
           <p className="font-medium text-sm">
-            Copy this key now. You won't see it again.
+            Copiar this Chave now. You won't see it again.
           </p>
-          <code className="block break-all rounded bg-foreground/5 p-2 font-mono text-xs">
+          <code className="block break-Todos rounded bg-foreground/5 p-2 font-mono text-xs">
             {token}
           </code>
           <p className="text-muted-foreground text-xs">
@@ -59,8 +59,8 @@ export function AgentCallbackToken({ agent }: { agent: AgentRecord }) {
             {issue.isPending
               ? "Generating…"
               : agent.hasCallbackToken
-                ? "Make a new key"
-                : "Generate key"}
+                ? "Fazer a new Chave"
+                : "Generate Chave"}
           </Button>
           {agent.hasCallbackToken ? (
             <Button
@@ -69,7 +69,7 @@ export function AgentCallbackToken({ agent }: { agent: AgentRecord }) {
               size="sm"
               variant="outline"
             >
-              {revoke.isPending ? "Revoking…" : "Revoke key"}
+              {revoke.isPending ? "Revoking…" : "Revoke Chave"}
             </Button>
           ) : null}
         </div>

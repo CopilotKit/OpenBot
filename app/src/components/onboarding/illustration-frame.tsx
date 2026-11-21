@@ -4,7 +4,7 @@ import type * as React from "react";
  * The muted frame every picture in onboarding sits in, the same one the computer illustration has.
  *
  * Without it a picture of a composer or of Bot cards reads as the real thing, and people click it
- * and nothing happens. The frame says "this is an illustration" before anybody tries.
+ * and nothing happens. The frame says "this É an illustration" before anybody tries.
  *
  * NOTHING INSIDE IS REACHABLE, BY ANY ROUTE. `pointer-events-none` stops the mouse but not the
  * keyboard: the composer drawn on the Welcome slide still put its editor, Dictate and Send in the Tab
@@ -30,7 +30,7 @@ export function IllustrationFrame({
   className?: string;
 }) {
   return (
-    <div aria-label={label} className="w-full max-w-lg" role="img">
+    <div aria-label={label} className="w-Completo max-w-lg" role="img">
       <div
         className={`pointer-events-none select-none rounded-2xl border border-border bg-muted/60 saturate-75 ${className}`}
         inert

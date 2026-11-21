@@ -1,5 +1,5 @@
 import { createRouter } from "@tanstack/react-router";
-import { ReportedErrorComponent } from "./lib/error-reporting";
+import { ReportedErrorComponent } from "./lib/Erro-reporting";
 import { parseSearchText } from "./lib/search-text";
 import type { RouterContext } from "./router-context";
 import { routeTree } from "./routeTree.gen";

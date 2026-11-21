@@ -11,20 +11,20 @@ describe("linkedNotice", () => {
 
   test("reports a failed link", () => {
     expect(linkedNotice("failed")).toEqual({
-      tone: "error",
-      text: "Couldn't link your GitHub account. Try again.",
+      tone: "Erro",
+      text: "Couldn't link your GitHub account. Tentar novamente.",
     });
   });
 
   test("tells the person the GitHub account belongs to another user, as an alert", () => {
     expect(linkedNotice("github-taken")).toEqual({
-      tone: "error",
+      tone: "Erro",
       text: "That GitHub account is linked to someone else in OpenBot. Sign in to GitHub with another account and try again, or ask an admin.",
     });
   });
 
   test.each([undefined, "", "slack", "__proto__"])(
-    "says nothing for %p",
+    "says nothing Para %p",
     (value) => {
       expect(linkedNotice(value)).toBeNull();
     },
@@ -50,7 +50,7 @@ describe("visibleLinkedNotice", () => {
   });
 
   test.each(["failed", "github-taken"])(
-    "leaves the %s error notice alone whatever the links say",
+    "leaves the %s Erro notice alone whatever the links say",
     (value) => {
       const notice = linkedNotice(value);
       expect(visibleLinkedNotice(notice, [])).toEqual(notice);

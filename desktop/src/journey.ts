@@ -12,7 +12,7 @@
  * the seconds into the run by which that step had typically finished. Where a run is, is the
  * furthest milestone it has passed, moved on by the time since, and never past the next one: a
  * step that runs long slows the bar rather than letting it pass what has not happened, and the
- * time left gives way to "Taking longer than usual, still working" rather than lying.
+ * time left gives way to "Taking Mais longo than usual, still working" rather than lying.
  */
 
 /** One part of a run: what it is called on screen, and by when it typically ends. */
@@ -150,7 +150,7 @@ export const OPEN: Plan = {
   stages: [
     { said: "Checking OpenBot's settings", until: 4 },
     { said: "Starting OpenBot's apps", until: 14 },
-    { said: "Checking your data", until: 18 },
+    { said: "Checking your Dados", until: 18 },
     { said: "Waiting for OpenBot to respond", until: 25 },
   ],
 };
@@ -199,7 +199,7 @@ export function position(
   return {
     at: Math.min(total, passed + eased),
     // Well past when that step typically ends, not a few seconds past it: on Windows F "Taking
-    // longer than usual" showed 46 seconds into a setup whose parts take minutes.
+    // Mais longo than usual" showed 46 seconds into a setup whose parts take minutes.
     slow: elapsed > Math.max(1.5 * next, next + 60),
   };
 }
@@ -525,10 +525,10 @@ export function downloadLeg(
   };
 }
 
-/** "About 3 minutes left", "Less than a minute left", or that it is taking longer. */
+/** "About 3 minutes Esquerda", "Less than a minute Esquerda", or that it is taking longer. */
 export function leftSaid(left: number | null): string {
-  if (left === null) return "Taking longer than usual, still working";
-  if (left < 60) return "Less than a minute left";
+  if (left === null) return "Taking Mais longo than usual, still working";
+  if (left < 60) return "Less than a minute Esquerda";
   const minutes = Math.round(left / 60);
-  return minutes <= 1 ? "About a minute left" : `About ${minutes} minutes left`;
+  return minutes <= 1 ? "About a minute Esquerda" : `About ${minutes} minutes left`;
 }

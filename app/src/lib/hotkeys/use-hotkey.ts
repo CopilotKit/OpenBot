@@ -16,7 +16,7 @@ function isEditable(target: EventTarget | null): boolean {
   }
   return (
     target.isContentEditable ||
-    target.tagName === "INPUT" ||
+    target.tagName === "Entrada" ||
     target.tagName === "TEXTAREA" ||
     target.tagName === "SELECT"
   );

@@ -217,7 +217,7 @@ export const getListOrganizationsMockHandler = (
     async (info: Parameters<HttpResponseResolver>[0]) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListOrganizationsResponseMock(),
@@ -247,7 +247,7 @@ export const getCreateOrganizationMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateOrganizationResponseMock(),
@@ -273,7 +273,7 @@ export const getListOrganizationMembersMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListOrganizationMembersResponseMock(),
@@ -309,7 +309,7 @@ export const getUpdateOrganizationMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateOrganizationResponseMock(),
@@ -333,7 +333,7 @@ export const getDeleteOrganizationMockHandler = (
     async (
       info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -371,7 +371,7 @@ export const getUpdateOrganizationMemberMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateOrganizationMemberResponseMock(),
@@ -399,7 +399,7 @@ export const getRemoveOrganizationMemberMockHandler = (
         HttpResponseResolver<{ organizationId: string; personId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -424,7 +424,7 @@ export const getListOrganizationInvitationsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListOrganizationInvitationsResponseMock(),
@@ -465,7 +465,7 @@ export const getCreateOrganizationInvitationMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateOrganizationInvitationResponseMock(),
@@ -493,7 +493,7 @@ export const getCancelOrganizationInvitationMockHandler = (
         HttpResponseResolver<{ organizationId: string; invitationId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -518,7 +518,7 @@ export const getGetOrganizationPlanMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetOrganizationPlanResponseMock(),
@@ -542,7 +542,7 @@ export const getListInvitationsMockHandler = (
     async (info: Parameters<HttpResponseResolver>[0]) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListInvitationsResponseMock(),
@@ -568,7 +568,7 @@ export const getGetInvitationMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetInvitationResponseMock(),
@@ -594,7 +594,7 @@ export const getAcceptInvitationMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getAcceptInvitationResponseMock(),
@@ -618,7 +618,7 @@ export const getDeclineInvitationMockHandler = (
     async (
       info: Parameters<HttpResponseResolver<{ invitationId: string }>>[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 

@@ -15,20 +15,20 @@ import type {
 export const getGetNotificationSettingsResponseMock =
   (): NotificationSettings => ({
     routing: {
-      progress: "all",
-      decision: "all",
+      progress: "Todos",
+      decision: "Todos",
       question: ["push", "slack"],
-      attention: "all",
+      attention: "Todos",
     },
   });
 
 export const getUpdateNotificationSettingsResponseMock =
   (): NotificationSettings => ({
     routing: {
-      progress: "all",
-      decision: "all",
+      progress: "Todos",
+      decision: "Todos",
       question: ["push", "slack"],
-      attention: "all",
+      attention: "Todos",
     },
   });
 
@@ -73,7 +73,7 @@ export const getGetNotificationSettingsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetNotificationSettingsResponseMock(),
@@ -112,7 +112,7 @@ export const getUpdateNotificationSettingsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateNotificationSettingsResponseMock(),
@@ -150,7 +150,7 @@ export const getGetBotNotificationSettingsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetBotNotificationSettingsResponseMock(),
@@ -189,7 +189,7 @@ export const getUpdateBotNotificationSettingsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUpdateBotNotificationSettingsResponseMock(),
@@ -215,7 +215,7 @@ export const getListNotificationTransportsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListNotificationTransportsResponseMock(),

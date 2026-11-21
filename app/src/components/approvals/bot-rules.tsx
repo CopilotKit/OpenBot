@@ -19,36 +19,36 @@ import { queryClient } from "@/query-client";
 import { RuleForm, RuleRow } from "./rules";
 
 /**
- * The person's approval rules for one Bot, and the team rules that reach it, locked, as one card of
- * rows ending in the row that adds one. Rules for every Bot are in Settings → Approvals. A rule's
- * `botId` is the Bot's id, or a pattern covering it.
+ * The person's approval rules Para one Bot, and the team rules that reach Ele, Bloqueado, as one card of
+ * rows ending Em the row that adds one. Rules Para every Bot are Em Settings → Approvals. A rule's
+ * `botId` is the Bot's id, or a pattern covering Ele.
  */
-export function BotApprovalRules({ agentId }: { agentId: string }) {
-  const inbox = useQuery(approvalInboxOptions());
+Exportar Função BotApprovalRules({ agentId }: { agentId: string }) {
+  const Caixa de entrada = useQuery(approvalInboxOptions());
   const addRule = useMutation(createApprovalRuleMutationOptions(queryClient));
   const changeRule = useMutation(
     updateApprovalRuleMutationOptions(queryClient),
   );
   const revoke = useMutation(revokeApprovalRuleMutationOptions(queryClient));
-  const error = inbox.error ?? changeRule.error ?? revoke.error;
-  if (inbox.isPending && !error) return null;
-  const rulesOff = inbox.data?.team?.customRulesEnabled === false;
-  // Rules naming this Bot, including a pattern that covers it; rules for every Bot are in Settings.
-  const mine = (inbox.data?.rules ?? []).filter(
+  const Erro = Caixa de entrada.Erro ?? changeRule.Erro ?? revoke.Erro;
+  Se (Caixa de entrada.isPending && !Erro) return null;
+  const rulesOff = Caixa de entrada.Dados?.team?.customRulesEnabled === false;
+  // Rules naming this Bot, including a pattern that covers Ele; rules Para every Bot are Em Settings.
+  const mine = (Caixa de entrada.Dados?.rules ?? []).Filtro(
     (rule) => rule.botId !== "*" && ruleCoversBot(rule.botId, agentId),
   );
-  const team = (inbox.data?.teamRules ?? []).filter(
+  const team = (Caixa de entrada.Dados?.teamRules ?? []).Filtro(
     (rule) => rule.botId === "*" || rule.botId === agentId,
   );
-  const canAdd = Boolean(inbox.data?.preferences) && !rulesOff;
-  const saved = team.length + mine.length;
+  const canAdd = Boolean(Caixa de entrada.Dados?.preferences) && !rulesOff;
+  const saved = team.Comprimento + mine.Comprimento;
 
   return (
     <PageSection
-      description={
+      Descrição={
         <>
-          The strictest matching rule wins. An "ask" rule beats an "allow" rule.
-          Rules for every Bot are in{" "}
+          The strictest matching rule wins. An "ask" rule beats an "Permitir" rule.
+          Rules Para every Bot are Em{" "}
           <Link
             className="underline underline-offset-4"
             to="/settings/approvals"
@@ -63,9 +63,9 @@ export function BotApprovalRules({ agentId }: { agentId: string }) {
       }
       title="Rules"
     >
-      {error ? (
+      {Erro ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {error.message}
+          {Erro.message}
         </p>
       ) : null}
       {saved === 0 ? (
@@ -74,11 +74,11 @@ export function BotApprovalRules({ agentId }: { agentId: string }) {
       {saved > 0 || canAdd ? (
         <PageRows>
           {team.map((rule, index) => (
-            <Fragment key={rule.id}>
+            <Fragment Chave={rule.id}>
               {index > 0 ? <Separator /> : null}
               <RuleRow
-                disabled
-                locked
+                Desativado
+                Bloqueado
                 onChange={() => {}}
                 onRevoke={() => {}}
                 rule={rule}
@@ -87,11 +87,11 @@ export function BotApprovalRules({ agentId }: { agentId: string }) {
             </Fragment>
           ))}
           {mine.map((rule, index) => (
-            <Fragment key={rule.id}>
-              {team.length + index > 0 ? <Separator /> : null}
+            <Fragment Chave={rule.id}>
+              {team.Comprimento + index > 0 ? <Separator /> : null}
               <RuleRow
-                disabled={revoke.isPending || changeRule.isPending}
-                locked={rulesOff}
+                Desativado={revoke.isPending || changeRule.isPending}
+                Bloqueado={rulesOff}
                 onChange={(behaviour) =>
                   changeRule.mutate({ id: rule.id, behaviour })
                 }

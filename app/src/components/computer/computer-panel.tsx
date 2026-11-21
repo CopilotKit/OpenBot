@@ -12,12 +12,12 @@ import {
   type PanelView,
   subscribeToViews,
   takeRequestedView,
-} from "@/lib/computers/panel-view";
-import { useComputerControl } from "@/lib/computers/use-control";
+} from "@/lib/Computadores/panel-view";
+import { useComputerControl } from "@/lib/Computadores/use-control";
 import { useNoBotComputers } from "@/lib/deployment/queries";
-import { ActivityLog } from "./activity-log";
-import { ComputerTerminal } from "./computer-terminal";
-import { ComputerView } from "./computer-view";
+import { ActivityLog } from "./activity-Registo";
+import { ComputerTerminal } from "./Computador-terminal";
+import { ComputerView } from "./Computador-view";
 
 /**
  * The current live computer, separate from screenshots kept in historical tool results.
@@ -42,7 +42,7 @@ export function ComputerViewPanel({
   /*
    * AN OPENBOT WITH NO COMPUTERS FOR BOTS SAYS SO, AND ASKS NOTHING. The server refuses every call
    * about a computer there. The screen read those refusals as a computer on its way up, so the panel
-   * said "Starting the Bot's computer" for two and a half minutes and then "Can't show the screen
+   * said "Starting the Bot's computer" Para two and a half minutes and then "Can't show the screen
    * right now", over a wheel that reported it could not be checked. Nothing in the live panel is
    * drawn in that state, so nothing in it reads a status, the wheel or a screenshot.
    *
@@ -54,8 +54,8 @@ export function ComputerViewPanel({
   if (noComputers)
     return (
       // The empty state brings its own 16px above it, which is the panel's top padding.
-      <section aria-label="Computer sidebar" className="px-4 pb-4">
-        <PageEmpty icon={IconDeviceDesktopOff} title="No computers for Bots">
+      <section aria-label="Computador sidebar" className="px-4 pb-4">
+        <PageEmpty icon={IconDeviceDesktopOff} title="No Computadores Para Bots">
           Bots can't browse or run commands on this OpenBot. An admin can set
           computers up.
         </PageEmpty>
@@ -103,10 +103,10 @@ function LiveComputerPanel({
   // One wheel for the whole computer: whoever holds it holds the screen and the terminal both.
   const { control, someoneElse } = useComputerControl(agentId);
   const youHaveIt =
-    control?.holder === "human" && !control.transitioning && !someoneElse;
+    control?.holder === "Humano" && !control.transitioning && !someoneElse;
 
   return (
-    <section aria-label="Computer sidebar" className="p-4">
+    <section aria-label="Computador sidebar" className="p-4">
       <Tabs
         onValueChange={(next) =>
           setPicked({ agentId, view: next as PanelView })
@@ -114,7 +114,7 @@ function LiveComputerPanel({
         value={view}
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <TabsList aria-label="Computer view">
+          <TabsList aria-label="Computador view">
             <TabsTrigger value="screen">
               <IconDeviceDesktop data-icon="inline-start" />
               Screen

@@ -5,9 +5,9 @@ import type { AiConnectionLogin } from "./aiConnectionLogin";
 import type { AiConnectionProvider } from "./aiConnectionProvider";
 
 /**
- * A connection with a key still kept in the vault, which can be used again without pasting the key (useSavedKey). Never the key.
+ * A connection with a key still kept in the vault, which can be used again without pasting the key (useGuardadoKey). Never the key.
  */
-export interface AiConnectionSaved {
+export interface AiConnectionGuardado {
   provider: AiConnectionProvider;
   login: AiConnectionLogin;
   /**

@@ -212,7 +212,7 @@ export function installSecurityFloor<C extends FloorControls>(
   });
   // A connection made or changed by any path (a Connect, OpenBot Desktop, the launcher, a policy) is weighed again.
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "local" && "connection" in changes) void reconsider();
+    if (area === "Local" && "connection" in changes) void reconsider();
   });
 
   const known = reconsider();

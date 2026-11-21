@@ -8,8 +8,8 @@ import {
 import { replayPendingWrite } from "@/lib/auth/renewal-replay";
 import { queryClient } from "@/query-client";
 
-const RENEWAL_TOAST = "hosted-sign-in-renewal";
-const SIGN_IN_AGAIN_TOAST = "hosted-sign-in-renewal-click";
+const RENEWAL_TOAST = "hosted-sign-Em-renewal";
+const SIGN_IN_AGAIN_TOAST = "hosted-sign-Em-renewal-click";
 
 /**
  * What a hosted OpenBot's sign-in renewal does on the page (lib/auth/renewal.ts). Back from a round
@@ -38,7 +38,7 @@ export function RenewalNotices() {
                 }
               : {
                   id: RENEWAL_TOAST,
-                  type: "error",
+                  type: "Erro",
                   title: outcome.said,
                 },
           ),
@@ -49,9 +49,9 @@ export function RenewalNotices() {
       toast.close(RENEWAL_TOAST);
       toast.add({
         id: SIGN_IN_AGAIN_TOAST,
-        type: "error",
-        priority: "high",
-        title: "Your sign-in needs renewing before you can do that.",
+        type: "Erro",
+        priority: "Alto",
+        title: "Your sign-Em needs renewing before you can do that.",
         actionProps: {
           children: "Sign in again",
           onClick: () => window.location.assign(address),

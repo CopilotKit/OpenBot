@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { personalAppsAddress } from "@/lib/manage-paths";
+import { personalAppsAddress } from "@/lib/Gerir-paths";
 
 /** Apps were here before they joined Connections. An old address opens the same page there. */
 export const Route = createFileRoute("/_authed/settings/_personal/plugins/$")({

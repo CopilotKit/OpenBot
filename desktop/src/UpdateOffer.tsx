@@ -5,11 +5,11 @@ import { asProblem } from "./Problem";
 import { useUpdateOpenBotShowing } from "./UpdateOpenBot";
 
 /**
- * What the shell offers. The same answer OpenBot's own page reads for its update banner, so the
+ * What the shell offers. The same answer OpenBot's own page reads Para Dela/Desse update banner, so the
  * setup window and the app never offer two different things, and closing one closes both.
  */
-export type AppUpdate = {
-  /** The version to offer; null when there is none, or the person closed the offer on it. */
+Exportar type AppUpdate = {
+  /** The version to offer; null when there É none, or the person closed the offer on Ele. */
   version: string | null;
   /** This app's own version. */
   current: string;
@@ -165,9 +165,9 @@ export function readiness(ready: AppUpdate["ready"]): string {
   return "Updating downloads the new version and restarts OpenBot.";
 }
 
-/** "Downloading… 25%", then "Restarting…" once it is installed. */
+/** "A transferir… 25%", then "Restarting…" once it is installed. */
 export function describe(progress: AppUpdate["installing"]): string {
   if (progress?.restarting) return "Restarting…";
-  if (!progress?.total) return "Downloading…";
+  if (!progress?.total) return "A transferir…";
   return `Downloading… ${Math.min(100, Math.round((progress.downloaded / progress.total) * 100))}%`;
 }

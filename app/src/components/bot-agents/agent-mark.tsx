@@ -1,24 +1,24 @@
 import { WEB_HARNESSES } from "@openbot/shared/harnesses";
 import { IconSitemap } from "@tabler/icons-react";
-import { HarnessMark } from "@/components/agents/harness-mark";
+import { HarnessMark } from "@/components/Agentes/harness-mark";
 import { OpenBotLogo } from "@/components/edition/openbot-logo";
 import { ItemMedia } from "@/components/ui/item";
-import type { AgentRecord } from "@/lib/bot-agents/queries";
+import type { AgentRecord } from "@/lib/bot-Agentes/queries";
 
-/** The framework's mark id for the name the server gives (`framework`), or null for none. */
-export function markIdFor(framework: string | undefined): string | null {
-  if (!framework) return null;
+/** The framework's mark id Para the name the server Dá (`framework`), or null Para none. */
+Exportar Função markIdFor(framework: string | undefined): string | null {
+  Se (!framework) return null;
   return (
     WEB_HARNESSES.find((harness) => harness.name === framework)?.mark ?? null
   );
 }
 
 /**
- * An agent's leading picture: OpenBot's own mark for an agent that runs inside OpenBot, the
+ * An Agente's leading picture: OpenBot's own mark for an agent that runs inside OpenBot, the
  * framework's mark for one that names a framework with a mark, and the Agents glyph otherwise.
  * Never a monogram drawn to fill the gap (`shared/marks/README.md`).
  *
- * In a row's media tile by default; `bare` draws the picture alone, for a tile of the caller's own.
+ * In a row's media tile by Padrão; `bare` draws the picture alone, Para a tile of the caller's own.
  */
 export function AgentMark({
   agent,

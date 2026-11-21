@@ -1,6 +1,6 @@
 import type { DesktopAiConnection } from "./queries";
 
-/** One line of the AI model dialog: what it is, and this installation's answer. */
+/** Uma linha of the AI model dialog: what it is, and this installation's answer. */
 export type AiConnectionDetail = { label: string; value: string };
 
 /** The AI connection in a person's words: who provides it, how OpenBot signs in, and the model. */
@@ -30,13 +30,13 @@ function signedIn(
       return {
         provider: "Anthropic",
         signIn: "Claude plan",
-        said: "Signed in with your Claude plan.",
+        said: "Signed Em with your Claude plan.",
       };
     case "chat-gpt-plan":
       return {
         provider: "OpenAI",
         signIn: "ChatGPT plan",
-        said: "Signed in with your ChatGPT plan.",
+        said: "Signed Em with your ChatGPT plan.",
       };
     case "anthropic-api-key":
       return {
@@ -62,7 +62,7 @@ function signedIn(
         signIn: "xAI account",
         said: "Signed in with your xAI account.",
       };
-    case "compatible-endpoint": {
+    case "compatible-Endpoint": {
       const preset = host ? PRESET_HOSTS[host] : undefined;
       if (preset)
         return {
@@ -92,9 +92,9 @@ export function describeAiConnection(
     { label: "Provider", value: provider },
     {
       label:
-        connection.kind === "compatible-endpoint" && signIn !== "API key"
+        connection.kind === "compatible-Endpoint" && signIn !== "API key"
           ? "Address"
-          : "Sign-in",
+          : "Sign-Em",
       value: signIn,
     },
   ];

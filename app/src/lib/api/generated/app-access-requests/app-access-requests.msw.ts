@@ -19,7 +19,7 @@ export const getListAppAccessRequestsResponseMock =
         id: "6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d",
         appId: "notion",
         appTitle: "Notion",
-        kind: "grant",
+        kind: "Conceder",
         status: "pending",
         botId: "research-assistant",
         botName: "Research Assistant",
@@ -38,7 +38,7 @@ export const getCreateAppAccessRequestResponseMock = (): AppAccessRequest => ({
   id: "6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d",
   appId: "notion",
   appTitle: "Notion",
-  kind: "grant",
+  kind: "Conceder",
   status: "pending",
   botId: "research-assistant",
   botName: "Research Assistant",
@@ -56,7 +56,7 @@ export const getApproveAppAccessRequestResponseMock =
       id: "6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d",
       appId: "notion",
       appTitle: "Notion",
-      kind: "grant",
+      kind: "Conceder",
       status: "approved",
       botId: "research-assistant",
       botName: "Research Assistant",
@@ -75,7 +75,7 @@ export const getDismissAppAccessRequestResponseMock = (): AppAccessRequest => ({
   id: "6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d",
   appId: "notion",
   appTitle: "Notion",
-  kind: "grant",
+  kind: "Conceder",
   status: "dismissed",
   botId: "research-assistant",
   botName: "Research Assistant",
@@ -102,7 +102,7 @@ export const getListAppAccessRequestsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListAppAccessRequestsResponseMock(),
@@ -135,7 +135,7 @@ export const getCreateAppAccessRequestMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCreateAppAccessRequestResponseMock(),
@@ -169,7 +169,7 @@ export const getDeleteAppAccessRequestMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -207,7 +207,7 @@ export const getApproveAppAccessRequestMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getApproveAppAccessRequestResponseMock(),
@@ -243,7 +243,7 @@ export const getDismissAppAccessRequestMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getDismissAppAccessRequestResponseMock(),

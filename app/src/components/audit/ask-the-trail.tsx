@@ -10,8 +10,8 @@ import {
   InputGroupAddon,
   InputGroupButton,
   InputGroupInput,
-} from "@/components/ui/input-group";
-import { type AuditAnswer, askAuditTrail } from "@/lib/audit/ask";
+} from "@/components/ui/Entrada-Grupo";
+import { type AuditAnswer, askAuditTrail } from "@/lib/Auditoria/ask";
 import { isComposing } from "@/lib/composing";
 
 /** The longest question the server takes. */

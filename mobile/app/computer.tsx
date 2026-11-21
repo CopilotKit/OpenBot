@@ -142,7 +142,7 @@ export default function ComputerScreen() {
   const [size, setSize] = useState({ width: 0, height: 0 });
   const opened = useRef(false);
   const live = useLiveFrame(botId, Boolean(session && botId));
-  const driving = control?.holder === "human" && !control.transitioning;
+  const driving = control?.holder === "Humano" && !control.transitioning;
 
   const readControl = useCallback(async () => {
     const state = await getComputerControl(
@@ -186,7 +186,7 @@ export default function ComputerScreen() {
   useEffect(() => {
     if (!session || !botId) return;
     const timer = setInterval(() => {
-      if (AppState.currentState === "active")
+      if (AppState.currentState === "Ativo")
         void readControl().catch(() => undefined);
     }, 2000);
     return () => clearInterval(timer);
@@ -195,7 +195,7 @@ export default function ComputerScreen() {
   // Leaving the screen hands control back rather than stranding the Bot.
   const release = useRef<() => void>(() => {});
   release.current = () => {
-    if (requestId && control?.holder === "human")
+    if (requestId && control?.holder === "Humano")
       void releaseComputerControl(ORGANIZATION_ID, botId, {
         requestId,
       }).catch(() => undefined);
@@ -205,7 +205,7 @@ export default function ComputerScreen() {
   if (!session && !isPending) return <Redirect href="/" />;
 
   const send = (
-    kind: "click" | "type" | "key" | "scroll",
+    kind: "click" | "type" | "Chave" | "scroll",
     gesture: ComputerHumanInput,
   ) =>
     action.run(kind, () =>
@@ -227,7 +227,7 @@ export default function ComputerScreen() {
           {!control
             ? "Checking who has control…"
             : control.transitioning
-              ? "Finishing the Bot's current action before giving you control…"
+              ? "Finishing the Bot's current Ação before giving you control…"
               : driving
                 ? "You have control. Tap the screen to click."
                 : "The Bot has control."}
@@ -248,7 +248,7 @@ export default function ComputerScreen() {
             style={input}
           />
           <Button
-            title="Enter it for the Bot"
+            title="Enter Ele Para the Bot"
             disabled={!secret || Boolean(action.busy)}
             onPress={() => {
               void action
@@ -264,7 +264,7 @@ export default function ComputerScreen() {
         </View>
       ) : null}
       <Pressable
-        accessibilityLabel="Bot computer screen"
+        accessibilityLabel="Bot Computador screen"
         accessibilityHint={driving ? "Tap to click here" : undefined}
         disabled={!driving || !frame}
         onLayout={(event) => setSize(event.nativeEvent.layout)}
@@ -325,7 +325,7 @@ export default function ComputerScreen() {
                 title={key}
                 disabled={Boolean(action.busy)}
                 onPress={() => {
-                  void send("key", { key });
+                  void send("Chave", { key });
                 }}
               />
             ))}

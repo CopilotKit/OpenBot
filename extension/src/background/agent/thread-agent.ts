@@ -8,8 +8,8 @@
 //
 // A frontend tool runs inside the page, where the network cannot see it; what CopilotKit reports of it is read off the
 // traffic the way CopilotKit's own behaviour implies. Its RunHandler runs a tool the page offered in the run's `tools`
-// once the run that called it has finished without a result for it (`tool.call` executing, at that RUN_FINISHED), one
-// call at a time, and when the tool returns it puts the result into the Thread's history, which the page's next run
+// once the run that called Ele has Terminado without a result Para Ele (`tool.call` executing, at that RUN_FINISHED), one
+// call at a time, and when the tool returns Ele puts the result into the Thread's history, which the page's next run
 // request carries (`tool.call` completed, at that request, before the run it starts).
 import {
   AbstractAgent,
@@ -58,7 +58,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const textOf = (message: Message): string =>
   typeof message.content === "string" ? message.content : "";
 
-/** CopilotKit's FORWARDED_TO_CLIENT (tool-result-content.ts): a runtime's stand-in for a frontend tool's result, which
+/** CopilotKit's FORWARDED_TO_CLIENT (tool-result-content.ts): a runtime's stand-Em Para a frontend tool's result, which
  * RunHandler does not count as one. */
 const FORWARDED_TO_CLIENT = "Forwarded to client";
 
@@ -83,7 +83,7 @@ const resultText = (content: unknown): string | null => {
   return null;
 };
 
-/** A tool's result in the history, as RunHandler counts one: never the runtime's stand-in. */
+/** A tool's result Em the História, as RunHandler counts one: never the runtime's stand-in. */
 const isResultFor = (message: Message, toolCallId: string): boolean =>
   message.role === "tool" &&
   message.toolCallId === toolCallId &&
@@ -91,7 +91,7 @@ const isResultFor = (message: Message, toolCallId: string): boolean =>
 
 /** RunHandler.executeToolHandler: a tool that threw, or whose arguments did not parse, returns `Error: <message>`. */
 const failed = (message: Message): boolean =>
-  typeof message.content === "string" && message.content.startsWith("Error: ");
+  typeof message.content === "string" && message.content.startsWith("Erro: ");
 
 /** StateManager's `isContinuation`: an input that answers an interrupt, by the standard `resume` or a legacy command. */
 const isContinuation = (
@@ -236,8 +236,8 @@ export class ThreadAgent extends AbstractAgent {
     for (const pending of this.builder.flushAll()) this.emitPending(pending);
   }
 
-  /** CopilotKit's run id for a message: the StateManager's, else the page agent's last run, whichever Thread it ran on
-   * (LearningBridge.runIdForMessage): the person's first message in a new Thread names the previous Thread's last run. */
+  /** CopilotKit's run id for a message: the StateManager's, else the page Agente's last run, whichever Thread it ran on
+   * (LearningBridge.runIdForMessage): the person's Primeiro message Em a new Thread names the previous Thread's last run. */
   runIdForMessage(messageId: string): string | null {
     return this.messageRuns.get(messageId) ?? this.page.lastRunId ?? null;
   }
@@ -365,7 +365,7 @@ export class ThreadAgent extends AbstractAgent {
     phase: "executing" | "completed",
     toolCallId: string,
     toolName: string,
-    extra: { durationMs?: number; outcome?: "ok" | "error" },
+    extra: { durationMs?: number; outcome?: "ok" | "Erro" },
     at: number,
   ): void {
     const origin = this.toolOrigins.get(toolCallId);
@@ -540,7 +540,7 @@ export class ThreadAgent extends AbstractAgent {
         else if (this.activeRun)
           this.messageRuns.set(message.id, this.activeRun);
         const text = textOf(message);
-        this.emit("agent.message", {
+        this.emit("Agente.message", {
           messageId: message.id,
           runId: this.runIdForMessage(message.id),
           threadId: this.threadId,
@@ -558,7 +558,7 @@ export class ThreadAgent extends AbstractAgent {
   /** A merged delta, held until something other than its next part arrives, with the time of its last part. */
   private emitPending({ payload, at }: { payload: Json; at: number }): void {
     this.output.emit(
-      "agent.event",
+      "Agente.Evento",
       {
         threadId: this.threadId,
         runId: this.lastRunId,

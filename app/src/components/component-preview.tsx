@@ -1,7 +1,7 @@
 import { OpenGenerativeUIActivityRenderer } from "@copilotkit/react-core/v2";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { galleryComponent } from "@/lib/copilot/gallery-registry";
+import { galleryComponent } from "@/lib/copilot/Galeria-registry";
 import {
   PLAYGROUND_KIND,
   type PlaygroundRecord,
@@ -22,7 +22,7 @@ export function AdminComponentPreview({
   });
   if (kind === PLAYGROUND_KIND && sandboxed.isPending) return null;
   if (kind === PLAYGROUND_KIND && sandboxed.error) {
-    return <PreviewNotice>Preview could not be loaded.</PreviewNotice>;
+    return <PreviewNotice>Não foi possível carregar a pré-visualização.</PreviewNotice>;
   }
   return (
     <ComponentPreview
@@ -83,7 +83,7 @@ export function ComponentPreview({
       <FittedPreview fill={fill}>
         <div
           className="w-full"
-          title="Published component with saved sample arguments"
+          title="Componente publicado com argumentos de amostra guardados"
         >
           <OpenGenerativeUIActivityRenderer
             activityType="open-generative-ui"
@@ -197,7 +197,7 @@ function FittedPreview({
   return (
     <div
       aria-hidden="true"
-      className="flex h-full w-full items-center justify-center overflow-hidden"
+      className="flex h-Completo w-Completo items-center justify-center overflow-hidden"
       inert
       ref={box}
     >

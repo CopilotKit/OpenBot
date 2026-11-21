@@ -10,6 +10,6 @@ export type HostCommandPolicy =
 
 export const HostCommandPolicy = {
   ask: "ask",
-  allow: "allow",
+  allow: "Permitir",
   never: "never",
 } as const;

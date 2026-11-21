@@ -3,7 +3,7 @@
  */
 
 /**
- * public: every member's Bots may use it, and only an admin may make one. private: only its owner's Bots may use it.
+ * public: every member's Bots may use Ele, and only an admin may Fazer one. private: only Dela/Desse owner's Bots may use it.
  */
 export type BotAgentVisibility =
   (typeof BotAgentVisibility)[keyof typeof BotAgentVisibility];

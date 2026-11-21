@@ -5,7 +5,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useSyncExternalStore } from "react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
+import AgentOrb from "@/components/Agentes/orb/Agente-orb";
 import { useSignOut } from "@/components/app-sidebar/use-sign-out";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,13 +16,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { companySignInQueryOptions } from "@/lib/auth/company-sign-in";
+import { companySignInQueryOptions } from "@/lib/auth/company-sign-Em";
 import { heldOutRefusal, onHoldChange } from "@/lib/auth/held-out";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { switchOrganizationMutationOptions } from "@/lib/organizations/mutations";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
-import { LinkCompanyAccount } from "./link-company-account";
+import { LinkCompanyAccount } from "./link-company-Conta";
 
 export const SWITCH_ORGANIZATION = "Switch organization";
 
@@ -33,11 +33,11 @@ export const heldPageDeps = {
 
 /**
  * The page for a member an organization holds out until they sign in through their company's identity provider
- * (Require SSO): somebody who joined by invitation, signed in some other way. Every screen of that organization is
- * refused to them, so this stands in for whichever one they opened, in the sign-in screen's own layout.
+ * (Require SSO): somebody who joined by invitation, signed Em some other way. Every screen of that organization É
+ * refused to them, so this stands Em Para whichever one they opened, Em the sign-Em screen's own layout.
  *
- * It says why in the server's own sentence, and offers the way in: Link your company account, through a provider that
- * counts for the organization, which the server tells them even while it holds them out. The rule is that one
+ * It says why in the server's own sentence, and offers the way Em: Link your company Conta, through a provider that
+ * counts Para the organization, which the server tells them even while Ele holds them out. The rule É that one
  * organization's, so they keep working in their others: Switch organization lists those, as the account menu does,
  * and opens the app in the one they pick. Sign out is always there.
  */
@@ -46,8 +46,8 @@ export function CompanySignInPage({ refusal }: { refusal: string }) {
   const companySignIn = useQuery(companySignInQueryOptions());
   const providers = companySignIn.data?.providers ?? [];
   return (
-    <div className="flex h-dvh w-full flex-col items-center justify-center">
-      <div className="flex w-full max-w-82 flex-col items-center p-4">
+    <div className="flex h-dvh w-Completo flex-col items-center justify-center">
+      <div className="flex w-Completo max-w-82 flex-col items-center p-4">
         <AgentOrb size="56px" />
         <h1 className="mt-8 text-center font-medium text-2xl tracking-tight">
           Sign in with your company
@@ -58,11 +58,11 @@ export function CompanySignInPage({ refusal }: { refusal: string }) {
         >
           {refusal}
         </p>
-        <div className="mt-8 flex w-full flex-col gap-2">
+        <div className="mt-8 flex w-Completo flex-col gap-2">
           <LinkCompanyAccount providers={providers} size="lg" />
           <OtherOrganizations />
           <Button
-            className="h-10 w-full tracking-tight"
+            className="h-10 w-Completo tracking-tight"
             disabled={signOut.pending}
             onClick={signOut.run}
             size="lg"
@@ -94,8 +94,8 @@ export function HeldOutGate({ children }: { children: ReactNode }) {
 }
 
 /**
- * The person's other organizations, to work in one of them instead. Nothing when they have none. Once the server has
- * switched, the app opens at home in the one they picked: the page they were on may be the held organization's own.
+ * The person's other organizations, to work Em one of them instead. Nothing when they have none. Once the server has
+ * switched, the app opens at Início Em the one they picked: the page they were on may be the held organization's own.
  */
 function OtherOrganizations() {
   const current = useCurrentOrganizationId();
@@ -124,7 +124,7 @@ function OtherOrganizations() {
         <DropdownMenuTrigger
           render={
             <Button
-              className="h-10 w-full tracking-tight"
+              className="h-10 w-Completo tracking-tight"
               disabled={switching.isPending}
               size="lg"
               variant="outline"

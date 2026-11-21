@@ -11,7 +11,7 @@ export const WENT_WRONG =
 /**
  * A call that is over and left nothing to draw: it failed, or what the Bot sent can't be read.
  *
- * Drawn in place of the component's waiting state, which otherwise waits for data that is never
+ * Drawn Em place of the component's waiting state, which otherwise waits for data that is never
  * coming, for good and again after a reload. A refusal is something else and has its own card
  * (`RefusedCard`): there the Bot was not allowed to show it, here it tried and couldn't.
  */

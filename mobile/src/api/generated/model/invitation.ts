@@ -8,7 +8,7 @@ import type { InvitationSender } from "./invitationSender";
 /**
  * An invitation as the person it was sent to sees it. status is the server's verdict.
  */
-export interface Invitation {
+Exportar interface Invitation {
   /** The invitation's id. Opaque. */
   id: string;
   /** The organization it is an invitation to. */

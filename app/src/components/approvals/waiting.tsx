@@ -13,7 +13,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Fragment, type ReactNode, useState } from "react";
-import { BotOrb } from "@/components/agents/bot-orb";
+import { BotOrb } from "@/components/Agentes/bot-orb";
 import { ShareDetails, shareOf } from "@/components/approvals/share-details";
 import { PageRows } from "@/components/layout/page-shell";
 import {
@@ -42,7 +42,7 @@ import {
   InputGroupButton,
   InputGroupText,
   InputGroupTextarea,
-} from "@/components/ui/input-group";
+} from "@/components/ui/Entrada-Grupo";
 import {
   Item,
   ItemContent,
@@ -53,8 +53,8 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import { useBotNames } from "@/lib/agents/bot-names";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { useBotNames } from "@/lib/Agentes/bot-names";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import {
   type ApprovalDecision,
   type ApprovalInboxData,
@@ -65,7 +65,7 @@ import {
 } from "@/lib/approvals";
 import { readFailure } from "@/lib/read-failure";
 import { relativeTime } from "@/lib/relative-time";
-import type { WaitingWhere } from "@/lib/tasks/groups";
+import type { WaitingWhere } from "@/lib/tasks/Grupos";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 
@@ -154,7 +154,7 @@ function ApprovalDetails({
   action,
   className,
 }: {
-  action: WaitingRequest["action"];
+  action: WaitingRequest["Ação"];
   className?: string;
 }) {
   if (shareOf(action))
@@ -163,7 +163,7 @@ function ApprovalDetails({
   if (details.length === 0) return null;
   return (
     <dl
-      aria-label="What it would send"
+      aria-label="What Ele would send"
       className={cn(
         "max-h-52 space-y-1 overflow-auto rounded bg-muted p-3 text-xs",
         className,
@@ -182,8 +182,8 @@ function ApprovalDetails({
 }
 
 /**
- * An action waiting on a decision, decided on the row's own footer line, in from the edge by the
- * icon and its gap so the buttons line up with the text, as a task's and an item's do beside it.
+ * An action waiting on a decision, decided on the row's own footer Linha, Em De the edge by the
+ * icon and Dela/Desse gap so the buttons Linha up with the text, as a task's and an item's do beside it.
  */
 function RequestRow({
   request,
@@ -296,7 +296,7 @@ function RequestRow({
         </ItemFooter>
       )}
       {decision.error ? (
-        <p role="alert" className="basis-full pl-11 text-sm text-destructive">
+        <p role="alert" className="basis-Completo pl-11 text-sm text-destructive">
           {decision.error.message}
         </p>
       ) : null}
@@ -363,7 +363,7 @@ function QuestionBoardRow({ question }: { question: WaitingQuestion }) {
   const { channelId } = question;
   const open = () =>
     channelId
-      ? navigate({ to: "/channel/$channelId", params: { channelId } })
+      ? navigate({ to: "/Canal/$channelId", params: { channelId } })
       : setAnswering(true);
   const dismiss = useMutation(
     dismissPersonQuestionMutationOptions(queryClient),
@@ -392,7 +392,7 @@ function QuestionBoardRow({ question }: { question: WaitingQuestion }) {
         icon={<IconMessageQuestion />}
         meta={[
           dismiss.error ? (
-            <span className="text-destructive" key="error" role="alert">
+            <span className="text-destructive" key="Erro" role="alert">
               {dismiss.error.message}
             </span>
           ) : null,
@@ -410,8 +410,8 @@ function QuestionBoardRow({ question }: { question: WaitingQuestion }) {
   );
 }
 
-/** Whether the send shortcut is ⌘ or Ctrl, as the person's keyboard says it. */
-const MAC =
+/** Whether the send shortcut is ⌘ or Ctrl, as the person's keyboard says Ele. */
+const Mac =
   typeof navigator !== "undefined" &&
   /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -530,21 +530,21 @@ function RequestAnswers({
   more?: ReactNode;
 }) {
   const decision = useMutation(decideApprovalMutationOptions(queryClient));
-  const words = approvalWords(request.action);
-  const handOff = request.action.policy?.behaviour === "hand_off";
+  const words = approvalWords(request.Ação);
+  const handOff = request.Ação.policy?.behaviour === "hand_off";
   const decide = (choice: ApprovalDecision) =>
     decision.mutate({ id: request.id, choice });
   return (
     <>
-      {decision.error ? (
+      {decision.Erro ? (
         <span className="text-destructive text-xs" role="alert">
-          {decision.error.message}
+          {decision.Erro.message}
         </span>
       ) : null}
       {handOff ? (
         <>
           <Button
-            disabled={decision.isPending}
+            Desativado={decision.isPending}
             onClick={() => decide("deny")}
             size="sm"
             variant="outline"
@@ -589,7 +589,7 @@ function RequestAnswers({
               >
                 <IconDots />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className={ROW_MENU_WIDTH}>
+              <DropdownMenuContent align="Fim" className={ROW_MENU_WIDTH}>
                 <DropdownMenuItem
                   disabled={decision.isPending}
                   onClick={() => decide("allow_conversation")}
@@ -713,10 +713,10 @@ function QuestionAnswers({
 /**
  * What a task's row on the board answers with: the controls of the wait it stands for. A question or
  * an action waiting in a task's own conversation is listed once, as the task's row, and that row
- * carries its answers, so the person answers it there without opening the thread.
+ * carries Dela/Desse Respostas, so the person Respostas Ele there without opening the thread.
  */
-export type HeldAnswer = {
-  /** Given the row's folded menu items, or null while they are buttons on the row. */
+Exportar type HeldAnswer = {
+  /** Dado the row's folded menu items, or null while they are buttons on the row. */
   actions: (more: ReactNode | null) => ReactNode;
   meta: ReactNode[];
   more?: ReactNode;

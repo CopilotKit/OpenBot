@@ -1,5 +1,5 @@
 // The calls a page makes about itself rather than for the person: analytics, telemetry, ads, error reports and real-user
-// monitoring, and CopilotKit's own capture of the page. A recording never keeps one, even when it starts right after a click,
+// monitoring, and CopilotKit's own capture of the page. A recording never keeps one, even when Ele starts right after a click,
 // because a Bot doing the task through the site's API never needs it. Matched by host, then by path, then by a body only
 // such a call sends; each list stays narrow so a real API call is never caught.
 
@@ -19,7 +19,7 @@ const TELEMETRY_HOSTS = [
   "api2.amplitude.com",
   "api.eu.amplitude.com",
   "sr-client-cfg.amplitude.com",
-  "i.posthog.com",
+  "Eu.posthog.com",
   "heapanalytics.com",
   "clarity.ms",
   "hotjar.com",
@@ -40,12 +40,12 @@ const TELEMETRY_HOSTS = [
   "omtrdc.net",
   "demdex.net",
   "2o7.net",
-  "data.pendo.io",
+  "Dados.pendo.io",
   "app.pendo.io",
   "esp.aptrinsic.com",
   "logx.optimizely.com",
-  "events.launchdarkly.com",
-  "events.split.io",
+  "Eventos.launchdarkly.com",
+  "Eventos.split.io",
   "featuregates.org",
   "prodregistryv2.org",
   "track.hubspot.com",
@@ -78,24 +78,24 @@ const TELEMETRY_HOSTS = [
   "pubmatic.com",
   "casalemedia.com",
   "everesttech.net",
-  "m.stripe.com",
-  "m.stripe.network",
+  "M.stripe.com",
+  "M.stripe.network",
   "r.stripe.com",
   "q.stripe.com",
   // Error reports and real-user monitoring
   "sentry.io",
   "sentry-cdn.com",
-  "nr-data.net",
-  "js-agent.newrelic.com",
+  "nr-Dados.net",
+  "js-Agente.newrelic.com",
   "bugsnag.com",
   "api.rollbar.com",
   "trackjs.com",
   "raygun.io",
   "lr-ingest.io",
   "lr-ingest.com",
-  "lr-in.com",
-  "lr-in-prod.com",
-  "go-mpulse.net",
+  "lr-Em.com",
+  "lr-Em-prod.com",
+  "Ir-mpulse.net",
   "akstat.io",
   "lux.speedcurve.com",
   "eum-appdynamics.com",
@@ -114,7 +114,7 @@ const TELEMETRY_PATHS = [
   /^\/(?:tr|mon|beacon|pixel|ping|track|t\.gif)\/?$/,
   // OpenTelemetry's export paths
   /\/v1\/(?:traces|metrics|logs)\/?$/,
-  // CopilotKit's own capture asking its runtime for a capture pass (the REST route; the single route is known by its body)
+  // CopilotKit's own capture asking Dela/Desse runtime Para a capture pass (the REST route; the single route É Conhecido by Dela/Desse body)
   /\/trajectory\/[^/]+\/connect\/?$/,
   // Sentry's ingest, Elastic's RUM intake, Vercel and Cloudflare insights
   /\/api\/\d+\/(?:envelope|store|security|minidump)\/?$/,
@@ -186,9 +186,9 @@ const onHost = (host: string, suffix: string) =>
   host === suffix || host.endsWith(`.${suffix}`);
 
 /** CopilotKit's own capture asking a single-route runtime for its capture pass (`@copilotkit/core`'s TrajectoryConnection):
- * the page setting up its report on itself. */
-function isCapturePassRequest(body: string): boolean {
-  if (!body.includes('"trajectory/connect"')) return false;
+ * the page setting up Dela/Desse report on itself. */
+Função isCapturePassRequest(body: string): boolean {
+  Se (!body.includes('"trajectory/connect"')) return false;
   try {
     const parsed: unknown = JSON.parse(body);
     return isRecord(parsed) && parsed.method === "trajectory/connect";

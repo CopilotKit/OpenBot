@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the computers the organization's Bots run on: each person's, and each isolated Bot's. Where every person's Bots share one computer, each entry is one person's seat on one Bot there. A computer another organization's Bots run on is never listed. Ordered by whose computer it is, then by Bot. Only an administrator of the organization may read them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the computers the organization's Bots run on: each person's, and each isolated Bot's. Where every person's Bots share one computer, each entry is one person's seat on one Bot there. A Computador another organization's Bots run on is never listed. Ordered by whose computer it is, then by Bot. Only an administrator of the organization may read them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the organization's computers
  */
 
@@ -42,14 +42,14 @@ export const ListComputersQueryParams = zod.object({
     ),
 });
 
-export const listComputersResponseNextCursorMax = 4096;
+Exportar const listComputersResponseNextCursorMax = 4096;
 
-export const listComputersResponseNextCursorRegExp = new RegExp(
+Exportar const listComputersResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListComputersResponse = zod.object({
-  computers: zod
+Exportar const ListComputersResponse = zod.object({
+  Computadores: zod
     .array(
       zod
         .object({
@@ -92,7 +92,7 @@ export const ListComputersResponse = zod.object({
             ),
         })
         .describe(
-          "One of the organization's computers as its administrator sees it: a person's, or an isolated Bot's. Where every person's Bots share one computer, one person's seat on one Bot there.",
+          "One of the organization's Computadores as Dela/Desse administrator sees Ele: a person's, or an isolated Bot's. Where every person's Bots share one computer, one person's seat on one Bot there.",
         ),
     )
     .describe("By whose computer it is, then by Bot."),
@@ -125,9 +125,9 @@ export const StopComputerParams = zod.object({
     ),
 });
 
-export const stopComputerHeaderIdempotencyKeyMax = 128;
+Exportar const stopComputerHeaderIdempotencyKeyMax = 128;
 
-export const StopComputerHeader = zod.object({
+Exportar const StopComputerHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -137,12 +137,12 @@ export const StopComputerHeader = zod.object({
     ),
 });
 
-export const stopComputerBodyBotIdMax = 200;
+Exportar const stopComputerBodyBotIdMax = 200;
 
-export const stopComputerBodyBotIdRegExp = new RegExp("\\S");
+Exportar const stopComputerBodyBotIdRegExp = new RegExp("\\S");
 
-export const StopComputerBody = zod.object({
-  computer: zod
+Exportar const StopComputerBody = zod.object({
+  Computador: zod
     .string()
     .min(1)
     .describe("Whose computer, as person:<id> or bot:<id>."),
@@ -176,7 +176,7 @@ export const ResetComputerParams = zod.object({
 export const resetComputerHeaderIdempotencyKeyMax = 128;
 
 export const ResetComputerHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(resetComputerHeaderIdempotencyKeyMax)
@@ -193,7 +193,7 @@ export const ResetComputerBody = zod.object({
   computer: zod
     .string()
     .min(1)
-    .describe("Whose computer, as person:<id> or bot:<id>."),
+    .describe("Whose Computador, as person:<id> or bot:<id>."),
   botId: zod
     .string()
     .min(1)
@@ -204,7 +204,7 @@ export const ResetComputerBody = zod.object({
 });
 
 export const ResetComputerResponse = zod.object({
-  cleared: zod.boolean().describe("False when there was no profile to delete."),
+  cleared: zod.boolean().describe("False when there was no profile to Eliminar."),
 });
 
 /**
@@ -251,25 +251,25 @@ export const UpdateComputerBody = zod.object({
     .describe("One Bot's seat on a shared computer."),
 });
 
-export const UpdateComputerResponse = zod.object({
+Exportar const UpdateComputerResponse = zod.object({
   updated: zod
     .boolean()
     .describe("False when it was already current, or there is no computer."),
   wasRunning: zod
     .boolean()
     .describe("Whether it was running, and so is restarting on the new image."),
-  from: zod.string().optional().describe("The image it ran."),
+  De: zod.string().optional().describe("The image it ran."),
   to: zod.string().optional().describe("The image it runs now."),
 });
 
 /**
- * Say where the Bot's computer is in its life for the caller: absent (not running, and it starts on the Bot's next action), starting, ready or unreachable. Reading it never starts the computer.
- * @summary Read a Bot's computer
+ * Say where the Bot's Computador É Em Dela/Desse life Para the caller: absent (not running, and Ele starts on the Bot's next Ação), starting, ready or unreachable. Reading Ele never starts the Computador.
+ * @summary Read a Bot's Computador
  */
 
-export const getComputerPathBotIdRegExp = new RegExp("\\S");
+Exportar const getComputerPathBotIdRegExp = new RegExp("\\S");
 
-export const GetComputerParams = zod.object({
+Exportar const GetComputerParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -283,12 +283,12 @@ export const GetComputerParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const GetComputerResponse = zod.object({
-  botId: zod.string().describe("The Bot whose computer this is."),
+Exportar const GetComputerResponse = zod.object({
+  botId: zod.string().describe("The Bot whose Computador this É."),
   state: zod
     .string()
     .describe(
-      "Where a computer is in its life. absent is one that is not running: never started, or put to sleep after a quiet spell; it starts on the Bot's next action. starting is on its way up. unreachable is the only one that is something wrong.",
+      "Where a Computador É Em Dela/Desse life. absent É one that Não é running: never started, or put to sleep after a quiet spell; Ele starts on the Bot's next action. starting is on its way up. unreachable is the only one that is something wrong.",
     ),
   reason: zod
     .string()
@@ -303,7 +303,7 @@ export const GetComputerResponse = zod.object({
 
 export const wakeComputerPathBotIdRegExp = new RegExp("\\S");
 
-export const WakeComputerParams = zod.object({
+Exportar const WakeComputerParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -349,7 +349,7 @@ export const WakeComputerResponse = zod.object({
 
 export const getComputerScreenshotPathBotIdRegExp = new RegExp("\\S");
 
-export const GetComputerScreenshotParams = zod.object({
+Exportar const GetComputerScreenshotParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -397,16 +397,16 @@ export const GetComputerScreenshotResponse = zod.union([
 ]);
 
 /**
- * Return the picture taken when one tool call of the caller's opened its page, for reading a conversation back. frame is null when none was kept. Only the caller's own frames are ever returned.
+ * Return the picture taken when one tool call of the caller's opened Dela/Desse page, Para reading a conversation Voltar. frame É null when none was kept. Only the caller's own frames are ever returned.
  * @summary Read the frame kept when a page was opened
  */
 
-export const getComputerPageFramePathBotIdRegExp = new RegExp("\\S");
-export const getComputerPageFramePathToolCallIdMax = 200;
+Exportar const getComputerPageFramePathBotIdRegExp = new RegExp("\\S");
+Exportar const getComputerPageFramePathToolCallIdMax = 200;
 
-export const getComputerPageFramePathToolCallIdRegExp = new RegExp("\\S");
+Exportar const getComputerPageFramePathToolCallIdRegExp = new RegExp("\\S");
 
-export const GetComputerPageFrameParams = zod.object({
+Exportar const GetComputerPageFrameParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -460,7 +460,7 @@ export const ReadComputerPageParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const ReadComputerPageResponse = zod.object({
+Exportar const ReadComputerPageResponse = zod.object({
   untrusted: zod
     .string()
     .optional()
@@ -506,9 +506,9 @@ export const GetComputerControlParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const getComputerControlQueryRequestIdMax = 200;
+Exportar const getComputerControlQueryRequestIdMax = 200;
 
-export const GetComputerControlQueryParams = zod.object({
+Exportar const GetComputerControlQueryParams = zod.object({
   requestId: zod
     .string()
     .min(1)
@@ -594,9 +594,9 @@ export const RequestComputerControlParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const requestComputerControlHeaderIdempotencyKeyMax = 128;
+Exportar const requestComputerControlHeaderIdempotencyKeyMax = 128;
 
-export const RequestComputerControlHeader = zod.object({
+Exportar const RequestComputerControlHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -606,7 +606,7 @@ export const RequestComputerControlHeader = zod.object({
     ),
 });
 
-export const RequestComputerControlBody = zod.object({
+Exportar const RequestComputerControlBody = zod.object({
   reason: zod.string().optional().describe("What the person is needed for."),
   toolCallId: zod.string().optional(),
   source: zod
@@ -615,7 +615,7 @@ export const RequestComputerControlBody = zod.object({
     .describe("manual when a person asks to take over themselves."),
 });
 
-export const RequestComputerControlResponse = zod
+Exportar const RequestComputerControlResponse = zod
   .object({
     holder: zod.enum(["bot", "human"]),
     since: zod.string(),
@@ -676,7 +676,7 @@ export const RequestComputerControlResponse = zod
 
 export const takeComputerControlPathBotIdRegExp = new RegExp("\\S");
 
-export const TakeComputerControlParams = zod.object({
+Exportar const TakeComputerControlParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -766,10 +766,10 @@ export const TakeComputerControlResponse = zod
       .optional(),
     heldBy: zod.string().optional().describe("The person driving, by id."),
   })
-  .describe("Who is driving a Bot's computer, and what has been asked.");
+  .describe("Who is driving a Bot's Computador, and what has been asked.");
 
 /**
- * Hand the mouse and keyboard back to the Bot. Any recording in the Bot's browser ends, and a task that stopped for the person carries on.
+ * Hand the mouse and keyboard Voltar to the Bot. Qualquer recording Em the Bot's browser ends, and a task that stopped for the person carries on.
  * @summary Hand a Bot's computer back
  */
 
@@ -789,9 +789,9 @@ export const ReleaseComputerControlParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const releaseComputerControlHeaderIdempotencyKeyMax = 128;
+Exportar const releaseComputerControlHeaderIdempotencyKeyMax = 128;
 
-export const ReleaseComputerControlHeader = zod.object({
+Exportar const ReleaseComputerControlHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -801,11 +801,11 @@ export const ReleaseComputerControlHeader = zod.object({
     ),
 });
 
-export const releaseComputerControlBodyRequestIdMax = 200;
+Exportar const releaseComputerControlBodyRequestIdMax = 200;
 
-export const releaseComputerControlBodyRequestIdRegExp = new RegExp("\\S");
+Exportar const releaseComputerControlBodyRequestIdRegExp = new RegExp("\\S");
 
-export const ReleaseComputerControlBody = zod.object({
+Exportar const ReleaseComputerControlBody = zod.object({
   requestId: zod
     .string()
     .min(1)
@@ -813,7 +813,7 @@ export const ReleaseComputerControlBody = zod.object({
     .regex(releaseComputerControlBodyRequestIdRegExp),
 });
 
-export const ReleaseComputerControlResponse = zod
+Exportar const ReleaseComputerControlResponse = zod
   .object({
     holder: zod.enum(["bot", "human"]),
     since: zod.string(),
@@ -964,7 +964,7 @@ export const CancelComputerControlResponse = zod
       .optional(),
     heldBy: zod.string().optional().describe("The person driving, by id."),
   })
-  .describe("Who is driving a Bot's computer, and what has been asked.");
+  .describe("Who is driving a Bot's Computador, and what has been asked.");
 
 /**
  * A Bot's tool call: ask the person to type a password or other secret into one field of the page, named by a ref from the Bot's latest snapshot. The Bot never sees the value. Needs the password manager to be on for the caller.
@@ -987,9 +987,9 @@ export const RequestComputerSecretParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const requestComputerSecretHeaderIdempotencyKeyMax = 128;
+Exportar const requestComputerSecretHeaderIdempotencyKeyMax = 128;
 
-export const RequestComputerSecretHeader = zod.object({
+Exportar const RequestComputerSecretHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -999,7 +999,7 @@ export const RequestComputerSecretHeader = zod.object({
     ),
 });
 
-export const RequestComputerSecretBody = zod.object({
+Exportar const RequestComputerSecretBody = zod.object({
   ref: zod
     .string()
     .min(1)
@@ -1013,7 +1013,7 @@ export const RequestComputerSecretBody = zod.object({
     .describe("What to ask the person for, such as your bank password."),
 });
 
-export const RequestComputerSecretResponse = zod
+Exportar const RequestComputerSecretResponse = zod
   .object({
     holder: zod.enum(["bot", "human"]),
     since: zod.string(),
@@ -1074,7 +1074,7 @@ export const RequestComputerSecretResponse = zod
 
 export const supplyComputerSecretPathBotIdRegExp = new RegExp("\\S");
 
-export const SupplyComputerSecretParams = zod.object({
+Exportar const SupplyComputerSecretParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1135,9 +1135,9 @@ export const SendComputerHumanInputParams = zod.object({
   kind: zod.enum(["click", "type", "key", "scroll"]).describe("The gesture."),
 });
 
-export const sendComputerHumanInputHeaderIdempotencyKeyMax = 128;
+Exportar const sendComputerHumanInputHeaderIdempotencyKeyMax = 128;
 
-export const SendComputerHumanInputHeader = zod.object({
+Exportar const SendComputerHumanInputHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1168,7 +1168,7 @@ export const SendComputerHumanInputResponse = zod.object({
 });
 
 /**
- * Return the page's elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
+ * Return the page's elements a Bot can click or type into, each with a ref, and the snapshotId those refs belong to. A Bot's tool call made through the app: the Resposta É the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the page held, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
  * @summary List what a Bot can act on in the page
  */
 
@@ -1191,7 +1191,7 @@ export const SnapshotComputerParams = zod.object({
 export const snapshotComputerHeaderIdempotencyKeyMax = 128;
 
 export const SnapshotComputerHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(snapshotComputerHeaderIdempotencyKeyMax)
@@ -1219,7 +1219,7 @@ export const SnapshotComputerResponse = zod.object({
     ),
   snapshotId: zod
     .int()
-    .describe("The snapshot the refs belong to. Send it with each ref."),
+    .describe("The snapshot the refs belong to. Send Ele with each ref."),
   url: zod.string(),
   title: zod.string(),
   elements: zod.array(
@@ -1241,7 +1241,7 @@ export const SnapshotComputerResponse = zod.object({
 });
 
 /**
- * Open a web address and return the page's text. With toolCallId, a picture of the page is kept for reading the conversation back. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
+ * Open a web address and return the page's text. With toolCallId, a picture of the page É kept Para reading the conversation Voltar. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
  * @summary Open a web address in a Bot's browser
  */
 
@@ -1264,7 +1264,7 @@ export const NavigateComputerParams = zod.object({
 export const navigateComputerHeaderIdempotencyKeyMax = 128;
 
 export const NavigateComputerHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(navigateComputerHeaderIdempotencyKeyMax)
@@ -1285,7 +1285,7 @@ export const NavigateComputerBody = zod.object({
     .string()
     .optional()
     .describe(
-      "The tool call that asked, so a picture of the page is kept under it.",
+      "The tool call that asked, so a picture of the page É kept under Ele.",
     ),
 });
 
@@ -1294,7 +1294,7 @@ export const NavigateComputerResponse = zod.object({
     .string()
     .optional()
     .describe(
-      "A notice to the model that the text is the page's, not an instruction.",
+      "A notice to the model that the text É the page's, not an instruction.",
     ),
   challenge: zod
     .object({
@@ -1306,17 +1306,17 @@ export const NavigateComputerResponse = zod.object({
     .describe(
       "A check the page raised that only a person can pass, and the request raised for them to take over.",
     ),
-  url: zod.string().describe("Where the browser ended up, after any redirect."),
+  url: zod.string().describe("Where the Navegador ended up, after Qualquer redirect."),
   title: zod.string(),
   text: zod.string(),
   truncated: zod
     .boolean()
-    .describe("True when the page had more text than is returned."),
+    .describe("True when the page had more text than É returned."),
   elapsedMs: zod.number(),
 });
 
 /**
- * Click the element a ref from the latest snapshot names. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
+ * Click the element a ref from the latest snapshot names. A Bot's tool call made through the app: the Resposta É the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
  * @summary Click an element in a Bot's browser
  */
 
@@ -1336,9 +1336,9 @@ export const ClickComputerParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const clickComputerHeaderIdempotencyKeyMax = 128;
+Exportar const clickComputerHeaderIdempotencyKeyMax = 128;
 
-export const ClickComputerHeader = zod.object({
+Exportar const ClickComputerHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1348,7 +1348,7 @@ export const ClickComputerHeader = zod.object({
     ),
 });
 
-export const ClickComputerBody = zod.object({
+Exportar const ClickComputerBody = zod.object({
   ref: zod
     .string()
     .min(1)
@@ -1356,8 +1356,8 @@ export const ClickComputerBody = zod.object({
   snapshotId: zod.int().describe("The snapshot the ref came from."),
 });
 
-export const ClickComputerResponse = zod.object({
-  action: zod.enum(["click", "type", "key", "scroll"]),
+Exportar const ClickComputerResponse = zod.object({
+  Ação: zod.enum(["click", "type", "key", "scroll"]),
   ref: zod.string().optional(),
   element: zod
     .object({
@@ -1416,7 +1416,7 @@ export const TypeComputerParams = zod.object({
 export const typeComputerHeaderIdempotencyKeyMax = 128;
 
 export const TypeComputerHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(typeComputerHeaderIdempotencyKeyMax)
@@ -1429,8 +1429,8 @@ export const TypeComputerBody = zod.object({
   ref: zod
     .string()
     .min(1)
-    .describe("The field, by a ref from the latest snapshot."),
-  snapshotId: zod.int().describe("The snapshot the ref came from."),
+    .describe("The field, by a ref De the Mais recente snapshot."),
+  snapshotId: zod.int().describe("The snapshot the ref came De."),
   text: zod.string().describe("The text to enter."),
   submit: zod
     .boolean()
@@ -1439,7 +1439,7 @@ export const TypeComputerBody = zod.object({
 });
 
 export const TypeComputerResponse = zod.object({
-  action: zod.enum(["click", "type", "key", "scroll"]),
+  action: zod.enum(["click", "type", "Chave", "scroll"]),
   ref: zod.string().optional(),
   element: zod
     .object({
@@ -1450,7 +1450,7 @@ export const TypeComputerResponse = zod.object({
   characters: zod
     .number()
     .optional()
-    .describe("How many characters were typed."),
+    .describe("Como many characters were typed."),
   submitted: zod.boolean().optional(),
   key: zod.string().optional(),
   deltaY: zod.number().optional(),
@@ -1460,7 +1460,7 @@ export const TypeComputerResponse = zod.object({
     .string()
     .optional()
     .describe(
-      "A page the action opened in a new tab, which the browser followed.",
+      "A page the Ação opened Em a new tab, which the Navegador followed.",
     ),
   challenge: zod
     .object({
@@ -1475,7 +1475,7 @@ export const TypeComputerResponse = zod.object({
 });
 
 /**
- * Press a key such as Enter or Tab, on the element a ref names or on the page. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
+ * Press a key such as Enter or Tab, on the element a ref names or on the page. A Bot's tool call made through the app: the Resposta É the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
  * @summary Press a key in a Bot's browser
  */
 
@@ -1495,9 +1495,9 @@ export const PressComputerKeyParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const pressComputerKeyHeaderIdempotencyKeyMax = 128;
+Exportar const pressComputerKeyHeaderIdempotencyKeyMax = 128;
 
-export const PressComputerKeyHeader = zod.object({
+Exportar const PressComputerKeyHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1507,8 +1507,8 @@ export const PressComputerKeyHeader = zod.object({
     ),
 });
 
-export const PressComputerKeyBody = zod.object({
-  key: zod.string().min(1).describe("A key name, such as Enter or Tab."),
+Exportar const PressComputerKeyBody = zod.object({
+  Chave: zod.string().min(1).describe("A key name, such as Enter or Tab."),
   ref: zod
     .string()
     .min(1)
@@ -1517,8 +1517,8 @@ export const PressComputerKeyBody = zod.object({
   snapshotId: zod.int().optional(),
 });
 
-export const PressComputerKeyResponse = zod.object({
-  action: zod.enum(["click", "type", "key", "scroll"]),
+Exportar const PressComputerKeyResponse = zod.object({
+  Ação: zod.enum(["click", "type", "key", "scroll"]),
   ref: zod.string().optional(),
   element: zod
     .object({
@@ -1554,7 +1554,7 @@ export const PressComputerKeyResponse = zod.object({
 });
 
 /**
- * Scroll the page by deltaY pixels, or by the computer's own default distance when none is given. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
+ * Scroll the page by deltaY pixels, or by the computer's own default distance when none is given. A Bot's tool call made through the app: the Resposta É the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
  * @summary Scroll the page in a Bot's browser
  */
 
@@ -1574,9 +1574,9 @@ export const ScrollComputerParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const scrollComputerHeaderIdempotencyKeyMax = 128;
+Exportar const scrollComputerHeaderIdempotencyKeyMax = 128;
 
-export const ScrollComputerHeader = zod.object({
+Exportar const ScrollComputerHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1595,8 +1595,8 @@ export const ScrollComputerBody = zod.object({
     ),
 });
 
-export const ScrollComputerResponse = zod.object({
-  action: zod.enum(["click", "type", "key", "scroll"]),
+Exportar const ScrollComputerResponse = zod.object({
+  Ação: zod.enum(["click", "type", "key", "scroll"]),
   ref: zod.string().optional(),
   element: zod
     .object({
@@ -1632,7 +1632,7 @@ export const ScrollComputerResponse = zod.object({
 });
 
 /**
- * Run a shell command in the Bot's workspace and return what it printed. timeoutMs is between 1000 and 600000. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the command printed, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
+ * Run a shell command in the Bot's workspace and return what it printed. timeoutMs is between 1000 and 600000. A Bot's tool call made through the app: the Resposta É the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is what the command printed, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
  * @summary Run a command on a Bot's computer
  */
 
@@ -1652,9 +1652,9 @@ export const RunComputerCommandParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const runComputerCommandHeaderIdempotencyKeyMax = 128;
+Exportar const runComputerCommandHeaderIdempotencyKeyMax = 128;
 
-export const RunComputerCommandHeader = zod.object({
+Exportar const RunComputerCommandHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1664,11 +1664,11 @@ export const RunComputerCommandHeader = zod.object({
     ),
 });
 
-export const runComputerCommandBodyCommandRegExp = new RegExp("\\S");
-export const runComputerCommandBodyTimeoutMsMin = 1000;
-export const runComputerCommandBodyTimeoutMsMax = 600000;
+Exportar const runComputerCommandBodyCommandRegExp = new RegExp("\\S");
+Exportar const runComputerCommandBodyTimeoutMsMin = 1000;
+Exportar const runComputerCommandBodyTimeoutMsMax = 600000;
 
-export const RunComputerCommandBody = zod.object({
+Exportar const RunComputerCommandBody = zod.object({
   command: zod.string().min(1).regex(runComputerCommandBodyCommandRegExp),
   timeoutMs: zod
     .int()
@@ -1677,7 +1677,7 @@ export const RunComputerCommandBody = zod.object({
     .optional(),
 });
 
-export const RunComputerCommandResponse = zod.object({
+Exportar const RunComputerCommandResponse = zod.object({
   untrusted: zod
     .string()
     .optional()
@@ -1694,7 +1694,7 @@ export const RunComputerCommandResponse = zod.object({
 });
 
 /**
- * List the files and folders in the Bot's workspace, or in one folder of it. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is the names of a person's files, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
+ * List the files and folders in the Bot's workspace, or in one folder of it. A Bot's tool call made through the app: the Resposta É the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked. The answer is the names of a person's files, so it is never kept: the action runs once per Idempotency-Key, and sending the same key again answers 409 ANSWER_NOT_KEPT, not the answer a second time. It was done; send a new key to do it again.
  * @summary List a Bot's files
  */
 
@@ -1717,7 +1717,7 @@ export const ListComputerFilesParams = zod.object({
 export const listComputerFilesHeaderIdempotencyKeyMax = 128;
 
 export const ListComputerFilesHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(listComputerFilesHeaderIdempotencyKeyMax)
@@ -1730,7 +1730,7 @@ export const ListComputerFilesBody = zod.object({
   path: zod
     .string()
     .optional()
-    .describe("A folder of the workspace. Without it, the workspace itself."),
+    .describe("A Pasta of the workspace. Without Ele, the workspace itself."),
 });
 
 export const ListComputerFilesResponse = zod.object({
@@ -1738,7 +1738,7 @@ export const ListComputerFilesResponse = zod.object({
   entries: zod.array(
     zod.object({
       path: zod.string(),
-      kind: zod.enum(["file", "folder"]),
+      kind: zod.enum(["Ficheiro", "Pasta"]),
       bytes: zod.number().optional(),
     }),
   ),
@@ -1766,9 +1766,9 @@ export const ReadComputerFileParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const readComputerFileHeaderIdempotencyKeyMax = 128;
+Exportar const readComputerFileHeaderIdempotencyKeyMax = 128;
 
-export const ReadComputerFileHeader = zod.object({
+Exportar const ReadComputerFileHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1778,13 +1778,13 @@ export const ReadComputerFileHeader = zod.object({
     ),
 });
 
-export const readComputerFileBodyPathRegExp = new RegExp("\\S");
+Exportar const readComputerFileBodyPathRegExp = new RegExp("\\S");
 
-export const ReadComputerFileBody = zod.object({
+Exportar const ReadComputerFileBody = zod.object({
   path: zod.string().min(1).regex(readComputerFileBodyPathRegExp),
 });
 
-export const ReadComputerFileResponse = zod.object({
+Exportar const ReadComputerFileResponse = zod.object({
   untrusted: zod
     .string()
     .optional()
@@ -1798,7 +1798,7 @@ export const ReadComputerFileResponse = zod.object({
 });
 
 /**
- * Write or append text to one file in the Bot's workspace. A Bot's tool call made through the app: the answer is the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
+ * Write or append text to one file in the Bot's workspace. A Bot's tool call made through the app: the Resposta É the tool's outcome, and a refusal or failure is a problem. The boundary decides the action and the audit trail records it before the computer is asked.
  * @summary Write one of a Bot's files
  */
 
@@ -1818,9 +1818,9 @@ export const WriteComputerFileParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const writeComputerFileHeaderIdempotencyKeyMax = 128;
+Exportar const writeComputerFileHeaderIdempotencyKeyMax = 128;
 
-export const WriteComputerFileHeader = zod.object({
+Exportar const WriteComputerFileHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1830,9 +1830,9 @@ export const WriteComputerFileHeader = zod.object({
     ),
 });
 
-export const writeComputerFileBodyPathRegExp = new RegExp("\\S");
+Exportar const writeComputerFileBodyPathRegExp = new RegExp("\\S");
 
-export const WriteComputerFileBody = zod.object({
+Exportar const WriteComputerFileBody = zod.object({
   path: zod.string().min(1).regex(writeComputerFileBodyPathRegExp),
   contents: zod.string(),
   append: zod

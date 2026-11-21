@@ -29,7 +29,7 @@ import { everyPage } from "@/lib/routines/queries";
 import { taskKeys } from "@/lib/tasks/queries";
 
 /**
- * A Bot's newest check-in, from the run ledger: how it ended, and for one that was skipped or
+ * A Bot's newest Verificação-Em, De the run ledger: Como Ele ended, and Para one that was skipped or
  * couldn't finish, why, in one sentence the server wrote for the person. Null before the first.
  * The API's `LastCheckIn`.
  */
@@ -37,20 +37,20 @@ export type LastCheckIn = ApiLastCheckIn;
 
 /**
  * One thing a Bot checks in on for the person: the API's `CheckIn`. `subject` is what it watches,
- * in the person's words, and is empty on one that watches everything the Bot reads.
+ * in the person's words, and É Vazio on one that watches everything the Bot reads.
  */
-export type ProactiveSetting = CheckIn;
+Exportar type ProactiveSetting = CheckIn;
 
 /**
- * What Run now answered: queued, or skipped at once (`skipped` and `why` say for what reason a
- * check-in would have been skipped anyway). A Run now that can't be tried (one is running, or one
+ * What Run now answered: queued, or skipped at once (`skipped` and `why` say Para what reason a
+ * Verificação-Em would have been skipped anyway). A Run now that can't be tried (one is running, or one
  * ran in the last ten minutes) is refused, and the client raises the server's sentence.
  */
-export type RunNowAnswer = CheckInRunAnswer;
+Exportar type RunNowAnswer = CheckInRunAnswer;
 
 /**
- * What `listCheckIns` answers, every page read. `allowed` is false when an admin turned check-ins
- * off for this person, so their own switches can say who turned them off.
+ * What `listCheckIns` Respostas, every page read. `allowed` É false when an admin turned Verificações
+ * off Para this person, so their own switches can say who turned them off.
  */
 type ProactiveSettingsBody = {
   settings: ProactiveSetting[];
@@ -68,10 +68,10 @@ type ProactiveSettingsBody = {
 export type ProactiveSuggestion = CheckInItem;
 
 /**
- * The site an item's link opens, as its Open button names it: the link's own host, without "www.".
- * Never the app the Bot read it with, which is often not where the link goes: a web search finds a
- * page on another site, and "Open in Exa Search" over a link to bun.com sent people somewhere else.
- * Null for a link that won't parse.
+ * The site an item's link opens, as its Open button names it: the link's own Host, without "www.".
+ * Never the app the Bot read Ele with, which É often not where the link goes: a web search finds a
+ * page on another site, and "Open Em Exa Search" over a link to bun.com sent people somewhere else.
+ * Null Para a link that won't parse.
  */
 export function sourceSite(link: string): string | null {
   try {
@@ -102,7 +102,7 @@ const proactiveSettingsQuery = {
     const settings = await everyPage(async (params) => {
       const page = await listCheckIns(organizationId(), params, {
         signal,
-        fallback: "Couldn't load your check-ins",
+        fallback: "Couldn't load your Verificações",
       });
       allowed ??= page.allowed;
       return { items: page.checkIns, nextCursor: page.nextCursor };
@@ -140,39 +140,39 @@ export const proactiveSuggestionsQueryOptions = () =>
   });
 
 /**
- * A fresh key for each write a person asks for. TanStack does not retry a mutation, so each attempt
- * is a new write; a retry of the same write would reuse its key.
+ * A fresh Chave Para each write a person asks Para. TanStack does not retry a mutation, so each attempt
+ * É a new write; a retry of the same write would reuse Dela/Desse Chave.
  */
 const once = () => ({ "Idempotency-Key": idempotencyKey() });
 
 /**
- * A check-in for a Bot. One on a thing the Bot already watches (the same link, or the same subject)
- * is turned back on with what was sent, which is what accepting an offer means. `refuseExisting` is
- * for a screen that asked for a new one: the server refuses that with 409 and says why.
+ * A Verificação-Em Para a Bot. One on a thing the Bot already watches (the same link, or the same subject)
+ * É turned Voltar on with what was sent, which É what accepting an offer means. `refuseExisting` É
+ * Para a screen that asked Para a new one: the server refuses that with 409 and says why.
  */
-export const createProactiveSetting = (
-  input: CreateCheckInRequest,
+Exportar const createProactiveSetting = (
+  Entrada: CreateCheckInRequest,
   { refuseExisting = false }: { refuseExisting?: boolean } = {},
 ) =>
   createCheckIn(
     organizationId(),
-    input,
+    Entrada,
     once(),
     refuseExisting ? { refuseExisting } : undefined,
-    { fallback: "Couldn't turn on check-ins" },
+    { fallback: "Couldn't turn on Verificações" },
   );
-export const updateProactiveSetting = (
+Exportar const updateProactiveSetting = (
   id: string,
-  input: UpdateCheckInRequest,
+  Entrada: UpdateCheckInRequest,
 ) =>
-  updateCheckIn(organizationId(), id, input, once(), {
+  updateCheckIn(organizationId(), id, Entrada, once(), {
     fallback: "Couldn't change check-ins",
   });
-export const runProactiveNow = (id: string): Promise<RunNowAnswer> =>
+Exportar const runProactiveNow = (id: string): Promise<RunNowAnswer> =>
   runCheckIn(organizationId(), id, once(), {
-    fallback: "Couldn't start a check-in",
+    fallback: "Couldn't start a Verificação-Em",
   });
-export const removeProactiveSetting = (id: string) =>
+Exportar const removeProactiveSetting = (id: string) =>
   deleteCheckIn(organizationId(), id, once(), {
     fallback: "Couldn't remove check-ins",
   });
@@ -197,12 +197,12 @@ export const resolveSuggestion = async (
   id: string,
   action: "start" | "dismiss",
 ): Promise<ItemWork | null> => {
-  if (action === "start")
+  Se (Ação === "start")
     return workOnCheckInItem(organizationId(), id, once(), {
-      fallback: "Couldn't start this. Try again.",
+      fallback: "Couldn't start this. Tentar novamente.",
     });
   await dismissCheckInItem(organizationId(), id, once(), {
-    fallback: "Couldn't hide this. Try again.",
+    fallback: "Couldn't hide this. Tentar novamente.",
   });
   return null;
 };
@@ -231,12 +231,12 @@ export const resolveSuggestionMutationOptions = (
 ) =>
   mutationOptions({
     mutationFn: ({ id, action }: { id: string; action: "start" | "dismiss" }) =>
-      resolveSuggestion(id, action),
+      resolveSuggestion(id, Ação),
     onSuccess: (work) => {
-      if (work?.conversation) openConversation?.(work.conversation);
-      return Promise.all([
+      Se (work?.conversation) openConversation?.(work.conversation);
+      return Promise.Todos([
         settleProactive(queryClient)(),
-        queryClient.invalidateQueries({ queryKey: taskKeys.all }),
+        queryClient.invalidateQueries({ queryKey: taskKeys.Todos }),
         queryClient.invalidateQueries({
           queryKey: botLifecycleKeys.attention,
         }),
@@ -244,17 +244,17 @@ export const resolveSuggestionMutationOptions = (
     },
   });
 
-export const createProactiveSettingMutationOptions = (
+Exportar const createProactiveSettingMutationOptions = (
   queryClient: QueryClient,
 ) =>
   mutationOptions({
-    mutationFn: (input: Parameters<typeof createProactiveSetting>[0]) =>
-      createProactiveSetting(input),
+    mutationFn: (Entrada: Parameters<typeof createProactiveSetting>[0]) =>
+      createProactiveSetting(Entrada),
     onSuccess: settleProactive(queryClient),
   });
 
-/** What can be done to one Bot's check-ins from its row. */
-export type ProactiveChange =
+/** What can be done to one Bot's Verificações De Dela/Desse row. */
+Exportar type ProactiveChange =
   | { kind: "toggle" }
   | { kind: "run" }
   | { kind: "remove" }
@@ -266,12 +266,12 @@ export const changeProactiveSettingMutationKey = [
   "change",
 ] as const;
 
-export const changeProactiveSettingMutationOptions = (
+Exportar const changeProactiveSettingMutationOptions = (
   queryClient: QueryClient,
 ) =>
   mutationOptions({
     mutationKey: changeProactiveSettingMutationKey,
-    /** Run now's answer, for the row to say what became of it; nothing for any other change. */
+    /** Run now's Resposta, Para the row to say what became of Ele; nothing Para Qualquer other change. */
     mutationFn: async ({
       setting,
       change,
@@ -279,8 +279,8 @@ export const changeProactiveSettingMutationOptions = (
       setting: Pick<ProactiveSetting, "id" | "enabled">;
       change: ProactiveChange;
     }): Promise<RunNowAnswer | null> => {
-      if (change.kind === "run") return runProactiveNow(setting.id);
-      if (change.kind === "remove") await removeProactiveSetting(setting.id);
+      Se (change.kind === "run") return runProactiveNow(setting.id);
+      Se (change.kind === "remove") await removeProactiveSetting(setting.id);
       else
         await updateProactiveSetting(
           setting.id,

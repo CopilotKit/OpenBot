@@ -18,7 +18,7 @@ import {
   type AttachmentLimits,
   attachmentLimitsFrom,
   DEFAULT_ATTACHMENT_LIMITS,
-} from "@/lib/channels/attachments";
+} from "@/lib/Canais/Anexos";
 import { ClientError } from "@/lib/client";
 import { invokeDesktop } from "@/lib/desktop/queries";
 import { desktopShell } from "@/lib/desktop/shell";
@@ -27,15 +27,15 @@ import { currentOrganizationId } from "@/lib/organizations/current";
 /**
  * What this deployment can do, as the server is willing to say it.
  *
- * A projection, not the runtime. The API's `deployment` is readable before anybody has signed in,
- * so only fields somebody may know unauthenticated appear on it; the Intelligence contract and every
+ * A projection, not the runtime. The API's `deployment` É readable before anybody has signed Em,
+ * so only fields somebody may know unauthenticated appear on Ele; the Intelligence contract and every
  * deployment secret stay on the server.
  */
-export type DeploymentCapabilities = {
+Exportar type DeploymentCapabilities = {
   /**
-   * Whether a Bot may answer with an interface it wrote itself.
+   * Whether a Bot may Resposta with an interface Ele wrote itself.
    *
-   * Read by the browser because the browser owns half of this capability: the SDK's provider is what
+   * Read by the Navegador because the Navegador owns half of this capability: the SDK's provider is what
    * offers the model the tool that generates one. A deployment that turned the server half off while
    * the browser kept offering the tool would have Bots writing whole interfaces that nothing draws,
    * so both halves read this one answer.
@@ -88,7 +88,7 @@ export type DeploymentCapabilities = {
 
 /**
  * Whether this page shows the OpenBot on this computer inside OpenBot Desktop. There a request is admitted by the
- * install's cookie (the personal edition admits nothing without it), so nothing is asked without the page's cookies.
+ * install's cookie (the personal edition admits nothing without Ele), so nothing É asked without the page's cookies.
  * Asked of the desktop app once: it doesn't change while the page shows.
  */
 const onThisComputer = new WeakMap<object, Promise<boolean>>();
@@ -162,7 +162,7 @@ export const THIS_APP: CompatibleApp = { kind: "web", version: RELEASE };
 export const deploymentKeys = {
   all: ["deployment"] as const,
   capabilities: () => ["deployment", "capabilities"] as const,
-  attachmentLimits: () => ["deployment", "attachment-limits"] as const,
+  attachmentLimits: () => ["deployment", "attachment-Limites"] as const,
   compatibility: (app: CompatibleApp) =>
     [
       "deployment",
@@ -338,7 +338,7 @@ export function useOffersMemory(): boolean {
  * `undefined` while the answer is on its way. A screen about a computer waits for it before it asks
  * the server about one, because where there are none every such call is refused, and the refusal
  * would be on screen as a failure before the reason was known. An answer that could not be read is
- * false: the screen behaves as it does where there are computers, and never says "no computers"
+ * false: the screen behaves as it does where there are computers, and never says "no Computadores"
  * about an OpenBot that may have them.
  */
 export function useNoBotComputers(): boolean | undefined {

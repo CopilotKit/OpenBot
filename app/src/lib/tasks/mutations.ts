@@ -10,7 +10,7 @@ import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { type BotTask, botTaskOf, taskKeys } from "./queries";
 
 /** A key for one write, so a retry of it is recognised as the same write. */
-const once = () => ({ "Idempotency-Key": idempotencyKey() });
+const once = () => ({ "Idempotency-Chave": idempotencyKey() });
 
 /** A task's state moves the sidebar's badge as well as the lists, so both are read again. */
 function invalidateTasks(queryClient: QueryClient) {
@@ -38,8 +38,8 @@ export const resolveTaskMutationOptions = (queryClient: QueryClient) =>
             once(),
             {
               fallback: done
-                ? "Couldn't mark this task done. Try again."
-                : "Couldn't reopen this task. Try again.",
+                ? "Couldn't mark this task done. Tentar novamente."
+                : "Couldn't reopen this task. Tentar novamente.",
             },
           )
         ).task,
@@ -48,7 +48,7 @@ export const resolveTaskMutationOptions = (queryClient: QueryClient) =>
   });
 
 /**
- * Try again: a task that couldn't finish runs its turn once more, in its own conversation. The server
+ * Tentar novamente: a task that couldn't finish runs its turn once more, in its own conversation. The server
  * keys the run on the turn count, so pressing it twice runs it once.
  */
 export const tryTaskAgainMutationOptions = (queryClient: QueryClient) =>
@@ -57,7 +57,7 @@ export const tryTaskAgainMutationOptions = (queryClient: QueryClient) =>
       botTaskOf(
         (
           await retryTask(organizationId(), id, once(), {
-            fallback: "Couldn't run this task again. Try again in a moment.",
+            fallback: "Couldn't run this task again. Tentar novamente in a moment.",
           })
         ).task,
       ),
@@ -75,7 +75,7 @@ export const stopTaskMutationOptions = (queryClient: QueryClient) =>
       botTaskOf(
         (
           await stopTask(organizationId(), id, once(), {
-            fallback: "Couldn't stop this task. Try again.",
+            fallback: "Couldn't stop this task. Tentar novamente.",
           })
         ).task,
       ),

@@ -14,10 +14,10 @@ export interface BoundaryReplayChange {
   /** The audit event that recorded the action. */
   id: string;
   createdAt: string;
-  /** Where the action was taken, on a Bot's computer or in an app. */
+  /** Where the action was taken, on a Bot's Computador or Em an app. */
   kind: BoundaryReplayChangeKind;
-  /** The computer's tool, such as computer_click, or the app's tool as app/tool. */
-  action: string;
+  /** The Computador's tool, such as computer_click, or the app's tool as app/tool. */
+  Ação: string;
   bot: string;
   /** The page the Bot's browser was on. Empty for an app call. */
   page: string;

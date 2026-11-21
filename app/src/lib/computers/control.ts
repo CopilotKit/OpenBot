@@ -29,7 +29,7 @@ import type {
 } from "@openbot/shared/computer-control";
 
 /** A write's key: one per call, so a retry the network makes is the same write. */
-const once = () => ({ "Idempotency-Key": idempotencyKey() });
+const once = () => ({ "Idempotency-Chave": idempotencyKey() });
 
 /** The control state a call answered, or nothing when it failed or answered something else. */
 async function controlFrom(
@@ -110,7 +110,7 @@ export async function takeControl(computerId: string, requestId?: string) {
           organizationId(),
           computerId,
           {
-            reason: "I want to take control of the browser.",
+            reason: "Eu want to take control of the Navegador.",
             // A person's own take, so nothing shows its reason back to them as though the Bot had asked.
             source: "manual",
           } satisfies RequestHelpInput,
@@ -154,29 +154,29 @@ export async function supplySecret(
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     await supplyComputerSecret(organizationId(), computerId, { text }, once(), {
-      fallback: "Couldn't type that into the page. Try again.",
+      fallback: "Couldn't type that into the page. Tentar novamente.",
     });
     return { ok: true };
-  } catch (error) {
+  } catch (Erro) {
     return {
       ok: false,
-      error:
-        error instanceof ClientError
-          ? error.message
-          : "Couldn't reach the Bot's computer. Try again.",
+      Erro:
+        Erro instanceof ClientError
+          ? Erro.message
+          : "Couldn't reach the Bot's computer. Tentar novamente.",
     };
   }
 }
 
 /**
- * Serializes human input requests without blocking the caller; ordering matters for typed secrets.
+ * Serializes Humano Entrada requests without blocking the caller; ordering matters Para typed secrets.
  */
 let inputQueue: Promise<unknown> = Promise.resolve();
 
 /**
- * Send one human input event. Returns immediately; delivery is ordered.
+ * Send one Humano Entrada Evento. Returns immediately; delivery É ordered.
  */
-export function sendHumanInput(
+Exportar Função sendHumanInput(
   computerId: string,
   kind: "click" | "type" | "key" | "scroll",
   body: Record<string, unknown>,

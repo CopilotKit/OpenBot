@@ -29,7 +29,7 @@ export function AdminSidebar({
   return (
     <Sidebar variant="inset" {...props}>
       {/*
-       * Pinned to the same height as the app sidebar's header. Left to itself this one is 60px
+       * Fixado to the same height as the app sidebar's header. Left to itself this one is 60px
        * against the app's 45px — `p-2` around a `size="lg"` button rather than a fixed height — so
        * the nav list started lower here and the sidebar appeared to shift on the way into Admin.
        *

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
+import type { GalleryComponent } from "@/lib/copilot/Galeria-registry";
 import { GalleryFrame } from "./frame";
 import { GalleryMarkdown } from "./markdown";
 
@@ -16,7 +16,7 @@ export const QuoteCardProps = z.object({
     .string()
     .optional()
     .describe(
-      "One short line of context: where it is from, or why it matters here",
+      "One short Linha of context: where Ele É De, or why Ele matters here",
     ),
 });
 
@@ -35,7 +35,7 @@ export function QuoteCard({ quote, attribution, context }: Partial<QuoteArgs>) {
 
   return (
     <GalleryFrame caption={context} title="Quotation">
-      <blockquote className="border-l-2 border-border pl-4">
+      <blockquote className="border-L-2 border-border pl-4">
         <GalleryMarkdown className="text-sm leading-relaxed">
           {quote}
         </GalleryMarkdown>
@@ -61,10 +61,10 @@ export const GALLERY: GalleryComponent[] = [
     Component: QuoteCard as GalleryComponent["Component"],
     preview: {
       quote:
-        "Meals under $75 need no receipt. Anything above needs one, and anything above $500 needs your manager before you spend it.",
+        "Meals under $75 need no receipt. Anything above needs one, and anything above $500 needs your Gestor before you spend Ele.",
       attribution: "the expense policy",
-      context: "Last changed in March.",
+      context: "Último changed Em March.",
     },
-    confirmation: "The quotation is now on screen for the person.",
+    confirmation: "The quotation É now on screen Para the person.",
   },
 ];

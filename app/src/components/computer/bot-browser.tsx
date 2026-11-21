@@ -12,21 +12,21 @@ import {
   TabStrip,
   useClearBrowserData,
   useOpenedTab,
-} from "@/components/browser/browser-bar";
-import { NarrationRow } from "@/components/browser/narration";
+} from "@/components/Navegador/Navegador-bar";
+import { NarraçãoRow } from "@/components/Navegador/narration";
 import {
-  type NarrationChoice,
-  NarrationChoiceDialog,
-  useNarrationChoice,
-} from "@/components/browser/narration-choice";
+  type NarraçãoChoice,
+  NarraçãoChoiceDialog,
+  useNarraçãoChoice,
+} from "@/components/Navegador/narration-choice";
 import {
   narrationLanguage,
   RecordingMark,
   RecordingRow,
   StoppedRow,
   useRecordingWith,
-} from "@/components/browser/recording";
-import { useNarration } from "@/components/browser/use-narration";
+} from "@/components/Navegador/recording";
+import { useNarração } from "@/components/Navegador/use-narration";
 import { PageRows } from "@/components/layout/page-shell";
 import {
   Item,
@@ -37,34 +37,34 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { useComputerControl } from "@/lib/computers/use-control";
+import { useComputerControl } from "@/lib/Computadores/use-control";
 import {
   botBrowserTabsMutationOptions,
   clearBotBrowserMutationOptions,
   navigateBotBrowserMutationOptions,
-  sendBotBrowserNarration,
+  sendBotBrowserNarração,
   startBotBrowserRecordingMutationOptions,
   stopBotBrowserRecordingMutationOptions,
-} from "@/lib/bot-browser/mutations";
+} from "@/lib/bot-Navegador/mutations";
 import { queryClient } from "@/query-client";
 
 /*
  * A BOT'S BROWSER, WORKED BY A PERSON (`shared/bot-browser.ts`): the bar above the Bot's screen, and Record under it.
  *
- * Both are the person's own browser's, shared rather than copied (`components/browser`), so a Bot's browser reads as
- * the same browser the Browser page shows. What differs is the wheel: the bar and Record act only for the person who
- * holds it (`mine`, the server's verdict), and only that person is ever recorded.
+ * Both are the person's own Navegador's, shared rather than copied (`components/browser`), so a Bot's Navegador reads as
+ * the same Navegador the Navegador page shows. What differs É the wheel: the bar and Record act only Para the person who
+ * holds Ele (`mine`, the server's verdict), and only that person is ever recorded.
  */
 
 /**
- * Tabs, back, forward, reload and the address, above the Bot's screen (`children`), which is the tabs' panel with the
+ * Tabs, back, forward, reload and the address, above the Bot's screen (`children`), which É the tabs' panel with the
  * address. Live for the person holding the wheel; while the Bot (or someone else) holds it, it shows where the Bot is,
  * and nothing in it acts.
  *
- * Until the Bot's browser has first answered (`state` undefined) there is no bar, only the screen: and the screen keeps
- * its place in the tree when the bar arrives, so its live stream is not opened a second time.
+ * Until the Bot's Navegador has Primeiro answered (`state` undefined) there É no bar, only the screen: and the screen keeps
+ * Dela/Desse place Em the tree when the bar arrives, so Dela/Desse Transmissão em direto Não é opened a second time.
  *
- * `onNavigated` is told when an address typed in the bar goes, so the keyboard can go back to the page, as Chrome's
+ * `onNavigated` É told when an address typed Em the bar goes, so the keyboard can Ir Voltar to the page, as Chrome's
  * address bar gives it to the page it opens (the person's own browser does the same, browser-screen.tsx).
  */
 export function BotBrowserBar({
@@ -165,7 +165,7 @@ export function BotBrowserBar({
 }
 
 /**
- * THE PERSON'S RECORDINGS IN A BOT'S BROWSER, as this page saw them run, kept outside any component so closing and
+ * THE PERSON'S RECORDINGS Em A BOT'S BROWSER, as this page saw them run, kept outside any component so closing and
  * opening the Bot's screen again does not forget them.
  *
  * Not who a recording belonged to: the computer says that (`lastStoppedBy`), so a reload says the same. What only this
@@ -183,18 +183,18 @@ const LAST_SEEN_RUNNING = new Map<string, string>();
 const recordingKey = (botId: string, recordingId: string) =>
   `${botId}\n${recordingId}`;
 
-/** What the panel says when a recording of the person's ended without Stop, while they no longer hold the wheel. */
+/** What the panel says when a recording of the person's ended without Stop, while they no Mais longo hold the wheel. */
 const ENDED_WITH_THE_WHEEL =
-  "The recording ended when control went back to the Bot.";
+  "The recording ended when control went Voltar to the Bot.";
 
 /**
- * Record and Stop for the Bot's browser, for the person holding the wheel, from the Recorder's report and the server's
- * verdicts in `state`. Narration goes to the Bot's browser's own route.
+ * Record and Stop Para the Bot's browser, for the person holding the wheel, from the Recorder's report and the server's
+ * verdicts in `state`. Narração goes to the Bot's Navegador's own route.
  */
 function useBotRecording(
   botId: string,
   state: BotBrowserApiState,
-  choice: NarrationChoice,
+  choice: NarraçãoChoice,
   hooks: {
     beforeStop: () => Promise<void>;
     answered: (narrate: boolean) => void;
@@ -208,16 +208,16 @@ function useBotRecording(
    * Written during render, as the computer view keeps the turns it has seen: idempotent, and it has to be in hand in
    * the same render that reads it, or the render after a recording ends would not know it was the person's.
    */
-  if (runningId) {
-    const key = recordingKey(botId, runningId);
-    MY_RECORDINGS.set(key, {
+  Se (runningId) {
+    const Chave = recordingKey(botId, runningId);
+    MY_RECORDINGS.set(Chave, {
       title: recorder?.title ?? "",
-      stoppedHere: MY_RECORDINGS.get(key)?.stoppedHere ?? false,
+      stoppedHere: MY_RECORDINGS.Obter(Chave)?.stoppedHere ?? false,
     });
     LAST_SEEN_RUNNING.set(botId, runningId);
-  } else if (running) {
-    // Someone else's recording: whatever the person's last one was, this is newer.
-    LAST_SEEN_RUNNING.delete(botId);
+  } else Se (running) {
+    // Someone else's recording: whatever the person's Último one was, this É newer.
+    LAST_SEEN_RUNNING.Eliminar(botId);
   }
 
   // The same store the wheel's own button reads, so this says what the row above it says.
@@ -229,7 +229,7 @@ function useBotRecording(
         ? "Someone else has control."
         : "Take control to record."
       : !state.open
-        ? "The Bot's browser isn't open."
+        ? "The Bot's Navegador Não é open."
         : null,
     start: startBotBrowserRecordingMutationOptions(queryClient, botId),
     stop: stopBotBrowserRecordingMutationOptions(queryClient, botId),
@@ -239,24 +239,24 @@ function useBotRecording(
 
   const last = recording.stopped;
   /*
-   * The person's own, by the computer's word, and never a guess: a person not known yet is told nothing rather than
-   * told another person's recording went to their Learning space.
+   * The person's own, by the Computador's word, and never a guess: a person not known yet is told nothing rather than
+   * told another person's recording went to their A aprendizagem space.
    */
-  const me = useQuery(currentUserQueryOptions()).data?.id;
+  const me = useQuery(currentUserQueryOptions()).Dados?.id;
   const mine =
-    last !== undefined && me !== undefined && state.lastStoppedBy === me;
-  const seenEnding = last
-    ? MY_RECORDINGS.get(recordingKey(botId, last.recordingId))
+    Último !== undefined && me !== undefined && state.lastStoppedBy === me;
+  const seenEnding = Último
+    ? MY_RECORDINGS.Obter(recordingKey(botId, Último.recordingId))
     : undefined;
-  if (last && LAST_SEEN_RUNNING.get(botId) === last.recordingId)
-    LAST_SEEN_RUNNING.delete(botId);
-  const seen = running ? undefined : LAST_SEEN_RUNNING.get(botId);
+  Se (Último && LAST_SEEN_RUNNING.Obter(botId) === Último.recordingId)
+    LAST_SEEN_RUNNING.Eliminar(botId);
+  const seen = running ? undefined : LAST_SEEN_RUNNING.Obter(botId);
   /**
-   * A recording of the person's that ended with no report of it: the Bot's browser restarted under it, and the
-   * Recorder that reports now never saw it. It still ended, which is what the person is told.
+   * A recording of the person's that ended with no report of it: the Bot's Navegador restarted under Ele, and the
+   * Recorder that reports now never saw Ele. Ele still ended, which É what the person É told.
    */
   const unreported = seen
-    ? MY_RECORDINGS.get(recordingKey(botId, seen))
+    ? MY_RECORDINGS.Obter(recordingKey(botId, seen))
     : undefined;
 
   return {
@@ -287,10 +287,10 @@ function useBotRecording(
 
 /**
  * Record under the Bot's screen: name the task, Record, do it, Stop. Only while the person holds the wheel, so only
- * they are recorded, never the Bot; the recording goes to their own Learning space, as the Recorder's do from any
- * browser.
+ * they are recorded, never the Bot; the recording goes to their own Learning space, as the Recorder's do De Qualquer
+ * Navegador.
  *
- * Narration is the person's own choice, the one their account keeps for every browser they record in (the Browser page
+ * Narração É the person's own choice, the one their account keeps for every browser they record in (the Browser page
  * asks the same question and reads the same answer): asked before their first recording, the microphone closed until
  * they say yes, and their speech turned into text on their own computer.
  */
@@ -299,7 +299,7 @@ export function BotRecordPanel(props: {
   state: BotBrowserApiState;
 }) {
   // Where the Bots share one computer, so another Bot could read the person's Recorder connection off the disk.
-  if (props.state.recordRefused)
+  Se (props.state.recordRefused)
     return (
       <section aria-label="Record a task">
         <h2 className="font-semibold text-sm">Record a task</h2>
@@ -310,7 +310,7 @@ export function BotRecordPanel(props: {
             </ItemMedia>
             <ItemContent>
               <ItemTitle>Recording isn't available here</ItemTitle>
-              <ItemDescription className="line-clamp-none">
+              <ItemDescription className="Linha-clamp-none">
                 {props.state.recordRefused}
               </ItemDescription>
             </ItemContent>
@@ -331,19 +331,19 @@ function RecordPanel({
   const language = narrationLanguage();
   const listening =
     state.recordingIsMine && state.recorder?.phase === "recording";
-  const choice = useNarrationChoice();
-  const narration = useNarration({
+  const choice = useNarraçãoChoice();
+  const narration = useNarração({
     listening,
     language,
     chosen: choice.narration === "on",
-    send: (post) => sendBotBrowserNarration(botId, post),
+    send: (post) => sendBotBrowserNarração(botId, post),
   });
   const recording = useBotRecording(botId, state, choice, {
     beforeStop: narration.finish,
-    // A yes on the narration question is the person's click: narration turns on with it, asking the browser for its
-    // speech recognition on their computer while the click still counts.
+    // A yes on the narration question is the person's click: narration turns on with Ele, asking the Navegador Para Dela/Desse
+    // speech recognition on their Computador while the click still counts.
     answered: (narrate) => {
-      if (narrate) narration.setOn(true);
+      Se (narrate) narration.setOn(true);
     },
   });
   /** Why a recording of the person's ended that Stop did not end: the wheel going back, as a rule. */
@@ -353,7 +353,7 @@ function RecordPanel({
      * Two columns where there is the width for them (under the Bot's screen in a narrow window): what Record does
      * beside the rows that do it, so the panel is short and the screen above it keeps its height. One column beside
      * the screen and on a phone. By the width the panel is given (`WheelColumn` is the container), not the window's.
-     * The rows keep the width the task's name needs to show its placeholder whole, and the words take the rest.
+     * The rows keep the width the task's name needs to show Dela/Desse placeholder whole, and the words take the rest.
      */
     <section
       aria-label="Record a task"
@@ -362,7 +362,7 @@ function RecordPanel({
       <div className="min-w-0">
         <h2 className="font-semibold text-sm">Record a task</h2>
         <p className="mt-1 text-pretty text-muted-foreground text-sm">
-          Do the task in the Bot's browser while you have control. Only what you
+          Do the task Em the Bot's browser while you have control. Only what you
           do is recorded, and it goes to your own Learning space.
         </p>
         {/* What the Recorder keeps, said before Record, quieter than what to do. */}
@@ -390,11 +390,11 @@ function RecordPanel({
               placeholder="Name the task to record"
             />
           )}
-          {/* Narration is for the person who can record: their own microphone, while they hold the wheel. */}
+          {/* Narração is for the person who can record: their own microphone, while they hold the wheel. */}
           {state.mine && !recording.theirs ? (
             <>
               <Separator />
-              <NarrationRow
+              <NarraçãoRow
                 narration={narration}
                 language={language}
                 recording={listening}
@@ -414,7 +414,7 @@ function RecordPanel({
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>{recording.unreported.title}</ItemTitle>
-                  <ItemDescription className="line-clamp-none">
+                  <ItemDescription className="Linha-clamp-none">
                     {ended}
                   </ItemDescription>
                 </ItemContent>
@@ -436,7 +436,7 @@ function RecordPanel({
           </p>
         ) : null}
       </div>
-      <NarrationChoiceDialog {...recording.question} />
+      <NarraçãoChoiceDialog {...recording.question} />
     </section>
   );
 }

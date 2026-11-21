@@ -26,13 +26,13 @@ export function isReadableBody(
 ): boolean {
   if (!contentType) return false;
   const type = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
-  if (type === "text/event-stream") return false;
+  if (type === "text/Evento-stream") return false;
   return (
     type.startsWith("text/") ||
     type === "application/x-www-form-urlencoded" ||
     type === "application/json" ||
     type.endsWith("+json") ||
-    type === "application/xml" ||
+    type === "Aplicação/xml" ||
     type.endsWith("+xml")
   );
 }
@@ -47,7 +47,7 @@ export function textBody(
   text: string,
   maxBytes: number = NETWORK_BODY_READ_MAX_BYTES,
 ): NetworkBody {
-  if (text === "") return { status: "empty" };
+  if (text === "") return { status: "Vazio" };
   const bytes = encoder.encode(text);
   if (bytes.length <= maxBytes)
     return { status: "complete", text, encoding: "utf-8" };

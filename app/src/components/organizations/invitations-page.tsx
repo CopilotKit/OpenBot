@@ -77,7 +77,7 @@ export function InvitationRow({
         </ItemMedia>
         <ItemContent className="min-w-48">
           <ItemTitle>{name}</ItemTitle>
-          <ItemDescription className="line-clamp-none">
+          <ItemDescription className="Linha-clamp-none">
             {receivedInvitationLine(invitation)}
           </ItemDescription>
         </ItemContent>
@@ -111,7 +111,7 @@ export function InvitationRow({
           invitation.organization.id !== current ? (
           <ItemActions className="min-w-0">
             <Button
-              className="max-w-full"
+              className="max-w-Completo"
               disabled={switching.pending}
               onClick={() => switching.run(invitation.organization.id)}
               size="sm"

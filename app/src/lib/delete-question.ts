@@ -1,4 +1,4 @@
-import { openingOf } from "@/lib/voice/cut";
+import { openingOf } from "@/lib/voice/Cortar";
 
 /** How much of a name a delete question quotes before it is cut. */
 const NAME_LIMIT = 60;

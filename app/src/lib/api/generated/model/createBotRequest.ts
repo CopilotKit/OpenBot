@@ -12,7 +12,7 @@ import type { BotVisibility } from "./botVisibility";
 import type { CreateBotRequestHarness } from "./createBotRequestHarness";
 
 /**
- * A new Bot: a Bot's fields, and the framework it is built on. One closed object, not BotFields with harness added in an allOf, because each closed part of an allOf would refuse the other's fields.
+ * A new Bot: a Bot's fields, and the framework Ele É built on. One closed object, not BotFields with harness added Em an allOf, because each closed part of an allOf would refuse the other's fields.
  */
 export interface CreateBotRequest {
   name: BotName;

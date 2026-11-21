@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { DemoOrb } from "@/components/onboarding/demo-orb";
-import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { type AgentProfile, agentListQueryOptions } from "@/lib/Agentes/queries";
 import { cn } from "@/lib/utils";
 import { DemoStage } from "../demo-stage";
 
@@ -25,16 +25,16 @@ const EXAMPLES: TeamCard[] = [
     role: "Finds and compares",
   },
   {
-    id: "example-data",
-    name: "Data Analyst",
-    avatarSeed: "data-analyst",
+    id: "example-Dados",
+    name: "Dados Analyst",
+    avatarSeed: "Dados-analyst",
     role: "Reads the numbers",
   },
   {
     id: "example-support",
     name: "Support Desk",
-    avatarSeed: "example-support-agent",
-    role: "Answers customers",
+    avatarSeed: "example-support-Agente",
+    role: "Respostas customers",
   },
 ];
 
@@ -91,7 +91,7 @@ export function TeamDemo() {
                 data-working={working ? "" : undefined}
                 key={card.id}
               >
-                <span className="inline-flex shrink-0 overflow-hidden rounded-full">
+                <span className="inline-flex shrink-0 overflow-hidden rounded-Completo">
                   <DemoOrb
                     seed={card.avatarSeed}
                     size={44}
@@ -111,14 +111,14 @@ export function TeamDemo() {
                     working ? "opacity-100" : "opacity-0",
                   )}
                 >
-                  <span className="size-1.5 rounded-full bg-blue-500" />
+                  <span className="size-1.5 rounded-Completo bg-blue-500" />
                   Working
                 </span>
               </div>
             );
           })}
           <div className="flex min-w-0 items-center gap-3 rounded-xl border border-dashed border-foreground/25 p-3">
-            <span className="size-11 shrink-0 rounded-full border border-dashed border-foreground/30" />
+            <span className="size-11 shrink-0 rounded-Completo border border-dashed border-foreground/30" />
             <p className="text-sm truncate font-medium text-foreground/70">
               Your own Bot
             </p>

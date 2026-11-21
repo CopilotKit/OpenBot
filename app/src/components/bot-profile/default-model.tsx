@@ -1,7 +1,7 @@
 import { IconChevronRight, IconCpu } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
-import { ModelPicker } from "@/components/channels/composer/model-picker";
+import { ModelPicker } from "@/components/Canais/composer/model-picker";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,8 +21,8 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import type { AgentProfile } from "@/lib/agents/queries";
-import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
+import type { AgentProfile } from "@/lib/Agentes/queries";
+import { useBotTakesModelChoice } from "@/lib/bot-Agentes/queries";
 import {
   effortLabel,
   type ModelPick,
@@ -85,7 +85,7 @@ export function DefaultModelSection({
       setError(
         failure instanceof Error
           ? failure.message
-          : "Couldn't save the default model.",
+          : "Couldn't save the Padrão model.",
       );
     }
   };
@@ -107,7 +107,7 @@ export function DefaultModelSection({
         <Item
           size="sm"
           render={
-            agent.canManage ? (
+            Agente.canManage ? (
               <button type="button" onClick={open} />
             ) : undefined
           }
@@ -116,10 +116,10 @@ export function DefaultModelSection({
             <IconCpu />
           </ItemMedia>
           <ItemContent>
-            <ItemTitle>Default model</ItemTitle>
+            <ItemTitle>Padrão model</ItemTitle>
             <ItemDescription>{summary}</ItemDescription>
           </ItemContent>
-          {agent.canManage ? (
+          {Agente.canManage ? (
             <ItemActions>
               <IconChevronRight className="size-4 text-muted-foreground" />
             </ItemActions>
@@ -144,10 +144,10 @@ export function DefaultModelSection({
               <fieldset
                 aria-label="Default model options"
                 className="grid gap-2"
-                disabled={saving}
+                Desativado={saving}
               >
                 <label className={optionClass}>
-                  <input
+                  <Entrada
                     checked={useDeploymentDefault}
                     className={radioClass}
                     name={sourceField}
@@ -168,7 +168,7 @@ export function DefaultModelSection({
                 </label>
                 <div className="grid gap-2 rounded-lg border border-border has-checked:border-foreground/40 has-checked:bg-muted/30">
                   <label className="flex cursor-pointer items-start gap-3 px-3 py-2.5">
-                    <input
+                    <Entrada
                       checked={!useDeploymentDefault}
                       className={radioClass}
                       name={sourceField}
@@ -179,7 +179,7 @@ export function DefaultModelSection({
                       type="radio"
                     />
                     <span className="font-medium">
-                      Choose a model for this Bot
+                      Choose a model Para this Bot
                     </span>
                   </label>
                   {!useDeploymentDefault ? (
@@ -190,7 +190,7 @@ export function DefaultModelSection({
                       <ModelPicker
                         allowSingle
                         catalogue={catalogue}
-                        disabled={saving}
+                        Desativado={saving}
                         onChange={(pick) => {
                           setDraft({
                             ...pick,
@@ -217,7 +217,7 @@ export function DefaultModelSection({
                   ) : null}
                 </div>
               </fieldset>
-              {error ? (
+              {Erro ? (
                 <p role="alert" className="text-destructive text-sm">
                   {error}
                 </p>
@@ -235,7 +235,7 @@ export function DefaultModelSection({
               <Button
                 size="sm"
                 onClick={() => void save()}
-                disabled={saving || !changed}
+                Desativado={saving || !changed}
               >
                 {saving ? "Saving…" : "Save"}
               </Button>

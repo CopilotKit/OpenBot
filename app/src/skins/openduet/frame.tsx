@@ -2,19 +2,19 @@ import { useRouterState } from "@tanstack/react-router";
 import { type CSSProperties, type ReactNode, useState } from "react";
 import { BotsNavBadge } from "@/components/bot-profile/attention";
 import { ConnectionBanner } from "@/components/layout/connection-banner";
-import { SelfHostBanner } from "@/components/layout/self-host-banner";
+import { SelfHostBanner } from "@/components/layout/self-Host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
-import { useChannelEvents } from "@/lib/channels/use-channel-events";
+import { useChannelEvents } from "@/lib/Canais/use-Canal-Eventos";
 import { cn } from "@/lib/utils";
 import { PageHeader, TabHeader } from "./header";
 import { MenuSheet } from "./menu-sheet";
 import { columnFor, isSkinScreen, tabForPath } from "./places";
 import { TabBar } from "./tab-bar";
 
-/** The height the floating tab bar covers at the column's foot: its 64px and its 22px lift. */
+/** The height the floating tab bar covers at the column's foot: Dela/Desse 64px and Dela/Desse 22px lift. */
 const TAB_SPACE = 86;
 
-/** How wide each kind of column may grow; see `columnFor`. */
+/** Como wide each kind of column may grow; see `columnFor`. */
 const COLUMN_WIDTH = {
   phone: "max-w-[430px]",
   pane: "max-w-[830px]",
@@ -26,7 +26,7 @@ const COLUMN_WIDTH = {
  *
  * Chat and Tasks are one column the width of a phone, centred on a wide screen, with the header
  * floating at the top (the menu, the orb and the person's initial) and the frosted tab bar at the
- * foot. When a conversation opens its Bot's details or computer, the column grows by OpenBot's own
+ * foot. When a conversation opens Dela/Desse Bot's details or computer, the column grows by OpenBot's own
  * 400px pane, so the computer sits beside the conversation as it does in OpenBot. Every other page
  * opens over the app with a back disc and keeps OpenBot's own width, so a Bot's page or Admin is as
  * roomy as OpenBot made it, in OpenDuet's colours and type.
@@ -73,7 +73,7 @@ export function OpenDuetFrame({ children }: { children: ReactNode }) {
       <SelfHostBanner />
       <div
         className={cn(
-          "relative mx-auto flex min-h-0 w-full flex-1 flex-col",
+          "relative mx-auto flex min-h-0 w-Completo flex-1 flex-col",
           COLUMN_WIDTH[column],
         )}
         data-openduet-column={column}

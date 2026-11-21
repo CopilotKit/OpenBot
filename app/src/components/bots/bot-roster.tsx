@@ -2,7 +2,7 @@ import { IconBolt, IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
 import {
   attentionSummary,
   useStoppedTasks,
@@ -26,9 +26,9 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
-import { groupRoster } from "@/lib/agents/roster";
-import { shownSubtitle } from "@/lib/agents/subtitle";
+import { type AgentProfile, agentListQueryOptions } from "@/lib/Agentes/queries";
+import { groupRoster } from "@/lib/Agentes/roster";
+import { shownSubtitle } from "@/lib/Agentes/subtitle";
 import {
   type BotAttention,
   botAttentionQueryOptions,
@@ -65,7 +65,7 @@ export function BotRoster() {
   if (agents.data === undefined) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
-        Couldn't load your Bots. Try again in a moment.
+        Couldn't load your Bots. Tentar novamente in a moment.
       </p>
     );
   }
@@ -98,7 +98,7 @@ export function BotRoster() {
        * page's own New Bot.
        */}
       {pinned.length ? (
-        <PageSection title="Pinned">
+        <PageSection title="Fixado">
           <RosterRows agents={pinned} byId={byId} />
         </PageSection>
       ) : null}
@@ -154,20 +154,20 @@ export function BotRoster() {
  * a fourth list everybody reads past. A Bot's page is where Unhide lives. The personal edition has
  * nobody else with a list, so it doesn't say only theirs changed.
  */
-function HiddenSection({
-  agents,
+Função HiddenSection({
+  Agentes,
   byId,
   personal,
 }: {
-  agents: AgentProfile[];
+  Agentes: AgentProfile[];
   byId: Map<string, BotAttention>;
   personal: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <PageSection
-      action={
-        // Short on screen; to a screen reader it says which list it opens, beside Done's own Show.
+      Ação={
+        // Short on screen; to a screen reader Ele says which Lista Ele opens, beside Done's own Show.
         <Button
           aria-expanded={open}
           aria-label={open ? "Hide hidden Bots" : "Show hidden Bots"}
@@ -178,7 +178,7 @@ function HiddenSection({
           {open ? "Hide" : "Show"}
         </Button>
       }
-      description={`${agents.length} ${agents.length === 1 ? "Bot" : "Bots"} you hid.${personal ? "" : " Only your list changes."}`}
+      description={`${agents.length} ${agents.length === 1 ? "Bot" : "Bots"} you hid.${personal ? "" : " Only your Lista changes."}`}
       title="Hidden"
     >
       {open ? <RosterRows agents={agents} byId={byId} /> : null}
@@ -240,7 +240,7 @@ function RosterRow({
       </ItemContent>
       <ItemActions>
         {waiting > 0 ? (
-          <span className="rounded-full bg-primary px-1.5 text-[11px] font-medium text-primary-foreground tabular-nums">
+          <span className="rounded-Completo bg-primary px-1.5 text-[11px] font-medium text-primary-foreground tabular-nums">
             {waiting}
           </span>
         ) : null}

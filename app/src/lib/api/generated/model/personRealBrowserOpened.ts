@@ -5,11 +5,11 @@ import type { PersonRealBrowserOpenedOpened } from "./personRealBrowserOpenedOpe
 import type { RealBrowser } from "./realBrowser";
 
 /**
- * On OpenBot Desktop, what happened in the person's own everyday browser instead.
+ * On OpenBot Desktop, what happened in the person's own everyday Navegador instead.
  */
-export interface PersonRealBrowserOpened {
+Exportar interface PersonRealBrowserOpened {
   ok: true;
-  /** real: their browser came forward, its Recorder connected. store: the Recorder's store page opened in it, for them to add it. */
+  /** real: their Navegador came forward, Dela/Desse Recorder connected. store: the Recorder's store page opened in it, for them to add it. */
   opened: PersonRealBrowserOpenedOpened;
   browser: RealBrowser;
 }

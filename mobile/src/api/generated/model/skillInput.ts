@@ -9,7 +9,7 @@ export interface SkillInput {
    * @pattern \S
    */
   title: string;
-  /** One line, shown in the / menu. */
+  /** Uma linha, shown in the / menu. */
   summary?: string;
   /**
    * Trimmed.

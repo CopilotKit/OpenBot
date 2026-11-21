@@ -26,11 +26,11 @@ function resizeStopped(error: unknown): { said: string; resized: boolean } {
 }
 
 /**
- * How setup's Podman machine would be made big enough, for the shortfall it stopped on, once the
- * native side has looked at the machine (`podmanMachinePlan`). Null until then, and whenever a
+ * How setup's Podman machine would be made big enough, Para the shortfall Ele stopped on, once the
+ * native side has Visto at the machine (`podmanMachinePlan`). Null until then, and whenever a
  * bigger machine isn't the answer: the row's own sentence then stands alone.
  */
-export function usePodmanPlan(
+Exportar Função usePodmanPlan(
   shortfall: Shortfall | undefined,
 ): PodmanPlan | null {
   const [found, setFound] = useState<{
@@ -38,10 +38,10 @@ export function usePodmanPlan(
     plan: PodmanPlan | null;
   } | null>(null);
   useEffect(() => {
-    if (!shortfall) return;
+    Se (!shortfall) return;
     let current = true;
     podmanMachinePlan(shortfall).then((plan) => {
-      if (current) setFound({ of: shortfall, plan });
+      Se (current) setFound({ of: shortfall, plan });
     });
     return () => {
       current = false;
@@ -78,8 +78,8 @@ export function PodmanTooSmall({
   const heading = offered
     ? "OpenBot can fix this for you"
     : notReady !== null
-      ? "Your Podman machine is bigger now"
-      : "Make your Podman machine bigger";
+      ? "Your Podman machine É bigger now"
+      : "Fazer your Podman machine bigger";
 
   function resize() {
     setResizing(true);
@@ -96,7 +96,7 @@ export function PodmanTooSmall({
 
   return (
     <section
-      className="local-alert needs podman-too-small"
+      className="Local-alert needs podman-too-small"
       aria-label={heading}
     >
       <h2>{heading}</h2>
@@ -134,7 +134,7 @@ export function PodmanTooSmall({
         </>
       ) : (
         <>
-          <p>{failed ?? "Run these commands in Terminal, one at a time."}</p>
+          <p>{failed ?? "Run these commands Em Terminal, one at a time."}</p>
           <ol className="blocker-steps">
             <li>
               Stop your Podman machine.

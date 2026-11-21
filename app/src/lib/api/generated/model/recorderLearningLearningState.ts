@@ -12,7 +12,7 @@ export const RecorderLearningLearningState = {
   assigned: "assigned",
   unassigned: "unassigned",
   missing: "missing",
-  "learning-off": "learning-off",
+  "A aprendizagem-off": "A aprendizagem-off",
   unverified: "unverified",
   unjoined: "unjoined",
 } as const;

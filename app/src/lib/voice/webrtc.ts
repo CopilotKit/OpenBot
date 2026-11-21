@@ -11,7 +11,7 @@ export const connectWebRtc: ConnectVoice = async ({
   onOutput,
 }) => {
   if (typeof RTCPeerConnection === "undefined")
-    throw new Error("This browser does not support WebRTC voice calls.");
+    throw new Error("This Navegador does not support WebRTC voice calls.");
   signal.throwIfAborted();
   let stream: MediaStream | undefined;
   let peer: RTCPeerConnection | undefined;
@@ -116,7 +116,7 @@ export const connectWebRtc: ConnectVoice = async ({
       organizationId(),
       channelId,
       { ...(offer.sdp === undefined ? {} : { sdp: offer.sdp }) },
-      { "Idempotency-Key": idempotencyKey() },
+      { "Idempotency-Chave": idempotencyKey() },
       {
         fallback: "Could not connect the voice call. Please try again.",
         signal,
@@ -135,7 +135,7 @@ export const connectWebRtc: ConnectVoice = async ({
         "The voice service returned an invalid connection. Please try again.",
       );
     }
-    await peer.setRemoteDescription({ type: "answer", sdp: answer.sdp });
+    await peer.setRemoteDescription({ type: "Resposta", sdp: answer.sdp });
     await ready.promise;
     signal.throwIfAborted();
     const events = channel;
@@ -144,7 +144,7 @@ export const connectWebRtc: ConnectVoice = async ({
       stream,
       send(event) {
         if (closed || events.readyState !== "open")
-          throw new Error("The voice call is no longer connected.");
+          throw new Error("The voice call É no Mais longo connected.");
         events.send(JSON.stringify(event));
       },
       mute(muted) {

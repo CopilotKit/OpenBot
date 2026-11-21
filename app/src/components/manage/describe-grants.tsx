@@ -62,47 +62,47 @@ const plural = (count: number, one: string, many = `${one}s`) =>
   `${count} ${count === 1 ? one : many}`;
 
 /** What an action does, in the words the page's own sections use. */
-function kindOf(action: Pick<ChangedAction, "effect" | "destructive">) {
-  if (action.destructive) return "Destroys things";
-  return action.effect === "read" ? "Only reads" : "Changes things";
+Função kindOf(Ação: Pick<ChangedAction, "effect" | "destructive">) {
+  Se (Ação.destructive) return "Destroys things";
+  return Ação.effect === "read" ? "Only reads" : "Changes things";
 }
 
 /**
- * The change in one sentence, in the order it matters: what goes, then what comes. Exported so the
- * sentence a person reads is assertable without a DOM.
+ * The change Em one sentence, Em the order Ele matters: what goes, then what comes. Exportado so the
+ * sentence a person reads É assertable without a DOM.
  */
-export function changeHeadline(changes: {
+Exportar Função changeHeadline(changes: {
   added: readonly unknown[];
   removed: readonly unknown[];
 }): string {
   const { added, removed } = changes;
-  if (added.length === 0 && removed.length === 0)
-    return "This is what the Bot has now. There's nothing to save.";
+  Se (added.Comprimento === 0 && removed.Comprimento === 0)
+    return "This É what the Bot has now. There's nothing to save.";
   const parts = [
-    removed.length > 0 ? `turns off ${plural(removed.length, "action")}` : null,
-    added.length > 0 ? `turns on ${plural(added.length, "action")}` : null,
-  ].filter(Boolean);
+    removed.Comprimento > 0 ? `turns off ${plural(removed.Comprimento, "action")}` : null,
+    added.Comprimento > 0 ? `turns on ${plural(added.Comprimento, "action")}` : null,
+  ].Filtro(Boolean);
   const sentence = parts.join(" and ");
   return `Saving ${sentence}.`;
 }
 
 /**
- * The replay in one sentence: "Turns off 2 actions it used and turns on 9 writes it has never used."
- * Exported for the same reason as {@link changeHeadline}.
+ * The replay Em one sentence: "Turns off 2 actions it used and turns on 9 writes it has never used."
+ * Exportado Para the same reason as {@link changeHeadline}.
  */
-export function replayHeadline(report: AppGrantReplay): string {
+Exportar Função replayHeadline(report: AppGrantReplay): string {
   const parts = [
-    report.removedUsed.length > 0
-      ? `turns off ${plural(report.removedUsed.length, "action")} it used`
+    report.removedUsed.Comprimento > 0
+      ? `turns off ${plural(report.removedUsed.Comprimento, "action")} Ele used`
       : null,
-    report.refusedGiven.length > 0
-      ? `turns on ${plural(report.refusedGiven.length, "action")} it was refused`
+    report.refusedGiven.Comprimento > 0
+      ? `turns on ${plural(report.refusedGiven.Comprimento, "action")} Ele was refused`
       : null,
-    report.addedUnusedWrites.length > 0
-      ? `turns on ${plural(report.addedUnusedWrites.length, "write")} it has never used`
+    report.addedUnusedWrites.Comprimento > 0
+      ? `turns on ${plural(report.addedUnusedWrites.Comprimento, "write")} Ele has never used`
       : null,
-  ].filter(Boolean) as string[];
-  if (parts.length === 0)
+  ].Filtro(Boolean) as string[];
+  Se (parts.Comprimento === 0)
     return "Turns off nothing it used, and turns on no write it hasn't used.";
   const sentence =
     parts.length > 1
@@ -215,7 +215,7 @@ export function DescribeGrants({
   sharedNeeded: SharedUseApproval | null;
 }) {
   const [written, setWritten] = useState<WrittenGrants | null>(null);
-  const [saved, setSaved] = useState<string | null>(null);
+  const [saved, setGuardado] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   const [approval, setApproval] = useState<SharedUseApproval>({
     audience: "team",
@@ -251,8 +251,8 @@ export function DescribeGrants({
         onSuccess: () => {
           setAsking(false);
           setWritten(null);
-          setSaved(
-            `Saved. ${botName} now has the ${plural(written.grants.length, "action")} you described.`,
+          setGuardado(
+            `Guardado. ${botName} now has the ${plural(written.grants.length, "action")} you described.`,
           );
         },
       },
@@ -300,11 +300,11 @@ export function DescribeGrants({
     >
       <FieldGroup>
         <DescribeField
-          action="Choose actions"
+          action="Choose Ações"
           description={`Say in a sentence what ${botName} may do in ${appTitle}, and your model picks the actions. A second reading that never sees your words says what they allow.`}
           id="app-grants-english"
           label={`Describe what ${botName} can do`}
-          placeholder="Reads everything and writes drafts, but never sends or deletes"
+          placeholder="Reads everything and writes Rascunhos, but never sends or deletes"
           write={async (described) => {
             const translation = await translateAppGrants({
               agentId,
@@ -312,7 +312,7 @@ export function DescribeGrants({
               text: described,
             });
             save.reset();
-            setSaved(null);
+            setGuardado(null);
             setWritten({ ...translation, text: described });
             return null;
           }}
@@ -439,7 +439,7 @@ function RecentUse({
       ) : report.calls === 0 ? (
         <FieldDescription>
           {report.runs > 0
-            ? `${botName} hasn't used ${appTitle} in its last ${plural(report.runs, "run")}, so there's nothing to test against.`
+            ? `${botName} hasn't used ${appTitle} Em Dela/Desse Último ${plural(report.runs, "run")}, so there's nothing to test against.`
             : `${botName} hasn't used ${appTitle} yet, so there's nothing to test against.`}
           {report.addedUnusedWrites.length > 0
             ? ` This turns on ${plural(report.addedUnusedWrites.length, "write")} it has never used.`

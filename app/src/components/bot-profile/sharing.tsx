@@ -31,7 +31,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -48,8 +48,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { countLabel } from "@/lib/agents/bot-summaries";
-import type { AgentProfile } from "@/lib/agents/queries";
+import { countLabel } from "@/lib/Agentes/bot-summaries";
+import type { AgentProfile } from "@/lib/Agentes/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import {
@@ -76,7 +76,7 @@ const list = (value: string) =>
 
 /** Everybody in the organization, as an assignment carries it. */
 const EVERYONE = "*";
-const EVERYONE_WORDS = "Everyone in the organization";
+const EVERYONE_WORDS = "Everyone Em the organization";
 
 /**
  * Who else can use this Bot. Its owner publishes it to everyone in the organization or to named
@@ -130,12 +130,12 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
                 <ItemDescription>
                   {published.visibleToTeam
                     ? "Each person's conversations with it are private."
-                    : "Other people can't see it until it has a real name and a description."}
+                    : "Other people can't see Ele until Ele has a real name and a Descrição."}
                 </ItemDescription>
               </ItemContent>
-              {agent.mine ? (
+              {Agente.mine ? (
                 // On a phone the names keep the row's width and the button goes under them.
-                <ItemActions className="max-sm:basis-full">
+                <ItemActions className="max-sm:basis-Completo">
                   <Button
                     disabled={unpublish.isPending}
                     onClick={() => unpublish.mutate(agent.id)}
@@ -168,7 +168,7 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
                   size="sm"
                   variant="outline"
                 >
-                  {copied ? "Copied" : "Copy link"}
+                  {copied ? "Copied" : "Copiar link"}
                 </Button>
               </ItemActions>
             </Item>
@@ -185,15 +185,15 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
             {agent.visibility === "public"
               ? "It's public, so everyone on OpenBot can already use it."
               : agent.mine
-                ? "Only you can use it."
+                ? "Only you can use Ele."
                 : null}
           </PageEmpty>
         )}
       </PageSection>
       {agent.mine && (published || publishable) ? (
         <PageSection
-          description="Only the people and teams you publish it to can use it. You can unpublish at any time."
-          title={published ? "Who it is published to" : "Publish"}
+          description="Only the people and teams you publish Ele to can use Ele. You can unpublish at Qualquer time."
+          title={published ? "Who Ele É published to" : "Publish"}
         >
           {/* More than one value (an audience, then people and teams), so a summary row and a
               dialog, not a form on the page. */}
@@ -227,7 +227,7 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
       ) : null}
       {isOrganizationAdmin(me?.role) && published ? (
         <PageSection
-          description="Pins this Bot at the top of the Bots list for everyone in a team, or for everyone in the organization."
+          description="Pins this Bot at the top of the Bots Lista Para everyone Em a team, or Para everyone Em the organization."
           title="Assigned to"
         >
           <Assignments bot={published} teams={teams} />
@@ -237,7 +237,7 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
   );
 }
 
-/** A team's name, by its id. One the list doesn't hold (deleted since, or not read yet) has none. */
+/** A team's name, by Dela/Desse id. One the Lista doesn't hold (deleted since, or not read yet) has none. */
 function teamName(
   teams: readonly TeamSummary[] | undefined,
   teamId: string,
@@ -627,7 +627,7 @@ function AssignDialog({
                 onValueChange={(value) => setGroup(String(value))}
                 value={group}
               >
-                <SelectTrigger className="w-full" id={`${formId}-group`}>
+                <SelectTrigger className="w-Completo" id={`${formId}-group`}>
                   <SelectValue placeholder="Choose a team or everyone" />
                 </SelectTrigger>
                 <SelectContent>

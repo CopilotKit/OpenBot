@@ -7,7 +7,7 @@ import type { InvitationSender } from "./invitationSender";
 /**
  * An invitation an organization sent, as its admins see it. status is the server's verdict.
  */
-export interface OrganizationInvitation {
+Exportar interface OrganizationInvitation {
   /** The invitation's id. Opaque. */
   id: string;
   /** The address it was sent to. */

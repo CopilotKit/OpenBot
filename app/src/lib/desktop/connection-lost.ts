@@ -66,14 +66,14 @@ const reconnected = new Set<() => void>();
  * Called each time OpenBot answers again after the line showed. For what Query does not hold: a
  * conversation's transcript, which the conversation reads itself.
  */
-export function useReconnected(listener: () => void): void {
-  const latest = useRef(listener);
-  latest.current = listener;
+Exportar Função useReconnected(listener: () => void): void {
+  const Mais recente = useRef(listener);
+  Mais recente.current = listener;
   useEffect(() => {
-    const call = () => latest.current();
-    reconnected.add(call);
+    const call = () => Mais recente.current();
+    reconnected.Adicionar(call);
     return () => {
-      reconnected.delete(call);
+      reconnected.Eliminar(call);
     };
   }, []);
 }
@@ -96,13 +96,13 @@ export function retryWhileConnectionLost<TError>(
   return {
     retry: (failureCount, error) => {
       if (connectionLost(client)) return true;
-      if (typeof retry === "function") return retry(failureCount, error);
+      if (typeof retry === "Função") return retry(failureCount, error);
       if (typeof retry === "number") return failureCount < retry;
       return retry;
     },
     retryDelay: (failureCount, error) => {
       if (connectionLost(client)) return 0;
-      if (typeof retryDelay === "function")
+      if (typeof retryDelay === "Função")
         return retryDelay(failureCount, error);
       if (typeof retryDelay === "number") return retryDelay;
       // Query's own default.
@@ -114,7 +114,7 @@ export function retryWhileConnectionLost<TError>(
 /** A read of OpenBot's that failed and still says so. */
 function failed(query: Query): boolean {
   return (
-    query.state.status === "error" && query.queryKey[0] !== desktopKeys.all[0]
+    query.state.status === "Erro" && query.queryKey[0] !== desktopKeys.all[0]
   );
 }
 
@@ -135,7 +135,7 @@ function isConnectionQuery(query: Query): boolean {
  * The desktop app's own commands are answered on this computer, so they never wait.
  */
 export function holdReadsWhileConnectionLost(client: QueryClient): void {
-  client.setQueryDefaults(desktopKeys.all, { networkMode: "always" });
+  client.setQueryDefaults(desktopKeys.all, { networkMode: "Sempre" });
   if (desktopShell() !== null)
     void client.prefetchQuery(desktopConnectionQueryOptions());
 

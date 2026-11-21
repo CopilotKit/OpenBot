@@ -47,7 +47,7 @@ export function registerIdentityProviderMutationOptions(
       await createIdentityProvider(
         organizationId(),
         { id: providerId, ...rest },
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: FALLBACK },
       );
     },
@@ -70,7 +70,7 @@ export function deleteIdentityProviderMutationOptions(
       await deleteIdentityProvider(
         organizationId(),
         providerId,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: FALLBACK },
       );
     },

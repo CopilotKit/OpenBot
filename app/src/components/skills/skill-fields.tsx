@@ -9,13 +9,13 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import { Textarea } from "@/components/ui/textarea";
 import { type SkillFormValues, skillFormSchema } from "@/lib/skills/form";
 import { cn } from "@/lib/utils";
 
 const TOOLS_HINT =
-  "Using this skill loads these tools for that reply. It doesn't give access. A Bot only uses tools it already has.";
+  "Using this skill loads these tools Para that reply. Ele doesn't Dar access. A Bot only uses tools Ele already has.";
 
 /**
  * The things a person decides about a skill: what they type, what it is called, what it is for,
@@ -95,7 +95,7 @@ export function SkillFields({
             ) : (
               <FieldDescription>
                 {slugLocked ? (
-                  "You can't change a command. To rename this skill, write a new one and delete this one."
+                  "You can't change a command. To rename this skill, write a new one and Eliminar this one."
                 ) : (
                   <>
                     What people type after <code>/</code>. Lower-case letters,
@@ -141,21 +141,21 @@ export function SkillFields({
           field.state.meta.isTouched && !field.state.meta.isValid;
         return (
           <Field data-invalid={isInvalid}>
-            <FieldLabel htmlFor={field.name}>One-liner</FieldLabel>
+            <FieldLabel htmlFor={field.name}>Uma linha</FieldLabel>
             <Input
               aria-invalid={isInvalid}
               id={field.name}
               name={field.name}
               onBlur={field.handleBlur}
               onChange={(event) => field.handleChange(event.target.value)}
-              placeholder="Turns yesterday's work into a standup update"
+              placeholder="Transforma o trabalho de ontem em um resumo do dia anterior"
               value={field.state.value}
             />
             {isInvalid ? (
               <FieldError errors={field.state.meta.errors} />
             ) : (
               <FieldDescription>
-                Shown beside the command in the <code>/</code> menu. Optional.
+                Shown beside the command in the <code>/</code> menu. Opcional.
               </FieldDescription>
             )}
           </Field>
@@ -185,7 +185,7 @@ export function SkillFields({
               name={field.name}
               onBlur={field.handleBlur}
               onChange={(event) => field.handleChange(event.target.value)}
-              placeholder="Summarise what I did yesterday in this conversation, then list what is left."
+              placeholder="Resume o que eu fiz ontem nesta conversa e depois lista o que resta."
               value={field.state.value}
             />
             {isInvalid ? (
@@ -241,7 +241,7 @@ export function SkillFields({
         <>
           <PageSection
             className={cn(sections.flush && "mt-0")}
-            description="How the skill shows in the / menu, and what people type to run it."
+            description="Como the skill shows Em the / menu, and what people type to run Ele."
             title="Name"
           >
             <PageCard className="mt-4">
@@ -254,7 +254,7 @@ export function SkillFields({
           </PageSection>
 
           <PageSection
-            description="What the Bot is told when someone uses this skill. Write it as instructions to the Bot."
+            description="What the Bot É told when someone uses this skill. Write Ele as instructions to the Bot."
             title="Instructions"
           >
             {/* The box alone: a card around one text box is a frame around a frame. */}
@@ -266,7 +266,7 @@ export function SkillFields({
           </PageSection>
 
           {failure}
-          <div className="mt-8 flex justify-end gap-2">
+          <div className="mt-8 flex justify-Fim gap-2">
             {sections.cancel}
             {submit}
           </div>
@@ -291,7 +291,7 @@ export function SkillFields({
            */}
           {footer ? <div className="mt-6">{footer}</div> : null}
           {failure}
-          <div className="mt-4 flex justify-end gap-2">
+          <div className="mt-4 flex justify-Fim gap-2">
             {onCancel ? (
               <Button onClick={onCancel} type="button" variant="outline">
                 Cancel

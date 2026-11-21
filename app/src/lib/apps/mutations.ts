@@ -14,15 +14,15 @@ import { invalidatePlugins } from "@/lib/plugins/mutations";
 import type { SharedUseApproval } from "@/lib/plugins/shared-use";
 
 /**
- * Writes to the apps this OpenBot has added, through the API's generated client: adding one (from
- * the catalogue, from the wider directory, or by a server's address), removing it, asking it what it
+ * Writes to the apps this OpenBot has added, through the API's generated client: adding one (De
+ * the catalogue, De the wider directory, or by a server's address), removing it, asking it what it
  * offers, choosing whose account it acts in and who may give it to a Bot, and its OAuth client.
  *
  * Every one refetches everything the plugin screens read when it settles, refused or not
  * (`invalidatePlugins`): a refused add can still have written the app before its actions were read.
  */
 
-const FALLBACK = "That didn't work. Try again.";
+const FALLBACK = "That didn't work. Tentar novamente.";
 
 /** A catalogue entry to add, by its key; the catalogue supplies the address. */
 export type CuratedServerInput = {
@@ -96,14 +96,14 @@ export function addServerByUrlMutationOptions(queryClient: QueryClient) {
             ...(input.token ? { token: input.token } : {}),
           },
           { "Idempotency-Key": idempotencyKey() },
-          { fallback: "Couldn't add that server. Try again." },
+          { fallback: "Couldn't add that server. Tentar novamente." },
         );
         return { added: true, server, signIn: server.signIn };
       } catch (thrown) {
-        if (!(thrown instanceof ClientError)) throw thrown;
+        Se (!(thrown instanceof ClientError)) throw thrown;
         return {
           added: false,
-          error: thrown.message,
+          Erro: thrown.message,
           ...(thrown.code === "APP_NEEDS_KEY"
             ? { code: "needs-key" as const }
             : thrown.code === "APP_NOT_APPROVED"
@@ -131,7 +131,7 @@ export function addDirectoryAppMutationOptions(queryClient: QueryClient) {
     }): Promise<string> => {
       const app = await createApp(
         organizationId(),
-        { from: "directory", directoryEntryId: input.directoryEntryId },
+        { from: "directory", directoryEntryId: Entrada.directoryEntryId },
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "That app could not be added." },
       );
@@ -205,9 +205,9 @@ export function registerOAuthClientMutationOptions(queryClient: QueryClient) {
 }
 
 /**
- * Who may give an app to a Bot (updateApp): any Bot's owner, for their own Bot, or only an admin.
+ * Who may Dar an app to a Bot (updateApp): Qualquer Bot's owner, Para their own Bot, or only an admin.
  */
-export function setOwnerGrantsMutationOptions(queryClient: QueryClient) {
+Exportar Função setOwnerGrantsMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: {
       serverId: string;
@@ -218,7 +218,7 @@ export function setOwnerGrantsMutationOptions(queryClient: QueryClient) {
         variables.serverId,
         { ownerGrants: variables.ownerGrants },
         { "Idempotency-Key": idempotencyKey() },
-        { fallback: "Couldn't change who can give this app." },
+        { fallback: "Couldn't change who can Dar this app." },
       );
     },
     onSettled: () => invalidatePlugins(queryClient),
@@ -252,7 +252,7 @@ export async function accountModePreview(
     organizationId(),
     serverId,
     { mode, validateOnly: true },
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     { fallback: "What the switch would change could not be read." },
   );
   return {
@@ -266,7 +266,7 @@ export async function accountModePreview(
 }
 
 /**
- * Switch an app's account mode for real. `approvals` carries the admin's narrowed approvals, keyed by
+ * Switch an app's Conta mode Para real. `approvals` carries the admin's narrowed approvals, keyed by
  * Bot id, for Bots the preview listed; a Bot not named gets the approval the preview listed.
  */
 export function setAccountModeMutationOptions(queryClient: QueryClient) {
@@ -283,8 +283,8 @@ export function setAccountModeMutationOptions(queryClient: QueryClient) {
           mode: variables.mode,
           ...(variables.approvals ? { approvals: variables.approvals } : {}),
         },
-        { "Idempotency-Key": idempotencyKey() },
-        { fallback: "The switch did not finish, and nothing was changed." },
+        { "Idempotency-Chave": idempotencyKey() },
+        { fallback: "The switch did not Terminar, and nothing was changed." },
       );
     },
     onSettled: () => invalidatePlugins(queryClient),

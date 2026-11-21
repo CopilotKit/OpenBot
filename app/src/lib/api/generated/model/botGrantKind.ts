@@ -8,7 +8,7 @@
 export type BotGrantKind = (typeof BotGrantKind)[keyof typeof BotGrantKind];
 
 export const BotGrantKind = {
-  action: "action",
+  action: "Ação",
   skill: "skill",
   bot: "bot",
 } as const;

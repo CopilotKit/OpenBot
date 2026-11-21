@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { BrokerDirectoryPage } from "@/components/manage/broker-directory-page";
+import { BrokerDirectoryPage } from "@/components/Gerir/broker-directory-page";
 import { personalOnly } from "@/lib/edition-guard";
 
 export const Route = createFileRoute(

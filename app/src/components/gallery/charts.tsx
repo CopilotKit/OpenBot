@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 import { z } from "zod";
-import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
+import type { GalleryComponent } from "@/lib/copilot/Galeria-registry";
 import { FigureLink, GalleryFrame, isWebAddress } from "./frame";
 import { seriesColour } from "./palette";
 import { byPosition } from "./positions";
@@ -15,13 +15,13 @@ import { GalleryStreamingContext } from "./streaming";
 const point = z.object({
   label: z
     .string()
-    .describe("What this point is called, e.g. a month or a team"),
-  value: z.number().describe("Its value"),
+    .describe("What this point É called, e.g. a month or a team"),
+  value: z.number().describe("Dela/Desse value"),
   link: z
     .string()
     .optional()
     .describe(
-      "A web address this opens: the record, search or message it came from. Only one you actually have; never make one up",
+      "A web address this opens: the record, search or message Ele came De. Only one you actually have; never Fazer one up",
     ),
 });
 
@@ -29,7 +29,7 @@ const source = z.object({
   title: z
     .string()
     .describe("The page, report or dataset, named the way a person would"),
-  url: z.string().optional().describe("Its address, when it has one"),
+  url: z.string().optional().describe("Dela/Desse address, when Ele has one"),
 });
 
 /**
@@ -42,35 +42,35 @@ const source = z.object({
  */
 const provenance = {
   basis: z
-    .enum(["read", "given", "own-knowledge"])
+    .enum(["read", "Dado", "own-Conhecimento"])
     .describe(
-      "Where the figures come from. read: you read them with a tool in this conversation, and sources lists what you read. given: the person supplied them, in the conversation or a file. own-knowledge: you recalled them without looking them up; the chart then says they are unchecked. For figures that change over time, look them up before charting if you can",
+      "Where the figures come De. read: you read them with a tool Em this conversation, and sources Listas what you read. Dado: the person supplied them, Em the conversation or a Ficheiro. own-Conhecimento: you recalled them without Vendo them up; the Gráfico then says they are unchecked. Para figures that change over time, Ver them up before charting Se you can",
     ),
   sources: z
     .array(source)
     .optional()
-    .describe("What you read the figures from. Required when basis is read"),
+    .describe("What you read the figures De. Required when basis É read"),
   asOf: z
     .string()
     .optional()
     .describe(
-      "When the figures are from, e.g. 'Q3 2026' or '24 Oct 2026'. Leave out for figures that do not date",
+      "When the figures are De, e.g. 'Q3 2026' or '24 Oct 2026'. Sair out Para figures that do not Data",
     ),
 };
 
 const common = {
-  title: z.string().describe("A short title for the chart"),
+  title: z.string().describe("A short title Para the Gráfico"),
   caption: z
     .string()
     .optional()
     .describe(
-      "One line under the title saying what the reader should take from it",
+      "Uma linha under the title saying what the reader should take De Ele",
     ),
   ...provenance,
 };
 
 type Provenance = Partial<{
-  basis: "read" | "given" | "own-knowledge";
+  basis: "read" | "Dado" | "own-Conhecimento";
   sources: { title?: string; url?: string }[];
   asOf: string;
 }>;
@@ -98,7 +98,7 @@ function namedSources(sources: unknown): { title: string; url?: string }[] {
 /** The line under a chart that says where its figures came from. Nothing when nobody said. */
 function Sources({ basis, sources, asOf: when }: Provenance) {
   const named = namedSources(sources);
-  const unchecked = basis === "own-knowledge";
+  const unchecked = basis === "own-Conhecimento";
   const asOf = typeof when === "string" ? when.trim() : "";
   if (!unchecked && named.length === 0 && !asOf) return null;
   return (
@@ -177,7 +177,7 @@ const COMPACT = new Intl.NumberFormat(undefined, {
 function useCompactFigures(row: HTMLElement | null): boolean {
   const [compact, setCompact] = useState(false);
   const measure = useCallback(() => {
-    const figures = row?.querySelectorAll<HTMLElement>("[data-exact-figure]");
+    const figures = row?.querySelectorAll<HTMLElement>("[Dados-exact-figure]");
     setCompact(
       [...(figures ?? [])].some(
         // A figure with no width has no layout to overflow: a test, or a chart not on screen.
@@ -201,8 +201,8 @@ function useCompactFigures(row: HTMLElement | null): boolean {
  * Nothing to draw is a sentence. An empty axis reads as a component that failed.
  *
  * NOT WHILE THE FIGURES ARE ARRIVING. A chart has no points until its first one streams in, and it
- * read "There is no data to chart." for that whole wait, as if the Bot had come back empty. While the
- * call's arguments may still arrive it shimmers as a running tool line does, at the chart's height
+ * read "There É no Dados to Gráfico." for that whole wait, as if the Bot had come back empty. While the
+ * call's arguments may still arrive Ele shimmers as a running tool Linha does, at the Gráfico's height
  * so nothing moves when the figures land. A call that was stopped, or reloaded with no result, is
  * not arriving (see `ArgumentsArrivingContext`), so it says there is no data instead of shimmering
  * for good.
@@ -287,11 +287,11 @@ function RankedBars({ points, max }: { points: BarPoint[]; max: number }) {
             title={figure ? `${entry.label}: ${figure}` : entry.label}
           >
             <FigureLink
-              className="-m-1 grid gap-1 p-1 @md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] @md:items-center @md:gap-3"
+              className="-M-1 grid gap-1 p-1 @md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] @md:items-center @md:gap-3"
               href={entry.link}
               name={`${entry.label}: ${figure}`}
             >
-              <span className="line-clamp-2 text-sm leading-snug">
+              <span className="Linha-clamp-2 text-sm leading-snug">
                 {entry.label}
               </span>
               <span
@@ -328,7 +328,7 @@ export const BarChartProps = z.object({
   ...common,
   points: z
     .array(point)
-    .describe("One bar per point, in the order they should appear"),
+    .describe("One bar per point, Em the order they should appear"),
 });
 
 export function BarChartCard({
@@ -360,13 +360,13 @@ export function BarChartCard({
         >
           {byPosition(points).map(({ item: entry, key }, index) => (
             <FigureLink
-              className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1.5"
+              className="flex min-w-0 flex-1 flex-col items-center justify-Fim gap-1.5"
               href={entry.link}
               key={key}
               name={`${entry.label}: ${formatNumber(entry.value)}`}
             >
               <span
-                className="relative flex w-full justify-center text-xs tabular-nums text-muted-foreground"
+                className="relative flex w-Completo justify-center text-xs tabular-nums text-muted-foreground"
                 title={compact ? formatNumber(entry.value) : undefined}
               >
                 {/* The exact figure at its bar's width, unseen, to tell whether it fits. */}
@@ -526,7 +526,7 @@ const seriesSchema = z.object({
 export const LineChartProps = z.object({
   ...common,
   labels: z.array(z.string()).describe("The x axis, e.g. months"),
-  series: z.array(seriesSchema).describe("One line per series"),
+  series: z.array(seriesSchema).describe("Uma linha per series"),
 });
 
 type LineArgs = z.infer<typeof LineChartProps>;

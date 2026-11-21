@@ -2,7 +2,7 @@ import { IconUsersGroup } from "@tabler/icons-react";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { TeamPage } from "@/components/edition/for-a-team";
+import { TeamPage } from "@/components/edition/Para-a-team";
 import { PageCard, PageEmpty, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +12,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Select,
   SelectContent,
@@ -38,10 +38,10 @@ import {
   teamPaths,
 } from "./team-paths";
 
-const DESCRIPTION = "Name the team. You add its people on the next screen.";
+const DESCRIPTION = "Name the team. You Adicionar Dela/Desse people on the next screen.";
 
 /** What the parent Select shows for each value: without it the trigger would draw a team's id. */
-export function parentLabels(
+Exportar Função parentLabels(
   teams: readonly { id: string; name: string }[],
 ): Record<string, string> {
   return {
@@ -51,7 +51,7 @@ export function parentLabels(
 }
 
 /**
- * Creating a team, on a screen of its own reached from the list's New team. On success the person
+ * Creating a team, on a screen of Dela/Desse own reached De the Lista's New team. On success the person
  * lands on the new team's page, where its people are added.
  */
 function NewTeam({ paths }: { paths: TeamPaths }) {

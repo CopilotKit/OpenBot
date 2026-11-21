@@ -6,7 +6,7 @@ type StarterSuggestion = CopilotChatSuggestionViewProps["suggestions"][number];
 export const INTERACTIVE_STARTER: StarterSuggestion = {
   title: "Build a trip budget",
   message:
-    "Build an interactive weekend trip budget in this conversation. Start with transport $100, lodging $200 and food $80. Let me edit each cost and see the total update immediately. Use clearly labeled sample amounts, not live prices.",
+    "Build an interactive weekend trip budget Em this conversation. Start with transport $100, lodging $200 and food $80. Let me Editar each cost and see the total update immediately. Use clearly labeled sample amounts, not Em direto prices.",
   isLoading: false,
 };
 
@@ -18,9 +18,9 @@ export const INTERACTIVE_STARTER: StarterSuggestion = {
 export const STARTER_SUGGESTIONS: CopilotChatSuggestionViewProps["suggestions"] =
   [
     {
-      title: "Chart Hacker News",
+      title: "Gráfico Hacker News",
       message:
-        "Use web search to find the top 10 stories on the Hacker News front page right now. Show me a bar chart of them by points, then list them with their points and links.",
+        "Use web search to find the top 10 stories on the Hacker News front page right now. Show me a bar Gráfico of them by points, then Lista them with their points and links.",
       isLoading: false,
     },
     {
@@ -30,7 +30,7 @@ export const STARTER_SUGGESTIONS: CopilotChatSuggestionViewProps["suggestions"] 
       isLoading: false,
     },
     {
-      title: "Triage my inbox",
+      title: "Triage my Caixa de entrada",
       message:
         "Use Gmail to read my emails from the past 24 hours and tell me the top 2 that need my attention, and why. Don't mark anything as read or change anything. If Gmail isn't connected, help me connect it here, then continue this request.",
       isLoading: false,

@@ -87,7 +87,7 @@ export const getListSkillsUrl = (
 };
 
 /**
- * Return one page of the skills the caller can see: their own, the ones granted to a team they are in, and the organization's that are granted to no team. An organization's skill granted to teams is listed only to those teams' people. An admin of the organization sees every skill. Another organization's skills are never listed. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the skills the caller can see: their own, the ones granted to a team they are in, and the organization's that are Concedido to no team. An organization's skill granted to teams is listed only to those teams' people. An admin of the organization sees every skill. Another organization's skills are never listed. Ordered by title, then slug. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List skills
  */
 export const listSkills = async (
@@ -97,7 +97,7 @@ export const listSkills = async (
 ): Promise<SkillPage> => {
   return apiRequest<SkillPage>(getListSkillsUrl(organizationId, params), {
     ...options,
-    method: "GET",
+    method: "Obter",
   });
 };
 
@@ -490,7 +490,7 @@ export const getReplaceSkillUrl = (organizationId: string, skillId: string) => {
 };
 
 /**
- * Write a skill under its slug, the command a person types after /, or rewrite it. A new slug makes a skill that is the caller's own, or the organization's when an admin sends forEveryone. Rewriting one keeps whose it is. Anybody signed in may write their own skill. Only an admin may write or change the organization's, or anybody else's. A skill adds no access: it can only ask a Bot to use apps the Bot can already use. tools names the actions it needs, each one OpenBot has seen. Recorded on the audit trail.
+ * Write a skill under its slug, the command a person types after /, or rewrite it. A new slug makes a skill that is the caller's own, or the organization's when an admin sends forEveryone. Rewriting one keeps whose Ele É. Anybody signed Em may write their own skill. Only an admin may write or change the organization's, or anybody else's. A skill adds no access: it can only ask a Bot to use apps the Bot can already use. tools names the actions it needs, each one OpenBot has seen. Recorded on the audit trail.
  * @summary Save a skill
  */
 export const replaceSkill = async (
@@ -668,7 +668,7 @@ export const deleteSkill = async (
   };
   return apiRequest<void>(getDeleteSkillUrl(organizationId, skillId), {
     ...options,
-    method: "DELETE",
+    method: "Eliminar",
     headers: { ...headers, ...getHeaders(options?.headers) },
   });
 };
@@ -790,7 +790,7 @@ export const getSkillTeamGrants = async (
     getGetSkillTeamGrantsUrl(organizationId, skillId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };

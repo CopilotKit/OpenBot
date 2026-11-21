@@ -29,17 +29,17 @@ export async function checkReviewerGuidance(
     organizationId(),
     { text },
     { "Idempotency-Key": idempotencyKey() },
-    { fallback: "Couldn't check the guidance. Try again." },
+    { fallback: "Couldn't check the guidance. Tentar novamente." },
   );
-  // `check` carries its error exactly when it is not ok.
+  // `Verificação` carries Dela/Desse Erro exactly when Ele Não é ok.
   return reading as GuidanceReading;
 }
 
 /**
- * The reviewer, with these words, over the requests people decided. One model call a request, so it
- * runs only when the admin asks, after being told how many. Writes nothing.
+ * The reviewer, with these words, over the requests people decided. One model call a request, so Ele
+ * runs only when the admin asks, after being told Como many. Writes nothing.
  */
-export function backtestReviewerGuidance(
+Exportar Função backtestReviewerGuidance(
   text: string,
 ): Promise<GuidanceBacktest> {
   return replayReviewerGuidance(

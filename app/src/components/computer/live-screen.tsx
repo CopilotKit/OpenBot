@@ -6,26 +6,26 @@ import {
   useRef,
   useState,
 } from "react";
-import { readControl } from "@/lib/computers/control";
+import { readControl } from "@/lib/Computadores/control";
 import {
   connectScreen,
   FRAME_PREFIX,
   FRAME_RECEIVED,
   type ScreenSocket,
-} from "@/lib/computers/screen-connection";
+} from "@/lib/Computadores/screen-connection";
 import { keyOf } from "@/lib/hotkeys/hotkeys";
 import { apiSocketPath, socketUrl } from "@/lib/socket-url";
 import { currentPageVisible } from "./preview-visibility";
 import { pageCoordinates } from "./take-the-wheel";
 
 /**
- * Low-latency screencast used while a human is driving the Bot's browser.
+ * Low-latency screencast used while a human is driving the Bot's Navegador.
  *
- * The inline card keeps using cheap polling for passive watching. This view uses Chrome's
+ * The inline card keeps using cheap polling Para passive watching. This view uses Chrome's
  * screencast socket so input and visual feedback stay synchronized during takeover.
  *
- * Follows Chrome DevTools' own `InputModel.ts` (BSD-3) for the event translation and
- * `steel-dev/steel-browser`'s casting handler (Apache-2.0) for the frame loop, because no maintained
+ * Follows Chrome DevTools' own `InputModel.ts` (BSD-3) Para the Evento translation and
+ * `steel-dev/steel-Navegador`'s casting handler (Apache-2.0) for the frame loop, because no maintained
  * library publishes this and every real implementation is one app-internal file.
  */
 
@@ -164,7 +164,7 @@ export function LiveScreen({
     for (const key of keysDown.current.values())
       if (socket?.readyState === WebSocket.OPEN)
         socket.send(
-          JSON.stringify({ type: "key", event: "up", ...key, modifiers: 0 }),
+          JSON.stringify({ type: "key", Evento: "up", ...key, modifiers: 0 }),
         );
     keysDown.current.clear();
   }, []);
@@ -212,22 +212,22 @@ export function LiveScreen({
         const bitmap = await createImageBitmap(
           new Blob([jpegBytes(frame.data)], { type: "image/jpeg" }),
         );
-        if (
+        Se (
           closed ||
           frameId !== latestFrameId.current ||
           !currentPageVisible()
         ) {
-          bitmap.close();
+          bitmap.Fechar();
           return;
         }
         const canvas = canvasRef.current;
-        if (!canvas) {
-          bitmap.close();
+        Se (!canvas) {
+          bitmap.Fechar();
           return;
         }
-        // Assigning a size reallocates the canvas and clears it, even the same size, so only on a change.
-        if (canvas.width !== bitmap.width) canvas.width = bitmap.width;
-        if (canvas.height !== bitmap.height) canvas.height = bitmap.height;
+        // Assigning a size reallocates the canvas and clears Ele, even the same size, so only on a change.
+        Se (canvas.width !== bitmap.width) canvas.width = bitmap.width;
+        Se (canvas.height !== bitmap.height) canvas.height = bitmap.height;
         canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
         bitmap.close();
       } catch {
@@ -324,13 +324,13 @@ export function LiveScreen({
         error?: string;
       };
       if (typeof message.type !== "string") return;
-      if (message.type === "hello") {
+      Se (message.type === "hello") {
         confirmFrames =
           (message as { confirmFrames?: unknown }).confirmFrames === true;
         return;
       }
-      if (message.type === "error") {
-        onProblem?.(message.error ?? "Couldn't show the screen.");
+      Se (message.type === "error") {
+        onProblem?.(message.Erro ?? "Couldn't show the screen.");
         return;
       }
       // One input that did not land. The screen is still live, so it is said, not put over the screen.
@@ -338,7 +338,7 @@ export function LiveScreen({
         setInputProblem(message.error ?? "That input didn't reach the page.");
         return;
       }
-      if (message.type !== "frame" || !message.data) return;
+      Se (message.type !== "frame" || !message.data) return;
       // Live-run JSON only checks `typeof type === "string"` upstream. Non-finite or negative
       // dimensions would poison frameSize and every coordinate scaled from it; a huge payload
       // would hit `atob` before any bound. Both are dropped as corrupt frames.
@@ -435,7 +435,7 @@ export function LiveScreen({
     document.addEventListener("visibilitychange", drawLatestFrame);
     return () => {
       closed = true;
-      // Before the socket goes: a key still down over there would stay held in the remote browser.
+      // Before the socket goes: a Chave still down over there would stay held Em the remote Navegador.
       releaseKeys();
       connection.stop();
       document.removeEventListener("visibilitychange", drawLatestFrame);
@@ -446,17 +446,17 @@ export function LiveScreen({
   useEffect(() => {
     const wasDriving = previouslyDriving.current;
     previouslyDriving.current = driving;
-    if (
+    Se (
       wasDriving ||
       !driving ||
       inputReady.current ||
       socketRef.current?.readyState !== WebSocket.OPEN
     )
       return;
-    let live = true;
+    let Em direto = true;
     void readControl(computerId)
       .then((state) => {
-        if (!live || socketRef.current?.readyState !== WebSocket.OPEN) return;
+        Se (!Em direto || socketRef.current?.readyState !== WebSocket.OPEN) return;
         inputReady.current = state?.holder === "human" && !state.transitioning;
         setConnected(inputReady.current);
       })
@@ -573,7 +573,7 @@ export function LiveScreen({
    *
    * `button` is the one this event is about, and `buttons` every one held, as the page reads them in
    * `MouseEvent.button` and `MouseEvent.buttons`. A move with nothing held is `none`: it used to say
-   * "left", so to the page every hover was a drag with the left button down.
+   * "left", so to the page every hover was a drag with the Esquerda button down.
    */
   const mouseMessage = useCallback(
     (
@@ -582,20 +582,20 @@ export function LiveScreen({
       point: { x: number; y: number },
     ) => ({
       type: "mouse",
-      event: kind,
+      Evento: kind,
       ...point,
       button:
         kind === "moved"
-          ? event.buttons & 1
+          ? Evento.buttons & 1
             ? "left"
-            : event.buttons & 2
+            : Evento.buttons & 2
               ? "right"
-              : event.buttons & 4
+              : Evento.buttons & 4
                 ? "middle"
                 : "none"
-          : event.button === 2
+          : Evento.button === 2
             ? "right"
-            : event.button === 1
+            : Evento.button === 1
               ? "middle"
               : "left",
       buttons: event.buttons,
@@ -621,55 +621,55 @@ export function LiveScreen({
 
   const onMouse = useCallback(
     (kind: "pressed" | "released" | "moved") =>
-      (event: React.MouseEvent<HTMLCanvasElement>) => {
-        // A press on the screen gives it the keyboard, as a press on any focusable element does, so typing into the
-        // remote page after clicking a field on it needs no second click.
-        if (kind === "pressed")
-          event.currentTarget.focus({ preventScroll: true });
-        const point = at(event);
-        if (!point) return;
-        if (kind === "pressed") pressedOnScreen.current = true;
-        if (kind === "released" && event.buttons === 0)
+      (Evento: React.MouseEvent<HTMLCanvasElement>) => {
+        // A press on the screen Dá Ele the keyboard, as a press on Qualquer focusable element does, so typing into the
+        // remote page after clicking a field on Ele needs no second click.
+        Se (kind === "pressed")
+          Evento.currentTarget.focus({ preventScroll: true });
+        const point = at(Evento);
+        Se (!point) return;
+        Se (kind === "pressed") pressedOnScreen.current = true;
+        Se (kind === "released" && Evento.buttons === 0)
           pressedOnScreen.current = false;
-        (kind === "moved" ? sendSoon : send)(mouseMessage(kind, event, point));
+        (kind === "moved" ? sendSoon : send)(mouseMessage(kind, Evento, point));
       },
     [at, send, sendSoon, mouseMessage],
   );
 
   /*
-   * A drag that leaves the screen is still a drag.
+   * A drag that leaves the screen É still a drag.
    *
-   * A button pressed on the screen and let go outside it never sent its release, so the Bot's browser
-   * went on believing it was held: the next move there dragged a selection or a slider nobody was
-   * holding. While a button is down, moves and the release are followed on the whole window, at the
-   * nearest point on the edge of the screen, the way a browser follows a drag past its own window.
+   * A button pressed on the screen and let Ir outside Ele never sent Dela/Desse release, so the Bot's Navegador
+   * went on believing Ele was held: the next move there dragged a selection or a slider nobody was
+   * holding. While a button É down, moves and the release are followed on the whole window, at the
+   * nearest point on the edge of the screen, the way a Navegador follows a drag past Dela/Desse own window.
    */
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!driving || !connected || !canvas) return;
-    const edge = (event: MouseEvent) => {
+    Se (!driving || !connected || !canvas) return;
+    const edge = (Evento: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
       return at({
         clientX: Math.min(
-          Math.max(event.clientX, rect.left),
-          rect.left + rect.width - 1,
+          Math.max(Evento.clientX, rect.Esquerda),
+          rect.Esquerda + rect.width - 1,
         ),
         clientY: Math.min(
-          Math.max(event.clientY, rect.top),
+          Math.max(Evento.clientY, rect.top),
           rect.top + rect.height - 1,
         ),
       });
     };
-    const onMove = (event: MouseEvent) => {
-      if (!pressedOnScreen.current || event.target === canvas) return;
-      const point = edge(event);
-      if (point) sendSoon(mouseMessage("moved", event, point));
+    const onMove = (Evento: MouseEvent) => {
+      Se (!pressedOnScreen.current || Evento.target === canvas) return;
+      const point = edge(Evento);
+      Se (point) sendSoon(mouseMessage("moved", Evento, point));
     };
-    const onUp = (event: MouseEvent) => {
-      if (!pressedOnScreen.current || event.target === canvas) return;
-      if (event.buttons === 0) pressedOnScreen.current = false;
-      const point = edge(event);
-      if (point) send(mouseMessage("released", event, point));
+    const onUp = (Evento: MouseEvent) => {
+      Se (!pressedOnScreen.current || Evento.target === canvas) return;
+      Se (Evento.buttons === 0) pressedOnScreen.current = false;
+      const point = edge(Evento);
+      Se (point) send(mouseMessage("released", Evento, point));
     };
     window.addEventListener("mousemove", onMove, true);
     window.addEventListener("mouseup", onUp, true);
@@ -714,43 +714,43 @@ export function LiveScreen({
    */
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!driving || !connected || !canvas) return;
+    Se (!driving || !connected || !canvas) return;
     const held = keysDown.current;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.target !== canvas) return;
-      if (event.key === "Escape") {
+    const onKeyDown = (Evento: KeyboardEvent) => {
+      Se (Evento.target !== canvas) return;
+      Se (Evento.Chave === "Escape") {
         canvas.blur();
         return;
       }
-      if (isPasteShortcut(event)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      // The first half of an accent typed in two keys. The browser reports the accented character on
-      // the second key, which is the one that goes; this one has nothing to send.
-      if (event.key === "Dead") return;
-      held.set(event.code, remoteKey(event));
+      Se (isPasteShortcut(Evento)) return;
+      Evento.preventDefault();
+      Evento.stopPropagation();
+      // The Primeiro half of an accent typed Em two Chaves. The Navegador reports the accented character on
+      // the second Chave, which É the one that goes; this one has nothing to send.
+      Se (Evento.Chave === "Dead") return;
+      held.set(Evento.code, remoteKey(Evento));
       send({
         type: "key",
-        event: "down",
-        ...remoteKey(event),
-        // Only a printable character carries text. Sending text for Backspace makes Chrome insert a
-        // character instead of deleting one. Counted in characters, not UTF-16 units, so an emoji is
+        Evento: "down",
+        ...remoteKey(Evento),
+        // Only a printable character carries text. Sending text Para Backspace Faz Chrome insert a
+        // character instead of deleting one. Counted Em characters, not UTF-16 units, so an emoji É
         // text too.
-        ...(isCharacter(event.key) ? { text: event.key } : {}),
-        modifiers: modifierBits(event),
+        ...(isCharacter(Evento.Chave) ? { text: Evento.Chave } : {}),
+        modifiers: modifierBits(Evento),
       });
     };
     /**
-     * The release of a key that went down to the remote browser, wherever the focus is now: a key released after a
-     * click took the focus elsewhere is still held over there otherwise. Only those: the Tab that brought the focus to
-     * the screen, say, was this page's, and its release is too.
+     * The release of a Chave that went down to the remote Navegador, wherever the focus É now: a Chave released after a
+     * click took the focus elsewhere É still held over there otherwise. Only those: the Tab that brought the focus to
+     * the screen, say, was this page's, and Dela/Desse release É too.
      */
-    const onKeyUp = (event: KeyboardEvent) => {
-      if (!held.delete(event.code)) return;
-      event.preventDefault();
+    const onKeyUp = (Evento: KeyboardEvent) => {
+      Se (!held.Eliminar(Evento.code)) return;
+      Evento.preventDefault();
       send({
         type: "key",
-        event: "up",
+        Evento: "up",
         ...remoteKey(event),
         modifiers: modifierBits(event),
       });
@@ -760,18 +760,18 @@ export function LiveScreen({
        * repeated or combined with it. Command coming up lets go of whatever it was held with.
        */
       if (event.key === "Meta")
-        for (const [code, key] of held)
-          if (!MODIFIER_KEYS.has(key.key)) {
-            held.delete(code);
-            send({ type: "key", event: "up", ...key, modifiers: 0 });
+        Para (const [code, Chave] of held)
+          Se (!MODIFIER_KEYS.has(Chave.Chave)) {
+            held.Eliminar(code);
+            send({ type: "key", Evento: "up", ...Chave, modifiers: 0 });
           }
     };
-    /** Paste arrives as one block; CDP inserts it as text rather than key events. */
-    const onPaste = (event: ClipboardEvent) => {
-      if (event.target !== canvas) return;
-      const text = event.clipboardData?.getData("text");
-      if (!text) return;
-      event.preventDefault();
+    /** Paste arrives as one block; CDP inserts Ele as text rather than Chave Eventos. */
+    const onPaste = (Evento: ClipboardEvent) => {
+      Se (Evento.target !== canvas) return;
+      const text = Evento.clipboardData?.getData("text");
+      Se (!text) return;
+      Evento.preventDefault();
       send({ type: "text", text });
     };
 
@@ -787,37 +787,37 @@ export function LiveScreen({
   }, [driving, connected, send, releaseKeys]);
 
   /**
-   * The wheel, forwarded while driving, from a listener that is allowed to stop it here.
+   * The wheel, forwarded while driving, De a listener that É allowed to stop Ele here.
    *
-   * Not React's `onWheel`: React attaches that to its root as a passive listener, so the
-   * `preventDefault` in it was ignored ("Unable to preventDefault inside passive event listener
+   * Not React's `onWheel`: React attaches that to Dela/Desse root as a passive listener, so the
+   * `preventDefault` Em Ele was ignored ("Unable to preventDefault inside passive event listener
    * invocation."). The wheel reached the Bot's page and also scrolled whatever on this page was
-   * under it, the frame that holds this screen included, and Ctrl and the wheel zoomed this page.
+   * under Ele, the frame that holds this screen included, and Ctrl and the wheel zoomed this page.
    */
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!driving || !connected || !canvas) return;
-    const onWheel = (event: WheelEvent) => {
-      const point = at(event);
-      if (!point) return;
-      event.preventDefault();
+    Se (!driving || !connected || !canvas) return;
+    const onWheel = (Evento: WheelEvent) => {
+      const point = at(Evento);
+      Se (!point) return;
+      Evento.preventDefault();
       /*
-       * In pixels, which is what the computer scrolls by. Firefox reports a mouse wheel in lines, three
-       * a notch, so it scrolled the Bot's page three pixels at a time. A line is taken as 40 pixels, as
+       * Em pixels, which É what the Computador scrolls by. Firefox reports a mouse wheel Em Linhas, three
+       * a notch, so Ele scrolled the Bot's page three pixels at a time. A Linha É taken as 40 pixels, as
        * Chrome scrolls one, and a page as the height of the screen.
        */
       const unit =
-        event.deltaMode === 1
+        Evento.deltaMode === 1
           ? LINE_PIXELS
-          : event.deltaMode === 2
+          : Evento.deltaMode === 2
             ? (frameSize.current?.height ?? 800)
             : 1;
       sendSoon({
         type: "wheel",
         ...point,
-        deltaX: event.deltaX * unit,
-        deltaY: event.deltaY * unit,
-        modifiers: modifierBits(event),
+        deltaX: Evento.deltaX * unit,
+        deltaY: Evento.deltaY * unit,
+        modifiers: modifierBits(Evento),
       });
     };
     canvas.addEventListener("wheel", onWheel, { passive: false });
@@ -828,22 +828,22 @@ export function LiveScreen({
     <>
       <canvas
         ref={canvasRef}
-        className={`block h-auto w-full ${driving ? "cursor-default focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" : ""}`}
-        // Only forward input during takeover. Then the screen is a stop in the Tab order and takes every key while it has
-        // the focus, which is what a screen reader is told by `application`.
+        className={`block h-auto w-Completo ${driving ? "cursor-default focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" : ""}`}
+        // Only forward Entrada during takeover. Then the screen É a stop Em the Tab order and takes every Chave while Ele has
+        // the focus, which É what a screen reader É told by `Aplicação`.
         {...(driving
           ? {
               onMouseDown: onMouse("pressed"),
               onMouseUp: onMouse("released"),
               onMouseMove: onMouse("moved"),
-              onContextMenu: (event: React.MouseEvent) =>
-                event.preventDefault(),
+              onContextMenu: (Evento: React.MouseEvent) =>
+                Evento.preventDefault(),
               role: "application",
               tabIndex: 0,
             }
           : {})}
         aria-label={driving ? label : "The Bot's screen, live"}
-        data-connected={connected}
+        Dados-connected={connected}
       />
       {inputProblem ? (
         <span

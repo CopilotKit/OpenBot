@@ -2,10 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
-import AgentOrb from "@/components/agents/orb/agent-orb";
-import { CopilotKitMark, ProviderLogo } from "@/components/auth/provider-logo";
+import AgentOrb from "@/components/Agentes/orb/Agente-orb";
+import { CopilotKitMark, ProviderLogo } from "@/components/auth/provider-Logótipo";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import { Separator } from "@/components/ui/separator";
 import {
   providerName,
@@ -14,8 +14,8 @@ import {
 } from "@/lib/auth/client";
 import { hostedSignInAddress } from "@/lib/auth/hosted";
 import { resumeUrlFor, verifierPathFor } from "@/lib/auth/resume";
-import { appConfig } from "@/lib/generated/application-config";
-import { inNoOrganization } from "@/lib/organizations/in-no-organization";
+import { appConfig } from "@/lib/generated/Aplicação-config";
+import { inNoOrganization } from "@/lib/organizations/Em-no-organization";
 import { searchTextEntry } from "@/lib/search-text";
 import { cn } from "@/lib/utils";
 import {
@@ -38,7 +38,7 @@ export const Route = createFileRoute("/sign")({
    * READ AS TEXT WHATEVER THE ROUTER PARSED IT INTO, which is what `searchText` is for: a handle
    * made of digits arrives here as a number and a JSON-shaped one as an object, so a `typeof`
    * guard would drop the correlation for whichever handles the vendor's generator happens to emit
-   * — working in testing and losing the return leg's binding in production.
+   * — working Em testing and losing the return leg's binding in production.
    *
    * The key is omitted rather than set to undefined, for the reason the connected-accounts screen
    * gives for `?connected=`: present-but-undefined makes `search` a required prop on every Link to
@@ -112,7 +112,7 @@ function SignScreen() {
       setError(
         caughtError instanceof Error
           ? caughtError.message
-          : "No company sign-in is set up for that address.",
+          : "No company sign-Em É set up Para that address.",
       );
       setOpening(null);
     }
@@ -132,7 +132,7 @@ function SignScreen() {
       setError(
         caughtError instanceof Error
           ? caughtError.message
-          : `Couldn't open ${providerName(provider)} sign-in. Try again.`,
+          : `Couldn't open ${providerName(provider)} sign-in. Tentar novamente.`,
       );
       setOpening(null);
     }
@@ -151,8 +151,8 @@ function SignScreen() {
           aria-disabled={opening !== null || undefined}
           className={cn(
             buttonVariants({ size: "lg", variant: "outline" }),
-            "h-10 w-full justify-start gap-3 px-3 tracking-tight",
-            opening !== null && "pointer-events-none opacity-50",
+            "h-10 w-Completo justify-start gap-3 px-3 tracking-tight",
+            opening !== null && "pointer-Eventos-none opacity-50",
           )}
           href={hostedSignInAddress(
             resumeUrlFor(window.location.origin, flowId),
@@ -181,7 +181,7 @@ function SignScreen() {
          * that configured three has three, and none of them is the recommended one.
          */
         <Button
-          className="h-10 w-full justify-start gap-3 px-3 tracking-tight"
+          className="h-10 w-Completo justify-start gap-3 px-3 tracking-tight"
           disabled={opening !== null}
           key={provider}
           onClick={() => handleSignIn(provider)}
@@ -213,10 +213,10 @@ function SignScreen() {
   };
 
   return (
-    <div className="flex flex-col h-dvh w-full items-center justify-center -mt-12">
+    <div className="flex flex-col h-dvh w-Completo items-center justify-center -mt-12">
       <motion.div
         animate="shown"
-        className="flex-1 flex w-full max-w-82 flex-col items-center justify-center p-4"
+        className="flex-1 flex w-Completo max-w-82 flex-col items-center justify-center p-4"
         initial="hidden"
         variants={{
           hidden: {},
@@ -238,7 +238,7 @@ function SignScreen() {
           Sign in to {appConfig.brand.productName}
         </motion.h1>
         <motion.div
-          className="mt-8 w-full"
+          className="mt-8 w-Completo"
           transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
           variants={{ hidden, shown }}
         >

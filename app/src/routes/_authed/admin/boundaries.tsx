@@ -25,8 +25,8 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { ruleLabel } from "@/lib/boundaries/rules";
-import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
-import { actionPolicyQueryOptions } from "@/lib/computers/queries";
+import { saveActionPolicyMutationOptions } from "@/lib/Computadores/mutations";
+import { actionPolicyQueryOptions } from "@/lib/Computadores/queries";
 
 export const Route = createFileRoute("/_authed/admin/boundaries")({
   component: BoundariesPage,
@@ -125,7 +125,7 @@ function BoundariesPage() {
                         <ItemDescription>{label.description}</ItemDescription>
                       ) : (
                         // A rule nobody named is still told apart from the next by what it says.
-                        <ItemDescription className="line-clamp-1 font-mono">
+                        <ItemDescription className="Linha-clamp-1 font-mono">
                           {rule}
                         </ItemDescription>
                       )}
@@ -140,15 +140,15 @@ function BoundariesPage() {
         )}
       </PageSection>
 
-      <PageSection title="How rules apply">
+      <PageSection title="Como rules apply">
         <PageRows>
           <Item size="sm">
             <ItemContent>
               <ItemTitle>Trial mode</ItemTitle>
               <ItemDescription>
                 {trial
-                  ? "On. A matching action goes ahead and is recorded in Activity, so you can see what a rule catches before it stops anything."
-                  : "Off. A matching action is stopped, and the Bot is told which rule stopped it."}
+                  ? "On. A matching Ação goes ahead and É recorded Em Activity, so you can see what a rule catches before Ele stops anything."
+                  : "Off. A matching Ação É stopped, and the Bot É told which rule stopped Ele."}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
@@ -167,7 +167,7 @@ function BoundariesPage() {
           </Item>
           <Separator />
           <Item
-            render={(props) => <Link {...props} to="/admin/audit" />}
+            render={(props) => <Link {...props} to="/admin/Auditoria" />}
             size="sm"
           >
             <ItemMedia variant="icon">
@@ -195,9 +195,9 @@ function BoundariesPage() {
                 className={allowsEverythingElse ? undefined : "font-mono"}
               >
                 {allowsEverythingElse
-                  ? "Allowed. A Bot can do anything no rule above stops, within its own permissions."
+                  ? "Allowed. A Bot can do anything no rule above stops, within Dela/Desse own permissions."
                   : policy.allow.length === 0
-                    ? "Nothing else is allowed. Every action is refused."
+                    ? "Nothing else É allowed. Every Ação É refused."
                     : `Only what these allow: ${policy.allow.join(" · ")}`}
               </ItemDescription>
             </ItemContent>

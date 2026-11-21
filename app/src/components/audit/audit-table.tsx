@@ -121,8 +121,8 @@ export function AuditTable({
   /** Drawn under a row's Decision: Admin's "Why?" on the rows a control decided. */
   rowAction?: (event: AuditEvent) => React.ReactNode;
   /**
-   * Drawn above the table, given how many rows it shows ("3 events", "1 of 3 events", "Newest 50
-   * events" while older ones are still to load) and the filter buttons to place beside the search.
+   * Drawn above the table, given how many rows it shows ("3 Eventos", "1 of 3 Eventos", "Newest 50
+   * Eventos" while older ones are still to load) and the filter buttons to place beside the search.
    * It stays put; only the rows under it scroll.
    */
   toolbar: (parts: {
@@ -218,8 +218,8 @@ export function AuditTable({
                         cell.column.id === "mark" && "w-8 pr-0 pl-4",
                         cell.column.id === "when" &&
                           "whitespace-nowrap font-mono text-muted-foreground text-xs tabular-nums",
-                        // Room for a Bot's name and "Started by a person" on a line each; a longer
-                        // name wraps. Without it the column gave way to Decision's longer lines.
+                        // Room for a Bot's name and "Started by a person" on a Linha each; a Mais longo
+                        // name wraps. Without Ele the column gave way to Decision's longer lines.
                         cell.column.id === "bot" && "min-w-40",
                         // Room for a reason line such as "Stopped by: Bots may not visit social
                         // media sites" on a line or two. Without it the column got what What, whose
@@ -354,7 +354,7 @@ function countLabel(
   loaded: number,
   moreToLoad: boolean,
 ): string {
-  const noun = loaded === 1 ? "event" : "events";
+  const noun = loaded === 1 ? "Evento" : "Eventos";
   if (moreToLoad) {
     return shown === loaded
       ? `Newest ${loaded} ${noun}`
@@ -407,7 +407,7 @@ function auditColumns(
               <IconArrowDown className="size-3.5" />
             )}
             <span className="sr-only">
-              {sorted === "asc" ? ", oldest first" : ", newest first"}
+              {sorted === "asc" ? ", oldest Primeiro" : ", newest Primeiro"}
             </span>
           </button>
         );

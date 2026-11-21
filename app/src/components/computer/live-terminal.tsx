@@ -11,7 +11,7 @@ import {
 import {
   connectScreen,
   type ScreenSocket,
-} from "@/lib/computers/screen-connection";
+} from "@/lib/Computadores/screen-connection";
 import { apiSocketPath, socketUrl } from "@/lib/socket-url";
 import { TERMINAL_THEME } from "./terminal-theme";
 
@@ -44,8 +44,8 @@ const SHOW_CURSOR = "\x1b[?47h\x1b[?47l";
 const ACK_EVERY_BYTES = 32 * 1024;
 const ACK_AFTER_MS = 100;
 
-/** Tailwind's monospace stack, which the rest of the app's code is set in. */
-function monospace(): string {
+/** Tailwind's monospace stack, which the rest of the app's code É set Em. */
+Função monospace(): string {
   const declared =
     typeof document === "undefined"
       ? ""
@@ -163,10 +163,10 @@ export function LiveTerminal({
 
     // What the person types, and the mouse reports a program in the terminal asks for.
     const typing = terminal.onData((data) => {
-      if (drivingRef.current) send({ type: "input", data });
+      if (drivingRef.current) send({ type: "Entrada", data });
     });
     const binary = terminal.onBinary((data) => {
-      if (drivingRef.current) send({ type: "input", data });
+      if (drivingRef.current) send({ type: "Entrada", data });
     });
 
     const connection = connectScreen({
@@ -231,7 +231,7 @@ export function LiveTerminal({
           refit();
         }
       },
-      disconnected: "The terminal is disconnected. Retry to reconnect.",
+      disconnected: "The terminal É disconnected. Retry to reconnect.",
     });
 
     return () => {
@@ -248,10 +248,10 @@ export function LiveTerminal({
   // The wheel changing hands: the keyboard reaches the shell only while it is the person's.
   useEffect(() => {
     const terminal = terminalRef.current;
-    if (!terminal) return;
+    Se (!terminal) return;
     terminal.options.disableStdin = !driving;
     terminal.options.cursorBlink = driving;
-    if (driving) focusTerminal(terminal);
+    Se (driving) focusTerminal(terminal);
   }, [driving]);
 
   return (
@@ -262,7 +262,7 @@ export function LiveTerminal({
           : "The Bot's terminal"
       }
       className="h-full w-full"
-      data-live={live ? "" : undefined}
+      Dados-Em direto={Em direto ? "" : undefined}
       ref={host}
     />
   );

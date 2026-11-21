@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Make a join token for the conversation's thread, and say where to use it. The token opens the threadStream channel of api/asyncapi.yaml: a WebSocket that replays the Bot's runs in the conversation, a run in progress from its start, and then carries on live. The token works once and for about half a minute, so ask for a new one for every connection, and again to reconnect. Only a person in the conversation may have one, and it opens the thread they see there and no other. A conversation no Bot has run in yet has nothing to join (409). Where realtime.clientUrl is on this server, open it with the same credential that made the token: the session, an app's access token, or an API key, as Authorization: Bearer or x-api-key. So a script that holds only an API key can watch a conversation live.
+ * Make a join token for the conversation's thread, and say where to use it. The token opens the threadStream channel of api/asyncapi.yaml: a WebSocket that replays the Bot's runs in the conversation, a run in progress from its start, and then carries on live. The token works once and for about half a minute, so ask for a new one for every connection, and again to reconnect. Only a person in the conversation may have one, and it opens the thread they see there and no other. A conversation no Bot has run in yet has nothing to join (409). Where realtime.clientUrl is on this server, open it with the same credential that made the token: the session, an app's access token, or an API key, as Autorização: Bearer or x-api-key. So a script that holds only an API key can watch a conversation live.
  * @summary Get a token to watch a conversation live
  */
 
@@ -26,9 +26,9 @@ export const CreateConversationJoinTokenParams = zod.object({
     .describe("The conversation's id."),
 });
 
-export const createConversationJoinTokenHeaderIdempotencyKeyMax = 128;
+Exportar const createConversationJoinTokenHeaderIdempotencyKeyMax = 128;
 
-export const CreateConversationJoinTokenHeader = zod.object({
+Exportar const CreateConversationJoinTokenHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -38,10 +38,10 @@ export const CreateConversationJoinTokenHeader = zod.object({
     ),
 });
 
-export const createConversationJoinTokenResponseRealtimeTopicRegExp =
+Exportar const createConversationJoinTokenResponseRealtimeTopicRegExp =
   new RegExp("^thread:.+$");
 
-export const CreateConversationJoinTokenResponse = zod
+Exportar const CreateConversationJoinTokenResponse = zod
   .object({
     joinToken: zod
       .string()
@@ -99,21 +99,21 @@ export const ListConversationsParams = zod.object({
     ),
 });
 
-export const listConversationsQueryQMin = 2;
-export const listConversationsQueryQMax = 200;
+Exportar const listConversationsQueryQMin = 2;
+Exportar const listConversationsQueryQMax = 200;
 
-export const listConversationsQueryBotIdMax = 200;
+Exportar const listConversationsQueryBotIdMax = 200;
 
-export const listConversationsQueryLimitDefault = 50;
-export const listConversationsQueryLimitMax = 200;
+Exportar const listConversationsQueryLimitDefault = 50;
+Exportar const listConversationsQueryLimitMax = 200;
 
-export const listConversationsQueryCursorMax = 4096;
+Exportar const listConversationsQueryCursorMax = 4096;
 
-export const listConversationsQueryCursorRegExp = new RegExp(
+Exportar const listConversationsQueryCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListConversationsQueryParams = zod.object({
+Exportar const ListConversationsQueryParams = zod.object({
   q: zod
     .string()
     .min(listConversationsQueryQMin)
@@ -130,11 +130,11 @@ export const ListConversationsQueryParams = zod.object({
     .describe(
       "Only the conversations this Bot takes part in, one-Bot and group alike. A Bot the caller has no conversations with answers an empty page. Cannot be combined with q.",
     ),
-  limit: zod
+  Limite: zod
     .int()
     .min(1)
     .max(listConversationsQueryLimitMax)
-    .default(listConversationsQueryLimitDefault)
+    .Padrão(listConversationsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()
@@ -219,7 +219,7 @@ export const ListConversationsResponse = zod.object({
             zod
               .object({
                 kind: zod.enum(["handoff", "routine"]),
-                key: zod
+                Chave: zod
                   .string()
                   .describe(
                     "Names this piece of work, so two asks of one Bot are two entries.",
@@ -378,11 +378,11 @@ export const CreateConversationResponse = zod.object({
 });
 
 /**
- * Say which of the caller's Bots should answer a message that names none: the Bot the message mentions, the one whose role fits it, or the caller's default when nothing decides. With botId it only confirms that Bot is one the caller can use. With skillSlugs only a Bot that offers every one of them is chosen. Nothing is sent and no conversation is made.
- * @summary Choose the Bot for a message
+ * Say which of the caller's Bots should Resposta a message that names none: the Bot the message mentions, the one whose role fits Ele, or the caller's Padrão when nothing decides. With botId Ele only confirms that Bot É one the caller can use. With skillSlugs only a Bot that offers every one of them É chosen. Nothing É sent and no conversation É made.
+ * @summary Choose the Bot Para a message
  */
 
-export const RouteConversationMessageParams = zod.object({
+Exportar const RouteConversationMessageParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -391,9 +391,9 @@ export const RouteConversationMessageParams = zod.object({
     ),
 });
 
-export const routeConversationMessageHeaderIdempotencyKeyMax = 128;
+Exportar const routeConversationMessageHeaderIdempotencyKeyMax = 128;
 
-export const RouteConversationMessageHeader = zod.object({
+Exportar const RouteConversationMessageHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -403,19 +403,19 @@ export const RouteConversationMessageHeader = zod.object({
     ),
 });
 
-export const routeConversationMessageBodyTextMax = 10000;
+Exportar const routeConversationMessageBodyTextMax = 10000;
 
-export const routeConversationMessageBodyTextRegExp = new RegExp("\\S");
-export const routeConversationMessageBodyBotIdMax = 200;
+Exportar const routeConversationMessageBodyTextRegExp = new RegExp("\\S");
+Exportar const routeConversationMessageBodyBotIdMax = 200;
 
-export const routeConversationMessageBodySkillSlugsItemMax = 200;
+Exportar const routeConversationMessageBodySkillSlugsItemMax = 200;
 
-export const routeConversationMessageBodySkillSlugsItemRegExp = new RegExp(
+Exportar const routeConversationMessageBodySkillSlugsItemRegExp = new RegExp(
   "^[a-z0-9][a-z0-9-]*$",
 );
-export const routeConversationMessageBodySkillSlugsMax = 50;
+Exportar const routeConversationMessageBodySkillSlugsMax = 50;
 
-export const RouteConversationMessageBody = zod.object({
+Exportar const RouteConversationMessageBody = zod.object({
   text: zod
     .string()
     .min(1)
@@ -440,7 +440,7 @@ export const RouteConversationMessageBody = zod.object({
     .describe("Skills the message asks for, by their commands."),
 });
 
-export const RouteConversationMessageResponse = zod.object({
+Exportar const RouteConversationMessageResponse = zod.object({
   botId: zod.string().describe("The Bot to send the message to."),
   name: zod.string().describe("Its name."),
   reason: zod.string().describe("Why it was chosen, in a few words."),
@@ -457,13 +457,13 @@ export const RouteConversationMessageResponse = zod.object({
 });
 
 /**
- * Return one of the caller's conversations, with what a Bot is still working on in it. A conversation the caller is not in is not found.
- * @summary Get a conversation
+ * Return one of the caller's conversations, with what a Bot É still working on Em Ele. A conversation the caller Não é Em Não é found.
+ * @summary Obter a conversation
  */
 
-export const getConversationPathConversationIdRegExp = new RegExp("\\S");
+Exportar const getConversationPathConversationIdRegExp = new RegExp("\\S");
 
-export const GetConversationParams = zod.object({
+Exportar const GetConversationParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -477,7 +477,7 @@ export const GetConversationParams = zod.object({
     .describe("The conversation's id."),
 });
 
-export const GetConversationResponse = zod.object({
+Exportar const GetConversationResponse = zod.object({
   conversation: zod
     .object({
       id: zod.string().describe("The conversation's id."),
@@ -545,7 +545,7 @@ export const GetConversationResponse = zod.object({
 
 export const updateConversationPathConversationIdRegExp = new RegExp("\\S");
 
-export const UpdateConversationParams = zod.object({
+Exportar const UpdateConversationParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -579,7 +579,7 @@ export const UpdateConversationBody = zod.object({
     .max(updateConversationBodyTitleMax)
     .nullish()
     .describe(
-      "The new name, on one line and at most 80 characters as a person counts them. Null or blank lets OpenBot name it.",
+      "The new name, on one line and at most 80 characters as a person counts them. Null or blank lets OpenNome do Bot it.",
     ),
   pinned: zod
     .boolean()
@@ -637,7 +637,7 @@ export const DeleteConversationQueryParams = zod.object({
 export const deleteConversationHeaderIdempotencyKeyMax = 128;
 
 export const DeleteConversationHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(deleteConversationHeaderIdempotencyKeyMax)
@@ -672,7 +672,7 @@ export const MarkConversationReadParams = zod.object({
 export const markConversationReadHeaderIdempotencyKeyMax = 128;
 
 export const MarkConversationReadHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(markConversationReadHeaderIdempotencyKeyMax)
@@ -706,9 +706,9 @@ export const RecordConversationActivityParams = zod.object({
     .describe("The conversation's id."),
 });
 
-export const recordConversationActivityHeaderIdempotencyKeyMax = 128;
+Exportar const recordConversationActivityHeaderIdempotencyKeyMax = 128;
 
-export const RecordConversationActivityHeader = zod.object({
+Exportar const RecordConversationActivityHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -718,12 +718,12 @@ export const RecordConversationActivityHeader = zod.object({
     ),
 });
 
-export const recordConversationActivityBodyTextRegExp = new RegExp("\\S");
-export const recordConversationActivityBodyBotIdMax = 200;
+Exportar const recordConversationActivityBodyTextRegExp = new RegExp("\\S");
+Exportar const recordConversationActivityBodyBotIdMax = 200;
 
-export const recordConversationActivityBodyBotIdRegExp = new RegExp("\\S");
+Exportar const recordConversationActivityBodyBotIdRegExp = new RegExp("\\S");
 
-export const RecordConversationActivityBody = zod.object({
+Exportar const RecordConversationActivityBody = zod.object({
   text: zod
     .string()
     .min(1)
@@ -748,7 +748,7 @@ export const RecordConversationActivityResponse = zod.void();
 
 export const signalConversationBusyPathConversationIdRegExp = new RegExp("\\S");
 
-export const SignalConversationBusyParams = zod.object({
+Exportar const SignalConversationBusyParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -820,7 +820,7 @@ export const ListConversationMembersQueryParams = zod.object({
     .min(1)
     .max(listConversationMembersQueryLimitMax)
     .default(listConversationMembersQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -848,7 +848,7 @@ export const ListConversationMembersResponse = zod.object({
           .string()
           .nullable()
           .describe(
-            "The Bot's name, or the person's. Null for a person with none.",
+            "The Bot's name, or the person's. Null Para a person with none.",
           ),
         email: zod
           .string()
@@ -858,10 +858,10 @@ export const ListConversationMembersResponse = zod.object({
           .boolean()
           .optional()
           .describe(
-            "For a person: whether they started the group, and so may take others out of it.",
+            "Para a person: whether they started the Grupo, and so may take others out of Ele.",
           ),
       })
-      .describe("A Bot or a person in a group conversation."),
+      .describe("A Bot or a person Em a Grupo conversation."),
   ),
   nextCursor: zod
     .string()
@@ -897,7 +897,7 @@ export const AddConversationMemberParams = zod.object({
 export const addConversationMemberHeaderIdempotencyKeyMax = 128;
 
 export const AddConversationMemberHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(addConversationMemberHeaderIdempotencyKeyMax)
@@ -918,7 +918,7 @@ export const AddConversationMemberBody = zod.object({
 });
 
 export const AddConversationMemberResponse = zod.object({
-  personId: zod.string().describe("The person who is now in the conversation."),
+  personId: zod.string().describe("The person who É now Em the conversation."),
 });
 
 /**
@@ -956,7 +956,7 @@ export const RemoveConversationMemberParams = zod.object({
 export const removeConversationMemberHeaderIdempotencyKeyMax = 128;
 
 export const RemoveConversationMemberHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(removeConversationMemberHeaderIdempotencyKeyMax)
@@ -968,7 +968,7 @@ export const RemoveConversationMemberHeader = zod.object({
 export const RemoveConversationMemberResponse = zod.void();
 
 /**
- * Return one page of what was said in the conversation, newest first. A group conversation answers its shared transcript, with each Bot's reply and where it stands. Any other conversation answers the caller's own exchange with one of its Bots, named by botId. A reply still being written is empty to everybody but the person whose Bot is writing it. A missing cursor starts at the newest page and nextCursor null ends the list.
+ * Return one page of what was said in the conversation, newest first. A group conversation answers its shared transcript, with each Bot's reply and where Ele stands. Qualquer other conversation Respostas the caller's own exchange with one of its Bots, named by botId. A reply still being written is empty to everybody but the person whose Bot is writing it. A missing cursor starts at the newest page and nextCursor null ends the list.
  * @summary List the messages in a conversation
  */
 
@@ -1008,14 +1008,14 @@ export const ListConversationMessagesQueryParams = zod.object({
     .max(listConversationMessagesQueryBotIdMax)
     .optional()
     .describe(
-      "Which Bot's exchange to read, in a conversation that is not a group. Leave it out for a group conversation.",
+      "Which Bot's exchange to read, Em a conversation that Não é a Grupo. Sair Ele out Para a Grupo conversation.",
     ),
   limit: zod
     .int()
     .min(1)
     .max(listConversationMessagesQueryLimitMax)
     .default(listConversationMessagesQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -1047,18 +1047,18 @@ export const ListConversationMessagesResponse = zod.object({
         role: zod
           .enum(["person", "bot", "tool", "system"])
           .describe(
-            "Who it is from. tool and system are what a Bot's run recorded beside its reply, in a conversation that is not a group.",
+            "Who Ele É De. tool and system are what a Bot's run recorded beside Dela/Desse reply, Em a conversation that Não é a Grupo.",
           ),
         personId: zod
           .string()
           .nullable()
           .describe(
-            "Who sent it, for a person's message; whose turn it answered, for a Bot's reply.",
+            "Who sent Ele, Para a person's message; whose turn Ele answered, Para a Bot's reply.",
           ),
         botId: zod
           .string()
           .nullable()
-          .describe("The Bot that replied. Null for a person's message."),
+          .describe("The Bot that replied. Null Para a person's message."),
         text: zod
           .string()
           .describe(
@@ -1067,7 +1067,7 @@ export const ListConversationMessagesResponse = zod.object({
         status: zod
           .string()
           .describe(
-            "Where a Bot's reply stands. A person's message is completed.",
+            "Where a Bot's reply stands. A person's message É completed.",
           ),
         createdAt: zod.iso
           .datetime({ offset: true })
@@ -1089,7 +1089,7 @@ export const ListConversationMessagesResponse = zod.object({
           .string()
           .optional()
           .describe(
-            "For an answer passed on from another Bot: which Bot answered.",
+            "Para an Resposta passed on De another Bot: which Bot answered.",
           ),
         consent: zod
           .object({
@@ -1098,21 +1098,21 @@ export const ListConversationMessagesResponse = zod.object({
           })
           .optional()
           .describe(
-            "A Team Bot asking the person whose turn it was to use their own account.",
+            "A Team Bot asking the person whose turn Ele was to use their own Conta.",
           ),
         toolCalls: zod
           .int()
           .min(listConversationMessagesResponseMessagesItemToolCallsMin)
           .optional()
           .describe(
-            "How many tools the Bot called in this message, when it called any.",
+            "Como many tools the Bot called Em this message, when Ele called Qualquer.",
           ),
         files: zod
           .array(
             zod
               .object({
                 id: zod.string().describe("The attachment's id."),
-                name: zod.string().describe("The file's name."),
+                name: zod.string().describe("The Ficheiro's name."),
                 mimeType: zod
                   .string()
                   .describe("The type OpenBot recognised it as."),
@@ -1122,12 +1122,12 @@ export const ListConversationMessagesResponse = zod.object({
                     listConversationMessagesResponseMessagesItemFilesItemSizeBytesMin,
                   ),
               })
-              .describe("A file held for a message, or sent with one."),
+              .describe("A Ficheiro held Para a message, or sent with one."),
           )
           .max(listConversationMessagesResponseMessagesItemFilesMax)
           .optional()
           .describe(
-            "In a group conversation, the files a Bot sent from its computer with this reply, in the order it sent them. Each is an attachment of the conversation, read at its attachment address by anyone in it.",
+            "Em a Grupo conversation, the Ficheiros a Bot sent De Dela/Desse Computador with this reply, Em the order Ele sent them. Each É an attachment of the conversation, read at Dela/Desse attachment address by anyone Em Ele.",
           ),
       })
       .describe(
@@ -1145,7 +1145,7 @@ export const ListConversationMessagesResponse = zod.object({
 });
 
 /**
- * Send the caller's message and have the server run the Bots that answer it, with no window left open. In a group conversation every Bot answers in turn, or only the ones the message names, or the one given as botId. In any other conversation botId says which of its Bots answers. The message's id is the caller's own, so the same id sent again is the same message, not a second one.
+ * Send the caller's message and have the server run the Bots that Resposta Ele, with no window Esquerda open. Em a Grupo conversation every Bot Respostas Em turn, or only the ones the message names, or the one Dado as botId. Em Qualquer other conversation botId says which of Dela/Desse Bots Respostas. The message's id is the caller's own, so the same id sent again is the same message, not a second one.
  * @summary Send a message for the server to answer
  */
 
@@ -1167,9 +1167,9 @@ export const SendConversationMessageParams = zod.object({
     .describe("The conversation's id."),
 });
 
-export const sendConversationMessageHeaderIdempotencyKeyMax = 128;
+Exportar const sendConversationMessageHeaderIdempotencyKeyMax = 128;
 
-export const SendConversationMessageHeader = zod.object({
+Exportar const SendConversationMessageHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1179,20 +1179,20 @@ export const SendConversationMessageHeader = zod.object({
     ),
 });
 
-export const sendConversationMessageBodyIdMax = 160;
+Exportar const sendConversationMessageBodyIdMax = 160;
 
-export const sendConversationMessageBodyTextMax = 16000;
+Exportar const sendConversationMessageBodyTextMax = 16000;
 
-export const sendConversationMessageBodyTextRegExp = new RegExp("\\S");
-export const sendConversationMessageBodyBotIdMax = 200;
+Exportar const sendConversationMessageBodyTextRegExp = new RegExp("\\S");
+Exportar const sendConversationMessageBodyBotIdMax = 200;
 
-export const SendConversationMessageBody = zod.object({
+Exportar const SendConversationMessageBody = zod.object({
   id: zod
     .string()
     .min(1)
     .max(sendConversationMessageBodyIdMax)
     .describe(
-      "The caller's own id for the message, any string, so a retry in the same conversation is the same message. The conversation's messages list it under this id.",
+      "The caller's own id Para the message, Qualquer string, so a retry Em the same conversation É the same message. The conversation's messages list it under this id.",
     ),
   text: zod
     .string()
@@ -1210,7 +1210,7 @@ export const SendConversationMessageBody = zod.object({
     ),
 });
 
-export const SendConversationMessageResponse = zod.object({
+Exportar const SendConversationMessageResponse = zod.object({
   id: zod.string().optional().describe("The message's id."),
   queued: zod
     .boolean()
@@ -1245,7 +1245,7 @@ export const UploadConversationAttachmentParams = zod.object({
 export const uploadConversationAttachmentHeaderIdempotencyKeyMax = 128;
 
 export const UploadConversationAttachmentHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(uploadConversationAttachmentHeaderIdempotencyKeyMax)
@@ -1272,11 +1272,11 @@ export const uploadConversationAttachmentResponseSizeBytesMin = 0;
 export const UploadConversationAttachmentResponse = zod
   .object({
     id: zod.string().describe("The attachment's id."),
-    name: zod.string().describe("The file's name."),
+    name: zod.string().describe("The Ficheiro's name."),
     mimeType: zod.string().describe("The type OpenBot recognised it as."),
     sizeBytes: zod.int().min(uploadConversationAttachmentResponseSizeBytesMin),
   })
-  .describe("A file held for a message, or sent with one.");
+  .describe("A Ficheiro held Para a message, or sent with one.");
 
 /**
  * Return the bytes of a file attached to a message, in the type OpenBot recognised it as. Only somebody in the conversation it was sent in, or the person still holding it to send, can read it. A picture is served to open in place. Every other file, a PDF or a Word, Excel or PowerPoint file among them, is served as a download.
@@ -1331,7 +1331,7 @@ export const DeleteAttachmentParams = zod.object({
 export const deleteAttachmentHeaderIdempotencyKeyMax = 128;
 
 export const DeleteAttachmentHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(deleteAttachmentHeaderIdempotencyKeyMax)
@@ -1393,9 +1393,9 @@ export const GetConversationThreadParams = zod.object({
   threadId: zod.uuid().describe("The thread's id."),
 });
 
-export const GetConversationThreadResponse = zod.object({
+Exportar const GetConversationThreadResponse = zod.object({
   threadId: zod.string(),
-  known: zod
+  Conhecido: zod
     .boolean()
     .describe("Whether the thread still holds the caller's conversation."),
   liveThreadId: zod
@@ -1407,11 +1407,11 @@ export const GetConversationThreadResponse = zod.object({
 });
 
 /**
- * Transcribe a short recording of the caller speaking, for dictating a message. The recording is WebM, MP4 or WAV audio under 10 MiB, and is not kept. One recording at a time for each person.
+ * Transcribe a short recording of the caller speaking, Para dictating a message. The recording É WebM, MP4 or WAV audio under 10 MiB, and Não é kept. One recording at a time Para each person.
  * @summary Turn a recording into text
  */
 
-export const CreateTranscriptionParams = zod.object({
+Exportar const CreateTranscriptionParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1420,9 +1420,9 @@ export const CreateTranscriptionParams = zod.object({
     ),
 });
 
-export const createTranscriptionHeaderIdempotencyKeyMax = 128;
+Exportar const createTranscriptionHeaderIdempotencyKeyMax = 128;
 
-export const CreateTranscriptionHeader = zod.object({
+Exportar const CreateTranscriptionHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -1432,10 +1432,10 @@ export const CreateTranscriptionHeader = zod.object({
     ),
 });
 
-export const CreateTranscriptionBody = zod.object({
-  file: zod.instanceof(Blob),
+Exportar const CreateTranscriptionBody = zod.object({
+  Ficheiro: zod.instanceof(Blob),
 });
 
-export const CreateTranscriptionResponse = zod.object({
+Exportar const CreateTranscriptionResponse = zod.object({
   text: zod.string().describe("What was said."),
 });

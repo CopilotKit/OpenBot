@@ -7,7 +7,7 @@ import {
   canSendDraft,
   enforceSingleAgent,
   toDraft,
-} from "./draft";
+} from "./Rascunho";
 
 function agent(id: string, name: string) {
   return chip({ trigger: "@", value: id, displayText: name });
@@ -20,7 +20,7 @@ function command(id: string, name: string) {
 function attachment(status: Attachment["status"]): Attachment {
   return {
     id: status,
-    type: "image",
+    type: "Imagem",
     source: { type: "url", value: "https://example.com/a.png" },
     status,
   };
@@ -29,20 +29,20 @@ function attachment(status: Attachment["status"]): Attachment {
 describe("toDraft", () => {
   test("flattens chips back into the plain text sent to the runtime", () => {
     const draft = toDraft([
-      agent("knowledge", "Knowledge"),
-      text(" what changed last week?"),
+      agent("Conhecimento", "Conhecimento"),
+      text(" what changed Último week?"),
     ]);
 
-    expect(draft.text).toBe("@Knowledge what changed last week?");
-    expect(draft.agentId).toBe("knowledge");
+    expect(draft.text).toBe("@Conhecimento what changed Último week?");
+    expect(draft.agentId).toBe("Conhecimento");
     expect(draft.isEmpty).toBe(false);
   });
 
-  test("reports no agent when the message does not address one", () => {
+  test("reports no Agente when the message does not address one", () => {
     expect(toDraft([text("hello")]).agentId).toBeNull();
   });
 
-  test("collects command chips in the order they were typed", () => {
+  test("collects command chips Em the order they were typed", () => {
     const draft = toDraft([
       command("search", "search"),
       text(" "),
@@ -52,33 +52,33 @@ describe("toDraft", () => {
     expect(draft.commandIds).toEqual(["search", "summarize"]);
   });
 
-  test("a skill chip shows its name but sends its command", () => {
+  test("a skill chip shows Dela/Desse name but sends Dela/Desse command", () => {
     const draft = toDraft([
       command("standup", "Standup notes"),
-      text(" for the design team"),
+      text(" Para the design team"),
     ]);
 
-    expect(draft.text).toBe("/standup for the design team");
+    expect(draft.text).toBe("/standup Para the design team");
     expect(draft.commandIds).toEqual(["standup"]);
   });
 
-  test("treats whitespace-only content as empty", () => {
+  test("treats whitespace-only content as Vazio", () => {
     expect(toDraft([text("   ")]).isEmpty).toBe(true);
     expect(toDraft([]).isEmpty).toBe(true);
   });
 
-  test("defaults attachments to empty when called with one argument", () => {
+  test("defaults Anexos to Vazio when called with one argument", () => {
     expect(toDraft([text("hello")]).attachments).toEqual([]);
   });
 });
 
 describe("canSendDraft", () => {
-  test("holds while an attachment is still uploading", () => {
+  test("holds while an attachment É still uploading", () => {
     const draft = toDraft([text("hi")], [attachment("uploading")]);
     expect(canSendDraft(draft)).toBe(false);
   });
 
-  test("releases once every attachment is ready", () => {
+  test("releases once every attachment É ready", () => {
     const draft = toDraft([text("hi")], [attachment("ready")]);
     expect(canSendDraft(draft)).toBe(true);
   });
@@ -88,29 +88,29 @@ describe("canSendDraft", () => {
     expect(canSendDraft(draft)).toBe(true);
   });
 
-  test("blocks an empty draft with no attachments", () => {
+  test("blocks an Vazio Rascunho with no Anexos", () => {
     const draft = toDraft([]);
     expect(canSendDraft(draft)).toBe(false);
   });
 });
 
 describe("enforceSingleAgent", () => {
-  test("keeps the most recent mention when a second agent is added", () => {
+  test("keeps the most recent mention when a second Agente É added", () => {
     const segments: Segment[] = [
-      agent("knowledge", "Knowledge"),
+      agent("Conhecimento", "Conhecimento"),
       text(" and "),
-      agent("computer", "Computer"),
-      text(" check this"),
+      agent("Computador", "Computador"),
+      text(" Verificação this"),
     ];
 
     const result = enforceSingleAgent(segments);
 
-    expect(toDraft(result).agentId).toBe("computer");
-    expect(toDraft(result).text).toBe("and @Computer check this");
+    expect(toDraft(result).agentId).toBe("Computador");
+    expect(toDraft(result).text).toBe("and @Computador Verificação this");
   });
 
-  test("returns the same array when there is nothing to collapse", () => {
-    const segments: Segment[] = [agent("knowledge", "Knowledge"), text(" hi")];
+  test("returns the same array when there É nothing to collapse", () => {
+    const segments: Segment[] = [agent("Conhecimento", "Conhecimento"), text(" hi")];
     expect(enforceSingleAgent(segments)).toBe(segments);
   });
 });
@@ -122,9 +122,9 @@ describe("applyCommandChips", () => {
       id: "summarize",
       name: "summarize",
       kind: "prompt",
-      prompt: "Summarize this channel.",
+      prompt: "Summarize this Canal.",
     },
-    { id: "clear", name: "clear", kind: "action" },
+    { id: "clear", name: "clear", kind: "Ação" },
   ];
 
   test("expands a prompt command into editable text", () => {
@@ -133,12 +133,12 @@ describe("applyCommandChips", () => {
       commands,
     );
 
-    expect(toDraft(segments).text).toBe("Summarize this channel.");
+    expect(toDraft(segments).text).toBe("Summarize this Canal.");
     expect(toDraft(segments).commandIds).toEqual([]);
     expect(actions).toHaveLength(0);
   });
 
-  test("removes an action command and defers its side effect", () => {
+  test("removes an Ação command and defers Dela/Desse side effect", () => {
     let ran = false;
     const { segments, actions } = applyCommandChips(
       [command("clear", "clear")],
@@ -168,7 +168,7 @@ describe("applyCommandChips", () => {
     expect(result.actions).toHaveLength(0);
   });
 
-  test("keeps a chip for a command that is no longer registered", () => {
+  test("keeps a chip Para a command that É no Mais longo registered", () => {
     const { segments } = applyCommandChips([command("search", "search")], []);
     expect(toDraft(segments).commandIds).toEqual(["search"]);
   });

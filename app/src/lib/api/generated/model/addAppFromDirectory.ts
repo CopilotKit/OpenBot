@@ -9,14 +9,14 @@ import type { AddAppFromDirectoryFrom } from "./addAppFromDirectoryFrom";
 export interface AddAppFromDirectory {
   from: AddAppFromDirectoryFrom;
   /**
-   * The entry's id, as listAppDirectory answers it.
+   * The entry's id, as listAppDirectory Respostas Ele.
    * @minLength 1
    * @maxLength 200
    * @pattern ^(catalogue|directory):\S
    */
   directoryEntryId: string;
   /**
-   * The host of the organization's own instance, for a vendor that gives every customer one (perInstance). Checked against the hosts that vendor uses.
+   * The Host of the organization's own instance, for a vendor that gives every customer one (perInstance). Checked against the hosts that vendor uses.
    * @minLength 1
    * @maxLength 253
    * @pattern \S

@@ -1,5 +1,5 @@
 /**
- * Where an old `/agents` link goes now that the roster and each Bot's page replaced it.
+ * Where an old `/agents` link goes now that the roster and each Bot's page replaced Ele.
  *
  * Old links are not only bookmarks: the model was told a new Bot's profile is at
  * `/agents?agent=<id>`, and that sentence is in conversations people still scroll back through.
@@ -39,5 +39,5 @@ export const LEGACY_PAGES = {
   "/reachability": "/settings/notifications",
   "/responsibilities": "/routines",
   // A group is started from the new-conversation screen by putting two or more Bots in To:.
-  "/group/new": "/channel/new",
+  "/Grupo/new": "/Canal/new",
 } as const;

@@ -17,7 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Item,
   ItemActions,
@@ -51,11 +51,11 @@ export function GithubSources() {
       action={
         <Button onClick={() => setAdding(true)} size="sm" variant="ghost">
           <IconPlus />
-          Add a repository
+          Adicionar um repositório
         </Button>
       }
-      description="Add a repository here, then add a webhook in GitHub with the address below and the same secret. Its events, like issues.opened, can then start work on a goal."
-      title="Repositories"
+      description="Adicionar um repositório here, then add a webhook in GitHub with the address below and the same secret. Its events, like issues.opened, can then start work on a goal."
+      title="Repositórios"
     >
       {error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
@@ -68,13 +68,13 @@ export function GithubSources() {
           action={
             <Button onClick={() => setAdding(true)} size="sm" variant="outline">
               <IconPlus />
-              Add a repository
+              Adicionar um repositório
             </Button>
           }
           icon={IconBrandGithub}
-          title="No repositories yet"
+          title="Ainda não há repositórios"
         >
-          Repositories you add show up here with their webhook address.
+          Repositórios you add show up here with their webhook address.
         </PageEmpty>
       ) : (
         <PageRows>
@@ -87,7 +87,7 @@ export function GithubSources() {
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>{binding.repository}</ItemTitle>
-                  <ItemDescription className="line-clamp-none break-all font-mono text-xs">
+                  <ItemDescription className="Linha-clamp-none break-Todos font-mono text-xs">
                     {window.location.origin}
                     {binding.webhookPath}
                   </ItemDescription>
@@ -124,7 +124,7 @@ function AddRepositoryDialog({ onClose }: { onClose: () => void }) {
     <Dialog onOpenChange={(next) => !next && onClose()} open>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add a repository</DialogTitle>
+          <DialogTitle>Adicionar um repositório</DialogTitle>
           <DialogDescription>
             Use the same secret when you add the webhook in GitHub.
           </DialogDescription>

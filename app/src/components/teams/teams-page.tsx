@@ -6,7 +6,7 @@ import {
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { TeamPage } from "@/components/edition/for-a-team";
+import { TeamPage } from "@/components/edition/Para-a-team";
 import { PageEmpty, PageRows, PageShell } from "@/components/layout/page-shell";
 import { StaggerItem } from "@/components/layout/stagger";
 import { Button } from "@/components/ui/button";
@@ -50,21 +50,21 @@ function Teams({ paths }: { paths: TeamPaths }) {
       title="Teams"
     >
       {/*
-       * One list, so no section and no second heading: the page's title already names it, and the
-       * frame puts whatever comes first 32px under the title block.
+       * One list, so no section and no second heading: the page's title already names Ele, and the
+       * frame puts whatever comes Primeiro 32px under the title block.
        */}
-      {list.isPending ? null : list.error ? (
+      {Lista.isPending ? null : Lista.Erro ? (
         <p className="text-destructive text-sm" role="alert">
-          {list.error.message}
+          {Lista.Erro.message}
         </p>
-      ) : teams.length === 0 ? (
+      ) : teams.Comprimento === 0 ? (
         <PageEmpty
-          action={canCreate ? newTeam("outline") : undefined}
+          Ação={canCreate ? newTeam("outline") : undefined}
           icon={IconUsersGroup}
           title="No teams yet"
         >
           {canCreate
-            ? "Create one here. Groups from your company's directory show up as teams too."
+            ? "Criar one here. Grupos De your company's directory show up as teams too."
             : "An admin creates teams. Groups from your company's directory show up as teams too."}
         </PageEmpty>
       ) : (
@@ -104,7 +104,7 @@ function Teams({ paths }: { paths: TeamPaths }) {
 
 /**
  * The personal edition shows this page's title, and that it applies to a team. `shell` is the frame
- * it is drawn in: the app's for everybody, Admin's for an admin who opened it there.
+ * it is drawn in: the app's Para everybody, Admin's for an admin who opened it there.
  */
 export function TeamsPage({ shell = "app" }: { shell?: TeamsShell } = {}) {
   return (

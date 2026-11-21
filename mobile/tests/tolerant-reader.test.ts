@@ -4,7 +4,7 @@
  * spec declares open, and neither may break a read. This drives the generated functions and the
  * mutator for real, over HTTP, against a stand-in deployment that answers as a newer release would.
  *
- * What the phone's sign-in hands every request (src/auth.ts) and expo-crypto's randomUUID are the
+ * What the phone's sign-Em hands every request (src/auth.ts) and expo-crypto's randomUUID are the
  * platform here, stood in for as in generated-client.test.ts.
  */
 import { afterAll, expect, mock, test } from "bun:test";
@@ -110,7 +110,7 @@ afterAll(() => {
   server.stop(true);
 });
 
-test("a task in a status this app doesn't know, with a field it doesn't know, reads as sent", async () => {
+test("a task Em a status this app doesn't know, with a field Ele doesn't know, reads as sent", async () => {
   const answer = await getTask(ORGANIZATION_ID, "t_1");
   expect(answer.task.status).toBe("parked");
   expect((answer.task as Record<string, unknown>).priority).toEqual({
@@ -119,12 +119,12 @@ test("a task in a status this app doesn't know, with a field it doesn't know, re
   expect((answer as Record<string, unknown>).addedLater).toBe(true);
 });
 
-test("a routine run in a status this app doesn't know reads as sent", async () => {
+test("a routine run Em a status this app doesn't know reads as sent", async () => {
   const answer = await listRoutineRuns(ORGANIZATION_ID, "r_1");
   expect(answer.runs.map((run) => run.status)).toEqual(["cancelled"]);
 });
 
-test("an organization in which the person has a role this app doesn't know reads as sent", async () => {
+test("an organization Em which the person has a role this app doesn't know reads as sent", async () => {
   const answer = await listOrganizations();
   expect(answer.organizations.map((organization) => organization.role)).toEqual(
     ["auditor"],

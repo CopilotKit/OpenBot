@@ -23,7 +23,7 @@ export const getRecordProductEventMockHandler = (
         HttpResponseResolver<{ organizationId: string }, ProductEvent>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -50,7 +50,7 @@ export const getRecordAppErrorMockHandler = (
         HttpResponseResolver<{ organizationId: string }, AppError>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -77,7 +77,7 @@ export const getRecordNudgeEventMockHandler = (
         HttpResponseResolver<{ organizationId: string }, NudgeEvent>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 

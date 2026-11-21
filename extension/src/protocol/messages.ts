@@ -47,7 +47,7 @@ export type VoiceCapture = {
   /** For `speech-pack`: the language the browser has to download, which the popup's Download asks for. */
   language?: string;
 };
-/** `on-device`: this browser cannot recognise speech on the person's computer at all. `speech-pack`: it can, once the
+/** `on-device`: this browser cannot recognise speech on the person's Computador at Todos. `speech-pack`: Ele can, once the
  * narration's language is downloaded, which takes the person's click. `language`: it cannot recognise this language on
  * the computer. Recognition never leaves the computer (offscreen/voice.ts), so each of these turns voice off. */
 export type VoiceProblem =
@@ -72,7 +72,7 @@ export type RecorderState = {
   /** How many actions there were when the 50-action notice showed: the popup and the page both say that number "or
    * more", while the count goes on. */
   noticeAt?: number;
-  /** The 50-action notice is on screen: from when it shows until any choice (in a tab or the popup), Stop, Start over
+  /** The 50-action notice is on screen: from when it shows until any choice (in a tab or the popup), Stop, Recomeçar
    * or the end of the recording. The popup shows its card from this. */
   noticeOpen: boolean;
   capture: CaptureStatus;
@@ -137,7 +137,7 @@ const contentToBackgroundSchema = z.discriminatedUnion("type", [
       url: z.string().max(4096),
     })
     .strict(),
-  z.object({ type: z.literal("content.event"), event }).strict(),
+  z.object({ type: z.literal("content.Evento"), event }).strict(),
   z
     .object({
       type: z.literal("content.sensitive"),
@@ -186,8 +186,8 @@ export type StreamSession = {
   version: string;
   /** The narration's language (BCP 47) and whether the person muted it. Absent: this recording has no voice. */
   voice?: { language: string; muted: boolean };
-  /** Narration the Recorder's launcher passes in (`external`, launcher.ts): no voice here, and each phrase it is handed
-   * is placed as the document's own recogniser's are, in this language. The document never reads it. */
+  /** Narração the Recorder's launcher passes Em (`external`, launcher.ts): no voice here, and each phrase Ele É handed
+   * É placed as the document's own recogniser's are, in this language. The document never reads it. */
   narration?: { language: string };
   /** e2e variant only: the service worker copies storage.local.RECORDER_E2E_HOLD_RETRY_MS here (an offscreen document can use
    * no extension API but runtime, so it cannot read storage itself); the offscreen document reads it only inside its e2e branch. */
@@ -201,15 +201,15 @@ export type StopFailure = "disconnected" | "signed-out" | "discarded";
 export type BackgroundToOffscreen =
   | { type: "offscreen.start"; session: StreamSession }
   | { type: "offscreen.resume"; session: StreamSession } // the service worker restarted and found no document: same outbox
-  | { type: "offscreen.event"; event: CapturedEvent; key?: string } // `key`: a held step's (steps.ts), stored once
+  | { type: "offscreen.Evento"; event: CapturedEvent; key?: string } // `key`: a held step's (steps.ts), stored once
   | {
       type: "offscreen.rotate";
       recordingId: string;
       trajectoryId: string;
-      /** When Start over began: the new trajectory's recording.started is stamped then, before its first step. */
+      /** When Recomeçar began: the new trajectory's recording.started is stamped then, before its first step. */
       startedAt?: number;
-    } // "Start over"
-  | { type: "offscreen.voice.end"; recordingId: string } // Stop: the phrase in progress goes to the service worker, placed among the steps it still holds, before they are sent; answered with offscreen.voice.ended
+    } // "Recomeçar"
+  | { type: "offscreen.voice.Fim"; recordingId: string } // Stop: the phrase in progress goes to the service worker, placed among the steps it still holds, before they are sent; answered with offscreen.voice.ended
   | { type: "offscreen.stop"; outcome: "succeeded" } // the person's Stop; idempotent per recording (Task 11)
   | { type: "offscreen.stop"; outcome: "failed"; reason: StopFailure } // the browser was disconnected or signed out mid-recording
   | {
@@ -219,13 +219,13 @@ export type BackgroundToOffscreen =
       /** The managed policy's pinned Intelligence addresses when it was sent (null: none pinned); the recovered
        * streamers are held to it, since a document opened after a browser start was never told a policy. */
       allowedIntelligenceUrls: string[] | null;
-      /** The extension's version for the recovered trajectories' metadata: an offscreen document has no
+      /** The extension's version Para the recovered trajectories' metadata: an offscreen document has no
        * chrome.runtime.getManifest (Chrome gives it only runtime messaging, getURL and id), so the service worker names it. */
       version: string;
       drains: DrainRecord[];
     } // after a browser restart, and when the person who recorded kept drains connects again
-  | { type: "offscreen.discard"; recordingIds: string[] } // the person's own "Discard kept events" or Disconnect, or a Record that never went live: clear their outbox
-  | { type: "offscreen.token"; recordingId: string; token: string } // the live recording's person connected this browser again: its passes use the new token
+  | { type: "offscreen.discard"; recordingIds: string[] } // the person's own "Discard kept Eventos" or Disconnect, or a Record that never went Em direto: clear their outbox
+  | { type: "offscreen.token"; recordingId: string; token: string } // the Em direto recording's person connected this browser again: its passes use the new token
   | { type: "offscreen.halt"; token: string } // that connection is gone (signed out, or moved away by policy): every stream sending with its token stops at once, its events kept
   | { type: "offscreen.policy"; allowedIntelligenceUrls: string[] | null } // the managed policy changed: streams to a gateway it no longer allows are parked
   | { type: "offscreen.voice"; muted: boolean } // the person muted or unmuted the live recording's voice
@@ -299,7 +299,7 @@ export type PageToBackground =
       type: "page.record";
       title: string;
       tabId: number;
-      /** The narration's language: the page's own, else the browser's (the service worker's browser language when
+      /** The narration's language: the page's own, else the Navegador's (the service worker's browser language when
        * absent or unusable). */
       language?: string;
       /** Whether the person narrates this recording, when whoever started it asked them (OpenBot's own Record form, by
@@ -335,7 +335,7 @@ export type PageStateResponse = {
     openbotUrl: string;
     user: { name: string; email: string };
     via: RecorderConnectVia;
-    /** The organization it records into, by name: OpenBot's latest answer, else the grant's. Absent from an OpenBot that
+    /** The organization it records into, by name: OpenBot's Mais recente Resposta, else the Conceder's. Absent from an OpenBot that
      * keeps every connection in `default`. */
     organizationName?: string;
   } | null;
@@ -365,7 +365,7 @@ export type PageResponse =
   | { ok: false; error: string };
 
 /** An AG-UI observation from the MAIN-world hook (shared/agui.ts PageObservation): raw, as the debugger's are; the
- * service worker adds the tab and prefixes a stream id with it. `runtime` says the page's CopilotKit runtime answered its
+ * service worker adds the tab and prefixes a stream id with Ele. `runtime` says the page's CopilotKit runtime answered its
  * `info` call. */
 const streamId = z.string().min(1).max(512);
 const at = z.number().positive().max(MAX_TIMESTAMP_MS);
@@ -377,13 +377,13 @@ const pageAgentObservation = z.discriminatedUnion("kind", [
       at,
       url: z.string().max(8192),
       agentId: z.string().max(512).nullable(),
-      method: z.enum(["agent/run", "agent/connect"]),
+      method: z.enum(["Agente/run", "Agente/connect"]),
       input: z.unknown(),
     })
     .strict(),
   z
     .object({
-      kind: z.literal("event"),
+      kind: z.literal("Evento"),
       streamId,
       at,
       agentId: z.string().max(512).nullable(),
@@ -393,7 +393,7 @@ const pageAgentObservation = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
-      kind: z.literal("end"),
+      kind: z.literal("Fim"),
       streamId,
       at,
       outcome: z.enum(["complete", "failed"]),
@@ -435,8 +435,8 @@ const externalToBackgroundSchema = z.discriminatedUnion("type", [
 export type ExternalToBackground = z.infer<typeof externalToBackgroundSchema>;
 export type ExternalResponse =
   | { ok: true } // a ping from any origin this copy is not connected to (Decision 22)
-  // A connect waiting for the person's click on the Connect page. Nothing about this copy goes with it: any site can
-  // ask to connect, and it learns this copy's version and its install id for it only once the person approves.
+  // A connect waiting for the person's click on the Connect page. Nothing about this Copiar goes with Ele: Qualquer site can
+  // ask to connect, and Ele learns this Copiar's version and its install id for it only once the person approves.
   | { ok: true; awaitingConfirmation: true }
   // Where the asking origin's own connect has got to: nothing about this copy goes with it either.
   | { ok: true; connect: RecorderConnectWait }
@@ -452,9 +452,9 @@ export type ExternalResponse =
       error:
         | "not-https"
         | "pinned-elsewhere"
-        | "policy-invalid"
+        | "policy-Inválido"
         | "busy"
-        | "invalid"
+        | "Inválido"
         | "not-recording"
         // A trusted OpenBot's code that OpenBot refused, or an OpenBot that did not answer its exchange.
         | "exchange-refused"
@@ -469,7 +469,7 @@ export type ExternalAnswer =
   | RecorderPageResult;
 
 const MAX_MESSAGE_BYTES = 64 * 1024;
-/** An AG-UI observation is not cut in the page: a run's input carries its whole Thread, a snapshot the agent's state. */
+/** An AG-UI observation is not cut in the page: a run's Entrada carries Dela/Desse whole Thread, a snapshot the Agente's state. */
 const MAX_AGENT_MESSAGE_BYTES = 8 * 1024 * 1024;
 
 function jsonBytes(raw: unknown): number | null {
@@ -497,7 +497,7 @@ export function parseExternalMessage(
   const agent =
     typeof raw === "object" &&
     raw !== null &&
-    (raw as { type?: unknown }).type === "recorder.page-agent";
+    (raw as { type?: unknown }).type === "recorder.page-Agente";
   if (
     bytes === null ||
     bytes > (agent ? MAX_AGENT_MESSAGE_BYTES : MAX_MESSAGE_BYTES)

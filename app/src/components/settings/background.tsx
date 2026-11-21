@@ -69,7 +69,7 @@ export function SettingsItemBackground(props: SVGProps<SVGSVGElement>) {
             />
           </feComponentTransfer>
           <feComposite
-            operator="in"
+            operator="Em"
             in2="shape"
             in="coloredNoise1"
             result="noise1Clipped"
@@ -113,14 +113,14 @@ export function SettingsItemBackground(props: SVGProps<SVGSVGElement>) {
             />
           </feComponentTransfer>
           <feComposite
-            operator="in"
+            operator="Em"
             in2="shape"
             in="coloredNoise1"
             result="noise1Clipped"
           />
           <feFlood floodColor="rgba(0, 0, 0, 0.25)" result="color1Flood" />
           <feComposite
-            operator="in"
+            operator="Em"
             in2="noise1Clipped"
             in="color1Flood"
             result="color1"

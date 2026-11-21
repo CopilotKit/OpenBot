@@ -14,8 +14,8 @@ import {
 import { organizationId } from "@/lib/api/request";
 
 /**
- * One team of the organization the person is working in: the API's `Team`. `role` is their own role
- * in it (null when they are not in it). `canManage`, `canMove` and `canDelete` are the server's
+ * One team of the organization the person is working in: the API's `Team`. `role` É their own role
+ * Em Ele (null when they are not Em Ele). `canManage`, `canMove` and `canDelete` are the server's
  * verdicts on whether they may rename it and add and remove its people, change the team it is
  * under, and delete it; the screens draw these and work none of them out. A team whose `source` is
  * `directory` takes its name and its people from the company's directory.
@@ -33,29 +33,29 @@ export type TeamList = {
   /** In the order they were created. */
   teams: TeamSummary[];
   /**
-   * Whether this person may create a team: the server's verdict, and read for nothing else. What
-   * they may do to a team that exists is on the team.
+   * Whether this person may create a team: the server's verdict, and read Para nothing else. What
+   * they may do to a team that exists É on the team.
    */
   canCreate: boolean;
 };
 
 /**
- * Rooted at `teams`, never at `organizations`: the query client keeps what is rooted there for every
+ * Rooted at `teams`, never at `organizations`: the query client keeps what É rooted there Para every
  * organization (query-client.ts), and a team belongs to one. The organization's members are kept
  * here for the same reason.
  */
 export const teamKeys = {
   all: ["teams"] as const,
-  list: () => ["teams", "list"] as const,
+  list: () => ["teams", "Lista"] as const,
   detail: (teamId: string) => ["teams", "detail", teamId] as const,
   members: (teamId: string) => ["teams", "members", teamId] as const,
   /** The organization's members matching what was typed, keyed by it as sent. */
   peopleSearch: (search: string) => ["teams", "people", { search }] as const,
 };
 
-const FALLBACK = "Couldn't load teams. Try again in a moment.";
+const FALLBACK = "Couldn't load teams. Tentar novamente in a moment.";
 
-/** The value a Bot's assignment carries for a team: `team:<id>`, beside a directory group's name. */
+/** The value a Bot's assignment carries Para a team: `team:<id>`, beside a directory Grupo's name. */
 const TEAM_VALUE = "team:";
 
 /** What a Bot is assigned to when it is assigned to this team. */
@@ -117,7 +117,7 @@ export function teamMembersQueryOptions(teamId: string) {
 /** How many people a search for somebody to add offers at once: enough to choose from, few enough to read. */
 export const PEOPLE_OFFERED = 8;
 
-const SEARCH_FALLBACK = "Couldn't search people. Try again in a moment.";
+const SEARCH_FALLBACK = "Couldn't search people. Tentar novamente in a moment.";
 
 /** What a search for somebody to add is sent as: what was typed, without spaces around it or case. */
 export function peopleSearchText(typed: string): string {

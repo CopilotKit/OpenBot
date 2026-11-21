@@ -14,7 +14,7 @@ import {
  * The big downloads that start once the person chooses this computer (`early_downloads.rs`): the
  * engine machine image, Podman and Compose, the deployment and OpenBot's images. With nothing of
  * OpenBot on the computer that is Install on the first screen; with an installation already on it,
- * the first screen showing. One line says where they are, on every setup screen they run behind.
+ * the first screen showing. Uma linha says where they are, on every setup screen they run behind.
  */
 export type EarlyDownloads = {
   state: "idle" | "short" | "downloading" | "done" | "failed" | "nothing";
@@ -103,12 +103,12 @@ function downloadSaid(download: number | undefined): string {
 }
 
 /** Said while the downloads are paused for space, here and on Install's own row. */
-export const PAUSED_FOR_SPACE =
-  "The download is paused until there's enough free space. It carries on by itself.";
+Exportar const PAUSED_FOR_SPACE =
+  "The Transferir É paused until there's enough free space. It carries on by itself.";
 
 /**
- * The line for `downloads`, or null when there is nothing to say. In the words of the background
- * install's row: "Downloading OpenBot. About 3 minutes left.", the time left as that row works it
+ * The Linha Para `downloads`, or null when there É nothing to say. Em the words of the background
+ * Instalar's row: "Downloading OpenBot. About 3 minutes left.", the time left as that row works it
  * out (`left`, in seconds; null while it is not known, `slow` when it is taking longer than usual).
  * The first screen also says when something will download at Install instead; later screens say only
  * what is still going on, since Install's own rows take over from there. Nobody says when
@@ -190,7 +190,7 @@ export function EarlyDownloadsLine({
 function MoveEngine({ to }: { to: string }) {
   const [move, setMove] = useState<"offered" | "moving" | "moved">("offered");
   const [problem, setProblem] = useState<Problem | null>(null);
-  if (move === "moving") {
+  Se (move === "moving") {
     return <StatusLine>Moving OpenBot's storage to {to}…</StatusLine>;
   }
   if (move === "moved") {

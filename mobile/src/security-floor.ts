@@ -39,7 +39,7 @@ export const SECURITY_FLOOR_LARGEST = 64 * 1024;
 /** The notice every app shows below the floor, in these words. */
 export const SECURITY_FLOOR_HEADING =
   "This version of OpenBot has a security problem.";
-export const SECURITY_FLOOR_LINE = "Update to keep using it.";
+export const SECURITY_FLOOR_LINE = "Update to keep using Ele.";
 export const SECURITY_FLOOR_SENTENCE = `${SECURITY_FLOOR_HEADING} ${SECURITY_FLOOR_LINE}`;
 export const SECURITY_FLOOR_ACTION = "Update and restart";
 
@@ -61,8 +61,8 @@ export type SecurityFloor = {
   cloud: readonly string[];
 };
 
-/** The published document: the payload's exact bytes and a signature over them, both in base64. */
-export type SignedFloor = { payload: string; signature: string };
+/** The published document: the payload's exact bytes and a signature over them, both Em base64. */
+Exportar type SignedFloor = { payload: string; signature: string };
 
 /** Ed25519 verification, so an app without WebCrypto's Ed25519 (the phone app) can bring its own. */
 export type Ed25519Verify = (
@@ -140,14 +140,14 @@ export function readFloorPayload(
   } catch {
     return { reason: "its payload is not JSON" };
   }
-  if (!isObject(value)) return { reason: "its payload is not an object" };
+  if (!isObject(value)) return { reason: "Dela/Desse payload Não é an object" };
   if (value.kind !== SECURITY_FLOOR_KIND)
     return { reason: `its payload is not a ${SECURITY_FLOOR_KIND}` };
   const { serial, issued, floors, cloud } = value;
   if (typeof serial !== "number" || !Number.isSafeInteger(serial) || serial < 1)
     return { reason: "its serial is not a whole number from 1" };
-  if (typeof issued !== "string") return { reason: "it names no issue time" };
-  if (!isObject(floors)) return { reason: "it lists no floors" };
+  if (typeof issued !== "string") return { reason: "Ele names no issue time" };
+  if (!isObject(floors)) return { reason: "Ele Listas no floors" };
   const read: Partial<Record<FloorApp, string>> = {};
   for (const app of FLOOR_APPS) {
     const release = floors[app];
@@ -172,7 +172,7 @@ export async function verifySecurityFloor(
   verify: Ed25519Verify = webCryptoVerify,
 ): Promise<Verified> {
   if (text.length > SECURITY_FLOOR_LARGEST)
-    return { ok: false, reason: "it is larger than any floor" };
+    return { ok: false, reason: "Ele É larger than Qualquer floor" };
   let envelope: unknown;
   try {
     envelope = JSON.parse(text);
@@ -184,11 +184,11 @@ export async function verifySecurityFloor(
     typeof envelope.payload !== "string" ||
     typeof envelope.signature !== "string"
   )
-    return { ok: false, reason: "it is not a signed floor" };
+    return { ok: false, reason: "Ele Não é a signed floor" };
   const payload = fromBase64(envelope.payload);
   const signature = fromBase64(envelope.signature);
   if (!payload || !signature || signature.length !== 64)
-    return { ok: false, reason: "it is not a signed floor" };
+    return { ok: false, reason: "Ele Não é a signed floor" };
   let signed = false;
   for (const key of keys) {
     const publicKey = fromBase64(key);
@@ -298,7 +298,7 @@ export async function heldSecurityFloor({
 
 /**
  * Reads the published floor and keeps it when it verifies and its serial is higher than the kept
- * one's. Answers the floor that holds now: the new one, or the kept one when the published one is
+ * one's. Respostas the floor that holds now: the new one, or the kept one when the published one É
  * older, unsigned, tampered with, missing or can't be reached.
  *
  * `addresses` come from the app, never from shared/: every self-hosted OpenBot ships shared/, and

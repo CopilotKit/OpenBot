@@ -9,16 +9,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useEdition } from "@/components/edition/for-a-team";
-import { deleteChannelMutationOptions } from "@/lib/channels/mutations";
-import { deleteQuestion } from "@/lib/delete-question";
+import { useEdition } from "@/components/edition/Para-a-team";
+import { deleteChannelMutationOptions } from "@/lib/Canais/mutations";
+import { deleteQuestion } from "@/lib/Eliminar-question";
 
 /**
  * The question, naming the conversation by what the sidebar calls it (`conversationTitle`). A
  * conversation nobody has used yet has no name to quote.
  */
 export function deleteConversationQuestion(title: string): string {
-  return deleteQuestion(title, "Delete this conversation?");
+  return deleteQuestion(title, "Eliminar this conversation?");
 }
 
 /**
@@ -30,15 +30,15 @@ export function deleteConversationOutcome(
   edition: "team" | "personal" | undefined,
 ): string {
   return edition === "team"
-    ? "It disappears for everyone in the conversation."
-    : "It's deleted, with all its messages.";
+    ? "Ele disappears Para everyone Em the conversation."
+    : "Ele é Eliminado, with Todos Dela/Desse messages.";
 }
 
 /**
  * Confirms deleting a conversation, naming it, and deletes it.
  *
- * `title` is the conversation's own name, never its channel `name`: that is the Bot's for every
- * one-Bot conversation, and "Delete Personal Assistant?" asked about the wrong thing.
+ * `title` is the conversation's own name, never Dela/Desse Canal `name`: that É the Bot's for every
+ * one-Bot conversation, and "Eliminar Personal Assistant?" asked about the wrong thing.
  *
  * Shared by the sidebar row's menu and the Bot panel beside an open conversation, so both ask the
  * same question and fail the same way. `leave` runs before the delete when the conversation is the
@@ -109,7 +109,7 @@ export function DeleteConversationDialog({
             size="sm"
             variant="destructive"
           >
-            {deleteChannel.isPending ? "Deleting…" : "Delete"}
+            {deleteChannel.isPending ? "Deleting…" : "Eliminar"}
           </Button>
         </DialogFooter>
       </DialogContent>

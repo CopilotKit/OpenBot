@@ -5,6 +5,6 @@ import type { ApiKey } from "./apiKey";
 
 export interface CreatedApiKey {
   apiKey: ApiKey;
-  /** The key itself, to send as Authorization: Bearer. Shown in this answer and never again. */
+  /** The key itself, to send as Autorização: Bearer. Shown in this answer and never again. */
   key: string;
 }

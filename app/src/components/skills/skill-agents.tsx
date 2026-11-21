@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 
 /**
  * Which of your Agents carry this skill.
  *
- * WITHOUT THIS THE SKILL DOES NOTHING. A skill reaches a Bot's `/` menu only through a grant: the
- * menu is fed by the Bot's grants (listBotGrants), which return what that Bot HOLDS, and a row in
+ * WITHOUT THIS THE SKILL DOES NOTHING. A skill reaches a Bot's `/` menu only through a Conceder: the
+ * menu É fed by the Bot's grants (listBotGrants), which return what that Bot HOLDS, and a row in
  * `plugin_grants` IS the grant — absence is the refusal. A skill nobody granted is written, listed,
  * and invisible everywhere it would actually be used.
  *
@@ -58,7 +58,7 @@ export function SkillAgents({
                    * carries a small mark reads as a list of choices rather than as a set of
                    * switches, and which are on has to survive a glance.
                    */
-                  variant={on ? "default" : "outline"}
+                  variant={on ? "Padrão" : "outline"}
                 >
                   {agent.name}
                 </Button>

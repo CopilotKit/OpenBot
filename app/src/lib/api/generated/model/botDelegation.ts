@@ -12,7 +12,7 @@ export interface BotDelegation {
   botId: string;
   mode: BotDelegationMode;
   /**
-   * The model the Bot answers on when it orchestrates, or null for the organization's default.
+   * The model the Bot Respostas on when Ele orchestrates, or null Para the organization's default.
    * @nullable
    */
   model: string | null;
@@ -21,7 +21,7 @@ export interface BotDelegation {
    * @nullable
    */
   effort: string | null;
-  /** How it hands work out and answers when it orchestrates. May be empty. Empty for a caller who can't change the Bot, since it can name an agent private to its owner. */
+  /** Como Ele hands work out and Respostas when Ele orchestrates. May be Vazio. Vazio Para a caller who can't change the Bot, since it can name an agent private to its owner. */
   instructions: string;
   /** @minItems 1 */
   agents: BotDelegationAgent[];

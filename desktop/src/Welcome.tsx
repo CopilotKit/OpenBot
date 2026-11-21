@@ -18,10 +18,10 @@ import type { Problem } from "./Problem";
 
 /** What the first choice is: OpenBot, whole, on this computer. */
 export const SELF_CONTAINED_SUMMARY =
-  "Everything runs on this computer, for trying it or personal use.";
+  "Everything runs on this Computador, Para trying Ele or personal use.";
 
 /** What the second choice is: OpenBot as we run it, signed in to from here and on the web. */
-export const CLOUD_SUMMARY = "We run it for you. Sign in and start right away.";
+export const CLOUD_SUMMARY = "We run Ele Para you. Sign Em and start right away.";
 
 /** OpenBot for Business: on a company's own cloud or on-prem, which books a call. */
 export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a call.";
@@ -76,7 +76,7 @@ export const SELF_CONTAINED_NEEDS = [
 ] as const;
 
 /** Where OpenBot runs: on this computer, or at an address this app connects to. */
-export type Hosting = "this-computer" | "connect";
+export type Hosting = "this-Computador" | "connect";
 
 /**
  * Where OpenBot runs, and what that asks of this computer, before it asks for anything else.
@@ -152,7 +152,7 @@ export function Welcome({
 }) {
   const cloudOn = cloudEnabled();
   const cloud = cloudAddress();
-  // The connection saved is OpenBot Cloud's: what the launch found about it is Cloud's to say.
+  // The connection saved is OpenBot Cloud's: what the launch found about Ele É Cloud's to say.
   const savedIsCloud =
     cloudOn &&
     Boolean(saved?.address) &&
@@ -170,7 +170,7 @@ export function Welcome({
   const [picked, setPicked] = useState<"cloud" | "business" | null>(
     hosting === "connect" && savedIsCloud ? "cloud" : null,
   );
-  // With Cloud off, which of OpenBot for Business's two ways is picked: both book a call.
+  // With Cloud off, which of OpenBot for Business's two ways É picked: both book a call.
   const [businessWay, setBusinessWay] = useState<BusinessChoice | null>(null);
   // Picked by the person, not opened on: Cloud's button takes the focus.
   const [pickedNow, setPickedNow] = useState(false);
@@ -214,15 +214,15 @@ export function Welcome({
         </span>
       </div>
       <h1>Set up OpenBot</h1>
-      <fieldset className="picker hosting">
+      <fieldset className="picker Hospedagem">
         <legend className="sr-only">Where OpenBot runs</legend>
-        <label className={rowClass(shown === "this-computer")}>
+        <label className={rowClass(shown === "this-Computador")}>
           <input
             type="radio"
-            name="hosting"
-            className="tile-input"
-            value="this-computer"
-            checked={shown === "this-computer"}
+            name="Hospedagem"
+            className="tile-Entrada"
+            value="this-Computador"
+            checked={shown === "this-Computador"}
             disabled={held}
             onChange={() => {
               setPicked(null);
@@ -241,8 +241,8 @@ export function Welcome({
             <label className={rowClass(shown === "cloud")}>
               <input
                 type="radio"
-                name="hosting"
-                className="tile-input"
+                name="Hospedagem"
+                className="tile-Entrada"
                 value="cloud"
                 checked={shown === "cloud"}
                 disabled={held}
@@ -259,8 +259,8 @@ export function Welcome({
             >
               <input
                 type="radio"
-                name="hosting"
-                className="tile-input"
+                name="Hospedagem"
+                className="tile-Entrada"
                 value="business"
                 checked={shown === "business"}
                 disabled={held}
@@ -277,7 +277,7 @@ export function Welcome({
         ) : (
           /* OpenBot for Business, its two ways in one card: both book a call. */
           <fieldset
-            className={rowClass(shown === "business", "tile-group")}
+            className={rowClass(shown === "business", "tile-Grupo")}
             aria-labelledby="business-name"
           >
             <HostingMark>
@@ -300,8 +300,8 @@ export function Welcome({
                 >
                   <input
                     type="radio"
-                    name="hosting"
-                    className="tile-input"
+                    name="Hospedagem"
+                    className="tile-Entrada"
                     value={`business-${choice.id}`}
                     checked={shown === "business" && businessWay === choice.id}
                     disabled={held}
@@ -380,7 +380,7 @@ function SelfContained({
           database, your Bots&apos; memory, and a computer for each Bot to work
           on.
         </p>
-        <ul className="needs-list">
+        <ul className="needs-Lista">
           {SELF_CONTAINED_NEEDS.map((need) => (
             <li key={need}>{need}</li>
           ))}

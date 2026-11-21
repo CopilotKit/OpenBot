@@ -1,10 +1,10 @@
 import { IconPlus } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { PageSection, PageShell } from "@/components/layout/page-shell";
-import { CredentialsList } from "@/components/manage/credentials-page";
+import { CredentialsList } from "@/components/Gerir/credentials-page";
 import { Button } from "@/components/ui/button";
-import { useManagePaths } from "@/lib/manage-paths";
-import { SavedLogins } from "./saved-logins";
+import { useManagePaths } from "@/lib/Gerir-paths";
+import { GuardadoLogins } from "./saved-Iniciadores de sessão";
 
 /**
  * The Vault: one place for the person's saved logins and keys. It sits beside the eight things a
@@ -21,8 +21,8 @@ export function VaultPage() {
     <PageShell
       description={
         personal
-          ? "Your saved logins and keys are kept here. Bots never see them."
-          : "Your saved website logins are kept here. Bots never see them, and you approve each use."
+          ? "Your saved Iniciadores de sessão and Chaves are kept here. Bots never see them."
+          : "Your saved website Iniciadores de sessão are kept here. Bots never see them, and you approve each use."
       }
       title="Vault"
     >
@@ -35,11 +35,11 @@ export function VaultPage() {
           description="Website logins you saved when signing a Bot in. You approve each use."
           title="Logins"
         >
-          <SavedLogins />
+          <GuardadoLogins />
         </PageSection>
       ) : (
         <PageSection>
-          <SavedLogins />
+          <GuardadoLogins />
         </PageSection>
       )}
       {personal ? (

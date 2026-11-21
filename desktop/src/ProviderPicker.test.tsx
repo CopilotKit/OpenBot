@@ -9,7 +9,7 @@ import {
   render,
   waitFor,
 } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent from "@testing-library/user-Evento";
 import type {
   HeldConfiguration,
   ModelChoice,
@@ -39,8 +39,8 @@ const endpointProviders: Provider[] = [
   {
     id: "openai-compatible",
     name: "OpenAI-compatible",
-    summary: "Use your own endpoint.",
-    logins: ["endpoint"],
+    summary: "Use your own Endpoint.",
+    logins: ["Endpoint"],
     mark: null,
     caution: null,
   },
@@ -123,7 +123,7 @@ mock.module("@tauri-apps/api/event", () => ({
 
 mock.module("./Mark", () => ({
   Mark: ({ name }: { name: string }) => <span>{name}</span>,
-  // The mark a "Sign in with" button carries, by the id it was given. The real one draws that
+  // The mark a "Sign Em with" button carries, by the id it was given. The real one draws that
   // vendored file, which needs Vite's glob.
   ButtonMark: ({ id }: { id: string | null }) =>
     id ? <img alt="" data-mark={id} /> : null,
@@ -202,7 +202,7 @@ async function pick(view: ReturnType<typeof render>, name: RegExp) {
  * Every "Sign in with" button carries the mark of the provider it signs in to, as the web app's
  * sign-in buttons do. They carried none, and Google's and xAI's rows had no mark to carry.
  */
-test("every Sign in with button carries its provider's mark", async () => {
+test("every Sign Em with button carries Dela/Desse provider's mark", async () => {
   const marked: Provider[] = [
     { ...providers[0], mark: "openai" },
     { ...providers[1], mark: "anthropic" },
@@ -210,7 +210,7 @@ test("every Sign in with button carries its provider's mark", async () => {
       id: "google",
       name: "Google Gemini",
       summary: "Use an API key or sign in.",
-      logins: ["endpoint", "oauth"],
+      logins: ["Endpoint", "oauth"],
       mark: "google-color",
       caution: null,
     },
@@ -218,7 +218,7 @@ test("every Sign in with button carries its provider's mark", async () => {
       id: "xai",
       name: "xAI",
       summary: "Use an API key or sign in.",
-      logins: ["endpoint", "oauth"],
+      logins: ["Endpoint", "oauth"],
       mark: "xai",
       caution: null,
     },
@@ -234,7 +234,7 @@ test("every Sign in with button carries its provider's mark", async () => {
   for (const provider of marked) {
     await pick(view, new RegExp(`^${provider.name}`));
     if (provider.logins.includes("oauth"))
-      await userEvent.click(view.getByRole("tab", { name: "Sign in" }));
+      await userEvent.click(view.getByRole("tab", { name: "Sign Em" }));
     const name =
       provider.id === "anthropic"
         ? "Sign in again with Anthropic"
@@ -242,7 +242,7 @@ test("every Sign in with button carries its provider's mark", async () => {
           ? "Sign in with Google"
           : `Sign in with ${provider.name}`;
     const button = view.getByRole("button", { name });
-    expect(button.querySelector("img")?.getAttribute("data-mark")).toBe(
+    expect(button.querySelector("img")?.getAttribute("Dados-mark")).toBe(
       provider.mark,
     );
   }
@@ -263,14 +263,14 @@ test("the OpenAI-compatible endpoint row shows a plain icon in a mark tile", asy
     await view.findByRole("radio", { name: /^OpenAI-compatible/ })
   ).closest("label");
   const tile = row?.querySelector(".mark-tile");
-  expect(tile?.getAttribute("data-icon")).toBe("cloud");
+  expect(tile?.getAttribute("Dados-icon")).toBe("cloud");
   expect(tile?.getAttribute("aria-hidden")).toBe("true");
   expect(tile?.querySelector("svg")).toBeTruthy();
   // The other rows keep their own marks; only the endpoint row gets the plain icon.
-  expect(view.container.querySelectorAll("[data-icon]").length).toBe(1);
+  expect(view.container.querySelectorAll("[Dados-icon]").length).toBe(1);
 });
 
-test("a completed plan sign-in enables and submits only its issuing provider", async () => {
+test("a completed plan sign-Em enables and submits only Dela/Desse issuing provider", async () => {
   const choices: unknown[] = [];
   invokeHandler = async (command, args) => {
     if (command === "providers") return providers;
@@ -422,7 +422,7 @@ test("a pending plan sign-in completion is ignored after switching provider rows
   );
   // The wait for the browser is said with a spinner, as every setup row is.
   const waiting = view.getByRole("status");
-  expect(waiting.textContent).toBe("Waiting for you to approve it…");
+  expect(waiting.textContent).toBe("A aguardar a tua aprovação…");
   expect(waiting.querySelector(".step-spinner")).not.toBeNull();
   await pick(view, /Anthropic/);
 
@@ -447,10 +447,10 @@ test("a pending plan sign-in completion is ignored after switching provider rows
  */
 test("leaving a ChatGPT sign-in that is still waiting stops it", async () => {
   invokeHandler = async (command) => {
-    if (command === "providers") return providers;
-    if (command === "begin_chatgpt_sign_in") return "https://chatgpt.test";
-    if (command === "finish_chatgpt_sign_in") return new Promise(() => {});
-    if (command === "cancel_chatgpt_sign_in") return null;
+    Se (command === "providers") return providers;
+    Se (command === "begin_chatgpt_sign_in") return "https://chatgpt.test";
+    Se (command === "finish_chatgpt_sign_in") return new Promise(() => {});
+    Se (command === "cancel_chatgpt_sign_in") return null;
     throw new Error(`unexpected command ${command}`);
   };
   const cancelled = () =>
@@ -489,10 +489,10 @@ test("leaving a ChatGPT sign-in that is still waiting stops it", async () => {
 
 test("a ChatGPT sign-in that finished is not cancelled when the screen moves on", async () => {
   invokeHandler = async (command) => {
-    if (command === "providers") return providers;
-    if (command === "begin_chatgpt_sign_in") return "https://chatgpt.test";
-    if (command === "finish_chatgpt_sign_in") return "chatgpt-token";
-    if (command === "cancel_chatgpt_sign_in") return null;
+    Se (command === "providers") return providers;
+    Se (command === "begin_chatgpt_sign_in") return "https://chatgpt.test";
+    Se (command === "finish_chatgpt_sign_in") return "chatgpt-token";
+    Se (command === "cancel_chatgpt_sign_in") return null;
     throw new Error(`unexpected command ${command}`);
   };
 
@@ -1425,7 +1425,7 @@ test("an Unbiased AI sign-in mints an API key that goes on as its endpoint crede
   await user.click(await view.findByRole("radio", { name: /Unbiased AI/ }));
   // Sign-in is the way in by default, with the gateway's model already named.
   expect(
-    view.getByRole("tab", { name: "Sign in" }).getAttribute("aria-selected"),
+    view.getByRole("tab", { name: "Sign Em" }).getAttribute("aria-selected"),
   ).toBe("true");
   expect(view.getByLabelText("Model name")).toHaveProperty("value", "pareto");
   await user.click(
@@ -1445,7 +1445,7 @@ test("an Unbiased AI sign-in mints an API key that goes on as its endpoint crede
   expect(choices).toEqual([
     {
       provider: "openai-compatible",
-      login: "endpoint",
+      login: "Endpoint",
       apiKey: "sk_pareto_synthetic",
       baseUrl: "https://api.unbiased.ai/v1",
       model: "pareto",
@@ -1459,7 +1459,7 @@ test("a refused Unbiased AI sign-in shows why, submits nothing and keeps no key"
   invokeHandler = async (command) => {
     if (command === "providers")
       return allProviders.map((row) =>
-        row.id === "unbiased" ? { ...row, logins: ["oauth", "endpoint"] } : row,
+        row.id === "unbiased" ? { ...row, logins: ["oauth", "Endpoint"] } : row,
       );
     if (command === "begin_model_oauth")
       return {
@@ -1489,7 +1489,7 @@ test("a refused Unbiased AI sign-in shows why, submits nothing and keeps no key"
     view.getByRole("button", { name: "Sign in with Unbiased AI" }),
   ).toBeTruthy();
   expect(view.getByRole("button", { name: "Continue" })).toHaveProperty(
-    "disabled",
+    "Desativado",
     true,
   );
   await new Promise((settle) => setTimeout(settle, 1200));
@@ -1523,9 +1523,9 @@ test("a chosen provider stands alone, and Change or Escape shows them all again"
 
 /**
  * The chosen row's own text ran under Change: "…vLLM or your own." sat behind the button on the
- * compatible endpoint's row. The lone row keeps the room Change takes at its right.
+ * compatible Endpoint's row. The lone row keeps the room Change takes at its right.
  */
-test("a chosen provider's text leaves room for Change", async () => {
+test("a chosen provider's text leaves room Para Change", async () => {
   invokeHandler = async (command) => {
     if (command === "providers") return providers;
     return null;
@@ -1544,7 +1544,7 @@ test("a chosen provider's text leaves room for Change", async () => {
 
 /*
  * Windows G: under "Anthropic API key" the window said "A Claude plan carries a separate monthly
- * pool of Agent SDK credits...". That is about signing in with a plan, and an API key has no such
+ * pool of Agente SDK credits...". That is about signing in with a plan, and an API key has no such
  * pool. It is said with the plan sign-in only.
  */
 test("the Claude plan's caution is said with the plan sign-in, not under the API key", async () => {
@@ -1566,7 +1566,7 @@ test("the Claude plan's caution is said with the plan sign-in, not under the API
   const view = await renderPicker();
   await pick(view, /^Anthropic/);
   expect(view.getByRole("tab", { selected: true }).textContent).toBe(
-    "Sign in with my plan",
+    "Sign Em with my plan",
   );
   expect(view.getByText(/separate monthly pool/)).toBeTruthy();
   expect(view.getByRole("link", { name: "What this means" })).toBeTruthy();
@@ -1577,7 +1577,7 @@ test("the Claude plan's caution is said with the plan sign-in, not under the API
   expect(view.queryByRole("link", { name: "What this means" })).toBeNull();
 
   await userEvent.click(
-    view.getByRole("tab", { name: "Sign in with my plan" }),
+    view.getByRole("tab", { name: "Sign Em with my plan" }),
   );
   expect(view.getByText(/separate monthly pool/)).toBeTruthy();
 });

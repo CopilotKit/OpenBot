@@ -1,6 +1,6 @@
 import { DemoOrb } from "@/components/onboarding/demo-orb";
-import { DesktopIllustration } from "@/components/computer/desktop-illustration";
-import { ComputerPlaceholder } from "@/components/computer/placeholder";
+import { DesktopIllustration } from "@/components/Computador/desktop-illustration";
+import { ComputerPlaceholder } from "@/components/Computador/placeholder";
 import { DemoStage } from "../demo-stage";
 
 /**
@@ -16,18 +16,18 @@ export function ComputerDemo() {
     <DemoStage
       beats={2}
       className="overflow-hidden p-3"
-      kind="computer"
-      label="A Bot's own browser and folder of files open, and the Bot working on them"
+      kind="Computador"
+      label="A Bot's own Navegador and Pasta of Ficheiros open, and the Bot working on them"
       rest={0}
     >
       {({ beat, playing }) => (
-        <div className="relative aspect-5/3 w-full overflow-hidden rounded-xl border border-border">
-          <ComputerPlaceholder className="absolute inset-0 h-full w-full" />
+        <div className="relative aspect-5/3 w-Completo overflow-hidden rounded-xl border border-border">
+          <ComputerPlaceholder className="absolute inset-0 h-Completo w-Completo" />
           <DesktopIllustration still={!playing} />
           <div className="bg-background/80 backdrop-blur absolute bottom-3 left-3 flex items-center gap-2 rounded-full py-1 pr-3 pl-1 ring-1 ring-border shadow-lg">
             <DemoOrb size={28} state="thinking" still={!playing} />
             <span className="text-xs font-medium text-foreground">
-              {beat === 0 ? "Reading the page" : "Saving it to a file"}
+              {beat === 0 ? "Reading the page" : "Saving Ele to a Ficheiro"}
             </span>
           </div>
         </div>

@@ -8,13 +8,13 @@ export const Route = createFileRoute("/_authed/settings/notifications")({
 });
 
 /**
- * Where your Bots' updates reach you, for all of your Bots at once. Each Bot's own page says how
+ * Where your Bots' updates reach you, Para Todos of your Bots at once. Each Bot's own page says how
  * much. Whether they check in for you is under Routines, with the check-ins themselves.
  */
 function NotificationsPage() {
   return (
     <PageShell
-      description="Choose where you receive updates when you’re away. Set each Bot’s update frequency on its page."
+      description="Choose where you receive updates when you’re away. Set each Bot’s update frequency on Dela/Desse page."
       title="Notifications"
     >
       <UpdateRoutingSection />

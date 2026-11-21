@@ -33,7 +33,7 @@ export const listBotGrantsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
 export const ListBotGrantsQueryParams = zod.object({
   kind: zod
-    .enum(["action", "skill", "bot"])
+    .enum(["Ação", "skill", "bot"])
     .optional()
     .describe("Only grants of this kind."),
   limit: zod
@@ -41,7 +41,7 @@ export const ListBotGrantsQueryParams = zod.object({
     .min(1)
     .max(listBotGrantsQueryLimitMax)
     .default(listBotGrantsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -68,18 +68,18 @@ export const ListBotGrantsResponse = zod.object({
             .string()
             .min(1)
             .describe(
-              "The grant's address: action:<app id>:<action name>, skill:<slug> or bot:<Bot id>.",
+              "The Conceder's address: Ação:<app id>:<Ação name>, skill:<slug> or bot:<Bot id>.",
             ),
           kind: zod
-            .enum(["action", "skill", "bot"])
+            .enum(["Ação", "skill", "bot"])
             .describe(
-              "What a grant gives a Bot: one action of an app, a skill, or another Bot it may hand work to.",
+              "What a Conceder Dá a Bot: one Ação of an app, a skill, or another Bot Ele may hand work to.",
             ),
           ref: zod
             .string()
             .min(1)
             .describe(
-              "What it names: an action as <app id>/<action name>, a skill's slug, or a Bot's id.",
+              "What Ele names: an Ação as <app id>/<Ação name>, a skill's slug, or a Bot's id.",
             ),
           action: zod
             .union([
@@ -96,14 +96,14 @@ export const ListBotGrantsResponse = zod.object({
                   read: zod
                     .boolean()
                     .describe(
-                      "It only reads. Anything else is treated as a change.",
+                      "Ele only reads. Anything else É treated as a change.",
                     ),
                 })
-                .describe("One action of an app, as the Bot is offered it."),
+                .describe("One Ação of an app, as the Bot É offered Ele."),
               zod.null(),
             ])
             .describe(
-              "The action, while its app offers it. Null for a skill or a Bot, and for an action the app no longer lists, which is kept but not offered.",
+              "The Ação, while Dela/Desse app offers Ele. Null Para a skill or a Bot, and Para an Ação the app no Mais longo Listas, which É kept but not offered.",
             ),
           skill: zod
             .union([
@@ -113,14 +113,14 @@ export const ListBotGrantsResponse = zod.object({
                   title: zod.string(),
                   summary: zod.string(),
                 })
-                .describe("A skill, as the Bot's / menu offers it."),
+                .describe("A skill, as the Bot's / menu offers Ele."),
               zod.null(),
             ])
-            .describe("The skill, for a skill that exists. Null otherwise."),
+            .describe("The skill, Para a skill that exists. Null otherwise."),
         })
         .describe("One thing a Bot may use."),
     )
-    .describe("In order of their id."),
+    .describe("Em order of their id."),
   nextCursor: zod
     .string()
     .max(listBotGrantsResponseNextCursorMax)
@@ -132,7 +132,7 @@ export const ListBotGrantsResponse = zod.object({
 });
 
 /**
- * Turn several of one app's actions on and off for a Bot as one change, or none of them: one that can't be made refuses them all, and problems says which. Each action is checked as replaceBotGrant and deleteBotGrant check it, and an action turned on must be one the app offers now. The audit trail records the change once, with the sentence it was chosen from when it was described in English (translateBotGrants). An administrator may turn actions on and off. A Bot's owner may only turn on actions of their own app.
+ * Turn several of one app's Ações on and off Para a Bot as one change, or none of them: one that can't be made refuses them all, and problems says which. Each action is checked as replaceBotGrant and deleteBotGrant check it, and an action turned on must be one the app offers now. The audit trail records the change once, with the sentence it was chosen from when it was described in English (translateBotGrants). An administrator may turn actions on and off. A Bot's owner may only turn on Ações of their own app.
  * @summary Change a Bot's actions in one app at once
  */
 
@@ -155,7 +155,7 @@ export const BatchUpdateBotGrantsParams = zod.object({
 export const batchUpdateBotGrantsHeaderIdempotencyKeyMax = 128;
 
 export const BatchUpdateBotGrantsHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(batchUpdateBotGrantsHeaderIdempotencyKeyMax)
@@ -204,7 +204,7 @@ export const BatchUpdateBotGrantsBody = zod
           .regex(batchUpdateBotGrantsBodyAddItemRegExp),
       )
       .max(batchUpdateBotGrantsBodyAddMax)
-      .describe("The actions to turn on. Repeats count once."),
+      .describe("The Ações to turn on. Repeats count once."),
     remove: zod
       .array(
         zod
@@ -214,7 +214,7 @@ export const BatchUpdateBotGrantsBody = zod
           .regex(batchUpdateBotGrantsBodyRemoveItemRegExp),
       )
       .max(batchUpdateBotGrantsBodyRemoveMax)
-      .describe("The actions to turn off. Repeats count once."),
+      .describe("The Ações to turn off. Repeats count once."),
     authoring: zod
       .object({
         source: zod.enum(["english"]),
@@ -226,7 +226,7 @@ export const BatchUpdateBotGrantsBody = zod
       })
       .optional()
       .describe(
-        "The description the actions were chosen from (translateBotGrants), recorded with the change.",
+        "The Descrição the Ações were chosen De (translateBotGrants), recorded with the change.",
       ),
     approval: zod
       .object({
@@ -235,7 +235,7 @@ export const BatchUpdateBotGrantsBody = zod
         members: zod
           .array(
             zod.object({
-              kind: zod.enum(["user", "group", "team"]),
+              kind: zod.enum(["user", "Grupo", "team"]),
               value: zod
                 .string()
                 .min(1)
@@ -251,19 +251,19 @@ export const BatchUpdateBotGrantsBody = zod
       ),
   })
   .describe(
-    "One app's actions to turn on and off for a Bot. Each action is written <app id>/<action name>, and every one must be the app's. An action can't be in both lists, and at least one list must name one.",
+    "One app's Ações to turn on and off Para a Bot. Each Ação É written <app id>/<Ação name>, and every one must be the app's. An Ação can't be Em both Listas, and at least one Lista must name one.",
   );
 
 export const BatchUpdateBotGrantsResponse = zod.object({
-  added: zod.array(zod.string()).describe("The actions turned on, once each."),
+  added: zod.array(zod.string()).describe("The Ações turned on, once each."),
   removed: zod
     .array(zod.string())
-    .describe("The actions turned off, once each."),
+    .describe("The Ações turned off, once each."),
 });
 
 /**
  * Turn a description in English of what a Bot may do in one app into an exact set of that app's actions. OpenBot's model chooses them, they are checked against what the app offers now, and a second call that never sees the description says what the set lets the Bot do. Nothing is saved: batchUpdateBotGrants saves the set. The audit trail records the description and what it became. Only an administrator may ask.
- * @summary Choose a Bot's actions in one app from a description
+ * @summary Escolhe um Bot's actions in one app from a description
  */
 
 export const translateBotGrantsPathBotIdRegExp = new RegExp("\\S");
@@ -282,9 +282,9 @@ export const TranslateBotGrantsParams = zod.object({
     .describe("The Bot's id."),
 });
 
-export const translateBotGrantsHeaderIdempotencyKeyMax = 128;
+Exportar const translateBotGrantsHeaderIdempotencyKeyMax = 128;
 
-export const TranslateBotGrantsHeader = zod.object({
+Exportar const TranslateBotGrantsHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -294,16 +294,16 @@ export const TranslateBotGrantsHeader = zod.object({
     ),
 });
 
-export const translateBotGrantsBodyAppIdMax = 200;
+Exportar const translateBotGrantsBodyAppIdMax = 200;
 
-export const translateBotGrantsBodyAppIdRegExp = new RegExp("\\S");
-export const translateBotGrantsBodyTextMax = 1000;
+Exportar const translateBotGrantsBodyAppIdRegExp = new RegExp("\\S");
+Exportar const translateBotGrantsBodyTextMax = 1000;
 
-export const translateBotGrantsBodyTextRegExp = new RegExp(
+Exportar const translateBotGrantsBodyTextRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
-export const TranslateBotGrantsBody = zod.object({
+Exportar const TranslateBotGrantsBody = zod.object({
   appId: zod
     .string()
     .min(1)
@@ -319,8 +319,8 @@ export const TranslateBotGrantsBody = zod.object({
     ),
 });
 
-export const TranslateBotGrantsResponse = zod.object({
-  actions: zod
+Exportar const TranslateBotGrantsResponse = zod.object({
+  Ações: zod
     .array(zod.string())
     .describe("The action names the model chose, as it wrote them."),
   grants: zod
@@ -337,29 +337,29 @@ export const TranslateBotGrantsResponse = zod.object({
     .string()
     .nullable()
     .describe(
-      "What the set lets the Bot do, in one sentence. Null when it doesn't check.",
+      "What the set lets the Bot do, Em one sentence. Null when Ele doesn't check.",
     ),
   explanation: zod
     .string()
     .nullable()
     .describe(
-      "What the set lets the Bot do, read from the set alone by a call that never saw the description. Null when it doesn't check.",
+      "What the set lets the Bot do, read from the set alone by a call that never saw the description. Null when it doesn't Verificação.",
     ),
-  check: zod
+  Verificação: zod
     .object({
       ok: zod.boolean(),
-      error: zod.string().optional(),
+      Erro: zod.string().optional(),
       problems: zod
         .array(
           zod.object({
-            action: zod.string(),
+            Ação: zod.string(),
             message: zod.string(),
           }),
         )
         .optional(),
     })
     .describe(
-      "Whether every action named is one the app offers now, and what is wrong with each one that isn't.",
+      "Whether every Ação named É one the app offers now, and what É wrong with each one that isn't.",
     ),
   warning: zod
     .string()
@@ -374,7 +374,7 @@ export const TranslateBotGrantsResponse = zod.object({
 
 export const replayBotGrantsPathBotIdRegExp = new RegExp("\\S");
 
-export const ReplayBotGrantsParams = zod.object({
+Exportar const ReplayBotGrantsParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -607,9 +607,9 @@ export const ReplaceBotGrantParams = zod.object({
     ),
 });
 
-export const replaceBotGrantHeaderIdempotencyKeyMax = 128;
+Exportar const replaceBotGrantHeaderIdempotencyKeyMax = 128;
 
-export const ReplaceBotGrantHeader = zod.object({
+Exportar const ReplaceBotGrantHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -647,31 +647,31 @@ export const ReplaceBotGrantBody = zod
       })
       .optional()
       .describe(
-        "Who may have a Bot use an app's one shared account, approved by an administrator: only the Bot's owner, named people, teams and directory groups, or everyone in the organization (team); and whether the Bot may act on what people outside the organization send it. A member of kind team names one of the organization's teams by id; a team of another organization is not found.",
+        "Who may have a Bot use an app's one shared account, approved by an administrator: only the Bot's owner, named people, teams and directory groups, or everyone in the organization (team); and whether the Bot may act on what people outside the organization send it. A member of kind team names one of the organization's teams by id; a team of another organization Não é found.",
       ),
   })
   .describe(
-    "What a grant may carry. Only an administrator's grant of an action of an app with one shared account reads it.",
+    "What a Conceder may carry. Only an administrator's grant of an action of an app with one shared account reads it.",
   );
 
-export const ReplaceBotGrantResponse = zod
+Exportar const ReplaceBotGrantResponse = zod
   .object({
     id: zod
       .string()
       .min(1)
       .describe(
-        "The grant's address: action:<app id>:<action name>, skill:<slug> or bot:<Bot id>.",
+        "The grant's address: Ação:<app id>:<Ação name>, skill:<slug> or bot:<Bot id>.",
       ),
     kind: zod
-      .enum(["action", "skill", "bot"])
+      .enum(["Ação", "skill", "bot"])
       .describe(
-        "What a grant gives a Bot: one action of an app, a skill, or another Bot it may hand work to.",
+        "What a Conceder Dá a Bot: one Ação of an app, a skill, or another Bot Ele may hand work to.",
       ),
     ref: zod
       .string()
       .min(1)
       .describe(
-        "What it names: an action as <app id>/<action name>, a skill's slug, or a Bot's id.",
+        "What Ele names: an Ação as <app id>/<Ação name>, a skill's slug, or a Bot's id.",
       ),
     action: zod
       .union([
@@ -716,13 +716,13 @@ export const ReplaceBotGrantResponse = zod
  */
 
 export const deleteBotGrantPathBotIdRegExp = new RegExp("\\S");
-export const deleteBotGrantPathGrantIdMax = 512;
+Exportar const deleteBotGrantPathGrantIdMax = 512;
 
-export const deleteBotGrantPathGrantIdRegExp = new RegExp(
+Exportar const deleteBotGrantPathGrantIdRegExp = new RegExp(
   "^(action:[^:]+:|skill:|bot:)\\S",
 );
 
-export const DeleteBotGrantParams = zod.object({
+Exportar const DeleteBotGrantParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -792,7 +792,7 @@ export const ListBotAppsQueryParams = zod.object({
     .min(1)
     .max(listBotAppsQueryLimitMax)
     .default(listBotAppsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -818,7 +818,7 @@ export const ListBotAppsResponse = zod.object({
           id: zod
             .string()
             .min(1)
-            .describe("The app's id, or the one turning it on would give it."),
+            .describe("The app's id, or the one turning Ele on would Dar Ele."),
           title: zod.string().describe("The app's own name, such as Gmail."),
           logo: zod.string().nullable(),
           source: zod
@@ -832,7 +832,7 @@ export const ListBotAppsResponse = zod.object({
               "Whose account the app's actions use: each person's own, one shared account an administrator connects, or no person's.",
             ),
           connect: zod
-            .union([zod.enum(["oauth", "consent", "key"]), zod.null()])
+            .union([zod.enum(["oauth", "consent", "Chave"]), zod.null()])
             .describe(
               "How the person's account is connected: OpenBot's own sign-in, the directory's sign-in, a key, or nothing to connect.",
             ),
@@ -843,7 +843,7 @@ export const ListBotAppsResponse = zod.object({
               "reconnect",
               "shared_not_connected",
               "shared_not_approved",
-              "disabled",
+              "Desativado",
               "not_granted",
               "owner_grantable",
             ])
@@ -876,46 +876,46 @@ export const ListBotAppsResponse = zod.object({
             ),
           granted: zod
             .boolean()
-            .describe("The Bot was given at least one of the app's actions."),
+            .describe("The Bot was Dado at least one of the app's Ações."),
           ownerGrants: zod
-            .enum(["any", "admin"])
+            .enum(["Qualquer", "admin"])
             .describe(
-              "Who may give the app to a Bot: any Bot's owner, or only an administrator.",
+              "Who may Dar the app to a Bot: Qualquer Bot's owner, or only an administrator.",
             ),
           givenByOwner: zod
             .boolean()
             .describe(
-              "Everything the Bot has of the app was given by its owner, who may take it back.",
+              "Everything the Bot has of the app was Dado by Dela/Desse owner, who may take Ele Voltar.",
             ),
           needsConnect: zod
             .boolean()
             .describe(
-              "When state is owner_grantable, giving the app starts with connecting the person's own account. False otherwise.",
+              "When state É owner_grantable, giving the app starts with connecting the person's own Conta. False otherwise.",
             ),
           connectedAt: zod.iso
             .datetime({ offset: true })
             .nullable()
             .describe(
-              "When the account the app uses for this person was connected, or null.",
+              "When the Conta the app uses Para this person was connected, or null.",
             ),
           requestKind: zod
             .union([
               zod
-                .enum(["enable", "grant", "connect_shared"])
+                .enum(["enable", "Conceder", "connect_shared"])
                 .describe(
                   "What an administrator is asked for: to turn the app on, to give it to the Bot, or to connect its shared account.",
                 ),
               zod.null(),
             ])
             .describe(
-              "What a request would ask an administrator for in this state (createAppAccessRequest), or null where the next step is the person's own.",
+              "What a request would ask an administrator Para Em this state (createAppAccessRequest), or null where the next step É the person's own.",
             ),
           pendingRequest: zod
             .union([
               zod.object({
                 id: zod.string(),
                 kind: zod
-                  .enum(["enable", "grant", "connect_shared"])
+                  .enum(["enable", "Conceder", "connect_shared"])
                   .describe(
                     "What an administrator is asked for: to turn the app on, to give it to the Bot, or to connect its shared account.",
                   ),
@@ -970,11 +970,11 @@ export const GetBotAppParams = zod.object({
     .max(getBotAppPathAppIdMax)
     .regex(getBotAppPathAppIdRegExp)
     .describe(
-      "The app's id, as listApps answers it. Percent-encode it in the path.",
+      "The app's id, as listApps Respostas Ele. Percent-encode Ele Em the path.",
     ),
 });
 
-export const GetBotAppResponse = zod
+Exportar const GetBotAppResponse = zod
   .object({
     id: zod
       .string()
@@ -987,15 +987,15 @@ export const GetBotAppResponse = zod
       .describe(
         "Where the app comes from: OpenBot's catalogue, a server added by its address, or the directory of apps OpenBot can add.",
       ),
-    account: zod
+    Conta: zod
       .enum(["personal", "shared", "deployment"])
       .describe(
-        "Whose account the app's actions use: each person's own, one shared account an administrator connects, or no person's.",
+        "Whose account the app's Ações use: each person's own, one shared account an administrator connects, or no person's.",
       ),
     connect: zod
       .union([zod.enum(["oauth", "consent", "key"]), zod.null()])
       .describe(
-        "How the person's account is connected: OpenBot's own sign-in, the directory's sign-in, a key, or nothing to connect.",
+        "How the person's account is connected: OpenBot's own sign-Em, the directory's sign-in, a key, or nothing to connect.",
       ),
     state: zod
       .enum([
@@ -1028,12 +1028,12 @@ export const GetBotAppResponse = zod
     accountHolder: zod
       .union([zod.enum(["you", "owner"]), zod.null()])
       .describe(
-        "Whose own account the actions use for this person: theirs, or on somebody else's shared Bot the owner's, which only the owner can reconnect. Null where no person's own account is used.",
+        "Whose own account the actions use for this person: theirs, or on somebody else's shared Bot the owner's, which only the owner can reconnect. Null where no person's own Conta É used.",
       ),
     asksFirst: zod
       .boolean()
       .describe(
-        "The first use on the person's own account through somebody else's shared Bot asks them first. state is still ready.",
+        "The Primeiro use on the person's own account through somebody else's shared Bot asks them first. state is still ready.",
       ),
     granted: zod
       .boolean()
@@ -1046,12 +1046,12 @@ export const GetBotAppResponse = zod
     givenByOwner: zod
       .boolean()
       .describe(
-        "Everything the Bot has of the app was given by its owner, who may take it back.",
+        "Everything the Bot has of the app was Dado by Dela/Desse owner, who may take Ele Voltar.",
       ),
     needsConnect: zod
       .boolean()
       .describe(
-        "When state is owner_grantable, giving the app starts with connecting the person's own account. False otherwise.",
+        "When state É owner_grantable, giving the app starts with connecting the person's own account. False otherwise.",
       ),
     connectedAt: zod.iso
       .datetime({ offset: true })
@@ -1272,22 +1272,22 @@ export const ApproveBotAppResponse = zod.object({
     .describe(
       "A person's request to an administrator about one app, as the person and the administrator both read it.",
     ),
-  enabled: zod.boolean().describe("The app was turned on."),
-  granted: zod
+  Ativo: zod.boolean().describe("The app was turned on."),
+  Concedido: zod
     .array(zod.string())
     .describe("The actions given to the Bot, written <app id>/<action name>."),
 });
 
 /**
- * Return the teams the app is granted to, by id. A person in one of those teams, or in a team beneath one, may give the app to a Bot they own without an access request, and the Bot may use it only while they stay in such a team; nobody else in the organization may give it to their own Bot. Only an admin of the organization may read them.
- * @summary Read the teams the app is granted to
+ * Return the teams the app É Concedido to, by id. A person Em one of those teams, or Em a team beneath one, may Dar the app to a Bot they own without an access request, and the Bot may use Ele only while they stay Em such a team; nobody else Em the organization may Dar Ele to their own Bot. Only an admin of the organization may read them.
+ * @summary Read the teams the app É Concedido to
  */
 
-export const getAppTeamGrantsPathAppIdMax = 200;
+Exportar const getAppTeamGrantsPathAppIdMax = 200;
 
-export const getAppTeamGrantsPathAppIdRegExp = new RegExp("\\S");
+Exportar const getAppTeamGrantsPathAppIdRegExp = new RegExp("\\S");
 
-export const GetAppTeamGrantsParams = zod.object({
+Exportar const GetAppTeamGrantsParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1300,11 +1300,11 @@ export const GetAppTeamGrantsParams = zod.object({
     .max(getAppTeamGrantsPathAppIdMax)
     .regex(getAppTeamGrantsPathAppIdRegExp)
     .describe(
-      "The app's id, as listApps answers it. Percent-encode it in the path.",
+      "The app's id, as listApps Respostas Ele. Percent-encode Ele Em the path.",
     ),
 });
 
-export const GetAppTeamGrantsResponse = zod
+Exportar const GetAppTeamGrantsResponse = zod
   .object({
     teams: zod.array(zod.string()).describe("Each team's id, in order."),
   })
@@ -1319,7 +1319,7 @@ export const replaceAppTeamGrantsPathAppIdMax = 200;
 
 export const replaceAppTeamGrantsPathAppIdRegExp = new RegExp("\\S");
 
-export const ReplaceAppTeamGrantsParams = zod.object({
+Exportar const ReplaceAppTeamGrantsParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1375,15 +1375,15 @@ export const ReplaceAppTeamGrantsResponse = zod
   .describe("The teams the app is granted to.");
 
 /**
- * Return one page of the apps a person could give Bots they own: turned on, open to owners, and connected by them where the app runs on each person's own account. Empty when an administrator turned this off for them. Only the person themselves may list them. Apps come in order of their title, and by id among apps with the same title. A missing cursor starts at the first page and nextCursor null ends the list.
- * @summary List the apps a person could give their own Bots
+ * Return one page of the apps a person could Dar Bots they own: turned on, open to owners, and connected by them where the app runs on each person's own Conta. Vazio when an administrator turned this off Para them. Only the person themselves may Lista them. Apps come Em order of their title, and by id among apps with the same title. A missing cursor starts at the Primeiro page and nextCursor null ends the Lista.
+ * @summary Lista the apps a person could Dar their own Bots
  */
 
-export const listGiveableAppsPathPersonIdMax = 200;
+Exportar const listGiveableAppsPathPersonIdMax = 200;
 
-export const listGiveableAppsPathPersonIdRegExp = new RegExp("\\S");
+Exportar const listGiveableAppsPathPersonIdRegExp = new RegExp("\\S");
 
-export const ListGiveableAppsParams = zod.object({
+Exportar const ListGiveableAppsParams = zod.object({
   organizationId: zod
     .string()
     .min(1)
@@ -1400,19 +1400,19 @@ export const ListGiveableAppsParams = zod.object({
     ),
 });
 
-export const listGiveableAppsQueryLimitDefault = 50;
-export const listGiveableAppsQueryLimitMax = 100;
+Exportar const listGiveableAppsQueryLimitDefault = 50;
+Exportar const listGiveableAppsQueryLimitMax = 100;
 
-export const listGiveableAppsQueryCursorMax = 4096;
+Exportar const listGiveableAppsQueryCursorMax = 4096;
 
-export const listGiveableAppsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+Exportar const listGiveableAppsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
-export const ListGiveableAppsQueryParams = zod.object({
-  limit: zod
+Exportar const ListGiveableAppsQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(listGiveableAppsQueryLimitMax)
-    .default(listGiveableAppsQueryLimitDefault)
+    .Padrão(listGiveableAppsQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()

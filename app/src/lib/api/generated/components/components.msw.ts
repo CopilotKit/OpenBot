@@ -23,15 +23,15 @@ export const getListComponentsResponseMock = (): ComponentPage => ({
   components: [
     {
       name: "showBarChart",
-      title: "Bar chart",
-      kind: "chart",
+      title: "Bar Gráfico",
+      kind: "Gráfico",
       published: true,
       publishedAt: "2026-11-02T10:15:00.000Z",
-      description: "Compare values across categories with a bar chart.",
+      description: "Compare values across categories with a bar Gráfico.",
       source: null,
       draft: {
-        title: "Bar chart",
-        description: "Compare values across categories with a bar chart.",
+        title: "Bar Gráfico",
+        description: "Compare values across categories with a bar Gráfico.",
         source: null,
       },
       hasUnpublishedChanges: false,
@@ -46,7 +46,7 @@ export const getListComponentsResponseMock = (): ComponentPage => ({
       kind: "playground",
       published: true,
       publishedAt: "2026-11-13T16:40:12.000Z",
-      description: "Show today's weather for one city.",
+      description: "Show today's weather Para one city.",
       source: {
         html: '<div class="card"><h3 id="city"></h3></div>',
         css: ".card { padding: 12px; }",
@@ -60,7 +60,7 @@ export const getListComponentsResponseMock = (): ComponentPage => ({
       },
       draft: {
         title: "Weather card",
-        description: "Show today's weather for one city.",
+        description: "Show today's weather Para one city.",
         source: {
           html: '<div class="card"><h3 id="city"></h3></div>',
           css: ".card { padding: 12px; }",
@@ -93,7 +93,7 @@ export const getGetComponentResponseMock = (): Component => ({
   kind: "card",
   published: true,
   publishedAt: "2026-11-02T10:15:00.000Z",
-  description: "Show how many actions each Bot took recently.",
+  description: "Show Como many Ações each Bot took recently.",
   source: null,
   draft: {
     title: "Activity report",
@@ -114,7 +114,7 @@ export const getReplaceComponentDraftResponseMock = (): Component => ({
   kind: "card",
   published: true,
   publishedAt: "2026-11-02T10:15:00.000Z",
-  description: "Show how many actions each Bot took recently.",
+  description: "Show Como many Ações each Bot took recently.",
   source: null,
   draft: {
     title: "Activity report",
@@ -135,7 +135,7 @@ export const getPublishComponentResponseMock = (): Component => ({
   kind: "card",
   published: true,
   publishedAt: "2026-11-02T10:15:00.000Z",
-  description: "Show how many actions each Bot took recently.",
+  description: "Show Como many Ações each Bot took recently.",
   source: null,
   draft: {
     title: "Activity report",
@@ -152,15 +152,15 @@ export const getPublishComponentResponseMock = (): Component => ({
 
 export const getUnpublishComponentResponseMock = (): Component => ({
   name: "showPieChart",
-  title: "Pie chart",
-  kind: "chart",
+  title: "Pie Gráfico",
+  kind: "Gráfico",
   published: false,
   publishedAt: "2026-11-02T10:15:00.000Z",
-  description: "Show how a whole splits into parts with a pie chart.",
+  description: "Show Como a whole splits into parts with a pie Gráfico.",
   source: null,
   draft: {
-    title: "Pie chart",
-    description: "Show how a whole splits into parts with a pie chart.",
+    title: "Pie Gráfico",
+    description: "Show Como a whole splits into parts with a pie Gráfico.",
     source: null,
   },
   hasUnpublishedChanges: false,
@@ -202,11 +202,11 @@ export const getListBotComponentsResponseMock = (): BotComponentPage => ({
   components: [
     {
       name: "showActivityReport",
-      description: "Show how many actions each Bot took recently.",
+      description: "Show Como many Ações each Bot took recently.",
     },
     {
       name: "showBarChart",
-      description: "Compare values across categories with a bar chart.",
+      description: "Compare values across categories with a bar Gráfico.",
     },
   ],
   nextCursor: null,
@@ -244,7 +244,7 @@ export const getListComponentsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListComponentsResponseMock(),
@@ -277,7 +277,7 @@ export const getAnnounceComponentsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getAnnounceComponentsResponseMock(),
@@ -307,7 +307,7 @@ export const getGetComponentMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetComponentResponseMock(),
@@ -335,7 +335,7 @@ export const getDeleteComponentMockHandler = (
         HttpResponseResolver<{ organizationId: string; componentId: string }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -373,7 +373,7 @@ export const getReplaceComponentDraftMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplaceComponentDraftResponseMock(),
@@ -403,7 +403,7 @@ export const getPublishComponentMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getPublishComponentResponseMock(),
@@ -433,7 +433,7 @@ export const getUnpublishComponentMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getUnpublishComponentResponseMock(),
@@ -463,7 +463,7 @@ export const getListComponentFunctionsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListComponentFunctionsResponseMock(),
@@ -505,7 +505,7 @@ export const getGrantComponentFunctionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGrantComponentFunctionResponseMock(),
@@ -545,7 +545,7 @@ export const getRevokeComponentFunctionMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -574,7 +574,7 @@ export const getListBotComponentsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListBotComponentsResponseMock(),
@@ -614,7 +614,7 @@ export const getAllowBotComponentMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -653,7 +653,7 @@ export const getWithholdBotComponentMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -691,7 +691,7 @@ export const getCheckBotComponentMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCheckBotComponentResponseMock(),
@@ -730,7 +730,7 @@ export const getCallComponentFunctionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getCallComponentFunctionResponseMock(),

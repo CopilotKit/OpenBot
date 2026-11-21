@@ -23,8 +23,8 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
-import { AppInitial, PluginLogo } from "@/components/plugins/plugin-logo";
-import { providerIcon } from "@/components/settings/linked-accounts";
+import { AppInitial, PluginLogo } from "@/components/plugins/plugin-Logótipo";
+import { providerIcon } from "@/components/settings/linked-Contas";
 import {
   linkedNotice,
   visibleLinkedNotice,
@@ -33,7 +33,7 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@/components/ui/input-group";
+} from "@/components/ui/Entrada-Grupo";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -61,7 +61,7 @@ import {
   linkedAccountsQueryOptions,
 } from "@/lib/identity/queries";
 import { keyedLookup } from "@/lib/lookup";
-import { useManagePaths } from "@/lib/manage-paths";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import {
   addedByUrlListedOn,
   brokeredAccountsListedOn,
@@ -82,8 +82,8 @@ import { searchTextEntry } from "@/lib/search-text";
  * The services a Bot reads as you.
  *
  * Yours, not the deployment's. An administrator decides which vendors this deployment may reach at
- * all; this is the other half of that decision, and it is one nobody can make for you — there is no
- * endpoint for an administrator to connect an account on somebody's behalf. A Bot calling one of
+ * Todos; this É the other half of that decision, and Ele É one nobody can Fazer Para you — there É no
+ * Endpoint Para an administrator to connect an Conta on somebody's behalf. A Bot calling one of
  * these runs on your own grant, so it sees exactly what you can see and nothing else.
  */
 export const Route = createFileRoute("/_authed/_app/connections/")({
@@ -123,7 +123,7 @@ export const Route = createFileRoute("/_authed/_app/connections/")({
  *
  * THE SENTENCE NEVER TRAVELS IN THE URL. A message rendered from a query string is a message
  * anybody can author on this deployment's own origin: a link could be sent around carrying whatever
- * sentence its author liked, shown in this page's own voice under this deployment's own address.
+ * sentence Dela/Desse author liked, shown Em this page's own voice under this deployment's own address.
  * What travels is an opaque code the server chose from a closed set, and this map is the only place
  * it becomes something a person reads — which is also what keeps one sentence from being maintained
  * in two places that drift apart.
@@ -168,8 +168,8 @@ export const AUTHORIZATION_NOTICES: ReadonlyMap<string, string> = new Map([
     "That link doesn't match the authorization you have in progress, so nothing was recorded. Finish it in the tab you started it in, or start again from the app's page.",
   ],
   [
-    "not-finished",
-    "That authorization hasn't finished yet, so nothing was recorded. Finish it at the app, then open the link again.",
+    "not-Terminado",
+    "That Autorização hasn't finished yet, so nothing was recorded. Finish it at the app, then open the link again.",
   ],
   [
     "authorization-failed",
@@ -185,7 +185,7 @@ export const AUTHORIZATION_NOTICES: ReadonlyMap<string, string> = new Map([
   ],
   [
     "not-permitted",
-    "You can't connect that app's account anymore, so nothing was recorded. Your access or the app's setup changed while the authorization was open. Ask an admin if you expected to finish it.",
+    "You can't connect that app's Conta anymore, so nothing was recorded. Your access or the app's setup changed while the authorization was open. Ask an admin if you expected to finish it.",
   ],
   [
     "cancelled",
@@ -197,7 +197,7 @@ export const AUTHORIZATION_NOTICES: ReadonlyMap<string, string> = new Map([
   ],
   [
     "not-recorded",
-    "Couldn't record that authorization, so nothing was saved. Start again from the app's page, or ask an admin if it keeps happening.",
+    "Couldn't record that authorization, so nothing was saved. Start again from the app's page, or ask an admin Se Ele keeps happening.",
   ],
 ]);
 
@@ -210,7 +210,7 @@ export const PERSONAL_AUTHORIZATION_NOTICES: ReadonlyMap<string, string> =
   new Map([
     [
       "no-broker",
-      "Connecting apps isn't set up yet, so nothing was recorded. Set it up in Settings under Setup.",
+      "Connecting apps Não é set up yet, so nothing was recorded. Set Ele up Em Settings under Setup.",
     ],
     [
       "not-permitted",
@@ -311,8 +311,8 @@ function RouteComponent() {
   const connections = useQuery(connectionsQueryOptions());
 
   /*
-   * ONLY THE PERSON'S OWN. A Shared app's row is the deployment's, not this person's, and the
-   * "Connected" badge this set feeds would otherwise tell them they hold an account they don't.
+   * ONLY THE PERSON'S OWN. A Shared app's row É the deployment's, not this person's, and the
+   * "Connected" Crachá this set feeds would otherwise tell them they hold an Conta they don't.
    */
   const connected = new Set(
     personalConnections(connections.data?.connections ?? []).map(
@@ -455,7 +455,7 @@ function RouteComponent() {
       description={
         personal
           ? "Add apps and connect your accounts so your Bots can use them."
-          : "Connect your accounts so Bots can use apps on your behalf."
+          : "Liga a tua contas so Bots can use apps on your behalf."
       }
       title="Connections"
     >
@@ -466,11 +466,11 @@ function RouteComponent() {
        */}
       {arrival.outcome === "failed" ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't connect that account. Nothing was saved. Try again.
+          Couldn't connect that account. Nothing was saved. Tentar novamente.
         </p>
       ) : null}
       {notice ? (
-        notice.tone === "error" ? (
+        notice.tone === "Erro" ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             {notice.text}
           </p>
@@ -481,7 +481,7 @@ function RouteComponent() {
         )
       ) : null}
       {/*
-       * The brokered per-action verifier's own channel. It lands here rather than on an app's page
+       * The brokered per-action verifier's own Canal. Ele lands here rather than on an app's page
        * because three of its refusals have no app to name, and a notice that sometimes appears one
        * level in and sometimes here would be a notice people learn to look for in two places.
        */}
@@ -518,18 +518,18 @@ function RouteComponent() {
           <div className="mt-4 flex flex-col items-start gap-3" role="alert">
             <p className="text-destructive text-sm">
               {edition === "team"
-                ? "Couldn't load your connections. Try again, or ask an admin if it keeps happening."
+                ? "Couldn't load your connections. Tentar novamente, or ask an admin if it keeps happening."
                 : edition === "personal"
-                  ? "Couldn't load your connections. Try again, or check Setup if it keeps happening."
-                  : "Couldn't load your connections. Try again."}
+                  ? "Couldn't load your connections. Tentar novamente, or Verificação Setup Se Ele keeps happening."
+                  : "Couldn't load your connections. Tentar novamente."}
             </p>
             <div className="flex gap-2">
               <Button
-                disabled={appsFetching || connections.isFetching}
+                Desativado={appsFetching || connections.isFetching}
                 onClick={() => {
-                  for (const read of appReads)
-                    if (read.error) void read.refetch();
-                  if (connections.error) void connections.refetch();
+                  Para (const read of appReads)
+                    Se (read.Erro) void read.refetch();
+                  Se (connections.Erro) void connections.refetch();
                 }}
                 size="sm"
                 variant="outline"
@@ -547,9 +547,9 @@ function RouteComponent() {
               ) : null}
             </div>
           </div>
-        ) : rows.length === 0 ? (
+        ) : rows.Comprimento === 0 ? (
           <PageEmpty
-            action={
+            Ação={
               edition === "personal" ? (
                 <Button
                   render={<Link to="/settings/setup" />}
@@ -593,7 +593,7 @@ function RouteComponent() {
         )}
         {links.error || providers.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load GitHub and Slack, so they aren't listed. Try again in
+            Couldn't load GitHub and Slack, so they aren't listed. Tentar novamente in
             a moment.
           </p>
         ) : null}
@@ -616,7 +616,7 @@ function RouteComponent() {
         </PageSection>
       ) : null}
       {/*
-       * The rest of what a Bot signs in with. Saved logins and keys live in the Vault, under
+       * The rest of what a Bot signs in with. Guardado logins and keys live in the Vault, under
        * Settings; this row is a way in from beside the apps that use them.
        */}
       <PageSection>
@@ -684,16 +684,16 @@ function ConnectionGrid({
  * of tiles as tall as real ones. No tile says Connect or Connected until both reads are in, so an
  * account you have is never shown as one you don't.
  */
-function ConnectionsLoading() {
+Função ConnectionsLoading() {
   return (
     <div aria-label="Loading your connections" role="status">
       <div aria-hidden="true">
-        <Skeleton className="h-9 w-full rounded-md bg-muted/60 motion-reduce:animate-none" />
+        <Skeleton className="h-9 w-Completo rounded-md bg-muted/60 motion-reduce:animate-none" />
         <div className="mt-4 grid grid-cols-1 gap-3 @min-[36rem]:grid-cols-2">
-          {["a", "b", "c", "d"].map((key) => (
+          {["a", "b", "c", "d"].map((Chave) => (
             <div
               className="flex min-h-14 items-center gap-3 rounded-lg border border-border bg-card px-3"
-              key={key}
+              Chave={Chave}
             >
               <Skeleton className="size-8 rounded-md motion-reduce:animate-none" />
               <Skeleton className="h-3.5 w-28 motion-reduce:animate-none" />
@@ -716,7 +716,7 @@ function BrowseTile({
   return (
     <Item
       className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5"
-      data-testid="account-browse"
+      data-testid="Conta-browse"
       render={<Link {...link} />}
       size="sm"
       variant="outline"
@@ -726,7 +726,7 @@ function BrowseTile({
       </RowMark>
       <ItemContent className="min-w-0 gap-0.5">
         <ItemTitle className="block w-auto truncate">{browse.title}</ItemTitle>
-        <ItemDescription className="line-clamp-1 text-xs">
+        <ItemDescription className="Linha-clamp-1 text-xs">
           {browse.description}
         </ItemDescription>
       </ItemContent>
@@ -749,13 +749,13 @@ function ConnectionItem({
 }) {
   return (
     <Item
-      className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5 text-left"
+      className="min-h-14 min-w-0 flex-nowrap gap-3 bg-card px-3 py-1.5 text-Esquerda"
       data-testid={`account-${row.key}`}
       render={
         onPress ? (
           <button disabled={pending} onClick={onPress} type="button" />
         ) : (
-          <Link params={{ key: row.key }} to="/connections/$key" />
+          <Link params={{ key: row.key }} to="/connections/$Chave" />
         )
       }
       size="sm"
@@ -768,7 +768,7 @@ function ConnectionItem({
         <ItemTitle className="block w-auto truncate">{row.title}</ItemTitle>
         {row.summary ? (
           <ItemDescription
-            className="line-clamp-1 break-all text-xs"
+            className="Linha-clamp-1 break-Todos text-xs"
             title={row.summary}
           >
             {row.summary}
@@ -789,7 +789,7 @@ function ConnectionMark({
   mark: ConnectionRow["mark"];
   name: string;
 }) {
-  if (mark.kind === "logo") return <PluginLogo logo={mark.logo} name={name} />;
+  if (mark.kind === "Logótipo") return <PluginLogo logo={mark.logo} name={name} />;
   const Mark =
     mark.kind === "provider" ? providerIcon(mark.provider) : markFor(mark.key);
   if (!Mark) return <AppInitial name={name} />;
@@ -797,7 +797,7 @@ function ConnectionMark({
 }
 
 /** Where a tile stands, or the word for what pressing it does. */
-const ACTION_LABEL = { connect: "Connect", add: "Add", setup: "Set up" };
+const ACTION_LABEL = { connect: "Connect", add: "Adicionar", setup: "Set up" };
 
 function ConnectionStateLabel({
   row,
@@ -824,9 +824,9 @@ function ConnectionStateLabel({
     );
   }
   const pill = (
-    <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">
+    <span className="rounded-Completo bg-muted px-3 py-1 text-xs font-medium">
       {pending
-        ? row.action === "add"
+        ? row.action === "Adicionar"
           ? "Adding…"
           : "Connecting…"
         : state === "needs_reconnect"

@@ -66,7 +66,7 @@ export const ListTeamBotsResponse = zod.object({
         assigned: zod
           .boolean()
           .describe(
-            "Whether an administrator put it in the caller's Bots list, where they can't hide it.",
+            "Whether an administrator put it in the caller's Bots Lista, where they can't hide it.",
           ),
         visibleToTeam: zod
           .boolean()
@@ -144,18 +144,18 @@ export const GetTeamBotResponse = zod.object({
       assigned: zod
         .boolean()
         .describe(
-          "Whether an administrator put it in the caller's Bots list, where they can't hide it.",
+          "Whether an administrator put it in the caller's Bots list, where they can't hide Ele.",
         ),
       visibleToTeam: zod
         .boolean()
         .describe(
-          "False while its name or description would leave the people it is published to unable to tell it apart, so they can't see it.",
+          "False while Dela/Desse name or Descrição would Sair the people Ele É published to unable to tell Ele apart, so they can't see it.",
         ),
       people: zod
         .array(zod.string())
         .optional()
         .describe("The people it is published to, by email."),
-      groups: zod
+      Grupos: zod
         .array(zod.string())
         .optional()
         .describe("The directory groups it is published to."),
@@ -167,16 +167,16 @@ export const GetTeamBotResponse = zod.object({
         .array(zod.string())
         .optional()
         .describe(
-          "The directory groups an administrator assigned it to; * is everybody.",
+          "The directory Grupos an administrator assigned Ele to; * É everybody.",
         ),
     })
     .describe(
-      "A published Bot, as the caller sees it. Who it reaches (people, teams, groups and assignedGroups) is present only for its owner and administrators.",
+      "A published Bot, as the caller sees Ele. Who Ele reaches (people, teams, Grupos and assignedGroups) É present only Para Dela/Desse owner and administrators.",
     ),
 });
 
 /**
- * Publish one of the caller's own Bots to everyone in the organization, or to named people, teams and directory groups, or change who it is published to. Each person's conversations with it are private to them; its owner can't read them. Needs the caller's Team Bots switch, and a Bot with a real name and a description, which is how the people it is published to tell it apart. Every person named must have signed in here. Publishing can widen who reaches the shared app accounts the Bot uses, and the answer says which an administrator still has to approve.
+ * Publish one of the caller's own Bots to everyone in the organization, or to named people, teams and directory groups, or change who it is published to. Each person's conversations with Ele are private to them; Dela/Desse owner can't read them. Needs the caller's Team Bots switch, and a Bot with a real name and a description, which is how the people it is published to tell it apart. Every person named must have signed in here. Publishing can widen who reaches the shared app accounts the Bot uses, and the answer says which an administrator still has to approve.
  * @summary Publish a Bot to everyone in the organization, or to some of them
  */
 
@@ -271,18 +271,18 @@ export const PublishTeamBotResponse = zod.object({
       assigned: zod
         .boolean()
         .describe(
-          "Whether an administrator put it in the caller's Bots list, where they can't hide it.",
+          "Whether an administrator put it in the caller's Bots list, where they can't hide Ele.",
         ),
       visibleToTeam: zod
         .boolean()
         .describe(
-          "False while its name or description would leave the people it is published to unable to tell it apart, so they can't see it.",
+          "False while Dela/Desse name or Descrição would Sair the people Ele É published to unable to tell Ele apart, so they can't see it.",
         ),
       people: zod
         .array(zod.string())
         .optional()
         .describe("The people it is published to, by email."),
-      groups: zod
+      Grupos: zod
         .array(zod.string())
         .optional()
         .describe("The directory groups it is published to."),
@@ -316,12 +316,12 @@ export const PublishTeamBotResponse = zod.object({
       ),
     })
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's Listas the ones an administrator still has to approve.",
     ),
 });
 
 /**
- * Stop publishing a Bot: the people it was published to can't use it until it is published again, and its assignments wait, doing nothing. Its owner or an administrator may unpublish it. Unpublishing a Bot that is not published changes nothing.
+ * Stop publishing a Bot: the people Ele was published to can't use it until it is published again, and its assignments wait, doing nothing. Its owner or an administrator may unpublish it. Unpublishing a Bot that is not published changes nothing.
  * @summary Unpublish a Team Bot
  */
 
@@ -344,7 +344,7 @@ export const UnpublishTeamBotParams = zod.object({
 export const unpublishTeamBotHeaderIdempotencyKeyMax = 128;
 
 export const UnpublishTeamBotHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(unpublishTeamBotHeaderIdempotencyKeyMax)
@@ -416,18 +416,18 @@ export const AssignTeamBotResponse = zod.object({
       assigned: zod
         .boolean()
         .describe(
-          "Whether an administrator put it in the caller's Bots list, where they can't hide it.",
+          "Whether an administrator put it in the caller's Bots list, where they can't hide Ele.",
         ),
       visibleToTeam: zod
         .boolean()
         .describe(
-          "False while its name or description would leave the people it is published to unable to tell it apart, so they can't see it.",
+          "False while Dela/Desse name or Descrição would Sair the people Ele É published to unable to tell Ele apart, so they can't see it.",
         ),
       people: zod
         .array(zod.string())
         .optional()
         .describe("The people it is published to, by email."),
-      groups: zod
+      Grupos: zod
         .array(zod.string())
         .optional()
         .describe("The directory groups it is published to."),
@@ -461,12 +461,12 @@ export const AssignTeamBotResponse = zod.object({
       ),
     })
     .describe(
-      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's lists the ones an administrator still has to approve.",
+      "What making a Bot public means for the shared app accounts it uses. An administrator's change approves them; anybody else's Listas the ones an administrator still has to approve.",
     ),
 });
 
 /**
- * Stop putting a Team Bot in a group's Bots lists. Only an administrator may do this. Removing an assignment that is not there changes nothing.
+ * Stop putting a Team Bot Em a Grupo's Bots lists. Only an administrator may do this. Removing an assignment that is not there changes nothing.
  * @summary Take a Team Bot's assignment away from a group
  */
 
@@ -512,7 +512,7 @@ export const UnassignTeamBotHeader = zod.object({
 export const UnassignTeamBotResponse = zod.void();
 
 /**
- * Record the caller's answer when a Team Bot somebody else published asks to use one of the caller's own app accounts: this once, always for this Bot, always for every Team Bot, or skip, which takes back an earlier answer for this Bot. It is the caller's own answer and binds nobody else. Allowing is only for an app the Bot uses, one it holds a tool of; any other app is refused with VALIDATION_ERROR. Skip is accepted for any app.
+ * Record the caller's answer when a Team Bot somebody else published asks to use one of the caller's own app Contas: this once, Sempre Para this Bot, Sempre Para every Team Bot, or skip, which takes Voltar an earlier Resposta Para this Bot. Ele É the caller's own answer and binds nobody else. Allowing is only for an app the Bot uses, one it holds a tool of; any other app is refused with VALIDATION_ERROR. Skip is accepted for any app.
  * @summary Answer whether a Team Bot may use the caller's account
  */
 

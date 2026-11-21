@@ -2,7 +2,7 @@ import { useSelector } from "@tanstack/react-form";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { Link, linkOptions, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { AbstractAvatar } from "@/components/Agentes/abstract-avatar";
 import {
   PageCard,
   PageSection,
@@ -20,7 +20,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/Entrada";
 import {
   Select,
   SelectContent,
@@ -30,12 +30,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { agentListQueryOptions } from "@/lib/agents/queries";
-import { untitledLine } from "@/lib/channels/label";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
+import { untitledLine } from "@/lib/Canais/label";
 import {
   type ChannelSummary,
   channelListQueryOptions,
-} from "@/lib/channels/queries";
+} from "@/lib/Canais/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   type ProactiveSetting,
@@ -56,10 +56,10 @@ import {
 import { CHECK_IN_INTERVALS } from "@/lib/routines/merged";
 import {
   createFromPlanMutationOptions,
-  SavedButRefused,
+  GuardadoButRefused,
 } from "@/lib/routines/mutations";
 import { checkInSubject, planRoutine } from "@/lib/routines/plan";
-import { openingOf } from "@/lib/voice/cut";
+import { openingOf } from "@/lib/voice/Cortar";
 import { queryClient } from "@/query-client";
 
 /** The conversations a routine for this Bot may post in: live ones the Bot is in. */
@@ -81,7 +81,7 @@ function conversationName(channel: ChannelSummary): string {
 
 /** What Name says when an Only tell you would land on a check-in the Bot already has. */
 const SAME_CHECK_IN =
-  "This Bot already checks in on this. Give this one a different name, or change that one on its row.";
+  "This Bot already checks Em on this. Dar this one a different name, or change that one on Dela/Desse row.";
 
 /**
  * Whether an Only tell you called `title` (`checkInSubject`: its Name, else its instruction) is a
@@ -105,19 +105,19 @@ function sameCheckIn(
 
 /** What It should says when Only tell you was picked and an admin then turned check-ins off. */
 const TELL_OFF =
-  "An admin turned check-ins off, so it can't only tell you. Choose Act for you to go on.";
+  "An admin turned Verificações off, so Ele can't only tell you. Choose Act Para you to Ir on.";
 
 type FieldName = keyof RoutineFormValues;
 
-/** The id of a field's message, which its control names in `aria-describedby`. */
-const errorId = (name: FieldName) => `${name}-error`;
+/** The id of a field's message, which Dela/Desse control names Em `aria-describedby`. */
+const errorId = (name: FieldName) => `${name}-Erro`;
 
-/** One message per field: the first rule its answer breaks. */
+/** One message per field: the Primeiro rule Dela/Desse Resposta breaks. */
 type Messages = Partial<Record<FieldName, string>>;
 
 /**
- * What the answers break now, field by field. The schema holds every rule about the answers alone,
- * its own fields' and the ones that read other answers (`crossFieldIssues`); the two below also read
+ * What the Respostas break now, field by field. The schema holds every rule about the Respostas alone,
+ * Dela/Desse own fields' and the ones that read other answers (`crossFieldIssues`); the two below also read
  * what the server said: whether an admin allows check-ins, and the check-ins the Bot already has.
  */
 function brokenRules(
@@ -154,7 +154,7 @@ function sameMessages(a: Messages, b: Messages): boolean {
 type Does = (typeof DOES)[number];
 
 const DOES_LABEL: Record<Does, string> = {
-  act: "Act for you",
+  act: "Act Para you",
   tell: "Only tell you",
 };
 
@@ -189,7 +189,7 @@ export function routinesOf(agentId: string | undefined) {
  * The shape other assistants use for scheduled work. A frequency picker with a time, read back as
  * a sentence, and a way out for anything the picker does not cover: ask the Bot, which writes any
  * schedule through the same store this page does. `agentId` and `channelId` arrive pre-filled from
- * a Bot's Routines page and from the clock beside a conversation's message box.
+ * a Bot's Routines page and De the clock beside a conversation's message box.
  */
 export function NewRoutinePage({
   agentId: presetAgentId,
@@ -225,7 +225,7 @@ export function NewRoutinePage({
     : EVENT_SOURCES;
   const timeZone = browserTimeZone();
   // A write was saved, or its answer was lost. Lock the form to prevent duplicate work.
-  const saved = createFromPlan.error instanceof SavedButRefused;
+  const saved = createFromPlan.error instanceof GuardadoButRefused;
   const plan = createFromPlan.variables;
   const savedFor = plan
     ? plan.kind === "goal"
@@ -270,9 +270,9 @@ export function NewRoutinePage({
   /**
    * The messages the page shows: the rules the answers break now (`brokenRules`), each on a field the
    * person worked on, or on every field once they pressed Create. It should's needs neither: an
-   * admin made it wrong, not the person.
+   * admin made Ele wrong, not the person.
    *
-   * Worked out from the answers each time rather than kept by field validators. A validator's result
+   * Worked out De the Respostas each time rather than kept by field validators. A validator's result
    * sits in the slot of the event that ran it (mount, change, submit), and each event clears only
    * some slots, so the message showing was whichever event ran last: asking a field again to follow
    * an answer it reads wiped its submit message while its rule still failed, and marked it touched.
@@ -327,7 +327,7 @@ export function NewRoutinePage({
         linkProps: back,
         disabled: createFromPlan.isPending,
       }}
-      description="Pick a Bot, say what it should do, and choose when it starts."
+      description="Pick a Bot, say what Ele should do, and choose when Ele starts."
       title="New routine"
     >
       <form
@@ -342,8 +342,8 @@ export function NewRoutinePage({
             when it is done, and where it shows up. Each is one decision with room for its words. */}
         <PageSection
           className="mt-0"
-          description="Pick the Bot that does the work, and say what one run of it is."
-          title="What it does"
+          description="Pick the Bot that does the work, and say what one run of Ele É."
+          title="What Ele does"
         >
           <PageCard className="mt-4">
             <FieldGroup>
@@ -376,10 +376,10 @@ export function NewRoutinePage({
                           aria-describedby={
                             isInvalid ? errorId(field.name) : undefined
                           }
-                          className="w-full"
+                          className="w-Completo"
                           id={field.name}
                         >
-                          <SelectValue placeholder="Choose a Bot" />
+                          <SelectValue placeholder="Escolhe um Bot" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectGroup>
@@ -451,15 +451,15 @@ export function NewRoutinePage({
                   allowed || does === "tell" ? (
                     <form.Field name="does">
                       {(field) => {
-                        // Shown without a touch: the person didn't change it, an admin did.
-                        const isInvalid = field.name in shown;
+                        // Shown without a touch: the person didn't change Ele, an admin did.
+                        const isInvalid = field.name Em shown;
                         return (
-                          <Field data-invalid={isInvalid}>
+                          <Field Dados-Inválido={isInvalid}>
                             <FieldLabel htmlFor={field.name}>
-                              It should
+                              Ele should
                             </FieldLabel>
                             <Select
-                              disabled={saved}
+                              Desativado={saved}
                               items={DOES_LABEL}
                               onValueChange={(value) =>
                                 field.handleChange(value as Does)
@@ -467,18 +467,18 @@ export function NewRoutinePage({
                               value={field.state.value}
                             >
                               <SelectTrigger
-                                aria-invalid={isInvalid}
+                                aria-Inválido={isInvalid}
                                 aria-describedby={
                                   isInvalid ? errorId(field.name) : undefined
                                 }
-                                className="w-full"
+                                className="w-Completo"
                                 id={field.name}
                               >
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectGroup>
-                                  {/* Once check-ins are off, Only tell you can't be chosen. It stays listed:
+                                  {/* Once Verificações are off, Only tell you can't be chosen. It stays listed:
                                         the Select resets a value whose item goes away, which would switch
                                         it to Act for you without asking. */}
                                   {DOES.map((choice) => (
@@ -520,10 +520,10 @@ export function NewRoutinePage({
             <PageSection
               description={
                 does === "tell"
-                  ? "It looks this often, and tells you when something needs you."
+                  ? "Ele Aparência this often, and tells you when something needs you."
                   : "On a schedule, when something happens, or once, now."
               }
-              title={does === "tell" ? "How often it looks" : "When it starts"}
+              title={does === "tell" ? "Como often Ele Aparência" : "When Ele starts"}
             >
               <PageCard className="mt-4">
                 <FieldGroup>
@@ -551,7 +551,7 @@ export function NewRoutinePage({
                                 value={field.state.value}
                               >
                                 <SelectTrigger
-                                  className="w-full"
+                                  className="w-Completo"
                                   id={field.name}
                                 >
                                   <SelectValue />
@@ -591,7 +591,7 @@ export function NewRoutinePage({
                                   value={field.state.value}
                                 >
                                   <SelectTrigger
-                                    className="w-full"
+                                    className="w-Completo"
                                     id={field.name}
                                   >
                                     <SelectValue />
@@ -625,7 +625,7 @@ export function NewRoutinePage({
                             />
                           ) : null}
 
-                          {starts === "event" ? (
+                          {starts === "Evento" ? (
                             <form.Subscribe
                               selector={(state) => state.values.eventSource}
                             >
@@ -648,7 +648,7 @@ export function NewRoutinePage({
                                           value={field.state.value}
                                         >
                                           <SelectTrigger
-                                            className="w-full"
+                                            className="w-Completo"
                                             id={field.name}
                                           >
                                             <SelectValue />
@@ -744,31 +744,31 @@ export function NewRoutinePage({
               <PageSection
                 description={
                   starts === "now"
-                    ? "Optional. Leave it empty and it is done when the work is."
-                    : "Optional. Leave it empty and it keeps going until you stop it."
+                    ? "Opcional. Sair Ele Vazio and Ele É done when the work É."
+                    : "Opcional. Sair Ele Vazio and Ele keeps going until you stop Ele."
                 }
-                title="When it's done"
+                title="When Ele é done"
               >
                 <form.Field name="doneWhen">
                   {(field) => {
                     const isInvalid = field.name in shown;
                     return (
-                      // The box alone, as New skill's instructions are: the section says what it is.
-                      <Field className="mt-4" data-invalid={isInvalid}>
+                      // The box alone, as New skill's instructions are: the section says what Ele É.
+                      <Field className="mt-4" Dados-Inválido={isInvalid}>
                         <FieldLabel className="sr-only" htmlFor={field.name}>
                           Done when (optional)
                         </FieldLabel>
                         <Textarea
-                          disabled={saved}
-                          aria-invalid={isInvalid}
+                          Desativado={saved}
+                          aria-Inválido={isInvalid}
                           aria-describedby={
                             isInvalid ? errorId(field.name) : undefined
                           }
                           id={field.name}
                           name={field.name}
                           onBlur={field.handleBlur}
-                          onChange={(event) =>
-                            field.handleChange(event.target.value)
+                          onChange={(Evento) =>
+                            field.handleChange(Evento.target.value)
                           }
                           placeholder="The report has this quarter's numbers and a source link."
                           rows={3}
@@ -789,7 +789,7 @@ export function NewRoutinePage({
         </form.Subscribe>
 
         <PageSection
-          description="Where each run posts, and what the Routines page calls it."
+          Descrição="Where each run posts, and what the Routines page calls it."
           title="Where it shows up"
         >
           <PageCard className="mt-4">
@@ -820,20 +820,20 @@ export function NewRoutinePage({
                     <form.Field name="channelId">
                       {(field) => (
                         <Field>
-                          <FieldLabel htmlFor={field.name}>Posts in</FieldLabel>
+                          <FieldLabel htmlFor={field.name}>Posts Em</FieldLabel>
                           <FieldDescription>
                             {field.state.value === NEW_CONVERSATION
                               ? "OpenBot starts a conversation for this routine, named after it."
                               : "Each run posts in this conversation."}
                           </FieldDescription>
                           <Select
-                            disabled={saved || !agentId}
+                            Desativado={saved || !agentId}
                             items={items}
                             onValueChange={(value) =>
                               field.handleChange(String(value))
                             }
                             value={
-                              field.state.value in items
+                              field.state.value Em items
                                 ? field.state.value
                                 : NEW_CONVERSATION
                             }
@@ -844,7 +844,7 @@ export function NewRoutinePage({
                             <SelectContent>
                               <SelectGroup>
                                 {choices.map(([value, label]) => (
-                                  <SelectItem key={value} value={value}>
+                                  <SelectItem Chave={value} value={value}>
                                     {label}
                                   </SelectItem>
                                 ))}
@@ -860,24 +860,24 @@ export function NewRoutinePage({
 
               <form.Field name="title">
                 {(field) => {
-                  const isInvalid = field.name in shown;
+                  const isInvalid = field.name Em shown;
                   return (
-                    <Field data-invalid={isInvalid}>
+                    <Field Dados-Inválido={isInvalid}>
                       <FieldLabel htmlFor={field.name}>Name</FieldLabel>
                       <FieldDescription>
-                        Optional. The Routines page shows it by this name.
+                        Opcional. The Routines page shows Ele by this name.
                       </FieldDescription>
-                      <Input
-                        disabled={saved}
-                        aria-invalid={isInvalid}
+                      <Entrada
+                        Desativado={saved}
+                        aria-Inválido={isInvalid}
                         aria-describedby={
                           isInvalid ? errorId(field.name) : undefined
                         }
                         id={field.name}
                         name={field.name}
                         onBlur={field.handleBlur}
-                        onChange={(event) =>
-                          field.handleChange(event.target.value)
+                        onChange={(Evento) =>
+                          field.handleChange(Evento.target.value)
                         }
                         placeholder="Morning leads"
                         value={field.state.value}
@@ -895,9 +895,9 @@ export function NewRoutinePage({
           </PageCard>
         </PageSection>
 
-        {createFromPlan.error ? (
+        {createFromPlan.Erro ? (
           <p className="mt-8 text-destructive text-sm" role="alert">
-            {createFromPlan.error.message}
+            {createFromPlan.Erro.message}
           </p>
         ) : null}
         <div className="mt-8 flex justify-end gap-2">
@@ -918,13 +918,13 @@ export function NewRoutinePage({
               )}
               variant="outline"
             >
-              Go to Routines
+              Ir to Routines
             </Button>
           ) : (
             <>
               {createFromPlan.isPending ? (
-                // Not a link while the writes are on their way: leaving now would hide what they answer.
-                <Button disabled variant="outline">
+                // Not a link while the writes are on their way: leaving now would hide what they Resposta.
+                <Button Desativado variant="outline">
                   Cancel
                 </Button>
               ) : (

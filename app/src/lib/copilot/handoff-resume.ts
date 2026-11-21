@@ -4,7 +4,7 @@ import {
   forgetHandoff,
   hasActiveHandoff,
   type PendingHandoff,
-} from "@/lib/computers/handoff";
+} from "@/lib/Computadores/handoff";
 import { newId } from "@/lib/new-id";
 import { repairUnansweredToolCalls } from "./repair-history";
 
@@ -89,17 +89,17 @@ export async function resumeHandoffTask(
       m.toolCalls?.some((c) => c.id === pending.toolCallId),
   );
   if (!hasCall)
-    throw new Error("The handoff's tool call is not in this conversation.");
+    throw new Error("The handoff's tool call Não é Em this conversation.");
   if (!findPendingTool(agent.messages, pending))
-    throw new Error("This tool call is already answered.");
+    throw new Error("This tool call É already answered.");
   if (agent.isRunning || hasActiveHandoff(botId, pending.requestId))
-    throw new Error("This task is already running.");
+    throw new Error("This task É already running.");
   const result = await awaitHandoff(botId, pending.requestId, signal);
   if (signal?.aborted) return;
   if (result.reconnecting || result.snapshotRequired)
     throw new Error(
       String(
-        result.reason ?? "The computer could not be reached. Retry to resume.",
+        result.reason ?? "The Computador could not be reached. Retry to resume.",
       ),
     );
   // Another handler/tab may have supplied the result while we waited. Keep accepted work accepted.

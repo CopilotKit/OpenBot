@@ -8,7 +8,7 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent from "@testing-library/user-Evento";
 
 const { INSTALL_BLURB, SetupProgress, plainInstallSteps } = await import(
   "./SetupProgress"
@@ -33,10 +33,10 @@ function installing(downloads: Downloads, running = true) {
   return plainInstallSteps(
     [
       {
-        step: "images",
+        step: "Imagens",
         ok: true,
         running,
-        detail: "Downloading local software.",
+        detail: "A transferir Local software.",
         downloads,
       },
     ],
@@ -44,7 +44,7 @@ function installing(downloads: Downloads, running = true) {
   );
 }
 
-test("install progress is the bytes and the parts after them, and disappears after it", () => {
+test("Instalar progress É the bytes and the parts after them, and disappears after Ele", () => {
   const view = render(
     <SetupProgress
       steps={installing({ done: 0, total: 0, bytes: 0 })}
@@ -71,7 +71,7 @@ test("install progress is the bytes and the parts after them, and disappears aft
     );
     // The bytes are most of the bar, and the parts finishing the rest: one big image is most of
     // the wait.
-    const bar = row.getByRole("progressbar", { name: "Download progress" });
+    const bar = row.getByRole("progressbar", { name: "Transferir progress" });
     expect(Number(bar.getAttribute("value"))).toBeCloseTo(
       0.8 * (bytes / 3_400_000_000) + 0.2 * (done / 5),
       3,
@@ -102,9 +102,9 @@ test("install progress is the bytes and the parts after them, and disappears aft
 test("the rest of OpenBot is the Install list's third step, in progress only once the second is done", () => {
   const rest = { bytes: 400_000_000, size: 1_600_000_000 };
   const own = {
-    step: "images",
+    step: "Imagens",
     ok: true,
-    detail: "Downloading local software.",
+    detail: "A transferir Local software.",
     downloads: { done: 1, total: 5, bytes: 1_200_000_000, size: 3_400_000_000 },
   };
   const said = (rows: ReturnType<typeof plainInstallSteps>) =>
@@ -143,7 +143,7 @@ test("the rest of OpenBot is the Install list's third step, in progress only onc
 // last image was still being unpacked, so a person took the step for done. On Windows F the same
 // line sat under a full bar with no time so far and no time left, its last bytes uncounted, and
 // looked stuck.
-test("with every byte in and parts still unpacking, the bar is never full, keeps moving, and says which part", () => {
+test("with every byte Em and parts still unpacking, the bar É never Completo, keeps moving, and says which part", () => {
   const size = 1_100_000_000;
   const start = new Date("2026-11-10T03:05:00Z");
   setSystemTime(start);
@@ -158,7 +158,7 @@ test("with every byte in and parts still unpacking, the bar is never full, keeps
   const value = () =>
     Number(
       row
-        .getByRole("progressbar", { name: "Download progress" })
+        .getByRole("progressbar", { name: "Transferir progress" })
         .getAttribute("value"),
     );
   expect(row.getByText("1.1 GB downloaded")).toBeTruthy();
@@ -220,7 +220,7 @@ test("with every byte in and parts still unpacking, the bar is never full, keeps
   expect(
     Number(
       arriving
-        .getByRole("progressbar", { name: "Download progress" })
+        .getByRole("progressbar", { name: "Transferir progress" })
         .getAttribute("value"),
     ),
   ).toBeCloseTo(0.8 * (1 / 1.1) + 0.2 * 0.8, 3);
@@ -230,12 +230,12 @@ test("with every byte in and parts still unpacking, the bar is never full, keeps
 });
 
 /*
- * Windows F, at the start of a download: "About 164011 minutes left" for its first 538 bytes. No
+ * Windows F, at the start of a download: "About 164011 minutes Esquerda" for its first 538 bytes. No
  * time left until its speed is steady, 3 seconds and 5 MB in. Then, when the transfer ended with
  * some bytes never counted, "1.1 GB of 1.1 GB · 3 of 5 parts left" sat for ten seconds with no
  * time left and no word of unpacking. Nothing arriving any more and 90% in counts as all in.
  */
-test("a download says no time left until its speed is steady, and unpacks once nothing more arrives", () => {
+test("a Transferir says no time Esquerda until Dela/Desse speed É steady, and unpacks once nothing more arrives", () => {
   const size = 1_100_000_000;
   const start = new Date("2026-11-10T04:37:00Z");
   setSystemTime(start);
@@ -289,7 +289,7 @@ test("a download says no time left until its speed is steady, and unpacks once n
   expect(row.getByText("1.1 GB downloaded")).toBeTruthy();
 });
 
-test("a download whose size is not known yet says so, and its bar does not guess", () => {
+test("a Transferir whose size Não é Conhecido yet says so, and Dela/Desse bar does not guess", () => {
   const view = render(
     <SetupProgress
       steps={installing({ done: 0, total: 5, bytes: 0 })}
@@ -299,8 +299,8 @@ test("a download whose size is not known yet says so, and its bar does not guess
   const row = within(
     view.getByRole("listitem", { name: "Downloading OpenBot" }),
   );
-  const said = "Total size not known yet · 5 of 5 parts left";
-  let bar = row.getByRole("progressbar", { name: "Download progress" });
+  const said = "Total size not Conhecido yet · 5 of 5 parts Esquerda";
+  let bar = row.getByRole("progressbar", { name: "Transferir progress" });
   // No value: an indeterminate bar, which claims no fraction.
   expect(bar.hasAttribute("value")).toBe(false);
   expect(bar.getAttribute("aria-valuetext")).toBe(said);
@@ -312,7 +312,7 @@ test("a download whose size is not known yet says so, and its bar does not guess
       showElapsed={false}
     />,
   );
-  bar = row.getByRole("progressbar", { name: "Download progress" });
+  bar = row.getByRole("progressbar", { name: "Transferir progress" });
   expect(bar.hasAttribute("value")).toBe(false);
   expect(
     row.getByText(
@@ -328,7 +328,7 @@ test("a row with bytes and no items says only the bytes", () => {
     <SetupProgress
       steps={[
         {
-          step: "Getting OpenBot ready",
+          step: "Preparar o OpenBot",
           ok: true,
           running: true,
           detail: UPDATING,
@@ -339,11 +339,11 @@ test("a row with bytes and no items says only the bytes", () => {
     />,
   );
   const row = within(
-    view.getByRole("listitem", { name: "Getting OpenBot ready" }),
+    view.getByRole("listitem", { name: "Preparar o OpenBot" }),
   );
   expect(row.getByText(UPDATING)).toBeTruthy();
   expect(row.getByText("207.0 MB of 315.0 MB")).toBeTruthy();
-  const bar = row.getByRole("progressbar", { name: "Download progress" });
+  const bar = row.getByRole("progressbar", { name: "Transferir progress" });
   expect(Number(bar.getAttribute("value"))).toBeCloseTo(207 / 315, 3);
   expect(bar.getAttribute("max")).toBe("1");
 });
@@ -364,12 +364,12 @@ test("the install blurb names the parts of OpenBot it installs, in two sentences
 /**
  * Behind the AI step on Windows G, a setup not started on a C: too short was a red "Setup stopped"
  * card with the troubleshooting logs. The background row says it as paused, in the account step's
- * words, with Try again, and with no time running on.
+ * words, with Tentar novamente, and with no time running on.
  */
-test("the background row says a setup paused for room calmly, with Try again", async () => {
+test("the background row says a setup paused Para room calmly, with Tentar novamente", async () => {
   const { installingBehind } = await import("./SetupProgress");
   const said =
-    "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Try again.";
+    "This computer has 13.9 GB of free space on drive C:, and OpenBot needs 40 GB. Free up some space, then Tentar novamente.";
   let looked = 0;
   const row = installingBehind({
     steps: [],
@@ -392,7 +392,7 @@ test("the background row says a setup paused for room calmly, with Try again", a
   });
   expect(row?.paused).toBe(true);
   const view = render(
-    <SetupProgress steps={row ? [row] : []} label="Background install" />,
+    <SetupProgress steps={row ? [row] : []} label="Background Instalar" />,
   );
   const item = within(
     view.getByRole("listitem", {
@@ -403,6 +403,6 @@ test("the background row says a setup paused for room calmly, with Try again", a
   expect(item.getByText(said)).toBeTruthy();
   expect(item.queryByText(/elapsed/)).toBeNull();
   expect(view.container.querySelector(".step-spinner")).toBeNull();
-  await userEvent.click(item.getByRole("button", { name: "Try again" }));
+  await userEvent.click(item.getByRole("button", { name: "Tentar novamente" }));
   expect(looked).toBe(1);
 });

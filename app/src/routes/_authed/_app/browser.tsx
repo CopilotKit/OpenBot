@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { BrowserPage } from "@/components/browser/browser-page";
+import { BrowserPage } from "@/components/Navegador/Navegador-page";
 
 /**
  * The person's own browser, with the OpenBot Recorder in it.
@@ -8,6 +8,6 @@ import { BrowserPage } from "@/components/browser/browser-page";
  * page needs the app's full-height pane. Reached from Teach a Bot on the Skills page, which shows only where OpenBot can
  * run a browser for the person.
  */
-export const Route = createFileRoute("/_authed/_app/browser")({
+export const Route = createFileRoute("/_authed/_app/Navegador")({
   component: BrowserPage,
 });

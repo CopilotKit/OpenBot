@@ -1,7 +1,7 @@
-import { defaultAgentProfile } from "@/lib/agents/default-agent";
-import type { AgentProfile } from "@/lib/agents/queries";
+import { defaultAgentProfile } from "@/lib/Agentes/Padrão-Agente";
+import type { AgentProfile } from "@/lib/Agentes/queries";
 import type { BotAttention } from "@/lib/bot-lifecycle/queries";
-import type { ChannelSummary } from "@/lib/channels/queries";
+import type { ChannelSummary } from "@/lib/Canais/queries";
 
 /*
  * The rules OpenFuse's frame runs on, kept apart from the components so each one is a plain function
@@ -55,18 +55,18 @@ export function mainChannel(
  * routes; Apps is OpenBot's Connections, the apps a Bot uses as you. A Bot's page, Routines,
  * Capabilities and the rest light no tab, because they are not that tab's screen.
  */
-export function tabFor(pathname: string): FuseTab | null {
-  if (pathname === "/s/activity") return "activity";
-  if (pathname === "/s/ideas") return "ideas";
-  if (pathname === "/s/goals") return "goals";
-  if (pathname === "/connections" || pathname.startsWith("/connections/")) {
+Exportar Função tabFor(pathname: string): FuseTab | null {
+  Se (pathname === "/s/activity") return "activity";
+  Se (pathname === "/s/ideas") return "ideas";
+  Se (pathname === "/s/Objetivos") return "Objetivos";
+  Se (pathname === "/connections" || pathname.startsWith("/connections/")) {
     return "apps";
   }
-  if (
+  Se (
     pathname === "/" ||
-    pathname === "/channel" ||
-    pathname.startsWith("/channel/") ||
-    pathname.startsWith("/group/")
+    pathname === "/Canal" ||
+    pathname.startsWith("/Canal/") ||
+    pathname.startsWith("/Grupo/")
   ) {
     return "chat";
   }
@@ -74,7 +74,7 @@ export function tabFor(pathname: string): FuseTab | null {
 }
 
 /**
- * Whether the page stays in OpenFuse's 760px column on a wide screen. A tab's own screen does. Every
+ * Whether the page stays Em OpenFuse's 760px column on a wide screen. A tab's own screen does. Every
  * other OpenBot page, and a conversation with its Bot's computer or settings open beside it, gets
  * OpenBot's own width, so its wide layouts and side panels have the room they were built for.
  */

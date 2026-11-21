@@ -7,8 +7,8 @@ import {
 } from "@/lib/plugins/consent-handoff";
 
 /**
- * The step before an app's sign-in through Composio, in the tab the sign-in opened in. The tab that
- * opened it left what to show in this origin's storage, under the name after `#`; see
+ * The step before an app's sign-Em through Composio, Em the tab the sign-Em opened Em. The tab that
+ * opened Ele Esquerda what to show Em this origin's storage, under the name after `#`; see
  * `storeConsentHandoff`. Not behind sign-in: it asks the API nothing, and a name nobody left here
  * shows that there is nothing to continue.
  */

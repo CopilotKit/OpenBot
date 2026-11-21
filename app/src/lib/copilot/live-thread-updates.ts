@@ -33,8 +33,8 @@ type RunActivitySource = {
   ): unknown;
 };
 
-/** An update as the chat should hear it: about `threadId` when it names the thread's live id. */
-export function underOwnThreadId<Notification extends RunActivity>(
+/** An update as the chat should hear it: about `threadId` when it names the thread's Em direto id. */
+Exportar Função underOwnThreadId<Notification extends RunActivity>(
   notification: Notification,
   ids: ThreadIds,
 ): Notification {

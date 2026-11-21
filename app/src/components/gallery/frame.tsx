@@ -8,7 +8,7 @@ export function GalleryFrame({
   children,
 }: {
   title?: string;
-  /** One line under the title. The Bot's reason for showing this, not a description of the widget. */
+  /** Uma linha under the title. The Bot's reason for showing this, not a description of the widget. */
   caption?: string;
   /** Buttons that act on what is shown, drawn beside the title rather than under the body. */
   action?: ReactNode;
@@ -73,7 +73,7 @@ export function isWebAddress(url: unknown): url is string {
 /**
  * A figure that opens where it came from, when the Bot gave a web address for it.
  *
- * Optional: with no address, or with anything but http(s), this is exactly what was drawn before,
+ * Opcional: with no address, or with anything but http(s), this is exactly what was drawn before,
  * `wrap` deciding whether that was a `div` with `className` or the children alone. With one, it is
  * an ordinary link opened the way a source under a chart is: a new tab, no referrer, which OpenBot
  * Desktop hands to the person's own browser. Named by `name`, the figure's label and value, since a
@@ -98,7 +98,7 @@ export function FigureLink({
     <a
       aria-label={name}
       className={cn(
-        className ?? "-m-1 block p-1",
+        className ?? "-M-1 block p-1",
         "rounded-md transition-colors hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-reduce:transition-none",
       )}
       href={href}

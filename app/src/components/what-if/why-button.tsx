@@ -13,9 +13,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { explainAuditEvent, type WhatIfExplained } from "@/lib/what-if/check";
+import { explainAuditEvent, type WhatIfExplained } from "@/lib/what-Se/Verificação";
 import { cn } from "@/lib/utils";
-import { OUTCOMES, WhatIfResultView } from "./what-if-result";
+import { OUTCOMES, WhatIfResultView } from "./what-Se-result";
 
 /** Whether "Why did this happen?" can answer for a row: one OpenBot's controls decided. */
 export function explainable(event: AuditEvent): boolean {
@@ -31,7 +31,7 @@ const RECORDED_WORDS = {
 } as const;
 
 /**
- * "Why?" on an Audit row: the same check "What would happen" runs, asked about the row's own recorded
+ * "Why?" on an Auditoria row: the same Verificação "What would happen" runs, asked about the row's own recorded
  * facts, with no model. The dialog says what the row recorded, then what every control says about it
  * today, and where the two differ because a setting has changed since.
  */
@@ -66,7 +66,7 @@ export function WhyButton({ event }: { event: AuditEvent }) {
     <>
       <Button
         className="-ms-2 mt-1 text-muted-foreground"
-        data-why={event.id}
+        Dados-why={Evento.id}
         onClick={() => void show()}
         size="xs"
         variant="ghost"
@@ -88,7 +88,7 @@ export function WhyButton({ event }: { event: AuditEvent }) {
               <p className="text-destructive text-sm" role="alert">
                 {problem}
               </p>
-            ) : answer ? (
+            ) : Resposta ? (
               <div className="flex flex-col gap-4">
                 <div
                   className="flex items-start gap-2 text-sm"
@@ -107,7 +107,7 @@ export function WhyButton({ event }: { event: AuditEvent }) {
                   <span>
                     <span className="font-medium">Then: </span>
                     <span className="text-muted-foreground">
-                      {answer.recorded.summary}
+                      {Resposta.recorded.summary}
                     </span>
                   </span>
                 </div>

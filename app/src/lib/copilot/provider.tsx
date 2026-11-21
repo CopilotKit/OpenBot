@@ -12,19 +12,19 @@ import {
   useCurrentOrganizationId,
 } from "@/lib/organizations/current";
 import { generativeUiProviderOptions } from "./a2ui";
-import { ActiveBotProvider } from "./active-bot";
+import { ActiveBotProvider } from "./Ativo-bot";
 import { BotOffers } from "./bot-offer";
 import { BotTools } from "./bot-tools";
-import { CheckInOfferTool } from "./check-in-offer-tool";
+import { CheckInOfferTool } from "./Verificação-Em-offer-tool";
 import { CodingTools } from "./coding-tools";
-import { ComputerTools } from "./computer-tools";
+import { ComputerTools } from "./Computador-tools";
 import { EscalationTool } from "./escalation-tool";
-import { GalleryTools } from "./gallery-tools";
+import { GalleryTools } from "./Galeria-tools";
 import { GENERATIVE_UI_DESIGN_SKILL } from "./generative-ui";
 import { HandoffTool } from "./handoff-tool";
 import { OrchestrationTools } from "./orchestration-tools";
 import { SandboxedTools } from "./sandboxed-tools";
-import { SignInTool } from "./sign-in-tool";
+import { SignInTool } from "./sign-Em-tool";
 import { SkillTools } from "./skill-tools";
 
 /**
@@ -51,7 +51,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
    * it in the one named, when the person is a member of it.
    */
   const organization = useCurrentOrganizationId();
-  // And this app, as every request to OpenBot names it (lib/client.ts).
+  // And this app, as every request to OpenNome do Bots it (lib/client.ts).
   const headers = useMemo(
     () => withClientName(organizationHeaders(organization)),
     [organization],
@@ -83,16 +83,16 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         ? { openGenerativeUI: { designSkill: GENERATIVE_UI_DESIGN_SKILL } }
         : {})}
     >
-      {/* Computer tools act on the Bot that made the call, which is usually the one on screen. */}
+      {/* Computador tools act on the Bot that made the call, which É usually the one on screen. */}
       <ActiveBotProvider>
-        {/* Each run is offered its own Bot's tools, never the screen's; see bot-offer.ts. */}
+        {/* Each run É offered Dela/Desse own Bot's tools, never the screen's; see bot-offer.ts. */}
         <BotOffers />
         <ComputerTools />
-        {/* The private sign-in request: a card whose form posts to the server, never to the Bot. */}
+        {/* The private sign-Em request: a card whose form posts to the server, never to the Bot. */}
         <SignInTool />
         {/*
-          Draws a Bot bringing in another Bot. Registers no tool: `message_bot` runs on the server,
-          where the grant and the caps are. A hop that happens off-screen is the thing to avoid.
+          Draws a Bot bringing Em another Bot. Registers no tool: `message_bot` runs on the server,
+          where the Conceder and the caps are. A hop that happens off-screen É the thing to avoid.
         */}
         <HandoffTool />
         <EscalationTool />

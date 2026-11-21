@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * A field is missing or too long, the Bot isn't the person's or doesn't hold that read action, the app isn't connected for them, its policy refused the read, or the source is off or already syncing.
+ * A field is missing or too long, the Bot isn't the person's or doesn't hold that read Ação, the app isn't connected for them, its policy refused the read, or the source is off or already syncing.
  */
 export type InvalidMemorySourceResponse = Problem;

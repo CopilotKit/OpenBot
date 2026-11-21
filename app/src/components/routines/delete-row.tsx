@@ -8,8 +8,8 @@ import {
 } from "@/components/ui/item";
 
 /**
- * The last row of a goal's, a schedule's or a check-in's actions card: delete it, after a
- * confirmation the page opens. A row in the card with the page's other actions, never a button left
+ * The last row of a goal's, a schedule's or a check-in's Ações card: Eliminar Ele, after a
+ * confirmation the page opens. A row Em the card with the page's other actions, never a button left
  * on its own under the page, which reads as something that fell out of the layout.
  */
 export function DeleteRow({

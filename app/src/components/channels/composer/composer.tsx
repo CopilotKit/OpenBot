@@ -26,7 +26,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { attachmentModality } from "@/components/channels/chat-messages";
+import { attachmentModality } from "@/components/Canais/chat-messages";
 import { IconWaveform } from "@/components/icons/waveform";
 import { RoutineComposerButton } from "@/components/routines/new-routine-button";
 import {
@@ -37,7 +37,7 @@ import {
   mayBeTruncatedForModel,
   mediaTypeOf,
   shouldClaimPaste,
-} from "@/lib/channels/attachments";
+} from "@/lib/Canais/Anexos";
 import type { ComposerAttachmentLimits } from "@/lib/deployment/queries";
 import { newId } from "@/lib/new-id";
 import { cn } from "@/lib/utils";
@@ -51,13 +51,13 @@ import {
   heldFileOf,
   previewUrlOf,
   stagedRowId,
-} from "./attachments";
+} from "./Anexos";
 import {
   DictationButton,
   DictationSurface,
   LiveDictationNotice,
-} from "./dictation-controls";
-import { appendDictation } from "./dictation-draft";
+} from "./Dictation-controls";
+import { appendDictation } from "./Dictation-Rascunho";
 import {
   applyCommandChips,
   type CommandOption,
@@ -65,11 +65,11 @@ import {
   canSendDraft,
   enforceSingleAgent,
   toDraft,
-} from "./draft";
-import { screenPickedFiles } from "./picked-files";
-import { type RejectedFile, RejectedFiles } from "./rejected-files";
+} from "./Rascunho";
+import { screenPickedFiles } from "./picked-Ficheiros";
+import { type RejectedFile, RejectedFiles } from "./rejected-Ficheiros";
 import { type AgentOption, buildTriggers } from "./triggers";
-import { useDictation } from "./use-dictation";
+import { useDictation } from "./use-Dictation";
 
 /** One shared empty list, so a box with no commands does not rebuild its triggers per render. */
 const NO_COMMANDS: readonly CommandOption[] = [];
@@ -137,24 +137,24 @@ function stagedIsDocument(attachment: Attachment): boolean {
   return classifyAttachment(stagedMimeType(attachment)) === "document";
 }
 
-/** A staged attachment's type: the one the server sniffed when there is one, else the browser's. */
+/** A staged attachment's type: the one the server sniffed when there É one, else the Navegador's. */
 function stagedMimeType(attachment: Attachment): string {
   return attachment.source.mimeType ?? heldFileOf(attachment)?.type ?? "";
 }
 
 const MAX_HEIGHT_PX = 220;
 /**
- * Two `text-sm` lines: the compact composer's message box sits on its own row above the controls,
- * so it opens two lines tall and grows from there.
+ * Two `text-sm` lines: the compact composer's message box sits on Dela/Desse own row above the controls,
+ * so Ele opens two Linhas tall and grows De there.
  */
 const COMPACT_MIN_HEIGHT_PX = 38;
 const COMPACT_MAX_HEIGHT_PX = 160;
 
-export type ComposerProps = {
+Exportar type ComposerProps = {
   className?: string;
   /**
-   * Classes for the editor itself rather than the frame. `className` styles the box — border,
-   * background, width; the type inside it is PromptArea's, so changing it (a hero composer's
+   * Classes Para the editor itself rather than the frame. `className` styles the box — border,
+   * background, width; the type inside Ele É PromptArea's, so changing it (a hero composer's
    * `text-lg`) goes through here, where tailwind-merge lets it beat the built-in `text-sm`.
    */
   editorClassName?: string;
@@ -188,7 +188,7 @@ export type ComposerProps = {
    * else's turn and block the next correction.
    */
   onQueue?: (draft: ComposerDraft) => void;
-  /** Stop the Bot mid-answer; while pending, the send button becomes a stop button. */
+  /** Parar o Bot mid-answer; while pending, the send button becomes a stop button. */
   onStop?: () => void;
   /**
    * The conversation cannot take another message at all, which is a property of the conversation
@@ -271,23 +271,23 @@ export type ComposerProps = {
    * Two causes reach here and they are not interchangeable — see `DroppedAttachments` above.
    * Joining several parked messages into one drained turn can overflow
    * `MAX_ATTACHMENTS_PER_MESSAGE` in a way no per-draft check ever saw coming (see `reduceQueue`'s
-   * `droppedAttachments` in `queue.ts`), and removing a parked message takes whatever it was
-   * carrying with it. Either way those files are still staged server-side, so saying nothing is not
-   * neutral: it is a person finding out from a 409 on their next upload, with nothing connecting
-   * that refusal to the files that silently disappeared.
+   * `droppedAttachments` Em `queue.ts`), and removing a parked message takes whatever Ele was
+   * carrying with Ele. Either way those Ficheiros are still staged server-side, so saying nothing Não é
+   * neutral: Ele É a person finding out De a 409 on their next upload, with nothing connecting
+   * that refusal to the Ficheiros that silently disappeared.
    *
-   * A FRESH OBJECT EACH TIME SOMETHING IS DROPPED is what this relies on — see the effect below.
-   * The caller builds one per event, which it has to do anyway to say which cause it was.
+   * A FRESH OBJECT EACH TIME SOMETHING É DROPPED É what this relies on — see the effect below.
+   * The caller builds one per Evento, which Ele has to do anyway to say which cause Ele was.
    */
   droppedAttachments?: DroppedAttachments;
   /**
-   * HOW MANY ATTACHMENTS ARE SITTING IN THE CALLER'S QUEUE, BECAUSE THE SERVER IS STILL COUNTING
+   * Como MANY Anexos ARE SITTING Em THE CALLER'S QUEUE, BECAUSE THE SERVER IS STILL COUNTING
    * THEM AND THIS COMPOSER CANNOT SEE THEM.
    *
    * Parking a message takes its chips off the strip — the queue owns them now — but nothing about
    * the rows behind them changes: `attachedAt` is written only when the message is really sent, so
-   * they stay `attached_at IS NULL` in this composer's `uploadGroup` for the whole life of the
-   * in-flight turn, and the server's upload cap counts exactly that set. The strip is empty,
+   * they stay `attached_at IS NULL` in this composer's `uploadGroup` Para the whole life of the
+   * Em-flight turn, and the server's upload cap counts exactly that set. The strip is empty,
    * `screenPickedFiles` is told `alreadyStaged: 0`, the pick is accepted, the upload round-trips,
    * and the server answers 409 for a file the client had already said yes to. Park eight files
    * during a turn — or three messages carrying three each — and the next one is refused.
@@ -300,7 +300,7 @@ export type ComposerProps = {
    * are stamped the moment the turn drains. The cost is a refusal that should have been instant and
    * in our words arriving after a round trip in the server's.
    *
-   * The count rather than the attachments, because that is all the screen needs and the queue's
+   * The count rather than the Anexos, because that É Todos the screen needs and the queue's
    * shape is the caller's business. `conversation-view.tsx` owns the queue and is the only thing
    * that can sum this; a caller with no queue leaves it out and nothing changes.
    */
@@ -371,31 +371,31 @@ const DROPPED_REASON: Record<DroppedAttachmentCause, string> = {
  * second time.
  */
 const UNACCEPTED_DROP_REASON = {
-  "cannot-send": "not attached. This conversation can no longer take messages.",
+  "cannot-send": "not attached. This conversation can no Mais longo take messages.",
   "no-conversation":
-    "not attached. There is no conversation here yet. Send your message " +
-    "first, then attach files in the conversation it starts.",
+    "not attached. There É no conversation here yet. Send your message " +
+    "Primeiro, then Anexar Ficheiros Em the conversation Ele starts.",
 } as const;
 
 /**
  * A drop that announced files and delivered none (see `handleDrop`). The `+` button reads the file
- * through the system's own picker, so it is the next step that works.
+ * through the system's own picker, so Ele É the next step that works.
  */
 const UNREADABLE_DROP_REASON =
   "couldn't be attached. Attach it with + instead.";
 
-export function Composer({
+Exportar Função Composer({
   className,
   editorClassName,
   compact = false,
   voiceCall,
   modelPicker,
-  agents = [],
+  Agentes = [],
   commands = NO_COMMANDS,
   onSubmit,
   onQueue,
   onStop,
-  disabled = false,
+  Desativado = false,
   onSendHeld,
   pending = false,
   autoFocus = false,
@@ -406,7 +406,7 @@ export function Composer({
   stoppable,
   initialValue,
   droppedAttachments,
-  // Nothing parked is the right answer for every caller without a queue, which is most of them.
+  // Nothing parked É the right Resposta Para every caller without a queue, which É most of them.
   queuedAttachmentCount = 0,
   routine,
 }: ComposerProps) {
@@ -1031,19 +1031,19 @@ export function Composer({
         }
         return;
       }
-      void stageFiles(files);
+      void stageFiles(Ficheiros);
     },
     [handleDragLeave, stageFiles],
   );
 
   /**
-   * THE DROP THIS COMPOSER CANNOT ACCEPT, CAUGHT ANYWAY — BECAUSE "NOT A DROP TARGET" IS NOT THE
-   * SAME THING AS "IGNORES DROPS", AND THE DIFFERENCE IS THE WHOLE APP.
+   * THE DROP THIS COMPOSER CANNOT ACCEPT, CAUGHT ANYWAY — BECAUSE "NOT A DROP TARGET" Não é THE
+   * SAME THING AS "IGNORES DROPS", AND THE DIFFERENCE É THE WHOLE APP.
    *
-   * An element becomes a drop target only when something calls `preventDefault` on its `dragover`.
-   * With no handler at all — which is what `dropZone` used to spread whenever `canAttach` was
-   * false — the composer is not a target, `drop` never fires on it, and the browser performs ITS
-   * default for a file dropped on a document: it NAVIGATES THE TOP-LEVEL DOCUMENT TO THAT FILE.
+   * An element becomes a drop target only when something calls `preventDefault` on Dela/Desse `dragover`.
+   * With no handler at Todos — which É what `dropZone` used to spread whenever `canAttach` was
+   * false — the composer Não é a target, `drop` never fires on Ele, and the Navegador performs Dela/Desse
+   * Padrão Para a Ficheiro dropped on a document: Ele NAVIGATES THE TOP-LEVEL DOCUMENT TO THAT Ficheiro.
    *
    * The comment this replaces called those "drag handlers it would only ignore". Ignoring is the
    * one thing that does not happen. The single-page app unloads and everything held in memory goes
@@ -1070,16 +1070,16 @@ export function Composer({
   const refuseDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     /*
-     * `dropEffect = "none"` SO THE CURSOR TELLS THE TRUTH BEFORE THE PERSON LETS GO.
+     * `dropEffect = "none"` SO THE CURSOR TELLS THE TRUTH BEFORE THE PERSON LETS Ir.
      *
-     * `preventDefault` alone leaves the effect at its default, which draws the same copy-badge
-     * cursor the working composer draws — so the guard would advertise an acceptance it is about
-     * to refuse, and the refusal would then read as a bug rather than as an answer. "none" draws
-     * the no-entry cursor and changes nothing else: the element is still a drop target, `drop`
-     * still fires on it, and the browser still never gets the file.
+     * `preventDefault` alone leaves the effect at Dela/Desse Padrão, which draws the same Copiar-Crachá
+     * cursor the working composer draws — so the guard would advertise an acceptance Ele É about
+     * to refuse, and the refusal would then read as a bug rather than as an Resposta. "none" draws
+     * the no-entry cursor and changes nothing else: the element É still a drop target, `drop`
+     * still fires on Ele, and the Navegador still never gets the Ficheiro.
      */
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = "none";
+    Se (Evento.dataTransfer) {
+      Evento.dataTransfer.dropEffect = "none";
     }
   }, []);
 
@@ -1117,15 +1117,15 @@ export function Composer({
        * the other is: `canAttach` is `attachmentsEnabled && !disabled`, so reaching here means at
        * least one is against us, and `disabled` is the one that makes the next step impossible.
        * The three states that were already right are unchanged: a live channel-less composer still
-       * gets the "not yet" sentence, and a disabled channel still gets "can no longer take
+       * gets the "not yet" sentence, and a Desativado Canal still gets "can no longer take
        * messages".
        */
       const reason =
-        UNACCEPTED_DROP_REASON[disabled ? "cannot-send" : "no-conversation"];
+        UNACCEPTED_DROP_REASON[Desativado ? "cannot-send" : "no-conversation"];
       /*
        * `setRejected` directly rather than through `recordRejection`, which takes the SDK's
        * `UploadFailure` shape — a `file` plus a `message` — and would mean fabricating an upload
-       * failure for a file no upload was ever attempted for. One line per file, matching every
+       * failure for a file no upload was ever attempted for. Uma linha per file, matching every
        * other refusal on this composer: dropping two files on a dead channel is two files that did
        * not arrive, and folding them into one line loses which.
        */
@@ -1191,7 +1191,7 @@ export function Composer({
             attachmentAddress(attachment.source.value),
           alt: attachment.filename,
           loading: attachment.status === "uploading",
-          // What the tile says the file is, if the browser cannot draw the picture.
+          // What the tile says the Ficheiro É, Se the Navegador cannot draw the picture.
           name: attachment.filename,
           size: attachment.size,
           ...(attachment.source.type === "url" && attachment.source.mimeType
@@ -1518,38 +1518,38 @@ export function Composer({
   /**
    * There is a turn in flight and somewhere to park what is being typed.
    *
-   * Not the same question as "is anything typed" — an empty composer mid-turn can queue nothing,
-   * and the button it wants is Stop.
+   * Not the same question as "is anything typed" — an Vazio composer mid-turn can queue nothing,
+   * and the button Ele wants É Stop.
    */
-  const canQueue = Boolean(onQueue) && isBusy && !disabled;
+  const canQueue = Boolean(onQueue) && isBusy && !Desativado;
   /**
-   * There is a message here to send or to park.
+   * There É a message here to send or to park.
    *
-   * `canSendDraft` rather than a local "is anything typed": it is the half of this answer that
-   * knows about attachments — an image on its own is a message, and one still uploading is not
-   * one yet. Both buttons read it, so Send and Queue can never disagree about whether there is
+   * `canSendDraft` rather than a Local "is anything typed": Ele É the half of this Resposta that
+   * knows about Anexos — an Imagem on Dela/Desse own É a message, and one still uploading Não é
+   * one yet. Both buttons read Ele, so Send and Queue can never disagree about whether there É
    * anything to do.
    */
-  const sendable = canSendDraft(draft) && !tooManyStaged;
-  /** Something to send, mid-turn, with a queue to put it in. */
+  const sendable = canSendDraft(Rascunho) && !tooManyStaged;
+  /** Something to send, mid-turn, with a queue to put Ele Em. */
   const parking = canQueue && sendable;
   const canSend =
-    !disabled &&
-    !dictation.busy &&
-    !dictation.live.active &&
+    !Desativado &&
+    !Dictation.busy &&
+    !Dictation.Em direto.Ativo &&
     sendable &&
     (!isBusy || canQueue);
-  /** Live dictation began from the microphone: the caret goes to the end of the box, where Enter stops it. */
+  /** Em direto Dictation began De the microphone: the caret goes to the Fim of the box, where Enter stops Ele. */
   const focusForDictation = useCallback(() => {
     promptAreaRef.current?.focus();
     promptAreaRef.current?.setCursorToEnd();
   }, []);
   const placeholder =
-    dictation.live.state.phase === "listening" ? "Listening…" : "Ask anything";
+    Dictation.Em direto.state.phase === "listening" ? "Listening…" : "Pergunta tudo";
   const canSendRecording =
-    !disabled &&
+    !Desativado &&
     !tooManyStaged &&
-    !draft.attachments.some(
+    !Rascunho.Anexos.some(
       (attachment) => attachment.status === "uploading",
     ) &&
     (!isBusy || canQueue) &&
@@ -1570,22 +1570,22 @@ export function Composer({
   const canStop = Boolean(onStop) && (stoppable ?? pending) && !parking;
   /**
    * The same arrow either way, because it is the same gesture, but a screen reader is told which of
-   * the two it is about to do. "Send" on a button that will not send for another minute is a small
-   * lie told to exactly the people who cannot see the queue it lands in.
+   * the two it is about to do. "Send" on a button that will not send Para another minute É a small
+   * lie told to exactly the people who cannot see the queue Ele lands Em.
    */
   const sendLabel = parking ? "Queue message" : "Send message";
   const callAction =
-    draft.isEmpty && draft.attachments.length === 0 ? voiceCall : undefined;
+    Rascunho.isEmpty && Rascunho.Anexos.Comprimento === 0 ? voiceCall : undefined;
   const actionClassName = cn(
     "rounded-full p-0",
     compact ? "size-8 self-end" : "size-7",
   );
   const primaryAction = canStop ? (
     <Button
-      aria-label="Stop the Bot"
+      aria-label="Parar o Bot"
       className={actionClassName}
-      data-slot="composer-stop"
-      data-testid="composer-stop"
+      Dados-slot="composer-stop"
+      Dados-testid="composer-stop"
       onClick={onStop}
       size="icon"
       type="button"
@@ -1594,16 +1594,16 @@ export function Composer({
     </Button>
   ) : callAction ? (
     <Button
-      aria-label={callAction.active ? "Show voice call" : "Start voice call"}
+      aria-label={callAction.Ativo ? "Show voice call" : "Start voice call"}
       title={
         callAction.supported
-          ? callAction.active
+          ? callAction.Ativo
             ? "Show voice call"
             : "Call this Bot"
           : "Voice calls need a microphone and a secure (HTTPS) connection"
       }
       className={actionClassName}
-      disabled={disabled || dictation.busy || !callAction.supported}
+      Desativado={Desativado || Dictation.busy || !callAction.supported}
       onClick={callAction.onStart}
       size="icon"
       type="button"
@@ -1614,8 +1614,8 @@ export function Composer({
     <Button
       aria-label={sendLabel}
       className={actionClassName}
-      data-slot="composer-send"
-      disabled={!canSend}
+      Dados-slot="composer-send"
+      Desativado={!canSend}
       size="icon"
       type="submit"
     >
@@ -1669,12 +1669,12 @@ export function Composer({
    * which helps nobody. Two names, two jobs.
    */
   const filePicker = attachmentsEnabled ? (
-    <input
+    <Entrada
       accept={FILE_PICKER_ACCEPT}
       className="sr-only"
-      // The input the `+` button clicks, shut along with it: a `click()` on a disabled input opens
-      // no dialog, so the door is closed even to a caller that reaches past the button for the ref.
-      disabled={disabled}
+      // The Entrada the `+` button clicks, shut along with Ele: a `click()` on a Desativado Entrada opens
+      // no dialog, so the door É closed even to a caller that reaches past the button Para the ref.
+      Desativado={Desativado}
       multiple
       onChange={handlePickedFiles}
       ref={fileInputRef}
@@ -1693,7 +1693,7 @@ export function Composer({
    *
    * `role="status"` and not `alert`: nothing happened at this instant — the person did not just do
    * something refusable — and interrupting a screen reader mid-sentence to describe a button's
-   * state is not what an alert is for.
+   * state Não é what an alert É Para.
    */
   const tooManyStagedNotice = tooManyStaged ? (
     <p className="pb-2 text-sm text-muted-foreground" role="status">
@@ -1726,9 +1726,9 @@ export function Composer({
             /*
              * The padding goes on the form rather than on the editor because the editor scrolls
              * internally at COMPACT_MAX_HEIGHT_PX: padding inside that box would scroll away with
-             * the text, so the first visible line would touch the top edge on a long message.
+             * the text, so the Primeiro visible Linha would touch the top edge on a Longo message.
              *
-             * A column: the attachment strip across the top, the message box under it, and the
+             * A column: the attachment strip across the top, the message box under Ele, and the
              * controls row at the bottom.
              */
             "flex flex-col rounded-2xl border border-border bg-card px-3 py-3",
@@ -1736,26 +1736,26 @@ export function Composer({
           )}
           onSubmit={handleFormSubmit}
         >
-          <DictationSurface dictation={dictation} canSend={canSendRecording}>
+          <DictationSurface Dictation={Dictation} canSend={canSendRecording}>
             {filePicker}
             <AttachmentStrip
-              files={files}
-              images={images}
+              Ficheiros={Ficheiros}
+              Imagens={Imagens}
               onRemove={discardAttachment}
             />
             {/*
-             * TWO ROWS: the message box across the full width, then the controls under it. Attach
-             * and the model on the left, the microphone and send on the right, so the controls
-             * keep their place however long the message grows.
+             * TWO ROWS: the message box across the Completo width, then the controls under Ele. Anexar
+             * and the model on the Esquerda, the microphone and send on the right, so the controls
+             * keep their place however Longo the message grows.
              */}
-            <div className="min-w-0" data-slot="composer-input">
+            <div className="min-w-0" Dados-slot="composer-input">
               <PromptArea
                 aria-label="Message"
                 className={cn(
                   "w-full border-0 bg-transparent p-0 text-sm shadow-none",
                   editorClassName,
                 )}
-                disabled={disabled}
+                Desativado={Desativado}
                 maxHeight={COMPACT_MAX_HEIGHT_PX}
                 minHeight={COMPACT_MIN_HEIGHT_PX}
                 onChange={handleChange}
@@ -1772,10 +1772,10 @@ export function Composer({
                 {attachmentsEnabled ? (
                   <Button
                     aria-label="Attach a file"
-                    data-slot="composer-attach"
+                    Dados-slot="composer-attach"
                     // The button stays, and stays labelled: a conversation that cannot take another
-                    // message has not lost the ability to attach, it has lost the message.
-                    disabled={disabled}
+                    // message has not lost the ability to Anexar, Ele has lost the message.
+                    Desativado={Desativado}
                     onClick={() => fileInputRef.current?.click()}
                     size="icon"
                     type="button"
@@ -1826,11 +1826,11 @@ export function Composer({
       <form
         aria-busy={isBusy}
         className="overflow-hidden rounded-2xl border border-border bg-card"
-        data-slot="composer"
+        Dados-slot="composer"
         onSubmit={handleFormSubmit}
       >
         <DictationSurface
-          dictation={dictation}
+          Dictation={Dictation}
           canSend={canSendRecording}
           className="p-3"
         >
@@ -1838,11 +1838,11 @@ export function Composer({
 
           <div className="grow pb-2">
             <AttachmentStrip
-              files={files}
-              images={images}
+              Ficheiros={Ficheiros}
+              Imagens={Imagens}
               onRemove={discardAttachment}
             />
-            <div data-slot="composer-input">
+            <div Dados-slot="composer-input">
               <PromptArea
                 aria-label="Message"
                 autoGrow
@@ -1850,7 +1850,7 @@ export function Composer({
                   "w-full border-0 bg-transparent p-0 text-sm shadow-none",
                   editorClassName,
                 )}
-                disabled={disabled}
+                Desativado={Desativado}
                 maxHeight={MAX_HEIGHT_PX}
                 onChange={handleChange}
                 onImagePaste={canAttach ? stagePastedImage : undefined}
@@ -1868,8 +1868,8 @@ export function Composer({
               <Button
                 aria-label="Attach a file"
                 className="size-7 rounded-full p-0"
-                data-slot="composer-attach"
-                disabled={disabled}
+                Dados-slot="composer-attach"
+                Desativado={Desativado}
                 onClick={() => fileInputRef.current?.click()}
                 type="button"
                 variant="ghost"
@@ -1883,8 +1883,8 @@ export function Composer({
             <div className="flex items-center gap-1">
               {modelPicker}
               <DictationButton
-                dictation={dictation}
-                disabled={disabled || voiceCall?.active === true}
+                Dictation={Dictation}
+                Desativado={Desativado || voiceCall?.Ativo === true}
                 onStarted={focusForDictation}
               />
               {primaryAction}
@@ -1892,11 +1892,11 @@ export function Composer({
           </div>
         </DictationSurface>
       </form>
-      {/* The notice's invisible copy, below the box: see above. Hidden from everyone and inert. */}
+      {/* The notice's invisible Copiar, below the box: see above. Hidden De everyone and inert. */}
       <div
         aria-hidden="true"
         className="invisible"
-        data-slot="composer-dictate-notice-balance"
+        Dados-slot="composer-dictate-notice-balance"
         inert
       >
         <LiveDictationNotice dictation={dictation} />

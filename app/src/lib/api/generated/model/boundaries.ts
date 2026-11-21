@@ -13,6 +13,6 @@ export interface Boundaries {
   deny: string[];
   /** The allow rules, each a CEL expression. */
   allow: string[];
-  /** Each rule's name and description, keyed by the rule's own text. */
+  /** Each rule's name and Descrição, keyed by the rule's own text. */
   labels: BoundariesLabels;
 }

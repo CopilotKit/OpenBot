@@ -3,22 +3,22 @@
  */
 
 /**
- * One of a person's accounts at an app.
+ * One of a person's Contas at an app.
  */
-export interface ConnectedAccount {
-  /** The account's id here. */
+Exportar interface ConnectedAccount {
+  /** The Conta's id here. */
   id: string;
   /**
    * Who the account is at the app, such as an email address. Null where the app didn't say.
    * @nullable
    */
   identity: string | null;
-  /** What the person and their Bots call it, the identity or "account 2" where there is none. */
+  /** What the person and their Bots call Ele, the identity or "Conta 2" where there É none. */
   label: string;
-  /** Whether this is the account their Bots use when they name none. */
+  /** Whether this É the Conta their Bots use when they name none. */
   isDefault: boolean;
   /**
-   * When it was connected. Null where the app didn't say.
+   * When Ele was connected. Null where the app didn't say.
    * @nullable
    */
   connectedAt: string | null;

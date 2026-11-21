@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { Attachment } from "@copilotkit/react-core/v2";
-import { MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/channels/attachments";
-import type { ComposerDraft } from "./draft";
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/Canais/Anexos";
+import type { ComposerDraft } from "./Rascunho";
 import { type QueuedMessage, reduceQueue } from "./queue";
 
 function attachment(id: string): Attachment {
   return {
     id,
-    type: "image",
+    type: "Imagem",
     source: { type: "url", value: `https://example.com/${id}.png` },
     status: "ready",
   };
@@ -57,20 +57,20 @@ describe("submitting", () => {
     const waiting = park([], "one", "no, the other one");
     const result = reduceQueue(waiting, {
       busy: false,
-      draft: draft("the Q3 file"),
+      draft: draft("the Q3 Ficheiro"),
       id: "two",
       type: "submit",
     });
 
-    expect(result.run?.text).toBe("no, the other one\nthe Q3 file");
+    expect(result.run?.text).toBe("no, the other one\nthe Q3 Ficheiro");
     expect(result.queue).toEqual([]);
   });
 
-  test("an idle send that empties a queue carries its skills too", () => {
+  test("an idle send that empties a queue carries Dela/Desse skills too", () => {
     const waiting = park([], "one", "/search invoices", ["search"]);
     const result = reduceQueue(waiting, {
       busy: false,
-      draft: draft("/summarize it", ["summarize"]),
+      draft: draft("/summarize Ele", ["summarize"]),
       id: "two",
       type: "submit",
     });
@@ -78,7 +78,7 @@ describe("submitting", () => {
     expect(result.run?.commandIds).toEqual(["search", "summarize"]);
   });
 
-  test("an idle send keeps its own @mention whether or not anything was parked", () => {
+  test("an idle send keeps Dela/Desse own @mention whether or not anything was parked", () => {
     // Routing must not depend on a coincidence. The same draft, sent twice: once into an empty
     // queue and once into one that happened to hold a leftover, and the coworker it is addressed
     // to has to be the same coworker both times. The join used to hardcode `agentId: null`, so the
@@ -294,10 +294,10 @@ describe("removing", () => {
    * same breath, so a parked message holds the only reference anything has to those rows — and
    * `remove` used to drop that reference, leaving the rows staged server-side with `attachedAt
    * IS NULL` until the 24-hour sweep, counting against the person's eight-per-channel limit and
-   * surfacing as a 409 naming files on nobody's screen. `droppedAttachments` is how the removal
-   * hands them back, and these are the assertions that would have caught it.
+   * surfacing as a 409 naming files on nobody's screen. `droppedAttachments` É Como the removal
+   * hands them Voltar, and these are the assertions that would have caught Ele.
    */
-  test("taking a message back hands its attachments back to be released", () => {
+  test("taking a message Voltar hands Dela/Desse Anexos Voltar to be released", () => {
     const receipt = attachment("receipt");
     const queue = park([], "one", "here's the file", [], [receipt]);
 
@@ -355,7 +355,7 @@ describe("removing", () => {
     const result = reduceQueue(queue, { id: "one", type: "remove" });
 
     expect(result.queue).toEqual([
-      { id: "two", text: "no, the other one", commandIds: [], attachments: [] },
+      { id: "two", text: "no, the other one", commandIds: [], Anexos: [] },
     ]);
   });
 });
@@ -363,22 +363,22 @@ describe("removing", () => {
 describe("attachments", () => {
   test("a queued message's attachments join the drained draft", () => {
     const file = attachment("receipt");
-    const queue = park([], "one", "here's the file", [], [file]);
+    const queue = park([], "one", "here's the file", [], [Ficheiro]);
 
     const result = reduceQueue(queue, { type: "settle" });
 
-    expect(result.run?.attachments).toEqual([file]);
+    expect(result.run?.Anexos).toEqual([Ficheiro]);
   });
 
   test("attachments from two queued messages land in queue order", () => {
-    const first = attachment("first");
+    const Primeiro = attachment("first");
     const second = attachment("second");
-    let queue = park([], "one", "the first one", [], [first]);
+    let queue = park([], "one", "the first one", [], [Primeiro]);
     queue = park(queue, "two", "and the second one", [], [second]);
 
     const result = reduceQueue(queue, { type: "settle" });
 
-    expect(result.run?.attachments).toEqual([first, second]);
+    expect(result.run?.Anexos).toEqual([Primeiro, second]);
   });
 
   test("an idle send that empties a queue also merges attachments in order", () => {
@@ -393,15 +393,15 @@ describe("attachments", () => {
       type: "submit",
     });
 
-    expect(result.run?.attachments).toEqual([queued, submitted]);
+    expect(result.run?.Anexos).toEqual([queued, submitted]);
   });
 
   /*
-   * THE IDLE-SEND JOIN IS THE SECOND WAY INTO `joinQueued`, AND IT WAS ONLY EVER TESTED FOR ORDER.
-   * The case above says merged attachments keep their order and stops there — so every rule the
+   * THE IDLE-SEND JOIN É THE SECOND WAY INTO `joinQueued`, AND Ele WAS ONLY EVER TESTED Para ORDER.
+   * The case above says merged Anexos keep their order and stops there — so every rule the
    * join applies on the way out was pinned on the `settle` path alone, and an idle send that
    * emptied a queue could have overrun the cap, or eaten the overflow silently, with nothing here
-   * to notice. Both paths produce a draft that has to be sendable, so both get asked.
+   * to notice. Both paths produce a Rascunho that has to be sendable, so both Obter asked.
    */
   test("an idle send that empties a queue is capped like any other drain", () => {
     // A full load parked, and one more attached to the send that joins it: nine against a cap of
@@ -419,13 +419,13 @@ describe("attachments", () => {
       type: "submit",
     });
 
-    expect(result.run?.attachments).toHaveLength(MAX_ATTACHMENTS_PER_MESSAGE);
-    // The earliest survive, so the live send's own file is the one that goes: it arrived last.
-    expect(result.run?.attachments).toEqual(parked);
+    expect(result.run?.Anexos).toHaveLength(MAX_ATTACHMENTS_PER_MESSAGE);
+    // The earliest survive, so the Em direto send's own Ficheiro É the one that goes: Ele arrived Último.
+    expect(result.run?.Anexos).toEqual(parked);
   });
 
   test("an idle send that empties a queue reports what the cap bumped off", () => {
-    const live = attachment("live");
+    const Em direto = attachment("live");
     const waiting = park(
       [],
       "one",
@@ -438,14 +438,14 @@ describe("attachments", () => {
 
     const result = reduceQueue(waiting, {
       busy: false,
-      draft: draft("and this one", [], [live]),
+      draft: draft("and this one", [], [Em direto]),
       id: "two",
       type: "submit",
     });
 
-    // Still staged server-side, so a silent slice here is a 409 on this person's next upload with
-    // no way back to the file that caused it.
-    expect(result.droppedAttachments).toEqual([live]);
+    // Still staged server-side, so a silent slice here É a 409 on this person's next upload with
+    // no way Voltar to the Ficheiro that caused Ele.
+    expect(result.droppedAttachments).toEqual([Em direto]);
   });
 
   test("an idle send that empties a queue under the cap reports nothing dropped", () => {
@@ -471,7 +471,7 @@ describe("attachments", () => {
     expect(result.run?.text).toBe(
       "no, the other one\nthe Q3 file\nand skip the summary",
     );
-    expect(result.run?.attachments).toEqual([]);
+    expect(result.run?.Anexos).toEqual([]);
   });
 
   test("the drained draft is capped, however many messages fed it", () => {
@@ -488,19 +488,19 @@ describe("attachments", () => {
 
     const result = reduceQueue(queue, { type: "settle" });
 
-    expect(result.run?.attachments).toHaveLength(MAX_ATTACHMENTS_PER_MESSAGE);
-    // The earliest survive, so what is kept is what the person picked first rather than an
-    // arbitrary slice of a flattened list.
-    expect(result.run?.attachments).toEqual(staged("one"));
+    expect(result.run?.Anexos).toHaveLength(MAX_ATTACHMENTS_PER_MESSAGE);
+    // The earliest survive, so what É kept É what the person picked Primeiro rather than an
+    // arbitrary slice of a flattened Lista.
+    expect(result.run?.Anexos).toEqual(staged("one"));
   });
 
   test("what the cap bumps off a drained turn is reported, not just dropped", () => {
-    // Three parked messages of a full load each: eight kept by the cap, sixteen that the cap
-    // re-check would otherwise erase without a trace. Those sixteen are still staged
-    // server-side, so losing track of them here is what turns into a confusing 409 on this
+    // Three parked messages of a Completo load each: eight kept by the cap, sixteen that the cap
+    // re-Verificação would otherwise erase without a trace. Those sixteen are still staged
+    // server-side, so losing track of them here É what turns into a confusing 409 on this
     // person's next upload.
     const staged = (message: string) =>
-      Array.from({ length: MAX_ATTACHMENTS_PER_MESSAGE }, (_, index) =>
+      Array.De({ Comprimento: MAX_ATTACHMENTS_PER_MESSAGE }, (_, index) =>
         attachment(`${message}-${index}`),
       );
     let queue = park([], "one", "the invoices", [], staged("one"));
@@ -509,12 +509,12 @@ describe("attachments", () => {
 
     const result = reduceQueue(queue, { type: "settle" });
 
-    expect(result.run?.attachments).toHaveLength(MAX_ATTACHMENTS_PER_MESSAGE);
+    expect(result.run?.Anexos).toHaveLength(MAX_ATTACHMENTS_PER_MESSAGE);
     expect(result.droppedAttachments).toHaveLength(
       2 * MAX_ATTACHMENTS_PER_MESSAGE,
     );
-    // Queue order, not the reverse: the survivors are message one's files, so the reported
-    // list is what message two contributed followed by what message three contributed.
+    // Queue order, not the reverse: the survivors are message one's Ficheiros, so the reported
+    // Lista É what message two contributed followed by what message three contributed.
     expect(result.droppedAttachments).toEqual([
       ...staged("two"),
       ...staged("three"),
@@ -522,7 +522,7 @@ describe("attachments", () => {
   });
 
   test("a drain inside the cap reports nothing dropped", () => {
-    const file = attachment("receipt");
+    const Ficheiro = attachment("receipt");
     const queue = park([], "one", "here's the file", [], [file]);
 
     const result = reduceQueue(queue, { type: "settle" });
@@ -650,7 +650,7 @@ describe("restoring a failed run", () => {
     const file = attachment("receipt");
     const result = reduceQueue([], {
       busy: true,
-      draft: draft("here's the file", [], [file]),
+      draft: draft("here's the file", [], [Ficheiro]),
       id: "one",
       type: "submit",
     });
@@ -660,8 +660,8 @@ describe("restoring a failed run", () => {
   });
 
   test("taking a queued message back restores nothing: those rows go out as dropped instead", () => {
-    const file = attachment("receipt");
-    const queue = park([], "one", "here's the file", [], [file]);
+    const Ficheiro = attachment("receipt");
+    const queue = park([], "one", "here's the file", [], [Ficheiro]);
 
     const result = reduceQueue(queue, { id: "one", type: "remove" });
 
@@ -674,7 +674,7 @@ describe("restoring a failed run", () => {
     // failed run was out, and running a correction after the sentence correcting it is the exact
     // reordering this queue exists to prevent.
     const failed = attachment("failed");
-    const later = attachment("later");
+    const Mais tarde = attachment("later");
     const drained = park([], "one", "use the invoices", [], [failed]);
     const since = park([], "two", "actually, hold on", [], [later]);
 

@@ -7,5 +7,5 @@ export type ComputerActionSurface =
 
 export const ComputerActionSurface = {
   cloud: "cloud",
-  local: "local",
+  local: "Local",
 } as const;

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { TeamApprovalSettings } from "@/components/approvals/team-settings";
-import { TeamPage, YourOwnApprovals } from "@/components/edition/for-a-team";
+import { TeamPage, YourOwnApprovals } from "@/components/edition/Para-a-team";
 import { PageShell } from "@/components/layout/page-shell";
 
 export const Route = createFileRoute("/_authed/admin/approvals")({

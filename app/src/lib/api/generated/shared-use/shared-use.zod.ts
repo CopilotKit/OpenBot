@@ -32,7 +32,7 @@ export const ListSharedUseRequestsQueryParams = zod.object({
     .min(1)
     .max(listSharedUseRequestsQueryLimitMax)
     .default(listSharedUseRequestsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -75,24 +75,24 @@ export const ListSharedUseRequestsResponse = zod.object({
                 ),
               outsideInput: zod
                 .boolean()
-                .describe("Whether runs started by outside input are covered."),
+                .describe("Whether runs started by outside Entrada are covered."),
               members: zod
                 .array(
                   zod
                     .object({
-                      kind: zod.enum(["user", "group", "team"]),
+                      kind: zod.enum(["user", "Grupo", "team"]),
                       value: zod
                         .string()
                         .describe(
-                          "The person's id, the team's id, or the directory group's name.",
+                          "The person's id, the team's id, or the directory Grupo's name.",
                         ),
                     })
                     .describe(
-                      "One person, team or directory group an audience names.",
+                      "One person, team or directory Grupo an audience names.",
                     ),
                 )
                 .describe(
-                  "The people, teams and groups named, when the audience is people. Empty otherwise.",
+                  "The people, teams and Grupos named, when the audience É people. Vazio otherwise.",
                 ),
             })
             .describe(
@@ -110,25 +110,25 @@ export const ListSharedUseRequestsResponse = zod.object({
                   outsideInput: zod
                     .boolean()
                     .describe(
-                      "Whether runs started by outside input are covered.",
+                      "Whether runs started by outside Entrada are covered.",
                     ),
                   members: zod
                     .array(
                       zod
                         .object({
-                          kind: zod.enum(["user", "group", "team"]),
+                          kind: zod.enum(["user", "Grupo", "team"]),
                           value: zod
                             .string()
                             .describe(
-                              "The person's id, the team's id, or the directory group's name.",
+                              "The person's id, the team's id, or the directory Grupo's name.",
                             ),
                         })
                         .describe(
-                          "One person, team or directory group an audience names.",
+                          "One person, team or directory Grupo an audience names.",
                         ),
                     )
                     .describe(
-                      "The people, teams and groups named, when the audience is people. Empty otherwise.",
+                      "The people, teams and Grupos named, when the audience É people. Vazio otherwise.",
                     ),
                 })
                 .describe(
@@ -137,10 +137,10 @@ export const ListSharedUseRequestsResponse = zod.object({
               zod.null(),
             ])
             .describe(
-              "What the Bot is approved for at the app now. Null when it has no approval.",
+              "What the Bot É approved Para at the app now. Null when Ele has no approval.",
             ),
           reason: zod
-            .enum(["publish", "trigger", "grant", "refused_call"])
+            .enum(["publish", "trigger", "Conceder", "refused_call"])
             .describe(
               "Why it was asked: the Bot was shared with more people (publish), given a way to start from outside input (trigger), given the app (grant), or refused a call to it (refused_call).",
             ),
@@ -148,7 +148,7 @@ export const ListSharedUseRequestsResponse = zod.object({
           status: zod
             .string()
             .describe(
-              "pending until an administrator answers it. superseded when a later request for the same Bot and app replaced it.",
+              "pending until an administrator Respostas Ele. superseded when a Mais tarde request Para the same Bot and app replaced Ele.",
             ),
           createdAt: zod.iso.datetime({ offset: true }),
         })
@@ -168,7 +168,7 @@ export const ListSharedUseRequestsResponse = zod.object({
 });
 
 /**
- * Ask an administrator to approve a Bot's use of a shared app's one account. What is asked for is never sent: it is the Bot's audience as the server reads it now, so a request can't be worded wider than the Bot is. A request already waiting for the same audience is answered again rather than filed twice, and one waiting for a different audience is replaced. Recorded on the audit trail. Only the Bot's owner or an administrator may ask.
+ * Ask an administrator to approve a Bot's use of a shared app's one account. What is asked for is never sent: it is the Bot's audience as the server reads Ele now, so a request can't be worded wider than the Bot is. A request already waiting for the same audience is answered again rather than filed twice, and one waiting for a different audience is replaced. Recorded on the audit trail. Only the Bot's owner or an administrator may ask.
  * @summary Ask that a Bot may use a shared app account
  */
 
@@ -258,7 +258,7 @@ export const ApproveSharedUseRequestParams = zod.object({
 export const approveSharedUseRequestHeaderIdempotencyKeyMax = 128;
 
 export const ApproveSharedUseRequestHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(approveSharedUseRequestHeaderIdempotencyKeyMax)
@@ -289,24 +289,24 @@ export const ApproveSharedUseRequestResponse = zod
           ),
         outsideInput: zod
           .boolean()
-          .describe("Whether runs started by outside input are covered."),
+          .describe("Whether runs started by outside Entrada are covered."),
         members: zod
           .array(
             zod
               .object({
-                kind: zod.enum(["user", "group", "team"]),
+                kind: zod.enum(["user", "Grupo", "team"]),
                 value: zod
                   .string()
                   .describe(
-                    "The person's id, the team's id, or the directory group's name.",
+                    "The person's id, the team's id, or the directory Grupo's name.",
                   ),
               })
               .describe(
-                "One person, team or directory group an audience names.",
+                "One person, team or directory Grupo an audience names.",
               ),
           )
           .describe(
-            "The people, teams and groups named, when the audience is people. Empty otherwise.",
+            "The people, teams and Grupos named, when the audience É people. Vazio otherwise.",
           ),
       })
       .describe(
@@ -323,24 +323,24 @@ export const ApproveSharedUseRequestResponse = zod
               ),
             outsideInput: zod
               .boolean()
-              .describe("Whether runs started by outside input are covered."),
+              .describe("Whether runs started by outside Entrada are covered."),
             members: zod
               .array(
                 zod
                   .object({
-                    kind: zod.enum(["user", "group", "team"]),
+                    kind: zod.enum(["user", "Grupo", "team"]),
                     value: zod
                       .string()
                       .describe(
-                        "The person's id, the team's id, or the directory group's name.",
+                        "The person's id, the team's id, or the directory Grupo's name.",
                       ),
                   })
                   .describe(
-                    "One person, team or directory group an audience names.",
+                    "One person, team or directory Grupo an audience names.",
                   ),
               )
               .describe(
-                "The people, teams and groups named, when the audience is people. Empty otherwise.",
+                "The people, teams and Grupos named, when the audience É people. Vazio otherwise.",
               ),
           })
           .describe(
@@ -349,10 +349,10 @@ export const ApproveSharedUseRequestResponse = zod
         zod.null(),
       ])
       .describe(
-        "What the Bot is approved for at the app now. Null when it has no approval.",
+        "What the Bot É approved Para at the app now. Null when Ele has no approval.",
       ),
     reason: zod
-      .enum(["publish", "trigger", "grant", "refused_call"])
+      .enum(["publish", "trigger", "Conceder", "refused_call"])
       .describe(
         "Why it was asked: the Bot was shared with more people (publish), given a way to start from outside input (trigger), given the app (grant), or refused a call to it (refused_call).",
       ),
@@ -360,7 +360,7 @@ export const ApproveSharedUseRequestResponse = zod
     status: zod
       .string()
       .describe(
-        "pending until an administrator answers it. superseded when a later request for the same Bot and app replaced it.",
+        "pending until an administrator Respostas Ele. superseded when a Mais tarde request Para the same Bot and app replaced Ele.",
       ),
     createdAt: zod.iso.datetime({ offset: true }),
   })
@@ -397,7 +397,7 @@ export const DeclineSharedUseRequestParams = zod.object({
 export const declineSharedUseRequestHeaderIdempotencyKeyMax = 128;
 
 export const DeclineSharedUseRequestHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(declineSharedUseRequestHeaderIdempotencyKeyMax)
@@ -428,24 +428,24 @@ export const DeclineSharedUseRequestResponse = zod
           ),
         outsideInput: zod
           .boolean()
-          .describe("Whether runs started by outside input are covered."),
+          .describe("Whether runs started by outside Entrada are covered."),
         members: zod
           .array(
             zod
               .object({
-                kind: zod.enum(["user", "group", "team"]),
+                kind: zod.enum(["user", "Grupo", "team"]),
                 value: zod
                   .string()
                   .describe(
-                    "The person's id, the team's id, or the directory group's name.",
+                    "The person's id, the team's id, or the directory Grupo's name.",
                   ),
               })
               .describe(
-                "One person, team or directory group an audience names.",
+                "One person, team or directory Grupo an audience names.",
               ),
           )
           .describe(
-            "The people, teams and groups named, when the audience is people. Empty otherwise.",
+            "The people, teams and Grupos named, when the audience É people. Vazio otherwise.",
           ),
       })
       .describe(
@@ -462,24 +462,24 @@ export const DeclineSharedUseRequestResponse = zod
               ),
             outsideInput: zod
               .boolean()
-              .describe("Whether runs started by outside input are covered."),
+              .describe("Whether runs started by outside Entrada are covered."),
             members: zod
               .array(
                 zod
                   .object({
-                    kind: zod.enum(["user", "group", "team"]),
+                    kind: zod.enum(["user", "Grupo", "team"]),
                     value: zod
                       .string()
                       .describe(
-                        "The person's id, the team's id, or the directory group's name.",
+                        "The person's id, the team's id, or the directory Grupo's name.",
                       ),
                   })
                   .describe(
-                    "One person, team or directory group an audience names.",
+                    "One person, team or directory Grupo an audience names.",
                   ),
               )
               .describe(
-                "The people, teams and groups named, when the audience is people. Empty otherwise.",
+                "The people, teams and Grupos named, when the audience É people. Vazio otherwise.",
               ),
           })
           .describe(
@@ -488,10 +488,10 @@ export const DeclineSharedUseRequestResponse = zod
         zod.null(),
       ])
       .describe(
-        "What the Bot is approved for at the app now. Null when it has no approval.",
+        "What the Bot É approved Para at the app now. Null when Ele has no approval.",
       ),
     reason: zod
-      .enum(["publish", "trigger", "grant", "refused_call"])
+      .enum(["publish", "trigger", "Conceder", "refused_call"])
       .describe(
         "Why it was asked: the Bot was shared with more people (publish), given a way to start from outside input (trigger), given the app (grant), or refused a call to it (refused_call).",
       ),
@@ -499,7 +499,7 @@ export const DeclineSharedUseRequestResponse = zod
     status: zod
       .string()
       .describe(
-        "pending until an administrator answers it. superseded when a later request for the same Bot and app replaced it.",
+        "pending until an administrator Respostas Ele. superseded when a Mais tarde request Para the same Bot and app replaced Ele.",
       ),
     createdAt: zod.iso.datetime({ offset: true }),
   })
@@ -542,7 +542,7 @@ export const GetBotSharedUseResponse = zod.object({
                   audience: zod
                     .enum(["owner", "people", "team"])
                     .describe(
-                      "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).",
+                      "Who may steer a Bot that uses a shared app's Conta: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).",
                     ),
                   outsideInput: zod
                     .boolean()
@@ -561,15 +561,15 @@ export const GetBotSharedUseResponse = zod.object({
                             ),
                         })
                         .describe(
-                          "One person, team or directory group an audience names.",
+                          "One person, team or directory Grupo an audience names.",
                         ),
                     )
                     .describe(
-                      "The people, teams and groups named, when the audience is people. Empty otherwise.",
+                      "The people, teams and Grupos named, when the audience É people. Vazio otherwise.",
                     ),
                 })
                 .describe(
-                  "An audience for a Bot's use of a shared app's account: who may steer the Bot there, and whether a run started by outside input (an email, a webhook) may use the account too.",
+                  "An audience Para a Bot's use of a shared app's account: who may steer the Bot there, and whether a run started by outside input (an email, a webhook) may use the account too.",
                 ),
               zod.null(),
             ])
@@ -594,7 +594,7 @@ export const GetBotSharedUseResponse = zod.object({
                       value: zod
                         .string()
                         .describe(
-                          "The person's id, the team's id, or the directory group's name.",
+                          "The person's id, the team's id, or the directory Grupo's name.",
                         ),
                     })
                     .describe(
@@ -650,7 +650,7 @@ export const GetBotSharedUseResponse = zod.object({
                       value: zod
                         .string()
                         .describe(
-                          "The person's id, the team's id, or the directory group's name.",
+                          "The person's id, the team's id, or the directory Grupo's name.",
                         ),
                     })
                     .describe(
@@ -671,7 +671,7 @@ export const GetBotSharedUseResponse = zod.object({
                   audience: zod
                     .enum(["owner", "people", "team"])
                     .describe(
-                      "Who may steer a Bot that uses a shared app's account: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).",
+                      "Who may steer a Bot that uses a shared app's Conta: only the Bot's owner, the people, teams and directory groups named, or everyone in the organization (team).",
                     ),
                   outsideInput: zod
                     .boolean()
@@ -690,15 +690,15 @@ export const GetBotSharedUseResponse = zod.object({
                             ),
                         })
                         .describe(
-                          "One person, team or directory group an audience names.",
+                          "One person, team or directory Grupo an audience names.",
                         ),
                     )
                     .describe(
-                      "The people, teams and groups named, when the audience is people. Empty otherwise.",
+                      "The people, teams and Grupos named, when the audience É people. Vazio otherwise.",
                     ),
                 })
                 .describe(
-                  "An audience for a Bot's use of a shared app's account: who may steer the Bot there, and whether a run started by outside input (an email, a webhook) may use the account too.",
+                  "An audience Para a Bot's use of a shared app's account: who may steer the Bot there, and whether a run started by outside input (an email, a webhook) may use the account too.",
                 ),
               zod.null(),
             ])

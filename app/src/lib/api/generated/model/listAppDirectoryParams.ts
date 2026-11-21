@@ -7,7 +7,7 @@ import type { LimitParameter } from "./limitParameter";
 
 export type ListAppDirectoryParams = {
   /**
-   * Part of an entry's name or description, matched without regard to case.
+   * Part of an entry's name or Descrição, matched without regard to case.
    * @maxLength 200
    * @pattern ^[^\x00]*$
    */
@@ -17,13 +17,13 @@ export type ListAppDirectoryParams = {
    */
   source?: AppDirectorySource;
   /**
-   * Most items in one page.
+   * Most items Em one page.
    * @minimum 1
    * @maximum 100
    */
-  limit?: LimitParameter;
+  Limite?: LimitParameter;
   /**
-   * Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.
+   * Opaque continuation De the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.
    * @minLength 1
    * @maxLength 4096
    * @pattern ^[A-Za-z0-9_-]+$

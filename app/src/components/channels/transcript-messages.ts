@@ -6,7 +6,7 @@ import type { Attachment } from "@copilotkit/react-core/v2";
  *
  * NOT DECIDED ON `messages.length`: the runtime replaces its messages wholesale, so the seed would
  * be dropped on the first assistant token with the person's own turn already gone. A role rather
- * than an id, because the agent's copy and the restored copy each mint their own.
+ * than an id, because the Agente's copy and the restored copy each mint their own.
  */
 export function transcriptMessages(
   messages: readonly Message[],

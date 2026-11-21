@@ -12,8 +12,8 @@ const DEFAULT_HEIGHT = 700;
 const MIN_HEIGHT = 320;
 /** Above this a reported height is not believed, so a bad message can't stretch the step forever. */
 const MAX_HEIGHT = 1400;
-/** How long the calendar has to say it is there before the step offers the browser instead. */
-export const BOOKING_CALENDAR_TIMEOUT_MS = 20_000;
+/** Como Longo the calendar has to say Ele É there before the step offers the Navegador instead. */
+Exportar const BOOKING_CALENDAR_TIMEOUT_MS = 20_000;
 
 /**
  * One of the app's colour tokens as six hex digits, read from the page as it is drawn, so a skin
@@ -61,7 +61,7 @@ type CalendlyMessage = {
  * onboarding's Book a demo step and the OpenBot for Business dialog.
  *
  * A REAL CONTROL, SO A CARD, NOT THE ILLUSTRATION'S PANEL. It has the illustrations' rounded
- * corners and border, but the cards' fill: the muted fill is what says "this is only a picture" on
+ * corners and border, but the Cartões' fill: the muted fill is what says "this É only a picture" on
  * every other step. Calendly draws in the card's colour and the app's text and primary colours.
  *
  * ITS OWN MESSAGES SAY IT LOADED. A frame's `load` fires for an error page too, so the calendar
@@ -137,7 +137,7 @@ export function BookingCalendar({
       }, BOOKING_CALENDAR_TIMEOUT_MS);
     };
     let seen: IntersectionObserver | undefined;
-    if (element && typeof IntersectionObserver === "function") {
+    if (element && typeof IntersectionObserver === "Função") {
       seen = new IntersectionObserver((entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
           startWaiting();
@@ -150,28 +150,28 @@ export function BookingCalendar({
     }
     return () => {
       window.removeEventListener("message", onMessage);
-      element?.removeEventListener("error", onError);
+      element?.removeEventListener("Erro", onError);
       seen?.disconnect();
       clearTimeout(timer);
     };
   }, []);
 
   return (
-    <div className="flex w-full min-w-0 justify-center">
+    <div className="flex w-Completo min-w-0 justify-center">
       <div
-        className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card"
+        className="relative w-Completo max-w-lg overflow-hidden rounded-2xl border border-border bg-card"
         data-booking-calendar=""
         data-ready={ready ? "" : undefined}
       >
         <iframe
           className={cn(
-            "block w-full border-0 transition-opacity motion-reduce:transition-none",
+            "block w-Completo border-0 transition-opacity motion-reduce:transition-none",
             ready ? "opacity-100" : "opacity-0",
           )}
           ref={frame}
           referrerPolicy="strict-origin-when-cross-origin"
           // Everything a booking needs, and nothing that lets the frame move this window.
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+          sandbox="Permitir-scripts Permitir-same-origin Permitir-forms Permitir-popups Permitir-popups-to-escape-sandbox"
           src={src}
           /*
            * Light, whatever the app's theme. Calendly's page declares no colour scheme, and a frame
@@ -188,7 +188,7 @@ export function BookingCalendar({
           >
             <span
               aria-hidden
-              className="size-5 animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none"
+              className="size-5 animate-spin rounded-Completo border-2 border-current border-t-transparent motion-reduce:animate-none"
             />
             <span className="sr-only">Loading the calendar</span>
           </div>

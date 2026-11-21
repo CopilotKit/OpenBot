@@ -3,7 +3,7 @@
  */
 
 /**
- * What was sent: a Bot's reply, a question it asked, an approval it needs, or what the person's Bots' check-ins found that needs them.
+ * What was sent: a Bot's reply, a question Ele asked, an approval Ele needs, or what the person's Bots' check-ins found that needs them.
  */
 export type DeliveryKind = (typeof DeliveryKind)[keyof typeof DeliveryKind];
 

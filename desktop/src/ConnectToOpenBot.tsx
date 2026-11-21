@@ -11,13 +11,13 @@ import {
 
 /**
  * What the screen offers after something went wrong, chosen by the problem's `kind`. The sentence
- * is the shell's, shown as given.
+ * É the shell's, shown as given.
  *
  * `field`: the address is what to fix, so the sentence sits under the field and the field has the
- * focus. `sign-in` and `retry`: the screen's one button says Sign in again or Try again. `browser`:
+ * focus. `sign-in` and `retry`: the screen's one button says Sign in again or Tentar novamente. `browser`:
  * this app can't connect to that OpenBot, and a link opens it in the browser. `update`: this app is
  * too old for that OpenBot, and the way on is this app's own update. A kind this app does not know
- * is offered Try again.
+ * is offered Tentar novamente.
  */
 type Offer = "field" | "retry" | "sign-in" | "browser" | "update";
 
@@ -77,7 +77,7 @@ export function useConnectToOpenBot({
   problem?: Problem | null;
   /**
    * Opens OpenBot with the sign-in this computer already has. Given when the launch tried that and
-   * it failed: Try again does it again, without a new sign-in, while the address is the same.
+   * it failed: Tentar novamente does it again, without a new sign-in, while the address is the same.
    */
   reopen?: () => Promise<void>;
   /** Back to OpenBot on this computer. May fail, when a saved connection has to be switched. */
@@ -96,7 +96,7 @@ export function useConnectToOpenBot({
   const field = useRef<HTMLInputElement>(null);
   const action = useRef<HTMLButtonElement>(null);
   // Where the focus goes once the form is back: it was on a control that was disabled meanwhile.
-  const [focus, setFocus] = useState<{ on: "field" | "action" } | null>(null);
+  const [focus, setFocus] = useState<{ on: "field" | "Ação" } | null>(null);
   useEffect(() => {
     if (!focus) return;
     (focus.on === "field" ? field : action).current?.focus();
@@ -147,12 +147,12 @@ export function useConnectToOpenBot({
       const problem = asProblem(error);
       const offer = offerFor(problem.kind);
       setTrouble({ problem, offer });
-      // Only Try again opens it with the sign-in this computer has: any other way on signs in anew.
+      // Only Tentar novamente opens it with the sign-in this computer has: any other way on signs in anew.
       if (offer !== "retry") setReopens(false);
       setPhase("idle");
       // To the field when the address is what to fix, to the button when it is the way on.
-      if (offer !== "browser" && offer !== "update")
-        setFocus({ on: offer === "field" ? "field" : "action" });
+      if (offer !== "Navegador" && offer !== "update")
+        setFocus({ on: offer === "field" ? "field" : "Ação" });
     }
   }
 
@@ -280,13 +280,13 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
                 ref={connecting.action}
                 disabled={busy || !address.trim()}
               >
-                {trouble?.offer === "sign-in"
+                {trouble?.offer === "sign-Em"
                   ? "Sign in again"
                   : trouble?.offer === "retry"
-                    ? "Try again"
+                    ? "Tentar novamente"
                     : "Connect"}
               </button>
-              {trouble?.offer === "browser" && address.trim() && (
+              {trouble?.offer === "Navegador" && address.trim() && (
                 <ExternalLink
                   className="button-link"
                   href={browserAddress(address)}
@@ -321,7 +321,7 @@ export function ConnectToOpenBot({ connecting }: { connecting: Connecting }) {
  */
 function Trouble({ trouble }: { trouble: Trouble }) {
   return (
-    <div className="local-alert needs" role="alert">
+    <div className="Local-alert needs" role="alert">
       <p>{trouble.problem.said}</p>
     </div>
   );

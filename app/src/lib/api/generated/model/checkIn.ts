@@ -9,11 +9,11 @@ import type { LastCheckIn } from "./lastCheckIn";
 export interface CheckIn {
   /** The check-in's id. */
   id: string;
-  /** The Bot that checks in. */
+  /** The Bot that checks Em. */
   botId: string;
-  /** The conversation the check-in belongs to. */
+  /** The conversation the Verificação-Em belongs to. */
   conversationId: string;
-  /** What to look for, in the person's words. May be empty. */
+  /** What to Ver Para, Em the person's words. May be empty. */
   focus: string;
   /** What it watches, in the person's words. Empty for one that watches everything the Bot reads. */
   subject: string;

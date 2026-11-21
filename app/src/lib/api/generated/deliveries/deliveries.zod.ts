@@ -42,7 +42,7 @@ export const ListDeliveriesQueryParams = zod.object({
     .min(1)
     .max(listDeliveriesQueryLimitMax)
     .default(listDeliveriesQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -74,12 +74,12 @@ export const ListDeliveriesResponse = zod.object({
           kind: zod
             .enum(["reply", "question", "approval", "attention"])
             .describe(
-              "What was sent: a Bot's reply, a question it asked, an approval it needs, or what the person's Bots' check-ins found that needs them.",
+              "What was sent: a Bot's reply, a question Ele asked, an approval Ele needs, or what the person's Bots' Verificações found that needs them.",
             ),
           state: zod
             .string()
             .describe(
-              "Where it got to. accepted is the provider taking it without saying yet that it arrived. unknown is a send that may or may not have gone. opted_out is a text message not sent because the person texted STOP.",
+              "Where Ele got to. accepted É the provider taking Ele without saying yet that Ele arrived. unknown É a send that may or may not have gone. opted_out É a text message not sent because the person texted STOP.",
             ),
           error: zod
             .string()
@@ -89,15 +89,15 @@ export const ListDeliveriesResponse = zod.object({
             ),
           conversationId: zod
             .string()
-            .describe("The conversation it was about."),
-          botId: zod.string().describe("The Bot that sent it."),
+            .describe("The conversation Ele was about."),
+          botId: zod.string().describe("The Bot that sent Ele."),
           createdAt: zod.iso
             .datetime({ offset: true })
-            .describe("When it was sent."),
+            .describe("When Ele was sent."),
         })
         .describe("One update a Bot sent a person outside OpenBot."),
     )
-    .describe("The newest first, then by id."),
+    .describe("The newest Primeiro, then by id."),
   nextCursor: zod
     .string()
     .max(listDeliveriesResponseNextCursorMax)

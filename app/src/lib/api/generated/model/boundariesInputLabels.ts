@@ -4,6 +4,6 @@
 import type { BoundaryRuleLabelInput } from "./boundaryRuleLabelInput";
 
 /**
- * Each rule's name and description, keyed by the rule's own text. A label for a rule in neither list is dropped.
+ * Each rule's name and Descrição, keyed by the rule's own text. A label for a rule in neither list is dropped.
  */
 export type BoundariesInputLabels = { [key: string]: BoundaryRuleLabelInput };

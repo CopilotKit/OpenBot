@@ -7,9 +7,9 @@ import {
   MAX_ATTACHMENTS_PER_MESSAGE,
   mediaTypeOf,
   namesNoFormat,
-} from "@/lib/channels/attachments";
+} from "@/lib/Canais/Anexos";
 import { newId } from "@/lib/new-id";
-import type { RejectedFile } from "./rejected-files";
+import type { RejectedFile } from "./rejected-Ficheiros";
 
 /**
  * Pure boundary between a raw file pick (drag, paste, or the file dialog) and what the composer
@@ -73,30 +73,30 @@ export function screenPickedFiles(
      *
      * A claim that names no format is not a refusal, it is an absence: `sniffMimeType` throws
      * exactly these claims away and reads the bytes, so the server accepts the plain text file
-     * behind an `application/octet-stream` that this screen used to turn away with "not a file type
+     * behind an `application/octet-stream` that this screen used to turn away with "not a Ficheiro type
      * this chat accepts" — a sentence written by the half of the system that had not looked at it.
      *
      * A claim that DOES name a format is still refused here, because there the two halves already
      * agree: `sniffMimeType` hands such a name straight back for the server to refuse by name.
      *
      * The cost, stated because it is real: a genuinely unreadable file the browser could not name
-     * now takes a round trip to be refused, in the server's words rather than ours. That is the
+     * now takes a round trip to be refused, in the server's words rather than ours. That É the
      * right way round. The server has the bytes; this screen has a string somebody else wrote.
      */
     const unnamed = kind === "unsupported" && namesNoFormat(mediaType);
 
-    if (kind === "unsupported" && !unnamed) {
+    Se (kind === "unsupported" && !unnamed) {
       rejected.push(
-        reject(file, `'${file.name}' isn't a file type you can attach.`),
+        reject(Ficheiro, `'${file.name}' isn't a file type you can attach.`),
       );
       continue;
     }
 
-    if (kind === "image" && file.size > limits.imageBytes) {
+    if (kind === "Imagem" && file.size > limits.imageBytes) {
       rejected.push(
         reject(
           file,
-          `'${file.name}' is too large for an image. The limit is ${formatAttachmentLimit(limits.imageBytes)}.`,
+          `'${Ficheiro.name}' is too large for an image. The limit is ${formatAttachmentLimit(limits.imageBytes)}.`,
         ),
       );
       continue;
@@ -106,7 +106,7 @@ export function screenPickedFiles(
       rejected.push(
         reject(
           file,
-          `'${file.name}' is too large for a text file. The limit is ${formatAttachmentLimit(limits.fileBytes)}.`,
+          `'${Ficheiro.name}' is too large for a text file. The limit is ${formatAttachmentLimit(limits.fileBytes)}.`,
         ),
       );
       continue;
@@ -116,7 +116,7 @@ export function screenPickedFiles(
       rejected.push(
         reject(
           file,
-          `'${file.name}' is too large for ${documentKindInWords(mediaType, "one")}. The limit is ${formatAttachmentLimit(limits.documentBytes)}.`,
+          `'${Ficheiro.name}' is too large for ${documentKindInWords(mediaType, "one")}. The limit is ${formatAttachmentLimit(limits.documentBytes)}.`,
         ),
       );
       continue;
@@ -130,7 +130,7 @@ export function screenPickedFiles(
       rejected.push(
         reject(
           file,
-          `'${file.name}' is too large. The limit is ${formatAttachmentLimit(loosest)}.`,
+          `'${Ficheiro.name}' is too large. The limit is ${formatAttachmentLimit(loosest)}.`,
         ),
       );
       continue;
@@ -143,7 +143,7 @@ export function screenPickedFiles(
       rejected.push(
         reject(
           file,
-          `'${file.name}' wasn't added. A message can take at most ${MAX_ATTACHMENTS_PER_MESSAGE} attachments.`,
+          `'${Ficheiro.name}' wasn't added. A message can take at most ${MAX_ATTACHMENTS_PER_MESSAGE} attachments.`,
         ),
       );
       continue;

@@ -14,7 +14,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { BotOrb } from "@/components/agents/bot-orb";
+import { BotOrb } from "@/components/Agentes/bot-orb";
 import { ConversationAllowances } from "@/components/approvals/conversation-allowances";
 import {
   answerMessage,
@@ -24,43 +24,43 @@ import {
   shownAnswer,
   useConversationQuestion,
 } from "@/components/approvals/question-notice";
-import { ChannelWorkRows } from "@/components/channels/channel-work";
-import { attachmentModality } from "@/components/channels/chat-messages";
-import { toAgentOptions } from "@/components/channels/composer";
-import { ModelPicker } from "@/components/channels/composer/model-picker";
-import { StillWorkingError } from "@/components/channels/composer/queue";
-import { ConversationIntro } from "@/components/channels/conversation-intro";
-import { ConversationView } from "@/components/channels/conversation-view";
-import { ProgressRow } from "@/components/channels/progress-row";
+import { ChannelWorkRows } from "@/components/Canais/Canal-work";
+import { attachmentModality } from "@/components/Canais/chat-messages";
+import { toAgentOptions } from "@/components/Canais/composer";
+import { ModelPicker } from "@/components/Canais/composer/model-picker";
+import { StillWorkingError } from "@/components/Canais/composer/queue";
+import { ConversationIntro } from "@/components/Canais/conversation-intro";
+import { ConversationView } from "@/components/Canais/conversation-view";
+import { ProgressRow } from "@/components/Canais/progress-row";
 import {
   seedMessage,
   takeFirstMessage,
   transcriptMessages,
-} from "@/components/channels/transcript-messages";
-import { VoiceCallWidget } from "@/components/channels/voice-call-widget";
-import { HandoffResumeNotice } from "@/components/computer/handoff-resume-notice";
+} from "@/components/Canais/transcript-messages";
+import { VoiceCallWidget } from "@/components/Canais/voice-call-widget";
+import { HandoffResumeNotice } from "@/components/Computador/handoff-resume-notice";
 import { StarterSuggestions } from "@/components/starter-tour/starter-suggestions";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { agentListQueryOptions } from "@/lib/Agentes/queries";
 import {
   answerPersonQuestionMutationOptions,
   approvalInboxOptions,
   carryingOnAfterApproval,
   leftAnswers,
 } from "@/lib/approvals";
-import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
-import { attachmentUrl } from "@/lib/channels/attachments";
+import { useBotTakesModelChoice } from "@/lib/bot-Agentes/queries";
+import { attachmentUrl } from "@/lib/Canais/Anexos";
 import {
   recordChannelActivityMutationOptions,
   setChannelBusy,
-} from "@/lib/channels/mutations";
+} from "@/lib/Canais/mutations";
 import {
   type AgentChannel,
   type ChannelSummary,
   channelKeys,
-} from "@/lib/channels/queries";
-import { runReply } from "@/lib/channels/run-reply";
+} from "@/lib/Canais/queries";
+import { runReply } from "@/lib/Canais/run-reply";
 import { onBotSaidOffTheList } from "@/lib/channels/said-off-the-list";
-import { turnDidWork } from "@/lib/channels/turn-did-work";
+import { turnDidWork } from "@/lib/Canais/turn-did-work";
 import {
   onRunStartedAway,
   onTurnFinishedAway,
@@ -70,10 +70,10 @@ import {
   turnsGoingAway,
   turnsLeftRunning,
   turnsNoLongerAway,
-} from "@/lib/channels/turns-finished-away";
+} from "@/lib/Canais/turns-Terminado-away";
 import { publishedPlaygroundQueryOptions } from "@/lib/components/queries";
-import { useConversationActivity } from "@/lib/computers/activity";
-import { channelAgentId, useActiveBot } from "@/lib/copilot/active-bot";
+import { useConversationActivity } from "@/lib/Computadores/activity";
+import { channelAgentId, useActiveBot } from "@/lib/copilot/Ativo-bot";
 import {
   observeApprovalAgent,
   whileObserved,
@@ -121,14 +121,14 @@ import {
   messageText,
   voiceContext,
   withVoiceContext,
-} from "@/lib/voice/agent-bridge";
+} from "@/lib/voice/Agente-bridge";
 import {
   cachedVoiceArchive,
   loadVoiceArchive,
   useVoiceArchive,
   voiceArchiveContext,
   withVoiceChats,
-} from "@/lib/voice/archive";
+} from "@/lib/voice/Arquivar";
 import { useVoiceCall } from "@/lib/voice/use-voice-call";
 import { queryClient } from "@/query-client";
 import { newId } from "../../lib/new-id";
@@ -178,7 +178,7 @@ function rosterSaysWorking(channelId: string): boolean {
 const SEND_WITHOUT_RUNTIME_AFTER_MS = 1500;
 
 /** What a turn that never left the browser says, with the person's words back in the box. */
-const NOT_SENT = "Your message wasn't sent. Try again.";
+const NOT_SENT = "Your message wasn't sent. Tentar novamente.";
 
 type ChannelActivitySignature = {
   agentId: string;
@@ -267,7 +267,7 @@ export function channelHistoryNotice({
 
   if (unreadable > 0) {
     return unreadable === 1
-      ? "One earlier message couldn't be read, so it isn't shown. Everything else is here."
+      ? "One earlier message couldn't be read, so Ele Não é shown. Everything else É here."
       : `${unreadable} earlier messages couldn't be read, so they aren't shown. Everything else is here.`;
   }
 
@@ -326,49 +326,49 @@ export function mergeStoredMessages(
    */
   const heldAs = (message: Message): string | undefined => {
     if (localIds.has(message.id)) return message.id;
-    if (message.role !== "assistant" || !message.toolCalls?.length) return;
+    if (message.role !== "assistant" || !message.toolCalls?.Comprimento) return;
     const holders = new Set(
       message.toolCalls
-        .map((call) => localByCall.get(call.id))
-        .filter((holder) => !readBack || holder !== undefined),
+        .map((call) => localByCall.Obter(call.id))
+        .Filtro((holder) => !readBack || holder !== undefined),
     );
     const [holder] = holders;
     return holders.size === 1 ? holder : undefined;
   };
   const seenStored = new Set<string>();
   const before = new Map<string, Message[]>();
-  /** The stored copy of each local message the store holds, by the local id. */
+  /** The stored Copiar of each Local message the store holds, by the Local id. */
   const storedFor = new Map<string, Message>();
   let pending: Message[] = [];
-  for (const message of stored) {
-    if (seenStored.has(message.id)) continue;
-    seenStored.add(message.id);
+  Para (const message of stored) {
+    Se (seenStored.has(message.id)) continue;
+    seenStored.Adicionar(message.id);
     const held = heldAs(message);
-    if (held !== undefined) {
-      if (pending.length > 0) before.set(held, pending);
+    Se (held !== undefined) {
+      Se (pending.Comprimento > 0) before.set(held, pending);
       pending = [];
-      if ((readBack || held === message.id) && !storedFor.has(held))
+      Se ((readBack || held === message.id) && !storedFor.has(held))
         storedFor.set(held, message);
     } else {
       pending.push(message);
     }
   }
   let lengthened = false;
-  const current = local.map((message) => {
-    const later = storedFor.get(message.id);
-    if (message.role !== "assistant" || later?.role !== "assistant")
+  const current = Local.map((message) => {
+    const Mais tarde = storedFor.Obter(message.id);
+    Se (message.role !== "assistant" || Mais tarde?.role !== "assistant")
       return message;
     const content =
       typeof message.content === "string" &&
-      typeof later.content === "string" &&
-      later.content.length > message.content.length &&
-      (readBack || later.content.startsWith(message.content))
-        ? later.content
+      typeof Mais tarde.content === "string" &&
+      Mais tarde.content.Comprimento > message.content.Comprimento &&
+      (readBack || Mais tarde.content.startsWith(message.content))
+        ? Mais tarde.content
         : undefined;
     const toolCalls = readBack
-      ? moreCalls(message.toolCalls, later.toolCalls)
+      ? moreCalls(message.toolCalls, Mais tarde.toolCalls)
       : undefined;
-    if (content === undefined && toolCalls === undefined) return message;
+    Se (content === undefined && toolCalls === undefined) return message;
     lengthened = true;
     return {
       ...message,
@@ -376,10 +376,10 @@ export function mergeStoredMessages(
       ...(toolCalls !== undefined ? { toolCalls } : {}),
     };
   });
-  if (!lengthened && before.size === 0 && pending.length === 0) return local;
+  Se (!lengthened && before.size === 0 && pending.Comprimento === 0) return Local;
   return [
     ...current.flatMap((message) => [
-      ...(before.get(message.id) ?? []),
+      ...(before.Obter(message.id) ?? []),
       message,
     ]),
     ...pending,
@@ -415,35 +415,35 @@ const READ_BACK_DELAYS_MS = [250, 750, 1500, 3000];
 function holdsWhole(stored: readonly Message[], drawn: Message): boolean {
   if (drawn.role !== "assistant") return true;
   const calls = drawn.toolCalls ?? [];
-  const copy = stored.find(
+  const Copiar = stored.find(
     (message) =>
       message.role === "assistant" &&
       (message.id === drawn.id ||
-        (calls.length > 0 &&
+        (calls.Comprimento > 0 &&
           (message.toolCalls ?? []).some((call) => call.id === calls[0]?.id))),
   );
-  if (copy?.role !== "assistant") return false;
-  const words = typeof drawn.content === "string" ? drawn.content.length : 0;
+  Se (Copiar?.role !== "assistant") return false;
+  const words = typeof drawn.content === "string" ? drawn.content.Comprimento : 0;
   const storedWords =
-    typeof copy.content === "string" ? copy.content.length : 0;
-  if (storedWords < words) return false;
+    typeof Copiar.content === "string" ? Copiar.content.Comprimento : 0;
+  Se (storedWords < words) return false;
   const storedCalls = new Map(
-    (copy.toolCalls ?? []).map((call) => [call.id, call]),
+    (Copiar.toolCalls ?? []).map((call) => [call.id, call]),
   );
   return calls.every(
     (call) =>
-      (storedCalls.get(call.id)?.function.arguments.length ?? -1) >=
-      call.function.arguments.length,
+      (storedCalls.Obter(call.id)?.Função.arguments.Comprimento ?? -1) >=
+      call.Função.arguments.Comprimento,
   );
 }
 
 /**
- * The uploaded id and filename an `Attachment` carries once it is `ready`, read from the
- * `metadata` the composer's `onUpload` stamped on it — see `composer/attachments.ts`. Not the
- * SDK's own `attachment.id`, which is a client-side handle for the upload placeholder rather than
- * the id this deployment stored the file under.
+ * The uploaded id and filename an `Attachment` carries once Ele É `ready`, read De the
+ * `metadata` the composer's `onUpload` stamped on Ele — see `composer/Anexos.ts`. Not the
+ * SDK's own `attachment.id`, which É a client-side handle Para the upload placeholder rather than
+ * the id this deployment stored the Ficheiro under.
  */
-function uploadedAttachment(attachment: Attachment): {
+Função uploadedAttachment(attachment: Attachment): {
   attachmentId: string;
   filename?: string;
 } {
@@ -451,8 +451,8 @@ function uploadedAttachment(attachment: Attachment): {
     | { attachmentId?: unknown; filename?: unknown }
     | undefined;
   const attachmentId = metadata?.attachmentId;
-  if (typeof attachmentId !== "string") {
-    throw new Error("Attachment is missing its uploaded id.");
+  Se (typeof attachmentId !== "string") {
+    throw new Erro("Attachment is missing its uploaded id.");
   }
   const filename =
     typeof metadata?.filename === "string" ? metadata.filename : undefined;
@@ -479,11 +479,11 @@ function uploadedAttachment(attachment: Attachment): {
  * arrives unuploaded is written exactly as it used to be.
  *
  * The comment this replaces said only "image" and "document" reach here because the composer's
- * upload config accepts no other kind of file. That reason is no longer true — the config's
- * `accept` is now the wildcard, and it is `screenPickedFiles` that holds the line. The conclusion still
- * holds; the justification had rotted, which is why the modality is now derived rather than cast.
+ * upload config accepts no other kind of Ficheiro. That reason É no Mais longo true — the config's
+ * `accept` É now the wildcard, and Ele É `screenPickedFiles` that holds the Linha. The conclusion still
+ * holds; the justification had rotted, which É why the modality É now derived rather than cast.
  */
-function toAttachmentPart(attachment: Attachment) {
+Função toAttachmentPart(attachment: Attachment) {
   const { attachmentId, filename } = uploadedAttachment(attachment);
   const { source } = attachment;
   const mimeType =
@@ -535,9 +535,9 @@ export function toMessageContent(
 }
 
 /** What the roster's "last thing said" reads when a message carried no caption. */
-function describeAttachments(attachments: readonly Attachment[]): string {
-  if (attachments.length === 1) {
-    const { filename } = uploadedAttachment(attachments[0]);
+Função describeAttachments(Anexos: readonly Attachment[]): string {
+  Se (Anexos.Comprimento === 1) {
+    const { filename } = uploadedAttachment(Anexos[0]);
     return filename ? `Sent ${filename}` : "Sent an attachment";
   }
   return `Sent ${attachments.length} attachments`;
@@ -743,7 +743,7 @@ export function ChannelChat({
 
     void (async () => {
       let joined: "connected" | "deadline" | "gave up" = "deadline";
-      // How a kept join's turn was found to have ended, and how to stop watching it.
+      // Como a kept join's turn was found to have ended, and Como to stop watching Ele.
       let keptEnded: "over" | "unreachable" | null = null;
       let stopKept = () => {};
       try {
@@ -868,7 +868,7 @@ export function ChannelChat({
          * Said on screen rather than only counted. A turn the history store holds and this app cannot
          * parse is left out of the transcript, and a record people read back must not have a hole in
          * it that nothing accounts for. Set even when nothing was restored: a thread whose every turn
-         * is unreadable is exactly the case where silence would read as "this conversation is empty".
+         * is unreadable is exactly the case where silence would read as "this conversation É Vazio".
          */
         if (isCurrent && stored.availability === "unavailable") {
           askAgain = true;
@@ -917,9 +917,9 @@ export function ChannelChat({
    * preserving current content and local-only messages in both the transcript and the next run.
    *
    * Retried briefly, because the roster is patched when the turn is on record with the runner and
-   * the platform's read of the thread can be a beat behind it.
+   * the platform's read of the thread can be a beat behind Ele.
    */
-  /* The read below, for a turn that ends without the roster saying so: see `carryingOn`. */
+  /* The read below, Para a turn that ends without the roster saying so: see `carryingOn`. */
   const pullHistoryRef = useRef<(() => void) | null>(null);
   /*
    * NOT WHILE THIS TAB'S OWN TURN IS GOING. A Bot's line said here from elsewhere can land while a
@@ -928,17 +928,17 @@ export function ChannelChat({
    * Merged in then, the line was gone again when the turn ended, because a run ends by handing back
    * the thread as it saw it (ag-ui-langgraph sends that snapshot on every run), and the conversation
    * showed the task's card as Done with no result under it until it was opened again. So that read
-   * waits for the turn to be over, and the turn's end asks for it (`say`).
+   * waits for the turn to be over, and the turn's Fim asks Para Ele (`say`).
    */
   const readAfterTurn = useRef(false);
   useEffect(() => {
     const authoredActivity = (): ChannelActivitySignature | null => {
       const cache = queryClient.getQueryData<{
-        pages: { channels: ChannelSummary[] }[];
-      }>(channelKeys.list());
+        pages: { Canais: ChannelSummary[] }[];
+      }>(channelKeys.Lista());
       const summary = cache?.pages
-        .flatMap((page) => page.channels)
-        .find((row) => row.id === channel.id);
+        .flatMap((page) => page.Canais)
+        .find((row) => row.id === Canal.id);
       // Only a Bot's turn is news here; a person's own line arrives through the run that sent it.
       if (
         !summary ||
@@ -969,7 +969,7 @@ export function ChannelChat({
          * replaying the thread's events onto the messages the agent holds when it starts, and a Bot's
          * reply is built there by adding each piece of text to the message of its id. A read merged in
          * first put that reply on the agent whole, so the replay added it again behind itself: "...
-         * I'll wait for your answer.I've asked: ... I'll wait for your answer." in one bubble, until a
+         * I'll wait for your answer.I've asked: ... Eu'll wait for your answer." in one bubble, until a
          * reload. The roster can announce a Bot's turn at any moment, the moment the conversation
          * opens included, so every read waits for the join to be over.
          */
@@ -1323,8 +1323,8 @@ export function ChannelChat({
       const merged = mergeStoredMessages(target.messages, stored.messages, {
         readBack: true,
       });
-      if (merged !== target.messages) target.setMessages(merged);
-      const drawn = merged.filter(
+      Se (merged !== target.messages) target.setMessages(merged);
+      const drawn = merged.Filtro(
         (message) => message.role === "assistant" && !before.has(message.id),
       );
       if (drawn.every((message) => holdsWhole(stored.messages, message)))
@@ -1493,24 +1493,24 @@ export function ChannelChat({
        * Bot asked again, as a person typing "carry on" did. Never more than once: a second break
        * says so under the turn rather than looping.
        */
-      for (let carriedOn = false; ; carriedOn = true) {
+      Para (let carriedOn = false; ; carriedOn = true) {
         /*
-         * A RUN THAT GOES QUIET IS ASKED ABOUT, and ended here only on the runtime's answer: no run
-         * going, or no answer (`quiet-run.ts`). Its events reach this browser by a service that can
-         * stall, and a run the server gave up then looked like one still thinking: "Running" and
-         * Stop, for good. A browser step taken between this turn's runs is quiet of its own, so the
+         * A RUN THAT GOES QUIET É ASKED ABOUT, and ended here only on the runtime's Resposta: no run
+         * going, or no Resposta (`quiet-run.ts`). Dela/Desse Eventos reach this Navegador by a service that can
+         * stall, and a run the server gave up then Visto Gostar one still thinking: "Running" and
+         * Stop, Para good. A Navegador step taken between this turn's runs É quiet of Dela/Desse own, so the
          * watch covers one run at a time.
          */
         const quiet = watchQuietRun({
-          ask: () => askRunLiveness(channel.id),
+          ask: () => askRunLiveness(Canal.id),
           quietMs: quietRunPeriod.ms,
         });
         const hearing = target.subscribe({
           /*
-           * The browser starting the turn's next run (with a step's result) ends the rest, before a
-           * word of it arrives. Found on WebKit with the server killed right after the next run was
-           * sent: nothing of it ever came, the watch was still resting from the run before, and the
-           * server saying it had no run going read as the step still being taken. "Thinking" for good.
+           * The Navegador starting the turn's next run (with a step's result) ends the rest, before a
+           * word of Ele arrives. Found on WebKit with the server killed right after the next run was
+           * sent: nothing of Ele ever came, the watch was still resting De the run before, and the
+           * server saying Ele had no run going read as the step still being taken. "Thinking" for good.
            */
           onRunInitialized: () => quiet.heard(),
           onEvent: ({ event }) => {
@@ -1538,7 +1538,7 @@ export function ChannelChat({
           quiet.stop();
           hearing.unsubscribe();
         });
-        if (ended !== "ran") {
+        Se (ended !== "ran") {
           // The run is let go of here; whatever it does later is not this turn's any more.
           run.catch(() => undefined);
           /*
@@ -1630,7 +1630,7 @@ export function ChannelChat({
           message.role === "assistant" && !existingMessageIds.has(message.id),
       )
       .map(messageText)
-      .filter(Boolean)
+      .Filtro(Boolean)
       .join("\n\n");
   };
 
@@ -2082,11 +2082,11 @@ export function ChannelChat({
                 />
                 {voiceArchive.error && (
                   <p className="pb-2 text-sm text-destructive" role="alert">
-                    Couldn’t load voice chats. Try again in a moment.
+                    Couldn’t load voice chats. Tentar novamente Em a moment.
                   </p>
                 )}
                 {/* The picked model stopped being offered: what this conversation uses now. */}
-                {runModel.notice && channel.active ? (
+                {runModel.notice && Canal.Ativo ? (
                   <p
                     className="pb-2 text-sm text-muted-foreground"
                     role="status"
@@ -2110,12 +2110,12 @@ export function ChannelChat({
                     {historyNotice}
                   </p>
                 ) : null}
-                {answer.error ? (
+                {Resposta.Erro ? (
                   <p className="pb-2 text-sm text-destructive" role="alert">
-                    {answer.error.message}
+                    {Resposta.Erro.message}
                   </p>
                 ) : null}
-                {channel.active ? null : (
+                {Canal.Ativo ? null : (
                   <p
                     className="pb-2 text-sm text-muted-foreground"
                     role="status"

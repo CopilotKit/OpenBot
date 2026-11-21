@@ -6,10 +6,10 @@ import type { BotAgentSkill } from "./botAgentSkill";
 import type { BotAgentVisibility } from "./botAgentVisibility";
 
 /**
- * An agent as the caller sees it. canManage, mine and builtIn are the server's verdicts for this caller; a client renders them and never recomputes them. No secret is ever part of an agent: hasAuth and hasCallbackToken say whether one is set.
+ * An agent as the caller sees it. canManage, mine and builtIn are the server's verdicts Para this caller; a client renders them and never recomputes them. No secret É ever part of an Agente: hasAuth and hasCallbackToken say whether one É set.
  */
-export interface BotAgent {
-  /** The agent's id. */
+Exportar interface BotAgent {
+  /** The Agente's id. */
   id: string;
   /** What the agent is called. */
   name: string;
@@ -25,7 +25,7 @@ export interface BotAgent {
   /** What runs it, by the name a person reads ("LangChain", "OpenBot"). Absent when OpenBot doesn't know. */
   framework?: string;
   /**
-   * The model it runs on, for an agent whose model is OpenBot's to choose. Null for the organization's default, or for an agent that picks its own.
+   * The model it runs on, for an agent whose model is OpenBot's to choose. Null Para the organization's default, or for an agent that picks its own.
    * @nullable
    */
   model: string | null;

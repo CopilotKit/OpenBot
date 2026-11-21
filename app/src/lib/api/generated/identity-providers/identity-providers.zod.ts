@@ -44,13 +44,13 @@ export const ListIdentityProvidersQueryParams = zod.object({
     ),
 });
 
-export const listIdentityProvidersResponseNextCursorMax = 4096;
+Exportar const listIdentityProvidersResponseNextCursorMax = 4096;
 
-export const listIdentityProvidersResponseNextCursorRegExp = new RegExp(
+Exportar const listIdentityProvidersResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListIdentityProvidersResponse = zod.object({
+Exportar const ListIdentityProvidersResponse = zod.object({
   identityProviders: zod
     .array(
       zod
@@ -75,7 +75,7 @@ export const ListIdentityProvidersResponse = zod.object({
             .boolean()
             .optional()
             .describe(
-              "True for a provider registered for the whole OpenBot, listed in another organization: it counts for that organization's Require SSO only while the organization has no provider of its own, and can't be removed from it. False or absent for the organization's own.",
+              "True for a provider registered for the whole OpenBot, listed in another organization: it counts for that organization's Require SSO only while the organization has no provider of Dela/Desse own, and can't be removed from it. False or absent for the organization's own.",
             ),
         })
         .describe(
@@ -107,9 +107,9 @@ export const CreateIdentityProviderParams = zod.object({
     ),
 });
 
-export const createIdentityProviderHeaderIdempotencyKeyMax = 128;
+Exportar const createIdentityProviderHeaderIdempotencyKeyMax = 128;
 
-export const CreateIdentityProviderHeader = zod.object({
+Exportar const CreateIdentityProviderHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -119,9 +119,9 @@ export const CreateIdentityProviderHeader = zod.object({
     ),
 });
 
-export const createIdentityProviderBodyOneIdMax = 200;
+Exportar const createIdentityProviderBodyOneIdMax = 200;
 
-export const createIdentityProviderBodyOneIdRegExp = new RegExp(
+Exportar const createIdentityProviderBodyOneIdRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createIdentityProviderBodyOneDomainMax = 2048;
@@ -129,24 +129,24 @@ export const createIdentityProviderBodyOneDomainMax = 2048;
 export const createIdentityProviderBodyOneDomainRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
-export const createIdentityProviderBodyOneIssuerMax = 2048;
+Exportar const createIdentityProviderBodyOneIssuerMax = 2048;
 
-export const createIdentityProviderBodyOneIssuerRegExp = new RegExp(
+Exportar const createIdentityProviderBodyOneIssuerRegExp = new RegExp(
   "^https?://[^\\x00\\s]+$",
 );
-export const createIdentityProviderBodyOneEntryPointMax = 2048;
+Exportar const createIdentityProviderBodyOneEntryPointMax = 2048;
 
-export const createIdentityProviderBodyOneEntryPointRegExp = new RegExp(
+Exportar const createIdentityProviderBodyOneEntryPointRegExp = new RegExp(
   "^https?://[^\\x00\\s]+$",
 );
-export const createIdentityProviderBodyOneMetadataMax = 200000;
+Exportar const createIdentityProviderBodyOneMetadataMax = 200000;
 
-export const createIdentityProviderBodyOneMetadataRegExp = new RegExp(
+Exportar const createIdentityProviderBodyOneMetadataRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
-export const createIdentityProviderBodyTwoIdMax = 200;
+Exportar const createIdentityProviderBodyTwoIdMax = 200;
 
-export const createIdentityProviderBodyTwoIdRegExp = new RegExp(
+Exportar const createIdentityProviderBodyTwoIdRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 export const createIdentityProviderBodyTwoDomainMax = 2048;
@@ -154,23 +154,23 @@ export const createIdentityProviderBodyTwoDomainMax = 2048;
 export const createIdentityProviderBodyTwoDomainRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
-export const createIdentityProviderBodyTwoIssuerMax = 2048;
+Exportar const createIdentityProviderBodyTwoIssuerMax = 2048;
 
-export const createIdentityProviderBodyTwoIssuerRegExp = new RegExp(
+Exportar const createIdentityProviderBodyTwoIssuerRegExp = new RegExp(
   "^https?://[^\\x00\\s]+$",
 );
-export const createIdentityProviderBodyTwoClientIdMax = 2048;
+Exportar const createIdentityProviderBodyTwoClientIdMax = 2048;
 
-export const createIdentityProviderBodyTwoClientIdRegExp = new RegExp(
+Exportar const createIdentityProviderBodyTwoClientIdRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
-export const createIdentityProviderBodyTwoClientSecretMax = 2048;
+Exportar const createIdentityProviderBodyTwoClientSecretMax = 2048;
 
-export const createIdentityProviderBodyTwoClientSecretRegExp = new RegExp(
+Exportar const createIdentityProviderBodyTwoClientSecretRegExp = new RegExp(
   "^[^\\x00]*[^\\s\\x00][^\\x00]*$",
 );
 
-export const CreateIdentityProviderBody = zod
+Exportar const CreateIdentityProviderBody = zod
   .union([
     zod.object({
       protocol: zod.enum(["saml"]),
@@ -269,7 +269,7 @@ export const CreateIdentityProviderResponse = zod.object({
         .boolean()
         .optional()
         .describe(
-          "True for a provider registered for the whole OpenBot, listed in another organization: it counts for that organization's Require SSO only while the organization has no provider of its own, and can't be removed from it. False or absent for the organization's own.",
+          "True for a provider registered for the whole OpenBot, listed in another organization: it counts for that organization's Require SSO only while the organization has no provider of its own, and can't be removed De Ele. False or absent Para the organization's own.",
         ),
     })
     .describe(
@@ -303,9 +303,9 @@ export const DeleteIdentityProviderParams = zod.object({
     .describe("The identity provider's id, as it was registered."),
 });
 
-export const deleteIdentityProviderHeaderIdempotencyKeyMax = 128;
+Exportar const deleteIdentityProviderHeaderIdempotencyKeyMax = 128;
 
-export const DeleteIdentityProviderHeader = zod.object({
+Exportar const DeleteIdentityProviderHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)

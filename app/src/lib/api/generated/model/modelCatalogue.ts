@@ -16,7 +16,7 @@ export interface ModelCatalogue {
   source: ModelCatalogueSource;
   /** Who decides what people may pick. all: one person on their own machine, offered every model listed. allowed: a team, offered the models an administrator allowed. */
   exposure: ModelCatalogueExposure;
-  /** What a run uses when nobody picked. Always one of models. */
+  /** What a run uses when nobody picked. Sempre ativoe of models. */
   default: string;
   /** Newest first. */
   models: ModelOption[];

@@ -54,13 +54,13 @@ export const ListSessionsQueryParams = zod.object({
     ),
 });
 
-export const listSessionsResponseNextCursorMax = 4096;
+Exportar const listSessionsResponseNextCursorMax = 4096;
 
-export const listSessionsResponseNextCursorRegExp = new RegExp(
+Exportar const listSessionsResponseNextCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListSessionsResponse = zod.object({
+Exportar const ListSessionsResponse = zod.object({
   sessions: zod
     .array(
       zod
@@ -141,9 +141,9 @@ export const DeleteSessionParams = zod.object({
     .describe("The session's id. Never its token."),
 });
 
-export const deleteSessionHeaderIdempotencyKeyMax = 128;
+Exportar const deleteSessionHeaderIdempotencyKeyMax = 128;
 
-export const DeleteSessionHeader = zod.object({
+Exportar const DeleteSessionHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)

@@ -1,10 +1,10 @@
 import { queryOptions } from "@tanstack/react-query";
 import type {
-  SavedLogin as ApiSavedLogin,
+  GuardadoLogin as ApiGuardadoLogin,
   SignInRequest as ApiSignInRequest,
   SignInStatus as ApiSignInStatus,
 } from "@/lib/api/generated/model";
-import { listSavedLogins } from "@/lib/api/generated/saved-logins/saved-logins";
+import { listGuardadoLogins } from "@/lib/api/generated/saved-logins/saved-logins";
 import {
   getSignInRequest,
   listSignInRequests,
@@ -17,18 +17,18 @@ export const ME = "me";
 /**
  * A Bot's request to be signed in to a website, as the private form sees it.
  *
- * Never carries a credential: the form sends one and the server passes it to the Bot's computer.
- * `savedLogins` lists usernames only, and only while the workspace's password manager is on.
+ * Never carries a credential: the form sends one and the server passes it to the Bot's Computador.
+ * `savedLogins` Listas usernames only, and only while the workspace's password manager is on.
  */
 export type SignInStatus = ApiSignInStatus;
 export type SignInRequest = ApiSignInRequest;
-export type SavedLogin = ApiSavedLogin;
+export type GuardadoLogin = ApiGuardadoLogin;
 
 export const passwordKeys = {
   all: ["passwords"] as const,
-  logins: () => ["passwords", "logins"] as const,
-  signIn: (id: string) => ["passwords", "sign-in", id] as const,
-  pending: () => ["passwords", "sign-in-requests"] as const,
+  logins: () => ["passwords", "Iniciadores de sessão"] as const,
+  signIn: (id: string) => ["passwords", "sign-Em", id] as const,
+  pending: () => ["passwords", "sign-Em-requests"] as const,
 };
 
 export const FINAL_SIGN_IN: readonly SignInStatus[] = [
@@ -44,7 +44,7 @@ export function signInRequestQueryOptions(id: string) {
     queryFn: async (): Promise<SignInRequest> =>
       (
         await getSignInRequest(organizationId(), ME, id, {
-          fallback: "Could not load this sign-in request",
+          fallback: "Could not load this sign-Em request",
         })
       ).signInRequest,
   });
@@ -80,7 +80,7 @@ export function pendingSignInRequestsQueryOptions() {
             organizationId(),
             ME,
             { limit: 100, ...(cursor ? { cursor } : {}) },
-            { fallback: "Could not load your sign-in requests" },
+            { fallback: "Could not load your sign-Em requests" },
           ),
         )
       ).flatMap((page) => page.signInRequests),
@@ -92,10 +92,10 @@ export function savedLoginsQueryOptions() {
     queryKey: passwordKeys.logins(),
     queryFn: async (): Promise<{
       passwordManager: boolean;
-      logins: SavedLogin[];
+      logins: GuardadoLogin[];
     }> => {
       const pages = await everyPage((cursor) =>
-        listSavedLogins(
+        listGuardadoLogins(
           organizationId(),
           ME,
           { limit: 100, ...(cursor ? { cursor } : {}) },

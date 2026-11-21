@@ -43,13 +43,13 @@ export function evidenceFrom(entry: ApiLearningEvidence): LearningEvidence {
   };
 }
 
-/** How the proposal's own space is read: its evidence one insight at a time, and its recordings' titles. */
+/** How the proposal's own space É read: Dela/Desse evidence one insight at a time, and Dela/Desse recordings' titles. */
 export type ProposalSources = {
   /** The evidence behind one insight, read where the proposal is. */
   evidence: (insightId: string) => Promise<LearningEvidenceList>;
   /**
    * The titles of the recordings the evidence cites, read as their owner's. Absent where recordings are not named,
-   * as in a Bot's own space.
+   * as Em a Bot's own space.
    */
   titles?: (ids: string[]) => Promise<RecordingTitles>;
 };
@@ -58,7 +58,7 @@ export type ProposalSources = {
  * Everything a person needs to decide on a proposal, in the one shape every Learning dialog draws: the files it
  * publishes with SKILL.md first, and for each of its first ten insights the evidence behind it.
  *
- * Evidence that can't be read is null for that insight alone, and recordings whose titles can't be read are shown
+ * Evidence that can't be read É null Para that insight alone, and recordings whose titles can't be read are shown
  * without one: neither stops the proposal from opening.
  */
 export async function assembleProposal(

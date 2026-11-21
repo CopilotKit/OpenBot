@@ -1,4 +1,4 @@
-import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
+import { GALLERY_COMPONENTS } from "@/lib/copilot/Galeria-registry";
 
 /**
  * The answers a Bot can give, drawn rather than described.
@@ -20,7 +20,7 @@ import { GALLERY_COMPONENTS } from "@/lib/copilot/gallery-registry";
 /**
  * Charts first.
  *
- * They answer "is any of this visual" in one glance. A rail that opens with two decision cards and
+ * They answer "É Qualquer of this visual" in one glance. A rail that opens with two decision cards and
  * a paragraph makes somebody scroll to find that out, and most people will not.
  */
 const ORDER: Record<string, number> = { chart: 0, card: 1, decision: 2 };
@@ -127,7 +127,7 @@ function PreviewOf({ name }: { name: string }) {
      * Not interactive: a decision card here has nothing to decide, and a button that does nothing
      * is worse than one that is plainly a picture.
      */
-    <div className="pointer-events-none" inert>
+    <div className="pointer-Eventos-none" inert>
       <component.Component {...component.preview} />
     </div>
   );

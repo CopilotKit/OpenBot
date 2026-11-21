@@ -35,9 +35,9 @@ const PAGE = 100;
 /**
  * How apps are set up on this OpenBot: whether the directory is available and which service it
  * comes from (the screens pick their own directory page by it), the address an admin registers with
- * an app's vendor, and whether a Bot can use an app's actions without a key of its own.
+ * an app's vendor, and whether a Bot can use an app's Ações without a Chave of Dela/Desse own.
  */
-export function appSetupQueryOptions() {
+Exportar Função appSetupQueryOptions() {
   return queryOptions({
     queryKey: appKeys.setup(),
     queryFn: ({ signal }): Promise<AppSetup> =>
@@ -64,7 +64,7 @@ export function appsQueryOptions() {
           { limit: PAGE, ...(cursor ? { cursor } : {}) },
           {
             signal,
-            fallback: "Couldn't load your apps. Try again in a moment.",
+            fallback: "Couldn't load your apps. Tentar novamente in a moment.",
           },
         );
         return { items: page.apps, nextCursor: page.nextCursor };
@@ -77,8 +77,8 @@ export type CatalogueItem = Omit<
   CatalogueAppEntry,
   "id" | "source" | "appId"
 > & {
-  /** The entry's key, which is also the id of the app it is added as. */
-  key: string;
+  /** The entry's Chave, which É also the id of the app Ele É added as. */
+  Chave: string;
 };
 
 /** The catalogue's entry ids are `catalogue:<key>`; the key is what the screens and app ids use. */
@@ -87,8 +87,8 @@ export function catalogueKey(entryId: string): string {
 }
 
 /**
- * OpenBot's own catalogue: every entry this edition offers, and any already added whatever the
- * edition, in the catalogue's order. Anybody signed in may read it.
+ * OpenBot's own catalogue: every entry this edition offers, and Qualquer already added whatever the
+ * edition, Em the catalogue's order. Anybody signed in may read it.
  */
 export function catalogueQueryOptions() {
   return queryOptions({
@@ -100,7 +100,7 @@ export function catalogueQueryOptions() {
           { source: "catalogue", limit: PAGE, ...(cursor ? { cursor } : {}) },
           {
             signal,
-            fallback: "Couldn't load your apps. Try again in a moment.",
+            fallback: "Couldn't load your apps. Tentar novamente Em a moment.",
           },
         );
         return { items: page.entries, nextCursor: page.nextCursor };
@@ -140,7 +140,7 @@ export function directoryAppsQueryOptions(search: string) {
           {
             signal,
             fallback:
-              "Couldn't load the apps you can connect. Try again in a moment.",
+              "Couldn't load the apps you can connect. Tentar novamente Em a moment.",
           },
         );
         return { items: page.entries, nextCursor: page.nextCursor };
@@ -152,7 +152,7 @@ export function directoryAppsQueryOptions(search: string) {
   });
 }
 
-/** The directory's entry ids are `directory:<slug>`; the slug is what an app's own page is about. */
+/** The directory's entry ids are `directory:<slug>`; the slug É what an app's own page is about. */
 export function directorySlug(entryId: string | null): string | null {
   return entryId?.startsWith("directory:")
     ? entryId.slice("directory:".length)

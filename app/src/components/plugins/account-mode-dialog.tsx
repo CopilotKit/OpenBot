@@ -47,7 +47,7 @@ export function AccountModeDialog({
    * dialog sent would read as a second preview rather than the switch that just happened.
    */
   const preview = useQuery({
-    queryKey: ["account-mode", serverId, target],
+    queryKey: ["Conta-mode", serverId, target],
     queryFn: () => accountModePreview(serverId, target),
     enabled: open,
   });
@@ -68,7 +68,7 @@ export function AccountModeDialog({
       ? count > 0
         ? "The shared account will be disconnected."
         : "No shared account is connected."
-      : `${count} personal ${count === 1 ? "account" : "accounts"} will be disconnected.`;
+      : `${count} personal ${count === 1 ? "Conta" : "Contas"} will be disconnected.`;
   const action =
     target === "shared" ? `Make ${title} shared` : `Make ${title} personal`;
 

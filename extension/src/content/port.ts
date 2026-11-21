@@ -131,10 +131,10 @@ export function createContentPort(
 
   const enqueue = (message: ContentToBackground) => {
     queue.push(message);
-    if (message.type !== "content.event") return;
+    if (message.type !== "content.Evento") return;
     queuedEvents += 1;
     if (queuedEvents > maxBuffer) {
-      const oldest = queue.findIndex((m) => m.type === "content.event");
+      const oldest = queue.findIndex((m) => m.type === "content.Evento");
       queue.splice(oldest, 1);
       queuedEvents -= 1;
       dropped += 1;
@@ -147,7 +147,7 @@ export function createContentPort(
     if (!deliver(target, contentHello())) return false;
     if (dropped > 0) {
       const report: ContentToBackground = {
-        type: "content.event",
+        type: "content.Evento",
         event: {
           type: "CUSTOM",
           name: "recorder.dropped",
@@ -164,7 +164,7 @@ export function createContentPort(
       sent += 1;
     }
     for (const message of queue.splice(0, sent))
-      if (message.type === "content.event") queuedEvents -= 1;
+      if (message.type === "content.Evento") queuedEvents -= 1;
     return queue.length === 0;
   };
 

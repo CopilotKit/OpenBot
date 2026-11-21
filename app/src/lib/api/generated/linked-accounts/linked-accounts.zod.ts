@@ -44,7 +44,7 @@ export const ListLinkedAccountsQueryParams = zod.object({
     .min(1)
     .max(listLinkedAccountsQueryLimitMax)
     .default(listLinkedAccountsQueryLimitDefault)
-    .describe("Most items in one page."),
+    .describe("Most items Em one page."),
   cursor: zod
     .string()
     .min(1)
@@ -70,10 +70,10 @@ export const ListLinkedAccountsResponse = zod.object({
           id: zod.string().describe("The link's id."),
           provider: zod
             .enum(["slack", "github"])
-            .describe("A service a person can link an account at."),
+            .describe("A service a person can link an Conta at."),
           title: zod
             .string()
-            .describe("The service's name, as a person reads it."),
+            .describe("The service's name, as a person reads Ele."),
           handle: zod
             .string()
             .nullable()
@@ -91,7 +91,7 @@ export const ListLinkedAccountsResponse = zod.object({
           "A person's account at another service, which OpenBot knows is theirs. Never the credential it holds.",
         ),
     )
-    .describe("The oldest link first, then by id."),
+    .describe("The oldest link Primeiro, then by id."),
   nextCursor: zod
     .string()
     .max(listLinkedAccountsResponseNextCursorMax)
@@ -131,7 +131,7 @@ export const LinkAccountParams = zod.object({
 export const linkAccountHeaderIdempotencyKeyMax = 128;
 
 export const LinkAccountHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(linkAccountHeaderIdempotencyKeyMax)
@@ -143,7 +143,7 @@ export const LinkAccountHeader = zod.object({
 export const LinkAccountBody = zod.object({
   provider: zod
     .enum(["slack", "github"])
-    .describe("A service a person can link an account at."),
+    .describe("A service a person can link an Conta at."),
 });
 
 export const LinkAccountResponse = zod
@@ -154,14 +154,14 @@ export const LinkAccountResponse = zod
         code: zod
           .string()
           .describe(
-            "The code. It works once, and only for the person it was made for.",
+            "The code. Ele works once, and only Para the person Ele was made Para.",
           ),
         expiresAt: zod.iso
           .datetime({ offset: true })
           .describe("When the code stops working."),
         instruction: zod
           .string()
-          .describe("What to send, and where, as a person reads it."),
+          .describe("What to send, and where, as a person reads Ele."),
       })
       .describe("A one-time code the person sends the OpenBot app in Slack."),
     zod
@@ -214,9 +214,9 @@ export const DeleteLinkedAccountParams = zod.object({
     .describe("The linked account's id."),
 });
 
-export const deleteLinkedAccountHeaderIdempotencyKeyMax = 128;
+Exportar const deleteLinkedAccountHeaderIdempotencyKeyMax = 128;
 
-export const DeleteLinkedAccountHeader = zod.object({
+Exportar const DeleteLinkedAccountHeader = zod.object({
   "Idempotency-Key": zod
     .string()
     .min(1)
@@ -242,21 +242,21 @@ export const ListLinkedAccountProvidersParams = zod.object({
     ),
 });
 
-export const listLinkedAccountProvidersQueryLimitDefault = 50;
-export const listLinkedAccountProvidersQueryLimitMax = 100;
+Exportar const listLinkedAccountProvidersQueryLimitDefault = 50;
+Exportar const listLinkedAccountProvidersQueryLimitMax = 100;
 
-export const listLinkedAccountProvidersQueryCursorMax = 4096;
+Exportar const listLinkedAccountProvidersQueryCursorMax = 4096;
 
-export const listLinkedAccountProvidersQueryCursorRegExp = new RegExp(
+Exportar const listLinkedAccountProvidersQueryCursorRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
 
-export const ListLinkedAccountProvidersQueryParams = zod.object({
-  limit: zod
+Exportar const ListLinkedAccountProvidersQueryParams = zod.object({
+  Limite: zod
     .int()
     .min(1)
     .max(listLinkedAccountProvidersQueryLimitMax)
-    .default(listLinkedAccountProvidersQueryLimitDefault)
+    .Padrão(listLinkedAccountProvidersQueryLimitDefault)
     .describe("Most items in one page."),
   cursor: zod
     .string()

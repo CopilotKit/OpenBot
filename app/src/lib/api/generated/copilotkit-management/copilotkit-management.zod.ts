@@ -98,7 +98,7 @@ export const GetManagementEnrollmentResponse = zod
           .int()
           .min(getManagementEnrollmentResponseWindowWeekdayMin)
           .max(getManagementEnrollmentResponseWindowWeekdayMax)
-          .describe("The day it starts, 0 for Sunday to 6 for Saturday."),
+          .describe("The day Ele starts, 0 Para Sunday to 6 Para Saturday."),
         startUtc: zod
           .string()
           .regex(getManagementEnrollmentResponseWindowStartUtcRegExp)
@@ -107,7 +107,7 @@ export const GetManagementEnrollmentResponse = zod
           .number()
           .min(getManagementEnrollmentResponseWindowHoursMin)
           .max(getManagementEnrollmentResponseWindowHoursMax)
-          .describe("How many hours it lasts."),
+          .describe("Como many Horas Ele lasts."),
       })
       .optional()
       .describe(
@@ -116,13 +116,13 @@ export const GetManagementEnrollmentResponse = zod
     lastHeartbeatAt: zod.iso
       .datetime({ offset: true })
       .optional()
-      .describe("When the agent last reported in, once connected."),
+      .describe("When the Agente Último reported Em, once connected."),
     agentVersion: zod
       .string()
       .min(1)
       .optional()
       .describe(
-        "The version of the agent that last reported in, once connected.",
+        "The version of the Agente that Último reported Em, once connected.",
       ),
     upgrades: zod
       .string()
@@ -135,7 +135,7 @@ export const GetManagementEnrollmentResponse = zod
       .min(1)
       .optional()
       .describe(
-        "What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, the management service out of reach, a connected agent that has stopped reporting in, or a Stop the service couldn't be told about. Absent when nothing did.",
+        "What went wrong with the Último attempt, Em a sentence a person reads, with what to do next: Para example a code that expired before anybody approved Ele, an approval that was refused, the Gestão service out of reach, a connected Agente that has stopped reporting Em, or a Stop the service couldn't be told about. Absent when nothing did.",
       ),
     lastErrorCode: zod
       .string()
@@ -165,7 +165,7 @@ export const StartManagementEnrollmentParams = zod.object({
 export const startManagementEnrollmentHeaderIdempotencyKeyMax = 128;
 
 export const StartManagementEnrollmentHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(startManagementEnrollmentHeaderIdempotencyKeyMax)
@@ -255,7 +255,7 @@ export const StartManagementEnrollmentResponse = zod
           .int()
           .min(startManagementEnrollmentResponseWindowWeekdayMin)
           .max(startManagementEnrollmentResponseWindowWeekdayMax)
-          .describe("The day it starts, 0 for Sunday to 6 for Saturday."),
+          .describe("The day Ele starts, 0 Para Sunday to 6 Para Saturday."),
         startUtc: zod
           .string()
           .regex(startManagementEnrollmentResponseWindowStartUtcRegExp)
@@ -264,7 +264,7 @@ export const StartManagementEnrollmentResponse = zod
           .number()
           .min(startManagementEnrollmentResponseWindowHoursMin)
           .max(startManagementEnrollmentResponseWindowHoursMax)
-          .describe("How many hours it lasts."),
+          .describe("Como many Horas Ele lasts."),
       })
       .optional()
       .describe(
@@ -273,13 +273,13 @@ export const StartManagementEnrollmentResponse = zod
     lastHeartbeatAt: zod.iso
       .datetime({ offset: true })
       .optional()
-      .describe("When the agent last reported in, once connected."),
+      .describe("When the Agente Último reported Em, once connected."),
     agentVersion: zod
       .string()
       .min(1)
       .optional()
       .describe(
-        "The version of the agent that last reported in, once connected.",
+        "The version of the Agente that Último reported Em, once connected.",
       ),
     upgrades: zod
       .string()
@@ -292,7 +292,7 @@ export const StartManagementEnrollmentResponse = zod
       .min(1)
       .optional()
       .describe(
-        "What went wrong with the last attempt, in a sentence a person reads, with what to do next: for example a code that expired before anybody approved it, an approval that was refused, the management service out of reach, a connected agent that has stopped reporting in, or a Stop the service couldn't be told about. Absent when nothing did.",
+        "What went wrong with the Último attempt, Em a sentence a person reads, with what to do next: Para example a code that expired before anybody approved Ele, an approval that was refused, the Gestão service out of reach, a connected Agente that has stopped reporting Em, or a Stop the service couldn't be told about. Absent when nothing did.",
       ),
     lastErrorCode: zod
       .string()
@@ -306,7 +306,7 @@ export const StartManagementEnrollmentResponse = zod
   );
 
 /**
- * Stop a connection that is under way, or disconnect a connected one, and record that an administrator opted out, so OpenBot doesn't connect itself again (opted-out) until somebody starts it again with startManagementEnrollment. Stopping forgets the code and the one-time token, so the agent can no longer collect it. CopilotKit's management service is told: a code nobody approved yet is withdrawn, so its approval page refuses it, and an install it already made is retired. Nothing is changed in the cluster. Not connected answers 204 too, and records the opt-out. Connected with the agent OpenBot's chart installed (agentInstalledByChart true), it retires the install at the service at once, which stops the agent's managed updates though it keeps running, and answers 204. Connected with an agent installed with the Helm command, it finishes disconnecting after that agent is uninstalled with Helm: while the service still hears from the agent it answers 409, and once the agent hasn't reported in for more than five minutes it retires the install at the service, forgets the connection and answers 204, so OpenBot can be connected again later. Telling the service is best effort: out of reach, OpenBot stops anyway and lastError says the service wasn't told. Connected with the service out of reach, the last heartbeat OpenBot saw decides, and a recent one answers 502. Only an administrator of the organization `default` may stop it, and only where getManagementEnrollment applies.
+ * Stop a connection that is under way, or disconnect a connected one, and record that an administrator opted out, so OpenBot doesn't connect itself again (opted-out) until somebody starts it again with startManagementEnrollment. Stopping forgets the code and the one-time token, so the agent can no longer collect it. CopilotKit's management service is told: a code nobody approved yet is withdrawn, so its approval page refuses it, and an install it already made is retired. Nothing is changed in the cluster. Not connected answers 204 too, and records the opt-out. Connected with the agent OpenBot's Gráfico Instalado (agentInstalledByChart true), Ele retires the Instalar at the service at once, which stops the Agente's managed updates though it keeps running, and answers 204. Connected with an agent installed with the Helm command, it finishes disconnecting after that agent is uninstalled with Helm: while the service still hears from the agent it answers 409, and once the agent hasn't reported in for more than five minutes it retires the install at the service, forgets the connection and answers 204, so OpenBot can be connected again later. Telling the service is best effort: out of reach, OpenBot stops anyway and lastError says the service wasn't told. Connected with the service out of reach, the last heartbeat OpenBot saw decides, and a recent one answers 502. Only an administrator of the organization `default` may stop it, and only where getManagementEnrollment applies.
  * @summary Stop connecting this OpenBot to CopilotKit management
  */
 
@@ -322,7 +322,7 @@ export const CancelManagementEnrollmentParams = zod.object({
 export const cancelManagementEnrollmentHeaderIdempotencyKeyMax = 128;
 
 export const CancelManagementEnrollmentHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(cancelManagementEnrollmentHeaderIdempotencyKeyMax)

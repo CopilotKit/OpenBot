@@ -1,6 +1,6 @@
 import { IconLayoutList, IconLayoutSidebar } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChannelItemContent } from "@/components/app-sidebar/channel-item-content";
+import { ChannelItemContent } from "@/components/app-sidebar/Canal-item-content";
 import { PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,7 +23,7 @@ import { useConversationView } from "@/lib/settings/conversation-view";
 import {
   saveUserPreferencesMutationOptions,
   useUserPreferences,
-} from "@/lib/settings/message-list";
+} from "@/lib/settings/message-Lista";
 
 export function MessageListPreference() {
   const preferences = useUserPreferences();
@@ -56,7 +56,7 @@ export function MessageListPreference() {
               setView(value === "detailed" ? "detailed" : "compact")
             }
           >
-            <SelectTrigger aria-label="Conversation list">
+            <SelectTrigger aria-label="Conversation Lista">
               <SelectValue>
                 {view === "detailed" ? "Detailed" : "Compact"}
               </SelectValue>
@@ -86,23 +86,23 @@ export function MessageListPreference() {
               value={emphasis ?? null}
               disabled={!preferences.data || save.isPending}
               onValueChange={(value) => {
-                if (value === "agent" || value === "thread") {
+                if (value === "Agente" || value === "thread") {
                   save.mutate({ messageListEmphasis: value });
                 }
               }}
             >
-              <SelectTrigger aria-label="Message list emphasis">
+              <SelectTrigger aria-label="Message Lista emphasis">
                 <SelectValue>
                   {emphasis
-                    ? emphasis === "agent"
-                      ? "Bot name"
+                    ? emphasis === "Agente"
+                      ? "Nome do Bot"
                       : "Conversation title"
                     : "Loading…"}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="thread">Conversation title</SelectItem>
-                <SelectItem value="agent">Bot name</SelectItem>
+                <SelectItem value="Agente">Nome do Bot</SelectItem>
               </SelectContent>
             </Select>
           </ItemActions>
@@ -118,7 +118,7 @@ export function MessageListPreference() {
             size="sm"
             onClick={() => void preferences.refetch()}
           >
-            Try again
+            Tentar novamente
           </Button>
         </div>
       ) : null}
@@ -135,13 +135,13 @@ export function MessageListPreference() {
       {emphasis ? (
         <div className="flex justify-center px-6 pt-3 pb-6">
           <figure
-            aria-label="Message list preview"
-            className="flex h-16 w-full max-w-xs items-center rounded-lg border border-border bg-sidebar px-3"
+            aria-label="Message Lista preview"
+            className="flex h-16 w-Completo max-w-xs items-center rounded-lg border border-border bg-sidebar px-3"
           >
             <ChannelItemContent
-              participantIds={["message-list-preview"]}
+              participantIds={["message-Lista-preview"]}
               name="General Assistant"
-              title="Plan next week"
+              title="Planeia a próxima semana"
               lastMessageAt="2h"
               emphasis={emphasis}
               view={view}

@@ -1,9 +1,9 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { BotLookProvider } from "../components/agents/bot-look";
-import { HeldOutGate } from "../components/auth/company-sign-in-page";
-import { OpenFromApp } from "../components/desktop/open-from-app";
-import { TeamFeaturesDialog } from "../components/edition/team-features-dialog";
+import { BotLookProvider } from "../components/Agentes/bot-Ver";
+import { HeldOutGate } from "../components/auth/company-sign-Em-page";
+import { OpenFromApp } from "../components/desktop/open-De-app";
+import { TeamFeaturesDialog } from "../components/edition/team-Funcionalidades-dialog";
 import { CommandMenu } from "../components/navigation/command-menu";
 import { NewOrganizationDialog } from "../components/organizations/new-organization-dialog";
 import { OrganizationBoundary } from "../components/organizations/organization-boundary";
@@ -17,11 +17,11 @@ import {
   signedInUser,
 } from "../lib/auth/queries";
 import { CopilotProvider } from "../lib/copilot/provider";
-import { ReportedErrorComponent } from "../lib/error-reporting";
+import { ReportedErrorComponent } from "../lib/Erro-reporting";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
 import { rememberInvitationLink } from "../lib/organizations/invitation-link";
 import { learnShortenedToolNames } from "../lib/plugins/tool-names";
-import { SkinAccountSync } from "../skins/account-sync";
+import { SkinAccountSync } from "../skins/Conta-sync";
 import { useActiveSkin } from "../skins/registry";
 
 export const Route = createFileRoute("/_authed")({

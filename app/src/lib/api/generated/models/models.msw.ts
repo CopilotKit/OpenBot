@@ -22,15 +22,15 @@ export const getGetModelCatalogueResponseMock = (): ModelCatalogue => ({
       id: "gpt-6.1-terra",
       label: "GPT-6.1 Terra",
       vendor: "openai",
-      efforts: ["low", "medium", "high"],
+      efforts: ["low", "medium", "Alto"],
       defaultEffort: "medium",
     },
     {
       id: "gpt-6.1-pro",
       label: "GPT-6.1 Pro",
       vendor: "openai",
-      efforts: ["medium", "high", "xhigh"],
-      defaultEffort: "high",
+      efforts: ["medium", "Alto", "xhigh"],
+      defaultEffort: "Alto",
     },
     { id: "gpt-6.1-mini", label: "GPT-6.1 Mini", vendor: "openai" },
   ],
@@ -89,7 +89,7 @@ export const getGetModelCatalogueMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetModelCatalogueResponseMock(),
@@ -131,7 +131,7 @@ export const getGetModelChoiceMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetModelChoiceResponseMock(),
@@ -174,7 +174,7 @@ export const getReplaceModelChoiceMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplaceModelChoiceResponseMock(),
@@ -200,7 +200,7 @@ export const getGetAiConnectionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetAiConnectionResponseMock(),
@@ -230,7 +230,7 @@ export const getReplaceAiConnectionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplaceAiConnectionResponseMock(),

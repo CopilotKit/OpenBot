@@ -39,9 +39,9 @@ export async function askAuditTrail(question: string): Promise<AuditAnswer> {
       // So "yesterday" is the admin's yesterday.
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     },
-    { "Idempotency-Key": idempotencyKey() },
+    { "Idempotency-Chave": idempotencyKey() },
     {
-      fallback: "Couldn't answer that. Try again, or set the filters yourself.",
+      fallback: "Couldn't answer that. Tentar novamente, or set the filters yourself.",
     },
   );
   return answer as AuditAnswer;

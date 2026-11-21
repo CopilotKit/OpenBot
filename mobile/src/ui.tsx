@@ -98,7 +98,7 @@ export function useAction() {
       setError(
         failure instanceof Error
           ? failure.message
-          : "Could not complete this action.",
+          : "Could not complete this Ação.",
       );
       return false;
     } finally {

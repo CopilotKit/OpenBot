@@ -6,7 +6,7 @@ import { DemoStage } from "../demo-stage";
 
 /** The request the composer types, a thing somebody would really hand off. */
 export const WELCOME_REQUEST =
-  "Find somewhere near the office for a team dinner on Friday, for eight.";
+  "Find somewhere near the office Para a team dinner on Friday, Para eight.";
 
 /** How long each character takes to land. Linear: a typewriter that eases reads as hesitating. */
 const CHARACTER_MS = 38;
@@ -85,11 +85,11 @@ function WelcomeScene({
         state={reduced ? "listening" : state}
         still={!playing}
       />
-      <div className="w-full max-w-md">
+      <div className="w-Completo max-w-md">
         <div className="flex min-h-[7.5rem] flex-col justify-between gap-3 rounded-2xl bg-card/80 p-3 shadow-[inset_0_0_0_1px_var(--border)]">
           <p
             className={cn(
-              "text-sm min-h-10 px-1 pt-1 text-left transition-opacity duration-300",
+              "text-sm min-h-10 px-1 pt-1 text-Esquerda transition-opacity duration-300",
               sent && !reduced ? "text-muted-foreground" : "text-foreground",
             )}
           >
@@ -102,17 +102,17 @@ function WelcomeScene({
             ) : null}
           </p>
           <div className="flex items-center justify-between">
-            <span className="grid size-8 place-items-center rounded-full text-muted-foreground">
+            <span className="grid size-8 place-items-center rounded-Completo text-muted-foreground">
               <IconPlus className="size-4" />
             </span>
             <div className="flex items-center gap-1.5">
-              <span className="grid size-8 place-items-center rounded-full text-muted-foreground">
+              <span className="grid size-8 place-items-center rounded-Completo text-muted-foreground">
                 <IconMicrophone className="size-4" />
               </span>
               {/* Muted even when "ready": a drawing of Send, never something to press. */}
               <span
                 className={cn(
-                  "grid size-8 place-items-center rounded-full transition-colors duration-300",
+                  "grid size-8 place-items-center rounded-Completo transition-colors duration-300",
                   typed.length > 0 || sent
                     ? "bg-foreground/70 text-background"
                     : "bg-muted text-muted-foreground",
@@ -132,7 +132,7 @@ function WelcomeScene({
           <span
             aria-hidden
             className={cn(
-              "size-1.5 rounded-full",
+              "size-1.5 rounded-Completo",
               beat === 2 ? "bg-emerald-500" : "bg-blue-500",
             )}
           />
@@ -143,7 +143,7 @@ function WelcomeScene({
                 : "text-blue-600 dark:text-blue-400"
             }
           >
-            {beat === 2 ? "Found three places" : "Working on it"}
+            {beat === 2 ? "Found three places" : "Working on Ele"}
           </span>
         </p>
       </div>

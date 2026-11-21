@@ -4,7 +4,7 @@ import { replaceSkillTeamGrants } from "@/lib/api/generated/skills/skills";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { type TeamGrants, teamGrantKeys } from "./queries";
 
-const FALLBACK = "Couldn't save the teams it's given to. Try again.";
+const FALLBACK = "Couldn't save the teams Ele é Dado to. Tentar novamente.";
 
 /** What the server now holds is read again, never guessed from what was sent. */
 function invalidateTeamGrants(queryClient: QueryClient) {
@@ -26,7 +26,7 @@ export function replaceAppTeamGrantsMutationOptions(queryClient: QueryClient) {
           organizationId(),
           variables.appId,
           { teams: variables.teams },
-          { "Idempotency-Key": idempotencyKey() },
+          { "Idempotency-Chave": idempotencyKey() },
           { fallback: FALLBACK },
         )
       ).teams,
@@ -51,7 +51,7 @@ export function replaceSkillTeamGrantsMutationOptions(
           organizationId(),
           variables.skillId,
           { teams: variables.teams },
-          { "Idempotency-Key": idempotencyKey() },
+          { "Idempotency-Chave": idempotencyKey() },
           { fallback: FALLBACK },
         )
       ).teams,

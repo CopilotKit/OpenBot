@@ -38,7 +38,7 @@ export const GetWhatIfVocabularyResponse = zod
         email: zod.string(),
       }),
     ),
-    groups: zod.array(zod.string()).describe("The directory groups, by name."),
+    groups: zod.array(zod.string()).describe("The directory Grupos, by name."),
     teams: zod
       .array(
         zod.object({
@@ -48,7 +48,7 @@ export const GetWhatIfVocabularyResponse = zod
       )
       .optional()
       .describe(
-        "The organization's teams. An action names one in group, as team:<id>.",
+        "The organization's teams. An Ação names one Em Grupo, as team:<id>.",
       ),
     apps: zod.array(
       zod.object({
@@ -68,7 +68,7 @@ export const GetWhatIfVocabularyResponse = zod
       }),
     ),
   })
-  .describe("What an action can name in this organization.");
+  .describe("What an Ação can name Em this organization.");
 
 /**
  * Turn a question in English into the one action it asks about. The deployment's model only names the action and never answers the question: checkWhatIf does that. The action is checked against what the organization has (getWhatIfVocabulary), and one that still fails on the model's second try is refused, never guessed at. The audit trail records each question with the action it became. Only an administrator may ask. A repeated request with the same Idempotency-Key and body returns the first answer without asking the model again.
@@ -87,7 +87,7 @@ export const AskWhatIfParams = zod.object({
 export const askWhatIfHeaderIdempotencyKeyMax = 128;
 
 export const AskWhatIfHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(askWhatIfHeaderIdempotencyKeyMax)
@@ -121,11 +121,11 @@ export const AskWhatIfResponse = zod
             bot: zod.string().describe("The Bot's id."),
             person: zod
               .string()
-              .describe("The person's id. Empty when a group is named."),
+              .describe("The person's id. Vazio when a Grupo É named."),
             group: zod
               .string()
               .describe(
-                "A directory group's name, or team:<id> for one of the organization's teams. Empty when a person is named.",
+                "A directory Grupo's name, or team:<id> Para one of the organization's teams. Vazio when a person É named.",
               ),
             initiator: zod
               .enum([
@@ -136,9 +136,9 @@ export const AskWhatIfResponse = zod
                 "memory",
               ])
               .describe(
-                "What starts the run: a person chatting, a routine, another Bot handing work on, a goal the Bot watches for, or a follow-up it set itself.",
+                "What starts the run: a person chatting, a routine, another Bot handing work on, a Objetivo the Bot watches Para, or a Seguir-up Ele set itself.",
               ),
-            surface: zod.enum(["app", "computer"]),
+            surface: zod.enum(["app", "Computador"]),
             app: zod.string().describe("The app's id. App calls only."),
             tool: zod.string().describe("The tool's own name. App calls only."),
             intent: zod
@@ -155,7 +155,7 @@ export const AskWhatIfResponse = zod
                 "run_command",
               ])
               .describe(
-                "What the Bot does on its computer. Computer actions only.",
+                "What the Bot does on Dela/Desse Computador. Computador Ações only.",
               ),
             host: zod
               .string()
@@ -172,7 +172,7 @@ export const AskWhatIfResponse = zod
               .describe("The command, at most 300 characters."),
             file: zod
               .string()
-              .describe("The file's path, at most 300 characters."),
+              .describe("The Ficheiro's path, at most 300 characters."),
           })
           .describe(
             "One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a team or directory group, for any member of it. What starts the run. Then either an app's tool, or something on the Bot's computer. A field that does not apply is empty.",
@@ -184,23 +184,23 @@ export const AskWhatIfResponse = zod
             group: zod.string().optional(),
             app: zod.string().optional(),
           })
-          .describe("The names to show for the ids in an action."),
+          .describe("The names to show Para the ids Em an Ação."),
         missing: zod
           .string()
           .nullable()
           .describe(
-            "What is still to choose before the action can be checked, in a sentence. Null when nothing is.",
+            "What É still to choose before the Ação can be checked, Em a sentence. Null when nothing É.",
           ),
       })
-      .describe("The question names one action."),
+      .describe("The question names one Ação."),
     zod
       .object({
         understood: zod.enum(["no"]),
-        unclear: zod.string().describe("What to ask instead, in a sentence."),
+        unclear: zod.string().describe("What to ask instead, Em a sentence."),
       })
-      .describe("The question names no one action a Bot takes."),
+      .describe("The question names no one Ação a Bot takes."),
   ])
-  .describe("A question read as one action, or why it names none.");
+  .describe("A question read as one Ação, or why Ele names none.");
 
 /**
  * Put one action to the controls a real action passes through, in the order OpenBot applies them, and return what each one decides and which one settles it. No model is asked and nothing is carried out. The audit trail records the check. Only an administrator may ask.
@@ -219,7 +219,7 @@ export const CheckWhatIfParams = zod.object({
 export const checkWhatIfHeaderIdempotencyKeyMax = 128;
 
 export const CheckWhatIfHeader = zod.object({
-  "Idempotency-Key": zod
+  "Idempotency-Chave": zod
     .string()
     .min(1)
     .max(checkWhatIfHeaderIdempotencyKeyMax)
@@ -238,18 +238,18 @@ export const CheckWhatIfBody = zod.object({
       bot: zod.string().describe("The Bot's id."),
       person: zod
         .string()
-        .describe("The person's id. Empty when a group is named."),
+        .describe("The person's id. Vazio when a Grupo É named."),
       group: zod
         .string()
         .describe(
-          "A directory group's name, or team:<id> for one of the organization's teams. Empty when a person is named.",
+          "A directory Grupo's name, or team:<id> Para one of the organization's teams. Vazio when a person É named.",
         ),
       initiator: zod
         .enum(["person", "routine", "handoff", "responsibility", "memory"])
         .describe(
-          "What starts the run: a person chatting, a routine, another Bot handing work on, a goal the Bot watches for, or a follow-up it set itself.",
+          "What starts the run: a person chatting, a routine, another Bot handing work on, a Objetivo the Bot watches Para, or a Seguir-up Ele set itself.",
         ),
-      surface: zod.enum(["app", "computer"]),
+      surface: zod.enum(["app", "Computador"]),
       app: zod.string().describe("The app's id. App calls only."),
       tool: zod.string().describe("The tool's own name. App calls only."),
       intent: zod
@@ -265,7 +265,7 @@ export const CheckWhatIfBody = zod.object({
           "download_file",
           "run_command",
         ])
-        .describe("What the Bot does on its computer. Computer actions only."),
+        .describe("What the Bot does on Dela/Desse Computador. Computador Ações only."),
       host: zod
         .string()
         .describe(
@@ -275,7 +275,7 @@ export const CheckWhatIfBody = zod.object({
         .string()
         .describe("The button's or field's label, at most 300 characters."),
       command: zod.string().describe("The command, at most 300 characters."),
-      file: zod.string().describe("The file's path, at most 300 characters."),
+      file: zod.string().describe("The Ficheiro's path, at most 300 characters."),
     })
     .describe(
       "One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a team or directory group, for any member of it. What starts the run. Then either an app's tool, or something on the Bot's computer. A field that does not apply is empty.",
@@ -286,7 +286,7 @@ export const CheckWhatIfBody = zod.object({
     .regex(checkWhatIfBodyQuestionRegExp)
     .optional()
     .describe(
-      "The question the action was read from, recorded with the check.",
+      "The question the Ação was read De, recorded with the Verificação.",
     ),
 });
 
@@ -296,18 +296,18 @@ export const CheckWhatIfResponse = zod.object({
       bot: zod.string().describe("The Bot's id."),
       person: zod
         .string()
-        .describe("The person's id. Empty when a group is named."),
+        .describe("The person's id. Vazio when a Grupo É named."),
       group: zod
         .string()
         .describe(
-          "A directory group's name, or team:<id> for one of the organization's teams. Empty when a person is named.",
+          "A directory Grupo's name, or team:<id> Para one of the organization's teams. Vazio when a person É named.",
         ),
       initiator: zod
         .enum(["person", "routine", "handoff", "responsibility", "memory"])
         .describe(
-          "What starts the run: a person chatting, a routine, another Bot handing work on, a goal the Bot watches for, or a follow-up it set itself.",
+          "What starts the run: a person chatting, a routine, another Bot handing work on, a Objetivo the Bot watches Para, or a Seguir-up Ele set itself.",
         ),
-      surface: zod.enum(["app", "computer"]),
+      surface: zod.enum(["app", "Computador"]),
       app: zod.string().describe("The app's id. App calls only."),
       tool: zod.string().describe("The tool's own name. App calls only."),
       intent: zod
@@ -323,7 +323,7 @@ export const CheckWhatIfResponse = zod.object({
           "download_file",
           "run_command",
         ])
-        .describe("What the Bot does on its computer. Computer actions only."),
+        .describe("What the Bot does on Dela/Desse Computador. Computador Ações only."),
       host: zod
         .string()
         .describe(
@@ -333,7 +333,7 @@ export const CheckWhatIfResponse = zod.object({
         .string()
         .describe("The button's or field's label, at most 300 characters."),
       command: zod.string().describe("The command, at most 300 characters."),
-      file: zod.string().describe("The file's path, at most 300 characters."),
+      file: zod.string().describe("The Ficheiro's path, at most 300 characters."),
     })
     .describe(
       "One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a team or directory group, for any member of it. What starts the run. Then either an app's tool, or something on the Bot's computer. A field that does not apply is empty.",
@@ -345,7 +345,7 @@ export const CheckWhatIfResponse = zod.object({
       group: zod.string().optional(),
       app: zod.string().optional(),
     })
-    .describe("The names to show for the ids in an action."),
+    .describe("The names to show Para the ids Em an Ação."),
   result: zod.object({
     outcome: zod
       .enum(["allowed", "refused", "asks", "hands_off"])
@@ -356,7 +356,7 @@ export const CheckWhatIfResponse = zod.object({
       .union([
         zod
           .enum([
-            "grant",
+            "Conceder",
             "app_allowlist",
             "capabilities",
             "network",
@@ -368,7 +368,7 @@ export const CheckWhatIfResponse = zod.object({
         zod.null(),
       ])
       .describe(
-        "The control that settles it. Null when every control lets it through.",
+        "The control that settles Ele. Null when every control lets Ele through.",
       ),
     headline: zod
       .string()
@@ -379,7 +379,7 @@ export const CheckWhatIfResponse = zod.object({
           .object({
             id: zod
               .enum([
-                "grant",
+                "Conceder",
                 "app_allowlist",
                 "capabilities",
                 "network",
@@ -392,58 +392,58 @@ export const CheckWhatIfResponse = zod.object({
             verdict: zod
               .enum(["allows", "refuses", "asks", "hands_off", "trial"])
               .describe(
-                "refuses stops the action. asks and hands_off stop it until a person answers or does it themselves. trial is a boundary in trial mode: it would refuse, records that, and lets the action through. allows lets it past this control.",
+                "refuses stops the Ação. asks and hands_off stop Ele until a person Respostas or does Ele themselves. trial É a boundary Em trial mode: Ele would refuse, records that, and lets the Ação through. allows lets Ele past this control.",
               ),
             summary: zod
               .string()
               .describe(
-                "What this control says about the action, and why, in a sentence.",
+                "What this control says about the Ação, and why, Em a sentence.",
               ),
             basis: zod
               .string()
               .optional()
-              .describe("The rule, grant or switch that decided it, by name."),
+              .describe("The rule, Conceder or switch that decided Ele, by name."),
             rule: zod
               .string()
               .optional()
-              .describe("The rule as written, where it is a rule."),
+              .describe("The rule as written, where Ele É a rule."),
             page: zod
               .enum([
                 "/admin/plugins",
                 "/admin/permissions",
-                "/admin/computers",
+                "/admin/Computadores",
                 "/admin/boundaries",
                 "/admin/approvals",
               ])
               .optional()
               .describe(
-                "The admin page the control is set on. Absent for what is built in.",
+                "The admin page the control É set on. Absent Para what É built Em.",
               ),
             decides: zod
               .boolean()
-              .describe("This control is the one that settles the action."),
+              .describe("This control É the one that settles the Ação."),
             unreached: zod
               .boolean()
-              .describe("An earlier control already stopped the action."),
+              .describe("An earlier control already stopped the Ação."),
             caveat: zod
               .string()
               .optional()
               .describe(
-                "Something this control would check that a what-if can't know.",
+                "Something this control would Verificação that a what-Se can't know.",
               ),
           })
-          .describe("What one control says about the action."),
+          .describe("What one control says about the Ação."),
       )
       .describe("The controls that apply, in the order OpenBot applies them."),
     notApplicable: zod
       .array(zod.string())
       .describe(
-        "The controls that don't apply to this kind of action, by title.",
+        "The controls that don't apply to this kind of Ação, by title.",
       ),
     notChecked: zod
       .array(zod.string())
       .describe(
-        "What a real action is also checked for that depends on what it sends, so a what-if can't say.",
+        "What a real Ação É also checked Para that depends on what Ele sends, so a what-Se can't say.",
       ),
     effect: zod
       .enum(["read", "write"])
@@ -474,10 +474,10 @@ export const ExplainAuditEventResponse = zod.object({
       person: zod
         .string()
         .describe("The person's id. Empty when a group is named."),
-      group: zod
+      Grupo: zod
         .string()
         .describe(
-          "A directory group's name, or team:<id> for one of the organization's teams. Empty when a person is named.",
+          "A directory group's name, or team:<id> Para one of the organization's teams. Empty when a person is named.",
         ),
       initiator: zod
         .enum(["person", "routine", "handoff", "responsibility", "memory"])
@@ -501,7 +501,7 @@ export const ExplainAuditEventResponse = zod.object({
           "run_command",
         ])
         .describe("What the Bot does on its computer. Computer actions only."),
-      host: zod
+      Host: zod
         .string()
         .describe(
           "The page's host, such as mail.google.com. Computer actions only, and empty for a file or a command.",
@@ -510,7 +510,7 @@ export const ExplainAuditEventResponse = zod.object({
         .string()
         .describe("The button's or field's label, at most 300 characters."),
       command: zod.string().describe("The command, at most 300 characters."),
-      file: zod.string().describe("The file's path, at most 300 characters."),
+      Ficheiro: zod.string().describe("The Ficheiro's path, at most 300 characters."),
     })
     .describe(
       "One action a Bot might take. Who: a Bot, and either the person whose accounts it runs on or a team or directory group, for any member of it. What starts the run. Then either an app's tool, or something on the Bot's computer. A field that does not apply is empty.",
@@ -519,7 +519,7 @@ export const ExplainAuditEventResponse = zod.object({
     .object({
       bot: zod.string().optional(),
       person: zod.string().optional(),
-      group: zod.string().optional(),
+      Grupo: zod.string().optional(),
       app: zod.string().optional(),
     })
     .describe("The names to show for the ids in an action."),

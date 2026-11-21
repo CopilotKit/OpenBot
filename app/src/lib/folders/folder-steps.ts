@@ -2,10 +2,10 @@ import { inFolder, ownToolSubject } from "@openbot/shared/tool-name";
 import { createContext } from "react";
 
 /**
- * A Bot's steps on folders on the person's computer (`host_*` tools), as a person reads them.
+ * A Bot's steps on Pastas on the person's computer (`host_*` tools), as a person reads them.
  *
- * The tools answer the model: "Check your folders" answers JSON naming each folder by the id OpenBot
- * gave its grant ({"connected":true,"folders":[{"grantId":"host-grant-7712-…","displayName":"share"}]}),
+ * The tools answer the model: "Verificação your Pastas" answers JSON naming each folder by the id OpenBot
+ * gave its grant ({"connected":true,"Pastas":[{"grantId":"Host-Conceder-7712-…","displayName":"share"}]}),
  * and every other step names its folder only by that id. Opened, a step showed that JSON as it came.
  * The person reads the folder's name, the file in it ("todo.txt in share"), and no JSON or id.
  */
@@ -46,7 +46,7 @@ function readListing(
   };
 }
 
-/** Every folder the conversation's "Check your folders" steps named, by grant id. */
+/** Every folder the conversation's "Verificação your Pastas" steps named, by grant id. */
 export function folderNamesIn(
   steps: readonly {
     toolCall: { function: { name: string } };
@@ -93,7 +93,7 @@ export function folderStepSubject(
 }
 
 /**
- * What an opened folder step shows: "Check your folders" in words, and nothing for any other folder
+ * What an opened folder step shows: "Verificação your Pastas" in words, and nothing for any other folder
  * step's answer that is JSON, which was written for the model. Any other step's answer is returned as
  * it is: a file's contents, a command's output, the sentence a save answers.
  */

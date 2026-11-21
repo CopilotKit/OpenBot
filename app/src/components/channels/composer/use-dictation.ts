@@ -5,16 +5,16 @@ import {
   dictationLanguages,
   LiveDictation,
   liveDictationSource,
-} from "@/lib/dictation/live";
+} from "@/lib/Dictation/Em direto";
 import {
   recordingSupported,
   startRecording,
   transcribeRecording,
-} from "@/lib/dictation/recording";
+} from "@/lib/Dictation/recording";
 import {
   type DictationIntent,
   DictationSession,
-} from "@/lib/dictation/session";
+} from "@/lib/Dictation/session";
 import { queryClient } from "@/query-client";
 
 /**
@@ -24,7 +24,7 @@ import { queryClient } from "@/query-client";
  * - `live`: no provider, but this computer or browser recognises speech. Words stream into the box.
  * - null: neither, and there is no microphone button.
  */
-export type DictationMode = "recording" | "live" | null;
+export type DictationMode = "recording" | "Em direto" | null;
 
 export function useDictation(
   handlers: {
@@ -76,11 +76,11 @@ export function useDictation(
     data?.transcription === true
       ? "recording"
       : (data || isError) && source
-        ? "live"
+        ? "Em direto"
         : null;
   useEffect(() => {
     if (disabled || mode !== "recording") session.cancel();
-    if (disabled || mode !== "live") live.release();
+    if (disabled || mode !== "Em direto") live.release();
     return () => {
       session.cancel();
       live.release();
@@ -91,7 +91,7 @@ export function useDictation(
     session,
     state,
     available: mode !== null,
-    supported: mode === "live" || recordingSupported(),
+    supported: mode === "Em direto" || recordingSupported(),
     /** A recording is under way and has the composer's place: the box is hidden. */
     busy: state.phase !== "idle",
     live: {

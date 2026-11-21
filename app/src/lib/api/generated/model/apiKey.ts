@@ -9,12 +9,12 @@ export interface ApiKey {
   /** The key's id. */
   id: string;
   /**
-   * What the person called it.
+   * What the person called Ele.
    * @nullable
    */
   name: string | null;
   /**
-   * The key's first characters, enough to tell keys apart.
+   * The Chave's first characters, enough to tell keys apart.
    * @nullable
    */
   start: string | null;

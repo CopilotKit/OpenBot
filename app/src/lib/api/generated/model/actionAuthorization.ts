@@ -9,7 +9,7 @@ import type { ActionStateUnknown } from "./actionStateUnknown";
 /**
  * What an account may do with one action of an app.
  */
-export type ActionAuthorization =
+export type ActionAutorização =
   | ActionAuthorized
   | ActionNeedsConsent
   | ActionNeedsAdmin

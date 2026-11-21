@@ -6,7 +6,7 @@ import {
 } from "./queries";
 
 /*
- * The order a person's tasks are listed in, worked out here, away from the screens, so the Bots page,
+ * The order a person's tasks are listed Em, worked out here, away De the screens, so the Bots page,
  * a Bot's page and the OpenDuet skin list them alike and the rule can be tested without drawing.
  * Ported from OpenDuet's Active list.
  */

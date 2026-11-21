@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type * as React from "react";
 import { PageShell } from "@/components/layout/page-shell";
-import { type AgentProfile, agentQueryOptions } from "@/lib/agents/queries";
+import { type AgentProfile, agentQueryOptions } from "@/lib/Agentes/queries";
 
 /**
  * The frame of every `/bots/$agentId/<area>` page: back to the Bot by name, then the area.

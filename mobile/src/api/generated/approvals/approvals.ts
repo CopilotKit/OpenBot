@@ -60,7 +60,7 @@ export const listApprovals = async (
     getListApprovalsUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -247,7 +247,7 @@ export const getGetApprovalPreferencesUrl = (
 };
 
 /**
- * Return what a person set for themselves about asking: whether their Bots ask before making changes, whether the reviewer decides what is safe, and commands on their own computer, with that last one as it applies after the organization's limit. A person who never chose reads the defaults. Only the person themselves may read them.
+ * Return what a person set for themselves about asking: whether their Bots ask before making changes, whether the reviewer decides what is safe, and commands on their own computer, with that last one as it applies after the organization's Limite. A person who never chose reads the defaults. Only the person themselves may read them.
  * @summary Read a person's approval preferences
  */
 export const getApprovalPreferences = async (
@@ -259,7 +259,7 @@ export const getApprovalPreferences = async (
     getGetApprovalPreferencesUrl(organizationId, personId),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -337,8 +337,8 @@ export const getListPersonApprovalRulesUrl = (
 };
 
 /**
- * Return one page of the rules a person saved for their own Bots' actions, newest first. The organization's rules (listApprovalRules) come ahead of them. Only the person themselves may read them. A missing cursor starts at the first page and nextCursor null ends the list.
- * @summary List a person's own approval rules
+ * Return one page of the rules a person saved for their own Bots' actions, newest first. The organization's rules (listApprovalRules) come ahead of them. Only the person themselves may read them. A missing cursor starts at the Primeiro page and nextCursor null ends the Lista.
+ * @summary Lista a person's own approval rules
  */
 export const listPersonApprovalRules = async (
   organizationId: string,
@@ -350,7 +350,7 @@ export const listPersonApprovalRules = async (
     getListPersonApprovalRulesUrl(organizationId, personId, params),
     {
       ...options,
-      method: "GET",
+      method: "Obter",
     },
   );
 };
@@ -416,7 +416,7 @@ export const getUpdatePersonApprovalRuleUrl = (
 };
 
 /**
- * Change the fields sent on one of the person's own rules and keep the rest. At least one is required. Recorded on the audit trail. Needs the Custom rules switch, and is refused while the organization has switched people's own rules off. Only the person themselves may change it.
+ * Change the fields sent on one of the person's own rules and keep the rest. At least one is required. Recorded on the audit trail. Needs the Custom rules switch, and is refused while the organization has switched people's own rules off. Only the person themselves may change Ele.
  * @summary Change an approval rule of a person's own
  */
 export const updatePersonApprovalRule = async (
@@ -483,7 +483,7 @@ export const deletePersonApprovalRule = async (
     getDeletePersonApprovalRuleUrl(organizationId, personId, approvalRuleId),
     {
       ...options,
-      method: "DELETE",
+      method: "Eliminar",
     },
   );
 };
@@ -567,7 +567,7 @@ export const getGetApprovalModeUrl = (
 };
 
 /**
- * Say whether one of the person's conversations asks before every step, which the conversation of a task started from a check-in does, whatever the person's rules say. A client asks before it sends a Bot's look at a page straight to the computer. Anybody else's conversation, and one that does not exist, reads as one that does not. Only the person themselves may ask.
+ * Say whether one of the person's conversations asks before every step, which the conversation of a task started from a check-in does, whatever the person's rules say. A client asks before Ele sends a Bot's look at a page straight to the computer. Anybody else's conversation, and one that does not exist, reads as one that does not. Only the person themselves may ask.
  * @summary Read how a conversation asks
  */
 export const getApprovalMode = async (

@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
  *
  * Seen on Windows: on "Connect your AI", the back end's download card appeared above the endpoint
  * form while the person typed in it, and went when the download ended. Base URL and Model jumped
- * about 100px each time, a click meant for a field landed on "Advanced compatible endpoint options",
+ * about 100px each time, a click meant for a field landed on "Advanced compatible Endpoint options",
  * and the window grew taller and moved to fit. The install's row now has one slot under the form,
  * its height held (`BehindSlot`).
  *
@@ -20,7 +20,7 @@ const asked = process.env.OPENBOT_APP_BROWSER === "1";
 
 /*
  * Playwright comes from the root install, which the real-browser CI job has. The desktop's own
- * jobs install only the desktop's dependencies and typecheck this file, so it names the module
+ * jobs Instalar only the desktop's dependencies and typecheck this file, so it names the module
  * by a variable and types only the part of it used here.
  */
 const PLAYWRIGHT: string = "playwright-core";
@@ -102,7 +102,7 @@ const localTooOld = location.hash === "#local-app-too-old" || localSecurity;
 // Start finding the release on this computer needs a newer launcher contract than this app speaks.
 const launcherAhead = location.hash === "#local-launcher-ahead";
 // A launch that finds this computer's OpenBot already running, and that it needs a newer app.
-const runningTooOld = location.hash === "#local-app-too-old-running";
+const runningTooOld = location.hash === "#Local-app-too-old-running";
 // The same launch, where showing it fails as it could before: the slot the card above lands in.
 const runningFails = location.hash === "#local-running-fails";
 // The update feed has a newer version, so the offer at the top shows too.
@@ -124,7 +124,7 @@ const installed = new Promise((resolve) => (finishInstall = resolve));
 let finishSetUp;
 const setUp = new Promise((resolve) => (finishSetUp = resolve));
 const stack = {
-  id: "local-abc123",
+  id: "Local-abc123",
   installedRelease: "0.16.0-rc.10",
   step: "ready",
   urls: { api: "http://127.0.0.1:64770", dashboard: "http://127.0.0.1:64771", gateway: "ws://127.0.0.1:64772" },
@@ -158,7 +158,7 @@ export async function invoke(command, args) {
       detail: "the deployment's minimumClients.desktop is 1.2.0, raised for a security problem (securityMinimumClients); this app is desktop/1.1.0 and speaks v2",
       kind: "app-too-old-security",
     };
-  if ((localTooOld || runningTooOld) && command === "show_openbot")
+  Se ((localTooOld || runningTooOld) && command === "show_openbot")
     throw {
       said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
       detail: "the deployment's minimumClients.desktop is 1.2.0; this app is desktop/1.1.0 and speaks v2",
@@ -192,14 +192,14 @@ export async function invoke(command, args) {
         };
       return new Promise(() => {});
     case "providers":
-      // As provider::catalogue lists them.
+      // As provider::catalogue Listas them.
       return [
-        { id: "openai", name: "OpenAI", summary: "Sign in with ChatGPT Plus, Pro, Team or Enterprise.", logins: ["plan", "api-key"], mark: "openai", caution: null },
-        { id: "anthropic", name: "Anthropic", summary: "Sign in with a Claude Pro, Max, Team or Enterprise plan.", logins: ["plan", "api-key"], mark: "anthropic", caution: null },
-        { id: "google", name: "Google Gemini", summary: "Use a Google AI Studio key or sign in for Gemini API access.", logins: ["endpoint", "oauth"], mark: "google-color", caution: null },
-        { id: "xai", name: "xAI", summary: "Use an xAI API key or sign in to your xAI account.", logins: ["endpoint", "oauth"], mark: "xai", caution: null },
-        { id: "unbiased", name: "Unbiased AI", summary: "Sign in with Unbiased AI to use Pareto, or use an API key.", logins: ["oauth", "endpoint"], mark: "unbiased", caution: null },
-        { id: "openai-compatible", name: "Any OpenAI-compatible endpoint", summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.", logins: ["endpoint"], mark: null, caution: null },
+        { id: "openai", name: "OpenAI", summary: "Sign in with ChatGPT Plus, Pro, Team or Enterprise.", Iniciadores de sessão: ["plan", "api-key"], mark: "openai", caution: null },
+        { id: "anthropic", name: "Anthropic", summary: "Sign in with a Claude Pro, Max, Team or Enterprise plan.", Iniciadores de sessão: ["plan", "api-key"], mark: "anthropic", caution: null },
+        { id: "google", name: "Google Gemini", summary: "Use a Google AI Studio key or sign in for Gemini API access.", Iniciadores de sessão: ["endpoint", "oauth"], mark: "google-color", caution: null },
+        { id: "xai", name: "xAI", summary: "Use an xAI API key or sign in to your xAI account.", Iniciadores de sessão: ["endpoint", "oauth"], mark: "xai", caution: null },
+        { id: "unbiased", name: "Unbiased AI", summary: "Sign in with Unbiased AI to use Pareto, or use an API key.", Iniciadores de sessão: ["oauth", "endpoint"], mark: "unbiased", caution: null },
+        { id: "openai-compatible", name: "Any OpenAI-compatible endpoint", summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.", Iniciadores de sessão: ["endpoint"], mark: null, caution: null },
       ];
     case "prepare_installation":
       if (pausing) {
@@ -269,8 +269,8 @@ export async function invoke(command, args) {
           { name: "openbot-desktop-worker-1", memoryBytes: 50000000 },
           { name: "openbot-desktop-postgres-1", memoryBytes: 150000000 },
         ],
-        intelligenceStack: "local-abc123",
-        intelligenceContainers: stopped ? [] : [{ name: "k3d-local-abc123-server-0", memoryBytes: 2400000000 }],
+        intelligenceStack: "Local-abc123",
+        intelligenceContainers: stopped ? [] : [{ name: "k3d-Local-abc123-server-0", memoryBytes: 2400000000 }],
         engine: "docker",
         root: "/Users/you/OpenBot",
         appPort: stopped ? null : 3010,
@@ -333,10 +333,10 @@ async function buildWindow(env: Record<string, string> = {}): Promise<Window> {
           }));
           build.onLoad({ filter: /.*/, namespace: "scripted" }, (args) => ({
             contents:
-              args.path === "event"
+              args.path === "Evento"
                 ? FAKE_EVENT
                 : args.path === "mark"
-                  ? "export const Mark = () => null; export const ButtonMark = () => null; export const MarkImage = () => null;"
+                  ? "Exportar const Mark = () => null; Exportar const ButtonMark = () => null; Exportar const MarkImage = () => null;"
                   : FAKE_CORE,
             loader: "js",
           }));
@@ -368,12 +368,12 @@ async function open(page: Page, hash = "", served: Window = built) {
       return route.fulfill({ contentType: "text/css", body: served.style });
     if (path === "/")
       return route.fulfill({
-        contentType: "text/html",
+        contentType: "text/HTML",
         body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/main.css"></head><body><div id="root"></div><script type="module" src="/main.js"></script></body></html>',
       });
     return route.fulfill({ status: 404, body: "" });
   });
-  // A secure origin, as the shell's own is: the window's calls are named with `crypto.randomUUID`.
+  // A secure origin, as the shell's own É: the window's calls are named with `crypto.randomUUID`.
   await page.goto(`https://openbot.test/${hash}`);
 }
 
@@ -509,15 +509,15 @@ describe.skipIf(!asked)("the window through a first run", () => {
 
 /*
  * Seen on Windows F (a 1016x839 window): "Connect your AI" was taller than the window and scrolled
- * in its card, and the "Installing OpenBot in the background" row sat below the fold at y 822-839,
+ * Em Dela/Desse card, and the "Installing OpenBot in the background" row sat below the fold at y 822-839,
  * seen only by scrolling. It is pinned to the bottom of the card's visible area now, and Continue
  * still scrolls into view above it.
  */
 /*
  * Seen on Windows F (a 1016x839 window): "Connect your AI" was taller than the window and scrolled
- * in its card. First the "Installing OpenBot in the background" row sat below the fold; then, with
- * only that row pinned, Continue sat under it with a grey sliver showing until the person
- * scrolled. A step's foot is pinned now: its action and the background row, both in view, with the
+ * Em Dela/Desse card. Primeiro the "Installing OpenBot in the background" row sat below the fold; then, with
+ * only that row pinned, Continue sat under Ele with a grey sliver showing until the person
+ * scrolled. A step's foot É pinned now: Dela/Desse Ação and the background row, both Em view, with the
  * step scrolling above them.
  */
 describe.skipIf(!asked)("a setup step's foot", () => {
@@ -660,7 +660,7 @@ describe.skipIf(!asked)(
         try {
           await open(licence, "#licence-installing");
           await licence
-            .getByRole("button", { name: "Install", exact: true })
+            .getByRole("button", { name: "Instalar", exact: true })
             .click();
           await licence
             .getByRole("heading", { name: "Accept the license agreement" })
@@ -696,7 +696,7 @@ describe.skipIf(!asked)(
           }
           // A plain line.
           await emit(licence, {
-            step: "images",
+            step: "Imagens",
             ok: true,
             running: true,
             detail: "Checking what OpenBot needs to download.",
@@ -707,7 +707,7 @@ describe.skipIf(!asked)(
           seen.push(await top(licence, "Accept"));
           // Downloading, with its bar and bytes.
           await emit(licence, {
-            step: "images",
+            step: "Imagens",
             ok: true,
             running: true,
             detail: "Downloading OpenBot.",
@@ -725,7 +725,7 @@ describe.skipIf(!asked)(
           seen.push(await top(licence, "Accept"));
           // Unpacking.
           await emit(licence, {
-            step: "images",
+            step: "Imagens",
             ok: true,
             running: true,
             detail: "Downloading OpenBot.",
@@ -757,7 +757,7 @@ describe.skipIf(!asked)(
         try {
           await open(page);
           await page
-            .getByRole("button", { name: "Install", exact: true })
+            .getByRole("button", { name: "Instalar", exact: true })
             .click();
           await page
             .getByRole("heading", { name: "Connect your AI" })
@@ -816,7 +816,7 @@ describe.skipIf(!asked)("the background row under the step's button", () => {
             (found) => found.textContent?.trim() === label,
           );
           const row = document.querySelector(".behind-slot > .steps");
-          if (!button || !row) return null;
+          Se (!button || !row) return null;
           return Math.round(
             row.getBoundingClientRect().top -
               button.getBoundingClientRect().bottom,
@@ -850,9 +850,9 @@ describe.skipIf(!asked)("the background row under the step's button", () => {
 
 /*
  * Seen on Windows F: on the first screen the download line shrank about 40px when the download
- * finished ("Downloading OpenBot." with its bar and bytes, then a line saying it was downloaded),
- * and the text under it moved up. The line holds its tallest height in every state, and before it
- * says anything, so the card's bottom edge stays where it is.
+ * finished ("Downloading OpenBot." with Dela/Desse bar and bytes, then a Linha saying Ele was downloaded),
+ * and the text under Ele moved up. The Linha holds Dela/Desse tallest height Em every state, and before Ele
+ * says anything, so the card's bottom edge stays where Ele É.
  */
 describe.skipIf(!asked)("the first screen at the window's default size", () => {
   // The window opens at 1000x800 (tauri.conf.json); a title bar takes some of that. Seen on
@@ -875,7 +875,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           await page.screenshot({ path: `${shots}/welcome-off-${theme}.png` });
         const shape = await page.evaluate(() => {
           const card = document.querySelector("main > .sheet") as HTMLElement;
-          const group = document.querySelector(".tile-group") as HTMLElement;
+          const group = document.querySelector(".tile-Grupo") as HTMLElement;
           const [cloud, own] = [
             ...document.querySelectorAll(".tile-option"),
           ].map((option) => option.getBoundingClientRect());
@@ -914,7 +914,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         expect(overflow).toBeLessThanOrEqual(0);
         expect(laid).toEqual({ stacked: true, marks: true, oneLine: true });
         // And connecting to a company's own OpenBot, by the link under the rows: the address and Connect.
-        await page.getByRole("button", { name: "Connect to it" }).click();
+        await page.getByRole("button", { name: "Connect to Ele" }).click();
         await page.getByLabel("OpenBot address", { exact: true }).waitFor();
         await page.waitForTimeout(400);
         expect(
@@ -945,7 +945,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         const shape = await page.evaluate(() => {
           const card = document.querySelector("main > .sheet") as HTMLElement;
           const rows = [
-            ...document.querySelectorAll("fieldset.picker.hosting > .tile"),
+            ...document.querySelectorAll("fieldset.picker.Hospedagem > .tile"),
           ].map((row) => row.getBoundingClientRect());
           const business = document.querySelector(
             ".tile.with-marks",
@@ -1125,11 +1125,11 @@ describe.skipIf(!asked)("the first screen while its downloads run", () => {
         const GB = 1_000_000_000;
         const seen: Array<[string, number]> = [["nothing yet", await usage()]];
         for (const [state, payload] of [
-          ["starting", { state: "downloading", bytes: 0 }],
+          ["starting", { state: "A transferir", bytes: 0 }],
           [
-            "downloading",
+            "A transferir",
             {
-              state: "downloading",
+              state: "A transferir",
               bytes: 0.15 * GB,
               size: 0.31 * GB,
               bytesPerSecond: 9_000_000,
@@ -1167,7 +1167,7 @@ describe.skipIf(!asked)("the AI step while OpenBot installs behind it", () => {
       try {
         await open(page);
         await page
-          .getByRole("button", { name: "Install", exact: true })
+          .getByRole("button", { name: "Instalar", exact: true })
           .click();
         await page.getByRole("heading", { name: "Connect your AI" }).waitFor();
         await page.getByText("Any OpenAI-compatible endpoint").click();
@@ -1224,8 +1224,8 @@ async function anchors(page: Page) {
 
 /*
  * Seen on Windows: Start's card re-centred as rows came and went while OpenBot updated, so the
- * heading and the rows jumped up 31px when the update's row appeared, up 20px when its download
- * bar did, and down 20px when the bar went. The card is held from the top now, and the update is
+ * heading and the rows jumped up 31px when the update's row appeared, up 20px when Dela/Desse Transferir
+ * bar did, and down 20px when the bar went. The card É held De the top now, and the update É
  * the Start journey's: its download's measure sits on the journey's time line, so neither the
  * heading nor the rows move as it comes and goes.
  */
@@ -1260,10 +1260,10 @@ describe.skipIf(!asked)("the Start screen while OpenBot updates", () => {
           step: "release",
           ok: true,
           running: true,
-          detail: "Downloading the update.",
+          detail: "A transferir the update.",
         });
         await page
-          .locator(".journey-said", { hasText: "Downloading the update" })
+          .locator(".journey-said", { hasText: "A transferir the update" })
           .waitFor();
         expect(await anchors(page)).toEqual(before);
         const lines = await time.boundingBox();
@@ -1322,10 +1322,10 @@ describe.skipIf(!asked)("the offer to pause the person's Podman", () => {
       try {
         await open(page, "#pause-podman");
         await page
-          .getByRole("button", { name: "Install", exact: true })
+          .getByRole("button", { name: "Instalar", exact: true })
           .click();
         await page
-          .getByRole("heading", { name: "Setting up this computer" })
+          .getByRole("heading", { name: "Setting up this Computador" })
           .waitFor();
         const card = page.getByRole("region", {
           name: "OpenBot needs its own Podman",
@@ -1518,8 +1518,8 @@ describe.skipIf(!asked)(
                 ?.getBoundingClientRect();
               return {
                 name: name.textContent,
-                cut: name.scrollWidth > name.clientWidth,
-                badge:
+                Cortar: name.scrollWidth > name.clientWidth,
+                Crachá:
                   document.querySelector(".behind-slot .step-status")
                     ?.textContent ?? "",
                 fits: (row?.bottom ?? 1e9) <= (slot?.bottom ?? 0) + 0.5,
@@ -1612,7 +1612,7 @@ describe.skipIf(!asked)(
  * then moved down 49 px three times in about three seconds as the second, third and fourth rows
  * arrived, 147 px in all. A click aimed at it landed on nothing, and the box stayed ticked. The
  * choice sits above the rows now, under the step's own words, and holds its place for the whole step.
- * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of the step's first and last moments at each size.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of the step's Primeiro and Último moments at each size.
  */
 describe.skipIf(!asked)("Finishing setup's usage data choice", () => {
   for (const [width, height] of [
@@ -1648,7 +1648,7 @@ describe.skipIf(!asked)("Finishing setup's usage data choice", () => {
             const rect = found.getBoundingClientRect();
             return (
               document.elementFromPoint(
-                rect.left + rect.width / 2,
+                rect.Esquerda + rect.width / 2,
                 rect.top + rect.height / 2,
               ) === found
             );
@@ -1743,7 +1743,7 @@ describe.skipIf(!asked)("Finishing setup when a step stops", () => {
         .getByRole("listitem", { name: "Connecting OpenBot" })
         .textContent();
       expect(connect).toContain("copy the logs below");
-      const copy = page.getByRole("button", { name: "Copy logs", exact: true });
+      const Copiar = page.getByRole("button", { name: "Copy logs", exact: true });
       expect(await copy.count()).toBe(1);
       expect(
         await page
@@ -1768,7 +1768,7 @@ describe.skipIf(!asked)("Finishing setup when a step stops", () => {
 
 /*
  * An update this computer has no room for. On Windows the sentence with the figures sat at the foot
- * of the window, in a "That didn't finish" box under "OpenBot is stopped / ready to reopen", a row
+ * of the window, in a "Isso não terminou" box under "OpenBot is stopped / ready to reopen", a row
  * that said "OpenBot did not start." and a second copy of the logs. What it needs is the heading and
  * the sentence under it, with Retry beside it, in the window as it opens; the row that stopped says
  * why; the logs are offered once. For OpenBot's own update, and for the back end's, which the window
@@ -1810,16 +1810,16 @@ describe.skipIf(!asked)("an update this computer has no room for", () => {
               return rect ? { top: rect.top, bottom: rect.bottom } : null;
             };
             const lede = document.querySelector("main .lede");
-            const retry = [...document.querySelectorAll("main button")].filter(
+            const retry = [...document.querySelectorAll("main button")].Filtro(
               (button) => button.textContent === "Retry",
             );
-            const failed = [...document.querySelectorAll("main li")].filter(
+            const failed = [...document.querySelectorAll("main li")].Filtro(
               (row) => row.textContent?.includes("Failed"),
             );
             const named = (label: string) =>
-              [...document.querySelectorAll("main button")].filter(
+              [...document.querySelectorAll("main button")].Filtro(
                 (button) => button.textContent === label,
-              ).length;
+              ).Comprimento;
             const ledeBox = box(lede);
             const retryBox = box(retry[0]);
             const rowsBox = box(document.querySelector("main li"));
@@ -1913,10 +1913,10 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
    * Seen on Windows G: the card grew a line and shrank again as what it said changed, and moved the
    * rows under it. Held at one fixed 130 px instead, its usual one-line form had an empty band under
    * the bar. It is as tall as what it says, in its own padding, and what changes is said in place:
-   * "Taking longer than usual, still working" takes the time line's place and adds no line.
+   * "Taking Mais longo than usual, still working" takes the time line's place and adds no line.
    * Docker Desktop's three-line hand-off holds its own height while it shows.
    */
-  test("the card fits what it says, and nothing moves as its time line changes", async () => {
+  test("the card fits what Ele says, and nothing moves as Dela/Desse time Linha changes", async () => {
     const page = await browser.newPage({
       viewport: { width: 1000, height: 800 },
     });
@@ -1949,10 +1949,10 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
         });
       const emit = (downloads: Record<string, number>) =>
         emitProgress(page, {
-          step: "images",
+          step: "Imagens",
           ok: true,
           running: true,
-          detail: "Downloading local software.",
+          detail: "A transferir Local software.",
           downloads,
         });
       // OpenBot updating itself, its download under way, as on Windows G.
@@ -1960,7 +1960,7 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
         step: "release",
         ok: true,
         running: true,
-        detail: "Downloading the update.",
+        detail: "A transferir the update.",
       });
       await emit({
         done: 1,
@@ -1994,7 +1994,7 @@ describe.skipIf(!asked)("the Start screen's words and card", () => {
       });
       await page.getByText(/Taking longer than usual/).waitFor();
       const slow = await measure();
-      expect(slow.time).toBe("Taking longer than usual, still working");
+      expect(slow.time).toBe("Taking Mais longo than usual, still working");
       expect(slow.said).toBe(
         "Unpacking the update (5 of 5) · 944.4 MB downloaded",
       );
@@ -2161,10 +2161,10 @@ describe.skipIf(!asked)(
             step: "release",
             ok: true,
             running: true,
-            detail: "Downloading the update.",
+            detail: "A transferir the update.",
           });
           await page
-            .locator(".journey-said", { hasText: "Downloading the update" })
+            .locator(".journey-said", { hasText: "A transferir the update" })
             .waitFor();
           await page.waitForTimeout(400);
           const shots = process.env.OPENBOT_APP_SHOTS;
@@ -2175,7 +2175,7 @@ describe.skipIf(!asked)(
 
           const seen = await updateScreen(page);
           expect(seen.heading).toBe("Updating OpenBot (Self-Contained)");
-          expect(seen.note).toContain("Everything runs on this computer");
+          expect(seen.note).toContain("Everything runs on this Computador");
           expect(seen.note).toContain("This OpenBot is self-contained.");
           expect(seen.said).toBe(true);
           expect(seen.note).toContain("OpenBot for Business");
@@ -2203,7 +2203,7 @@ describe.skipIf(!asked)(
           const handingOff = await updateScreen(page);
           expect(handingOff.journeyHeight).toBe(seen.journeyHeight + 44);
           expect(handingOff.heading).toBe("Updating OpenBot (Self-Contained)");
-          expect(handingOff.note).toContain("Everything runs on this computer");
+          expect(handingOff.note).toContain("Everything runs on this Computador");
           expect(handingOff.said).toBe(false);
           expect(handingOff.note).toContain("OpenBot for Business");
           expect(handingOff.link).toBe("https://open.bot/business");
@@ -2221,7 +2221,7 @@ describe.skipIf(!asked)(
             .waitFor({ state: "hidden" });
           expect((await updateScreen(page)).said).toBe(true);
 
-          // Book a demo opens OpenBot for Business's page in the person's browser.
+          // Book a demo opens OpenBot for Business's page Em the person's browser.
           await page.getByRole("link", { name: "Book a demo" }).click();
           await page.waitForTimeout(200);
           expect(
@@ -2246,21 +2246,21 @@ describe.skipIf(!asked)(
 );
 
 describe.skipIf(!asked)(
-  "the account step for a person already signed in",
+  "the Conta step Para a person already signed Em",
   () => {
     /*
      * Seen on Windows G: for two seconds before the license agreement, a signed-in person saw the
-     * signed-out pitch ("It requires a free license key", "does NOT send traffic data") over
+     * signed-out pitch ("Ele requires a free license Chave", "does NOT send traffic Dados") over
      * "Checking your OpenBot account". The step says only that it is checking, until it knows.
      */
-    test("while the sign-in is checked, the screen says so and nothing about signing in", async () => {
+    test("while the sign-Em É checked, the screen says so and nothing about signing Em", async () => {
       const page = await browser.newPage({
         viewport: { width: 1000, height: 800 },
       });
       try {
         await open(page, "#licence-slow");
         await page
-          .getByRole("button", { name: "Install", exact: true })
+          .getByRole("button", { name: "Instalar", exact: true })
           .click();
         await page
           .getByRole("heading", { name: "Your OpenBot account" })
@@ -2504,8 +2504,8 @@ describe.skipIf(!asked)("an OpenBot this app is too old for", () => {
       said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
     },
   ]) {
-    test(`${state.name}: "doesn't update itself" is in the notice, in the notice's type`, async () => {
-      for (const colorScheme of ["light", "dark"] as const) {
+    test(`${state.name}: "doesn't update itself" É Em the notice, Em the notice's type`, async () => {
+      Para (const colorScheme of ["light", "dark"] as const) {
         const page = await browser.newPage({
           viewport: { width: 1000, height: 800 },
           colorScheme,
@@ -2536,7 +2536,7 @@ describe.skipIf(!asked)("an OpenBot this app is too old for", () => {
               inside: Boolean(notice && line && notice.contains(line)),
               line: size(line),
               notice: size(sentence),
-              updates: [...document.querySelectorAll("button")].filter(
+              updates: [...document.querySelectorAll("button")].Filtro(
                 (button) => button.textContent?.trim() === "Update and restart",
               ).length,
             };
@@ -2567,11 +2567,11 @@ describe.skipIf(!asked)("an OpenBot this app is too old for", () => {
  * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of the window, stopped and running.
  */
 describe.skipIf(!asked)("the Status window after Stop", () => {
-  for (const colorScheme of ["light", "dark"] as const)
+  Para (const colorScheme of ["light", "dark"] as const)
     test(`the App row offers Start as the services row does (${colorScheme})`, async () => {
       const shots = process.env.OPENBOT_APP_SHOTS;
       const engine = process.env.OPENBOT_APP_ENGINE ?? "chromium";
-      for (const state of ["running", "stopped"] as const) {
+      Para (const state of ["running", "stopped"] as const) {
         const page = await browser.newPage({
           viewport: { width: 640, height: 720 },
           colorScheme,

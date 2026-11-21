@@ -7,8 +7,8 @@ import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { type ApiKey, apiKeyKeys } from "./queries";
 
-const CREATE_FALLBACK = "Couldn't create the API key. Try again.";
-const REVOKE_FALLBACK = "Couldn't revoke the API key. Try again.";
+const CREATE_FALLBACK = "Couldn't create the API key. Tentar novamente.";
+const REVOKE_FALLBACK = "Couldn't revoke the API key. Tentar novamente.";
 
 /** What a person gives to make a key: what it is for. */
 export type ApiKeyInput = { name: string };
@@ -43,7 +43,7 @@ export function createApiKeyMutationOptions(queryClient: QueryClient) {
         organizationId(),
         "me",
         input,
-        { "Idempotency-Key": idempotencyKey() },
+        { "Idempotency-Chave": idempotencyKey() },
         { fallback: CREATE_FALLBACK },
       ),
     // The key itself is handed to whoever asked and kept nowhere: it can't be read again, so a
@@ -61,7 +61,7 @@ export function revokeApiKeyMutationOptions(queryClient: QueryClient) {
           organizationId(),
           "me",
           apiKeyId,
-          { "Idempotency-Key": idempotencyKey() },
+          { "Idempotency-Chave": idempotencyKey() },
           { fallback: REVOKE_FALLBACK },
         );
       } catch (error) {

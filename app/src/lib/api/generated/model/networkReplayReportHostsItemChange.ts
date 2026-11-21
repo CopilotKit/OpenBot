@@ -7,5 +7,5 @@ export type NetworkReplayReportHostsItemChange =
 
 export const NetworkReplayReportHostsItemChange = {
   block: "block",
-  allow: "allow",
+  allow: "Permitir",
 } as const;

@@ -15,7 +15,7 @@ import type {
   BotGrant,
   BotGrantCandidate,
   BotGrantChanges,
-  BotGrantChangesSaved,
+  BotGrantChangesGuardado,
   BotGrantDescription,
   BotGrantInput,
   BotGrantPage,
@@ -27,8 +27,8 @@ import type {
 export const getListBotGrantsResponseMock = (): BotGrantPage => ({
   grants: [
     {
-      id: "action:notion:notion-fetch",
-      kind: "action",
+      id: "Ação:notion:notion-fetch",
+      kind: "Ação",
       ref: "notion/notion-fetch",
       action: {
         appId: "notion",
@@ -40,8 +40,8 @@ export const getListBotGrantsResponseMock = (): BotGrantPage => ({
       skill: null,
     },
     {
-      id: "action:notion:notion-search",
-      kind: "action",
+      id: "Ação:notion:notion-search",
+      kind: "Ação",
       ref: "notion/notion-search",
       action: {
         appId: "notion",
@@ -69,7 +69,7 @@ export const getListBotGrantsResponseMock = (): BotGrantPage => ({
 });
 
 export const getBatchUpdateBotGrantsResponseMock =
-  (): BotGrantChangesSaved => ({
+  (): BotGrantChangesGuardado => ({
     added: ["notion/notion-search", "notion/notion-fetch"],
     removed: ["notion/notion-update-page"],
   });
@@ -78,9 +78,9 @@ export const getTranslateBotGrantsResponseMock = (): BotGrantTranslation => ({
   actions: ["notion-search", "notion-fetch"],
   grants: ["notion/notion-search", "notion/notion-fetch"],
   otherApps: [],
-  summary: "Reads Notion, but can't change it.",
+  summary: "Reads Notion, but can't change Ele.",
   explanation:
-    "The Bot can search Notion and read its pages and databases. It can't create, change or move anything.",
+    "The Bot can search Notion and read Dela/Desse pages and databases. Ele can't Criar, change or move anything.",
   check: { ok: true },
   warning: null,
 });
@@ -122,8 +122,8 @@ export const getReplayBotGrantsResponseMock = (): BotGrantReplay => ({
 });
 
 export const getReplaceBotGrantResponseMock = (): BotGrant => ({
-  id: "action:notion:notion-search",
-  kind: "action",
+  id: "Ação:notion:notion-search",
+  kind: "Ação",
   ref: "notion/notion-search",
   action: {
     appId: "notion",
@@ -149,7 +149,7 @@ export const getListBotAppsResponseMock = (): BotAppPage => ({
       accountHolder: "you",
       asksFirst: false,
       granted: true,
-      ownerGrants: "any",
+      ownerGrants: "Qualquer",
       givenByOwner: true,
       needsConnect: false,
       connectedAt: "2026-11-10T08:15:00.000Z",
@@ -168,7 +168,7 @@ export const getListBotAppsResponseMock = (): BotAppPage => ({
       accountHolder: null,
       asksFirst: false,
       granted: true,
-      ownerGrants: "any",
+      ownerGrants: "Qualquer",
       givenByOwner: false,
       needsConnect: false,
       connectedAt: null,
@@ -191,7 +191,7 @@ export const getGetBotAppResponseMock = (): BotApp => ({
   accountHolder: "you",
   asksFirst: false,
   granted: true,
-  ownerGrants: "any",
+  ownerGrants: "Qualquer",
   givenByOwner: false,
   needsConnect: false,
   connectedAt: null,
@@ -212,7 +212,7 @@ export const getApproveBotAppResponseMock = (): AppAccessApproval => ({
     id: "6f1c2a9e-4b7d-4e3a-8c5f-0d9e8b7a6c5d",
     appId: "notion",
     appTitle: "Notion",
-    kind: "grant",
+    kind: "Conceder",
     status: "approved",
     botId: "research-assistant",
     botName: "Research Assistant",
@@ -262,7 +262,7 @@ export const getListBotGrantsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListBotGrantsResponseMock(),
@@ -275,7 +275,7 @@ export const getListBotGrantsMockHandler = (
 
 export const getBatchUpdateBotGrantsMockHandler = (
   overrideResponse?:
-    | BotGrantChangesSaved
+    | BotGrantChangesGuardado
     | ((
         info: Parameters<
           HttpResponseResolver<
@@ -283,7 +283,7 @@ export const getBatchUpdateBotGrantsMockHandler = (
             BotGrantChanges
           >
         >[0],
-      ) => Promise<BotGrantChangesSaved> | BotGrantChangesSaved),
+      ) => Promise<BotGrantChangesGuardado> | BotGrantChangesGuardado),
   options?: RequestHandlerOptions,
 ) => {
   return http.post<{ organizationId: string; botId: string }, BotGrantChanges>(
@@ -298,7 +298,7 @@ export const getBatchUpdateBotGrantsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getBatchUpdateBotGrantsResponseMock(),
@@ -337,7 +337,7 @@ export const getTranslateBotGrantsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getTranslateBotGrantsResponseMock(),
@@ -376,7 +376,7 @@ export const getReplayBotGrantsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplayBotGrantsResponseMock(),
@@ -415,7 +415,7 @@ export const getReplaceBotGrantMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplaceBotGrantResponseMock(),
@@ -455,7 +455,7 @@ export const getDeleteBotGrantMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -484,7 +484,7 @@ export const getListBotAppsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListBotAppsResponseMock(),
@@ -522,7 +522,7 @@ export const getGetBotAppMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetBotAppResponseMock(),
@@ -560,7 +560,7 @@ export const getGiveBotAppMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGiveBotAppResponseMock(),
@@ -598,7 +598,7 @@ export const getTakeBackBotAppMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getTakeBackBotAppResponseMock(),
@@ -636,7 +636,7 @@ export const getApproveBotAppMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getApproveBotAppResponseMock(),
@@ -666,7 +666,7 @@ export const getGetAppTeamGrantsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetAppTeamGrantsResponseMock(),
@@ -705,7 +705,7 @@ export const getReplaceAppTeamGrantsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getReplaceAppTeamGrantsResponseMock(),
@@ -735,7 +735,7 @@ export const getListGiveableAppsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListGiveableAppsResponseMock(),

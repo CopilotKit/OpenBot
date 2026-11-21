@@ -1,5 +1,5 @@
 /** Why Connect with OpenBot Desktop did not connect this browser, one plain sentence per code: OpenBot Desktop's own
- * error codes, and the Recorder's (no answer, the policy, an address it cannot use, OpenBot not taking Desktop's code,
+ * Erro codes, and the Recorder's (no answer, the policy, an address it cannot use, OpenBot not taking Desktop's code,
  * OpenBot serving only newer Recorders, for a security problem or not). */
 const SENTENCES: Record<string, string> = {
   "origin-not-allowed":
@@ -11,13 +11,13 @@ const SENTENCES: Record<string, string> = {
   "not-signed-in":
     "OpenBot Desktop is not signed in to your organization. Sign in again in OpenBot Desktop, then try again.",
   "organization-unavailable":
-    "OpenBot Desktop cannot hand over your organization sign-in right now. Try again later.",
+    "OpenBot Desktop cannot hand over your organization sign-in right now. Tentar novamente later.",
   "handoff-failed":
-    "OpenBot did not give OpenBot Desktop a code to connect with. Try again.",
-  "timed-out": "OpenBot Desktop did not answer in time. Try again.",
+    "OpenBot did not give OpenBot Desktop a code to connect with. Tentar novamente.",
+  "timed-out": "OpenBot Desktop did not answer in time. Tentar novamente.",
   "no-answer": "OpenBot Desktop did not answer. Open it, then try again.",
   "host-failed":
-    "OpenBot Desktop ran into a problem while answering. Try again, or connect from OpenBot in your browser.",
+    "OpenBot Desktop ran into a problem while answering. Tentar novamente, or connect from OpenBot in your browser.",
   "unknown-message":
     "This version of OpenBot Desktop does not understand the Recorder. Update OpenBot Desktop, then try again.",
   "policy-invalid":
@@ -27,7 +27,7 @@ const SENTENCES: Record<string, string> = {
   "invalid-address":
     "OpenBot Desktop answered with an address the Recorder cannot use. Connect from OpenBot in your browser instead.",
   "exchange-refused":
-    "OpenBot did not accept the code OpenBot Desktop gave the Recorder. Try again.",
+    "OpenBot did not accept the code OpenBot Desktop gave the Recorder. Tentar novamente.",
   "client-update-required":
     "This OpenBot needs a newer OpenBot Recorder. Update OpenBot, then try again.",
   "client-security-update-required":
@@ -37,7 +37,7 @@ const SENTENCES: Record<string, string> = {
 };
 
 const UNKNOWN =
-  "OpenBot Desktop could not connect this browser. Try again, or connect from OpenBot in your browser.";
+  "OpenBot Desktop could not connect this browser. Tentar novamente, or connect from OpenBot in your browser.";
 
 export function desktopSentence(code: string): string {
   return Object.hasOwn(SENTENCES, code) ? (SENTENCES[code] as string) : UNKNOWN;

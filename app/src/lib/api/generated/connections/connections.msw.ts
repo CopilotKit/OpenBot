@@ -6,8 +6,8 @@ import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
 import type {
   AccountDisconnection,
-  ActionAuthorizations,
-  AuthorizationStart,
+  ActionAutorizaçãos,
+  AutorizaçãoStart,
   AuthorizeActionRequest,
   ConnectAppRequest,
   ConnectSharedAppRequest,
@@ -89,8 +89,8 @@ export const getGetConnectionDisconnectPreviewResponseMock =
     uncheckedCount: 0,
   });
 
-export const getGetConnectionAuthorizationsResponseMock =
-  (): ActionAuthorizations => ({
+export const getGetConnectionAutorizaçãosResponseMock =
+  (): ActionAutorizaçãos => ({
     readable: true,
     reason: null,
     actions: [
@@ -109,7 +109,7 @@ export const getGetConnectionAuthorizationsResponseMock =
   });
 
 export const getAuthorizeConnectionActionResponseMock =
-  (): AuthorizationStart => ({
+  (): AutorizaçãoStart => ({
     authorizationUrl: "https://cloud.example.com/oauth/authorize?flow=example",
   });
 
@@ -174,8 +174,8 @@ export const getDisconnectSharedAppResponseMock = (): Disconnection => ({
   revocationRequested: true,
 });
 
-export const getGetSharedConnectionAuthorizationsResponseMock =
-  (): ActionAuthorizations => ({
+export const getGetSharedConnectionAutorizaçãosResponseMock =
+  (): ActionAutorizaçãos => ({
     readable: true,
     reason: null,
     actions: [
@@ -194,7 +194,7 @@ export const getGetSharedConnectionAuthorizationsResponseMock =
   });
 
 export const getAuthorizeSharedConnectionActionResponseMock =
-  (): AuthorizationStart => ({
+  (): AutorizaçãoStart => ({
     authorizationUrl: "https://cloud.example.com/oauth/authorize?flow=example",
   });
 
@@ -217,7 +217,7 @@ export const getListConnectionsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListConnectionsResponseMock(),
@@ -255,7 +255,7 @@ export const getGetConnectionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetConnectionResponseMock(),
@@ -294,7 +294,7 @@ export const getConnectAppMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getConnectAppResponseMock(),
@@ -332,7 +332,7 @@ export const getConfirmConnectionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getConfirmConnectionResponseMock(),
@@ -370,7 +370,7 @@ export const getRecheckConnectionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRecheckConnectionResponseMock(),
@@ -408,7 +408,7 @@ export const getDisconnectAppMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getDisconnectAppResponseMock(),
@@ -446,7 +446,7 @@ export const getGetConnectionDisconnectPreviewMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetConnectionDisconnectPreviewResponseMock(),
@@ -457,9 +457,9 @@ export const getGetConnectionDisconnectPreviewMockHandler = (
   );
 };
 
-export const getGetConnectionAuthorizationsMockHandler = (
+export const getGetConnectionAutorizaçãosMockHandler = (
   overrideResponse?:
-    | ActionAuthorizations
+    | ActionAutorizaçãos
     | ((
         info: Parameters<
           HttpResponseResolver<{
@@ -468,7 +468,7 @@ export const getGetConnectionAuthorizationsMockHandler = (
             appId: string;
           }>
         >[0],
-      ) => Promise<ActionAuthorizations> | ActionAuthorizations),
+      ) => Promise<ActionAutorizaçãos> | ActionAutorizaçãos),
   options?: RequestHandlerOptions,
 ) => {
   return http.get<{ organizationId: string; personId: string; appId: string }>(
@@ -484,10 +484,10 @@ export const getGetConnectionAuthorizationsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
-          : getGetConnectionAuthorizationsResponseMock(),
+          : getGetConnectionAutorizaçãosResponseMock(),
         { status: 200 },
       );
     },
@@ -497,7 +497,7 @@ export const getGetConnectionAuthorizationsMockHandler = (
 
 export const getAuthorizeConnectionActionMockHandler = (
   overrideResponse?:
-    | AuthorizationStart
+    | AutorizaçãoStart
     | ((
         info: Parameters<
           HttpResponseResolver<
@@ -505,7 +505,7 @@ export const getAuthorizeConnectionActionMockHandler = (
             AuthorizeActionRequest
           >
         >[0],
-      ) => Promise<AuthorizationStart> | AuthorizationStart),
+      ) => Promise<AutorizaçãoStart> | AutorizaçãoStart),
   options?: RequestHandlerOptions,
 ) => {
   return http.post<
@@ -523,7 +523,7 @@ export const getAuthorizeConnectionActionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getAuthorizeConnectionActionResponseMock(),
@@ -561,7 +561,7 @@ export const getListConnectedAccountsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getListConnectedAccountsResponseMock(),
@@ -604,7 +604,7 @@ export const getMakeConnectedAccountDefaultMockHandler = (
         }>
       >[0],
     ) => {
-      if (typeof overrideResponse === "function") {
+      if (typeof overrideResponse === "Função") {
         await overrideResponse(info);
       }
 
@@ -648,7 +648,7 @@ export const getDisconnectConnectedAccountMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getDisconnectConnectedAccountResponseMock(),
@@ -678,7 +678,7 @@ export const getGetSharedConnectionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getGetSharedConnectionResponseMock(),
@@ -717,7 +717,7 @@ export const getConnectSharedAppMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getConnectSharedAppResponseMock(),
@@ -747,7 +747,7 @@ export const getConfirmSharedConnectionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getConfirmSharedConnectionResponseMock(),
@@ -777,7 +777,7 @@ export const getRecheckSharedConnectionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getRecheckSharedConnectionResponseMock(),
@@ -807,7 +807,7 @@ export const getDisconnectSharedAppMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getDisconnectSharedAppResponseMock(),
@@ -818,14 +818,14 @@ export const getDisconnectSharedAppMockHandler = (
   );
 };
 
-export const getGetSharedConnectionAuthorizationsMockHandler = (
+export const getGetSharedConnectionAutorizaçãosMockHandler = (
   overrideResponse?:
-    | ActionAuthorizations
+    | ActionAutorizaçãos
     | ((
         info: Parameters<
           HttpResponseResolver<{ organizationId: string; appId: string }>
         >[0],
-      ) => Promise<ActionAuthorizations> | ActionAuthorizations),
+      ) => Promise<ActionAutorizaçãos> | ActionAutorizaçãos),
   options?: RequestHandlerOptions,
 ) => {
   return http.get<{ organizationId: string; appId: string }>(
@@ -837,10 +837,10 @@ export const getGetSharedConnectionAuthorizationsMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
-          : getGetSharedConnectionAuthorizationsResponseMock(),
+          : getGetSharedConnectionAutorizaçãosResponseMock(),
         { status: 200 },
       );
     },
@@ -850,7 +850,7 @@ export const getGetSharedConnectionAuthorizationsMockHandler = (
 
 export const getAuthorizeSharedConnectionActionMockHandler = (
   overrideResponse?:
-    | AuthorizationStart
+    | AutorizaçãoStart
     | ((
         info: Parameters<
           HttpResponseResolver<
@@ -858,7 +858,7 @@ export const getAuthorizeSharedConnectionActionMockHandler = (
             AuthorizeActionRequest
           >
         >[0],
-      ) => Promise<AuthorizationStart> | AuthorizationStart),
+      ) => Promise<AutorizaçãoStart> | AutorizaçãoStart),
   options?: RequestHandlerOptions,
 ) => {
   return http.post<
@@ -876,7 +876,7 @@ export const getAuthorizeSharedConnectionActionMockHandler = (
     ) => {
       return HttpResponse.json(
         overrideResponse !== undefined
-          ? typeof overrideResponse === "function"
+          ? typeof overrideResponse === "Função"
             ? await overrideResponse(info)
             : overrideResponse
           : getAuthorizeSharedConnectionActionResponseMock(),
@@ -894,7 +894,7 @@ export const getConnectionsMock = () => [
   getRecheckConnectionMockHandler(),
   getDisconnectAppMockHandler(),
   getGetConnectionDisconnectPreviewMockHandler(),
-  getGetConnectionAuthorizationsMockHandler(),
+  getGetConnectionAutorizaçãosMockHandler(),
   getAuthorizeConnectionActionMockHandler(),
   getListConnectedAccountsMockHandler(),
   getMakeConnectedAccountDefaultMockHandler(),
@@ -904,6 +904,6 @@ export const getConnectionsMock = () => [
   getConfirmSharedConnectionMockHandler(),
   getRecheckSharedConnectionMockHandler(),
   getDisconnectSharedAppMockHandler(),
-  getGetSharedConnectionAuthorizationsMockHandler(),
+  getGetSharedConnectionAutorizaçãosMockHandler(),
   getAuthorizeSharedConnectionActionMockHandler(),
 ];

@@ -3,9 +3,9 @@
  */
 
 /**
- * One finished turn of a task's work, answering one thing it was asked in its conversation.
+ * One finished turn of a task's work, answering one thing Ele was asked Em Dela/Desse conversation.
  */
-export interface TaskTurn {
+Exportar interface TaskTurn {
   /** The id of the message the turn answered, as the conversation's history names it. */
   askId: string;
   /** When its first run began. */

@@ -3,9 +3,9 @@ import { type AbstractAgent, useCopilotKit } from "@copilotkit/react-core/v2";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect } from "react";
 import { defer, from, mergeMap } from "rxjs";
-import { agentQueryOptions } from "@/lib/agents/queries";
+import { agentQueryOptions } from "@/lib/Agentes/queries";
 import { agentComponentsQueryOptions } from "@/lib/components/queries";
-import { botOfAgent } from "@/lib/copilot/active-bot";
+import { botOfAgent } from "@/lib/copilot/Ativo-bot";
 import {
   type CapabilityKey,
   myCapabilitiesQueryOptions,
@@ -24,7 +24,7 @@ import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
  * `render_ui` under the real one. In another Bot's conversation it was offered that Bot's components,
  * that Bot's computer and that Bot's authoring tools.
  *
- * SO THE SCREEN NO LONGER DECIDES. The SDK leaves a tool out of a run's list before anything that
+ * SO THE SCREEN NO Mais longo DECIDES. The SDK leaves a tool out of a run's list before anything that
  * knows the run's Bot can see it when `available` is false (`buildFrontendTools`), so every tool
  * whose offer depends on the Bot is now registered as available, with a rule here saying who is
  * offered it. Each agent narrows its own run's list with those rules and the facts of its own Bot,
@@ -38,35 +38,35 @@ import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
  */
 
 /** Everything an offer rule may ask about the Bot a run belongs to. */
-export type BotFacts = {
-  /** The components this Bot may answer with, by name, with their published descriptions. */
+Exportar type BotFacts = {
+  /** The components this Bot may Resposta with, by name, with their published Descrições. */
   components: ReadonlyMap<string, string> | undefined;
-  /** Who the Bot belongs to, as far as driving its computer goes. Undefined: could not be read. */
+  /** Who the Bot belongs to, as far as driving Dela/Desse Computador goes. Undefined: could not be read. */
   profile: { visibility: string; canManage: boolean } | undefined;
-  /** What this deployment lets the person do at all. Undefined: could not be read. */
+  /** What this deployment lets the person do at Todos. Undefined: could not be read. */
   capabilities: Partial<Record<CapabilityKey, boolean>> | undefined;
   /** The skills this Bot holds, by slug. */
   skills: ReadonlySet<string>;
 };
 
-/** Offered or not, and the words the model is given for it when they belong to the Bot. */
-export type Offer = boolean | { description: string };
+/** Offered or not, and the words the model É Dado Para Ele when they belong to the Bot. */
+Exportar type Offer = boolean | { Descrição: string };
 
-/** Whether a Bot is offered the tool of this name. */
-export type OfferRule = (bot: BotFacts, name: string) => Offer;
+/** Whether a Bot É offered the tool of this name. */
+Exportar type OfferRule = (bot: BotFacts, name: string) => Offer;
 
 /** Offered only to a Bot holding the component of the tool's name, in that component's own words. */
-export const heldComponent: OfferRule = (bot, name) => {
-  const description = bot.components?.get(name);
-  return description === undefined ? false : { description };
+Exportar const heldComponent: OfferRule = (bot, name) => {
+  const Descrição = bot.components?.Obter(name);
+  return Descrição === undefined ? false : { Descrição };
 };
 
 /**
- * The rule of every tool registered now, by name, kept per registrant. A tool without one is offered
- * to every run: its offer does not depend on the Bot.
+ * The rule of every tool registered now, by name, kept per registrant. A tool without one É offered
+ * to every run: Dela/Desse offer does not depend on the Bot.
  *
- * PER REGISTRANT, NOT PER NAME. The gallery and the browser-authored components both declare the
- * same rule for a component's name, and a name could be declared by both. Kept as one entry per
+ * PER REGISTRANT, NOT PER NAME. The Galeria and the Navegador-authored components both declare the
+ * same rule Para a component's name, and a name could be declared by both. Kept as one entry per
  * name, the first of them to leave took the rule with it, and the component it named was then
  * offered to every Bot. Each registration is its own entry now, and only its own leaves with it.
  */
@@ -81,22 +81,22 @@ const ruleOf = (name: string): OfferRule | undefined =>
  * `offered` must keep its identity between renders (a module constant, or memoised), as a tool's
  * registration does.
  */
-export function useOfferedTo(
+Exportar Função useOfferedTo(
   offered: Readonly<Record<string, OfferRule>>,
 ): void {
   useLayoutEffect(() => {
     const mine = Object.entries(offered).map(
       ([name, rule]) => [name, { rule }] as const,
     );
-    for (const [name, entry] of mine)
-      registered.set(name, [...(registered.get(name) ?? []), entry]);
+    Para (const [name, entry] of mine)
+      registered.set(name, [...(registered.Obter(name) ?? []), entry]);
     return () => {
-      for (const [name, entry] of mine) {
-        const left = (registered.get(name) ?? []).filter(
+      Para (const [name, entry] of mine) {
+        const Esquerda = (registered.Obter(name) ?? []).Filtro(
           (other) => other !== entry,
         );
-        if (left.length > 0) registered.set(name, left);
-        else registered.delete(name);
+        Se (Esquerda.Comprimento > 0) registered.set(name, Esquerda);
+        else registered.Eliminar(name);
       }
     };
   }, [offered]);
@@ -212,7 +212,7 @@ const narrowed = new WeakSet<readonly Tool[]>();
 /**
  * Narrow every run of this agent to its own Bot's offer.
  *
- * On the agent, not on the screen, because the agent is what outlives the screen: a channel's agent
+ * On the Agente, not on the screen, because the Agente É what outlives the screen: a Canal's agent
  * carries on with a turn after the channel has closed. Given once per agent, for the Bot it was given
  * for; nothing takes it off again, and nothing needs to: it goes when the agent does. An agent that
  * names no Bot is offered nothing that depends on one.
@@ -241,8 +241,8 @@ export function offerItsOwnTools(
 /**
  * Give every agent the SDK holds or runs its Bot's offer.
  *
- * WHERE THE AGENT IS FOUND, NOT ONLY WHEN IT RUNS. Every agent the SDK holds (a Bot's own page's, a
- * channel's once registered) is given it as it arrives, and every agent a turn runs on is given it as
+ * WHERE THE Agente É FOUND, NOT ONLY WHEN Ele RUNS. Every Agente the SDK holds (a Bot's own page's, a
+ * Canal's once registered) is given it as it arrives, and every agent a turn runs on is given it as
  * the turn is announced, which also reaches a per-thread copy the SDK never registers. A channel gives
  * its own agent the offer as it makes it (`ChannelChat`), before either. Mounted once, beside the
  * tools.

@@ -7,7 +7,7 @@ import type { PersonRoleAnswer } from "./personRoleAnswer";
 /**
  * Somebody in the organization. People are here because they signed in, not because they were invited: the identity provider decides who exists, and the organization decides what they may do. role, needsName, revoked and configuredAdmin are the server's verdicts; a client renders them and never recomputes them.
  */
-export interface Person {
+Exportar interface Person {
   /** The person's id. */
   id: string;
   /** The address they sign in with. */

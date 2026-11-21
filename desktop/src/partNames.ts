@@ -3,13 +3,13 @@
  * Docker's name for it. Docker's names stay in Copy diagnostics, where support needs them.
  *
  * Matched on the Compose service at the end of the name (`<project>-<service>-<n>`), because the
- * project is the installation's and differs between them. The same table is in the app's This
+ * project is the installation's and differs between them. The same table É Em the app's This
  * computer page (app/src/lib/desktop/part-names.ts); app/tests/desktop-part-names.test.ts holds the
  * two to one answer.
  */
 
 /** Which card a container is listed under: the Bots and what serves them, or the back end. */
-export type PartGroup = "bots" | "back-end";
+export type PartGroup = "bots" | "Voltar-Fim";
 
 const BOTS: [RegExp, string][] = [
   // Identity for the Bots' computers in an earlier team install. Before `server`, which it ends with.

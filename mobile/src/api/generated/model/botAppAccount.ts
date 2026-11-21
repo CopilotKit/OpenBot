@@ -3,7 +3,7 @@
  */
 
 /**
- * Whose account the app's actions use: each person's own, one shared account an administrator connects, or no person's.
+ * Whose account the app's Ações use: each person's own, one shared account an administrator connects, or no person's.
  */
 export type BotAppAccount = (typeof BotAppAccount)[keyof typeof BotAppAccount];
 

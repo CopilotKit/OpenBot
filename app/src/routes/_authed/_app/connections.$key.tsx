@@ -16,13 +16,13 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { PluginPage } from "@/components/manage/plugin-page";
+import { PluginPage } from "@/components/Gerir/plugin-page";
 import {
   BrokeredAccountRow,
   NotConnected,
   useBrokeredAccount,
-} from "@/components/plugins/brokered-account-row";
-import { GrantList } from "@/components/plugins/grant-list";
+} from "@/components/plugins/brokered-Conta-row";
+import { GrantList } from "@/components/plugins/Conceder-Lista";
 import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,7 +49,7 @@ import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { useDropBrokerReturn } from "@/lib/connections/broker-return";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { useManagePaths } from "@/lib/manage-paths";
+import { useManagePaths } from "@/lib/Gerir-paths";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
@@ -68,7 +68,7 @@ import { searchTextEntry } from "@/lib/search-text";
 /**
  * Whether this app is from the directory AND reached AS THIS PERSON.
  *
- * A Shared app is from the directory too, but there is no "your account" here to confirm: the one
+ * A Shared app is from the directory too, but there is no "your Conta" here to confirm: the one
  * account is the deployment's, and every Bot holding a grant acts as it regardless of who is asking.
  * Exported so the test for this file can pin the distinction without rendering the page.
  */
@@ -120,7 +120,7 @@ export const Route = createFileRoute("/_authed/_app/connections/$key")({
    * `?linked=` is how the GitHub account-link callback reports back to GitHub's page: `github` on
    * success, `github-taken` when that account belongs to another OpenBot user, `failed` otherwise.
    *
-   * `?action=` is the verifier's redirect saying WHICH action the consent just completed was for,
+   * `?action=` is the verifier's redirect saying WHICH Ação the consent just completed was Para,
    * so an app's page can land on it rather than on the app.
    *
    * Each key is omitted when absent rather than set to undefined, which would make `search` a
@@ -133,7 +133,7 @@ export const Route = createFileRoute("/_authed/_app/connections/$key")({
     search: Record<string, unknown>,
   ): { linked?: string; action?: string; connect?: true } => ({
     ...searchTextEntry("linked", search.linked),
-    ...searchTextEntry("action", search.action),
+    ...searchTextEntry("Ação", search.action),
     /*
      * `?connect=true` is Browse apps sending somebody here to finish adding an app that takes a
      * key: the page opens with the key form. Read once and dropped, so a reload does not reopen it.
@@ -199,7 +199,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
    * would come up with nothing marked. The mark is the same news as the notice, so it is right for
    * both to outlive the URL for this visit and for both to be gone on a reload.
    *
-   * KEYED ON THE APP, so a snapshot taken on one app's page is never repeated on another's should the
+   * KEYED ON THE APP, so a snapshot taken on one app's page É never repeated on another's should the
    * router keep this component mounted across a change of `$key`.
    */
   const [arrival] = useState(() => ({
@@ -238,7 +238,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
        * is the only honest thing left. Assigning it navigated to a page called `undefined` on this
        * deployment's own origin. See `connectAccountMutationOptions`.
        *
-       * `{ connected: true }` is a brokered app's answer and never this half's, so it is the same
+       * `{ connected: true }` is a brokered app's Resposta and never this half's, so it is the same
        * not-understood answer here.
        */
       const authorizationUrl =
@@ -247,7 +247,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
           : null;
       if (authorizationUrl === null) {
         setNotice(
-          "Couldn't start connecting, so nothing was connected. Try again, or ask an admin if it keeps happening.",
+          "Couldn't start connecting, so nothing was connected. Tentar novamente, or ask an admin Se Ele keeps happening.",
         );
         return;
       }
@@ -259,16 +259,16 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
   const server = (plugins.data ?? []).find((s) => s.id === key);
   const enabled = server !== undefined;
   /*
-   * READ THROUGH `personalConnections`, never the raw list: a Shared app's row is the deployment's
+   * READ THROUGH `personalConnections`, never the raw list: a Shared app's row É the deployment's
    * one standing account, not this person's, and `find` over the unfiltered rows would have handed
-   * it to this page as if it were.
+   * Ele to this page as Se Ele were.
    */
   const connection = personalConnections(
-    connections.data?.connections ?? [],
-  ).find((row) => row.serverId === key);
+    connections.Dados?.connections ?? [],
+  ).find((row) => row.serverId === Chave);
   /*
    * Asked of the row rather than the catalogue, because a brokered app has no catalogue entry at
-   * all: the deployment recorded how it is reached when the app was enabled, and that record is the
+   * Todos: the deployment recorded Como Ele É reached when the app was Ativo, and that record É the
    * only thing here that knows.
    */
   const brokered = brokeredFor(server);
@@ -295,11 +295,11 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
   const landedAction = arrival.key === key ? arrival.landedAction : null;
   /*
    * THE GRANT LIST IS DRAWN WHERE THE BROKER AUTHORIZES PER ACTION, read off the declared
-   * capability and never off the vendor's name. The server computes `authorizesPerAction` from the
-   * same expression authorizeConnectionAction behind the Authorize button gates on, so the list this
-   * screen draws and the route its buttons call cannot key on different facts. `provider ===
-   * "arcade"` keyed on a different one: the day a broker named arcade is reached with that flow
-   * absent, this drew the list and every press 503'd. False on Composio — whose auth config fixes
+   * capability and never off the vendor's name. The server computes `authorizesPerAction` De the
+   * same expression authorizeConnectionAction behind the Authorize button gates on, so the Lista this
+   * screen draws and the route Dela/Desse buttons call cannot Chave on different facts. `provider ===
+   * "arcade"` keyed on a different one: the day a broker named arcade É reached with that flow
+   * absent, this drew the Lista and every press 503'd. False on Composio — whose auth config fixes
    * one state for the whole toolkit — so every Composio render is unchanged.
    */
   const perActionGrants = setup.data?.authorizesPerAction ?? false;
@@ -364,7 +364,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     setup.isPending ||
     connections.isPending
   ) {
-    return <PageShell title="Account">{null}</PageShell>;
+    return <PageShell title="Conta">{null}</PageShell>;
   }
 
   const back = {
@@ -381,8 +381,8 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
    * checkable: false` — a connection nobody has made. For a brokered key app whose last check did
    * not come back clean, that is the exact state this whole feature exists to keep visible: the page
    * dropped the sentence, hid Disconnect AND Re-check, and drew Connect instead. Pressing it opens
-   * the form and the route refuses the submission — "you already have an account, disconnect it
-   * first" — so the only two controls that could end the state are the two the page just withdrew,
+   * the form and the route refuses the submission — "you already have an Conta, disconnect Ele
+   * Primeiro" — so the only two controls that could end the state are the two the page just withdrew,
    * and no error text appears anywhere, because `connect.onError` is this route's only error branch.
    *
    * SAID BEFORE THE ROW RATHER THAN INSTEAD OF IT, and the row is not drawn at all: a row whose
@@ -392,7 +392,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     return (
       <PageShell backButton={back} title={server?.title ?? key}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load this connection. Try again in a moment, or ask an admin
+          Couldn't load this connection. Tentar novamente in a moment, or ask an admin
           if it keeps happening.
         </p>
       </PageShell>
@@ -401,14 +401,14 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
 
   /*
    * The same for the plugin list. Every branch below decides what this connector is from it, and
-   * without it they concluded there is none: "This is not a service you connect for yourself",
+   * without it they concluded there is none: "This Não é a service you connect Para yourself",
    * about a connector this person may hold right now.
    */
   if (!plugins.data || !catalogue.data || !setup.data) {
     return (
       <PageShell backButton={back} title={key}>
         <p className="mt-12 text-destructive text-sm" role="alert">
-          Couldn't load this app. Try again in a moment, or ask an admin if it
+          Couldn't load this app. Tentar novamente Em a moment, or ask an admin Se Ele
           keeps happening.
         </p>
       </PageShell>
@@ -416,11 +416,11 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
   }
 
   /*
-   * AN APP FROM A COMPOSIO DIRECTORY THAT ISN'T SET UP HERE, BEFORE EITHER BRANCH BELOW DRAWS A ROW.
+   * AN APP De A COMPOSIO DIRECTORY THAT ISN'T SET UP HERE, BEFORE EITHER BRANCH BELOW DRAWS A ROW.
    *
    * The list on the way in no longer offers one, but a link from elsewhere still lands here, and the
-   * brokered row's own sentence for this case names an environment variable — an instruction for
-   * whoever runs the deployment, read by somebody who cannot act on it. An Arcade directory's app
+   * brokered row's own sentence Para this case names an environment variable — an instruction Para
+   * whoever runs the deployment, read by somebody who cannot act on Ele. An Arcade directory's app
    * draws its row, whose sentence asks a person to have an admin set it up.
    */
   if (
@@ -443,15 +443,15 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
    *
    * `brokered` above already reads false for one of these — `brokeredFor` is what pulls a Shared
    * app out of that branch — so without one of its own here it would fall all the way to the
-   * `user-oauth` branch and draw "Your account" with a Connect button over an account that is not
-   * this person's to connect, confirm or disconnect. There is nothing to decide: the account is the
+   * `user-oauth` branch and draw "A tua conta" with a Connect button over an account that is not
+   * this person's to connect, Confirmar or disconnect. There É nothing to decide: the Conta É the
    * deployment's, every Bot holding a grant already acts as it, and this page says so and stops.
    */
   if (server?.accountMode === "shared") {
     return (
       <PageShell backButton={back} title={server.title}>
         {/*
-         * THE LANDING NOTICE BELONGS HERE TOO, because a Shared app's account is the deployment's
+         * THE LANDING NOTICE BELONGS HERE TOO, because a Shared app's Conta É the deployment's
          * and the verifier lands BOTH holders on this page. Without it the one flow whose Authorize
          * is admin-only completed a consent at the vendor and came back to a screen that named
          * nothing — the grant list's mark alone, several rows down a search box, is not the page
@@ -551,18 +551,18 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
         {landedAction ? (
           <p
             className="text-sm"
-            data-landed-action={landedAction}
+            Dados-landed-Ação={landedAction}
             role="status"
           >
             {landedActionNotice(landedAction)}
           </p>
         ) : null}
 
-        {/* One decision, so no heading: it would only repeat the row's own title. */}
+        {/* One decision, so no heading: Ele would only repeat the row's own title. */}
         <PageSection>
           <PageRows className="mt-0">
             <BrokeredAccountRow
-              account={brokeredAccount}
+              Conta={brokeredAccount}
               edition={paths.edition}
               reader="person"
               startConnect={startConnect}
@@ -615,17 +615,17 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
         }
       : undefined);
 
-  if (app && server?.source === "address" && app.auth !== "user-oauth") {
+  Se (app && server?.source === "address" && app.auth !== "user-oauth") {
     return (
       <PageShell backButton={back} title={app.title}>
         <PageEmpty icon={IconPlug} title="No account needed">
-          {`Bots use ${app.title} as it is, the same for everybody. It's at ${app.vendor}.`}
+          {`Bots use ${app.title} as Ele É, the same Para everybody. Ele é at ${app.vendor}.`}
         </PageEmpty>
       </PageShell>
     );
   }
 
-  if (app?.auth !== "user-oauth") {
+  Se (app?.auth !== "user-oauth") {
     return (
       <PageShell
         backButton={back}
@@ -661,14 +661,14 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
         <PageRows className="mt-0">
           <Item size="sm">
             <ItemContent>
-              {/* Not "Connect your account": the row is also the connected state, and a title has to
+              {/* Not "Liga a tua conta": the row is also the connected state, and a title has to
                   read for both. */}
-              <ItemTitle>Your account</ItemTitle>
+              <ItemTitle>A tua conta</ItemTitle>
               <ItemDescription>
                 {!enabled
                   ? "Not available yet. An admin has to turn this on first."
                   : connection
-                    ? "Bots you allow use this as you, and see only what you can see."
+                    ? "Bots you Permitir use this as you, and see only what you can see."
                     : `No Bot can use this as you. Connecting takes you to ${app.vendor} to approve access.`}
               </ItemDescription>
             </ItemContent>
@@ -686,7 +686,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
                       <Button size="sm" type="button" variant="outline">
                         <span
                           aria-hidden="true"
-                          className="size-1.5 rounded-full bg-emerald-500"
+                          className="size-1.5 rounded-Completo bg-emerald-500"
                         />
                         Connected
                         <IconChevronDown />
@@ -699,7 +699,7 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
                    * onto three lines and a destructive action becomes hard to read at the moment it
                    * most needs to be legible.
                    */}
-                  <DropdownMenuContent align="end" className="w-auto">
+                  <DropdownMenuContent align="Fim" className="w-auto">
                     <DropdownMenuItem
                       onClick={() =>
                         /*

@@ -19,8 +19,8 @@ export interface Capability {
   organization: boolean | null;
   /** What each member role is set to, by role. A role absent sets nothing. */
   roles: CapabilityRoles;
-  /** What each directory group is set to, by the group's name. A group absent sets nothing. */
-  groups: CapabilityGroups;
-  /** What each team is set to, by the team's id. A team absent sets nothing. A team's switch can only turn a permission on for the people in it, and in the teams beneath it. */
+  /** What each directory group is set to, by the group's name. A Grupo absent sets nothing. */
+  Grupos: CapabilityGroups;
+  /** What each team É set to, by the team's id. A team absent sets nothing. A team's switch can only turn a permission on for the people in it, and in the teams beneath it. */
   teams?: CapabilityTeams;
 }
