@@ -21,6 +21,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { useManagePaths } from "@/lib/manage-paths";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import {
   brokeredConsentFor,
@@ -860,6 +861,8 @@ function accountSentence(input: {
   provider: PluginsProvider;
   /** Which edition draws this screen (`managePaths().edition`). */
   edition: Edition;
+  /** A hosted OpenBot (`managePaths().hosted`): its admin is never told to set a variable. */
+  hosted: boolean;
   /** Who reads the row: see {@link brokeredKeyMissing}. */
   reader: "admin" | "person";
   /** The one connected account's name, where the app reported one. */
@@ -871,6 +874,7 @@ function accountSentence(input: {
     edition,
     disconnectedDescription,
     disconnectedReassurance,
+    hosted,
     identity,
     provider,
     reader,
@@ -878,7 +882,7 @@ function accountSentence(input: {
   } = input;
 
   if (!account.configured) {
-    return brokeredKeyMissing(provider, edition, reader);
+    return brokeredKeyMissing(provider, edition, reader, hosted);
   }
 
   if (account.kind === "no-auth") {
@@ -1127,6 +1131,8 @@ export function BrokeredAccountRow({
    */
   title: string;
 }) {
+  // A hosted OpenBot's admin holds no environment: a missing key names who sets it up instead.
+  const { hosted } = useManagePaths();
   /*
    * Whether the form is on screen, which is the whole of what this row holds.
    *
@@ -1238,6 +1244,7 @@ export function BrokeredAccountRow({
                   edition,
                   disconnectedDescription,
                   disconnectedReassurance,
+                  hosted,
                   identity: accounts[0]?.identity ?? null,
                   provider,
                   reader,

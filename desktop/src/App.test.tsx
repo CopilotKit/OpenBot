@@ -5340,6 +5340,42 @@ test("an installation an earlier app connected to hosted Intelligence starts at 
   });
 });
 
+/**
+ * A Mac updated from 1.0.3 to 1.1.2 with its local backend gone came back to the first screen. Its
+ * install asked for the new default Bot, which the folder's release, still 1.0.3 until Start moves
+ * it, did not have, and failed every time. The native side now installs the Bot the folder has
+ * (`harness::the_release_includes`) and says which, and Start asks for that one.
+ */
+test("Start asks for the Bot the install put in when the folder's release lacked the default", async () => {
+  const root = "/tmp/older-release-folder";
+  setupRootConfiguration(root, async () =>
+    previouslyHostedConfiguration("langgraph"),
+  );
+  withLocalCli({
+    ...readyLocal(),
+    prepare_installation: async () => ({ id: "langgraph" }),
+  });
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "Set up OpenBot" });
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Connect your AI" });
+  expect(installationCalls()).toEqual([
+    {
+      command: "prepare_installation",
+      args: { root, harness: { id: DEFAULT_HARNESS } },
+    },
+  ]);
+  await userEvent.click(view.getByRole("radio", { name: /OpenAI/ }));
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await expectHandover();
+  expect(getStartStackPayload()).toEqual({
+    root,
+    ...LOCAL_ADDRESSES,
+    harness: { id: "langgraph" },
+    model: { provider: "openai", login: "api-key", saved: true },
+  });
+});
+
 test("a previously hosted installation of another Bot installs the default Bot", async () => {
   const root = "/tmp/previously-hosted-crewai";
   setupRootConfiguration(root, async () =>

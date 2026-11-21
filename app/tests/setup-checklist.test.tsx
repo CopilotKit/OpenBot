@@ -355,6 +355,20 @@ test("the summary counts in the singular and the plural", () => {
   );
 });
 
+/*
+ * On a hosted OpenBot the server sends an organization admin no fix for what OpenBot by CopilotKit
+ * sets up (the computer, more apps), so "Each says how to add it" pointed at rows that say nothing.
+ */
+test("on a hosted OpenBot, optional gaps don't promise a way to add each", () => {
+  const gap = ROW({ id: "apps", ready: false, status: "needs_setup" });
+  expect(summaryOf([gap], true)).toBe(
+    "OpenBot is ready to use. 1 optional feature isn't set up yet.",
+  );
+  expect(summaryOf([gap])).toBe(
+    "OpenBot is ready to use. 1 optional feature isn't set up yet. Each says how to add it.",
+  );
+});
+
 test("a check that fails says so, and Check again stays", async () => {
   answer = () => Response.json({ error: "nope" }, { status: 503 });
   const view = draw();

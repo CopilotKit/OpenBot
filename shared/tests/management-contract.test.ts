@@ -9,12 +9,12 @@ import {
   CertificateRequest,
   CommandResult,
   canonicalCommand,
+  ENROLLMENT_REFUSAL_CODES,
   EnrollmentGranted,
   EnrollmentPending,
   EnrollmentProblem,
   EnrollmentStart,
   EnrollmentStarted,
-  ENROLLMENT_REFUSAL_CODES,
   enrollmentTokenPath,
   Heartbeat,
   HeartbeatReply,
@@ -313,6 +313,14 @@ describe("enrollment contract", () => {
     expect(EnrollmentStart.safeParse({ ...start, mode: "auto" }).success).toBe(
       false,
     );
+    // The install's own id, so two installs at the same address under one licence stay apart.
+    const instanceId = "5d3c2b1a-0f9e-4d8c-8b7a-6e5f4d3c2b1a";
+    expect(
+      EnrollmentStart.parse({ ...start, mode: "licence", instanceId }),
+    ).toEqual({ ...start, mode: "licence", instanceId });
+    expect(
+      EnrollmentStart.safeParse({ ...start, instanceId: "production" }).success,
+    ).toBe(false);
     const started = {
       requestId: "0b7f4f2e-3a49-4f61-9d2c-6c1d5a7e8f90",
       userCode: "BDFH-KLMN",
