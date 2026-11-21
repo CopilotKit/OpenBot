@@ -1,6 +1,6 @@
 import { IconBuildingBank, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { SignInSection } from "@/components/admin/controls/sign-in-section";
 import { TeamPage } from "@/components/edition/for-a-team";
@@ -45,6 +45,19 @@ import { ONLY_ORGANIZATION } from "@/lib/organizations/queries";
 import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/identity-providers")({
+  /*
+   * On OpenBot by CopilotKit (`hostedSignIn`) people sign in with their CopilotKit account, so an
+   * organization has no identity provider of its own to set up: an old link or bookmark lands on the
+   * Admin overview, as Admin lists no such page there. Admin's route has already read the answer, so
+   * this waits on nothing and the page never draws first.
+   */
+  beforeLoad: async ({ context }) => {
+    const deployment = await context.queryClient
+      .ensureQueryData(deploymentCapabilitiesQueryOptions())
+      .catch(() => undefined);
+    if (deployment?.hostedSignIn)
+      throw redirect({ to: "/admin", replace: true });
+  },
   component: IdentityProvidersPageInEveryEdition,
 });
 
