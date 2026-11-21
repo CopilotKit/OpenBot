@@ -10,8 +10,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 **Before upgrading.**
 
-- **Migrations run at start: eleven, and none removes anything.** The database moves from
-  `0137_ai_connections`, where 1.1.2 left it, to `0148_recorder_capture_passes`. A 1.1.2 server
+- **Migrations run at start: fourteen, and none removes anything.** The database moves from
+  `0137_ai_connections`, where 1.1.2 left it, to `0151_sign_up_switch`. A 1.1.2 server
   works against the new schema, so 1.1.2 upgrades with its servers rolling one by one, with no
   downtime, and goes back to 1.1.2 the same way.
   - `0138_management_enrollment` keeps the connection to managed updates (below).
@@ -34,6 +34,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
     extension, so the role that owns OpenBot's database creates it without a superuser.
   - `0148_recorder_capture_passes` keeps the passes that let a Recorder's socket through the
     gateway relay.
+  - `0149_bot_default_model` keeps a Bot's default model, and the default each conversation started
+    with (below).
+  - `0150_management_auto_connect` keeps how managed updates connected, whether an admin turned them
+    off, the install's own id, its maintenance window, whether upgrades are set up, and which refusal
+    the last error was.
+  - `0151_sign_up_switch` keeps whether a hosted OpenBot takes new people.
+- **An `openbot-agent` release that runs your upgrades needs `managedUpgrades=true`.** The chart
+  now runs upgrades, and installs Flux beside the agent, only with it set (it is `false` by
+  default). A release installed from 1.1.2's chart and upgraded without it stays connected and
+  reporting, but its Flux controllers are removed and it upgrades nothing. See
+  [docs/managed-upgrades.md](docs/managed-upgrades.md).
 - **`OPENBOT_MULTIPLE_ORGANIZATIONS` is no longer read: `OPENBOT_ORGANIZATION_AUTHORITY` says
   how many organizations an OpenBot holds.** A self-hosted OpenBot that held more than one with
   `OPENBOT_MULTIPLE_ORGANIZATIONS=true` sets `OPENBOT_ORGANIZATION_AUTHORITY=intelligence-platform`
@@ -97,7 +108,34 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - New optional fields: `organizationId` on a conversation event and on a Recorder connection, and
   `hostedSignIn` on `deployment`, true where people sign in through OpenBot by CopilotKit's own
   sign-in, starting at `/api/auth/hosted/sign-in`.
-
+- **No company sign-in of an organization's own on a hosted OpenBot.** Where `hostedSignIn` is
+  true, registering or removing an identity provider, requiring SSO and asking for a company
+  sign-in ticket answer 409 with the code `HOSTED_SIGN_IN_ONLY`. `getCompanySignIn` lists no
+  providers there, and the deployment's `ssoConfigured` and `ssoRequired` are always false.
+- **An organization's plan and trial.** `GET /api/v2/organizations/{organizationId}/plan`
+  (`getOrganizationPlan`) says whether this OpenBot runs an organization's Bots only while it is on
+  a plan or its free trial, where the organization stands (`trialing`, `active`, `past_due`,
+  `none`, `unknown`, or `not_required` where no plan is needed), when the trial ends or the plan
+  renews, and where an owner or an admin adds a card. A message sent to an organization with no
+  plan or trial is refused with 402 `PLAN_REQUIRED`, which carries `addCardUrl`.
+- **A limit on how many organizations one person owns.** `createOrganization` says that an OpenBot
+  may limit how many organizations one person owns, their own included: at the limit it answers 403
+  saying so, and nothing is made. While another of the caller's requests is creating one, it
+  answers 409.
+- **Work on a check-in item the way the server takes work.** `workOnCheckInItem`
+  (`POST .../check-in-items/{checkInItemId}/work-on`) makes the item a task where task threads are
+  on, as `startCheckInItem` does. Where they are off, it starts the item and answers with the
+  caller's own conversation with the item's Bot and the message to send there. `startCheckInItem`
+  is unchanged.
+- **A Bot's default model.** A Bot carries `defaultModel`, its saved model and thinking level, or
+  null for OpenBot's default, and whoever may manage the Bot sets it with `updateBot`. A
+  conversation's model says the default it started with.
+- **Managed updates say more.** `getManagementEnrollment` gains the states `connecting` and
+  `opted-out`, `agentInstalledByChart`, `upgrades` (`on` or `not-set-up`), the install's maintenance
+  `window`, `installName` while waiting for approval, and `lastErrorCode` (`not-entitled`,
+  `invalid-licence` or `unreachable`). `startManagementEnrollment` connects by licence where the
+  chart installs the agent, and `cancelManagementEnrollment` records that an admin turned managed
+  updates off.
 - **One Bot's conversations.** `listConversations` takes `botId` and lists the conversations that
   Bot takes part in, one-Bot and group alike, in the same order and pages. It can't be combined
   with `q`: both together are a 400.
@@ -118,6 +156,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   five latest conversations, and Show more lists the next five.
 - **Agents are hidden for now.** The Agents page is out of the menu and `/agents` goes home. A
   Bot's page has no Agents row, and `/bots/<id>/agents` goes to the Bot's page.
+- **The sidebar drags narrower, and never takes more than two-fifths of the window.** Its edge
+  stopped at 220px; a panel now drags down to 180px (228px beside the strip), where every heading
+  still reads whole. Zooming in used to leave the sidebar its full width, so it could take more than
+  half of the window. It is now drawn no wider than 40% of the window, and the width you chose comes
+  back once the window is wide again.
 
 ### Organizations in the app
 
@@ -143,7 +186,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **A hosted OpenBot** offers Continue with OpenBot by CopilotKit on the sign-in screen, says an
   invitation arrives by email from OpenBot by CopilotKit, renews its hosted sign-in when an admin
   action needs it and sends that action again once, and no longer offers folders from this
-  computer in Admin, Computers.
+  computer in Admin, Computers. People there sign in with their OpenBot by CopilotKit account, so
+  Admin no longer lists Identity providers (an old link to it opens the Admin overview), and
+  Settings offers no company sign-in. Admin, Apps and Setup no longer tell an organization's admin
+  to set environment variables, read the deployment's logs or restart OpenBot, which only whoever
+  runs it can do: they say who sets it up, and Setup sends the admin to the pages its rows link to.
+  A company's own OpenBot and OpenBot Desktop read as before.
+- **Where Bots run only on a plan or a free trial**, people see where their organization stands. A
+  bar over every page gives the days left on the free trial or, while Bots can't run, what to do: an
+  owner or an admin gets Add a card or Update card, a member is told to ask an admin. Settings,
+  Organization has a read-only Plan row with the same link, and a message refused for want of a
+  plan gets the same button beside it, for an owner or an admin. An OpenBot that needs no plan,
+  self-hosted or Desktop, shows none of it.
 - **Learning** names the organization's own default space where it said "Deployment default", and
   the sidebar takes only the conversation events of the organization the person works in.
 - **A person outside `default` signs in with nothing refused on the way**: what OpenBot offers is
@@ -152,6 +206,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   members by name or email from the first letter, best matches first, and completes the best one in
   the box: Tab takes it, Enter adds, the arrow keys move through the list. Several people can be
   added in a row, and somebody already in the team is shown as such.
+- **Teams opened from Admin stay in Admin.** Teams in Admin's sidebar went to `/teams`, which closed
+  Admin. `/admin/teams`, a team and New team now open inside Admin, and their links stay there.
+  `/teams` stays in the app for everybody.
+- **A computer refused at a limit is Blocked on Activity, and says which limit.** It showed as
+  Allowed. Its row now says whether the organization's limit, the person's limit in it or OpenBot's
+  own refused it, how many that limit allows, and when the computer was for the person's own
+  browser.
+- **A person's computers in two organizations are kept apart.** Outside `default`, a computer's own
+  token names its organization, so one can't open the other. In `default` the token is as it was,
+  so a computer already running keeps it.
 
 ### The phone app
 
@@ -162,6 +226,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   your company account, Switch organization and Sign out. Link opens a single-use address in the
   system browser and comes back to the app once the account is linked.
 - Signing out stops push notifications from each of the person's organizations.
+- **Start on a check-in item works on it in the person's own conversation** where task threads are
+  off, as on the web (below).
 
 ### OpenBot Desktop
 
@@ -172,42 +238,113 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   CLI's record of it kept, every setup stopped with "OpenBot can't run on this computer as it's set
   up." until that record was removed by hand. Setup now forgets that back end and sets up a new
   one.
+- **A back end that a prune of stopped containers removed is said gone, and set up again.** With its
+  cluster gone from Docker Desktop or Podman, or no longer recorded by the CopilotKit CLI, the window
+  says your conversations and what your Bots remember are gone from this computer, and that your
+  Bots, settings, sign-in and AI connection stay. Set up again makes its cluster again for the same
+  back end, without installing OpenBot again. Stop and Quit finish when there is nothing to stop.
+- **Install no longer fails every time after an update from an older release.** A Mac whose OpenBot
+  folder was still laid out at 1.0.3 under a newer OpenBot Desktop failed Install, and Retry, with
+  "OpenBot v1.0.3 does not include agent-langgraph-ts". Install now keeps the Bot the folder
+  already has, or takes one its release includes, and Start then moves the folder to the new
+  release.
+- **OpenBot Desktop leaves a server that stops answering running.** When the container engine
+  stalled, the window went to setup after ten seconds and started OpenBot again by itself, which
+  ended every Bot turn that was running, and then failed with "OpenBot took too long to set up".
+  It now asks the engine about the server: one that is up, restarting or that a slow engine can't
+  report on in time is left running, and the window stays on OpenBot. One that stopped and stays
+  stopped sends the window to setup, which says what happened and waits for your Start. While
+  starting, a slow back end is asked again, and the window says the services are slow to answer.
+- **Get Troubleshooting Logs comes back when the container engine is stuck.** It waited on the
+  engine with no time limit, so it sat on Gathering Logs and wrote no file until the engine was
+  restarted. It now gives the engine 20 seconds, stops whatever is still running then, and writes
+  the file with what came back and a What couldn't be collected section.
+- **On macOS, the window's buttons no longer cover the top of the sidebar.** The close, minimise
+  and zoom buttons sat over the strip's orb and the panel's heading. The sidebar now starts below
+  them, as does the page's top bar in a window too narrow for the sidebar beside it, and the top of
+  the sidebar moves the window.
 
 ### Kubernetes
 
-- **A team install is connected to CopilotKit's management service by default; upgrades stay
-  yours to set up.** The `openbot` chart (and `openbot-bundle`) installs the management agent into
-  `openbot-system` without Flux: it enrolls by licence, sends its heartbeat and runs restart and
-  support-bundle commands, and reports that upgrades are not set up. It refuses pause, resume and
-  rollback, and a desired version waits, until upgrades are set up with the `openbot-agent`
-  release, which takes over with the same certificate. A cluster's own Flux is not touched. Turn it
-  off with `management.enabled=false` (`openbot.management.enabled=false` on the bundle). See
+- **A team install connects to CopilotKit's management service by default; upgrades stay yours to
+  set up.** The `openbot` chart (and `openbot-bundle`) installs the management agent into
+  `openbot-system` without Flux, and the server connects the install by itself with its CopilotKit
+  licence when it starts, and every hour until it is connected. Nobody approves a code: a team
+  licence is accepted at once. The agent sends its heartbeat, runs restart and support-bundle
+  commands, and reports that upgrades are not set up. It refuses pause, resume and rollback, and a
+  desired version waits, until upgrades are set up with the `openbot-agent` release, which takes
+  over with the same certificate. A cluster's own Flux is not touched. Nothing connects without a
+  team licence, on the personal edition or on OpenBot Desktop. Turn it off with
+  `management.enabled=false` (`openbot.management.enabled=false` on the bundle). See
   [docs/managed-upgrades.md](docs/managed-upgrades.md).
-- **An admin can turn on managed updates from Admin.** Admin, Managed updates, Connect shows a
-  code to approve at CopilotKit's page, signed in with your OpenBot account as an admin of the
-  organization your licence names. Once it's approved, it shows one `helm install` of
-  the `openbot-agent` chart with nothing secret in it: the agent collects a one-time token from
-  OpenBot itself, and the screen then shows its last heartbeat and version. Only the admins of the
-  organization `default` see it, and only on a team install you run yourself.
-  - The `openbot` chart turns this on by default (`server.managementEnrollment.enabled`). Nothing is
-    connected or called until an admin clicks Connect. The server's internal status port is now on,
-    open only to the agent's own pod (`openbot-agent` in `openbot-system`) until the agent manages
-    the release. The server gets a projected token of its own service account and the cluster's CA,
-    and checks the agent's token against the cluster's own keys. No role is granted.
+- **Admin, Managed updates shows the connection and turns it off.** It shows Connecting, Connected
+  (or Not reporting once the agent goes quiet) with the last heartbeat, the agent's version,
+  whether upgrades are on or not set up, the maintenance window and the install id, Turned off, or
+  Not in your licence. Disconnect, under Turn off managed updates, turns them off and is kept: the
+  server doesn't connect by itself again, after a restart or an upgrade, until an admin presses
+  Connect. Only the admins of the organization `default` see it, and only on a team install you run
+  yourself.
+  - With `management.enabled=false`, Connect takes two steps: approve a code at CopilotKit's page,
+    signed in with the CopilotKit account your licence is under, then one `helm install` of the
+    `openbot-agent` chart with nothing secret in it. Disconnect then asks you to uninstall the agent
+    with Helm first.
+  - The `openbot` chart turns the screen on by default (`server.managementEnrollment.enabled`). The
+    server's internal status port is now on, open only to the agent's own pod (`openbot-agent` in
+    `openbot-system`) until the agent manages the release. The server gets a projected token of its
+    own service account and the cluster's CA, and checks the agent's token against the cluster's
+    own keys. No role is granted.
   - With `networkPolicy.enabled`, also set `networkPolicy.kubernetesApiCidr`, so the server can read
-    the cluster's keys. To leave it off, set `server.managementEnrollment.enabled=false`.
+    the cluster's keys. To leave it off, set `server.managementEnrollment.enabled=false` with
+    `management.enabled=false`.
 - **The management agent can connect without copying a secret.** With `enrollment.serverUrl` set to
   OpenBot's internal status port and no install id, the agent proves itself to the OpenBot server
   with a short-lived service account token, collects the one-time enrollment token the server holds
-  once an admin connected the install, makes its own key, trades a certificate request for its
-  certificate and writes both to its own Secret, which it reuses after a restart. `helm uninstall`
-  leaves that Secret behind, so after a disconnect and a new Connect the agent asks OpenBot at
-  start and, handed the new install's token, enrolls again and replaces the old certificate. The
-  key never leaves the cluster, and nothing secret is logged. Until you choose how the database is
-  backed up (`backup.kind`), the agent refuses every upgrade that changes the database, before
-  touching anything.
+  once the install is connected, makes its own key, trades a certificate request for its
+  certificate and writes both to its own Secret, which it reuses after a restart. After a Disconnect
+  and a new Connect, an agent whose heartbeats fail asks OpenBot, at most every five minutes,
+  whether it connected the cluster as a new install, and if so enrolls again and replaces the old
+  certificate, with no restart. The key never leaves the cluster, and nothing secret is logged.
+  Until you choose how the database is backed up (`backup.kind`), the agent refuses every upgrade
+  that changes the database, before touching anything.
+- **A failed first install can be recovered.** When the agent's own first install of OpenBot failed,
+  it stayed stuck after a person cleared it. Once cleared, it now installs the desired release again
+  inside the window, with no backup, as there is no data yet.
+- **The product chart can come from the cloud's own registry.** On the `openbot-agent` chart,
+  `product.provider` (`aws`, `azure` or `gcp`) has Flux sign in to a mirror in ECR, ACR or Artifact
+  Registry with its own workload identity, whose pull tokens a `product.pullSecret` can't hold for
+  long.
+
+### Conversations
+
+- **A turn cut off part way says so and offers Carry on, never Thinking for good.** When OpenBot's
+  back end stopped answering in the middle of a long turn, the turn could sit on Thinking for good,
+  end with nothing said, or read "Runner connection dropped". It now ends with a notice that says
+  the Bot stopped before it finished and that what it saved is shown, and a Carry on button, live
+  and in a conversation opened again. A turn whose reply came back incomplete, or whose model's
+  connection dropped, gets the same Carry on beside the server's sentence.
+- **Send now on a queued message.** Each queued message has Send now beside Remove. It stops the
+  turn as Stop does, keeping its finished steps and the reply so far, then sends that message as
+  the next turn. The other queued messages stay queued after it.
+- **Work on it on a check-in item works in the person's own conversation while task threads are
+  off.** It opened a task thread even where the server runs none. It now opens the person's own
+  conversation with the Bot and sends the item there as their message, so the Bot works on it like
+  any other request. With task threads on, it becomes a task as before.
+- **An admin gets Add a model key when a Bot has no AI connection.** Where an organization brings
+  its own model key and has none yet, a message to a built-in Bot ends on the server's sentence
+  that an admin can add one in Admin, under Vault. An admin now gets Add a model key beside it,
+  opening a new credential in Vault. A member reads the sentence alone.
 
 ### Bots and models
+
+- **Whoever manages a Bot can set its default model on Setup.** Setup has a Model section with a
+  Default model row, whose dialog picks a model and thinking level, or Use OpenBot's default. A new
+  conversation with the Bot starts on it, the model picker marks it as the default, and each
+  conversation keeps the default it started with. A model that is no longer offered reads as
+  unavailable, and new conversations then use OpenBot's default.
+- **Admin, Permissions says when this OpenBot can't give a Bot its own computer.** Where the
+  deployment gives no Bot a computer of its own, the Isolated Bots switch did nothing and still
+  looked like it did. Its row now says "This OpenBot can't give a Bot a computer of its own.", and
+  the switch is off and can't be changed.
 
 - **Every harness OpenBot ships calls the model gateway with its run's own token, where the server
   sends one.** One harness serves every organization of an OpenBot, and the key in its environment
