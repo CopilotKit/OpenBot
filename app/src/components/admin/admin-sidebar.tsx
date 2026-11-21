@@ -88,7 +88,8 @@ export function AdminSidebar({
                         {...props}
                       >
                         <item.icon className="mr-2 h-4 w-4" />
-                        {item.title}
+                        {/* Cut short on one line in a narrow sidebar, never wrapped out of the row. */}
+                        <span className="min-w-0 truncate">{item.title}</span>
                       </Link>
                     )}
                   />

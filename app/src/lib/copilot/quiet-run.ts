@@ -20,6 +20,12 @@ import { ClientError } from "@/lib/client";
 /** How long nothing may arrive from a run before the server is asked about it. */
 export const QUIET_RUN_MS = 45_000;
 
+/**
+ * The quiet period the conversation screen watches with. Always {@link QUIET_RUN_MS}; a test of the
+ * whole screen shortens it, since nothing else can wait out three quarters of a minute.
+ */
+export const quietRunPeriod = { ms: QUIET_RUN_MS };
+
 /** How long the server is given to answer. Past this it has not answered. */
 export const LIVENESS_ANSWER_MS = 15_000;
 
