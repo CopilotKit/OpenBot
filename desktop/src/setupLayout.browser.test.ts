@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
 
 /**
  * The AI step's form holds still while the install behind it comes and goes.
@@ -302,8 +303,26 @@ export async function listen(name, listener) {
 type Window = { script: string; style: string };
 
 /**
- * The window as the app builds it, with the native side scripted and the marks left out. `env` is
- * Vite's build-time values; none set is a build without a whitelabel support page or OpenBot Cloud.
+ * `marks.ts` as Vite builds it: each vendored mark in `shared/marks` inlined as a data URI, by the
+ * file's name.
+ */
+function vendoredMarks(): string {
+  const folder = new URL("../../shared/marks/", import.meta.url);
+  const marks = Object.fromEntries(
+    readdirSync(folder)
+      .filter((file) => file.endsWith(".svg"))
+      .map((file) => [
+        file.replace(/\.svg$/, ""),
+        `data:image/svg+xml;base64,${readFileSync(new URL(file, folder)).toString("base64")}`,
+      ]),
+  );
+  return `const byId = new Map(Object.entries(${JSON.stringify(marks)}));
+export function markFor(id) { return (id && byId.get(id)) ?? null; }`;
+}
+
+/**
+ * The window as the app builds it, with the native side scripted. `env` is Vite's build-time
+ * values; none set is a build without a whitelabel support page or OpenBot Cloud.
  */
 async function buildWindow(env: Record<string, string> = {}): Promise<Window> {
   const built = await Bun.build({
@@ -326,17 +345,21 @@ async function buildWindow(env: Record<string, string> = {}): Promise<Window> {
             path: "core",
             namespace: "scripted",
           }));
-          // Brand marks come from Vite's glob import, which this build has not got.
-          build.onResolve({ filter: /^\.\/Mark$/ }, () => ({
-            path: "mark",
+          /*
+           * Brand marks come from Vite's glob import, which this build has not got. The same files
+           * are inlined here instead, so the window draws every mark the app draws. Left out, the
+           * clouds OpenBot for Business runs on showed as four empty tiles.
+           */
+          build.onResolve({ filter: /^\.\/marks$/ }, () => ({
+            path: "marks",
             namespace: "scripted",
           }));
           build.onLoad({ filter: /.*/, namespace: "scripted" }, (args) => ({
             contents:
               args.path === "event"
                 ? FAKE_EVENT
-                : args.path === "mark"
-                  ? "export const Mark = () => null; export const ButtonMark = () => null; export const MarkImage = () => null;"
+                : args.path === "marks"
+                  ? vendoredMarks()
                   : FAKE_CORE,
             loader: "js",
           }));
@@ -984,6 +1007,13 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           );
           return {
             overflow: card.scrollHeight - card.clientHeight,
+            // Each cloud's own mark, drawn: an empty tile is a mark that didn't load.
+            drawn: [
+              ...business.querySelectorAll<HTMLImageElement>(".cloud-mark img"),
+            ].map((image) => [
+              image.dataset.mark,
+              image.complete && image.naturalWidth > 0,
+            ]),
             // Two rows, one above the other, the same width.
             rows:
               rows.length === 2 &&
@@ -1027,6 +1057,12 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         const { overflow, ...laid } = shape;
         expect(overflow).toBeLessThanOrEqual(0);
         expect(laid).toEqual({
+          drawn: [
+            ["aws", true],
+            ["azure", true],
+            ["google-cloud", true],
+            ["kubernetes", true],
+          ],
           rows: true,
           smaller: true,
           marks: true,
