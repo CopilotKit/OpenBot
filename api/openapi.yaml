@@ -1647,7 +1647,7 @@ paths:
         - Identity providers
       operationId: createIdentityProvider
       summary: Register an identity provider
-      description: Register a company's identity provider, so everybody it vouches for at its email domain can sign in. SAML takes the metadata the company's identity team supplies; OIDC takes the issuer, which describes itself, and a client. Only an administrator may register one, signed in to OpenBot rather than with a key or an app's sign-in. The audit trail records who registered it.
+      description: 'Register a company''s identity provider, so everybody it vouches for at its email domain can sign in. SAML takes the metadata the company''s identity team supplies; OIDC takes the issuer, which describes itself, and a client. Only an administrator may register one, signed in to OpenBot rather than with a key or an app''s sign-in. The audit trail records who registered it. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), no organization registers a provider of its own: this answers 409 with the code HOSTED_SIGN_IN_ONLY.'
       security:
         - webSession: []
       parameters:
@@ -1709,7 +1709,7 @@ paths:
         - Identity providers
       operationId: deleteIdentityProvider
       summary: Remove an identity provider
-      description: 'Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider registered for the whole OpenBot (deployment) is removed only where it was registered: in any other organization it is refused with 403. A provider already removed is not found.'
+      description: 'Remove an identity provider, whoever registered it, so nobody signs in through it again. Only an administrator may remove one. A provider registered for the whole OpenBot (deployment) is removed only where it was registered: in any other organization it is refused with 403. A provider already removed is not found. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), this answers 409 with the code HOSTED_SIGN_IN_ONLY and removes nothing.'
       security:
         - webSession: []
         - appOAuth:
@@ -1729,7 +1729,7 @@ paths:
         '404':
           $ref: '#/components/responses/IdentityProviderNotFound'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/IdentityProviderRemovalConflict'
         '500':
           $ref: '#/components/responses/ServerError'
         default:
@@ -1743,7 +1743,7 @@ paths:
         - People
       operationId: getCompanySignIn
       summary: Read whether a person must use their company sign-in here
-      description: Return whether this organization requires its members to sign in through their company's identity provider, whether the person has, and the providers they can use for it. Any member may read their own, as me or by their own id. It answers even while the organization holds them out for not having signed in that way, when every other request they make in it is refused with SSO_REQUIRED. To use a provider, they sign in through it by its id (POST /api/auth/sign-in/sso with providerId) in a browser where they are signed in, or from an app through createCompanySignInTicket.
+      description: 'Return whether this organization requires its members to sign in through their company''s identity provider, whether the person has, and the providers they can use for it. Any member may read their own, as me or by their own id. It answers even while the organization holds them out for not having signed in that way, when every other request they make in it is refused with SSO_REQUIRED. To use a provider, they sign in through it by its id (POST /api/auth/sign-in/sso with providerId) in a browser where they are signed in, or from an app through createCompanySignInTicket. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), no organization requires it: required is false and no providers are listed.'
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -1784,7 +1784,7 @@ paths:
         - People
       operationId: createCompanySignInTicket
       summary: Get a ticket to link a company account from an app
-      description: 'Return an address for a browser to link the person''s company account at one of the organization''s identity providers, for an app that has no browser session to carry, such as the phone. The app opens it in the system browser, and the person signs in through the provider there. Sent with returnTo app, the browser goes back to the phone app once the account is linked. The address carries a ticket, never the app''s own sign-in. The ticket is the person''s, for this organization and this provider, lasts two minutes, and opens once. Signing in through the provider then links the company account as a signed-in browser''s sign-in does: the provider must give the person''s own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key.'
+      description: 'Return an address for a browser to link the person''s company account at one of the organization''s identity providers, for an app that has no browser session to carry, such as the phone. The app opens it in the system browser, and the person signs in through the provider there. Sent with returnTo app, the browser goes back to the phone app once the account is linked. The address carries a ticket, never the app''s own sign-in. The ticket is the person''s, for this organization and this provider, lasts two minutes, and opens once. Signing in through the provider then links the company account as a signed-in browser''s sign-in does: the provider must give the person''s own email address. Only the person themselves may ask, as me or by their own id, signed in to OpenBot or its app, never with an API key. It answers while the organization holds them out for not having signed in that way. providerId is one of the providers getCompanySignIn lists. Because the answer is a credential shown once, it is not kept: a retry with the same Idempotency-Key is refused as a conflict, so ask again with a new key. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), there is no company account to link: this answers 409 with the code HOSTED_SIGN_IN_ONLY.'
       x-openbot-singleton: true
       security:
         - webSession: []
@@ -1909,7 +1909,7 @@ paths:
         - Organization settings
       operationId: updateOrganizationSettings
       summary: Change the organization's settings
-      description: 'Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment''s configuration names and the caller. Where this OpenBot may keep more than one organization, requiring single sign-on is each organization''s own rule: its members sign in through an identity provider, and saving it signs out only this organization''s members who signed in another way. Where it keeps only one organization, that organization''s rule holds for everybody who signs in, and sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them.'
+      description: 'Change the settings sent and keep the rest. Each change is recorded on the audit trail with what it was before. Requiring single sign-on needs an identity provider registered first, and signs out everybody who signed in another way, apart from the administrators the deployment''s configuration names and the caller. Where this OpenBot may keep more than one organization, requiring single sign-on is each organization''s own rule: its members sign in through an identity provider, and saving it signs out only this organization''s members who signed in another way. Where it keeps only one organization, that organization''s rule holds for everybody who signs in, and sending ssoRequired in any other organization answers 409. Only an administrator of the organization may change them. Where people sign in with their OpenBot by CopilotKit account (hostedSignIn in getDeployment), single sign-on can''t be required: sending ssoRequired true answers 409 with the code HOSTED_SIGN_IN_ONLY.'
       security:
         - webSession: []
         - appOAuth:
@@ -22847,10 +22847,10 @@ components:
           description: Whether people sign in through OpenBot by CopilotKit's own sign-in, with their account there. The sign-in starts at /api/auth/hosted/sign-in. Absent or false, people sign in only the ways authProviders and ssoConfigured say.
         ssoConfigured:
           type: boolean
-          description: Whether a company's own identity provider is registered, so an email address can be sent to it. Never which.
+          description: Whether a company's own identity provider is registered, so an email address can be sent to it. Never which. Always false where hostedSignIn is true.
         ssoRequired:
           type: boolean
-          description: Whether everybody who signs in to this OpenBot must use single sign-on, because its one organization requires it; social sign-in then stays only as the configured administrators' way in. Where this OpenBot may keep more than one organization, each one requires it of its own members in its settings, and this says false.
+          description: Whether everybody who signs in to this OpenBot must use single sign-on, because its one organization requires it; social sign-in then stays only as the configured administrators' way in. Where this OpenBot may keep more than one organization, each one requires it of its own members in its settings, and this says false. Always false where hostedSignIn is true.
         builtInBots:
           type: boolean
           description: Whether a Bot can run inside OpenBot, with no address of its own.
@@ -37921,7 +37921,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     IdentityProviderConflict:
-      description: A provider with that id is registered already, or the Idempotency-Key was used for a different request.
+      description: A provider with that id is registered already, the Idempotency-Key was used for a different request, or people sign in here with their OpenBot by CopilotKit account, so no organization registers a provider of its own (HOSTED_SIGN_IN_ONLY).
       content:
         application/problem+json:
           schema:
@@ -37934,6 +37934,17 @@ components:
                 status: 409
                 detail: An identity provider with that name is registered already. Choose another name.
                 code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
                 category: conflict
                 retryable: false
                 requestId: req_example
@@ -37957,7 +37968,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     SettingsConflict:
-      description: Single sign-on can't be required before an identity provider is registered, ssoRequired was sent in an organization other than the one this OpenBot keeps, or the Idempotency-Key was used for a different request.
+      description: Single sign-on can't be required before an identity provider is registered, ssoRequired was sent in an organization other than the one this OpenBot keeps, people sign in here with their OpenBot by CopilotKit account so no organization requires it (HOSTED_SIGN_IN_ONLY), or the Idempotency-Key was used for a different request.
       content:
         application/problem+json:
           schema:
@@ -37981,6 +37992,17 @@ components:
                 status: 409
                 detail: Register an identity provider before requiring SSO, or nobody but the break-glass administrators can sign in.
                 code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
                 category: conflict
                 retryable: false
                 requestId: req_example
@@ -38423,6 +38445,35 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    IdentityProviderRemovalConflict:
+      description: The Idempotency-Key was used for a different request, or people sign in here with their OpenBot by CopilotKit account, so no organization changes a provider of its own (HOSTED_SIGN_IN_ONLY).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     InvalidCompanySignInTicket:
       description: No providerId was sent, or the body or the Idempotency-Key is malformed.
       content:
@@ -38500,7 +38551,7 @@ components:
                 requestId: req_example
                 traceId: trace_example
     CompanySignInTicketConflict:
-      description: 'The Idempotency-Key was used already. A ticket is a credential shown once, so its answer is never given again: ask with a new key.'
+      description: 'The Idempotency-Key was used already. A ticket is a credential shown once, so its answer is never given again: ask with a new key. Or people sign in here with their OpenBot by CopilotKit account, so there is no company account to link (HOSTED_SIGN_IN_ONLY).'
       content:
         application/problem+json:
           schema:
@@ -38513,6 +38564,17 @@ components:
                 status: 409
                 detail: That Idempotency-Key was used already. Ask again with a new one.
                 code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
                 category: conflict
                 retryable: false
                 requestId: req_example
