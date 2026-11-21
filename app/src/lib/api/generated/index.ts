@@ -28,6 +28,7 @@ export * from "./learning/learning";
 export * from "./linked-accounts/linked-accounts";
 export * from "./memory/memory";
 export * from "./models/models";
+export * from "./moving-to-openbot-cloud/moving-to-openbot-cloud";
 export * from "./network-policies/network-policies";
 export * from "./notification-settings/notification-settings";
 export * from "./organization-settings/organization-settings";

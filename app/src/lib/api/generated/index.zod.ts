@@ -28,6 +28,7 @@ export * from "./learning/learning.zod";
 export * from "./linked-accounts/linked-accounts.zod";
 export * from "./memory/memory.zod";
 export * from "./models/models.zod";
+export * from "./moving-to-openbot-cloud/moving-to-openbot-cloud.zod";
 export * from "./network-policies/network-policies.zod";
 export * from "./notification-settings/notification-settings.zod";
 export * from "./organization-settings/organization-settings.zod";
