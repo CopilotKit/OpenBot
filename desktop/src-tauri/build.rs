@@ -93,6 +93,8 @@ fn main() {
                     "sign_out",
                     "change_connection",
                     "set_organization",
+                    // Settings' Move to OpenBot Cloud. See `src/desktop_move.rs`.
+                    "move_to_cloud",
                 ]),
             ),
     )

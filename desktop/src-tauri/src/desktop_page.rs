@@ -37,6 +37,9 @@
 //! this computer, or at an address the app is connected to (`desktop_connected`). While it is
 //! connected, `status` answers the app's own facts only, and what is about an OpenBot on this
 //! computer (`restart`, `stop`, `intelligence`, `ai_connection`, `change_ai_connection`) is refused.
+//!
+//! And Settings' Move to OpenBot Cloud (`move_to_cloud`): the setup window at the move, with
+//! OpenBot left running here (`desktop_move`).
 
 use openbot_desktop_lib::{app_update, local_eval, local_eval_state, speech, stack};
 use tauri::Manager;
@@ -47,7 +50,7 @@ pub const PLUGIN: &str = "openbot-desktop";
 pub const QUIT_SHORTCUT_PAGE: &str = include_str!("quit-shortcut.js");
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 34] = [
+pub const PERMISSIONS: [&str; 35] = [
     "openbot-desktop:allow-connection",
     "openbot-desktop:allow-sign-out",
     "openbot-desktop:allow-change-connection",
@@ -82,6 +85,7 @@ pub const PERMISSIONS: [&str; 34] = [
     "openbot-desktop:allow-set-usage-data",
     "openbot-desktop:allow-quit",
     "openbot-desktop:allow-zoom",
+    "openbot-desktop:allow-move-to-cloud",
 ];
 
 /**
@@ -174,6 +178,16 @@ async fn set_organization(
     organization_id: Option<String>,
 ) -> Result<(), String> {
     crate::desktop_connected::set_organization_now(&app, organization_id)
+}
+
+/// Settings' Move to OpenBot Cloud: the setup window, at the move, with OpenBot left running here
+/// (the move reads what it has). Refused where the move isn't offered (`moveToCloud` on
+/// `connection`). The page asking goes with it.
+#[tauri::command]
+async fn move_to_cloud(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || crate::desktop_move::ask_from_settings(&app))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 /// `local status`, `start` or `stop` for the stack recorded for this installation.
@@ -499,7 +513,8 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             connection,
             sign_out,
             change_connection,
-            set_organization
+            set_organization,
+            move_to_cloud
         ])
         .build()
 }

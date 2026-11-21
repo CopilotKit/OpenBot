@@ -440,7 +440,8 @@ mod connected_ipc {
             serde_json::json!({
                 "mode": "connected",
                 "address": ADDRESS,
-                "organizationId": "org_1"
+                "organizationId": "org_1",
+                "moveToCloud": false
             })
         );
         desktop_connected::showing_for_test(shell.handle(), RELAY);
@@ -557,7 +558,12 @@ mod connected_ipc {
         // OpenBot's page on this computer is told local, and no address.
         assert_eq!(
             serde_json::to_value(desktop_connected::connection_now(shell.handle(), false)).unwrap(),
-            serde_json::json!({ "mode": "local", "address": null, "organizationId": null })
+            serde_json::json!({
+                "mode": "local",
+                "address": null,
+                "organizationId": null,
+                "moveToCloud": false
+            })
         );
         // Nothing token-shaped was ever written beside the choice.
         assert_eq!(shell.config_files(), ["connection.json"]);
