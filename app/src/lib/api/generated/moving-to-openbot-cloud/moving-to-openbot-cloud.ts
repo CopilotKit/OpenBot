@@ -1743,7 +1743,7 @@ export const getApplyImportUrl = (organizationId: string, importId: string) => {
 };
 
 /**
- * Once every part has arrived, import the bundle into this organization in the background: every id is given a new one here, everything is owned by the caller, and nothing reaches another organization. Read getImport until status is imported or failed. Applying again while it runs, or after it finished, changes nothing and answers where it stands; applying a failed import tries again from where it stopped, and nothing already imported is imported twice. A missing part answers 409 with IMPORT_INCOMPLETE.
+ * Once every part has arrived, import the bundle into this organization in the background: every id is given a new one here, everything is owned by the caller, and nothing reaches another organization. Every file is stored where a file uploaded here is, in this organization's own place in OpenBot's file store, and the uploaded parts are removed once the import is done. Read getImport until status is imported or failed. Applying again while it runs, or after it finished, changes nothing and answers where it stands; applying a failed import tries again from where it stopped, and nothing already imported is imported twice. A missing part answers 409 with IMPORT_INCOMPLETE.
  *
  * What OpenBot Cloud doesn't have comes in differently, and the summary says so in notes: a Bot that ran on its own isolated computer comes in as an ordinary Bot; a feature that needs the Business plan, in an organization that isn't on it, is left out. A model key in the bundle becomes the caller's own AI connection, unless they have one here already, which is kept.
  * @summary Import the uploaded bundle

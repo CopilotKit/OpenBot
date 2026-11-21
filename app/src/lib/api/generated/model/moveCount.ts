@@ -7,4 +7,9 @@ export interface MoveCount {
   kind: MoveKind;
   /** @minimum 0 */
   count: number;
+  /**
+   * For files, how many bytes they hold together.
+   * @minimum 0
+   */
+  bytes?: number;
 }

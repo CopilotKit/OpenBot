@@ -20,4 +20,14 @@ export interface ImportVerificationKind {
    * @minimum 0
    */
   leftOut: number;
+  /**
+   * For files, how many bytes the bundle held.
+   * @minimum 0
+   */
+  expectedBytes?: number;
+  /**
+   * For files, how many bytes are in this organization's file store now, read from the store itself.
+   * @minimum 0
+   */
+  foundBytes?: number;
 }

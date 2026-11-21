@@ -138,6 +138,10 @@ export const getListImportsResponseMock = (
       ).map(() => ({
         kind: faker.string.alpha({ length: { min: 10, max: 20 } }),
         count: faker.number.int({ min: 0 }),
+        bytes: faker.helpers.arrayElement([
+          faker.number.int({ min: 0 }),
+          undefined,
+        ]),
       })),
       undefined,
     ]),
@@ -148,6 +152,10 @@ export const getListImportsResponseMock = (
       ).map(() => ({
         kind: faker.string.alpha({ length: { min: 10, max: 20 } }),
         count: faker.number.int({ min: 0 }),
+        bytes: faker.helpers.arrayElement([
+          faker.number.int({ min: 0 }),
+          undefined,
+        ]),
       })),
       undefined,
     ]),
@@ -272,6 +280,10 @@ export const getUploadImportPartResponseMock = (
     ).map(() => ({
       kind: faker.string.alpha({ length: { min: 10, max: 20 } }),
       count: faker.number.int({ min: 0 }),
+      bytes: faker.helpers.arrayElement([
+        faker.number.int({ min: 0 }),
+        undefined,
+      ]),
     })),
     undefined,
   ]),
@@ -282,6 +294,10 @@ export const getUploadImportPartResponseMock = (
     ).map(() => ({
       kind: faker.string.alpha({ length: { min: 10, max: 20 } }),
       count: faker.number.int({ min: 0 }),
+      bytes: faker.helpers.arrayElement([
+        faker.number.int({ min: 0 }),
+        undefined,
+      ]),
     })),
     undefined,
   ]),
@@ -384,6 +400,10 @@ export const getApplyImportResponseMock = (
     ).map(() => ({
       kind: faker.string.alpha({ length: { min: 10, max: 20 } }),
       count: faker.number.int({ min: 0 }),
+      bytes: faker.helpers.arrayElement([
+        faker.number.int({ min: 0 }),
+        undefined,
+      ]),
     })),
     undefined,
   ]),
@@ -394,6 +414,10 @@ export const getApplyImportResponseMock = (
     ).map(() => ({
       kind: faker.string.alpha({ length: { min: 10, max: 20 } }),
       count: faker.number.int({ min: 0 }),
+      bytes: faker.helpers.arrayElement([
+        faker.number.int({ min: 0 }),
+        undefined,
+      ]),
     })),
     undefined,
   ]),
@@ -458,6 +482,14 @@ export const getGetImportVerificationResponseMock = (): ImportVerification => ({
     { kind: "bots", expected: 4, found: 4, leftOut: 0 },
     { kind: "conversations", expected: 37, found: 37, leftOut: 0 },
     { kind: "messages", expected: 2814, found: 2814, leftOut: 0 },
+    {
+      kind: "files",
+      expected: 64,
+      found: 64,
+      leftOut: 0,
+      expectedBytes: 152043520,
+      foundBytes: 152043520,
+    },
   ],
   notes: [],
   reconnect: [

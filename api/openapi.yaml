@@ -21382,7 +21382,7 @@ paths:
       operationId: applyImport
       summary: Import the uploaded bundle
       description: |-
-        Once every part has arrived, import the bundle into this organization in the background: every id is given a new one here, everything is owned by the caller, and nothing reaches another organization. Read getImport until status is imported or failed. Applying again while it runs, or after it finished, changes nothing and answers where it stands; applying a failed import tries again from where it stopped, and nothing already imported is imported twice. A missing part answers 409 with IMPORT_INCOMPLETE.
+        Once every part has arrived, import the bundle into this organization in the background: every id is given a new one here, everything is owned by the caller, and nothing reaches another organization. Every file is stored where a file uploaded here is, in this organization's own place in OpenBot's file store, and the uploaded parts are removed once the import is done. Read getImport until status is imported or failed. Applying again while it runs, or after it finished, changes nothing and answers where it stands; applying a failed import tries again from where it stopped, and nothing already imported is imported twice. A missing part answers 409 with IMPORT_INCOMPLETE.
 
         What OpenBot Cloud doesn't have comes in differently, and the summary says so in notes: a Bot that ran on its own isolated computer comes in as an ordinary Bot; a feature that needs the Business plan, in an organization that isn't on it, is left out. A model key in the bundle becomes the caller's own AI connection, unless they have one here already, which is kept.
       security:
@@ -38563,6 +38563,10 @@ components:
         count:
           type: integer
           minimum: 0
+        bytes:
+          type: integer
+          minimum: 0
+          description: For files, how many bytes they hold together.
     ReconnectApp:
       type: object
       description: 'A connection to an app that doesn''t move, because its sign-in stays on the person''s computer: the person connects it again on OpenBot Cloud. Never carries a token, a password or a key.'
@@ -38883,6 +38887,14 @@ components:
           type: integer
           minimum: 0
           description: How many OpenBot Cloud left out on purpose, as the notes say.
+        expectedBytes:
+          type: integer
+          minimum: 0
+          description: For files, how many bytes the bundle held.
+        foundBytes:
+          type: integer
+          minimum: 0
+          description: For files, how many bytes are in this organization's file store now, read from the store itself.
     ImportVerification:
       type: object
       required:
@@ -38897,7 +38909,7 @@ components:
           minLength: 1
         matches:
           type: boolean
-          description: True when, for every kind, found plus leftOut is expected.
+          description: True when, for every kind, found plus leftOut is expected, and for files foundBytes is expectedBytes.
         kinds:
           type: array
           items:
@@ -49361,6 +49373,12 @@ components:
             expected: 2814
             found: 2814
             leftOut: 0
+          - kind: files
+            expected: 64
+            found: 64
+            leftOut: 0
+            expectedBytes: 152043520
+            foundBytes: 152043520
         notes: []
         reconnect:
           - appId: gmail
