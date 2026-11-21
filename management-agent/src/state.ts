@@ -3,7 +3,8 @@
  * where it was and a person can read and clear it with kubectl:
  *
  *   state.json    the release it accepted (manifest and chart digest), the one before, whether
- *                 it is paused, and which commands it has already run
+ *                 it is paused, which commands it has already run, and the version its own first
+ *                 install went to while none has been accepted
  *   journal.json  the last promotion, in the promotion tool's journal format
  *
  * A journal in any phase other than `accepted` or `failed` means a promotion stopped after it may
@@ -35,6 +36,13 @@ const State = z.strictObject({
   suspendedByAgent: z.boolean(),
   /** A version rolled back from; not moved to again until the desired version changes. */
   rolledBackFrom: z.string().nullable(),
+  /**
+   * The version the agent's own first install went to, kept until a release is accepted. While it
+   * is set and nothing is accepted, the product in the namespace is one the agent put there and
+   * that never passed verification, so it holds no data to keep: once a person clears the journal,
+   * the agent installs the desired release again rather than trying to adopt it.
+   */
+  firstInstall: z.string().nullable().default(null),
   handledCommands: z.array(z.string()).max(200),
 });
 export type AgentState = z.infer<typeof State>;
@@ -45,6 +53,7 @@ export const EMPTY_STATE: AgentState = {
   paused: false,
   suspendedByAgent: false,
   rolledBackFrom: null,
+  firstInstall: null,
   handledCommands: [],
 };
 

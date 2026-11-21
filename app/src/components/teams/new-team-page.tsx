@@ -31,11 +31,13 @@ import {
 import { createTeamMutationOptions } from "@/lib/teams/mutations";
 import { possibleParents, teamListQueryOptions } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
+import {
+  backToTeams,
+  type TeamPaths,
+  type TeamsShell,
+  teamPaths,
+} from "./team-paths";
 
-const BACK = {
-  label: "Teams",
-  linkProps: { to: "/teams" as const },
-};
 const DESCRIPTION = "Name the team. You add its people on the next screen.";
 
 /** What the parent Select shows for each value: without it the trigger would draw a team's id. */
@@ -52,7 +54,8 @@ export function parentLabels(
  * Creating a team, on a screen of its own reached from the list's New team. On success the person
  * lands on the new team's page, where its people are added.
  */
-function NewTeam() {
+function NewTeam({ paths }: { paths: TeamPaths }) {
+  const back = backToTeams(paths);
   const navigate = useNavigate();
   const list = useQuery(teamListQueryOptions());
   const createTeam = useMutation(createTeamMutationOptions(queryClient));
@@ -67,17 +70,14 @@ function NewTeam() {
     validators: { onSubmit: teamFormSchema },
     onSubmit: async ({ value }) => {
       const team = await createTeam.mutateAsync(teamInputFrom(value));
-      await navigate({
-        to: "/teams/$teamId",
-        params: { teamId: team.id },
-      });
+      await navigate(paths.team(team.id));
     },
   });
 
   // Reached by its address by somebody the server would refuse: say so before they fill it in.
   if (list.data && !list.data.canCreate) {
     return (
-      <PageShell backButton={BACK} title="New team">
+      <PageShell backButton={back} title="New team">
         <PageEmpty
           icon={IconUsersGroup}
           title="Only an admin can create a team"
@@ -89,7 +89,7 @@ function NewTeam() {
   }
 
   return (
-    <PageShell backButton={BACK} description={DESCRIPTION} title="New team">
+    <PageShell backButton={back} description={DESCRIPTION} title="New team">
       <form
         noValidate
         onSubmit={(event) => {
@@ -101,7 +101,7 @@ function NewTeam() {
           footer={
             <>
               <Button
-                render={(props) => <Link {...props} to="/teams" />}
+                render={(props) => <Link {...props} {...paths.list()} />}
                 variant="outline"
               >
                 Cancel
@@ -216,11 +216,19 @@ function NewTeam() {
   );
 }
 
-/** The personal edition shows this page's title, and that it applies to a team. */
-export function NewTeamPage() {
+/**
+ * The personal edition shows this page's title, and that it applies to a team. `shell` is the frame
+ * it is drawn in, so Cancel, the back button and the new team's page stay in it.
+ */
+export function NewTeamPage({ shell = "app" }: { shell?: TeamsShell } = {}) {
+  const paths = teamPaths(shell);
   return (
-    <TeamPage backButton={BACK} description={DESCRIPTION} title="New team">
-      <NewTeam />
+    <TeamPage
+      backButton={backToTeams(paths)}
+      description={DESCRIPTION}
+      title="New team"
+    >
+      <NewTeam paths={paths} />
     </TeamPage>
   );
 }

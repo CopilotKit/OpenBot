@@ -16,8 +16,10 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { setChannelPinnedMutationOptions } from "@/lib/channels/mutations";
+import type { ConversationView } from "@/lib/settings/conversation-view";
 import type { MessageListEmphasis } from "@/lib/settings/message-list";
 import { useTypedReveal } from "@/lib/typed-reveal";
+import { cn } from "@/lib/utils";
 import { ChannelItemContent } from "./channel-item-content";
 
 /**
@@ -40,6 +42,9 @@ export const Channel = memo(function Channel({
   unread,
   busy,
   emphasis,
+  view = "detailed",
+  avatar = true,
+  "data-slot": slot,
 }: {
   channelId: string;
   participantIds: string[];
@@ -55,6 +60,12 @@ export const Channel = memo(function Channel({
   unread: boolean;
   busy: boolean;
   emphasis: MessageListEmphasis;
+  /** One line or two: see `ChannelItemContent`. */
+  view?: ConversationView;
+  /** False under its Bot in the Bots panel: see `ChannelItemContent`. */
+  avatar?: boolean;
+  /** Names the row's link for tests, as under its Bot in the Bots panel. Draws nothing. */
+  "data-slot"?: string;
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -93,11 +104,20 @@ export const Channel = memo(function Channel({
                 : "/channel/$channelId"
             }
             params={{ channelId }}
+            data-slot={slot}
             type="button"
-            // The open conversation is marked at the window's edge by the frame, not by a fill. In
-            // OpenBot's own look a row is Figma's "Recent Conversation item": 4px and 8px in, a white
-            // pill under the pointer, and none on the open conversation.
-            className="flex flex-row py-2 px-2.5 gap-2 items-center w-full hover:bg-sidebar-item-hover rounded-[20px] own:rounded-full own:px-2 own:py-1 own:data-[status=active]:hover:bg-transparent [contain-intrinsic-size:auto_3.25rem] [content-visibility:auto]"
+            // In OpenBot's own look a row is Figma's "Recent Conversation item": 4px and 8px in, and
+            // a white pill under the pointer. The open conversation keeps that pill: beside the strip
+            // the panel is off the window's edge, where the frame used to mark it.
+            className={cn(
+              "flex flex-row px-2.5 gap-2 items-center w-full hover:bg-sidebar-item-hover rounded-[20px] own:rounded-full own:px-2 [content-visibility:auto]",
+              view === "compact"
+                ? "py-1.5 [contain-intrinsic-size:auto_2rem]"
+                : "py-2 own:py-1 [contain-intrinsic-size:auto_3.25rem]",
+            )}
+            activeProps={{
+              className: "bg-foreground/5 own:bg-sidebar-item-hover",
+            }}
           >
             <ChannelItemContent
               participantIds={participantIds}
@@ -110,6 +130,8 @@ export const Channel = memo(function Channel({
               unread={unread}
               pinned={pinned}
               revealing={revealed.typing}
+              view={view}
+              avatar={avatar}
             />
           </Link>
         </ContextMenuTrigger>

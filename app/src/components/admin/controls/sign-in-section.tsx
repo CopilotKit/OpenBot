@@ -1,4 +1,5 @@
 import { IconFingerprint, IconShieldLock } from "@/components/icons";
+import { useQuery } from "@tanstack/react-query";
 import { PageRows } from "@/components/layout/page-shell";
 import {
   Item,
@@ -10,6 +11,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { identityProviderWords } from "@/lib/identity-providers/words";
 import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { ControlsSection } from "./controls-section";
@@ -35,12 +37,12 @@ export function SignInSection({
   organizationOnly?: boolean;
 }) {
   const severalOrganizations = useOrganizationChoices()?.canCreate === true;
-  const words = identityProviderWords(organizationOnly);
+  // A hosted OpenBot: no social sign-in, and nothing here is set in an environment its admin holds.
+  const hosted =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
+  const words = identityProviderWords(organizationOnly, hosted);
   return (
-    <ControlsSection
-      description="Addresses in INITIAL_ADMIN_EMAILS can always use social sign-in as an emergency way in. Each of those sign-ins shows in Activity."
-      title="Sign-in"
-    >
+    <ControlsSection description={words.signInDescription} title="Sign-in">
       {({ data, setSetting, saving }) => (
         <PageRows>
           <Item size="sm">
@@ -74,7 +76,7 @@ export function SignInSection({
               <ItemDescription className="line-clamp-none">
                 {data.scim.configured
                   ? `Directory base URL ${data.scim.baseUrl ?? "(set BETTER_AUTH_URL)"} with the SCIM_BEARER_TOKEN bearer token. ${deprovisioning(severalOrganizations)}`
-                  : "Off. Set SCIM_BEARER_TOKEN to accept provisioning from Okta, Entra or another directory."}
+                  : words.scimOff}
               </ItemDescription>
             </ItemContent>
             <ItemActions>

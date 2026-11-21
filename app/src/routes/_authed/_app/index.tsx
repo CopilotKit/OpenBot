@@ -70,22 +70,20 @@ const EXPLORE_HEADING = "font-semibold text-xl leading-tight tracking-heading";
 
 /**
  * Said when the Bot a message went to takes no model pick, so the pick was not saved. The person
- * picked before OpenBot picked the Bot, and a pick that silently does nothing is a surprise. The
- * action opens that Bot's Agents page, where what it runs on is shown.
+ * picked before OpenBot picked the Bot, and a pick that silently does nothing is a surprise. It
+ * offers nothing to open: the Bot's Agents page, where what it runs on is shown, is hidden for now.
  */
 function sayModelNotUsed(
   bot: AgentProfile,
   why: "own-agent" | "hands-to-agents",
-  openAgents: () => void,
 ) {
   toast.add({
     id: "home-model-not-used",
     type: "info",
     title:
       why === "hands-to-agents"
-        ? `${bot.name} hands work to agents, so it uses the model set on its Agents page.`
+        ? `${bot.name} hands work to agents, so it doesn't use the model you picked.`
         : `${bot.name} runs on its own agent, so it doesn't use the model you picked.`,
-    actionProps: { children: "Open Agents", onClick: openAgents },
   });
 }
 
@@ -200,13 +198,7 @@ function RouteComponent() {
     if (!bot || !why) return { pick };
     return {
       pick: null,
-      notUsed: () =>
-        sayModelNotUsed(bot, why, () => {
-          void router.navigate({
-            params: { agentId: bot.id },
-            to: "/bots/$agentId/agents",
-          });
-        }),
+      notUsed: () => sayModelNotUsed(bot, why),
     };
   };
 

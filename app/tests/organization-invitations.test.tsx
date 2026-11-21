@@ -61,6 +61,7 @@ import {
   roleName,
   sentInvitationLine,
 } from "@/lib/organizations/words";
+import { SectionProvider } from "@/lib/sections";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
 
@@ -534,13 +535,15 @@ async function open(start: string) {
   const rootRoute = createRootRoute({
     component: () => (
       <OrganizationBoundary>
-        <SidebarProvider>
-          <AppSidebar />
-          <main>
-            <Outlet />
-          </main>
-          <Toaster />
-        </SidebarProvider>
+        <SectionProvider>
+          <SidebarProvider>
+            <AppSidebar />
+            <main>
+              <Outlet />
+            </main>
+            <Toaster />
+          </SidebarProvider>
+        </SectionProvider>
       </OrganizationBoundary>
     ),
   });
@@ -918,15 +921,15 @@ describe("the account menu", () => {
     expect(app.view.queryByText("No invitations")).toBe(null);
   });
 
-  test("on the invitations page no destination in the sidebar is marked as the one open", async () => {
+  test("the invitations page belongs to no section, so the strip keeps the section that was open", async () => {
     server.received = [received("inv_1", "pending")];
     const app = await open("/bots");
     const marked = () =>
       [
         ...app.view.container.querySelectorAll(
-          "[data-sidebar=footer] a[data-status=active], [data-sidebar=footer] [aria-current=page]",
+          "[data-slot=strip] [aria-current=page], [data-slot=strip] [aria-pressed=true]",
         ),
-      ].map((link) => link.textContent?.trim());
+      ].map((item) => item.querySelector(".sr-only")?.textContent);
     await waitFor(() => expect(marked()).toEqual(["Bots"]));
     const menu = await app.openAccountMenu();
     await app.person.click(
@@ -935,9 +938,9 @@ describe("the account menu", () => {
     await waitFor(() =>
       expect(app.router.state.location.pathname).toBe("/invitations"),
     );
-    await waitFor(() => expect(marked()).toEqual([]));
+    expect(marked()).toEqual(["Bots"]);
     // Nor is any row drawn as if it were, by focus or by the pointer the menu left over it.
-    const bots = app.view.getByRole("link", { name: /^Bots/ });
+    const bots = app.view.getByRole("button", { name: /^Bots/ });
     expect(document.activeElement).not.toBe(bots);
   });
 

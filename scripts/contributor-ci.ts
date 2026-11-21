@@ -20,6 +20,12 @@ export const WAIT_MINUTES = 3;
 /** How far back a cancelled contributor run is still re-run. */
 export const RESUME_HOURS = 24;
 
+/**
+ * How old a CopilotKit run may be and still count as waiting. A run stuck in `queued` for days with
+ * no jobs (GitHub will not cancel some of them) is not a team member waiting for a runner.
+ */
+export const WAITING_RUN_HOURS = 3;
+
 /** The comment's marker, so a pull request is told once per run. */
 export const PAUSED_MARKER = "<!-- contributor-ci: paused";
 
@@ -61,7 +67,11 @@ const ACTIVE = new Set([
   "requested",
 ]);
 
-/** Whether a CopilotKit job has waited longer than WAIT_MINUTES for a runner. */
+/**
+ * Whether a CopilotKit job has waited longer than WAIT_MINUTES for a runner: a queued job, in a run
+ * of this repository's created in the last WAITING_RUN_HOURS. A run with no queued job is not
+ * waiting for a runner, whatever its own status says.
+ */
 export function teamIsWaiting(
   runs: Run[],
   jobsOf: (run: Run) => Job[],
@@ -74,6 +84,9 @@ export function teamIsWaiting(
     if (!ACTIVE.has(run.status) || isContributorRun(run, repository)) {
       return false;
     }
+    if (now - Date.parse(run.created_at) > WAITING_RUN_HOURS * 3_600_000) {
+      return false;
+    }
     // A pull request from a fork that is not one of ours is never the team's, whatever workflow.
     if (
       run.event === "pull_request" &&
@@ -82,7 +95,6 @@ export function teamIsWaiting(
     ) {
       return false;
     }
-    if (run.status === "queued") return longAgo(run.created_at);
     return jobsOf(run).some(
       (job) => job.status === "queued" && longAgo(job.created_at),
     );

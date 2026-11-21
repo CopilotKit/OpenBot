@@ -113,6 +113,7 @@ import {
   CircleDashedIcon,
   Clock01Icon,
   Clock03Icon,
+  CloudCogIcon,
   CloudIcon,
   CloudOffIcon,
   ComputerIcon,
@@ -171,6 +172,7 @@ import {
   LifebuoyIcon,
   Link01Icon,
   LinkSquare02Icon,
+  ListViewIcon,
   Loading03Icon,
   LockIcon,
   LockPasswordIcon,
@@ -184,6 +186,7 @@ import {
   Menu02Icon,
   Message01Icon,
   Message02Icon,
+  MessageAdd01Icon,
   MessageBlockedIcon,
   MessageNotification01Icon,
   MessageQuestionIcon,
@@ -215,6 +218,7 @@ import {
   Ppt01Icon,
   PresentationBarChart01Icon,
   Progress01Icon,
+  Pulse01Icon,
   PuzzleIcon,
   Radar01Icon,
   RecordIcon,
@@ -361,6 +365,7 @@ export const IconClock = defineIcon("clock", Clock01Icon);
 export const IconClockHour3 = defineIcon("clock-hour-3", Clock03Icon);
 export const IconClockPlay = defineIcon("clock-play", TimeScheduleIcon);
 export const IconCloud = defineIcon("cloud", CloudIcon);
+export const IconCloudCog = defineIcon("cloud-cog", CloudCogIcon);
 export const IconCloudOff = defineIcon("cloud-off", CloudOffIcon);
 export const IconCode = defineIcon("code", SourceCodeIcon);
 export const IconCopy = defineIcon("copy", Copy01Icon);
@@ -416,6 +421,7 @@ export const IconFolderFilled = defineIcon("folder-filled", Folder01Icon, {
 export const IconFolderSearch = defineIcon("folder-search", FolderSearchIcon);
 export const IconGauge = defineIcon("gauge", DashboardSpeed01Icon);
 export const IconHandStop = defineIcon("hand-stop", HandIcon);
+export const IconHeartbeat = defineIcon("heartbeat", Pulse01Icon);
 export const IconHelpCircle = defineIcon("help-circle", HelpCircleIcon);
 export const IconHistory = defineIcon("history", HistoryIcon);
 export const IconHome = defineIcon("home", Home01Icon);
@@ -426,6 +432,7 @@ export const IconJson = defineIcon("json", FileBracesIcon);
 export const IconKey = defineIcon("key", Key01Icon);
 export const IconKeyboard = defineIcon("keyboard", KeyboardIcon);
 export const IconLayoutGrid = defineIcon("layout-grid", GridViewIcon);
+export const IconLayoutList = defineIcon("layout-list", ListViewIcon);
 export const IconLayoutSidebar = defineIcon("layout-sidebar", SidebarLeftIcon);
 export const IconLifebuoy = defineIcon("lifebuoy", LifebuoyIcon);
 export const IconLink = defineIcon("link", Link01Icon);
@@ -457,6 +464,7 @@ export const IconMessageQuestion = defineIcon(
   MessageQuestionIcon,
 );
 export const IconMessages = defineIcon("messages", Message02Icon);
+export const IconMessagePlus = defineIcon("message-plus", MessageAdd01Icon);
 export const IconMicrophone = defineIcon("microphone", Mic01Icon);
 export const IconMicrophoneOff = defineIcon("microphone-off", MicOff01Icon);
 export const IconMinus = defineIcon("minus", MinusSignIcon);

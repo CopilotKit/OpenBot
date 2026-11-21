@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/item";
 import type { CompanySignIn } from "@/lib/api/generated/model";
 import { companySignInQueryOptions } from "@/lib/auth/company-sign-in";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 
 /** The row's second line: whether the person's company account is linked, and whether this organization requires it. */
 export function companySignInLine(
@@ -28,11 +29,18 @@ export function companySignInLine(
 /**
  * Settings, General: the person's company account, where their organization has identity providers. Linked, it says
  * so. Not linked, it offers Link your company account under the row: one button for one provider, a button each for
- * several. Nothing where the organization has none, or where the server has no answer for it.
+ * several. Nothing where the organization has none, or where the server has no answer for it. Nothing on OpenBot by
+ * CopilotKit (`hostedSignIn`), where people sign in with their CopilotKit account and no organization has a company
+ * sign-in of its own.
  */
 export function CompanySignInSection() {
-  const signIn = useQuery(companySignInQueryOptions()).data;
-  if (!signIn || signIn.providers.length === 0) return null;
+  const hosted =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
+  const signIn = useQuery({
+    ...companySignInQueryOptions(),
+    enabled: !hosted,
+  }).data;
+  if (hosted || !signIn || signIn.providers.length === 0) return null;
   return (
     <PageSection title="Company sign-in">
       <PageRows>

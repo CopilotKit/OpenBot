@@ -748,9 +748,10 @@ button.text-link.change-provider {
 }
 
 /*
- * The ways to run OpenBot, on the first screen. OpenBot (Self-Contained) is the one this app sets
- * up. OpenBot for Business is one card holding its two ways to run, each a smaller row inside it,
- * and either books a call.
+ * The ways to run OpenBot, on the first screen: OpenBot (Self-Contained), the one this app sets up;
+ * OpenBot Cloud, which this app signs in to, in a build that turns it on; and OpenBot for Business,
+ * which books a call. With Cloud off, OpenBot for Business is one card holding its two ways to run,
+ * each a smaller row inside it, and either books a call.
  */
 fieldset.picker.hosting {
   max-height: none;
@@ -767,10 +768,18 @@ fieldset.picker.hosting .tile.chosen {
   cursor: default;
 }
 
+/* OpenBot for Business: the clouds it runs on, at the row's right edge, beside its words. */
+.tile.with-marks {
+  grid-template-columns: 36px 1fr auto;
+  grid-template-areas:
+    "mark name marks"
+    "mark summary marks";
+}
+
 /*
- * OpenBot for Business: drawn as a row, mark and name and summary where every row has them, with
- * its two choices stacked under the summary. Not itself a choice, so no hover of its own; while one
- * of its choices is picked its edge is the chosen row's ring.
+ * OpenBot for Business with Cloud off: drawn as a row, mark and name and summary where every row
+ * has them, with its two choices stacked under the summary. Not itself a choice, so no hover of its
+ * own; while one of its choices is picked its edge is the chosen row's ring.
  */
 .tile-group {
   display: grid;
@@ -875,10 +884,15 @@ fieldset.picker.hosting .tile.chosen {
 
 /* The clouds it runs on: each mark on the marks' white ground, as the provider tiles draw theirs. */
 .cloud-marks {
+  grid-area: marks;
   display: flex;
   gap: 4px;
-  margin-left: auto;
   flex: none;
+}
+
+/* Self-Hosted's clouds, at its row's right edge. */
+.tile-option .cloud-marks {
+  margin-left: auto;
 }
 
 .cloud-mark {
@@ -1122,6 +1136,23 @@ fieldset.picker.hosting .tile.held:active {
 .connect-to-openbot .local-alert p {
   color: var(--text-primary);
   overflow-wrap: anywhere;
+}
+
+/*
+ * OpenBot Cloud, under the choices: what it is, then Sign in to OpenBot Cloud, laid out as the
+ * address screen lays out Connect. Its address is built in, so there is no field.
+ */
+.cloud-sign-in .local-alert {
+  margin: 16px 0 0;
+}
+
+.cloud-sign-in .local-alert p {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cloud-sign-in .footnote {
+  margin-top: 8px;
 }
 
 /* A link that is the way on, drawn as the app's `outline` button. */

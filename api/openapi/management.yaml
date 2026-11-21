@@ -12,10 +12,16 @@ paths:
       summary: Read whether this OpenBot is connected to CopilotKit management
       description: >-
         Return where connecting this OpenBot to CopilotKit's management
-        service stands: not connected; waiting for somebody at CopilotKit's
-        page to approve the code; waiting for the management agent to be
-        installed in the cluster with the Helm command given; or connected,
-        with the agent's last heartbeat and version. Management is for the
+        service stands: not connected; connecting by itself, by its licence,
+        with the management agent OpenBot's own chart installed; waiting for
+        somebody at CopilotKit's page to approve the code; waiting for the
+        management agent to be installed in the cluster with the Helm command
+        given; connected, with the agent's last heartbeat and version; or
+        opted out, after an administrator disconnected it. A team OpenBot
+        whose chart installs the management agent connects by itself when
+        it starts, and tries again every hour until it is connected, unless
+        an administrator disconnected it or the chart turned management off
+        (`management.enabled: false`). Management is for the
         whole OpenBot, so it is answered only in the organization `default`,
         and only to its administrators. It applies only to the team edition
         that a company runs itself: on the personal edition, on OpenBot
@@ -45,6 +51,10 @@ paths:
                   $ref: '#/components/examples/ManagementWaitingForAgentExample'
                 connected:
                   $ref: '#/components/examples/ManagementConnectedExample'
+                connecting:
+                  $ref: '#/components/examples/ManagementConnectingExample'
+                optedOut:
+                  $ref: '#/components/examples/ManagementOptedOutExample'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
         '403':
@@ -64,15 +74,24 @@ paths:
       summary: Start connecting this OpenBot to CopilotKit management
       description: >-
         Ask CopilotKit's management service to connect this OpenBot. OpenBot
-        sends its CopilotKit licence and its name, and gets back a short code
-        and the page where somebody signed in to CopilotKit, as an admin of
-        the organization the licence names, approves it (the OAuth device
-        authorization grant, RFC 8628). OpenBot then waits for the approval
-        on its own; read getManagementEnrollment to follow it. Once approved,
-        the answer carries the Helm command that installs the management
-        agent, with nothing secret in it. Started again while it is already
-        waiting, it changes nothing and answers where it stands. Already
-        connected answers 409. Only an administrator of the organization
+        sends its CopilotKit licence and its name. Where OpenBot's own chart
+        installs the management agent (agentInstalledByChart true), it
+        connects by licence: a team licence is accepted at once, with no code
+        to approve, OpenBot collects the install's one-time token on its own,
+        the agent picks it up, and the answer is connecting. This also ends
+        an opt-out: after an administrator disconnected OpenBot, this is how
+        managed updates are turned back on, and OpenBot connects by itself
+        again from then on. Where the chart turned the agent off, it is the
+        approval flow: OpenBot gets back a short code and the page where
+        somebody signed in to CopilotKit, as an admin of the organization the
+        licence names, approves it (the OAuth device authorization grant, RFC
+        8628); OpenBot then waits for the approval on its own, and once
+        approved the answer carries the Helm command that installs the agent,
+        with nothing secret in it. Read getManagementEnrollment to follow
+        either. A licence the service refuses answers 409 with the service's
+        sentence, and the state keeps lastErrorCode. Started again while it
+        is already under way, it changes nothing and answers where it stands.
+        Already connected answers 409. Only an administrator of the organization
         `default` may start it, and only where getManagementEnrollment
         applies.
       security:
@@ -115,13 +134,20 @@ paths:
       operationId: cancelManagementEnrollment
       summary: Stop connecting this OpenBot to CopilotKit management
       description: >-
-        Stop a connection that is waiting for approval or for the agent, and
-        forget its code and its one-time token, so the agent can no longer
-        collect it. CopilotKit's management service is told: a code nobody
+        Stop a connection that is under way, or disconnect a connected one,
+        and record that an administrator opted out, so OpenBot doesn't
+        connect itself again (opted-out) until somebody starts it again with
+        startManagementEnrollment. Stopping forgets the code and the one-time
+        token, so the agent can no longer collect it. CopilotKit's management service is told: a code nobody
         approved yet is withdrawn, so its approval page refuses it, and an
         install it already made is retired. Nothing is changed in the
-        cluster. Not connected answers 204 too. Connected, it finishes
-        disconnecting after the management agent is uninstalled with Helm:
+        cluster. Not connected answers 204 too, and records the opt-out.
+        Connected with the agent OpenBot's chart installed
+        (agentInstalledByChart true), it retires the install at the service
+        at once, which stops the agent's managed updates though it keeps
+        running, and answers 204. Connected with an agent installed with the
+        Helm command, it finishes disconnecting after that agent is
+        uninstalled with Helm:
         while the service still hears from the agent it answers 409, and once
         the agent hasn't reported in for more than five minutes it retires the
         install at the service, forgets the connection and answers 204, so
@@ -173,13 +199,20 @@ components:
             - waiting-for-approval
             - waiting-for-agent
             - connected
+            - connecting
+            - opted-out
           description: >-
             not-connected: nothing is under way. waiting-for-approval: the
             code is waiting for somebody to approve it at verificationUri.
             waiting-for-agent: approved, and waiting for the management agent
             to be installed with helmCommand and to report in. connected: the
-            agent reports in. A later OpenBot may add a state; read one you
-            don't know as not connected.
+            agent reports in. connecting: OpenBot is connecting by itself, by
+            its licence, and the management agent its chart installed is
+            collecting its one-time token and reporting in for the first
+            time; nobody needs to do anything. opted-out: an administrator
+            disconnected OpenBot, so it doesn't connect by itself; starting a
+            connection turns managed updates back on. A later OpenBot may add
+            a state; read one you don't know as not connected.
         userCode:
           type: string
           pattern: ^[A-Z0-9]{4}-[A-Z0-9]{4}$
@@ -223,6 +256,23 @@ components:
             development build). No published agent chart matches such a
             build, so helmCommand names no chart version and Helm installs
             the newest published one. Absent on a release.
+        agentInstalledByChart:
+          type: boolean
+          description: >-
+            True when OpenBot's own chart installs the management agent
+            beside it (`management.enabled`, on by default), so connecting
+            needs no Helm command and OpenBot connects by itself. False when
+            the chart turned it off: connecting then gives helmCommand to
+            install the agent by hand. Present in every state.
+        installName:
+          type: string
+          minLength: 1
+          description: >-
+            The name this OpenBot gave itself when it asked to be connected,
+            which the approval page shows the approver, so they can match it.
+            Present while waiting for approval.
+        window:
+          $ref: '#/components/schemas/ManagementWindow'
         lastHeartbeatAt:
           type: string
           format: date-time
@@ -231,6 +281,19 @@ components:
           type: string
           minLength: 1
           description: The version of the agent that last reported in, once connected.
+        upgrades:
+          type: string
+          x-extensible-enum:
+            - 'on'
+            - not-set-up
+          description: >-
+            Whether the managed updates service can upgrade this OpenBot, as
+            the agent last reported, once connected. on: upgrades are set up,
+            and happen in the maintenance window. not-set-up: the agent is
+            connected and reports health, but upgrading needs a one-time setup
+            in the cluster first. Absent when the agent hasn't said (an older
+            agent). A later OpenBot may add a value; read one you don't know as
+            absent.
         lastError:
           type: string
           minLength: 1
@@ -241,6 +304,48 @@ components:
             management service out of reach, a connected agent that has
             stopped reporting in, or a Stop the service couldn't be told
             about. Absent when nothing did.
+        lastErrorCode:
+          type: string
+          x-extensible-enum:
+            - not-entitled
+            - invalid-licence
+            - unreachable
+          description: >-
+            Which refusal lastError is, where a client acts on it.
+            not-entitled: this OpenBot's licence doesn't include managed
+            updates (it isn't a team licence, or managed updates were turned
+            off for its organization), so connecting again fails the same way
+            until they are added to it. invalid-licence: the licence wasn't
+            accepted (invalid or expired). unreachable: the managed updates
+            service couldn't be reached when OpenBot last tried to connect by
+            itself; it tries again within the hour. A later OpenBot may add a
+            code; read one you don't know as no code.
+    ManagementWindow:
+      type: object
+      description: >-
+        The weekly maintenance window the managed updates service upgrades
+        this OpenBot in, as the service last reported it, once connected.
+        It is agreed for each install; the default is Tuesdays from 14:00
+        UTC for four hours.
+      required:
+        - weekday
+        - startUtc
+        - hours
+      properties:
+        weekday:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: The day it starts, 0 for Sunday to 6 for Saturday.
+        startUtc:
+          type: string
+          pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+          description: When it starts, as HH:MM in UTC.
+        hours:
+          type: number
+          minimum: 4
+          maximum: 168
+          description: How many hours it lasts.
   responses:
     ManagementUnavailable:
       description: >-
@@ -332,9 +437,20 @@ components:
           oci://ghcr.io/copilotkit/charts/openbot-agent --version 1.2.0
           --namespace openbot-system --create-namespace --set
           enrollment.serverUrl=http://openbot-server-internal.openbot.svc:9464
+    ManagementConnectingExample:
+      value:
+        state: connecting
+        installId: 6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d
+        agentInstalledByChart: true
+    ManagementOptedOutExample:
+      value:
+        state: opted-out
+        agentInstalledByChart: true
     ManagementConnectedExample:
       value:
         state: connected
         installId: 6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d
         lastHeartbeatAt: '2026-11-20T10:31:12Z'
         agentVersion: 0.4.0
+        upgrades: not-set-up
+        agentInstalledByChart: true

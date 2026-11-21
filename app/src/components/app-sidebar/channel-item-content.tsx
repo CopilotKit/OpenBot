@@ -1,9 +1,17 @@
 import { IconPinFilled } from "@/components/icons";
 import { ChannelAvatar } from "@/components/channels/avatar";
+import type { ConversationView } from "@/lib/settings/conversation-view";
 import type { MessageListEmphasis } from "@/lib/settings/message-list";
 import { useSkinId } from "@/skins/store";
 
-/** Shared by live conversations and the appearance preference previews. */
+/**
+ * Shared by live conversations and the appearance preference previews.
+ *
+ * `view` picks the row's shape. Detailed (the default here) is two lines: the Bot's name, its time
+ * and marks, then the title. Compact is one line, as Claude's sidebar lists chats: a small avatar
+ * and the title, then the time, the unread dot and the pin at the right. It draws no Bot name, and
+ * says it to a screen reader.
+ */
 export function ChannelItemContent({
   participantIds,
   name,
@@ -15,6 +23,8 @@ export function ChannelItemContent({
   unread = false,
   pinned = false,
   revealing = false,
+  view = "detailed",
+  avatar = true,
 }: {
   participantIds: string[];
   name: string;
@@ -26,8 +36,74 @@ export function ChannelItemContent({
   unread?: boolean;
   pinned?: boolean;
   revealing?: boolean;
+  view?: ConversationView;
+  /** False where the row sits under its Bot already (the Bots panel), so the orb is not said twice. */
+  avatar?: boolean;
 }) {
   const own = useSkinId() === "openbot";
+  const unreadDot = unread ? (
+    <span
+      className="size-2 shrink-0 rounded-full bg-primary"
+      data-slot="unread-dot"
+    />
+  ) : null;
+  const pin = pinned ? (
+    <IconPinFilled
+      className="size-3 shrink-0 text-muted-foreground/70"
+      data-slot="pinned"
+    />
+  ) : null;
+  /*
+   * While a Bot works on it, the row says so where its time goes, in the one colour that means a Bot
+   * is acting right now: said as well as shown by the orb, and the time is news only once the work
+   * is done.
+   */
+  const time = busy ? (
+    <span className="shrink-0 whitespace-nowrap font-medium text-[12px] text-indigo-600 leading-4 dark:text-indigo-300">
+      Working
+    </span>
+  ) : (
+    <span className="shrink-0 whitespace-nowrap text-[12px] leading-4 text-muted-foreground/70">
+      {lastMessageAt}
+    </span>
+  );
+  const caret = revealing ? (
+    <span className="ml-0.5 inline-block h-3 w-px translate-y-px bg-foreground/70 align-middle" />
+  ) : null;
+
+  if (view === "compact") {
+    return (
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        {avatar ? (
+          <div className="shrink-0">
+            <ChannelAvatar
+              participantIds={participantIds}
+              size={20}
+              typing={busy}
+            />
+          </div>
+        ) : null}
+        {/*
+         * Not drawn, but read out: the orb is hidden from a screen reader, so without this every row
+         * is a title and a time with no Bot. Under its Bot (no avatar) the Bot is said already.
+         */}
+        {avatar ? (
+          <span className="sr-only" data-slot="bot-name">{`${name}, `}</span>
+        ) : null}
+        <span
+          className={`min-w-0 flex-1 truncate text-sm leading-5 tracking-[-1%] ${unread ? "font-semibold" : "font-normal"}`}
+          title={title}
+        >
+          {displayedTitle}
+          {caret}
+        </span>
+        {time}
+        {unreadDot}
+        {pin}
+      </div>
+    );
+  }
+
   // Figma's conversation row: a regular 14px line under a 12px one in the secondary ink, 4px apart.
   const primaryText = `text-sm ${unread ? "font-semibold" : "font-normal"}`;
   const secondaryText = "text-xs text-muted-foreground";
@@ -50,34 +126,16 @@ export function ChannelItemContent({
           >
             {name}
           </span>
-          {/*
-           * While a Bot works on it, the row says so where its time goes, in the one colour that means a Bot is acting
-           * right now: said as well as shown by the orb, and the time is news only once the work is done.
-           */}
-          {busy ? (
-            <span className="shrink-0 whitespace-nowrap font-medium text-[12px] text-indigo-600 leading-4 dark:text-indigo-300">
-              Working
-            </span>
-          ) : (
-            <span className="shrink-0 whitespace-nowrap text-[12px] leading-4 text-muted-foreground/70">
-              {lastMessageAt}
-            </span>
-          )}
-          {unread ? (
-            <span className="size-2 shrink-0 rounded-full bg-primary" />
-          ) : null}
-          {pinned ? (
-            <IconPinFilled className="size-3 shrink-0 text-muted-foreground/70" />
-          ) : null}
+          {time}
+          {unreadDot}
+          {pin}
         </div>
         <div
           className={`mt-1 truncate ${emphasis === "thread" ? primaryText : secondaryText}`}
           title={title}
         >
           {displayedTitle}
-          {revealing ? (
-            <span className="ml-0.5 inline-block h-3 w-px translate-y-px bg-foreground/70 align-middle" />
-          ) : null}
+          {caret}
         </div>
       </div>
     </div>

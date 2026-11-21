@@ -145,6 +145,12 @@ export const ListBotsResponse = zod.object({
           .describe(
             "Whether an administrator assigned this Bot to the caller.",
           ),
+        lastConversationAt: zod.iso
+          .datetime({ offset: true })
+          .nullish()
+          .describe(
+            "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+          ),
         builtIn: zod
           .boolean()
           .describe(
@@ -410,6 +416,12 @@ export const CreateBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -559,6 +571,12 @@ export const GetBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -823,6 +841,12 @@ export const UpdateBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1114,6 +1138,12 @@ export const DuplicateBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1275,6 +1305,12 @@ export const HideBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1436,6 +1472,12 @@ export const UnhideBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1597,6 +1639,12 @@ export const PinBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1758,6 +1806,12 @@ export const UnpinBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1961,6 +2015,12 @@ export const RevokeBotCallbackTokenResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(

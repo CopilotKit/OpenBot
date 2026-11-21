@@ -496,6 +496,112 @@ export function applyToRoster(
   if (line) botSaidOffTheList(activity.channelId, line);
 }
 
+/**
+ * Whether an event is something said in a conversation: the one kind that moves a conversation in a
+ * list ordered by recency, so the one kind that can bring it onto a Bot's first page. A name, an
+ * opening, a pin, busy and work patch a row where it is, and a deletion takes it out.
+ */
+function saidSomething(activity: ChannelActivityEvent): boolean {
+  return (
+    activity.deleted === undefined &&
+    activity.summary === undefined &&
+    activity.opening === undefined &&
+    activity.pinned === undefined &&
+    activity.busy === undefined &&
+    activity.work === undefined
+  );
+}
+
+/** Read a query again: now, or once a read already under way lands. Never cancels that read. */
+function readAgain(queryClient: QueryClient, query: Query): void {
+  if (query.state.fetchStatus === "fetching") {
+    readAgainWhenLanded(queryClient, query);
+    return;
+  }
+  void queryClient.invalidateQueries(
+    { queryKey: query.queryKey, exact: true },
+    { cancelRefetch: false },
+  );
+}
+
+/** The Bots in a conversation, as the roster holds it; undefined when the roster does not. */
+function botsInConversation(
+  queryClient: QueryClient,
+  channelId: string,
+): string[] | undefined {
+  return queryClient
+    .getQueryData<ChannelCache>(channelKeys.list())
+    ?.pages.flatMap((page) => page.channels)
+    .find((channel) => channel.id === channelId)?.agentIds;
+}
+
+/**
+ * Apply one event to every Bot's list the Bots panel has open (`channelKeys.byBot`), as
+ * {@link applyToRoster} does to the roster. A list that holds the conversation is patched in place. A
+ * list that does not is read again only for something said in the conversation, and only when its
+ * Bot is in it. Which Bots are in it is the roster's word (the event was just applied to it). When
+ * the roster does not know the conversation either, it is being read again for it, and once that
+ * read lands it says; a conversation it still does not hold, a task's thread, is on no Bot's list.
+ *
+ * Found in review: every busy, work or naming event on a conversation past a Bot's loaded rows read
+ * that Bot's list again, and a task thread's events read every open Bot's list, each read cancelling
+ * the one before (Show more's among them) and none of them ever bringing the row in.
+ */
+export function applyToBotLists(
+  queryClient: QueryClient,
+  activity: ChannelActivityEvent,
+): void {
+  const moves = saidSomething(activity);
+  const missing: { botId: string; query: Query }[] = [];
+  for (const query of queryClient
+    .getQueryCache()
+    .findAll({ queryKey: channelKeys.byBots() })) {
+    const botId = query.queryKey[2];
+    const data = query.state.data as ChannelCache | undefined;
+    if (typeof botId !== "string" || !data) continue;
+    const patched = applyChannelEvent(data, activity);
+    if (patched !== "unknown") {
+      /*
+       * A patch reorders only the page that holds the row. Past a Bot's first page (after Show
+       * more), a conversation with news could not reach the top that way, so the list is read again.
+       */
+      const holding = patched.pages.findIndex((page) =>
+        page.channels.some((channel) => channel.id === activity.channelId),
+      );
+      if (holding > 0 && moves) readAgain(queryClient, query);
+      else if (patched !== data)
+        queryClient.setQueryData(query.queryKey, patched);
+      continue;
+    }
+    if (moves) missing.push({ botId, query });
+  }
+  if (missing.length === 0) return;
+
+  const readFor = (botIds: readonly string[]) => {
+    for (const { botId, query } of missing)
+      if (botIds.includes(botId)) readAgain(queryClient, query);
+  };
+  const known = botsInConversation(queryClient, activity.channelId);
+  if (known) {
+    readFor(known);
+    return;
+  }
+  const roster = queryClient
+    .getQueryCache()
+    .find({ queryKey: channelKeys.list(), exact: true });
+  if (roster?.state.fetchStatus === "fetching") {
+    const stop = queryClient.getQueryCache().subscribe((event) => {
+      if (event.query !== roster || roster.state.fetchStatus === "fetching")
+        return;
+      stop();
+      readFor(botsInConversation(queryClient, activity.channelId) ?? []);
+    });
+    return;
+  }
+  // No roster read to wait on (nothing shows it): the Bot that spoke is in the conversation.
+  if (activity.lastMessageAgentId) readFor([activity.lastMessageAgentId]);
+}
+
 const FIRST_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
 
@@ -522,6 +628,7 @@ export function useChannelEvents() {
         // Recover events missed while the socket was disconnected.
         void queryClient.invalidateQueries({ queryKey: channelKeys.list() });
         void queryClient.invalidateQueries({ queryKey: channelKeys.details() });
+        void queryClient.invalidateQueries({ queryKey: channelKeys.byBots() });
       };
 
       socket.onmessage = (message) => {
@@ -535,6 +642,9 @@ export function useChannelEvents() {
           void queryClient.invalidateQueries({
             queryKey: channelKeys.details(),
           });
+          void queryClient.invalidateQueries({
+            queryKey: channelKeys.byBots(),
+          });
           return;
         }
 
@@ -545,6 +655,7 @@ export function useChannelEvents() {
         });
 
         applyToRoster(queryClient, activity);
+        applyToBotLists(queryClient, activity);
 
         // A Bot's reply, while OpenBot is out of sight: the notice, when the person allowed them.
         noticeChannelEvent(activity, queryClient, (channelId) => {

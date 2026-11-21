@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * The Idempotency-Key was used already. A ticket is a credential shown once, so its answer is never given again: ask with a new key.
+ * The Idempotency-Key was used already. A ticket is a credential shown once, so its answer is never given again: ask with a new key. Or people sign in here with their OpenBot by CopilotKit account, so there is no company account to link (HOSTED_SIGN_IN_ONLY).
  */
 export type CompanySignInTicketConflictResponse = Problem;

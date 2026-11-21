@@ -125,7 +125,9 @@ service reaches it by name. OpenBot Desktop needs neither: its picked harness is
 | `OPENBOT_TOOL_GUIDES` | unset                             | Path to a JSON file of `{ "<ACTION>": guide }` that replaces or adds to the guides OpenBot ships for Composio actions; `null` for an action puts the app's own words back. Read once. A file that cannot be read is logged and left out, and the shipped guides are used. |
 | `OPENBOT_GENERATIVE_UI` | unset (capability on)               | Set `false` or `0` to stop Bots from answering with generated interfaces. |
 | `OPENBOT_SELF_HOST_BANNER` | unset (banner on)               | Set `false` or `0` to hide the bar offering help self-hosting OpenBot, for everybody. It never shows on a paid Intelligence plan, and each person can also close it for themselves. |
-| `OPENBOT_MULTIPLE_ORGANIZATIONS` | unset (one organization) | `true` or `1` lets this OpenBot hold more than one organization. Everybody who signs in gets an organization of their own, anybody signed in can create another, and people join one by invitation. Signing in no longer makes anybody a member of `default`, which keeps the people already in it and the admins `INITIAL_ADMIN_EMAILS` names. Any other value, or none, keeps the one organization: everybody who signs in is a member of it, and creating another is refused for everybody. An OpenBot with one person keeps one organization either way. With it on, the server logs once at start what is not yet kept apart between organizations. |
+| `OPENBOT_ORGANIZATION_AUTHORITY` | `local` (one organization) | Which organization authority this OpenBot runs on, which decides how many organizations it holds. `local` keeps one: everybody who signs in is a member of `default`, and creating another is refused. `intelligence-platform`, for a self-hosted OpenBot, holds as many as people make, each with an organization, a project and a key of its own on this deployment's CopilotKit Intelligence, made through Intelligence's platform routes; it needs `INTELLIGENCE_PLATFORM_TOKEN`. An organization made before it was set, such as one an OpenBot held on 1.1.2, is given its own Intelligence organization at the next start and starts fresh there: its earlier conversation history, Learning and memory stay with `default` and aren't moved, while its members, Bots and settings are kept. `ops` is a hosted OpenBot by CopilotKit's. Anything but `local` needs people to sign in. Any other value refuses to start. |
+| `INTELLIGENCE_PLATFORM_TOKEN`, `INTELLIGENCE_PLATFORM_TOKEN_FILE` | unset | With `OPENBOT_ORGANIZATION_AUTHORITY=intelligence-platform`: the platform service token this deployment's Intelligence was given (its `CPKI_EI_PLATFORM_SERVICE_TOKEN_FILE`), given directly or in a file. Required there, and never logged. |
+| `INTELLIGENCE_PLATFORM_URL` | `INTELLIGENCE_API_URL` | With `OPENBOT_ORGANIZATION_AUTHORITY=intelligence-platform`: where Intelligence's platform routes are, when not at its API's address. |
 | `SMTP_HOST`          | unset (no email)                   | The mail server OpenBot sends email through. Today that is an invitation to an organization. Unset, OpenBot sends no email: the invited person sees the invitation in the app when they sign in with that address, and the inviter passes its link on. The email's link is on `OPENBOT_PUBLIC_URL` (or `BETTER_AUTH_URL`); with neither, no email is sent. When the mail server does not take a message, the invitation is still made and the inviter is told to pass the link on. With `SMTP_HOST` unset, none of the mail settings below is read. |
 | `MAIL_FROM`          | unset                              | The sender, such as `OpenBot <openbot@example.com>`. Required with `SMTP_HOST`: without it the server refuses to start. |
 | `SMTP_PORT`          | `587`, or `465` with `SMTP_SECURE=true` | The mail server's port. A value that is not a port number from 1 to 65535 refuses to start. |
@@ -163,11 +165,18 @@ kept for ten minutes, so a plan bought today hides the bar within ten minutes, a
 most a second for the first answer after the server starts. In Helm, set the variable through
 `config.extraEnv`.
 
-**`OPENBOT_MULTIPLE_ORGANIZATIONS` and the mail settings** reach the server from `.env` under
-Docker Compose: the `server` service reads that file, and its own `environment:` names none of them.
-In Helm, the mail settings are `config.mail` (`host`, `from`, `port`, `secure`, `user`), with the
-password in `secrets.smtpPassword`, and `OPENBOT_MULTIPLE_ORGANIZATIONS` goes through
-`config.extraEnv`.
+**`OPENBOT_ORGANIZATION_AUTHORITY`, its platform settings and the mail settings** reach the server
+from `.env` under Docker Compose: the `server` service reads that file, and its own `environment:`
+names none of them. In Helm, the mail settings are `config.mail` (`host`, `from`, `port`, `secure`,
+`user`), with the password in `secrets.smtpPassword`, and the organization authority's settings go
+through `config.extraEnv`.
+
+**`OPENBOT_MULTIPLE_ORGANIZATIONS`**, which 1.1.2 and earlier read, is no longer read. An OpenBot
+that still sets it to `true` or `1` with no `OPENBOT_ORGANIZATION_AUTHORITY` refuses to start and
+says what to set, rather than keep one of the organizations it held. On `local`, an OpenBot that
+holds organizations besides `default` with no Intelligence organization of their own, such as the
+ones it held on 1.1.2, refuses to start too and names them, since their Bots could not answer there:
+`intelligence-platform` keeps them.
 
 The component catalogue has separate per-Bot grants. Its sortable data table (`showTable`),
 interactive form (`askForm`), and other compiled or playground-authored components remain governed
@@ -872,6 +881,32 @@ is still the record.
 | `OTEL_EXPORTER_OTLP_HEADERS`       | The same, used when `OTEL_EXPORTER_OTLP_LOGS_HEADERS` is unset.                                        |
 | `OTEL_SERVICE_NAME`                | The `service.name` on every record. Defaults to `openbot`.                                             |
 | `OPENBOT_OTEL_EXPORT`              | `off` turns export off while an endpoint is still set.                                                 |
+
+## CopilotKit management (Kubernetes)
+
+A team install from the `openbot` or `openbot-bundle` chart connects to CopilotKit's management
+service by default, with its licence, through a management agent the chart installs into
+`openbot-system`. [managed-upgrades.md](managed-upgrades.md) says what it sends and how to set up
+managed upgrades. It never applies to the personal edition, to OpenBot Cloud, or to a server the
+chart didn't set up.
+
+The chart values:
+
+| Value (`openbot.` prefix on the bundle) | Default | Meaning |
+| --- | --- | --- |
+| `management.enabled` | `true` | Installs the management agent, and the server connects the install by itself with its licence. `false` opts out: no agent, no network policy peer for it, and the server never connects on its own. |
+| `management.agent.enabled` | unset (follows `management.enabled`) | `false` keeps management on with the agent left out of this release, for the `openbot-agent` release, which runs upgrades, to take over. |
+| `server.managementEnrollment.enabled` | `true` | Shows Admin → Managed updates to admins of `default` and turns on the server's internal port, where the agent collects its one-time token. `management.enabled` needs it. `false` (with `management.enabled=false`) hides the screen. |
+| `server.managementEnrollment.tokenReview` | `false` | Checks the agent's service account token with the TokenReview API, for a cluster that removed the default service account issuer discovery binding. Grants the server's service account `system:auth-delegator`. |
+
+The chart sets the server's environment from them. You don't set these by hand:
+
+| Variable | Meaning |
+| --- | --- |
+| `OPENBOT_MANAGEMENT_ENABLED` | `true` when the chart installs the agent beside this server (`management.enabled`), so the server connects by itself, by its licence, on start and every hour until connected, unless an admin disconnected it. `false` or unset: nothing connects until an admin presses Connect and installs the agent with the Helm command shown. Any other value refuses to start. |
+| `OPENBOT_MANAGEMENT_AGENT_SERVER_URL` | The server's internal port as the agent dials it, `http://<release>-server-internal.<namespace>.svc:9464`. Unset, management doesn't apply and Admin doesn't show Managed updates. Needs `RELEASE_STATUS_PORT`, or the server refuses to start. |
+| `OPENBOT_MANAGEMENT_ENROLL_URL` | CopilotKit's enrollment service. Defaults to `https://enroll.bot.copilotkit.ai`. |
+| `COPILOTKIT_LICENSE_TOKEN` | The licence the server connects with. Without one, nothing connects. |
 
 ## Computer and supervisor
 

@@ -591,7 +591,7 @@ describe("Tasks is OpenBot's own lists under OpenDuet's headings", () => {
     await waitFor(() =>
       expect(sent).toContainEqual({
         method: "POST",
-        path: `${CHECK_IN_ITEMS_PATH}/s-1/start`,
+        path: `${CHECK_IN_ITEMS_PATH}/s-1/work-on`,
         body: null,
       }),
     );

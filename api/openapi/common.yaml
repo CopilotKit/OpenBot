@@ -296,6 +296,7 @@ paths:
   /api/v2/organizations/{organizationId}/check-ins/{checkInId}/run: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-ins~1{checkInId}~1run' }
   /api/v2/organizations/{organizationId}/check-in-items: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-in-items' }
   /api/v2/organizations/{organizationId}/check-in-items/{checkInItemId}/start: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-in-items~1{checkInItemId}~1start' }
+  /api/v2/organizations/{organizationId}/check-in-items/{checkInItemId}/work-on: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-in-items~1{checkInItemId}~1work-on' }
   /api/v2/organizations/{organizationId}/check-in-items/{checkInItemId}/dismiss: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-in-items~1{checkInItemId}~1dismiss' }
   /api/v2/organizations/{organizationId}/check-in-usage: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1check-in-usage' }
   /api/v2/organizations/{organizationId}/goals: { $ref: './schedules.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1goals' }
@@ -320,6 +321,7 @@ paths:
   /api/v2/organizations/{organizationId}/members/{personId}: { $ref: './organizations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1members~1{personId}' }
   /api/v2/organizations/{organizationId}/invitations: { $ref: './organizations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1invitations' }
   /api/v2/organizations/{organizationId}/invitations/{invitationId}: { $ref: './organizations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1invitations~1{invitationId}' }
+  /api/v2/organizations/{organizationId}/plan: { $ref: './organizations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1plan' }
   /api/v2/people/me/invitations: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1invitations' }
   /api/v2/people/me/invitations/{invitationId}: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1invitations~1{invitationId}' }
   /api/v2/people/me/invitations/{invitationId}/accept: { $ref: './organizations.yaml#/paths/~1api~1v2~1people~1me~1invitations~1{invitationId}~1accept' }
@@ -1046,6 +1048,14 @@ components:
           description: >-
             On CLIENT_UPDATE_REQUIRED, true when the minimum the app is below
             was raised because of a security problem in older releases.
+        addCardUrl:
+          type: [string, 'null']
+          format: uri-reference
+          maxLength: 2048
+          description: >-
+            On PLAN_REQUIRED, where an owner or an admin goes in the browser to
+            add a card and start the organization's free trial, or to update
+            the card. Null for a member, who asks an admin.
     ConversationJoinToken: { $ref: './conversations.yaml#/components/schemas/ConversationJoinToken' }
     CredentialKind: { $ref: './model-connections.yaml#/components/schemas/CredentialKind' }
     Credential: { $ref: './model-connections.yaml#/components/schemas/Credential' }
@@ -1416,6 +1426,29 @@ components:
                 client: desktop
                 minimumVersion: 1.2.0
                 security: true
+    PlanRequired:
+      description: >-
+        This OpenBot runs an organization's Bots only while it is on a plan or
+        its free trial, and this organization is on neither, or its last
+        payment failed (PLAN_REQUIRED). An owner or an admin adds a card at
+        addCardUrl.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noPlan:
+              value:
+                type: https://open.bot/errors/plan-required
+                title: This organization needs a plan.
+                status: 402
+                detail: Bots in this organization can't run until a card is added. Add a card to start your 30-day free trial.
+                code: PLAN_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                addCardUrl: /api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
     ConversationNotFound:
       description: >-
         The conversation does not exist, was removed, or the caller is not in

@@ -75,12 +75,13 @@ import {
 import { queryClient } from "@/query-client";
 import { parentLabels } from "./new-team-page";
 import { PeopleTypeahead } from "./people-typeahead";
+import {
+  backToTeams,
+  type TeamPaths,
+  type TeamsShell,
+  teamPaths,
+} from "./team-paths";
 import { ROLE_WORDS, TEAMS_DESCRIPTION } from "./team-words";
-
-const BACK = {
-  label: "Teams",
-  linkProps: { to: "/teams" as const },
-};
 
 /**
  * One team: what it is called and for, the team it is under, and its people.
@@ -91,27 +92,31 @@ const BACK = {
  * serves a member, a maintainer and an admin. A team from the company's directory keeps the
  * directory's name and people, and nobody leaves it here.
  */
-function Team({ teamId }: { teamId: string }) {
+function Team({ teamId, paths }: { teamId: string; paths: TeamPaths }) {
   const team = useQuery(teamQueryOptions(teamId));
   const list = useQuery(teamListQueryOptions());
 
   if (team.isPending) return null;
   if (team.error) {
     return (
-      <PageShell backButton={BACK} title="Team">
+      <PageShell backButton={backToTeams(paths)} title="Team">
         <p className="text-destructive text-sm" role="alert">
           {team.error.message}
         </p>
       </PageShell>
     );
   }
-  return <TeamDetail team={team.data} teams={list.data?.teams ?? []} />;
+  return (
+    <TeamDetail paths={paths} team={team.data} teams={list.data?.teams ?? []} />
+  );
 }
 
 function TeamDetail({
+  paths,
   team,
   teams,
 }: {
+  paths: TeamPaths;
   team: TeamSummary;
   /** The organization's teams, to name this one's parent and to choose another from. */
   teams: readonly TeamSummary[];
@@ -127,7 +132,7 @@ function TeamDetail({
 
   return (
     <PageShell
-      backButton={BACK}
+      backButton={backToTeams(paths)}
       description={team.description ?? undefined}
       title={team.name}
     >
@@ -225,7 +230,9 @@ function TeamDetail({
       {open === "parent" ? (
         <ParentDialog onClose={close} team={team} teams={teams} />
       ) : null}
-      {open === "delete" ? <DeleteDialog onClose={close} team={team} /> : null}
+      {open === "delete" ? (
+        <DeleteDialog onClose={close} paths={paths} team={team} />
+      ) : null}
     </PageShell>
   );
 }
@@ -746,9 +753,12 @@ function LeaveDialog({
 function DeleteDialog({
   team,
   onClose,
+  paths,
 }: {
   team: TeamSummary;
   onClose: () => void;
+  /** Where the list is, in the frame the page is in: where a deleted team's page sends you. */
+  paths: TeamPaths;
 }) {
   const navigate = useNavigate();
   const remove = useMutation(deleteTeamMutationOptions(queryClient));
@@ -775,7 +785,7 @@ function DeleteDialog({
             disabled={remove.isPending}
             onClick={() =>
               remove.mutate(team.id, {
-                onSuccess: () => void navigate({ to: "/teams" }),
+                onSuccess: () => void navigate(paths.list()),
               })
             }
             size="sm"
@@ -789,11 +799,25 @@ function DeleteDialog({
   );
 }
 
-/** The personal edition shows that this page applies to a team. */
-export function TeamDetailPage({ teamId }: { teamId: string }) {
+/**
+ * The personal edition shows that this page applies to a team. `shell` is the frame it is drawn in,
+ * so the back button, and the list a deleted team leaves for, stay in it.
+ */
+export function TeamDetailPage({
+  teamId,
+  shell = "app",
+}: {
+  teamId: string;
+  shell?: TeamsShell;
+}) {
+  const paths = teamPaths(shell);
   return (
-    <TeamPage backButton={BACK} description={TEAMS_DESCRIPTION} title="Team">
-      <Team teamId={teamId} />
+    <TeamPage
+      backButton={backToTeams(paths)}
+      description={TEAMS_DESCRIPTION}
+      title="Team"
+    >
+      <Team paths={paths} teamId={teamId} />
     </TeamPage>
   );
 }
