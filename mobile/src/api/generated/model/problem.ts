@@ -37,4 +37,10 @@ export interface Problem {
   minimumVersion?: string;
   /** On CLIENT_UPDATE_REQUIRED, true when the minimum the app is below was raised because of a security problem in older releases. */
   security?: boolean;
+  /**
+   * On PLAN_REQUIRED, where an owner or an admin goes in the browser to add a card and start the organization's free trial, or to update the card. Null for a member, who asks an admin.
+   * @maxLength 2048
+   * @nullable
+   */
+  addCardUrl?: string | null;
 }

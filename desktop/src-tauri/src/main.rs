@@ -8027,10 +8027,11 @@ Windows opened a bare browser window of its own. The configuration says `"create
 */
 /**
 Where the main window's buttons sit on macOS: 20pt in from the left, and low enough that their middle
-lines up with the first row of OpenBot's sidebar header (its name and +), which the page
+lines up with the first row of Admin's and Settings' sidebar header (Back to app), which the page
 moves right to clear them (app/src/styles.css, `data-desktop-titlebar`). That row's middle is 32pt
 down (the inset sidebar's 8pt, the header's 8pt, then half its 32pt row), and on macOS 26 the
-circles' middle lands about 1.5pt below `y`, so `y` is 31.
+circles' middle lands about 1.5pt below `y`, so `y` is 31. The app's own sidebar, a strip of
+sections beside a panel, starts below them instead (app/src/components/layout/strip.tsx).
 
 Set on the builder, not per page, because tao keeps it and puts the buttons back after anything that
 moves them (a resize, leaving full screen), and Tauri 2.12 can't change it after the window exists.
@@ -8498,8 +8499,9 @@ fn show_window_title<R: tauri::Runtime>(window: &tauri::Window<R>, shown: bool) 
 /**
 Marks OpenBot's page for the overlay title bar: its styles pad the sidebar's header for the window
 buttons, and the header becomes the drag handle, as does the strip the main column keeps above
-itself while the sidebar is hidden, onboarding's header, which has no sidebar beside it, and every
-place a skin marks `data-desktop-drag` (its top bar, its rail). The
+itself while no sidebar shows beside it (hidden, or a sheet in a narrow window), onboarding's
+header, which has no sidebar beside it, and every place the page marks `data-desktop-drag` (the
+app sidebar's strip and panel, a skin's top bar and rail). The
 sidebar renders after the page loads and again on navigation, so new headers are marked as they
 appear, at most once a frame. Run on macOS only: Windows has its own title bar to drag.
 */
@@ -8511,8 +8513,9 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
     for (const header of document.querySelectorAll(`[data-slot="sidebar-header"]:not([${DRAG}])`)) {
       header.setAttribute(DRAG, "");
     }
-    // A skin draws its own frame, with no sidebar header, and names its own handles: its top bar,
-    // and the rail and sidebar strip under the window's buttons. `data-desktop-drag` carries Tauri's
+    // The app's sidebar of sections, and a skin's own frame, have no sidebar header and name their
+    // own handles: the room above the strip and the panel, a skin's top bar, and the rail and
+    // sidebar strip under the window's buttons. `data-desktop-drag` carries Tauri's
     // value: "deep" drags from anywhere inside but a button or link, bare from the element itself.
     for (const handle of document.querySelectorAll(`[data-desktop-drag]:not([${DRAG}])`)) {
       handle.setAttribute(DRAG, handle.dataset.desktopDrag);
@@ -8522,13 +8525,12 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
     for (const header of document.querySelectorAll(`[data-onboarding-frame] > header:not([${DRAG}])`)) {
       header.setAttribute(DRAG, "");
     }
-    // The main column only while the sidebar is hidden, when its top strip is the one handle left.
-    // With the sidebar showing, a press in its empty margins must not move the window.
+    // The main column only while no sidebar shows beside it (hidden, or a sheet in a narrow
+    // window), when its top strip is the one handle left. With the sidebar showing, a press in its
+    // empty margins must not move the window.
     for (const main of document.querySelectorAll('[data-slot="sidebar-wrapper"] > main')) {
-      const hidden = main.parentElement.querySelector(
-        ':scope > [data-slot="sidebar"][data-state="collapsed"]',
-      );
-      if (hidden) main.setAttribute(DRAG, "");
+      const beside = main.parentElement.querySelector(':scope > [data-slot="sidebar"]');
+      if (!beside || beside.dataset.state === "collapsed") main.setAttribute(DRAG, "");
       else main.removeAttribute(DRAG);
     }
   };
