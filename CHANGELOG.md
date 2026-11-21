@@ -721,6 +721,11 @@ or a script has to say.
   this release refused its own web app. `openbot release` prints it.
 - A step a rule refused, or one that failed, shows its whole reason, wrapped, where it was cut off.
 
+- **Confirming a character with a Chinese, Japanese or Korean input method no longer sends the
+  message.** Pressing Enter to confirm the character sent the half-finished message instead. The
+  chat composer now holds the key while a character is still being composed, so the confirming
+  Enter commits the character and only an Enter outside a composition sends.
+
 ## 1.1.0
 
 **Before upgrading.** Read these first: several of them change what a script, a proxy, a Compose
