@@ -48,11 +48,11 @@ describe("Admin's groups", () => {
       expect(titles).not.toContain(retired);
   });
 
-  test("send Teams to the page everybody in the organization opens, outside Admin", () => {
+  test("keep Teams inside Admin, where the same pages everybody opens at /teams are drawn", () => {
     const teams = ADMIN_SECTIONS.flatMap((section) => section.items).find(
       (entry) => entry.title === "Teams",
     );
-    expect(to(teams?.linkOptions)).toBe("/teams");
+    expect(to(teams?.linkOptions)).toBe("/admin/teams");
   });
 
   test("list every Admin page once", () => {
@@ -77,8 +77,8 @@ describe("Admin's groups", () => {
         "/admin/proactive",
         "/admin/providers",
         "/admin/skills",
+        "/admin/teams",
         "/admin/what-if",
-        "/teams",
       ].sort(),
     );
   });

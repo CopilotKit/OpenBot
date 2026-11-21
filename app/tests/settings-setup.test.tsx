@@ -66,6 +66,8 @@ const CHECKLIST = {
 const originalFetch = globalThis.fetch;
 let role: "admin" | "user";
 let localEvaluation: boolean;
+/** Whether the deployment says it is a hosted OpenBot (`hostedSignIn`). */
+let hostedSignIn: boolean;
 let rechecked: number;
 /** Every path asked for, to say what a member's sidebar never reads. */
 let requested: string[];
@@ -81,6 +83,7 @@ beforeEach(() => {
   });
   role = "admin";
   localEvaluation = false;
+  hostedSignIn = false;
   rechecked = 0;
   requested = [];
   checklist = CHECKLIST;
@@ -98,7 +101,8 @@ beforeEach(() => {
             role,
           },
         });
-      if (path === DEPLOYMENT_PATH) return Response.json({ localEvaluation });
+      if (path === DEPLOYMENT_PATH)
+        return Response.json({ localEvaluation, hostedSignIn });
       if (path === CHECK_SETUP_PATH && init?.method === "POST") {
         rechecked += 1;
         return Response.json(CHECKLIST);
@@ -190,6 +194,34 @@ test("an admin reopens the setup checklist in Settings, and can check again", as
 
   fireEvent.click(view.getByRole("button", { name: "Check again" }));
   await waitFor(() => expect(rechecked).toBe(1));
+});
+
+/*
+ * Found on a hosted OpenBot: Setup told an organization admin "After you change a setting and restart
+ * OpenBot, check again here". OpenBot by CopilotKit runs it, and nobody in an organization restarts it.
+ */
+test("on a hosted OpenBot, Setup sends an admin to the pages its rows link to, not to a restart", async () => {
+  hostedSignIn = true;
+  const view = open("/settings/setup");
+
+  await view.findByRole("heading", { name: "Setup" });
+  expect(
+    await view.findByText(
+      "See what's ready and what still needs setting up. Fix what you can on the page a row links to, then check again here. OpenBot by CopilotKit looks after the rest.",
+    ),
+  ).toBeTruthy();
+  expect(document.body.textContent).not.toContain("restart OpenBot, check");
+});
+
+test("on a company's own OpenBot, Setup still says to restart and check again", async () => {
+  const view = open("/settings/setup");
+
+  await view.findByRole("list", { name: "Setup" });
+  expect(
+    view.getByText(
+      "See what's ready and what still needs setting up. After you change a setting and restart OpenBot, check again here.",
+    ),
+  ).toBeTruthy();
 });
 
 test("a fix's page opens straight from Settings", async () => {

@@ -776,6 +776,8 @@ paths:
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
+        '402':
+          $ref: './common.yaml#/components/responses/PlanRequired'
         '403':
           $ref: './common.yaml#/components/responses/Forbidden'
         '404':

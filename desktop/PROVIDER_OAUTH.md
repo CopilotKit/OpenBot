@@ -88,6 +88,11 @@ partner, and [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628).
 `VITE_OPENBOT_SUPPORT_URL` replaces the support link a startup failure offers. Unset, it points at
 this repository's issues. A whitelabel build points it at its own support channel.
 
+`VITE_OPENBOT_CLOUD_URL` is the OpenBot that "Sign in to OpenBot Cloud" on the first screen signs in
+to. Unset, it is `https://my.open.bot`. A test build points it at a test stack, such as
+`https://cloud-test.example.com` or `http://127.0.0.1:3001` (the shell takes `http` only on this
+computer's own address).
+
 ## Credential lifecycle
 
 The desktop's provider credentials remain in its local deployment; React does
