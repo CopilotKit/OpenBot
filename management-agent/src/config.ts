@@ -74,6 +74,12 @@ export const AgentConfig = z
           .nullable(),
         insecure: z.boolean(),
         pullSecret: name.nullable(),
+        /**
+         * How Flux signs in to the registry: `aws`, `azure` or `gcp` with source-controller's own
+         * workload identity, for a mirror in the cloud's registry (ECR, ACR, Artifact Registry),
+         * whose short-lived tokens a pull secret can't hold. Absent: `pullSecret`, or none.
+         */
+        provider: z.enum(["aws", "azure", "gcp"]).optional(),
         verify: z
           .strictObject({
             provider: z.enum(["cosign", "notation"]),
