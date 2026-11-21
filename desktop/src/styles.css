@@ -882,6 +882,33 @@ fieldset.picker.hosting .tile.chosen {
   color: var(--text-secondary);
 }
 
+/*
+ * OpenBot (Self-Contained) with OpenBot Cloud on: the secondary choice, under OpenBot for Business
+ * and its link, drawn as the smaller row OpenBot for Business's ways are with Cloud off. What this
+ * computer needs is a line of its own under its name, in the footnote's size and colour.
+ */
+fieldset.picker.hosting .tile-option.this-computer-option {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  align-items: start;
+  column-gap: 12px;
+  margin-top: 2px;
+  padding: 7px 16px;
+}
+
+/* Its icon in the rows' mark column, on its name's line; its words start where theirs do. */
+.tile-option.this-computer-option .tile-option-icon {
+  justify-self: center;
+  margin-top: 2px;
+}
+
+.tile-option-needs {
+  flex-basis: 100%;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 18px;
+}
+
 /* The clouds it runs on: each mark on the marks' white ground, as the provider tiles draw theirs. */
 .cloud-marks {
   grid-area: marks;

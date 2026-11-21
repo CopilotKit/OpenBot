@@ -1387,11 +1387,14 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
   });
 
   /*
-   * The ways to run OpenBot, as they are sold with Cloud on: OpenBot (Self-Contained) on this
-   * computer, OpenBot Cloud, which this app signs in to, and OpenBot for Business, Self-Hosted on a
-   * company's own cloud or on-prem, which books a call.
+   * The ways to run OpenBot, as they are sold with Cloud on, in the order a person reads them and a
+   * keyboard or a screen reader meets them: OpenBot Cloud first and picked, which this app signs in
+   * to; OpenBot for Business, a company's own cloud or on-prem, which books a call, and the link to
+   * connect to a company's own OpenBot; then OpenBot (Self-Contained) on a smaller row that says
+   * what this computer needs. Before, Self-Contained came first and was picked, and Cloud was the
+   * second of three rows of the same size.
    */
-  test("the first screen offers OpenBot (Self-Contained), OpenBot Cloud and OpenBot for Business", async () => {
+  test("the first screen opens on OpenBot Cloud, then OpenBot for Business and its link, then a smaller OpenBot (Self-Contained) that says what it needs", async () => {
     setupRootConfiguration("/tmp/local-eval-welcome-cloud", async () =>
       emptyConfiguration(),
     );
@@ -1403,14 +1406,46 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     const view = await renderApp();
     const radios = view.getAllByRole("radio") as HTMLInputElement[];
     expect(radios.map((radio) => radio.closest("label")?.textContent)).toEqual([
-      "OpenBot (Self-Contained)Everything runs on this computer, for trying it or personal use.",
       "OpenBot CloudWe run it for you. Sign in and start right away.",
       "OpenBot for BusinessYour own cloud or on-prem. Book a call.",
+      "OpenBot (Self-Contained)Everything runs on this computer.Needs a Mac or a 64-bit Windows PC with at least 4 CPU cores, 16 GB of memory and 40 GB of free disk space. Setup takes 1 to 10 minutes.",
     ]);
-    expect(radios.map((radio) => radio.value)).toEqual([
-      "this-computer",
+    expect(radios.map((radio) => [radio.value, radio.checked])).toEqual([
+      ["cloud", true],
+      ["business", false],
+      ["this-computer", false],
+    ]);
+    // Self-Contained is the smaller row, not one of the big ones.
+    const smaller = radios[2]?.closest("label")?.className.split(" ") ?? [];
+    expect(smaller).toContain("tile-option");
+    expect(smaller).not.toContain("tile");
+    // The order a keyboard and a screen reader meet them: Cloud, Business, the link, Self-Contained,
+    // then Cloud's sign-in.
+    const order = [
+      ...view.container.querySelectorAll("input[type=radio], button"),
+    ].map((control) =>
+      control instanceof HTMLInputElement ? control.value : control.textContent,
+    );
+    expect(order).toEqual([
       "cloud",
       "business",
+      "Connect to it",
+      "this-computer",
+      "Sign in to OpenBot Cloud",
+    ]);
+    // Cloud's sign-in is what the screen opens on: nothing to install, nothing to type.
+    expect(
+      view.getByText(
+        "Sign in with your OpenBot account, or create one. Your Bots and conversations are the same here and at my.open.bot.",
+      ),
+    ).toBeTruthy();
+    expect(view.queryByLabelText("OpenBot address")).toBeNull();
+    expect(
+      view.queryByRole("heading", { name: "What this computer needs" }),
+    ).toBeNull();
+    expect(buttons(view)).toEqual([
+      "Connect to it",
+      "Sign in to OpenBot Cloud",
     ]);
     // OpenBot for Business is one row, not a group of two, and names its clouds by their marks.
     expect(
@@ -1418,22 +1453,106 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     ).toBeNull();
     expect(
       [
-        ...(radios[2]?.closest("label")?.querySelectorAll("img[data-mark]") ??
+        ...(radios[1]?.closest("label")?.querySelectorAll("img[data-mark]") ??
           []),
       ].map((mark) => mark.getAttribute("data-mark")),
     ).toEqual(["aws", "azure", "google-cloud", "kubernetes"]);
-    // Nothing about OpenBot Cloud's sign-in until it is picked.
+    // OpenBot for Business books a call.
+    await userEvent.click(radios[1] as HTMLInputElement);
+    expect(radios[1]?.checked).toBe(true);
+    expect(view.getByTitle("Booking calendar")).toBeTruthy();
+    expect(view.queryByLabelText("OpenBot address")).toBeNull();
     expect(
       view.queryByRole("button", { name: "Sign in to OpenBot Cloud" }),
     ).toBeNull();
-    expect(buttons(view)).toEqual(["Connect to it", "Install"]);
-    // OpenBot for Business books a call.
-    await userEvent.click(radios[2] as HTMLInputElement);
-    expect(radios[2]?.checked).toBe(true);
-    expect(view.getByTitle("Booking calendar")).toBeTruthy();
-    expect(view.queryByLabelText("OpenBot address")).toBeNull();
+    // Connect to it, under OpenBot for Business: the address and Connect, no row picked.
+    await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
+    expect(document.activeElement).toBe(view.getByLabelText("OpenBot address"));
+    expect(radios.map((radio) => radio.checked)).toEqual([false, false, false]);
+    expect(view.queryByTitle("Booking calendar")).toBeNull();
     expectPlain(view);
     expect(localCliCalls()).toEqual([]);
+  });
+
+  /*
+   * OpenBot (Self-Contained), picked from its smaller row: what this computer needs and why, the
+   * setup time and Install, as the first screen always showed them, and Install sets it up.
+   */
+  test("OpenBot (Self-Contained), picked, shows what this computer needs and Install, which sets it up", async () => {
+    setupRootConfiguration("/tmp/cloud-self-contained", async () =>
+      emptyConfiguration(),
+    );
+    withLocalCli({
+      connection: THIS_COMPUTER,
+      record_setup_event: null,
+      "plugin:opener|open_url": null,
+      ...readyLocal(),
+    });
+    const view = await renderApp();
+    const thisComputer = view.getByRole("radio", {
+      name: /^OpenBot \(Self-Contained\)/,
+    }) as HTMLInputElement;
+    await userEvent.click(thisComputer);
+    expect(thisComputer.checked).toBe(true);
+    expect(view.getByRole("radio", { name: /^OpenBot Cloud/ })).toHaveProperty(
+      "checked",
+      false,
+    );
+    expect(
+      view.getByRole("heading", { name: "What this computer needs" }),
+    ).toBeTruthy();
+    expect(
+      [...view.container.querySelectorAll(".needs-list li")].map(
+        (item) => item.textContent,
+      ),
+    ).toEqual([
+      "A Mac or a 64-bit Windows PC",
+      "16 GB of memory or more",
+      "4 CPU cores or more",
+      "40 GB of free disk space",
+    ]);
+    expect(
+      view.getByText(
+        "Setup takes 1 to 10 minutes, depending on your internet speed.",
+      ),
+    ).toBeTruthy();
+    expect(buttons(view)).toEqual(["Connect to it", "Install"]);
+    expect(
+      view.queryByRole("button", { name: "Sign in to OpenBot Cloud" }),
+    ).toBeNull();
+    expect(localCliCalls()).toEqual([]);
+    await installLocal(view);
+    await view.findByRole("heading", { name: "Connect your AI" });
+    // Nothing of OpenBot Cloud was asked for.
+    expect(
+      invokeCalls.some((call) =>
+        ["check_openbot_address", "connect_to_openbot"].includes(call.command),
+      ),
+    ).toBe(false);
+  });
+
+  /*
+   * Somebody who already chose this computer is not sent to OpenBot Cloud: a relaunch that finds
+   * OpenBot installed here opens on Self-Contained, with Install, as it did before Cloud led.
+   */
+  test("a relaunch that finds OpenBot on this computer opens on OpenBot (Self-Contained), not on OpenBot Cloud", async () => {
+    setupRootConfiguration("/tmp/cloud-installed-here", async () =>
+      previouslyHostedConfiguration(DEFAULT_HARNESS),
+    );
+    withLocalCli({ ...readyLocal(), record_setup_event: null });
+    const view = await renderApp();
+    await view.findByRole("heading", { name: "Set up OpenBot" });
+    expect(
+      (view.getAllByRole("radio") as HTMLInputElement[]).map((radio) => [
+        radio.value,
+        radio.checked,
+      ]),
+    ).toEqual([
+      ["cloud", false],
+      ["business", false],
+      ["this-computer", true],
+    ]);
+    expect(buttons(view)).toEqual(["Connect to it", "Install"]);
   });
 
   /*
@@ -1459,6 +1578,11 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     const cloud = view.getByRole("radio", {
       name: /^OpenBot Cloud/,
     }) as HTMLInputElement;
+    // Picked to begin with. Away and back, as a person who looked at another choice does.
+    expect(cloud.checked).toBe(true);
+    await userEvent.click(
+      view.getByRole("radio", { name: /^OpenBot for Business/ }),
+    );
     await userEvent.click(cloud);
     expect(cloud.checked).toBe(true);
     // Nothing to type, nothing to install, no calendar: its sign-in.

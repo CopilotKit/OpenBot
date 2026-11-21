@@ -931,8 +931,12 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
       }
     });
 
-    // A build with OpenBot Cloud on: three rows, and Cloud's sign-in fits as Install does.
-    test(`at 1000x760 (${theme}), a build with OpenBot Cloud on shows three rows without the card scrolling, and so does Cloud's sign-in`, async () => {
+    /*
+     * A build with OpenBot Cloud on: OpenBot Cloud and OpenBot for Business as the two rows, Cloud
+     * picked with its sign-in under them, and OpenBot (Self-Contained) on a smaller row under the
+     * link, its needs inside it. All of it fits, and so does Self-Contained picked, with Install.
+     */
+    test(`at 1000x760 (${theme}), a build with OpenBot Cloud on opens on Cloud's sign-in, Self-Contained a smaller row under the rows, without the card scrolling`, async () => {
       const page = await browser.newPage({
         viewport: { width: 1000, height: 760 },
         colorScheme: theme,
@@ -941,12 +945,33 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
       try {
         await open(page, "", cloudBuilt);
         await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+        await page
+          .getByRole("button", { name: "Sign in to OpenBot Cloud" })
+          .waitFor();
         await page.waitForTimeout(400);
         const shape = await page.evaluate(() => {
           const card = document.querySelector("main > .sheet") as HTMLElement;
           const rows = [
             ...document.querySelectorAll("fieldset.picker.hosting > .tile"),
           ].map((row) => row.getBoundingClientRect());
+          const aside = document
+            .querySelector("fieldset.picker.hosting .tile-aside")
+            ?.getBoundingClientRect();
+          const small = document
+            .querySelector(
+              "fieldset.picker.hosting .tile-option.this-computer-option",
+            )
+            ?.getBoundingClientRect();
+          const needs = document
+            .querySelector(
+              ".tile-option.this-computer-option .tile-option-needs",
+            )
+            ?.getBoundingClientRect();
+          const name = (selector: string) =>
+            Number.parseFloat(
+              getComputedStyle(document.querySelector(selector) as Element)
+                .fontSize,
+            );
           const business = document.querySelector(
             ".tile.with-marks",
           ) as HTMLElement;
@@ -959,14 +984,26 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           );
           return {
             overflow: card.scrollHeight - card.clientHeight,
-            // Three rows, one above the other, the same width.
+            // Two rows, one above the other, the same width.
             rows:
-              rows.length === 3 &&
+              rows.length === 2 &&
               rows.every(
                 (row, at) =>
                   row.width === rows[0]?.width &&
                   (at === 0 || row.top >= (rows[at - 1]?.bottom ?? 0)),
               ),
+            // Self-Contained under the link, as wide as the rows, its name smaller than theirs and
+            // its needs inside it.
+            smaller:
+              !!aside &&
+              !!small &&
+              !!needs &&
+              small.top >= aside.bottom &&
+              small.width === rows[0]?.width &&
+              name(".tile-option.this-computer-option .tile-option-name") <
+                name("fieldset.picker.hosting .tile-name") &&
+              needs.bottom <= small.bottom &&
+              needs.right <= small.right,
             // The four clouds' marks inside OpenBot for Business's row, on one line, past its words.
             marks:
               marks.length === 4 &&
@@ -989,12 +1026,28 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         });
         const { overflow, ...laid } = shape;
         expect(overflow).toBeLessThanOrEqual(0);
-        expect(laid).toEqual({ rows: true, marks: true, oneLine: true });
-        if (shots)
+        expect(laid).toEqual({
+          rows: true,
+          smaller: true,
+          marks: true,
+          oneLine: true,
+        });
+        if (shots) {
           await page.screenshot({ path: `${shots}/welcome-on-${theme}.png` });
-        await page.getByText("We run it for you.").click();
+          // OpenBot for Business picked, for a look: its booker scrolls in the card, as tested above.
+          await page
+            .getByText("Your own cloud or on-prem. Book a call.")
+            .click();
+          await page.getByRole("heading", { name: "Book a demo" }).waitFor();
+          await page.waitForTimeout(200);
+          await page.screenshot({
+            path: `${shots}/welcome-on-business-${theme}.png`,
+          });
+        }
+        // Self-Contained picked: what this computer needs and Install, still without a scrollbar.
+        await page.getByText("Everything runs on this computer.").click();
         await page
-          .getByRole("button", { name: "Sign in to OpenBot Cloud" })
+          .getByRole("button", { name: "Install", exact: true })
           .waitFor();
         await page.waitForTimeout(200);
         expect(
@@ -1005,7 +1058,21 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         ).toBeLessThanOrEqual(0);
         if (shots)
           await page.screenshot({
-            path: `${shots}/welcome-on-cloud-${theme}.png`,
+            path: `${shots}/welcome-on-self-contained-${theme}.png`,
+          });
+        // Connect to it: the address and Connect, still without a scrollbar.
+        await page.getByRole("button", { name: "Connect to it" }).click();
+        await page.getByLabel("OpenBot address", { exact: true }).waitFor();
+        await page.waitForTimeout(200);
+        expect(
+          await page.evaluate(() => {
+            const card = document.querySelector("main > .sheet") as HTMLElement;
+            return card.scrollHeight - card.clientHeight;
+          }),
+        ).toBeLessThanOrEqual(0);
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/welcome-on-connect-${theme}.png`,
           });
       } finally {
         await page.close();
