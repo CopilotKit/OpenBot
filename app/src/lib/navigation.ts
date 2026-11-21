@@ -149,7 +149,8 @@ export const NAVIGATION: readonly NavigationItem[] = [
      * The organization's teams, for everybody in it: which there are, which the person is in, and
      * a team's own page, where its maintainers keep its people. Under the person's name with their
      * organizations, because a team is the organization's and not something a Bot has. Not inside
-     * Admin: a team's members and maintainers are mostly not admins.
+     * Admin: a team's members and maintainers are mostly not admins. Admin draws the same pages in
+     * its own frame at /admin/teams, for an admin who opens them from there.
      */
     id: "teams",
     label: "Teams",

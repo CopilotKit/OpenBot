@@ -1,8 +1,15 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
+import { TeamsPage } from "@/components/teams/teams-page";
 
-/** Teams moved out of Admin, to where everybody in the organization can open them. */
+/**
+ * The organization's teams, inside Admin, for an admin who opens Teams from Admin's sidebar. The
+ * same page everybody opens at `/teams`, drawn in Admin's frame so Admin does not close under them;
+ * its links stay under `/admin/teams`.
+ */
 export const Route = createFileRoute("/_authed/admin/teams")({
-  beforeLoad: () => {
-    throw redirect({ to: "/teams", replace: true });
-  },
+  component: AdminTeamsPage,
 });
+
+function AdminTeamsPage() {
+  return <TeamsPage shell="admin" />;
+}
