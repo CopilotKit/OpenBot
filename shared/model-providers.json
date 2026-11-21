@@ -21,7 +21,7 @@
     }
   },
   "bots": {
-    "agent-mastra": { "provider": "openai", "model": "gpt-4o-mini" },
+    "agent-mastra": { "provider": "openai", "model": "gpt-5.4-mini" },
     "agent-adk": { "provider": "openai", "model": "gpt-4o-mini" },
     "agent-antigravity": { "provider": "google", "model": "gemini-3.6-flash" },
     "agent-ag2": { "provider": "openai", "model": "gpt-4o-mini" },

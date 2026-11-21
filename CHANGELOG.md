@@ -209,6 +209,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Bots and models
 
+- **Mastra uses GPT-5.4 mini when no model is set.** A deployment can still choose a different
+  model with `BOT_MODEL`.
 - **Every harness OpenBot ships calls the model gateway with its run's own token, where the server
   sends one.** One harness serves every organization of an OpenBot, and the key in its environment
   names one organization. A run that brings its own token (`forwardedProps.openbotModelRoute`; on

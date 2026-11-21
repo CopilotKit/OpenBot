@@ -281,7 +281,7 @@ describe("what a Bot runs from the spec file", () => {
     });
     expect(botSettings("agent-mastra", {})).toEqual({
       provider: "openai",
-      model: "gpt-4o-mini",
+      model: "gpt-5.4-mini",
     });
     // A Bot the file pairs with a different model than the provider's own default:
     expect(botSettings("agent-adk", {})).toEqual({

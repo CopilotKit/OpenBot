@@ -265,10 +265,11 @@ of it:
 2. the Bot's row in this file — what the repository decided;
 3. the provider's `default_model` — what is left when neither says.
 
-Each Bot retains its existing default: for example, `agent-mastra` uses `gpt-4o-mini`, while
+Each Bot has its own default: for example, `agent-mastra` uses `gpt-5.4-mini`, while
 `agent-agno` uses `gpt-5.5`. Editing a Bot's row changes that Bot's default without changing
 another Bot's choice. The Python LangGraph harness also accepts `BOT_PROVIDER=google_genai` as an
-alias for the spec's `google` provider.
+alias for the spec's `google` provider. For a custom OpenAI-compatible endpoint, set
+`BOT_MODEL` to a model that endpoint supports.
 
 A blank value is read as unset, which is what a compose file passing `${BOT_MODEL:-}` hands a Bot
 when nobody chose a model. API keys never appear in the file: they arrive in the environment
