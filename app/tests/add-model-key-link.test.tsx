@@ -7,6 +7,7 @@ import {
   ADD_MODEL_KEY_PATH,
   AddModelKeyLink,
   NO_AI_CONNECTION,
+  NO_PERSONAL_AI_CONNECTION,
 } from "@/components/channels/add-model-key-link";
 import {
   getGetPersonMockHandler,
@@ -71,6 +72,21 @@ test("a member gets the sentence alone, with nothing to click", async () => {
   await settleReactWork();
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(view.queryByRole("link")).toBeNull();
+});
+
+test("on OpenBot Cloud anybody, a member too, gets Connect your AI, which opens the step", async () => {
+  for (const role of ["member", "admin"] as const) {
+    signedInAs(role);
+    const view = render(<AddModelKeyLink reason={NO_PERSONAL_AI_CONNECTION} />);
+    const link = await waitFor(() =>
+      view.getByRole("link", { name: "Connect your AI" }),
+    );
+    expect(link.getAttribute("href")).toBe("/onboarding?step=ai");
+    // Not the admin's way to the organization's key: their own AI is the fix here.
+    expect(view.queryByRole("link", { name: "Add a model key" })).toBeNull();
+    cleanup();
+    queryClient.clear();
+  }
 });
 
 test("any other reason a turn ended draws nothing and asks the server nothing", async () => {
