@@ -85,6 +85,7 @@ function BotConversations({ botId }: { botId: string }) {
           busy={(channel.busy ?? false) || (channel.work?.length ?? 0) > 0}
           canRename={channel.canRename ?? false}
           channelId={channel.id}
+          data-slot="bot-conversation-row"
           emphasis={emphasis}
           key={channel.id}
           lastMessageAt={
