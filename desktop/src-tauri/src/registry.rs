@@ -33,8 +33,18 @@ pub fn short_id(digest: &str) -> String {
 }
 
 /// The architecture name images use for this computer, which is the one its engine's Linux runs.
+///
+/// The machine's, not this program's: Windows on ARM runs an x64 OpenBot under emulation, where
+/// `std::env::consts::ARCH` says `x86_64`, but the engine's machine is aarch64 and only runs
+/// arm64 images. Downloading by this program's architecture loads amd64 images into that machine,
+/// and Compose stops with "exec format error" (#1747).
 pub fn host_architecture() -> &'static str {
-    match std::env::consts::ARCH {
+    engine_architecture(crate::windows::machine_arch())
+}
+
+/// An engine's architecture name for a machine's, in `std::env::consts::ARCH`'s words.
+fn engine_architecture(machine: &str) -> &str {
+    match machine {
         "aarch64" => "arm64",
         "x86_64" => "amd64",
         other => other,
@@ -410,5 +420,16 @@ mod tests {
             ])
         );
         assert_eq!(read_manifest(b"not json", "arm64"), Err(None));
+    }
+
+    /// Every caller - early image downloads, pull sizes, update readiness - needs the engine's
+    /// architecture, which is the machine's. The mapping holds in every configuration, including
+    /// the one the fix is for, an x64 OpenBot on ARM64 Windows, where the compilation target and
+    /// the machine disagree.
+    #[test]
+    fn names_an_engine_architecture_for_each_machine() {
+        assert_eq!(engine_architecture("aarch64"), "arm64");
+        assert_eq!(engine_architecture("x86_64"), "amd64");
+        assert_eq!(engine_architecture("riscv64"), "riscv64");
     }
 }
