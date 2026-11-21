@@ -4,6 +4,6 @@
 import type { Problem } from "./problem";
 
 /**
- * A provider with that id is registered already, or the Idempotency-Key was used for a different request.
+ * A provider with that id is registered already, the Idempotency-Key was used for a different request, or people sign in here with their OpenBot by CopilotKit account, so no organization registers a provider of its own (HOSTED_SIGN_IN_ONLY).
  */
 export type IdentityProviderConflictResponse = Problem;

@@ -814,6 +814,7 @@ export * from "./identityProviderNotFoundResponse";
 export * from "./identityProviderNotRemovableResponse";
 export * from "./identityProviderPage";
 export * from "./identityProviderProtocol";
+export * from "./identityProviderRemovalConflictResponse";
 export * from "./identityProviderResponse";
 export * from "./identityProviderText";
 export * from "./inactiveComputersStopped";
