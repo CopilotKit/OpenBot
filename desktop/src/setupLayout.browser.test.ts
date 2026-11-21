@@ -966,11 +966,17 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
       });
       const shots = process.env.OPENBOT_APP_SHOTS;
       try {
+        await routeCalendar(page);
         await open(page, "", cloudBuilt);
         await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
         await page
           .getByRole("button", { name: "Sign in to OpenBot Cloud" })
           .waitFor();
+        // Measured in the window's own face: a line set in the fallback, before Inter has loaded,
+        // can wrap where Inter's doesn't.
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+        });
         await page.waitForTimeout(400);
         const shape = await page.evaluate(() => {
           const card = document.querySelector("main > .sheet") as HTMLElement;
@@ -1070,16 +1076,95 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         });
         if (shots) {
           await page.screenshot({ path: `${shots}/welcome-on-${theme}.png` });
-          // OpenBot for Business picked, for a look: its booker scrolls in the card, as tested above.
-          await page
-            .getByText("Your own cloud or on-prem. Book a call.")
-            .click();
-          await page.getByRole("heading", { name: "Book a demo" }).waitFor();
-          await page.waitForTimeout(200);
+        }
+        /*
+         * OpenBot for Business picked: what it adds, then Book a demo and its calendar, taller than
+         * the window. The card scrolls, never the page, and scrolled to its end the calendar is
+         * whole inside the card, nothing cut at either edge.
+         */
+        await page.getByText("Your own cloud or on-prem. Book a call.").click();
+        await page
+          .locator(
+            '.booking-calendar[data-ready] iframe[title="Booking calendar"]',
+          )
+          .waitFor();
+        await page.waitForTimeout(200);
+        if (shots)
           await page.screenshot({
             path: `${shots}/welcome-on-business-${theme}.png`,
           });
-        }
+        // Book a demo is in view as soon as Business is picked, and takes the card to the calendar.
+        const button = page.getByRole("button", {
+          name: "Book a demo",
+          exact: true,
+        });
+        const at = await button.boundingBox();
+        expect((at?.y ?? 760) + (at?.height ?? 0)).toBeLessThanOrEqual(760);
+        await button.click();
+        await page.waitForTimeout(800);
+        const jumped = await page.evaluate(() => {
+          const view = (
+            document.querySelector("main > .sheet") as HTMLElement
+          ).getBoundingClientRect();
+          const heading = document
+            .querySelector("#book-a-demo-title")
+            ?.getBoundingClientRect();
+          const frame = document
+            .querySelector('iframe[title="Booking calendar"]')
+            ?.getBoundingClientRect();
+          return {
+            heading:
+              !!heading &&
+              heading.top >= view.top &&
+              heading.top <= view.top + 40,
+            calendar: !!frame && frame.top < view.bottom - 300,
+            focused: document.activeElement?.id === "book-a-demo-title",
+          };
+        });
+        expect(jumped).toEqual({
+          heading: true,
+          calendar: true,
+          focused: true,
+        });
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/welcome-on-business-booker-${theme}.png`,
+          });
+        const booker = await page.evaluate(() => {
+          const card = document.querySelector("main > .sheet") as HTMLElement;
+          card.scrollTop = card.scrollHeight;
+          const view = card.getBoundingClientRect();
+          const heading = document
+            .querySelector("#book-a-demo-title")
+            ?.getBoundingClientRect();
+          const frame = document
+            .querySelector('iframe[title="Booking calendar"]')
+            ?.getBoundingClientRect();
+          return {
+            page: document.documentElement.scrollHeight <= window.innerHeight,
+            cardScrolls: card.scrollHeight > card.clientHeight + 1,
+            sideways: card.scrollWidth - card.clientWidth <= 0,
+            // At the card's end the calendar is whole inside the card's visible area.
+            calendar:
+              !!frame &&
+              frame.height >= 320 &&
+              frame.top >= view.top &&
+              frame.bottom <= view.bottom,
+            // Its heading sits above it, reached by the same scroll.
+            heading: !!heading && !!frame && heading.bottom <= frame.top,
+          };
+        });
+        expect(booker).toEqual({
+          page: true,
+          cardScrolls: true,
+          sideways: true,
+          calendar: true,
+          heading: true,
+        });
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/welcome-on-business-end-${theme}.png`,
+          });
         // Self-Contained picked: what this computer needs and Install, still without a scrollbar.
         await page.getByText("Everything runs on this computer.").click();
         await page
@@ -1192,7 +1277,7 @@ async function routeCalendar(page: Page) {
   await page.route("https://calendly.com/**", (route) =>
     route.fulfill({
       contentType: "text/html",
-      body: `<!doctype html><body style="margin:0;height:660px;background:#fff"><script>
+      body: `<!doctype html><body style="margin:0;height:660px;background:#fff;font:14px sans-serif;color:#555;display:grid;place-items:center">Booking calendar (stand-in for Calendly)<script>
         parent.postMessage({ event: "calendly.page_height", payload: { height: "660px" } }, "*");
       </script></body>`,
     }),

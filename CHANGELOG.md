@@ -233,13 +233,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
-- **Sign in to OpenBot Cloud, first on the first screen.** "Set up OpenBot" opens on OpenBot Cloud.
-  Sign in to OpenBot Cloud opens your browser to sign in at my.open.bot, or to create an account,
-  and the window then shows the same organizations, Bots and conversations as the web app. Nothing
-  is installed on the computer. OpenBot for Business comes next, on your own cloud or on-prem with a
-  call to book, and so does connecting to your company's OpenBot by its address. OpenBot
-  (Self-Contained), everything on this computer, is a smaller choice under them that says what the
-  computer needs and how long setup takes. A computer that already runs OpenBot opens on
+- **OpenBot Cloud, first on the first screen.** "Set up OpenBot" opens on OpenBot Cloud: this app on
+  your computer, connected to OpenBot Cloud, where your Bots run. Sign in to OpenBot Cloud opens
+  your browser to sign in at my.open.bot, or to create an account, then comes straight back to the
+  app, which shows the same organizations, Bots and conversations as the web app. OpenBot's
+  backend isn't set up on the computer. OpenBot for Business comes next, on your own cloud or
+  on-prem with a call to book, and so does connecting to your company's OpenBot by its address.
+  OpenBot (Self-Contained), everything on this computer, is a smaller choice under them that says
+  what the computer needs and how long setup takes. A computer that already runs OpenBot opens on
   Self-Contained, as before. A build made with `VITE_OPENBOT_CLOUD_ENABLED=false` keeps the first
   screen without OpenBot Cloud.
 - **OpenBot Desktop's back end moves to CopilotKit Intelligence 0.17.0-rc.4.** The bundled CLI

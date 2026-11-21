@@ -1406,7 +1406,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     const view = await renderApp();
     const radios = view.getAllByRole("radio") as HTMLInputElement[];
     expect(radios.map((radio) => radio.closest("label")?.textContent)).toEqual([
-      "OpenBot CloudWe run it for you. Sign in and start right away.",
+      "OpenBot CloudUse OpenBot here. Your Bots run in our cloud.",
       "OpenBot for BusinessYour own cloud or on-prem. Book a call.",
       "OpenBot (Self-Contained)Everything runs on this computer.Needs a Mac or a 64-bit Windows PC with at least 4 CPU cores, 16 GB of memory and 40 GB of free disk space. Setup takes 1 to 10 minutes.",
     ]);
@@ -1436,7 +1436,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     // Cloud's sign-in is what the screen opens on: nothing to install, nothing to type.
     expect(
       view.getByText(
-        "Sign in with your OpenBot account, or create one. Your Bots and conversations are the same here and at my.open.bot.",
+        "This app connects to OpenBot Cloud, where your Bots run. Your account, Bots and conversations are the same here and at my.open.bot.",
       ),
     ).toBeTruthy();
     expect(view.queryByLabelText("OpenBot address")).toBeNull();
@@ -1465,6 +1465,11 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     expect(
       view.queryByRole("button", { name: "Sign in to OpenBot Cloud" }),
     ).toBeNull();
+    // The calendar is below the lists: Book a demo, in view from the start, takes the person there.
+    await userEvent.click(view.getByRole("button", { name: "Book a demo" }));
+    expect(document.activeElement).toBe(
+      view.getByRole("heading", { name: "Book a demo" }),
+    );
     // Connect to it, under OpenBot for Business: the address and Connect, no row picked.
     await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
     expect(document.activeElement).toBe(view.getByLabelText("OpenBot address"));
@@ -1593,12 +1598,12 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     ).toBeNull();
     expect(
       view.getByText(
-        "Sign in with your OpenBot account, or create one. Your Bots and conversations are the same here and at my.open.bot.",
+        "This app connects to OpenBot Cloud, where your Bots run. Your account, Bots and conversations are the same here and at my.open.bot.",
       ),
     ).toBeTruthy();
     expect(
       view.getByText(
-        "You'll sign in in your browser. Nothing is installed on this computer.",
+        "You'll sign in or create an account in your browser, then come straight back here.",
       ),
     ).toBeTruthy();
     const signIn = view.getByRole("button", {

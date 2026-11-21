@@ -65,12 +65,18 @@ export function cloudHost(address = cloudWebAddress()): string {
 /** The button that signs in. */
 export const SIGN_IN_TO_CLOUD = "Sign in to OpenBot Cloud";
 
+/** What happens when the person signs in: the browser, then straight back to this app. */
+export const CLOUD_HAND_OFF =
+  "You'll sign in or create an account in your browser, then come straight back here.";
+
 /**
- * The first screen's lower half when OpenBot Cloud is picked: what it is, and the sign-in. Cloud's
- * address is built in, so there is nothing to type. Signing in is the same as connecting to any
- * OpenBot that runs elsewhere (`useConnectToOpenBot` with that address): the shell checks the
- * address, opens the person's browser to sign in (OAuth with PKCE, the way an app signs in), and
- * shows OpenBot Cloud in this window. Nothing is installed or started on this computer.
+ * The first screen's lower half when OpenBot Cloud is picked: what it is, and the sign-in. This app
+ * is OpenBot on the person's computer, connected to OpenBot Cloud, where their Bots run: the same
+ * account, Bots and conversations as the web app. Cloud's address is built in, so there is nothing
+ * to type. Signing in is the same as connecting to any OpenBot that runs elsewhere
+ * (`useConnectToOpenBot` with that address): the shell checks the address, opens the person's
+ * browser to sign in (OAuth with PKCE, the way a native app signs in), and shows OpenBot Cloud in
+ * this window once they come back. OpenBot's own backend is not set up on this computer.
  *
  * While the browser is waited on, Cancel is the only control. What went wrong is the shell's
  * sentence in the same calm notice the address screen draws, and the button says what pressing it
@@ -94,8 +100,8 @@ export function CloudSignIn({
   return (
     <section className="cloud-sign-in" aria-label="OpenBot Cloud">
       <p className="lede">
-        Sign in with your OpenBot account, or create one. Your Bots and
-        conversations are the same here and at {host}.
+        This app connects to OpenBot Cloud, where your Bots run. Your account,
+        Bots and conversations are the same here and at {host}.
       </p>
       {phase === "waiting" ? (
         <>
@@ -145,10 +151,7 @@ export function CloudSignIn({
           {phase === "checking" ? (
             <StatusLine>Reaching OpenBot Cloud…</StatusLine>
           ) : (
-            <p className="footnote">
-              You'll sign in in your browser. Nothing is installed on this
-              computer.
-            </p>
+            <p className="footnote">{CLOUD_HAND_OFF}</p>
           )}
         </>
       )}

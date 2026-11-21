@@ -1044,6 +1044,18 @@ button.text-link.inline-link {
 
 .book-a-demo h2 {
   margin: 0;
+  scroll-margin-top: 20px;
+}
+
+/* Focused by Book a demo above, not by a person's Tab: no ring around a heading. */
+.book-a-demo h2:focus {
+  outline: none;
+}
+
+/* Book a demo, under where it runs: one button that takes the card down to the calendar. */
+.business-book {
+  display: flex;
+  margin-top: -4px;
 }
 
 .book-a-demo-line {

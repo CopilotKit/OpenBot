@@ -31,7 +31,7 @@ export const SELF_CONTAINED_BRIEF =
   "Needs a Mac or a 64-bit Windows PC with at least 4 CPU cores, 16 GB of memory and 40 GB of free disk space. Setup takes 1 to 10 minutes.";
 
 /** What the second choice is: OpenBot as we run it, signed in to from here and on the web. */
-export const CLOUD_SUMMARY = "We run it for you. Sign in and start right away.";
+export const CLOUD_SUMMARY = "Use OpenBot here. Your Bots run in our cloud.";
 
 /** OpenBot for Business: on a company's own cloud or on-prem, which books a call. */
 export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a call.";
