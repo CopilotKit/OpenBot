@@ -59,6 +59,17 @@ export const AI_PROVIDERS: AiProvider[] = [
     mark: "xai",
   },
   {
+    id: "cloudflare",
+    name: "Cloudflare",
+    summary:
+      "Sign in with Cloudflare to use AI Gateway models on your credits.",
+    // Never drawn: the row has no key or address to offer, so a plain browser does not list it.
+    keySummary:
+      "Sign in with Cloudflare to use AI Gateway models on your credits.",
+    logins: ["oauth"],
+    mark: "cloudflare",
+  },
+  {
     id: "unbiased",
     name: "Unbiased AI",
     summary: "Sign in with Unbiased AI to use Pareto, or use an API key.",
@@ -104,6 +115,15 @@ export const ENDPOINT_PRESETS: Partial<
     keyUrl: "https://platform.unbiased.ai/dashboard/keys",
     keyLink: "Get an Unbiased AI API key",
   },
+};
+
+/**
+ * The model a sign-in row starts with where the provider has no endpoint preset to take it from.
+ * Cloudflare's AI Gateway names a model by who serves it (`provider/model`), and this is the one
+ * new Bots run on (shared/model-providers.json), as the setup window's `signInModels`.
+ */
+export const SIGN_IN_MODELS: Partial<Record<AiConnectionProvider, string>> = {
+  cloudflare: "openai/gpt-5.5",
 };
 
 /**

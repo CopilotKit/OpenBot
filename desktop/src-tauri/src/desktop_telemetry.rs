@@ -2258,6 +2258,7 @@ mod tests {
             ("anthropic", "api_key"),
             ("google", "oauth"),
             ("xai", "oauth"),
+            ("cloudflare", "oauth"),
             ("compatible", "api_key"),
             ("compatible", "none"),
             ("none", "none"),

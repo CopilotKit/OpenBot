@@ -219,6 +219,7 @@ pub fn intent_for(provider: &str, login: &str) -> Option<ModelIntent> {
         ("openai", "plan") => ModelIntent::ChatGptPlan,
         ("google", "oauth") => ModelIntent::GoogleOauth,
         ("xai", "oauth") => ModelIntent::XaiOauth,
+        ("cloudflare", "oauth") => ModelIntent::CloudflareOauth,
         ("google" | "xai" | "unbiased" | "openai-compatible", "endpoint") => {
             ModelIntent::CompatibleEndpoint
         }
@@ -236,6 +237,7 @@ pub fn connection_setting(credential: &ModelCredential) -> Option<String> {
         ModelCredential::ChatGptPlan { .. } => ("openai", "plan"),
         ModelCredential::ProviderOAuth { provider, .. } => match provider.as_str() {
             "google" => ("google", "oauth"),
+            "cloudflare" => ("cloudflare", "oauth"),
             _ => ("xai", "oauth"),
         },
         ModelCredential::Compatible { base_url, .. } => (endpoint_provider(base_url), "endpoint"),
@@ -331,7 +333,7 @@ The settings Start writes that depend on the installation folder: the plan engin
 release's manifest; when the setup window's AI screen last saved a choice; and the files the server
 reads, at the paths the Compose file mounts.
 
-`OPENBOT_MODEL_OAUTH_FILE` names where a Google or xAI sign-in is kept whether or not one is the
+`OPENBOT_MODEL_OAUTH_FILE` names where a Google, xAI or Cloudflare sign-in is kept whether or not one is the
 connection now, so one made in the app reaches the server with no restart.
 */
 pub fn start_settings(root: &Path) -> BTreeMap<String, String> {
@@ -546,7 +548,10 @@ pub fn settle(engine: &Address, root: &Path, change: &Change) -> Result<Settleme
         Some(model)
             if matches!(
                 intent,
-                ModelIntent::CompatibleEndpoint | ModelIntent::GoogleOauth | ModelIntent::XaiOauth
+                ModelIntent::CompatibleEndpoint
+                    | ModelIntent::GoogleOauth
+                    | ModelIntent::XaiOauth
+                    | ModelIntent::CloudflareOauth
             ) =>
         {
             settings.insert("BOT_MODEL".into(), model.into());
@@ -651,7 +656,12 @@ pub fn read(root: &Path) -> AiConnection {
     };
     let model = matches!(
         kind,
-        Some(ModelIntent::CompatibleEndpoint | ModelIntent::GoogleOauth | ModelIntent::XaiOauth)
+        Some(
+            ModelIntent::CompatibleEndpoint
+                | ModelIntent::GoogleOauth
+                | ModelIntent::XaiOauth
+                | ModelIntent::CloudflareOauth
+        )
     )
     .then(|| named("BOT_MODEL"))
     .flatten();
@@ -756,6 +766,7 @@ mod tests {
             ("openai", "plan", ModelIntent::ChatGptPlan),
             ("google", "oauth", ModelIntent::GoogleOauth),
             ("xai", "oauth", ModelIntent::XaiOauth),
+            ("cloudflare", "oauth", ModelIntent::CloudflareOauth),
             ("google", "endpoint", ModelIntent::CompatibleEndpoint),
             ("xai", "endpoint", ModelIntent::CompatibleEndpoint),
             ("unbiased", "endpoint", ModelIntent::CompatibleEndpoint),

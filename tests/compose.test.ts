@@ -1426,7 +1426,7 @@ test("addresses the server's Bots and endpoints from inside the network", () => 
 });
 
 /**
- * A Google or xAI sign-in is a file the server renews itself, so it reaches the container as the
+ * A Google, xAI or Cloudflare sign-in is a file the server renews itself, so it reaches the container as the
  * folder it sits in: the renewal writes a sibling and renames it over the original.
  */
 test("mounts the model sign-in folder into the server, and only there", () => {

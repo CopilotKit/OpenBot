@@ -1438,6 +1438,7 @@ pub enum Provider {
     Anthropic,
     Google,
     Xai,
+    Cloudflare,
     Compatible,
     None,
 }
@@ -1836,7 +1837,7 @@ pub fn schema_json() -> serde_json::Value {
         "events": {
             "step_viewed": { "step": steps },
             "harness_chosen": { "harness": ["crewai", "llamaindex", "agno", "langgraph", "langgraph_ts", "google_adk", "pydantic_ai", "microsoft_agent_framework", "claude_agent_sdk", "strands", "ag2", "langroid", "mastra", "byo_url"] },
-            "model_chosen": { "provider": ["openai", "anthropic", "google", "xai", "compatible", "none"], "credential_path": ["subscription", "api_key", "oauth", "none"], "custom_base_url": "bool" },
+            "model_chosen": { "provider": ["openai", "anthropic", "google", "xai", "cloudflare", "compatible", "none"], "credential_path": ["subscription", "api_key", "oauth", "none"], "custom_base_url": "bool" },
             "engine_detected": { "engine": ["docker", "podman", "none"], "responding": "bool" },
             "engine_installed": { "engine": ["docker", "podman", "none"], "outcome": ["success", "failure"] },
             "windows_stage": { "outcome": ["ready", "wsl_absent", "wsl_one", "wsl_no_kernel", "virtual_machine_platform_disabled", "virtualization_disabled", "nested_virtualization_unavailable", "not_administrator", "check_failed"] },
@@ -2363,7 +2364,15 @@ mod tests {
         let schema = schema_json();
         assert_eq!(
             schema["events"]["model_chosen"]["provider"],
-            serde_json::json!(["openai", "anthropic", "google", "xai", "compatible", "none"])
+            serde_json::json!([
+                "openai",
+                "anthropic",
+                "google",
+                "xai",
+                "cloudflare",
+                "compatible",
+                "none"
+            ])
         );
         assert_eq!(
             schema["events"]["model_chosen"]["credential_path"],
@@ -2376,6 +2385,7 @@ mod tests {
             ("anthropic", "api_key"),
             ("google", "oauth"),
             ("xai", "oauth"),
+            ("cloudflare", "oauth"),
             ("compatible", "api_key"),
             ("compatible", "none"),
             ("none", "none"),

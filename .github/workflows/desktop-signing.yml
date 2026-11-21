@@ -187,6 +187,7 @@ jobs:
           # To read the release's container-images.json when this build is a candidate.
           GH_TOKEN: ${{ github.token }}
           OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_ID }}
+          OPENBOT_CLOUDFLARE_MODEL_OAUTH_CLIENT_ID: ${{ vars.OPENBOT_CLOUDFLARE_MODEL_OAUTH_CLIENT_ID }}
           OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET: ${{ secrets.OPENBOT_GOOGLE_MODEL_OAUTH_CLIENT_SECRET }}
           OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT: ${{ vars.OPENBOT_GOOGLE_MODEL_OAUTH_QUOTA_PROJECT }}
         run: bun scripts/signed-build.ts win32 x64 src-tauri/tauri.windows-signing.conf.json --bundles nsis
