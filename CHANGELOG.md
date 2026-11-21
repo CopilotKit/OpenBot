@@ -239,10 +239,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   app, which shows the same organizations, Bots and conversations as the web app. OpenBot's
   backend isn't set up on the computer. OpenBot for Business comes next, on your own cloud or
   on-prem with a demo to book, and so does connecting to your company's OpenBot by its address.
-  OpenBot (Self-Contained), everything on this computer, is a smaller choice under them that says
-  what the computer needs and how long setup takes. A computer that already runs OpenBot opens on
-  Self-Contained, as before. A build made with `VITE_OPENBOT_CLOUD_ENABLED=false` keeps the first
-  screen without OpenBot Cloud.
+  The address field asks for your company's OpenBot address and says who has it. OpenBot
+  (Self-Contained), everything on this computer, is a line at the foot of the screen, which opens
+  what the computer needs and Install. A build made with `VITE_OPENBOT_CLOUD_ENABLED=false` keeps
+  the first screen without OpenBot Cloud.
 - **OpenBot Desktop's back end moves to CopilotKit Intelligence 0.17.0-rc.4.** The bundled CLI
   moves to `copilotkit@3e64135`, so an install or update runs Intelligence 0.17.0-rc.4.
 - **Setup no longer stops for good after the back end's saved settings were deleted.** With

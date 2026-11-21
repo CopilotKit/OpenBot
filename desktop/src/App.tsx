@@ -1375,8 +1375,6 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         <Welcome
           // The same screen with the other choice picked: an OpenBot that runs elsewhere.
           hosting={step === "welcome" ? "this-computer" : "connect"}
-          // OpenBot is on this computer, or its setup got under way: Self-Contained is picked.
-          thisComputerChosen={!windowsUnchecked.current}
           onConnect={() => setStep("connect_openbot")}
           onThisComputer={() => setStep("welcome")}
           saved={{ address }}

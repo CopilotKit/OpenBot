@@ -938,7 +938,9 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         expect(laid).toEqual({ stacked: true, marks: true, oneLine: true });
         // And connecting to a company's own OpenBot, by the link under the rows: the address and Connect.
         await page.getByRole("button", { name: "Connect to it" }).click();
-        await page.getByLabel("OpenBot address", { exact: true }).waitFor();
+        await page
+          .getByLabel("Your company's OpenBot address", { exact: true })
+          .waitFor();
         await page.waitForTimeout(400);
         expect(
           await page.evaluate(() => {
@@ -956,10 +958,10 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
 
     /*
      * A build with OpenBot Cloud on: OpenBot Cloud and OpenBot for Business as the two rows, Cloud
-     * picked with its sign-in under them, and OpenBot (Self-Contained) on a smaller row under the
-     * link, its needs inside it. All of it fits, and so does Self-Contained picked, with Install.
+     * picked with its sign-in under them, and OpenBot (Self-Contained) a line at the card's foot.
+     * All of it fits, and so does Self-Contained opened, with Install, and the address.
      */
-    test(`at 1000x760 (${theme}), a build with OpenBot Cloud on opens on Cloud's sign-in, Self-Contained a smaller row under the rows, without the card scrolling`, async () => {
+    test(`at 1000x760 (${theme}), a build with OpenBot Cloud on opens on Cloud's sign-in, Self-Contained a line at the foot, without the card scrolling`, async () => {
       const page = await browser.newPage({
         viewport: { width: 1000, height: 760 },
         colorScheme: theme,
@@ -983,24 +985,17 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           const rows = [
             ...document.querySelectorAll("fieldset.picker.hosting > .tile"),
           ].map((row) => row.getBoundingClientRect());
-          const aside = document
-            .querySelector("fieldset.picker.hosting .tile-aside")
+          const foot = document.querySelector(
+            ".this-computer-foot",
+          ) as HTMLElement | null;
+          const footBox = foot?.getBoundingClientRect();
+          const signIn = [...document.querySelectorAll("button")]
+            .find((button) => button.textContent === "Sign in to OpenBot Cloud")
             ?.getBoundingClientRect();
-          const small = document
-            .querySelector(
-              "fieldset.picker.hosting .tile-option.this-computer-option",
-            )
-            ?.getBoundingClientRect();
-          const needs = document
-            .querySelector(
-              ".tile-option.this-computer-option .tile-option-needs",
-            )
-            ?.getBoundingClientRect();
-          const name = (selector: string) =>
-            Number.parseFloat(
-              getComputedStyle(document.querySelector(selector) as Element)
-                .fontSize,
-            );
+          const size = (element: Element | null | undefined) =>
+            element
+              ? Number.parseFloat(getComputedStyle(element).fontSize)
+              : Number.NaN;
           const business = document.querySelector(
             ".tile.with-marks",
           ) as HTMLElement;
@@ -1028,18 +1023,22 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
                   row.width === rows[0]?.width &&
                   (at === 0 || row.top >= (rows[at - 1]?.bottom ?? 0)),
               ),
-            // Self-Contained under the link, as wide as the rows, its name smaller than theirs and
-            // its needs inside it.
-            smaller:
-              !!aside &&
-              !!small &&
-              !!needs &&
-              small.top >= aside.bottom &&
-              small.width === rows[0]?.width &&
-              name(".tile-option.this-computer-option .tile-option-name") <
-                name("fieldset.picker.hosting .tile-name") &&
-              needs.bottom <= small.bottom &&
-              needs.right <= small.right,
+            // Self-Contained at the foot: the card's last element, below Cloud's sign-in, one line
+            // in smaller type than the rows' names, inside the card.
+            foot:
+              !!foot &&
+              !!footBox &&
+              !!signIn &&
+              foot.parentElement?.lastElementChild === foot &&
+              footBox.top >= signIn.bottom &&
+              footBox.bottom <= card.getBoundingClientRect().bottom &&
+              size(foot.querySelector(".this-computer-aside")) <
+                size(
+                  document.querySelector("fieldset.picker.hosting .tile-name"),
+                ) &&
+              (foot
+                .querySelector(".this-computer-aside")
+                ?.getBoundingClientRect().height ?? 99) <= 21,
             // The four clouds' marks inside OpenBot for Business's row, on one line, past its words.
             marks:
               marks.length === 4 &&
@@ -1070,7 +1069,7 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
             ["kubernetes", true],
           ],
           rows: true,
-          smaller: true,
+          foot: true,
           marks: true,
           oneLine: true,
         });
@@ -1132,26 +1131,38 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           });
         const booker = await page.evaluate(() => {
           const card = document.querySelector("main > .sheet") as HTMLElement;
-          card.scrollTop = card.scrollHeight;
           const view = card.getBoundingClientRect();
+          const element = document.querySelector(
+            'iframe[title="Booking calendar"]',
+          ) as HTMLElement;
+          // The calendar fits the card's visible area whole, scrolled to it.
+          element.scrollIntoView({ block: "center" });
+          const frame = element.getBoundingClientRect();
           const heading = document
             .querySelector("#book-a-demo-title")
             ?.getBoundingClientRect();
-          const frame = document
-            .querySelector('iframe[title="Booking calendar"]')
+          const calendar =
+            frame.height >= 320 &&
+            frame.top >= view.top &&
+            frame.bottom <= view.bottom;
+          // At the card's end, Self-Contained's line is last and in view, below the calendar.
+          card.scrollTop = card.scrollHeight;
+          const foot = document
+            .querySelector(".this-computer-foot")
             ?.getBoundingClientRect();
+          const below = element.getBoundingClientRect();
           return {
             page: document.documentElement.scrollHeight <= window.innerHeight,
             cardScrolls: card.scrollHeight > card.clientHeight + 1,
             sideways: card.scrollWidth - card.clientWidth <= 0,
-            // At the card's end the calendar is whole inside the card's visible area.
-            calendar:
-              !!frame &&
-              frame.height >= 320 &&
-              frame.top >= view.top &&
-              frame.bottom <= view.bottom,
-            // Its heading sits above it, reached by the same scroll.
-            heading: !!heading && !!frame && heading.bottom <= frame.top,
+            calendar,
+            // Its heading sits above it.
+            heading: !!heading && heading.bottom <= frame.top,
+            foot:
+              !!foot &&
+              foot.top >= below.bottom &&
+              foot.top >= view.top &&
+              foot.bottom <= view.bottom,
           };
         });
         expect(booker).toEqual({
@@ -1160,13 +1171,17 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           sideways: true,
           calendar: true,
           heading: true,
+          foot: true,
         });
         if (shots)
           await page.screenshot({
             path: `${shots}/welcome-on-business-end-${theme}.png`,
           });
-        // Self-Contained picked: what this computer needs and Install, still without a scrollbar.
-        await page.getByText("Everything runs on this computer.").click();
+        // Self-Contained opened at the foot: what this computer needs and Install, still without a
+        // scrollbar.
+        await page
+          .getByRole("button", { name: "Use OpenBot (Self-Contained)" })
+          .click();
         await page
           .getByRole("button", { name: "Install", exact: true })
           .waitFor();
@@ -1183,14 +1198,22 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           });
         // Connect to it: the address and Connect, still without a scrollbar.
         await page.getByRole("button", { name: "Connect to it" }).click();
-        await page.getByLabel("OpenBot address", { exact: true }).waitFor();
+        await page
+          .getByLabel("Your company's OpenBot address", { exact: true })
+          .waitFor();
+        // The pointer off the card, as a person's is once they type: nothing shows hovered.
+        await page.mouse.move(2, 2);
         await page.waitForTimeout(200);
         expect(
           await page.evaluate(() => {
             const card = document.querySelector("main > .sheet") as HTMLElement;
-            return card.scrollHeight - card.clientHeight;
+            return {
+              overflow: card.scrollHeight - card.clientHeight <= 0,
+              // Nothing looks picked: no row, and no shaded Self-Contained.
+              chosen: document.querySelectorAll(".chosen").length,
+            };
           }),
-        ).toBeLessThanOrEqual(0);
+        ).toEqual({ overflow: true, chosen: 0 });
         if (shots)
           await page.screenshot({
             path: `${shots}/welcome-on-connect-${theme}.png`,
@@ -1224,7 +1247,9 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         )
         .waitFor();
       expect(
-        await page.getByLabel("OpenBot address", { exact: true }).count(),
+        await page
+          .getByLabel("Your company's OpenBot address", { exact: true })
+          .count(),
       ).toBe(0);
       expect(
         await page
@@ -1259,7 +1284,9 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
       expect(shape.frame).toBe(660);
       // The way to connect is still under the rows, and leads to the address.
       await page.getByRole("button", { name: "Connect to it" }).click();
-      await page.getByLabel("OpenBot address", { exact: true }).waitFor();
+      await page
+        .getByLabel("Your company's OpenBot address", { exact: true })
+        .waitFor();
       expect(
         await page.locator('iframe[title="Booking calendar"]').count(),
       ).toBe(0);
