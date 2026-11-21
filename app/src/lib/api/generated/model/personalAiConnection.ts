@@ -13,7 +13,7 @@ export interface PersonalAiConnection {
   organization: OrganizationAiSummary;
   /** The AI the person's next run uses. personal: their own. organization: the organization's, which they have none of their own to put ahead of. none: neither, so Bots can't run for them yet. */
   uses: string;
-  /** Whether the person has to have an AI (their own or the organization's) before they use OpenBot. True on OpenBot Cloud, where CopilotKit provides no AI: while uses is none, the apps send them to connect their own, and the server runs no Bot for them. */
+  /** Whether the person has to have an AI (their own or the organization's) before they use OpenBot. True on OpenBot Cloud, which brings no AI of its own: while uses is none, the apps send them to connect their own, and the server runs no Bot for them. */
   required: boolean;
   /** Whether the person can set an AI connection of their own here. False where the organization's AI is the only one. */
   available: boolean;

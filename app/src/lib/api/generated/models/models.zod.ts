@@ -745,7 +745,7 @@ export const GetPersonalAiConnectionResponse = zod
     required: zod
       .boolean()
       .describe(
-        "Whether the person has to have an AI (their own or the organization's) before they use OpenBot. True on OpenBot Cloud, where CopilotKit provides no AI: while uses is none, the apps send them to connect their own, and the server runs no Bot for them.",
+        "Whether the person has to have an AI (their own or the organization's) before they use OpenBot. True on OpenBot Cloud, which brings no AI of its own: while uses is none, the apps send them to connect their own, and the server runs no Bot for them.",
       ),
     available: zod
       .boolean()
@@ -1021,7 +1021,7 @@ export const ReplacePersonalAiConnectionResponse = zod
     required: zod
       .boolean()
       .describe(
-        "Whether the person has to have an AI (their own or the organization's) before they use OpenBot. True on OpenBot Cloud, where CopilotKit provides no AI: while uses is none, the apps send them to connect their own, and the server runs no Bot for them.",
+        "Whether the person has to have an AI (their own or the organization's) before they use OpenBot. True on OpenBot Cloud, which brings no AI of its own: while uses is none, the apps send them to connect their own, and the server runs no Bot for them.",
       ),
     available: zod
       .boolean()
@@ -1231,7 +1231,7 @@ export const DeletePersonalAiConnectionResponse = zod
     required: zod
       .boolean()
       .describe(
-        "Whether the person has to have an AI (their own or the organization's) before they use OpenBot. True on OpenBot Cloud, where CopilotKit provides no AI: while uses is none, the apps send them to connect their own, and the server runs no Bot for them.",
+        "Whether the person has to have an AI (their own or the organization's) before they use OpenBot. True on OpenBot Cloud, which brings no AI of its own: while uses is none, the apps send them to connect their own, and the server runs no Bot for them.",
       ),
     available: zod
       .boolean()
