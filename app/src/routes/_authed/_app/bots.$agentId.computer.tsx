@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { BotSubpage } from "@/components/bot-profile/bot-subpage";
 import { ComputersPage } from "@/components/manage/computers-page";
+import { WindowsComputerChoice } from "@/components/windows-computer/windows-computer-choice";
 
 /**
  * This Bot's Computer: what is this Bot's own of where it works. Its folders on this computer
@@ -19,7 +20,12 @@ function ComputerPage() {
       description="Choose the folders this Bot can read on this computer, and manage its browser."
       title="Computer"
     >
-      {(agent) => <ComputersPage agentId={agent.id} />}
+      {(agent) => (
+        <>
+          <WindowsComputerChoice agentId={agent.id} />
+          <ComputersPage agentId={agent.id} />
+        </>
+      )}
     </BotSubpage>
   );
 }

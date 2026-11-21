@@ -31,6 +31,12 @@ export const getWindowsComputerResponseRecordingBufferedMin = 0;
 
 export const GetWindowsComputerResponse = zod
   .object({
+    botId: zod
+      .string()
+      .optional()
+      .describe(
+        "The Bot it is set up for: the one Bot that can be told to work on it (computer: windows).",
+      ),
     available: zod
       .boolean()
       .describe(

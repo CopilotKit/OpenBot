@@ -3,9 +3,12 @@ import {
   IconDeviceDesktopOff,
   IconTerminal2,
 } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { PageEmpty } from "@/components/layout/page-parts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { WindowsComputerView } from "@/components/windows-computer/windows-computer-page";
+import { agentQueryOptions } from "@/lib/agents/queries";
 import {
   followedView,
   onComputerViewRequest,
@@ -15,6 +18,7 @@ import {
 } from "@/lib/computers/panel-view";
 import { useComputerControl } from "@/lib/computers/use-control";
 import { useNoBotComputers } from "@/lib/deployment/queries";
+import { windowsComputerQueryOptions } from "@/lib/windows-computer/queries";
 import { ActivityLog } from "./activity-log";
 import { ComputerTerminal } from "./computer-terminal";
 import { ComputerView } from "./computer-view";
@@ -49,7 +53,12 @@ export function ComputerViewPanel({
    * Until the deployment has said which it is, nothing is drawn: the first read of the wheel is
    * refused at once where there are no computers, and would be on screen as a failure.
    */
+  const bot = useQuery(agentQueryOptions(agentId));
   const noComputers = useNoBotComputers();
+  // A Bot set to work on a Windows computer (Bot.computer) shows that one: one computer at a time.
+  if (bot.data?.computer === "windows")
+    return <WindowsComputerPanel botId={agentId} />;
+  if (bot.isPending) return null;
   if (noComputers === undefined) return null;
   if (noComputers)
     return (
@@ -62,6 +71,30 @@ export function ComputerViewPanel({
       </section>
     );
   return <LiveComputerPanel agentId={agentId} name={name} />;
+}
+
+/**
+ * The panel for a Bot that works on the person's Windows computer: its live screen, who is using it, and
+ * its recording. Nothing of the browser computer is drawn: that Bot has none.
+ */
+function WindowsComputerPanel({ botId }: { botId: string }) {
+  const computer = useQuery(windowsComputerQueryOptions());
+  if (computer.isPending) return null;
+  return (
+    <section aria-label="Windows computer sidebar" className="px-4 pb-4">
+      {computer.error ? (
+        <p className="pt-4 text-destructive text-sm" role="alert">
+          Couldn't load your Windows computer. Try again in a moment.
+        </p>
+      ) : !computer.data || computer.data.botId !== botId ? (
+        <PageEmpty icon={IconDeviceDesktopOff} title="No Windows computer">
+          There's no Windows computer set up for this Bot.
+        </PageEmpty>
+      ) : (
+        <WindowsComputerView computer={computer.data} />
+      )}
+    </section>
+  );
 }
 
 /** The panel where there are computers for Bots: this Bot's screen, its terminal and what it did. */

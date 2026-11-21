@@ -41,8 +41,10 @@ import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
 export type BotFacts = {
   /** The components this Bot may answer with, by name, with their published descriptions. */
   components: ReadonlyMap<string, string> | undefined;
-  /** Who the Bot belongs to, as far as driving its computer goes. Undefined: could not be read. */
-  profile: { visibility: string; canManage: boolean } | undefined;
+  /** Who the Bot belongs to, and which computer it works on. Undefined: could not be read. */
+  profile:
+    | { visibility: string; canManage: boolean; computer?: string }
+    | undefined;
   /** What this deployment lets the person do at all. Undefined: could not be read. */
   capabilities: Partial<Record<CapabilityKey, boolean>> | undefined;
   /** The skills this Bot holds, by slug. */

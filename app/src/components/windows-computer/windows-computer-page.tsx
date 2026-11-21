@@ -145,10 +145,22 @@ export function WindowsComputerPage() {
         </PageEmpty>
       </PageShell>
     );
-  return <WindowsComputerView computer={computer.data} />;
+  return (
+    <PageShell description={DESCRIPTION} title={TITLE}>
+      <WindowsComputerView computer={computer.data} />
+    </PageShell>
+  );
 }
 
-function WindowsComputerView({ computer }: { computer: WindowsComputer }) {
+/**
+ * The Windows computer's screen, who is using it and its recording, without a page around it: the
+ * page above, and a conversation's computer panel for a Bot that works on it (computer-panel.tsx).
+ */
+export function WindowsComputerView({
+  computer,
+}: {
+  computer: WindowsComputer;
+}) {
   const [problem, setProblem] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
@@ -161,7 +173,7 @@ function WindowsComputerView({ computer }: { computer: WindowsComputer }) {
   const changeError = take.error ?? release.error;
 
   return (
-    <PageShell description={DESCRIPTION} title={TITLE}>
+    <>
       <div className="flex flex-col gap-3">
         <p className="text-muted-foreground text-sm">{NOT_MASKED}</p>
         <div className="relative min-h-48 w-full overflow-hidden rounded-lg border border-border bg-muted">
@@ -240,7 +252,7 @@ function WindowsComputerView({ computer }: { computer: WindowsComputer }) {
       <PageSection title="Recording">
         <RecordingRow computer={computer} />
       </PageSection>
-    </PageShell>
+    </>
   );
 }
 

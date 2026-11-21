@@ -90,11 +90,11 @@ import {
 } from "@/lib/channels/attachments";
 import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
+import { fileSize, kindLabel } from "@/lib/computers/sent-file";
 import type { CardPlace } from "@/lib/copilot/carry-on";
 import { foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
 import { useComponentTest } from "@/lib/copilot/tool-steps";
-import { fileSize, kindLabel } from "@/lib/computers/sent-file";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   type FolderNames,
@@ -144,7 +144,6 @@ import {
 } from "./attachment-view";
 import { ChannelAvatar } from "./avatar";
 import { isBrowserStep } from "./browser-activity";
-import { FileTypeIcon } from "./file-icon";
 import {
   attachmentModality,
   type SentAttachment,
@@ -152,6 +151,7 @@ import {
 } from "./chat-messages";
 import { splitChatOrigin } from "./chat-origin";
 import type { QueuedMessage } from "./composer";
+import { FileTypeIcon } from "./file-icon";
 import { FollowScroll, RESUME_PX, useFollowIntent } from "./follow-intent";
 import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
 import { usePacedReveal } from "./paced-reveal";
@@ -164,6 +164,7 @@ import {
   type ToolGroup,
   type TranscriptItem,
   useDrawnTool,
+  useReportsDesktopActivity,
 } from "./tool-activity";
 import { ToolRenderBoundary, toolCallFinal } from "./tool-boundary";
 import { ToolLine } from "./tool-line";
@@ -1600,6 +1601,7 @@ const ToolRow = memo(function ToolRow({
   spokeAfter,
 }: ToolRowProps) {
   const [only] = steps;
+  useReportsDesktopActivity(steps, active);
   return (
     <TurnInFlightContext.Provider value={inFlight}>
       <Arriving>

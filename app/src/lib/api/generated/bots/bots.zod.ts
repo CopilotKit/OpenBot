@@ -114,6 +114,12 @@ export const ListBotsResponse = zod.object({
           .describe(
             "Whether its owner asked for it to have a computer of its own. isolationActive says whether it has one now.",
           ),
+        computer: zod
+          .string()
+          .optional()
+          .describe(
+            "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+          ),
         instructions: zod
           .string()
           .optional()
@@ -381,6 +387,12 @@ export const CreateBotResponse = zod.object({
         .describe(
           "Whether its owner asked for it to have a computer of its own. isolationActive says whether it has one now.",
         ),
+      computer: zod
+        .string()
+        .optional()
+        .describe(
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+        ),
       instructions: zod
         .string()
         .optional()
@@ -529,6 +541,12 @@ export const GetBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether its owner asked for it to have a computer of its own. isolationActive says whether it has one now.",
+        ),
+      computer: zod
+        .string()
+        .optional()
+        .describe(
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
         ),
       instructions: zod
         .string()
@@ -714,6 +732,12 @@ export const UpdateBotBody = zod
       .describe(
         "Whether it gets a computer of its own. Absent leaves it as it is. True needs the owner's Isolated Bots switch.",
       ),
+    computer: zod
+      .enum(["browser", "windows"])
+      .optional()
+      .describe(
+        "The computer it works on. browser unless set; windows only for the Bot a Windows computer is set up for, and refused for any other. Absent leaves it as it is. Experimental.",
+      ),
     instructions: zod
       .string()
       .min(1)
@@ -793,6 +817,12 @@ export const UpdateBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether its owner asked for it to have a computer of its own. isolationActive says whether it has one now.",
+        ),
+      computer: zod
+        .string()
+        .optional()
+        .describe(
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
         ),
       instructions: zod
         .string()
@@ -1085,6 +1115,12 @@ export const DuplicateBotResponse = zod.object({
         .describe(
           "Whether its owner asked for it to have a computer of its own. isolationActive says whether it has one now.",
         ),
+      computer: zod
+        .string()
+        .optional()
+        .describe(
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+        ),
       instructions: zod
         .string()
         .optional()
@@ -1245,6 +1281,12 @@ export const HideBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether its owner asked for it to have a computer of its own. isolationActive says whether it has one now.",
+        ),
+      computer: zod
+        .string()
+        .optional()
+        .describe(
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
         ),
       instructions: zod
         .string()
@@ -1407,6 +1449,12 @@ export const UnhideBotResponse = zod.object({
         .describe(
           "Whether its owner asked for it to have a computer of its own. isolationActive says whether it has one now.",
         ),
+      computer: zod
+        .string()
+        .optional()
+        .describe(
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+        ),
       instructions: zod
         .string()
         .optional()
@@ -1568,6 +1616,12 @@ export const PinBotResponse = zod.object({
         .describe(
           "Whether its owner asked for it to have a computer of its own. isolationActive says whether it has one now.",
         ),
+      computer: zod
+        .string()
+        .optional()
+        .describe(
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
+        ),
       instructions: zod
         .string()
         .optional()
@@ -1728,6 +1782,12 @@ export const UnpinBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether its owner asked for it to have a computer of its own. isolationActive says whether it has one now.",
+        ),
+      computer: zod
+        .string()
+        .optional()
+        .describe(
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
         ),
       instructions: zod
         .string()
@@ -1931,6 +1991,12 @@ export const RevokeBotCallbackTokenResponse = zod.object({
         .boolean()
         .describe(
           "Whether its owner asked for it to have a computer of its own. isolationActive says whether it has one now.",
+        ),
+      computer: zod
+        .string()
+        .optional()
+        .describe(
+          "The computer it works on: browser, the Bot's own browser computer, which every Bot has unless told otherwise; or windows, a person's Windows computer, which only the Bot that computer is set up for can work on. One at a time. Experimental.",
         ),
       instructions: zod
         .string()
