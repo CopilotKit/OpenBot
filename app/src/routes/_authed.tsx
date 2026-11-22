@@ -7,6 +7,7 @@ import { TeamFeaturesDialog } from "../components/edition/team-features-dialog";
 import { CommandMenu } from "../components/navigation/command-menu";
 import { NewOrganizationDialog } from "../components/organizations/new-organization-dialog";
 import { OrganizationBoundary } from "../components/organizations/organization-boundary";
+import { aiConnectionRequired } from "../lib/ai-connection/queries";
 import {
   connectedThroughDesktop,
   signOutThroughDesktop,
@@ -49,6 +50,19 @@ export const Route = createFileRoute("/_authed")({
     if (needsOnboarding(user) && location.pathname !== "/onboarding") {
       rememberInvitationLink(location.pathname);
       throw redirect({ to: "/onboarding" });
+    }
+    /*
+     * Where OpenBot provides no AI (OpenBot Cloud), somebody whose runs have none, neither their own
+     * nor their organization's, connects their own before anything else: from anywhere, and
+     * somebody who finished onboarding before that step existed too. The onboarding route admits
+     * them while it holds.
+     */
+    if (
+      location.pathname !== "/onboarding" &&
+      (await aiConnectionRequired(context.queryClient))
+    ) {
+      rememberInvitationLink(location.pathname);
+      throw redirect({ to: "/onboarding", search: { step: "ai" } });
     }
     // Before any conversation is drawn, so a long-named action's step never shows its cut name.
     await learnShortenedToolNames(context.queryClient);

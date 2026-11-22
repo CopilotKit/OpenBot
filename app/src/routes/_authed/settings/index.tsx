@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import React from "react";
 import {
@@ -13,6 +14,7 @@ import { StandingInstructionsRow } from "@/components/settings/standing-instruct
 import { StarOnGitHubSection } from "@/components/settings/star-on-github";
 import { ThemeRow } from "@/components/settings/theme-row";
 import { UsageDataSection } from "@/components/settings/usage-data";
+import { YourAiSection } from "@/components/settings/your-ai";
 import {
   Item,
   ItemActions,
@@ -21,6 +23,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { personalAiConnectionQueryOptions } from "@/lib/ai-connection/queries";
 import { formatHotkey, HOTKEYS } from "@/lib/hotkeys/hotkeys";
 import { SkinPicker } from "@/skins/skin-picker";
 
@@ -37,6 +40,7 @@ function RouteComponent() {
    * Connected accounts used to be a section below. It is its own screen now: a connector can need
    * more from a person than one switch, and a section cannot grow a page's worth of that.
    */
+  const personal = useQuery(personalAiConnectionQueryOptions());
   return (
     <PageShell
       description="Set your name, how OpenBot looks, and the instructions every Bot follows."
@@ -55,8 +59,13 @@ function RouteComponent() {
       </PageSection>
       {/* Only where the organization has identity providers: the person's company account, and the way to link it. */}
       <CompanySignInSection />
-      {/* Only in OpenBot Desktop, which holds the AI connection and changes it in its own window. */}
-      <AiModelSection />
+      {/* Where each person brings their own AI (OpenBot Cloud): theirs, or that Bots use the organization's. */}
+      <YourAiSection />
+      {/*
+       * The organization's AI, for an admin who may change it. Beside "Your AI" it says it is the
+       * organization's, for everyone in it.
+       */}
+      <AiModelSection organizationWide={personal.data?.available === true} />
       {/* Only in OpenBot Desktop, which sends usage data and keeps this choice. */}
       <UsageDataSection />
       <PageSection title="Appearance">
