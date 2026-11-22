@@ -683,6 +683,7 @@ export function WorkbenchLoaded({
   const stillShownRef = useRef<(() => void) | null>(null);
   const {
     warnings,
+    checkedAt,
     flush: checkLayout,
     hold: holdLayout,
   } = useLayoutWatch(frameEl, {
@@ -1588,8 +1589,12 @@ export function WorkbenchLoaded({
    * The list keeps every row of the run: after a seek back, the rows that the replay has not
    * reached show muted, not removed, so the list does not shrink under the pointer. While a hover jumps to a
    * warning, it keeps the rows it had, so the row under the pointer stays. A new scene, window,
-   * answers or settings is a new run, and starts the rows again. A kept row the clock passed
-   * without the run finding it again (fixed, and the frame reloaded) goes.
+   * answers or settings is a new run, and starts the rows again. A kept row the window's checks
+   * passed without finding it again (fixed, and the frame reloaded) goes.
+   *
+   * That time is the watch's `checkedAt`, not `now`: after a seek back the new window's warnings
+   * start empty while `now` still holds the old window's time for a render, and a merge at that
+   * time dropped every row behind it, so the list showed nothing.
    */
   const runKey = JSON.stringify([
     state.scene,
@@ -1608,7 +1613,7 @@ export function WorkbenchLoaded({
     shownWarningsRef.current.warnings = mergeRunWarnings(
       shownWarningsRef.current.warnings,
       warnings,
-      now,
+      checkedAt,
     );
   /** The rows the run found up to now; frozen with the rows while a hover jumps. */
   const foundWarningsRef = useRef(warnings);

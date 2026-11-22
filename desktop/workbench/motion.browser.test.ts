@@ -193,6 +193,41 @@ describe.skipIf(!asked)("the workbench's motion", () => {
     }
   }, 60_000);
 
+  // A seek back starts a new window, whose warnings start empty. The rows stay: the ones the replay
+  // has not reached show muted. A merge at the old window's time once emptied the list.
+  test("a seek back keeps the rows; the ones after the new time show muted", async () => {
+    if (!browser) throw new Error("No browser.");
+    const page = await browser.newPage({
+      viewport: { width: 1600, height: 1000 },
+    });
+    try {
+      await openScene(page, "install-mac");
+      const rows = () =>
+        page.evaluate(() => ({
+          all: document.querySelectorAll(".wb-warning-list li").length,
+          muted: document.querySelectorAll(".wb-warning-list .wb-warning-later")
+            .length,
+        }));
+      await page.evaluate(() => window.__workbenchPage?.seek(240_000));
+      await page.waitForTimeout(300);
+      const atEnd = await rows();
+      expect(atEnd.all).toBeGreaterThan(0);
+      expect(atEnd.muted).toBe(0);
+      await page.evaluate(() => window.__workbenchPage?.seek(10_000));
+      await page.waitForTimeout(300);
+      const after = await rows();
+      // What the replay found up to 0:10 shows as found; every other row stays, muted.
+      const found = await page.evaluate(
+        () => window.__workbenchPage?.warnings().length ?? 0,
+      );
+      expect(after.all).toBe(atEnd.all);
+      expect(after.muted).toBe(atEnd.all - found);
+      expect(after.muted).toBeGreaterThan(0);
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
+
   for (const reducedMotion of ["no-preference", "reduce"] as const) {
     test(`the Install marker, or its ghost when the screen changed at once, shows for at least 400 ms (${reducedMotion})`, async () => {
       if (!browser) throw new Error("No browser.");

@@ -1,6 +1,8 @@
 // Workbench only. One Vite plugin for both workbench servers: desktop/vite.workbench.config.ts and
-// app/vite.workbench.config.ts. No bare imports: the app's typecheck reads this file in a job
-// that has no desktop install, so the server type below is the part of Vite's that it uses.
+// app/vite.workbench.config.ts. No package imports (Node's own modules only): the app's typecheck
+// reads this file in a job that has no desktop install, so the server type below is the part of
+// Vite's that it uses.
+import { type FSWatcher, watch } from "node:fs";
 
 /** The part of Vite's dev server that the plugin uses. */
 type WatchedServer = {
@@ -13,6 +15,7 @@ type WatchedServer = {
     unwatch(path: string): unknown;
     on(event: "change", listener: (file: string) => void): unknown;
   };
+  httpServer?: { once(event: "close", listener: () => void): unknown } | null;
 };
 
 /**
@@ -31,15 +34,41 @@ export function noConfigRestart() {
       const configFile = server.config.configFile;
       const deps = [...server.config.configFileDependencies];
       server.config.configFileDependencies.length = 0;
-      if (configFile) server.watcher.unwatch(configFile);
       const told = new Set<string>();
-      server.watcher.on("change", (file) => {
-        if (!deps.includes(file) || told.has(file)) return;
+      const tell = (file: string) => {
+        if (told.has(file)) return;
         told.add(file);
         server.config.logger.warn(
           `Workbench: ${file} changed. Stop and start the workbench to use the change.`,
         );
+      };
+      server.watcher.on("change", (file) => {
+        if (file !== configFile && deps.includes(file)) tell(file);
       });
+      if (!configFile) return;
+      // Vite restarts on any change event for the config file, so its watcher must not see the file
+      // (unwatch also makes the watcher ignore it). That also means no change event reaches the
+      // listener above: the file gets a watcher of its own, which only tells. It closes after the
+      // first change (one notice is enough; an editor's save by rename also ends a file watch) and
+      // when the server closes.
+      server.watcher.unwatch(configFile);
+      let own: FSWatcher | null = null;
+      const close = () => {
+        own?.close();
+        own = null;
+      };
+      try {
+        own = watch(configFile, () => {
+          close();
+          tell(configFile);
+        });
+        own.on("error", close);
+        // It never keeps the process up on its own.
+        own.unref();
+      } catch {
+        return;
+      }
+      server.httpServer?.once("close", close);
     },
   };
 }

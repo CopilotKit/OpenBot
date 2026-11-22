@@ -22,13 +22,14 @@ export function warningKey(warning: Warning): string {
 /**
  * The rows of a run after the run found `current` again (a seek back replays it from the start):
  * every row it found now, and every row it had before that it has not found yet and that is still
- * ahead of the clock (`at`, in ms). The list then does not shrink under the pointer; the rows not
- * found yet show muted (see `found`).
+ * ahead of `at`. The list then does not shrink under the pointer; the rows not found yet show
+ * muted (see `found`).
  *
- * A kept row the clock went past without finding it is gone from the run (the frame reloaded after
- * a fix, for example), so it is dropped, not left muted as "later in the run". The watch stamps a
- * warning with the clock's time when it finds it, never earlier than the page's clock, so a row
- * the run finds again is never dropped first.
+ * `at` (ms) is the time of the last check of the window that found `current` (the layout watch's
+ * `checkedAt`): 0 for a new window, so a seek back keeps every row. A kept row earlier than that is
+ * gone from the run (the frame reloaded after a fix, for example), so it is dropped, not left muted
+ * as "later in the run". A check stamps what it finds with its own time, so a row the run finds
+ * again is in `current` by the time `at` passes it.
  */
 export function mergeRunWarnings(
   kept: readonly Warning[],

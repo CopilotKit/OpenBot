@@ -263,6 +263,19 @@ test("mergeRunWarnings drops a kept row the clock went past without finding it a
   expect(mergeRunWarnings([early, late], [again], 12000)).toEqual([again]);
 });
 
+// The page merges at the layout watch's checkedAt. A seek back gives a new window: no warnings,
+// checked at 0. Every row stays, and the replay finds the early ones again.
+test("a seek back keeps every row: the new window starts at 0 with no warnings", () => {
+  const early = clipped(1000, "Title");
+  const late = clipped(9000, "Footer");
+  const atEnd = mergeRunWarnings([], [early, late], 60_000);
+  const newWindow = mergeRunWarnings(atEnd, [], 0);
+  expect(newWindow).toEqual([early, late]);
+  // The replay walked to 0:02: it found the early row; the late one waits ahead, muted.
+  const replayed = mergeRunWarnings(newWindow, [early], 2000);
+  expect(replayed).toEqual([early, late]);
+});
+
 test("after a seek back the list keeps its rows: the ones not reached show muted, in the same place", () => {
   const early = clipped(1000, "Title");
   const late = clipped(9000, "Footer");
