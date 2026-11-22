@@ -54,7 +54,7 @@ The page has three columns:
 - In the center: the window, the notices and the layout warnings.
 - On the right: Comment mode, the run controls, the Window panel and the panels that fold open.
 
-The page has the CopilotKit look: a lavender-gray ground with soft blur circles, glass panels, Plus Jakarta Sans for text and Spline Sans Mono for code. The fonts load from Google Fonts. When your computer uses a dark theme, the page is dark too. The look changes only the page around the window. The window and its contents show as the real app shows them.
+The page uses the CopilotKit colors on a plain, quiet ground, with glass panels. The text uses the sans-serif font of your computer. Times, routes, JSON and code use its monospace font. The page loads no fonts from the web. When your computer uses a dark theme, the page is dark too. The look changes only the page around the window. The window and its contents show as the real app shows them.
 
 ## Scenes and runs
 
@@ -209,7 +209,7 @@ The Window panel sets how the frame looks:
 
 For an app scene, the panel also has the **App** fieldset:
 
-- **Host**: OpenBot Desktop or Browser. With Browser, the frame shows a browser bar with the route.
+- **Host**: OpenBot Desktop or Browser. With Browser, the frame shows a browser bar with the route that the app shows now. When the app goes to another route, for example after a redirect, the bar shows the new route.
 - **Signed in as**: As the scene says, Member, Admin or Owner.
 - **Motion**: Still or Real.
 
@@ -233,6 +233,7 @@ The prompt is a Markdown message. It holds:
 
 - Your comment.
 - The scene, the time, the window settings and a link to the same frame.
+- For an app scene: the route that the app frame shows now, and the host (OpenBot Desktop or Browser).
 - The `bun run workbench:shot` command that shoots the same frame.
 - For one element: its label, its component, its box, its gaps, its distance from the grid, its main styles and its text.
 - For an area: a table of the elements in it (first 30), and a summary of vertical gaps, font sizes and padding.
@@ -409,6 +410,8 @@ The workbench page holds the window in an iframe (`WindowFrame.tsx`). For a desk
 
 For an app scene, the iframe loads the app at its route. The app server adds three scripts to the app's HTML. `preboot.js` runs first. It puts in the memory storage and a `matchMedia` that follows the workbench theme and motion. Then `clockBoot.ts` installs the page clock and the seeded `Math.random`. Then `frameBoot.ts` installs the fakes, runs the Desktop page scripts and starts the run. These run before `main.tsx`. After the app draws its first element, `appBoot.ts` tells the page that the frame is ready. The page loads the app scenes from `/__app/workbench/scenes/index.ts`. The frame finds its scene by id in the same file.
 
+If the app frame loads again during a seek (for example, Vite reloads it), the seek waits for the new load. It does not end on a window that is not ready. The app server's lines about optimized dependencies and reloads go to `server.log` in the folder `<tmpdir>/openbot-workbench-<port>/`. Look there to see if a reload occurred.
+
 The page clock (`clock.ts`) replaces `Date`, `setTimeout`, `setInterval` and `performance.now` in the iframe. Time moves only when the workbench says so. This makes every frame repeatable. A seek forward runs the clock in steps of at most 500 ms, and it stops at each run step. In this way every timer and every step runs in order, and the window can draw between them. A seek back loads the window again and plays forward to the new time.
 
 Nothing of the workbench goes into a shipped build:
@@ -444,9 +447,11 @@ OPENBOT_APP_BROWSER=1 bun test workbench/appDeterminism.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/appShot.browser.test.ts
 ```
 
-- `appFrame.browser.test.ts` checks the app frame: it boots, the bridge and the fake API answer, and Vite does not load it two times.
+- `appFrame.browser.test.ts` checks the app frame: it boots, the bridge and the fake API answer, and Vite does not load it two times. It also checks that a seek ends when the frame loads again.
 - `appDeterminism.browser.test.ts` checks that an app frame is the same after a seek back and after a reload.
 - `appShot.browser.test.ts` runs the CLI on an app scene and on an unknown scene.
+
+You can also run all seven files in one `bun test` command, as CI does. Each file gets the workbench server in its `beforeAll` hook and gives it back with `stop()` in its `afterAll` hook. The hooks have their own time limits, because bun gives a hook only 5 seconds. `bun test` does not send the process `exit` event, so a file that does not call `stop()` leaves the server running.
 
 `desktop/workbench/shippedBuild.test.ts` runs a full build. It takes up to three minutes. To run the full build check of the app, run this in the repository root:
 

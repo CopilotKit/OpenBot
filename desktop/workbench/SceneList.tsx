@@ -44,7 +44,8 @@ export function SceneList({
                 <button
                   key={scene.id}
                   type="button"
-                  title={scene.id}
+                  // A long title ends in an ellipsis: the tooltip has all of it, and the id for links and the CLI.
+                  title={`${scene.title} (${scene.id})`}
                   aria-current={isCurrent ? "true" : undefined}
                   className={isCurrent ? "wb-scene-current" : undefined}
                   onClick={() => onPick(scene.id)}

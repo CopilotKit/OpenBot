@@ -117,6 +117,8 @@ type FrameWindow = Window & typeof globalThis;
 /** The loaded window: its clock, its run, whether it shows the app, and how to stop listening to it. */
 type Live = {
   win: FrameWindow;
+  /** The document the window had when it booted. Another one means the frame loaded again. */
+  doc: Document;
   clock: PageClock;
   info: RunInfo;
   app: boolean;
@@ -221,7 +223,17 @@ function waitsOnClock(
   return false;
 }
 
-type RouterLike = { state?: { status?: string; isLoading?: boolean } };
+type RouterLike = {
+  state?: { status?: string; isLoading?: boolean };
+  /** The router's history: it calls back after each push, replace and back. */
+  history?: { subscribe?(listener: () => void): () => void };
+};
+
+/** The route an app frame shows now: its path, query and hash (the frame's address is the route). */
+function liveRouteOf(win: Window): string {
+  const { pathname, search, hash } = win.location;
+  return `${pathname}${search}${hash}`;
+}
 
 /**
  * True while the app frame still works on real time: a request to the fake API is on its way, or
@@ -572,6 +584,8 @@ export function WorkbenchLoaded({
   const handedBackRef = useRef<string | null>(null);
   /** The person closed the handback card. */
   const [handbackClosed, setHandbackClosed] = useState(false);
+  /** The route the app frame shows now, after its redirects and navigations. Null before it boots. */
+  const [liveRoute, setLiveRoute] = useState<string | null>(null);
   /** Comment mode: a click or a drag in the window picks what a comment is about. */
   const [commenting, setCommenting] = useState(false);
   /** The loaded window, as state, so the C key also works with the focus in it. */
@@ -731,6 +745,7 @@ export function WorkbenchLoaded({
     handedBackRef.current = null;
     setHandedBack(null);
     setHandbackClosed(false);
+    setLiveRoute(null);
   }, [holdLayout, stopLoop]);
 
   /** Tells the person once per clock time that a shot there can show a screen that still draws. */
@@ -765,6 +780,8 @@ export function WorkbenchLoaded({
     async (iframe: HTMLIFrameElement) => {
       const win = iframe.contentWindow as FrameWindow | null;
       if (!win) return;
+      // A load of the same iframe again (a reload of the app frame) is not ready until it walked.
+      readyRef.current = false;
       bootFailedRef.current = false;
       if (!(await booted(win))) {
         // A newer frame took this one's place, or the window closed: not a timeout.
@@ -793,8 +810,19 @@ export function WorkbenchLoaded({
       );
       const hasRun = current ? sceneSteps(current).length > 0 : false;
       const app = current ? isApp(current) : false;
+      // The app changes its route without a load (a redirect, a link): read it at each change.
+      const readRoute = () => {
+        if (app && !win.closed) setLiveRoute(liveRouteOf(win));
+      };
+      readRoute();
+      const router = app
+        ? (win as { __TSR_ROUTER__?: RouterLike }).__TSR_ROUTER__
+        : undefined;
+      const offHistory = router?.history?.subscribe?.(readRoute);
+      if (app) win.addEventListener("popstate", readRoute);
       const off = clock.onTick((ms) => {
         setNow(ms);
+        readRoute();
         checkHandover();
         // A run stops at its end, at every speed. A scene without a run plays on at 1×.
         if (hasRun && clock.playing() && ms >= info.end) {
@@ -807,6 +835,7 @@ export function WorkbenchLoaded({
       // so a new call or answer reads the handover again too.
       const offChange = win.__workbench?.onChange((change) => {
         if (change.kind !== "emit") checkHandover();
+        readRoute();
         // An app button that hands back to OpenBot Desktop.
         if (app && change.kind === "settled" && isHandback(change.call)) {
           handedBackRef.current = change.call.command;
@@ -831,6 +860,7 @@ export function WorkbenchLoaded({
       setFrameSockets(win.__workbenchSockets ?? null);
       const live: Live = {
         win,
+        doc: win.document,
         clock,
         info,
         app,
@@ -838,6 +868,8 @@ export function WorkbenchLoaded({
           off();
           offChange?.();
           offActions?.();
+          offHistory?.();
+          win.removeEventListener("popstate", readRoute);
         },
       };
       liveRef.current = live;
@@ -847,6 +879,7 @@ export function WorkbenchLoaded({
       if (liveRef.current !== live) return;
       setNow(clock.now());
       checkHandover();
+      readRoute();
       if (target === 0 && !hasRun) {
         clock.play(1);
         setPlaying(true);
@@ -857,20 +890,29 @@ export function WorkbenchLoaded({
   );
 
   const whenReady = useCallback(async () => {
-    if (!readyRef.current && bootFailedRef.current)
-      throw new Error("The window did not start in 10 seconds.");
-    if (!readyRef.current)
-      await new Promise<void>((resolve, reject) =>
-        waitersRef.current.push({ resolve, reject }),
-      );
-    const live = liveRef.current;
-    if (live) await fontsReady(live);
-    // An app frame does work on real time after the clock stops: ready only when it is quiet.
-    if (live?.app) {
-      const quiet = await waitQuiet(live.win, () => liveRef.current !== live);
-      if (!quiet && liveRef.current === live) noteNotQuiet(live.clock.now());
+    // The frame can load again while this waits (Vite reloads an app frame, for example). Then
+    // this waits for the new load, so a seek never ends on a window that is not ready.
+    for (;;) {
+      if (!readyRef.current && bootFailedRef.current)
+        throw new Error("The window did not start in 10 seconds.");
+      if (!readyRef.current)
+        await new Promise<void>((resolve, reject) =>
+          waitersRef.current.push({ resolve, reject }),
+        );
+      const live = liveRef.current;
+      if (live) await fontsReady(live);
+      // An app frame does work on real time after the clock stops: ready only when it is quiet.
+      if (live?.app) {
+        const quiet = await waitQuiet(live.win, () => liveRef.current !== live);
+        if (!quiet && liveRef.current === live) noteNotQuiet(live.clock.now());
+      }
+      // Not a bare frame of the window: a window that unloads drops its animation frames, and the
+      // seek would then never end ("Resulting promise was garbage collected" in a CLI shot).
+      await frameOrFallback(live?.win ?? window);
+      const reloaded =
+        live !== null && (live !== liveRef.current || live.win.document !== live.doc);
+      if (readyRef.current && !reloaded) return;
     }
-    await nextFrame(live?.win ?? window);
   }, [noteNotQuiet]);
 
   /** Removes the highlight of a layout warning. A play, a step, a new scene or a seek does this. */
@@ -1190,15 +1232,6 @@ export function WorkbenchLoaded({
 
   return (
     <div className="wb-page">
-      {/* The six CopilotKit blur circles behind the columns (workbench.css). */}
-      <div className="wb-bg" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-        <span />
-        <span />
-        <span />
-      </div>
       <aside className="wb-side wb-side-left">
         <ImportLogPanel
           scenes={imported}
@@ -1251,7 +1284,7 @@ export function WorkbenchLoaded({
               src={config ? frameUrl(config) : (appScene?.start.route ?? "/")}
               frameKey={frameKey}
               host={host}
-              address={appScene?.start.route}
+              address={liveRoute ?? appScene?.start.route}
               width={state.window.width}
               height={state.window.height}
               os={state.window.os}
@@ -1266,6 +1299,12 @@ export function WorkbenchLoaded({
                       scene: { id: scene.id, title: scene.title },
                       atSeconds: toSeconds(now),
                       window: state.window,
+                      app: appScene
+                        ? {
+                            route: liveRoute ?? appScene.start.route,
+                            host,
+                          }
+                        : undefined,
                     }
                   : null
               }

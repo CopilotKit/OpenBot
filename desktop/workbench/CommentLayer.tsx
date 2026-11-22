@@ -1,5 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { buildPrompt, type CommentTarget } from "./commentPrompt";
+import {
+  buildPrompt,
+  type CommentContext,
+  type CommentTarget,
+} from "./commentPrompt";
 import type { Box } from "./geometry";
 import { Measurement, measure, type Reading } from "./Inspector";
 import { pickArea, pickElement } from "./pickElement";
@@ -12,6 +16,8 @@ export type CommentLayerProps = {
   /** Seconds from the scene start, on the window's clock. */
   atSeconds: number;
   window: WindowSettings;
+  /** Set for an app scene: the live route of the app frame and where the app runs. */
+  app?: CommentContext["app"];
   gridStep?: number;
 };
 
@@ -106,6 +112,7 @@ export function CommentLayer({
   scene,
   atSeconds,
   window: settings,
+  app,
   gridStep = 4,
 }: CommentLayerProps) {
   const [hover, setHover] = useState<Reading | null>(null);
@@ -289,6 +296,7 @@ export function CommentLayer({
       atSeconds,
       window: settings,
       link: window.location.href,
+      app,
     });
     try {
       await navigator.clipboard.writeText(text);
@@ -390,7 +398,7 @@ export function CommentLayer({
             border: "1px solid var(--wb-border, #d4d4d8)",
             borderRadius: 8,
             boxShadow: "0 8px 24px rgb(0 0 0 / 0.3)",
-            font: "13px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif",
+            font: "13px/1.4 var(--ck-sans, system-ui, sans-serif)",
           }}
         >
           <div

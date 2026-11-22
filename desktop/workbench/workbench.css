@@ -1,13 +1,13 @@
 /*
- * The workbench chrome in the CopilotKit theme (copilotkit-ui-theme skill): a lavender-gray
- * ground with six blur circles, glass panels with white borders, Plus Jakarta Sans and
- * Spline Sans Mono, a 4px grid. The fonts load from a <link> in index.html.
+ * The workbench chrome: CopilotKit tokens (copilotkit-ui-theme skill) on a plain, quiet ground.
+ * Glass panels with white borders, a 4px grid. Text is the system sans-serif; times, routes,
+ * JSON and code are the system monospace. No web fonts.
  * The window frame (windowFrame.css) stays neutral and is not themed here.
  */
 :root {
   color-scheme: light dark;
   /* CopilotKit tokens */
-  --ck-surface-main: #dedee9;
+  --ck-surface-main: #f3f3f5;
   --ck-surface-container: #ffffff;
   --ck-surface-hovered: #fafcfa;
   --ck-border-default: #ffffff;
@@ -26,13 +26,15 @@
   --ck-radius-xs: 4px;
   --ck-radius-sm: 8px;
   --ck-radius-full: 9999px;
-  --ck-circle-orange: rgba(255, 172, 77, 0.2);
-  --ck-circle-yellow: rgba(255, 243, 136, 0.3);
-  --ck-circle-grey: #c9c9da;
-  --ck-circle-white: #f3f3fc;
   --ck-notice: #fff3b0;
-  --ck-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
-  --ck-mono: "Spline Sans Mono", ui-monospace, SFMono-Regular, monospace;
+  /* The system's own fonts, so nothing loads from the web. Monospace only for times, routes, JSON
+     and code. */
+  --ck-sans:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --ck-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  /* The glass of a card over the window: it must read on a light and on a dark window. */
+  --wb-glass-card: rgba(255, 255, 255, 0.82);
 
   /* The names the rest of the workbench uses (CommentLayer.tsx reads these). */
   --wb-bg: var(--ck-surface-main);
@@ -49,13 +51,12 @@
 }
 
 /*
- * Dark: derived from the same tokens. The ground keeps the lavender hue (240deg) at low
- * lightness; the glass is a dim white; text uses the light end of the grey scale; the blur
- * circles keep their colors at a lower strength.
+ * Dark: derived from the same tokens. The ground is a plain near-black; the glass is a dim white;
+ * text uses the light end of the grey scale.
  */
 @media (prefers-color-scheme: dark) {
   :root {
-    --ck-surface-main: #1b1b23;
+    --ck-surface-main: #111114;
     --ck-surface-container: #26262f;
     --ck-surface-hovered: #2e2e38;
     --ck-border-default: rgba(255, 255, 255, 0.1);
@@ -71,10 +72,7 @@
     --ck-elevation-sm: 0px 1px 3px 0px rgba(0, 0, 0, 0.3);
     --ck-elevation-md: 0px 6px 6px -2px rgba(0, 0, 0, 0.3);
     --ck-elevation-lg: 0px 16px 24px -8px rgba(0, 0, 0, 0.45);
-    --ck-circle-orange: rgba(255, 172, 77, 0.08);
-    --ck-circle-yellow: rgba(255, 243, 136, 0.06);
-    --ck-circle-grey: #2a2a3a;
-    --ck-circle-white: #30304a;
+    --wb-glass-card: rgba(38, 38, 47, 0.82);
     --ck-notice: #4a3f12;
   }
 }
@@ -94,8 +92,8 @@ body {
   background: var(--ck-surface-main);
   color: var(--ck-text-primary);
   font-family: var(--ck-sans);
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 13px;
+  line-height: 20px;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -113,83 +111,12 @@ textarea {
   font-weight: 500;
 }
 
-/* The page wrapper holds the blur circles, so it clips them and stacks the columns over them. */
 .wb-page {
-  position: relative;
-  overflow: hidden;
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr) 260px;
   gap: 8px;
   height: 100%;
   padding: 8px;
-}
-
-/* Six blur circles behind the content (CopilotCloud Figma specs). */
-.wb-bg {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-}
-
-.wb-bg > span {
-  position: absolute;
-  z-index: 0;
-  border-radius: 50%;
-  filter: blur(103px);
-}
-
-.wb-bg > span:nth-child(1) {
-  width: 446px;
-  height: 446px;
-  left: 1040px;
-  top: 11px;
-  background: var(--ck-circle-orange);
-}
-
-.wb-bg > span:nth-child(2) {
-  width: 609px;
-  height: 609px;
-  left: 1339px;
-  top: 625px;
-  background: var(--ck-circle-grey);
-}
-
-.wb-bg > span:nth-child(3) {
-  width: 609px;
-  height: 609px;
-  left: 670px;
-  top: -365px;
-  background: var(--ck-circle-grey);
-}
-
-.wb-bg > span:nth-child(4) {
-  width: 609px;
-  height: 609px;
-  left: 508px;
-  top: 702px;
-  background: var(--ck-circle-white);
-}
-
-.wb-bg > span:nth-child(5) {
-  width: 446px;
-  height: 446px;
-  left: 128px;
-  top: 331px;
-  background: var(--ck-circle-yellow);
-}
-
-.wb-bg > span:nth-child(6) {
-  width: 446px;
-  height: 446px;
-  left: -205px;
-  top: 803px;
-  background: var(--ck-circle-orange);
-}
-
-.wb-page > :not(.wb-bg) {
-  position: relative;
-  z-index: 1;
 }
 
 /* Glass panels: the scene list column, the right panel and the warnings area. */
@@ -205,13 +132,13 @@ textarea {
   padding: 16px;
 }
 
-/* Panel titles: "Import a log", "Scenes", "Window". Light, as the CopilotKit app title. */
+/* Panel titles: "Import a log", "Scenes", "Window". */
 .wb-side h2 {
   margin: 0 0 8px;
   padding: 0 4px;
-  font-size: 18px;
+  font-size: 15px;
   line-height: 20px;
-  font-weight: 300;
+  font-weight: 600;
 }
 
 /* Section title with an extending line. */
@@ -222,9 +149,9 @@ textarea {
   gap: 8px;
   margin: 16px 0 8px;
   padding: 0 4px;
-  font-size: 10px;
-  line-height: 12px;
-  font-weight: 400;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--ck-text-secondary);
@@ -244,9 +171,9 @@ textarea {
 .wb-notice button,
 .wb-handover-card button {
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
-  line-height: 16px;
+  line-height: 20px;
   color: var(--ck-text-primary);
   background: var(--ck-white-65);
   border: 1px solid var(--ck-border-default);
@@ -276,7 +203,7 @@ textarea {
 .wb-side select,
 .wb-side textarea {
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ck-text-primary);
   background: var(--ck-surface-container);
   border: 1px solid var(--ck-border-container);
@@ -326,7 +253,8 @@ textarea {
 
 .wb-side legend {
   padding: 0 4px;
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--ck-text-secondary);
@@ -340,7 +268,7 @@ textarea {
   padding: 4px 12px;
   text-align: left;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 20px;
   /* One line each, so the list is dense: a long title ends in an ellipsis. */
   white-space: nowrap;
@@ -356,6 +284,7 @@ textarea {
 }
 
 .wb-side nav button.wb-scene-current {
+  font-weight: 500;
   background: var(--ck-white-70);
 }
 
@@ -438,8 +367,8 @@ textarea {
 /* A warning row: the list item pattern. */
 .wb-under button {
   font: inherit;
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 13px;
+  line-height: 20px;
   color: inherit;
   background: transparent;
   border: 0;
@@ -479,8 +408,8 @@ textarea {
   padding: 4px;
   border-radius: var(--ck-radius-xs);
   cursor: pointer;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 13px;
+  line-height: 20px;
   font-weight: 500;
   overflow-wrap: anywhere;
 }
@@ -537,13 +466,16 @@ textarea {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: color-mix(in srgb, var(--ck-surface-main) 80%, transparent);
+  background: color-mix(in srgb, var(--ck-surface-main) 40%, transparent);
 }
 
+/* Glass over the window: the window shows through, blurred, on a light or a dark window. */
 .wb-handover-card {
-  max-width: 360px;
+  max-width: 400px;
   padding: 16px 20px;
-  background: var(--ck-surface-container);
+  background: var(--wb-glass-card);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
   border: 2px solid var(--ck-border-default);
   border-radius: var(--ck-radius-sm);
   box-shadow: var(--ck-elevation-lg);
@@ -551,15 +483,15 @@ textarea {
 
 .wb-handover-card h2 {
   margin: 0 0 8px;
-  font-size: 18px;
+  font-size: 15px;
   line-height: 20px;
-  font-weight: 300;
+  font-weight: 600;
 }
 
 .wb-handover-card p {
   margin: 0 0 12px;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 13px;
+  line-height: 20px;
   color: var(--ck-text-secondary);
 }
 

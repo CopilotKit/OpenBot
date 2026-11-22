@@ -101,3 +101,12 @@ test("a scene with an unknown group shows under Other, last", () => {
     { group: "Other", items: ["Lost one"] },
   ]);
 });
+
+test("a scene row's tooltip has its full title and its id", () => {
+  const { getByText } = render(
+    <SceneList scenes={scenes} current="i1" onPick={() => {}} />,
+  );
+  expect(getByText("Install two").getAttribute("title")).toBe(
+    "Install two (i2)",
+  );
+});
