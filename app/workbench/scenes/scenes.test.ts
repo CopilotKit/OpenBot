@@ -116,4 +116,29 @@ describe("app scenes", () => {
       });
     }
   });
+
+  // The first scene set of the design (docs/superpowers/specs/2026-11-23-app-workbench-design.md,
+  // section 8). It holds the two handover targets of desktop/workbench/handover.ts:
+  // "app-onboarding" after an install and "app-home-bots" after a connect.
+  test("the first scene set is there", () => {
+    const ids = new Set(APP_SCENES.map((scene) => scene.id));
+    const missing = [
+      "app-onboarding",
+      "app-home-no-bots",
+      "app-home-bots",
+      "app-update-offered",
+      "app-settings-ai",
+      "app-settings-ai-change",
+      "app-settings-ai-refused",
+      "app-settings-usage-data",
+      "app-settings-usage-data-locked",
+      "app-settings-this-computer",
+      "app-settings-this-computer-browser",
+      "app-settings-move-to-cloud",
+      "app-conversation-tools",
+      "app-signed-out",
+      "app-connection-lost",
+    ].filter((id) => !ids.has(id));
+    expect(missing).toEqual([]);
+  });
 });
