@@ -9,6 +9,7 @@ import {
 import { motion, useReducedMotion } from "motion/react";
 import * as React from "react";
 import { ALWAYS_ASKS_SHORT } from "@/components/approvals/ask-first-copy";
+import { useAiStep } from "@/components/onboarding/ai-step";
 import { AskFirstSwitch } from "@/components/onboarding/ask-first-switch";
 import { BookingCalendar } from "@/components/onboarding/booking-calendar";
 import { IntroReel } from "@/components/onboarding/demos/intro-reel";
@@ -20,7 +21,6 @@ import {
   OnboardingWizard,
 } from "@/components/onboarding/onboarding-wizard";
 import { Button } from "@/components/ui/button";
-import { useAiStep } from "@/components/onboarding/ai-step";
 import {
   aiConnectionRequired,
   needsAiConnection,
@@ -29,6 +29,10 @@ import {
 import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
+import {
+  afterOnboarding,
+  onboardingDestination,
+} from "@/lib/onboarding/destination";
 import {
   advanceOnboardingMutationOptions,
   completeOnboardingMutationOptions,
@@ -78,12 +82,19 @@ export const Route = createFileRoute("/_authed/onboarding")({
    * WHERE SOMEBODY IS LIVES IN THE ADDRESS. `?step=<id>` is the step on screen, so a reload stays
    * on it, and browser Back and Forward walk the steps. Anything else is ignored.
    */
-  validateSearch: (search: Record<string, unknown>): { step?: StepId } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { step?: StepId; next?: string } => ({
     // Named even when absent: the router lays this over the raw search, so a key left out would
     // keep whatever was typed into the address.
     step: isStepId(search.step) ? search.step : undefined,
+    /*
+     * Where the gate found the person headed (`routes/_authed.tsx`), kept on every step's address
+     * and followed by the last step's button. Only a page of this app.
+     */
+    next: onboardingDestination(search.next),
   }),
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context, search }) => {
     const user = await context.queryClient.ensureQueryData(
       currentUserQueryOptions(),
     );
@@ -96,7 +107,7 @@ export const Route = createFileRoute("/_authed/onboarding")({
     // Asked every time, not only for somebody who finished: the step list reads it from the cache.
     const aiRequired = await aiConnectionRequired(context.queryClient);
     if (!needsOnboarding(user) && !aiRequired) {
-      throw redirect({ to: "/" });
+      throw redirect({ href: afterOnboarding(search.next) });
     }
   },
   component: RouteComponent,
@@ -329,10 +340,17 @@ function RouteComponent() {
   const saved = reachable(stepForNumber(me.data?.onboarding?.step));
   const asked = reachable(isStepId(search.step) ? search.step : undefined);
   const current: StepId = asked ?? saved ?? ids[0] ?? "welcome";
+  // Where the gate found them headed, kept on every step's address so a reload keeps it too.
+  const next = search.next;
+  const keepNext = next ? { next } : {};
   React.useEffect(() => {
     if (asked !== undefined && asked === search.step) return;
-    navigate({ to: "/onboarding", search: { step: current }, replace: true });
-  }, [navigate, current, asked, search.step]);
+    navigate({
+      to: "/onboarding",
+      search: next ? { step: current, next } : { step: current },
+      replace: true,
+    });
+  }, [navigate, current, asked, search.step, next]);
 
   // Saved wherever the person goes, by Continue, Back or the browser.
   const savedStep = me.data?.onboarding?.step;
@@ -371,7 +389,7 @@ function RouteComponent() {
       way === "forward" ? { onboardingFrom: current } : {};
     navigate({
       to: "/onboarding",
-      search: { step: to },
+      search: { step: to, ...keepNext },
       replace: way === "back",
       state,
     });
@@ -397,9 +415,13 @@ function RouteComponent() {
   React.useEffect(() => {
     if (!leaving) return;
     // Navigation must also complete in a background tab, where animation frames may pause.
-    const timer = setTimeout(() => navigate({ to: "/" }), reduced ? 0 : 300);
+    // On to where the gate found them headed, else home.
+    const timer = setTimeout(
+      () => navigate({ href: afterOnboarding(next) }),
+      reduced ? 0 : 300,
+    );
     return () => clearTimeout(timer);
-  }, [leaving, navigate, reduced]);
+  }, [leaving, navigate, reduced, next]);
 
   const name = useNameStep({ finish, finished });
   const selfhost = useBookDemoStep();
