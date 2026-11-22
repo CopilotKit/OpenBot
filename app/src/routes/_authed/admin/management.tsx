@@ -551,6 +551,14 @@ function Connected({
           description="Managed updates stop, and you upgrade OpenBot yourself. Connect turns them back on."
           title="Turn off managed updates"
         />
+      ) : status.agentRemovedWithChart === true ? (
+        // The chart's agent, removed with OpenBot's release when management was turned off with
+        // Helm: there is no openbot-agent release, so no uninstall command. Disconnect finishes.
+        <PageSection
+          action={disconnectButton}
+          description={REMOVED_WITH_CHART}
+          title="Disconnect"
+        />
       ) : (
         <PageSection
           description="Uninstall the management agent with Helm, then choose Disconnect. OpenBot keeps running as it is, and you upgrade it yourself from then on."
@@ -570,4 +578,7 @@ function Connected({
   );
 }
 
+/** For an agent installed as its own Helm release (the Helm command, or the release that runs upgrades). */
 const UNINSTALL = "helm uninstall openbot-agent --namespace openbot-system";
+const REMOVED_WITH_CHART =
+  "Turning management off with Helm removed the management agent along with OpenBot's own release, so there is nothing to uninstall. Choose Disconnect to finish. OpenBot keeps running as it is, and you upgrade it yourself from then on.";
