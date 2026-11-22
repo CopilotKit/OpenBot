@@ -85,6 +85,12 @@ export const GetManagementEnrollmentResponse = zod
       .describe(
         "True when OpenBot's own chart installs the management agent beside it (`management.enabled`, on by default), so connecting needs no Helm command and OpenBot connects by itself. False when the chart turned it off: connecting then gives helmCommand to install the agent by hand. Present in every state.",
       ),
+    agentRemovedWithChart: zod
+      .boolean()
+      .optional()
+      .describe(
+        "True when OpenBot is connected through the agent its own chart installed, and the chart has since turned management off (`management.enabled=false`, so agentInstalledByChart is false). That Helm upgrade removed the agent along with OpenBot's own release, so there is no Helm release to uninstall: Disconnect retires the install at the service at once. Absent when the connected agent is a release of its own (installed with helmCommand, or the openbot-agent release that runs upgrades), which is uninstalled with Helm before Disconnect, and in every other state.",
+      ),
     installName: zod
       .string()
       .min(1)
@@ -242,6 +248,12 @@ export const StartManagementEnrollmentResponse = zod
       .describe(
         "True when OpenBot's own chart installs the management agent beside it (`management.enabled`, on by default), so connecting needs no Helm command and OpenBot connects by itself. False when the chart turned it off: connecting then gives helmCommand to install the agent by hand. Present in every state.",
       ),
+    agentRemovedWithChart: zod
+      .boolean()
+      .optional()
+      .describe(
+        "True when OpenBot is connected through the agent its own chart installed, and the chart has since turned management off (`management.enabled=false`, so agentInstalledByChart is false). That Helm upgrade removed the agent along with OpenBot's own release, so there is no Helm release to uninstall: Disconnect retires the install at the service at once. Absent when the connected agent is a release of its own (installed with helmCommand, or the openbot-agent release that runs upgrades), which is uninstalled with Helm before Disconnect, and in every other state.",
+      ),
     installName: zod
       .string()
       .min(1)
@@ -306,7 +318,7 @@ export const StartManagementEnrollmentResponse = zod
   );
 
 /**
- * Stop a connection that is under way, or disconnect a connected one, and record that an administrator opted out, so OpenBot doesn't connect itself again (opted-out) until somebody starts it again with startManagementEnrollment. Stopping forgets the code and the one-time token, so the agent can no longer collect it. CopilotKit's management service is told: a code nobody approved yet is withdrawn, so its approval page refuses it, and an install it already made is retired. Nothing is changed in the cluster. Not connected answers 204 too, and records the opt-out. Connected with the agent OpenBot's chart installed (agentInstalledByChart true), it retires the install at the service at once, which stops the agent's managed updates though it keeps running, and answers 204. Connected with an agent installed with the Helm command, it finishes disconnecting after that agent is uninstalled with Helm: while the service still hears from the agent it answers 409, and once the agent hasn't reported in for more than five minutes it retires the install at the service, forgets the connection and answers 204, so OpenBot can be connected again later. Telling the service is best effort: out of reach, OpenBot stops anyway and lastError says the service wasn't told. Connected with the service out of reach, the last heartbeat OpenBot saw decides, and a recent one answers 502. Only an administrator of the organization `default` may stop it, and only where getManagementEnrollment applies.
+ * Stop a connection that is under way, or disconnect a connected one, and record that an administrator opted out, so OpenBot doesn't connect itself again (opted-out) until somebody starts it again with startManagementEnrollment. Stopping forgets the code and the one-time token, so the agent can no longer collect it. CopilotKit's management service is told: a code nobody approved yet is withdrawn, so its approval page refuses it, and an install it already made is retired. Nothing is changed in the cluster. Not connected answers 204 too, and records the opt-out. Connected with the agent OpenBot's chart installed (agentInstalledByChart true), it retires the install at the service at once, which stops the agent's managed updates though it keeps running, and answers 204. The same goes for an agent the chart installed before management was turned off with Helm (agentRemovedWithChart true): that upgrade already removed it. Connected with an agent installed as its own Helm release, it finishes disconnecting after that agent is uninstalled with Helm: while the service still hears from the agent it answers 409, and once the agent hasn't reported in for more than five minutes it retires the install at the service, forgets the connection and answers 204, so OpenBot can be connected again later. Telling the service is best effort: out of reach, OpenBot stops anyway and lastError says the service wasn't told. Connected with the service out of reach, the last heartbeat OpenBot saw decides, and a recent one answers 502. Only an administrator of the organization `default` may stop it, and only where getManagementEnrollment applies.
  * @summary Stop connecting this OpenBot to CopilotKit management
  */
 
