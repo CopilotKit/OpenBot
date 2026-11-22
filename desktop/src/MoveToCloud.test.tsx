@@ -243,6 +243,9 @@ test("Keep records the answer and shows OpenBot, and the next launch never asks 
   await userEvent.click(
     view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
   );
+  // Keep picked: the note is about moving later, not about what a move removes (box B).
+  expect(view.queryByText(/Nothing is removed/)).toBe(null);
+  view.getByText("You can still move to OpenBot Cloud later in Settings.");
   await userEvent.click(
     view.getByRole("button", { name: "Keep OpenBot on this computer" }),
   );

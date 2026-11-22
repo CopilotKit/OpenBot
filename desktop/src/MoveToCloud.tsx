@@ -105,6 +105,10 @@ export const WHAT_MOVES =
 export const NOTHING_REMOVED_UNTIL_CHECKED =
   "Nothing is removed from this computer until everything has arrived in OpenBot Cloud and been checked.";
 
+/** Under the choice while Keep is picked: the move stays on offer. */
+export const MOVE_LATER_IN_SETTINGS =
+  "You can still move to OpenBot Cloud later in Settings.";
+
 /** Said when a move stopped: the one thing the person needs to know first. */
 export const NOTHING_WAS_REMOVED = "Nothing was removed from this computer.";
 
@@ -540,7 +544,11 @@ function Choice({
       {keeping ? (
         <StatusLine>Opening OpenBot…</StatusLine>
       ) : (
-        <p className="footnote">{NOTHING_REMOVED_UNTIL_CHECKED}</p>
+        <p className="footnote">
+          {picked === "cloud"
+            ? NOTHING_REMOVED_UNTIL_CHECKED
+            : MOVE_LATER_IN_SETTINGS}
+        </p>
       )}
     </Sheet>
   );
