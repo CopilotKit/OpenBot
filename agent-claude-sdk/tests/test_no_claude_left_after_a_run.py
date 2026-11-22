@@ -330,12 +330,8 @@ def test_no_claude_is_left_when_its_tool_does_not_stop(harness, stuck_tool, capl
             second = asyncio.create_task(stop())
             await asyncio.gather(first, second)
             await asyncio.gather(request, return_exceptions=True)
-            # The SDK's MCP server really does overrun its 5 seconds.
-            overran = "SDK MCP server 'ag_ui' did not stop within 5.0s"
-            deadline = time.monotonic() + GONE_WITHIN
-            while overran not in caplog.text and time.monotonic() < deadline:
-                await asyncio.sleep(0.25)
-            assert overran in caplog.text
             assert await left_after() == [], "Claude Code outlived its query"
+        # The SDK's MCP server really did overrun its 5 seconds before Claude Code was gone.
+        assert "SDK MCP server 'ag_ui' did not stop within 5.0s" in caplog.text
 
     asyncio.run(scenario())
