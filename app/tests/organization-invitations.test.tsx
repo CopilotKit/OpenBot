@@ -1444,7 +1444,7 @@ describe("invitations on a hosted OpenBot", () => {
       page.getAllByRole("button", { name: /^Cancel invitation for/ }),
     ).toHaveLength(3);
     expect(await inviteDialogSays(app)).toBe(
-      "OpenBot by CopilotKit emails them the invitation, and they accept it from that email. It lasts 7 days.",
+      "They get an email from OpenBot by CopilotKit and accept the invitation from it. It lasts 7 days.",
     );
   });
 });

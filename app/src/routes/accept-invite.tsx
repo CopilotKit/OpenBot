@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
  * Where the button in a hosted OpenBot's invitation email opens: `?ticket=` is the invitation's
  * one-time ticket and `?organization=` the OpenBot organization it invites to. `__clerk_ticket` is
  * the same ticket under the name the hosted sign-in gives it, when somebody opens the hosted sign-in's
- * own invitation link and it sends them here.
+ * own invitation link and it sends them here, with `__clerk_status` beside it (see `invitationFrom`).
  *
  * Not behind sign-in: the person invited usually has no OpenBot account yet. The page says it is
  * joining, then leaves for the hosted sign-in carrying the ticket, which signs them in or up with it
@@ -27,11 +27,10 @@ import { cn } from "@/lib/utils";
  * not become a number, or a different ticket.
  */
 export const Route = createFileRoute("/accept-invite")({
-  validateSearch: (
-    search: Record<string, unknown>,
-  ): { ticket?: string; __clerk_ticket?: string; organization?: string } => ({
+  validateSearch: (search: Record<string, unknown>): AcceptInviteSearch => ({
     ...searchTextEntry("ticket", search.ticket),
     ...searchTextEntry("__clerk_ticket", search.__clerk_ticket),
+    ...searchTextEntry("__clerk_status", search.__clerk_status),
     ...searchTextEntry("organization", search.organization),
   }),
   beforeLoad: async ({ context }) => {
@@ -44,20 +43,37 @@ export const Route = createFileRoute("/accept-invite")({
   component: AcceptInviteScreen,
 });
 
-/** The invitation the address carries, or null when it carries no ticket. */
-function invitationFrom(search: {
+type AcceptInviteSearch = {
   ticket?: string;
   __clerk_ticket?: string;
+  __clerk_status?: string;
   organization?: string;
-}): HostedInvitation | null {
+};
+
+/**
+ * What the hosted sign-in should carry for the invitation in the address: its ticket and
+ * organization; only the organization once the hosted sign-in says it is already accepted; or null
+ * when the address carries no invitation at all.
+ *
+ * `__clerk_status=complete` is the hosted sign-in reporting that the person already had an account
+ * and is signed in there, with the invitation accepted. The ticket is spent then, so it is not
+ * passed on, and the person still has to sign in to this OpenBot, in that organization.
+ */
+function invitationFrom(
+  search: AcceptInviteSearch,
+): { invitation?: HostedInvitation } | null {
+  const organizationId = search.organization?.trim() || undefined;
+  if (search.__clerk_status === "complete")
+    return organizationId ? { invitation: { organizationId } } : {};
   const ticket = (search.ticket ?? search.__clerk_ticket)?.trim();
   if (!ticket) return null;
-  const organizationId = search.organization?.trim();
-  return organizationId ? { ticket, organizationId } : { ticket };
+  return {
+    invitation: organizationId ? { ticket, organizationId } : { ticket },
+  };
 }
 
 function AcceptInviteScreen() {
-  const invitation = invitationFrom(Route.useSearch());
+  const carried = invitationFrom(Route.useSearch());
   const signIn = useQuery(authProvidersQueryOptions());
   const hosted = signIn.data?.hosted === true;
   /*
@@ -66,8 +82,8 @@ function AcceptInviteScreen() {
    * the person straight out again.
    */
   const leaveFor =
-    invitation !== null && hosted
-      ? hostedSignInAddress(window.location.origin, invitation)
+    carried !== null && hosted
+      ? hostedSignInAddress(window.location.origin, carried.invitation)
       : null;
 
   useEffect(() => {
@@ -106,7 +122,7 @@ function AcceptInviteScreen() {
     <AcceptInviteFrame
       title="Couldn't open the invitation"
       description={
-        invitation === null
+        carried === null
           ? "This link is missing part of the invitation. Open it again from your email, or sign in to see your invitations."
           : "Sign in to see your invitations."
       }

@@ -21,7 +21,8 @@ export function hostedSignInAddress(
 ): string {
   const query = [`returnTo=${encodeURIComponent(returnTo)}`];
   if (invitation) {
-    query.push(`invitationTicket=${encodeURIComponent(invitation.ticket)}`);
+    if (invitation.ticket)
+      query.push(`invitationTicket=${encodeURIComponent(invitation.ticket)}`);
     if (invitation.organizationId)
       query.push(
         `organizationId=${encodeURIComponent(invitation.organizationId)}`,
@@ -34,12 +35,12 @@ export function hostedSignInAddress(
  * An invitation to an organization on a hosted OpenBot, as its email's button carries it: the
  * one-time ticket from the hosted sign-in, and the OpenBot organization it invites to. The hosted
  * sign-in takes the ticket instead of asking the person to sign up again, and the server lands them
- * working in that organization.
+ * working in that organization. An invitation the hosted sign-in has already accepted has no ticket
+ * left to carry, only the organization to land in.
  */
-export type HostedInvitation = {
-  ticket: string;
-  organizationId?: string;
-};
+export type HostedInvitation =
+  | { ticket: string; organizationId?: string }
+  | { ticket?: undefined; organizationId: string };
 
 /**
  * The address that signs this browser out of OpenBot by CopilotKit and brings it back to `returnTo`, an address

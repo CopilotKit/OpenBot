@@ -167,7 +167,9 @@ test("signed out, the invitation's link says it is joining and leaves for the ho
 });
 
 test("the hosted sign-in's own ticket name works too, and a ticket of digits stays the ticket it was", async () => {
-  openApp("/accept-invite?__clerk_ticket=12345678901234567890&organization=O");
+  openApp(
+    "/accept-invite?organization=O&__clerk_ticket=12345678901234567890&__clerk_status=sign_up",
+  );
   await waitFor(() =>
     expect(new URL(window.location.href).pathname).toBe(
       "/api/auth/hosted/sign-in",
@@ -178,6 +180,24 @@ test("the hosted sign-in's own ticket name works too, and a ticket of digits sta
     "12345678901234567890",
   );
   expect(left.searchParams.get("organizationId")).toBe("O");
+});
+
+test("an invitation the hosted sign-in already accepted signs in to that organization without the spent ticket", async () => {
+  const view = openApp(
+    "/accept-invite?organization=O&__clerk_ticket=spent&__clerk_status=complete",
+  );
+  await view.findByRole("heading", { name: "Joining your organization…" });
+  await waitFor(() =>
+    expect(new URL(window.location.href).pathname).toBe(
+      "/api/auth/hosted/sign-in",
+    ),
+  );
+  const left = new URL(window.location.href);
+  expect(left.searchParams.has("invitationTicket")).toBe(false);
+  expect(left.searchParams.get("organizationId")).toBe("O");
+  expect(new URL(left.searchParams.get("returnTo") as string).origin).toBe(
+    origin(),
+  );
 });
 
 test("with no ticket the page says so and offers a way into OpenBot, and goes nowhere", async () => {

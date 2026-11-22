@@ -289,7 +289,7 @@ function InviteDialog({
               <DialogTitle>Invite to {organization.name}</DialogTitle>
               <DialogDescription>
                 {hosted
-                  ? "OpenBot by CopilotKit emails them the invitation, and they accept it from that email. It lasts 7 days."
+                  ? "They get an email from OpenBot by CopilotKit and accept the invitation from it. It lasts 7 days."
                   : "They see the invitation in OpenBot when they sign in with this address. It lasts 7 days."}
               </DialogDescription>
             </DialogHeader>
