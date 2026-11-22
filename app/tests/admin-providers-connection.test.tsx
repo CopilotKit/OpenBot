@@ -120,6 +120,24 @@ class FakeServer {
   aiConnectionRequests: string[] = [];
   writes: { method: string; body: unknown; idempotencyKey: string | null }[] =
     [];
+  /**
+   * The organization has no AI of its own, as on OpenBot Cloud before an admin connects one. The
+   * admin's model catalogue then answers what it did live: the deployment's own model, one of it,
+   * which nobody in the organization is offered.
+   */
+  noOrganizationAi = false;
+
+  withoutOrganizationAi() {
+    this.noOrganizationAi = true;
+    this.connection = GetAiConnectionResponse.parse(
+      spec.components.examples.AiConnectionNoneExample?.value,
+    ) as AiConnection;
+    if (this.personal)
+      this.personal = {
+        ...this.personal,
+        organization: { ready: false, provider: null },
+      };
+  }
 
   constructor() {
     // The organization's: OpenAI, by key, with Anthropic's key kept from before.
@@ -214,6 +232,21 @@ class FakeServer {
         json: GetPersonalAiConnectionResponse.parse(this.personal),
       };
     }
+    if (path === MODEL_CATALOGUE && this.noOrganizationAi)
+      return {
+        status: 200,
+        json: GetModelCatalogueResponse.parse({
+          provider: "openai",
+          source: "openai",
+          exposure: "allowed",
+          default: "gpt-5.6-terra",
+          models: [
+            { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", vendor: "openai" },
+          ],
+          choosable: false,
+          listed: true,
+        }),
+      };
     if (path === MODEL_CATALOGUE) {
       // As the server reads it for this admin: with their own AI, the Claude plan, first.
       const own = this.personal?.uses === "personal";
@@ -536,6 +569,115 @@ describe.skipIf(!asked)("Admin → Providers: the organization's AI", () => {
               .waitFor();
             expect(await measured(page)).toEqual(FINE);
             await shoot(page, "cloud-own", engine, theme, window);
+          } finally {
+            await page.close();
+          }
+        }, 60_000);
+
+  /*
+   * Seen live on OpenBot Cloud: with no organization AI, "In conversations" said people pick any
+   * model "your provider" lists and that Bots run on gpt-5.6-terra, the deployment's own model,
+   * while the admin's composer offered every model of their own AI. With no organization AI there
+   * is no organization list: each person's own AI lists their models, and all of them are open
+   * until an admin narrows it.
+   */
+  for (const engine of engines)
+    for (const theme of THEMES)
+      for (const window of [WIDE, PHONE])
+        test(`on OpenBot Cloud with no organization AI it says each person's own AI lists their models, in ${engine}, ${theme}, ${window.width}`, async () => {
+          const server = new FakeServer();
+          server.withoutOrganizationAi();
+          const page = await open(
+            "/admin/providers",
+            server,
+            engine,
+            theme,
+            window,
+          );
+          try {
+            await section(page, "Organization's AI")
+              .getByRole("button", { name: /Not chosen yet/ })
+              .waitFor();
+            const conversations = section(page, "In conversations");
+            await conversations.getByText("Each person's own AI").waitFor();
+            await conversations
+              .getByText(
+                "Each person picks from the models their own AI lists, and their thinking level, in each conversation. Your organization has no AI of its own yet.",
+              )
+              .waitFor();
+            // Nothing from the deployment's own model, which nobody here is offered.
+            const said = (await conversations.textContent()) ?? "";
+            expect(said).not.toContain("gpt-5.6-terra");
+            expect(said).not.toContain("your provider");
+            expect(said).not.toContain("1 model");
+            // Open by default: every model a person's AI lists, until an admin narrows it.
+            const allowlist = section(page, "Allowed models");
+            await allowlist
+              .getByText(
+                "Off. People can pick any model their own AI lists, and no run is refused for its model.",
+              )
+              .waitFor();
+            expect(await allowlist.textContent()).not.toContain(
+              "Every listed model",
+            );
+            expect(await measured(page)).toEqual(FINE);
+            await shoot(
+              page,
+              "cloud-no-organization-ai",
+              engine,
+              theme,
+              window,
+            );
+            // The page scrolls inside Admin's frame: the allowlist, brought into view to be seen.
+            await allowlist
+              .getByRole("button", { name: /Allowed models/ })
+              .scrollIntoViewIfNeeded();
+            await shoot(
+              page,
+              "cloud-no-organization-ai-allowlist-section",
+              engine,
+              theme,
+              window,
+            );
+
+            // The allowlist offers no organization list to pick from, and no default.
+            await allowlist
+              .getByRole("button", { name: /Allowed models/ })
+              .click();
+            const dialog = page.getByRole("dialog");
+            await dialog
+              .getByText(
+                "Your organization has no AI yet, so no models are listed. Add each model by its full name.",
+              )
+              .waitFor();
+            const offered = (await dialog.textContent()) ?? "";
+            expect(offered).not.toContain("gpt-5.6-terra");
+            expect(offered).not.toContain("No matches");
+            // Nothing listed yet, so nothing to search.
+            expect(
+              await dialog
+                .getByRole("textbox", { name: "Search models" })
+                .count(),
+            ).toBe(0);
+            // A model is still allowed by its full name, and then listed.
+            await style(page);
+            await dialog
+              .getByRole("textbox", { name: "Another model" })
+              .fill("anthropic/claude-sonnet-5-5");
+            await dialog.getByRole("button", { name: "Add" }).click();
+            await dialog
+              .getByRole("checkbox", {
+                name: "Allow anthropic/claude-sonnet-5-5",
+              })
+              .waitFor();
+            expect(await measured(page)).toEqual(FINE);
+            await shoot(
+              page,
+              "cloud-no-organization-ai-allowlist",
+              engine,
+              theme,
+              window,
+            );
           } finally {
             await page.close();
           }
