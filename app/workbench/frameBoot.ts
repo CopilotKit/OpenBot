@@ -2,6 +2,7 @@
  * The second module of the app frame, after clockBoot.ts and before the app's own entry. It sets
  * up the fakes of this frame: the user agent, still motion, the theme, the native side, the fake
  * `/api`, the AG-UI streams, the sockets, the Desktop page scripts and the scene's run.
+ * It does not set `__workbenchBooted`: appBoot.ts does, after the app's entry drew its first element.
  * Pattern: desktop/workbench/frameBoot.ts. The page plays the clock; this frame never does.
  */
 
@@ -231,7 +232,6 @@ function boot(): void {
       },
     },
   );
-  globalThis.__workbenchBooted = true;
 }
 
 boot();

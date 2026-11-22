@@ -18,10 +18,12 @@ const BOOT_TAGS = [
   '<script type="module" src="/workbench/clockBoot.ts"></script>',
   '<script type="module" src="/workbench/frameBoot.ts"></script>',
   MAIN_TAG,
+  '<script type="module" src="/workbench/appBoot.ts"></script>',
 ].join("\n    ");
 
 // The page clock and the fakes boot before the app's own entry, and the preboot runs before the
-// app's inline theme script, so the first paint already uses the scene's storage and theme.
+// app's inline theme script, so the first paint already uses the scene's storage and theme. The
+// last module, after the entry, tells the page that the frame booted once the app drew in #root.
 function workbenchHtml(): Plugin {
   const preboot = readFileSync(
     path.join(appDir, "workbench", "preboot.js"),
