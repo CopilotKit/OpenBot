@@ -125,7 +125,6 @@ export function ApiAnswersPanel(props: ApiAnswersPanelProps) {
 
   return (
     <section>
-      <h3>API answers</h3>
       <label>
         Route
         <input
@@ -205,7 +204,8 @@ export function ApiAnswersPanel(props: ApiAnswersPanelProps) {
         <ul>
           {answers.map(([key, answer]) => (
             <li key={key} data-testid="api-answer">
-              <code>{key}</code> <span>{modeLabel(answer.mode)}</span>{" "}
+              <code title={key}>{key}</code>{" "}
+              <span>{modeLabel(answer.mode)}</span>{" "}
               <button
                 type="button"
                 aria-label={`Clear ${key}`}

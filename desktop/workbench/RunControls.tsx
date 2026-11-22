@@ -51,55 +51,68 @@ export function parseSpeed(value: string): Speed {
 export function RunControls(props: RunControlsProps) {
   const { now, end, marks, playing, speed } = props;
   return (
-    <div>
-      <button type="button" onClick={playing ? props.onPause : props.onPlay}>
-        {playing ? "Pause" : "Play"}
-      </button>
-      <button type="button" onClick={props.onStep}>
-        Step
-      </button>
-      <div style={{ position: "relative" }}>
+    <div className="wb-run">
+      <div className="wb-run-buttons">
+        <button
+          type="button"
+          aria-keyshortcuts="Space"
+          title={playing ? "Pause (Space)" : "Play (Space)"}
+          onClick={playing ? props.onPause : props.onPlay}
+        >
+          {playing ? "Pause" : "Play"}
+        </button>
+        <button
+          type="button"
+          aria-keyshortcuts="."
+          title="Step to the next run step (.)"
+          onClick={props.onStep}
+        >
+          Step
+        </button>
+        <span className="wb-time">{`${formatTime(now)} / ${formatTime(end)}`}</span>
+      </div>
+      <div className="wb-run-track">
         <input
           type="range"
           aria-label="Time"
+          aria-keyshortcuts="ArrowLeft ArrowRight"
           min={0}
           max={end}
           step={100}
           value={now}
           onChange={(event) => props.onSeek(Number(event.target.value))}
         />
-        {end > 0 &&
-          marks.map((mark, index) => (
-            <span
-              // biome-ignore lint/suspicious/noArrayIndexKey: marks can repeat, and the list has no other identity
-              key={`${index}-${mark}`}
-              data-testid="mark"
-              style={{
-                position: "absolute",
-                left: `${(mark / end) * 100}%`,
-                top: 0,
-                width: 1,
-                height: "100%",
-                background: "currentColor",
-                pointerEvents: "none",
-              }}
-            />
-          ))}
+        {/* Inset by the thumb's radius, so 0% and 100% sit under the thumb's centre. */}
+        <div className="wb-run-marks" aria-hidden="true">
+          {end > 0 &&
+            marks.map((mark, index) => (
+              <span
+                // biome-ignore lint/suspicious/noArrayIndexKey: marks can repeat, and the list has no other identity
+                key={`${index}-${mark}`}
+                data-testid="mark"
+                className="wb-run-mark"
+                style={{ left: `${Math.min(100, (mark / end) * 100)}%` }}
+              />
+            ))}
+        </div>
       </div>
-      <select
-        aria-label="Speed"
-        value={String(speed)}
-        onChange={(event) => props.onSpeed(parseSpeed(event.target.value))}
-      >
-        {SPEEDS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      <span className="wb-time">{`${formatTime(now)} / ${formatTime(end)}`}</span>
+      <div className="wb-run-meta">
+        <label className="wb-prop">
+          <span>Speed</span>
+          <select
+            value={String(speed)}
+            onChange={(event) => props.onSpeed(parseSpeed(event.target.value))}
+          >
+            {SPEEDS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       {props.onPauseAtActions && (
-        <label className="wb-pause-at-actions">
+        <label className="wb-check">
           <input
             type="checkbox"
             checked={props.pauseAtActions ?? false}

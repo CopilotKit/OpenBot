@@ -65,6 +65,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   frame.remove();
+  window.localStorage.clear();
 });
 
 function edit(el: HTMLElement, value: string) {
@@ -188,4 +189,30 @@ test("the box stays inside the window", () => {
   expect(
     popoverPlace({ x: 0, y: 700, width: 1000, height: 90 }, size, bounds),
   ).toEqual({ x: 8, y: 512 });
+});
+
+test("Ask for an impeccable command copies a scoped impeccable prompt, without words too", async () => {
+  const view = show();
+  const doc = frame.contentDocument as Document;
+  const pill = doc.querySelector(".pill") as Element;
+  pointer("pointerdown", pill, 20, 50);
+  pointer("pointerup", pill, 20, 50);
+  await view.findByRole("dialog", { name: "Comment" });
+  const copy = view.getByRole("button", { name: "Copy as prompt" });
+  expect(copy.hasAttribute("disabled")).toBe(true);
+  edit(view.getByLabelText("Ask for"), "typeset");
+  // An impeccable prompt needs no words: the button works at once.
+  expect(view.getByLabelText("Anything to add? (optional)")).not.toBeNull();
+  expect(copy.hasAttribute("disabled")).toBe(false);
+  await act(async () => {
+    fireEvent.click(copy);
+  });
+  const prompt = String(writeText.mock.calls[0]?.[0]);
+  expect(prompt.startsWith("/impeccable typeset ")).toBe(true);
+  expect(prompt).toContain(
+    'Review only this part of the frame: the element "span',
+  );
+  expect(prompt).toContain("workbench:shot install-mac --at 90");
+  // The choice is kept for the next comment.
+  expect(window.localStorage.getItem("workbench.commentAsk")).toBe('"typeset"');
 });

@@ -93,9 +93,9 @@ test("Grid color calls onGridColor", () => {
   expect(p.onGridColor).toHaveBeenCalledWith("#00ff00");
 });
 
-test("without app there is no App fieldset", () => {
+test("without app there is no App section", () => {
   const view = render(<WindowSettingsPanel {...props()} />);
-  expect(view.container.querySelector("fieldset")).toBeNull();
+  expect(view.container.querySelector("h3")).toBeNull();
   expect(view.queryByLabelText("Host")).toBeNull();
 });
 
@@ -109,10 +109,10 @@ function appProps() {
   return { p, onAppChange };
 }
 
-test("with app the App fieldset shows the three selects", () => {
+test("with app the App section shows the three selects", () => {
   const { p } = appProps();
   const view = render(<WindowSettingsPanel {...p} />);
-  expect(view.container.querySelector("legend")?.textContent).toBe("App");
+  expect(view.container.querySelector("h3")?.textContent).toBe("App");
   expect((view.getByLabelText("Host") as HTMLSelectElement).value).toBe(
     "desktop",
   );
@@ -144,4 +144,53 @@ test("Motion sends only motion", () => {
   const view = render(<WindowSettingsPanel {...p} />);
   change(view.getByLabelText("Motion"), "real");
   expect(onAppChange).toHaveBeenCalledWith({ motion: "real" });
+});
+
+test("every control has a visible label", () => {
+  const { p } = appProps();
+  const view = render(<WindowSettingsPanel {...p} />);
+  const names = Array.from(
+    view.container.querySelectorAll(".wb-prop > span, .wb-prop > label"),
+  ).map((el) => el.textContent);
+  expect(names).toEqual([
+    "Size",
+    "Zoom",
+    "OS",
+    "Theme",
+    "Active",
+    "Grid",
+    "Host",
+    "Signed in as",
+    "Motion",
+  ]);
+});
+
+test("Fit shows its zoom, and a click turns it off", () => {
+  const onFit = mock();
+  const view = render(
+    <WindowSettingsPanel
+      {...props()}
+      fit={{ on: true, zoom: 0.734 }}
+      onFit={onFit}
+    />,
+  );
+  expect((view.getByLabelText("Zoom") as HTMLInputElement).value).toBe("0.73");
+  const button = view.getByText("Fit (73%)");
+  expect(button.getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(button);
+  expect(onFit).toHaveBeenCalledWith(false);
+});
+
+test("with Fit off the Zoom field shows the zoom you set", () => {
+  const onFit = mock();
+  const view = render(
+    <WindowSettingsPanel
+      {...props()}
+      fit={{ on: false, zoom: 0.5 }}
+      onFit={onFit}
+    />,
+  );
+  expect((view.getByLabelText("Zoom") as HTMLInputElement).value).toBe("1");
+  fireEvent.click(view.getByText("Fit"));
+  expect(onFit).toHaveBeenCalledWith(true);
 });

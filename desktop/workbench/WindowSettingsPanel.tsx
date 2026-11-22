@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 
 export type WindowSettingsValue = {
   width: number;
@@ -23,6 +23,12 @@ export type WindowSettingsPanelProps = {
   onChange(patch: Partial<WindowSettingsValue>): void;
   onGridColor(color: string): void;
   onCopyLink(): void;
+  /**
+   * Fit: the window is zoomed to fit the stage. `zoom` is the zoom that fits now. Without it the
+   * panel has no Fit button.
+   */
+  fit?: { on: boolean; zoom: number };
+  onFit?(on: boolean): void;
   /** Set for an app scene: shows the App fields. */
   app?: AppWindowSettings;
   onAppChange?(patch: Partial<AppWindowSettings>): void;
@@ -43,45 +49,51 @@ function AppFields(props: {
 }) {
   const { app } = props;
   return (
-    <fieldset>
-      <legend>App</legend>
-      <select
-        aria-label="Host"
-        value={app.host}
-        onChange={(event) =>
-          props.onAppChange?.({
-            host: event.target.value === "browser" ? "browser" : "desktop",
-          })
-        }
-      >
-        <option value="desktop">OpenBot Desktop</option>
-        <option value="browser">Browser</option>
-      </select>
-      <select
-        aria-label="Signed in as"
-        value={app.role ?? SCENE_ROLE}
-        onChange={(event) =>
-          props.onAppChange?.({ role: toRole(event.target.value) })
-        }
-      >
-        <option value={SCENE_ROLE}>As the scene says</option>
-        <option value="member">Member</option>
-        <option value="admin">Admin</option>
-        <option value="owner">Owner</option>
-      </select>
-      <select
-        aria-label="Motion"
-        value={app.motion}
-        onChange={(event) =>
-          props.onAppChange?.({
-            motion: event.target.value === "real" ? "real" : "still",
-          })
-        }
-      >
-        <option value="still">Still</option>
-        <option value="real">Real</option>
-      </select>
-    </fieldset>
+    <>
+      <h3>App</h3>
+      <label className="wb-prop">
+        <span>Host</span>
+        <select
+          value={app.host}
+          onChange={(event) =>
+            props.onAppChange?.({
+              host: event.target.value === "browser" ? "browser" : "desktop",
+            })
+          }
+        >
+          <option value="desktop">OpenBot Desktop</option>
+          <option value="browser">Browser</option>
+        </select>
+      </label>
+      <label className="wb-prop">
+        <span>Signed in as</span>
+        <select
+          value={app.role ?? SCENE_ROLE}
+          onChange={(event) =>
+            props.onAppChange?.({ role: toRole(event.target.value) })
+          }
+        >
+          <option value={SCENE_ROLE}>As the scene says</option>
+          <option value="member">Member</option>
+          <option value="admin">Admin</option>
+          <option value="owner">Owner</option>
+        </select>
+      </label>
+      <label className="wb-prop">
+        <span>Motion</span>
+        <select
+          value={app.motion}
+          onChange={(event) =>
+            props.onAppChange?.({
+              motion: event.target.value === "real" ? "real" : "still",
+            })
+          }
+        >
+          <option value="still">Still</option>
+          <option value="real">Real</option>
+        </select>
+      </label>
+    </>
   );
 }
 
@@ -90,6 +102,7 @@ const MIN_HEIGHT = 560;
 
 function SizeInput(props: {
   label: string;
+  id?: string;
   min: number;
   max?: number;
   step?: number;
@@ -98,39 +111,44 @@ function SizeInput(props: {
 }) {
   const [text, setText] = useState<string | null>(null);
   return (
-    <label>
-      {props.label}
-      <input
-        type="number"
-        min={props.min}
-        max={props.max}
-        step={props.step}
-        value={text ?? String(props.value)}
-        onChange={(event) => {
-          const next = event.target.value;
-          setText(next);
-          const number = Number(next);
-          if (
-            next !== "" &&
-            Number.isFinite(number) &&
-            number >= props.min &&
-            (props.max === undefined || number <= props.max)
-          ) {
-            props.onNumber(number);
-          }
-        }}
-        onBlur={() => setText(null)}
-      />
-    </label>
+    <input
+      id={props.id}
+      type="number"
+      aria-label={props.id ? undefined : props.label}
+      min={props.min}
+      max={props.max}
+      step={props.step}
+      value={text ?? String(props.value)}
+      onChange={(event) => {
+        const next = event.target.value;
+        setText(next);
+        const number = Number(next);
+        if (
+          next !== "" &&
+          Number.isFinite(number) &&
+          number >= props.min &&
+          (props.max === undefined || number <= props.max)
+        ) {
+          props.onNumber(number);
+        }
+      }}
+      onBlur={() => setText(null)}
+    />
   );
 }
 
 export function WindowSettingsPanel(props: WindowSettingsPanelProps) {
-  const { value } = props;
+  const { value, fit } = props;
+  const ids = useId();
+  const zoomId = `${ids}-zoom`;
+  const gridId = `${ids}-grid`;
+  const fitOn = fit?.on === true;
+  const shownZoom =
+    fitOn && fit ? Math.round(fit.zoom * 100) / 100 : value.zoom;
   return (
-    <section>
+    <section className="wb-window-panel">
       <h2>Window</h2>
-      <div>
+      <div className="wb-presets">
         <button
           type="button"
           onClick={() => props.onChange({ width: 1000, height: 800 })}
@@ -144,75 +162,109 @@ export function WindowSettingsPanel(props: WindowSettingsPanelProps) {
           720 × 560
         </button>
       </div>
-      <SizeInput
-        label="Width"
-        min={MIN_WIDTH}
-        value={value.width}
-        onNumber={(width) => props.onChange({ width })}
-      />
-      <SizeInput
-        label="Height"
-        min={MIN_HEIGHT}
-        value={value.height}
-        onNumber={(height) => props.onChange({ height })}
-      />
-      <select
-        aria-label="OS"
-        value={value.os}
-        onChange={(event) =>
-          props.onChange({
-            os: event.target.value === "windows" ? "windows" : "mac",
-          })
-        }
-      >
-        <option value="mac">Mac</option>
-        <option value="windows">Windows</option>
-      </select>
-      <label>
+      <div className="wb-prop">
+        <span>Size</span>
+        <div className="wb-size">
+          <SizeInput
+            label="Width"
+            min={MIN_WIDTH}
+            value={value.width}
+            onNumber={(width) => props.onChange({ width })}
+          />
+          <span aria-hidden="true">×</span>
+          <SizeInput
+            label="Height"
+            min={MIN_HEIGHT}
+            value={value.height}
+            onNumber={(height) => props.onChange({ height })}
+          />
+        </div>
+      </div>
+      <div className="wb-prop">
+        <label htmlFor={zoomId}>Zoom</label>
+        <div className="wb-inline">
+          <SizeInput
+            // A new fit value shows at once; a typed value stays while the field has the focus.
+            key={fitOn ? `fit-${shownZoom}` : "zoom"}
+            label="Zoom"
+            id={zoomId}
+            min={0.5}
+            max={2}
+            step={0.1}
+            value={shownZoom}
+            onNumber={(zoom) => props.onChange({ zoom })}
+          />
+          {props.onFit && fit && (
+            <button
+              type="button"
+              aria-pressed={fitOn}
+              title="Zoom the window to fit the space"
+              onClick={() => props.onFit?.(!fitOn)}
+            >
+              {fitOn ? `Fit (${Math.round(fit.zoom * 100)}%)` : "Fit"}
+            </button>
+          )}
+        </div>
+      </div>
+      <label className="wb-prop">
+        <span>OS</span>
+        <select
+          value={value.os}
+          onChange={(event) =>
+            props.onChange({
+              os: event.target.value === "windows" ? "windows" : "mac",
+            })
+          }
+        >
+          <option value="mac">Mac</option>
+          <option value="windows">Windows</option>
+        </select>
+      </label>
+      <label className="wb-prop">
+        <span>Theme</span>
+        <select
+          value={value.theme}
+          onChange={(event) =>
+            props.onChange({
+              theme: event.target.value === "dark" ? "dark" : "light",
+            })
+          }
+        >
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <label className="wb-prop">
+        <span>Active</span>
         <input
           type="checkbox"
           checked={value.active}
           onChange={(event) => props.onChange({ active: event.target.checked })}
         />
-        Active
       </label>
-      <select
-        aria-label="Theme"
-        value={value.theme}
-        onChange={(event) =>
-          props.onChange({
-            theme: event.target.value === "dark" ? "dark" : "light",
-          })
-        }
-      >
-        <option value="light">Light</option>
-        <option value="dark">Dark</option>
-      </select>
-      <SizeInput
-        label="Zoom"
-        min={0.5}
-        max={2}
-        step={0.1}
-        value={value.zoom}
-        onNumber={(zoom) => props.onChange({ zoom })}
-      />
-      <label>
-        <input
-          type="checkbox"
-          checked={value.grid}
-          onChange={(event) => props.onChange({ grid: event.target.checked })}
-        />
-        Grid
-      </label>
-      <input
-        type="color"
-        aria-label="Grid color"
-        value={props.gridColor}
-        onChange={(event) => props.onGridColor(event.target.value)}
-      />
-      <button type="button" onClick={props.onCopyLink}>
-        Copy link
-      </button>
+      <div className="wb-prop">
+        <label htmlFor={gridId}>Grid</label>
+        <div className="wb-inline">
+          <input
+            id={gridId}
+            type="checkbox"
+            checked={value.grid}
+            onChange={(event) => props.onChange({ grid: event.target.checked })}
+          />
+          <input
+            type="color"
+            aria-label="Grid color"
+            title="Grid color"
+            value={props.gridColor}
+            onChange={(event) => props.onGridColor(event.target.value)}
+          />
+        </div>
+      </div>
+      <div className="wb-presets">
+        <button type="button" onClick={props.onCopyLink}>
+          Copy link
+        </button>
+      </div>
       {props.app && (
         <AppFields app={props.app} onAppChange={props.onAppChange} />
       )}

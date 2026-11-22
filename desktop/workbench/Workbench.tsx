@@ -1,4 +1,5 @@
 import {
+  type CSSProperties,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -27,15 +28,19 @@ import type {
   StreamControl,
 } from "./appContract";
 import { appFrameConfig } from "./appFrameConfig";
+import { buildScreenPrompt } from "./askPrompt";
 import { CallLog } from "./CallLog";
 import { CommandsPanel } from "./CommandsPanel";
 import type { PageClock } from "./clock";
+import { CRITIQUE_COMMANDS, type CritiqueCommand } from "./critiquePrompt";
 import { EventsPanel } from "./EventsPanel";
 import { type FrameConfig, frameUrl } from "./frameConfig";
 import { appSceneAfter, desktopSceneFor, HANDBACK_WORDS } from "./handover";
 import { ImportLogPanel } from "./ImportLogPanel";
 import "./appPanels.css";
+import { KeysHelp } from "./KeysHelp";
 import { describeElements, type Warning } from "./layoutWatch";
+import { pickArea } from "./pickElement";
 import { RequestLog } from "./RequestLog";
 import { formatTime, RunControls, type Speed } from "./RunControls";
 import {
@@ -45,7 +50,8 @@ import {
   type RunAction,
   runActions,
 } from "./runner";
-import { SceneList } from "./SceneList";
+import { SceneList, type SceneListHandle } from "./SceneList";
+import { Splitter } from "./Splitter";
 import { StreamPanel } from "./StreamPanel";
 import {
   ALL_SCENE_GROUPS,
@@ -57,6 +63,7 @@ import {
   sceneSteps,
 } from "./sceneCatalog";
 import type { Scene } from "./scenes/types";
+import { resolveTarget } from "./sourceLines";
 import {
   DEFAULT_APP,
   decodeState,
@@ -64,6 +71,7 @@ import {
   type WorkbenchState,
 } from "./urlState";
 import { useLayoutWatch } from "./useLayoutWatch";
+import { clamp, isNumber, readPref, writePref } from "./viewerPrefs";
 import {
   type FrameOrigin,
   frameOrigin,
@@ -403,6 +411,52 @@ function isTextField(target: EventTarget | null): boolean {
   ].includes(type);
 }
 
+/** True for a control that uses the arrow keys itself: a slider or a splitter. */
+function usesArrows(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (el?.nodeType !== 1) return false;
+  if (el.getAttribute("role") === "separator") return true;
+  return (
+    el.tagName.toLowerCase() === "input" &&
+    (el.getAttribute("type") ?? "").toLowerCase() === "range"
+  );
+}
+
+/** True for a control that Space and Enter press: a button, a link, a checkbox, a summary. */
+function pressable(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (el?.nodeType !== 1) return false;
+  const tag = el.tagName.toLowerCase();
+  return (
+    tag === "button" ||
+    tag === "summary" ||
+    tag === "a" ||
+    tag === "input" ||
+    el.getAttribute("role") === "separator"
+  );
+}
+
+/** The panel sizes: defaults, limits and where each is kept for this viewer. */
+const LEFT = { pref: "leftWidth", initial: 248, min: 180, max: 420 };
+const RIGHT = { pref: "rightWidth", initial: 280, min: 220, max: 480 };
+const UNDER = { pref: "warningsHeight", min: 72 };
+/** The space around the window in the stage, on each side. */
+const STAGE_PAD = 16;
+/** The smallest zoom Fit uses. */
+const MIN_FIT = 0.25;
+
+function storedWidth(size: typeof LEFT): number {
+  const value = readPref(size.pref, isNumber);
+  return value === null ? size.initial : clamp(value, size.min, size.max);
+}
+
+/** The query without `zoom`: with Fit on, the link opens with Fit too. */
+function withoutZoom(query: string): string {
+  const params = new URLSearchParams(query);
+  params.delete("zoom");
+  return params.toString();
+}
+
 /** Waits until the window's boot script has set up its clock. */
 async function booted(win: FrameWindow): Promise<boolean> {
   const deadline = Date.now() + BOOT_TIMEOUT_MS;
@@ -542,6 +596,26 @@ export function WorkbenchLoaded({
 }: WorkbenchLoadedProps) {
   const [boot] = useState(() => initial(catalog));
   const [state, setState] = useState<WorkbenchState>(boot.state);
+  /** Fit: with no zoom in the URL, the window zooms to fit the stage. A zoom you set turns it off. */
+  const [fit, setFit] = useState(
+    () => !new URLSearchParams(window.location.search).has("zoom"),
+  );
+  const fitRef = useRef(fit);
+  fitRef.current = fit;
+  const [fitZoom, setFitZoom] = useState(1);
+  /** The panel sizes, kept for this viewer. A null warnings height is the automatic height. */
+  const [leftWidth, setLeftWidth] = useState(() => storedWidth(LEFT));
+  const [rightWidth, setRightWidth] = useState(() => storedWidth(RIGHT));
+  const [underHeight, setUnderHeight] = useState<number | null>(() =>
+    readPref(UNDER.pref, isNumber),
+  );
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const underRef = useRef<HTMLDivElement | null>(null);
+  const sceneListRef = useRef<SceneListHandle | null>(null);
+  /** "Critique this screen": the impeccable command, and what the copy did. */
+  const [screenCommand, setScreenCommand] =
+    useState<CritiqueCommand>("critique");
+  const [screenStatus, setScreenStatus] = useState<string | null>(null);
   /** Scenes made from logs in this page: only in this browser tab, and not in links elsewhere. */
   const [imported, setImported] = useState<Scene[]>(boot.imported);
   const scenes: readonly SceneEntry[] = [...catalog, ...imported];
@@ -637,7 +711,12 @@ export function WorkbenchLoaded({
     (next: WorkbenchState | ((prev: WorkbenchState) => WorkbenchState)) => {
       setState((prev) => {
         const value = typeof next === "function" ? next(prev) : next;
-        window.history.replaceState(null, "", `?${encodeState(value)}`);
+        const query = encodeState(value);
+        window.history.replaceState(
+          null,
+          "",
+          `?${fitRef.current ? withoutZoom(query) : query}`,
+        );
         return value;
       });
     },
@@ -668,6 +747,10 @@ export function WorkbenchLoaded({
     window.__workbenchRun = scene && !isApp(scene) ? (scene.run ?? []) : [];
   }
   const kind = appConfig ? "app" : "desktop";
+  /** The zoom the window shows at: Fit's zoom, or the zoom you set. */
+  const zoom = fit ? fitZoom : state.window.zoom;
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
   const host = appConfig?.host ?? "desktop";
   const frameKey = `${state.scene}|${state.window.os}|${JSON.stringify(config?.env ?? {})}|${remountCount}|${kind}|${host}|${appConfig?.role ?? ""}|${appConfig?.motion ?? ""}`;
 
@@ -910,7 +993,8 @@ export function WorkbenchLoaded({
       // seek would then never end ("Resulting promise was garbage collected" in a CLI shot).
       await frameOrFallback(live?.win ?? window);
       const reloaded =
-        live !== null && (live !== liveRef.current || live.win.document !== live.doc);
+        live !== null &&
+        (live !== liveRef.current || live.win.document !== live.doc);
       if (readyRef.current && !reloaded) return;
     }
   }, [noteNotQuiet]);
@@ -1003,13 +1087,14 @@ export function WorkbenchLoaded({
   };
 
   // Measures where the window is, after a jump and when the size, the zoom or the frame changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new zoom (Fit) moves the window, so it is measured again
   useLayoutEffect(() => {
     if (!highlight || highlight.jumping) return;
     const wrap = wrapRef.current;
     setOrigin(
       wrap && frameEl ? frameOrigin(wrap, frameEl, state.window.width) : null,
     );
-  }, [highlight, state.window, frameEl]);
+  }, [highlight, state.window, zoom, frameEl]);
 
   useEffect(() => {
     window.__workbenchPage = {
@@ -1050,6 +1135,34 @@ export function WorkbenchLoaded({
     };
   }, []);
 
+  // Fit: the largest zoom (at most 1) at which the whole window shows in the stage.
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    const wrap = wrapRef.current;
+    if (!stage || !wrap) return;
+    const measure = () => {
+      const rect = wrap.getBoundingClientRect();
+      const z = zoomRef.current || 1;
+      const width = rect.width / z;
+      const height = rect.height / z;
+      if (width <= 0 || height <= 0) return;
+      const next = Math.min(
+        1,
+        (stage.clientWidth - 2 * STAGE_PAD) / width,
+        (stage.clientHeight - 2 * STAGE_PAD) / height,
+      );
+      // Two decimals, rounded down: a scroll bar never comes and goes with the fit.
+      const rounded = Math.max(MIN_FIT, Math.floor(next * 100) / 100);
+      setFitZoom((prev) => (prev === rounded ? prev : rounded));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(stage);
+    observer.observe(wrap);
+    return () => observer.disconnect();
+  }, []);
+
   // C turns Comment mode on and off, when the focus is not in a text field.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1067,6 +1180,61 @@ export function WorkbenchLoaded({
       doc?.removeEventListener("keydown", onKey);
     };
   }, [frameEl]);
+
+  // The page's keys (see KeysHelp). None fires while the focus is in a field you type in.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey
+      )
+        return;
+      const target = event.target;
+      if (isTextField(target)) return;
+      const keys = keysRef.current;
+      switch (event.key) {
+        case "/":
+          event.preventDefault();
+          sceneListRef.current?.focusFilter();
+          return;
+        case "ArrowDown":
+        case "ArrowUp":
+          if (usesArrows(target)) return;
+          event.preventDefault();
+          sceneListRef.current?.move(event.key === "ArrowDown" ? 1 : -1);
+          return;
+        case "Enter":
+          if (pressable(target)) return;
+          if (sceneListRef.current?.pickCursor()) event.preventDefault();
+          return;
+        case " ": {
+          // A scene row is a button, but Space on it plays: a click on it again would start the scene over.
+          const row = (target as HTMLElement | null)?.classList?.contains(
+            "wb-scene",
+          );
+          if (pressable(target) && !row) return;
+          event.preventDefault();
+          if (keys.playing) keys.pause();
+          else keys.play();
+          return;
+        }
+        case ".":
+          event.preventDefault();
+          keys.step();
+          return;
+        case "ArrowLeft":
+        case "ArrowRight":
+          if (usesArrows(target)) return;
+          event.preventDefault();
+          keys.seekBy(event.key === "ArrowLeft" ? -1000 : 1000);
+          return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   /** Ends a play of the workbench's own loop. */
   const endLoop = (live: Live) => {
@@ -1156,6 +1324,29 @@ export function WorkbenchLoaded({
     writeAt(clock.now());
   };
 
+  const stepOnce = () => {
+    setNextAction(null);
+    clearHighlight();
+    steppingRef.current = true;
+    try {
+      liveRef.current?.clock.stepToNext();
+    } finally {
+      steppingRef.current = false;
+    }
+  };
+
+  /** ← and →: a seek of one second back or on, within the run. */
+  const seekBy = (deltaMs: number) => {
+    const live = liveRef.current;
+    if (!live) return;
+    const last = end || runEnd * 1000;
+    const target = Math.max(0, live.clock.now() + deltaMs);
+    void seek(last > 0 ? Math.min(last, target) : target);
+  };
+
+  const keysRef = useRef({ play, pause, step: stepOnce, seekBy, playing });
+  keysRef.current = { play, pause, step: stepOnce, seekBy, playing };
+
   const pickScene = (id: string) => {
     const scene = scenesRef.current.find((s) => s.id === id);
     clearHighlight();
@@ -1220,6 +1411,10 @@ export function WorkbenchLoaded({
     : null;
 
   const changeWindow = (patch: Partial<WindowSettingsValue>) => {
+    if (patch.zoom !== undefined) {
+      fitRef.current = false;
+      setFit(false);
+    }
     update((prev) => ({ ...prev, window: { ...prev.window, ...patch } }));
     if (patch.theme) {
       const win = frameRef.current?.contentWindow as
@@ -1230,30 +1425,109 @@ export function WorkbenchLoaded({
     }
   };
 
+  /** Fit on or off. Off keeps the zoom you set before; the URL gets the zoom again. */
+  const changeFit = (on: boolean) => {
+    fitRef.current = on;
+    setFit(on);
+    update((prev) => prev);
+  };
+
+  const copyScreenPrompt = async () => {
+    const doc = frameRef.current?.contentDocument;
+    if (!doc || !scene) return;
+    const area = {
+      x: 0,
+      y: 0,
+      width: state.window.width,
+      height: state.window.height,
+    };
+    const picked = {
+      kind: "area" as const,
+      area,
+      elements: pickArea(area, doc),
+    };
+    const resolved = await resolveTarget(picked).catch(() => picked);
+    const text = buildScreenPrompt(
+      screenCommand,
+      resolved.kind === "area" ? resolved.elements : [],
+      {
+        scene: { id: scene.id, title: scene.title },
+        atSeconds: toSeconds(now),
+        window: state.window,
+        link: window.location.href,
+        app: appScene
+          ? { route: liveRoute ?? appScene.start.route, host }
+          : undefined,
+      },
+      { kind, warnings },
+    );
+    try {
+      await navigator.clipboard.writeText(text);
+      setScreenStatus("Copied.");
+    } catch {
+      setScreenStatus("The workbench cannot write to the clipboard.");
+    }
+    setTimeout(() => setScreenStatus(null), 2000);
+  };
+
+  /** While a hover jumps to a warning, the list keeps the rows it had, so the row under the pointer stays. */
+  const shownWarningsRef = useRef(warnings);
+  if (!highlight?.jumping) shownWarningsRef.current = warnings;
+
+  const pageStyle = {
+    "--wb-left": `${leftWidth}px`,
+    "--wb-right": `${rightWidth}px`,
+  } as CSSProperties;
+  const underMax = Math.round(window.innerHeight * 0.7);
+
   return (
-    <div className="wb-page">
+    <div className="wb-page" style={pageStyle}>
       <aside className="wb-side wb-side-left">
-        <ImportLogPanel
-          scenes={imported}
-          current={state.scene}
-          onImport={(scene) => {
-            const next = [...imported.filter((s) => s.id !== scene.id), scene];
-            setImported(next);
-            saveImported(next);
-            // A new scene of the same id loads again.
-            setRemountCount((count) => count + 1);
-            scenesRef.current = [...catalog, ...next];
-            pickScene(scene.id);
-          }}
-          onPick={pickScene}
-        />
         <SceneList
           scenes={catalog}
           current={state.scene}
           onPick={pickScene}
           groups={ALL_SCENE_GROUPS}
+          handle={sceneListRef}
         />
+        <details className="wb-fold" open={imported.length > 0 || undefined}>
+          <summary>Import a log</summary>
+          <ImportLogPanel
+            scenes={imported}
+            current={state.scene}
+            onImport={(scene) => {
+              const next = [
+                ...imported.filter((s) => s.id !== scene.id),
+                scene,
+              ];
+              setImported(next);
+              saveImported(next);
+              // A new scene of the same id loads again.
+              setRemountCount((count) => count + 1);
+              scenesRef.current = [...catalog, ...next];
+              pickScene(scene.id);
+            }}
+            onPick={pickScene}
+          />
+        </details>
       </aside>
+      <Splitter
+        axis="x"
+        label="Scene column width"
+        size={() => leftWidth}
+        min={LEFT.min}
+        max={LEFT.max}
+        grow={1}
+        value={leftWidth}
+        onSize={(px) => {
+          setLeftWidth(px);
+          writePref(LEFT.pref, px);
+        }}
+        onReset={() => {
+          setLeftWidth(LEFT.initial);
+          writePref(LEFT.pref, null);
+        }}
+      />
       <main className="wb-center">
         {notices.length > 0 && (
           <div className="wb-notices">
@@ -1278,7 +1552,7 @@ export function WorkbenchLoaded({
             ))}
           </div>
         )}
-        <div className="wb-stage">
+        <div className="wb-stage" ref={stageRef}>
           <div className="wb-window-wrap" ref={wrapRef}>
             <WindowFrame
               src={config ? frameUrl(config) : (appScene?.start.route ?? "/")}
@@ -1290,7 +1564,7 @@ export function WorkbenchLoaded({
               os={state.window.os}
               active={state.window.active}
               theme={state.window.theme}
-              zoom={state.window.zoom}
+              zoom={zoom}
               grid={state.window.grid}
               gridColor={gridColor}
               comment={
@@ -1299,6 +1573,7 @@ export function WorkbenchLoaded({
                       scene: { id: scene.id, title: scene.title },
                       atSeconds: toSeconds(now),
                       window: state.window,
+                      frameInfo: { kind, warnings },
                       app: appScene
                         ? {
                             route: liveRoute ?? appScene.start.route,
@@ -1387,9 +1662,35 @@ export function WorkbenchLoaded({
             </section>
           )}
         </div>
-        <div className="wb-under">
+        <Splitter
+          axis="y"
+          label="Layout warnings height"
+          size={() => underRef.current?.offsetHeight ?? 160}
+          min={UNDER.min}
+          max={underMax}
+          grow={-1}
+          value={underHeight}
+          onSize={(px) => {
+            setUnderHeight(px);
+            writePref(UNDER.pref, px);
+          }}
+          onReset={() => {
+            setUnderHeight(null);
+            writePref(UNDER.pref, null);
+          }}
+        />
+        <div
+          className="wb-under"
+          ref={underRef}
+          style={
+            underHeight === null
+              ? undefined
+              : { height: Math.min(underHeight, underMax), maxHeight: "none" }
+          }
+        >
           <WarningsList
-            warnings={warnings}
+            warnings={shownWarningsRef.current}
+            seekingTo={highlight?.jumping ? highlight.warning.at : null}
             onSeek={(ms) => {
               void seek(ms);
             }}
@@ -1403,66 +1704,69 @@ export function WorkbenchLoaded({
           />
         </div>
       </main>
+      <Splitter
+        axis="x"
+        label="Right panel width"
+        size={() => rightWidth}
+        min={RIGHT.min}
+        max={RIGHT.max}
+        grow={-1}
+        value={rightWidth}
+        onSize={(px) => {
+          setRightWidth(px);
+          writePref(RIGHT.pref, px);
+        }}
+        onReset={() => {
+          setRightWidth(RIGHT.initial);
+          writePref(RIGHT.pref, null);
+        }}
+      />
       <aside className="wb-side wb-side-right">
-        <section className="wb-comment-toggle">
-          <button
-            type="button"
-            aria-pressed={commenting}
-            aria-keyshortcuts="C"
-            title="Comment (C)"
-            onClick={() => setCommenting((on) => !on)}
-          >
-            Comment
-          </button>
-          <p>
-            {commenting
-              ? "Click an element or drag over an area in the window. Press C to stop."
-              : "Press C to comment on a part of the window."}
-          </p>
+        <section className="wb-run-panel">
+          <div className="wb-panel-head">
+            <h2>Run</h2>
+            <KeysHelp />
+          </div>
+          {steps.length > 0 ? (
+            <RunControls
+              now={now}
+              end={end || runEnd * 1000}
+              marks={steps.map((step) => step.at * 1000)}
+              playing={playing}
+              speed={speed}
+              onPlay={() => play()}
+              onPause={pause}
+              onStep={stepOnce}
+              onSeek={(ms) => {
+                void seek(ms);
+              }}
+              onSpeed={(next) => {
+                setSpeed(next);
+                if (playing) play(next);
+              }}
+              pauseAtActions={pauseAtActions}
+              onPauseAtActions={(on) => {
+                setPauseAtActions(on);
+                pauseAtActionsRef.current = on;
+                if (!on) setNextAction(null);
+                if (playing) play();
+              }}
+              next={nextAction?.label ?? null}
+            />
+          ) : (
+            <p className="wb-run-still">
+              <span>No run. The scene plays on its own.</span>
+              <span className="wb-time">{formatTime(now)}</span>
+            </p>
+          )}
         </section>
-        {steps.length > 0 ? (
-          <RunControls
-            now={now}
-            end={end || runEnd * 1000}
-            marks={steps.map((step) => step.at * 1000)}
-            playing={playing}
-            speed={speed}
-            onPlay={() => play()}
-            onPause={pause}
-            onStep={() => {
-              setNextAction(null);
-              clearHighlight();
-              steppingRef.current = true;
-              try {
-                liveRef.current?.clock.stepToNext();
-              } finally {
-                steppingRef.current = false;
-              }
-            }}
-            onSeek={(ms) => {
-              void seek(ms);
-            }}
-            onSpeed={(next) => {
-              setSpeed(next);
-              if (playing) play(next);
-            }}
-            pauseAtActions={pauseAtActions}
-            onPauseAtActions={(on) => {
-              setPauseAtActions(on);
-              pauseAtActionsRef.current = on;
-              if (!on) setNextAction(null);
-              if (playing) play();
-            }}
-            next={nextAction?.label ?? null}
-          />
-        ) : (
-          <div className="wb-time">{`Time ${formatTime(now)}`}</div>
-        )}
         <WindowSettingsPanel
           value={state.window}
           gridColor={gridColor}
           onChange={changeWindow}
           onGridColor={setGridColor}
+          fit={{ on: fit, zoom: fitZoom }}
+          onFit={changeFit}
           app={
             appConfig
               ? {
@@ -1482,6 +1786,50 @@ export function WorkbenchLoaded({
               ]);
           }}
         />
+        <section className="wb-comment-toggle">
+          <h2>Review</h2>
+          <div className="wb-presets">
+            <button
+              type="button"
+              aria-pressed={commenting}
+              aria-keyshortcuts="C"
+              title="Comment (C)"
+              onClick={() => setCommenting((on) => !on)}
+            >
+              Comment
+            </button>
+          </div>
+          {commenting && (
+            <p>
+              Click an element or drag over an area in the window. Press C to
+              stop.
+            </p>
+          )}
+          <div className="wb-inline">
+            <select
+              aria-label="Impeccable command"
+              value={screenCommand}
+              onChange={(event) =>
+                setScreenCommand(event.target.value as CritiqueCommand)
+              }
+            >
+              {CRITIQUE_COMMANDS.map((command) => (
+                <option key={command} value={command}>
+                  {command}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              title="Copy an impeccable prompt about the whole window"
+              disabled={!frameEl}
+              onClick={() => void copyScreenPrompt()}
+            >
+              Critique this screen
+            </button>
+          </div>
+          {screenStatus && <p role="status">{screenStatus}</p>}
+        </section>
         {appConfig ? (
           <>
             <details className="wb-fold">

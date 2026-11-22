@@ -67,13 +67,19 @@ test("lists requests newest first with status, source and time", () => {
   const view = render(<RequestLog api={api} />);
   const rows = view.getAllByTestId("request");
   expect(rows).toHaveLength(2);
-  expect(rows[0]?.textContent).toContain(
+  // One line: the organization part is "…"; the tooltip has all of the path.
+  expect(rows[0]?.textContent).toContain("…/bots");
+  expect(rows[0]?.textContent).not.toContain("organizations");
+  expect(rows[0]?.getAttribute("title")).toBe(
     "GET /api/v2/organizations/default/bots",
   );
   expect(rows[0]?.textContent).toContain("Waiting");
   expect(rows[0]?.textContent).toContain("Scene answer");
   expect(rows[0]?.textContent).toContain("0:02");
-  expect(rows[1]?.textContent).toContain("GET /api/v2/person");
+  expect(rows[1]?.querySelector(".wb-req-method")?.textContent).toBe("GET");
+  expect(rows[1]?.querySelector(".wb-req-route")?.textContent).toBe(
+    "/api/v2/person",
+  );
   expect(rows[1]?.textContent).toContain("200");
   expect(rows[1]?.textContent).toContain("Spec example");
 });
@@ -95,7 +101,7 @@ test("the filter keeps the matching requests", () => {
   edit(view.getByLabelText("Filter"), "post");
   const rows = view.getAllByTestId("request");
   expect(rows).toHaveLength(1);
-  expect(rows[0]?.textContent).toContain("POST /api/copilotkit");
+  expect(rows[0]?.getAttribute("title")).toBe("POST /api/copilotkit");
 });
 
 test("a request with no answer says so and has the class", () => {

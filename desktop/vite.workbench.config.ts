@@ -111,6 +111,45 @@ function appFrames(): Plugin {
   };
 }
 
+// `bun run workbench` lands on the workbench: "/" (outside a frame) answers 302 to "/workbench/" with
+// the same query, and the startup output names /workbench/ as the link to open. An iframe still
+// gets the app at "/" (appFrames), so the app's own home route keeps working.
+const HOME = "/workbench/";
+
+function workbenchHome(): Plugin {
+  return {
+    name: "workbench-home",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url ?? "/";
+        const path = url.split(/[?#]/)[0];
+        if (
+          path !== "/" ||
+          (req.method !== "GET" && req.method !== "HEAD") ||
+          req.headers["sec-fetch-dest"] === "iframe"
+        ) {
+          next();
+          return;
+        }
+        const query = url.slice(path.length);
+        res.statusCode = 302;
+        res.setHeader("location", `${HOME}${query}`);
+        res.end();
+      });
+      // Vite prints its URLs after the server listens; print the workbench page under them.
+      const printUrls = server.printUrls.bind(server);
+      server.printUrls = () => {
+        printUrls();
+        const port = server.config.server.port ?? WORKBENCH_PORT;
+        server.config.logger.info(
+          `\n  Workbench: http://localhost:${port}${HOME}\n`,
+        );
+      };
+    },
+  };
+}
+
 // Vite restarts the server when the config file or a file it imports changes. A restart closes the
 // port for a moment and stops and starts the app server, so the runs of other processes that share
 // this server fail (ERR_CONNECTION_REFUSED, then 502 on /__app/ until the app is back). The server
@@ -224,6 +263,8 @@ async function startAppServer(server: ViteDevServer): Promise<void> {
       ...process.env,
       WORKBENCH_PORT: String(port),
       WORKBENCH_APP_PORT: String(WORKBENCH_APP_PORT),
+      // The same dependency cache hash for every app server (see spawnShared in server.ts).
+      NODE_ENV: "development",
     },
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
@@ -238,7 +279,14 @@ async function startAppServer(server: ViteDevServer): Promise<void> {
   } catch {}
 
   let stderr = "";
-  child.stdout?.resume();
+  // The app server's own log is dropped, except the lines that say it optimized dependencies or
+  // reloaded the page: a reload of the app frame during a shot shows in server.log.
+  child.stdout?.on("data", (chunk: Buffer) => {
+    for (const line of chunk.toString().split("\n")) {
+      if (/optimiz|reload/i.test(line))
+        logger.info(`Workbench app server: ${line.trim()}`);
+    }
+  });
   child.stderr?.on("data", (chunk: Buffer) => {
     stderr = (stderr + chunk.toString()).slice(-APP_STDERR_KEEP);
   });
@@ -264,9 +312,14 @@ async function startAppServer(server: ViteDevServer): Promise<void> {
     if (!exited) killGroup(pid as number);
     rmSync(pidPath, { force: true });
   }
-  child.on("exit", () => {
+  child.on("exit", (code, signal) => {
     exited = true;
     if (readPid(pidPath) === pid) rmSync(pidPath, { force: true });
+    // An app server that ends while this server runs leaves every app frame without its files.
+    if (!stopped)
+      logger.error(
+        `Workbench: the app server stopped (code ${code}, signal ${signal}).\n${stderr}`,
+      );
   });
   server.httpServer?.once("close", onExit);
   process.once("exit", onExit);
@@ -289,10 +342,14 @@ export default defineConfig(({ mode }) => ({
     react(),
     workbenchEnv(mode),
     noConfigRestart(),
+    workbenchHome(),
     appFrames(),
     appServer(),
   ],
   root: desktopDir,
+  // A dependency cache for each port: a second workbench (another port, the same checkout) never
+  // optimizes the dependencies again in the folder that this server serves them from.
+  cacheDir: join(desktopDir, "node_modules", ".vite-workbench", String(WORKBENCH_PORT)),
   clearScreen: false,
   server: {
     port: WORKBENCH_PORT,

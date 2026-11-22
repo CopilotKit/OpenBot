@@ -37,7 +37,22 @@ export type WarningsListProps = {
   onLeave?(): void;
   highlight?: ListHighlight | null;
   hoverDelay?: number;
+  /**
+   * Set while the page seeks to a warning's time: the list keeps the rows it had before the seek
+   * (the page passes them), and the heading says where it goes.
+   */
+  seekingTo?: number | null;
 };
+
+/** A fixed order, so a seek that finds the warnings again does not move a row under the pointer: by time, then by label. */
+export function sortWarnings(warnings: readonly Warning[]): Warning[] {
+  return [...warnings].sort(
+    (a, b) =>
+      a.at - b.at ||
+      a.label.localeCompare(b.label) ||
+      a.kind.localeCompare(b.kind),
+  );
+}
 
 export function WarningsList({
   warnings,
@@ -47,6 +62,7 @@ export function WarningsList({
   onLeave,
   highlight = null,
   hoverDelay = HOVER_DELAY_MS,
+  seekingTo = null,
 }: WarningsListProps) {
   const timerRef = useRef<{
     key: string;
@@ -92,29 +108,44 @@ export function WarningsList({
     timerRef.current = { key, handle };
   };
 
-  const newestFirst = warnings
-    .map((warning, index) => ({ warning, index }))
-    .sort((a, b) => b.warning.at - a.warning.at || b.index - a.index);
+  const sorted = sortWarnings(warnings);
+  /** The same warning can show twice; the second one gets "#2" on its key. */
+  const seen = new Map<string, number>();
+  const rows = sorted.map((warning) => {
+    const base = warningKey(warning);
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    return { warning, rowKey: n === 1 ? base : `${base}#${n}` };
+  });
   return (
     // The pointer leaving the list is not an action of its own; the rows are buttons.
     // biome-ignore lint/a11y/noStaticElementInteractions: a hover preview only
     <section
+      className="wb-warnings"
+      aria-busy={seekingTo !== null ? true : undefined}
       onMouseLeave={(event) => {
         if (!moved(event, false)) return;
         cancel();
         onLeave?.();
       }}
     >
-      <h3>{`Layout warnings (${warnings.length})`}</h3>
-      {newestFirst.length === 0 ? (
+      <h3>
+        {`Layout warnings (${warnings.length})`}
+        {seekingTo !== null && (
+          <span className="wb-warning-status" role="status">
+            {`Seeking to ${formatTime(seekingTo)}…`}
+          </span>
+        )}
+      </h3>
+      {rows.length === 0 ? (
         <p>No layout warnings.</p>
       ) : (
-        <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-          {newestFirst.map(({ warning, index }) => {
+        <ul className="wb-warning-list">
+          {rows.map(({ warning, rowKey }) => {
             const key = warningKey(warning);
             const current = highlight?.key === key ? highlight : null;
             return (
-              <li key={index}>
+              <li key={rowKey}>
                 <button
                   type="button"
                   className={current ? "wb-warning-current" : undefined}

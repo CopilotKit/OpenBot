@@ -2,6 +2,8 @@
  * The workbench chrome: CopilotKit tokens (copilotkit-ui-theme skill) on a plain, quiet ground.
  * Glass panels with white borders, a 4px grid. Text is the system sans-serif; times, routes,
  * JSON and code are the system monospace. No web fonts.
+ * Type scale: 12px (meta, group labels, times), 13px (text, controls, section titles), 16px (panel
+ * titles). Weight: 400 text, 500 controls, 600 titles.
  * The window frame (windowFrame.css) stays neutral and is not themed here.
  */
 :root {
@@ -9,9 +11,11 @@
   /* CopilotKit tokens */
   --ck-surface-main: #f3f3f5;
   --ck-surface-container: #ffffff;
-  --ck-surface-hovered: #fafcfa;
+  --ck-surface-hovered: #f7f7f9;
   --ck-border-default: #ffffff;
   --ck-border-container: #dbdbe5;
+  /* A control edge you can see on white glass. */
+  --ck-border-control: #c9c9d3;
   --ck-text-primary: #010507;
   --ck-text-secondary: #57575b;
   --ck-text-disabled: #838389;
@@ -20,7 +24,9 @@
   --ck-white-65: rgba(255, 255, 255, 0.65);
   --ck-white-70: rgba(255, 255, 255, 0.7);
   --ck-grey-200: #f0f0f4;
-  --ck-elevation-sm: 0px 1px 3px 0px rgba(1, 5, 7, 0.08);
+  /* The fill of the selected row in a list. */
+  --ck-selected: rgba(1, 5, 7, 0.07);
+  --ck-elevation-sm: 0px 1px 2px 0px rgba(1, 5, 7, 0.06);
   --ck-elevation-md: 0px 6px 6px -2px rgba(1, 5, 7, 0.08);
   --ck-elevation-lg: 0px 16px 24px -8px rgba(1, 5, 7, 0.12);
   --ck-radius-xs: 4px;
@@ -40,9 +46,9 @@
   --wb-bg: var(--ck-surface-main);
   --wb-panel: var(--ck-surface-container);
   --wb-text: var(--ck-text-primary);
-  --wb-muted: var(--ck-text-disabled);
-  --wb-border: var(--ck-border-container);
-  --wb-current: var(--ck-white-70);
+  --wb-muted: var(--ck-text-secondary);
+  --wb-border: var(--ck-border-control);
+  --wb-current: var(--ck-selected);
   --wb-notice: var(--ck-notice);
   /* The highlight of a layout warning over the window: strong enough for light and dark windows. */
   --wb-highlight-moved: #ff5a00;
@@ -61,6 +67,7 @@
     --ck-surface-hovered: #2e2e38;
     --ck-border-default: rgba(255, 255, 255, 0.1);
     --ck-border-container: rgba(255, 255, 255, 0.12);
+    --ck-border-control: rgba(255, 255, 255, 0.16);
     --ck-text-primary: #f0f0f4;
     --ck-text-secondary: #afafb7;
     --ck-text-disabled: #838389;
@@ -69,7 +76,8 @@
     --ck-white-65: rgba(255, 255, 255, 0.08);
     --ck-white-70: rgba(255, 255, 255, 0.1);
     --ck-grey-200: #33333d;
-    --ck-elevation-sm: 0px 1px 3px 0px rgba(0, 0, 0, 0.3);
+    --ck-selected: rgba(255, 255, 255, 0.1);
+    --ck-elevation-sm: 0px 1px 2px 0px rgba(0, 0, 0, 0.3);
     --ck-elevation-md: 0px 6px 6px -2px rgba(0, 0, 0, 0.3);
     --ck-elevation-lg: 0px 16px 24px -8px rgba(0, 0, 0, 0.45);
     --wb-glass-card: rgba(38, 38, 47, 0.82);
@@ -93,8 +101,13 @@ body {
   color: var(--ck-text-primary);
   font-family: var(--ck-sans);
   font-size: 13px;
+  font-weight: 400;
   line-height: 20px;
   -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--ck-text-primary) 18%, transparent);
 }
 
 code,
@@ -109,12 +122,15 @@ textarea {
   font-family: var(--ck-mono);
   font-size: 12px;
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
+/* Three columns with a drag handle between each: the widths are per viewer (Workbench.tsx). */
 .wb-page {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 260px;
-  gap: 8px;
+  grid-template-columns:
+    var(--wb-left, 248px) 8px minmax(0, 1fr) 8px
+    var(--wb-right, 280px);
   height: 100%;
   padding: 8px;
 }
@@ -128,20 +144,23 @@ textarea {
 }
 
 .wb-side {
+  min-width: 0;
   overflow-y: auto;
-  padding: 16px;
+  padding: 16px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ck-border-control) transparent;
 }
 
-/* Panel titles: "Import a log", "Scenes", "Window". */
+/* Panel titles: "Scenes", "Run", "Window", "Review". */
 .wb-side h2 {
   margin: 0 0 8px;
   padding: 0 4px;
-  font-size: 15px;
-  line-height: 20px;
+  font-size: 16px;
+  line-height: 24px;
   font-weight: 600;
 }
 
-/* Section title with an extending line. */
+/* Section title with an extending line: "App", "Layout warnings", "Keys". Sentence case. */
 .wb-side h3,
 .wb-under h3 {
   display: flex;
@@ -149,12 +168,10 @@ textarea {
   gap: 8px;
   margin: 16px 0 8px;
   padding: 0 4px;
-  font-size: 11px;
-  line-height: 16px;
+  font-size: 13px;
+  line-height: 20px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--ck-text-secondary);
+  color: var(--ck-text-primary);
   white-space: nowrap;
 }
 
@@ -166,30 +183,42 @@ textarea {
   background: var(--ck-border-container);
 }
 
-/* Buttons: inline tabs on the glass. Pressed is the selected-tag pattern (dark fill, light text). */
+/* Buttons: a visible edge on the glass, in light and in dark. Pressed is dark fill, light text. */
 .wb-side button,
 .wb-notice button,
-.wb-handover-card button {
+.wb-handover-card button,
+.wb-import input[type="file"]::file-selector-button {
   font: inherit;
   font-size: 13px;
   font-weight: 500;
   line-height: 20px;
   color: var(--ck-text-primary);
-  background: var(--ck-white-65);
-  border: 1px solid var(--ck-border-default);
+  background: var(--ck-surface-container);
+  border: 1px solid var(--ck-border-control);
   border-radius: var(--ck-radius-sm);
-  padding: 4px 12px;
+  box-shadow: var(--ck-elevation-sm);
+  padding: 3px 12px;
+  margin: 0;
   cursor: pointer;
 }
 
 .wb-side button:hover,
 .wb-notice button:hover,
-.wb-handover-card button:hover {
-  background: var(--ck-surface-container);
+.wb-handover-card button:hover,
+.wb-import input[type="file"]::file-selector-button:hover {
+  background: var(--ck-surface-hovered);
 }
 
-.wb-side button {
-  margin: 0 0 4px;
+.wb-side button:active,
+.wb-notice button:active,
+.wb-handover-card button:active {
+  background: var(--ck-grey-200);
+}
+
+.wb-side button:disabled {
+  color: var(--ck-text-disabled);
+  cursor: default;
+  box-shadow: none;
 }
 
 .wb-side button[aria-pressed="true"] {
@@ -198,7 +227,26 @@ textarea {
   color: var(--ck-text-invert);
 }
 
-/* Inputs and dropdowns: the dropdown pattern. */
+/* A quiet text action: "Collapse all", "Answer this". */
+.wb-side button.wb-link-button {
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--ck-text-secondary);
+  background: none;
+  border: 0;
+  box-shadow: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.wb-side button.wb-link-button:hover {
+  color: var(--ck-text-primary);
+  background: none;
+}
+
+/* Inputs and dropdowns. */
 .wb-side input,
 .wb-side select,
 .wb-side textarea {
@@ -206,32 +254,45 @@ textarea {
   font-size: 13px;
   color: var(--ck-text-primary);
   background: var(--ck-surface-container);
-  border: 1px solid var(--ck-border-container);
+  border: 1px solid var(--ck-border-control);
   border-radius: var(--ck-radius-xs);
-  padding: 4px 8px;
+  padding: 3px 8px;
+  min-width: 0;
 }
 
-/* Dropdowns carry the dropdown shadow. */
-.wb-side select {
-  box-shadow: var(--ck-elevation-md);
+.wb-side input::placeholder {
+  color: var(--ck-text-secondary);
 }
 
 .wb-side input[type="number"] {
   font-family: var(--ck-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
-.wb-side input:focus-visible,
-.wb-side select:focus-visible,
-.wb-side textarea:focus-visible {
-  outline: none;
-  border-color: var(--ck-text-secondary);
-  box-shadow: var(--ck-elevation-md);
+/* One focus ring for every control, from the palette. */
+:is(
+  button,
+  summary,
+  select,
+  input,
+  textarea,
+  [role="separator"]
+):focus-visible {
+  outline: 2px solid var(--ck-text-primary);
+  outline-offset: 2px;
 }
 
 .wb-side input[type="checkbox"],
 .wb-side input[type="range"],
 .wb-side input[type="color"] {
   accent-color: var(--ck-text-primary);
+}
+
+.wb-side input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
 }
 
 .wb-side input[type="range"] {
@@ -241,115 +302,441 @@ textarea {
 }
 
 .wb-side input[type="color"] {
+  width: 32px;
+  height: 24px;
   padding: 2px;
+  cursor: pointer;
 }
 
-.wb-side fieldset {
+.wb-side p {
   margin: 0;
-  padding: 8px 12px 12px;
-  border: 1px solid var(--ck-border-container);
-  border-radius: var(--ck-radius-sm);
-}
-
-.wb-side legend {
   padding: 0 4px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--ck-text-secondary);
 }
 
-/* Scene rows: the list item pattern. */
-.wb-side nav button {
+/* A property row: the name on the left, the control on the right. */
+.wb-prop {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 4px;
+}
+
+.wb-prop > span,
+.wb-prop > label {
+  color: var(--ck-text-secondary);
+}
+
+.wb-prop > :is(input, select):not([type="checkbox"]) {
+  width: 100%;
+}
+
+.wb-prop > input[type="checkbox"] {
+  justify-self: start;
+}
+
+.wb-size,
+.wb-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wb-size {
+  gap: 4px;
+  color: var(--ck-text-secondary);
+}
+
+.wb-size input,
+.wb-inline select {
+  flex: 1;
+  width: 0;
+}
+
+.wb-inline input[type="number"] {
+  flex: none;
+  width: 64px;
+}
+
+.wb-side .wb-prop .wb-inline button {
+  flex: none;
+  padding: 3px 8px;
+}
+
+.wb-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+/* The right column: Run, Window, Review, then the panels that fold open. */
+.wb-side-right > section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wb-side-right > section + section {
+  margin-top: 24px;
+}
+
+.wb-side-right .wb-inline {
+  padding: 0 4px;
+}
+
+.wb-panel-head,
+.wb-scenes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wb-panel-head h2,
+.wb-scenes-head h2 {
+  margin: 0;
+}
+
+/* The run's transport: buttons and time, the track with the step marks, the speed. */
+.wb-run {
+  display: grid;
+  gap: 8px;
+}
+
+.wb-run-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.wb-run-buttons .wb-time {
+  margin-left: auto;
+}
+
+.wb-run-track {
+  position: relative;
+  height: 24px;
+  margin: 0 4px;
+}
+
+.wb-side .wb-run-track input[type="range"] {
   display: block;
   width: 100%;
-  margin: 0 0 2px;
-  padding: 4px 12px;
+  height: 16px;
+  margin: 0;
+}
+
+/* Inset by the thumb's radius, so a mark sits under the thumb at that time. */
+.wb-run-marks {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 6px;
+  pointer-events: none;
+}
+
+.wb-run-mark {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 6px;
+  margin-left: -0.5px;
+  background: var(--ck-text-secondary);
+}
+
+.wb-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 4px;
+}
+
+.wb-next-action {
+  font-weight: 600;
+}
+
+.wb-side p.wb-next-action {
+  color: var(--ck-text-primary);
+}
+
+.wb-side p.wb-run-still {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wb-run-still .wb-time {
+  color: var(--ck-text-primary);
+}
+
+/* The "?" keys help. */
+.wb-keys {
+  position: relative;
+}
+
+.wb-keys > summary {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  list-style: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ck-text-secondary);
+  background: var(--ck-surface-container);
+  border: 1px solid var(--ck-border-control);
+  border-radius: var(--ck-radius-full);
+  cursor: pointer;
+}
+
+.wb-keys > summary::-webkit-details-marker {
+  display: none;
+}
+
+.wb-keys > summary:hover,
+.wb-keys[open] > summary {
+  color: var(--ck-text-primary);
+  background: var(--ck-surface-hovered);
+}
+
+.wb-keys-card {
+  position: absolute;
+  right: 0;
+  top: 32px;
+  z-index: 20;
+  width: 288px;
+  padding: 4px 12px 12px;
+  background: var(--ck-surface-container);
+  border: 1px solid var(--ck-border-container);
+  border-radius: var(--ck-radius-sm);
+  box-shadow: var(--ck-elevation-lg);
+}
+
+.wb-keys-card h3 {
+  margin-top: 8px;
+}
+
+.wb-keys-card dl {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 0 4px;
+}
+
+.wb-keys-card dl > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+}
+
+.wb-keys-card dt {
+  display: flex;
+  gap: 4px;
+}
+
+.wb-keys-card dd {
+  margin: 0;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+  background: var(--ck-grey-200);
+  border: 1px solid var(--ck-border-control);
+  border-radius: var(--ck-radius-xs);
+}
+
+/* Scenes: the filter, the groups that fold, and one row per scene. */
+.wb-scenes-head {
+  margin-bottom: 8px;
+}
+
+.wb-side input.wb-scene-filter {
+  display: block;
+  width: 100%;
+  height: 28px;
+  margin: 0 0 4px;
+}
+
+.wb-side .wb-scenes h3 {
+  margin: 12px 0 2px;
+  padding: 0;
+}
+
+.wb-side .wb-scenes h3::after {
+  display: none;
+}
+
+.wb-side button.wb-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 2px 4px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: left;
+  color: var(--ck-text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--ck-radius-xs);
+  box-shadow: none;
+}
+
+.wb-side button.wb-group-toggle:hover {
+  color: var(--ck-text-primary);
+  background: var(--ck-white-50);
+}
+
+.wb-side button.wb-group-toggle[aria-disabled="true"] {
+  cursor: default;
+}
+
+.wb-group-toggle::after {
+  content: attr(data-count);
+  margin-left: auto;
+  font-family: var(--ck-mono);
+  font-weight: 500;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-chevron {
+  flex: none;
+  transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+[aria-expanded="true"] > .wb-chevron {
+  transform: rotate(90deg);
+}
+
+/* Scene rows: 28px, one line each; a long title ends in an ellipsis. */
+.wb-side button.wb-scene {
+  display: block;
+  width: 100%;
+  margin: 0 0 1px;
+  padding: 4px 8px;
   text-align: left;
   font-size: 13px;
   font-weight: 400;
   line-height: 20px;
-  /* One line each, so the list is dense: a long title ends in an ellipsis. */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   background: transparent;
   border: 0;
   border-radius: var(--ck-radius-xs);
+  box-shadow: none;
 }
 
-.wb-side nav button:hover {
-  background: var(--ck-white-50);
+.wb-side button.wb-scene:hover {
+  background: color-mix(in srgb, var(--ck-selected) 50%, transparent);
 }
 
-.wb-side nav button.wb-scene-current {
-  font-weight: 500;
-  background: var(--ck-white-70);
+.wb-side button.wb-scene-current,
+.wb-side button.wb-scene-current:hover {
+  font-weight: 600;
+  background: var(--ck-selected);
 }
 
-/* "Window" follows the run controls; give it the section spacing. */
-.wb-side-right section > h2 {
-  margin-top: 16px;
+/* The keyboard cursor of ↑ and ↓, when it is not on the current scene. */
+.wb-side button.wb-scene-cursor {
+  box-shadow: inset 0 0 0 1px var(--ck-border-control);
 }
 
-.wb-side-right section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.wb-empty {
+  padding: 8px 4px;
 }
 
-.wb-side-right section > div {
-  display: flex;
-  gap: 4px;
+/* The drag handles between the panels. */
+.wb-split {
+  position: relative;
+  touch-action: none;
+  outline-offset: -2px;
 }
 
-.wb-comment-toggle {
-  margin-bottom: 12px;
+.wb-split-x {
+  cursor: col-resize;
 }
 
-.wb-comment-toggle p {
-  margin: 0;
-  padding: 0 4px;
-  color: var(--ck-text-disabled);
+.wb-split-y {
+  flex: none;
+  height: 8px;
+  cursor: row-resize;
 }
 
-.wb-side-right label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 4px;
+.wb-split::after {
+  content: "";
+  position: absolute;
+  border-radius: var(--ck-radius-full);
+  background: transparent;
+  transition: background 120ms ease-out;
 }
 
-.wb-side-right label input[type="number"] {
-  width: 90px;
+.wb-split-x::after {
+  top: 16px;
+  bottom: 16px;
+  left: 3px;
+  width: 2px;
 }
 
-/* The center column scrolls as one, so the whole window shows at its size and zoom. */
+.wb-split-y::after {
+  left: 16px;
+  right: 16px;
+  top: 3px;
+  height: 2px;
+}
+
+.wb-split:hover::after,
+.wb-split:focus-visible::after,
+.wb-split:active::after {
+  background: var(--ck-text-secondary);
+}
+
+/* The center column: the stage takes the height the warnings leave. */
 .wb-center {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
 }
 
-/* As tall as the window: never shorter, so nothing covers the window. */
+/* The window's space. It scrolls when the window is bigger than it (a zoom you set). */
 .wb-stage {
   position: relative;
-  flex: none;
-  overflow-x: auto;
-  overflow-y: hidden;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
   padding: 16px;
+  border-radius: var(--ck-radius-sm);
+  background: color-mix(in srgb, var(--ck-text-primary) 3%, transparent);
 }
 
-/* Below the window. The warnings scroll on their own, so the column does not grow as they grow. */
+/*
+ * Below the window. The warnings scroll on their own; a drag on the handle sets the height. The
+ * height does not follow the number of warnings: a stage that changed height would change Fit's
+ * zoom during a walk, and a zoom change moves the window's elements by a pixel or two.
+ */
 .wb-under {
   flex: none;
-  max-height: 40vh;
+  height: 25vh;
+  max-height: 30vh;
   overflow-y: auto;
   padding: 0 12px 12px;
 }
@@ -357,15 +744,23 @@ textarea {
 .wb-under p {
   margin: 0;
   padding: 0 4px;
-  color: var(--ck-text-disabled);
+  color: var(--ck-text-secondary);
+}
+
+.wb-warning-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 .wb-under li {
-  margin: 0 0 4px;
+  margin: 0 0 2px;
 }
 
-/* A warning row: the list item pattern. */
+/* A warning row: the list item pattern, as wide as the list. */
 .wb-under button {
+  display: block;
+  width: 100%;
   font: inherit;
   font-size: 13px;
   line-height: 20px;
@@ -379,13 +774,23 @@ textarea {
 }
 
 .wb-under button:hover {
-  background: var(--ck-white-50);
+  background: color-mix(in srgb, var(--ck-selected) 60%, transparent);
 }
 
-/* The warning shown over the window. */
+/* The warning shown over the window: a tint and a leading dot in the highlight's colour. */
 .wb-under button.wb-warning-current {
-  background: var(--ck-white-70);
-  box-shadow: inset 2px 0 0 var(--wb-highlight-moved);
+  background: color-mix(in srgb, var(--wb-highlight-moved) 12%, transparent);
+}
+
+.wb-under button.wb-warning-current::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  vertical-align: 1px;
+  border-radius: 50%;
+  background: var(--wb-highlight-moved);
 }
 
 .wb-under button[aria-pressed="true"] {
@@ -398,24 +803,58 @@ textarea {
   font-weight: 500;
 }
 
+/* The panels that fold open. */
 .wb-fold {
-  margin-top: 12px;
+  margin-top: 16px;
   border-top: 1px solid var(--ck-border-container);
   padding-top: 8px;
 }
 
+.wb-side-right > .wb-fold + .wb-fold {
+  margin-top: 0;
+}
+
 .wb-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 4px;
+  list-style: none;
   border-radius: var(--ck-radius-xs);
   cursor: pointer;
   font-size: 13px;
   line-height: 20px;
-  font-weight: 500;
+  font-weight: 600;
   overflow-wrap: anywhere;
+}
+
+.wb-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A drawn chevron: right when closed, down when open. */
+.wb-fold > summary::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 3px;
+  border-right: 1.5px solid var(--ck-text-secondary);
+  border-bottom: 1.5px solid var(--ck-text-secondary);
+  transform: rotate(-45deg);
+  transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.wb-fold[open] > summary::before {
+  transform: rotate(45deg);
 }
 
 .wb-fold > summary:hover {
   background: var(--ck-white-50);
+}
+
+.wb-fold > :not(summary) {
+  margin-top: 8px;
 }
 
 .wb-fold ul {
@@ -432,6 +871,14 @@ textarea {
   font-size: 12px;
   line-height: 1.5;
   width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-chevron,
+  .wb-fold > summary::before,
+  .wb-split::after {
+    transition: none;
+  }
 }
 
 .wb-notices {
@@ -483,7 +930,7 @@ textarea {
 
 .wb-handover-card h2 {
   margin: 0 0 8px;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 20px;
   font-weight: 600;
 }
@@ -568,36 +1015,11 @@ textarea {
   white-space: nowrap;
 }
 
-.wb-side-right .wb-pause-at-actions {
-  justify-content: flex-start;
-  margin-top: 4px;
-}
-
-.wb-pause-at-actions input {
-  margin: 0;
-}
-
-.wb-next-action {
-  margin: 4px 0 12px;
-  padding: 0 4px;
-  font-weight: 600;
-}
-
+/* Import a log: folded under the scenes. */
 .wb-import {
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--ck-border-container);
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.wb-import label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 4px;
 }
 
 .wb-import input[type="file"] {
@@ -609,18 +1031,6 @@ textarea {
 
 .wb-import input[type="file"]::file-selector-button {
   margin-right: 8px;
-  font: inherit;
-  font-weight: 500;
-  color: var(--ck-text-primary);
-  background: var(--ck-white-65);
-  border: 1px solid var(--ck-border-default);
-  border-radius: var(--ck-radius-sm);
-  padding: 4px 12px;
-  cursor: pointer;
-}
-
-.wb-import p {
-  margin: 0;
 }
 
 .wb-import code {
@@ -637,19 +1047,13 @@ textarea {
   cursor: pointer;
 }
 
-.wb-import-save p {
+.wb-side .wb-import-save p {
   margin: 4px 0;
-  color: var(--ck-text-disabled);
 }
 
-.wb-import nav button {
-  display: block;
-  width: 100%;
-  text-align: left;
-}
-
-.wb-side-right > .wb-time {
-  padding: 0 4px;
+/* The review prompts: Comment, and Critique this screen. */
+.wb-comment-toggle p[role="status"] {
+  color: var(--ck-text-primary);
 }
 
 /*

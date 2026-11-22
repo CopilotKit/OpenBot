@@ -63,12 +63,10 @@ export function ImportLogPanel({
   };
 
   return (
-    <section className="wb-import" aria-labelledby="wb-import-heading">
-      <h2 id="wb-import-heading">Import a log</h2>
-      <label>
-        Start
+    <section className="wb-import" aria-label="Import a log">
+      <label className="wb-prop">
+        <span>Start</span>
         <select
-          aria-label="Start"
           value={start}
           onChange={(event) => setStart(event.target.value as Start)}
         >
@@ -106,7 +104,7 @@ export function ImportLogPanel({
                 type="button"
                 title={scene.id}
                 aria-current={isCurrent ? "true" : undefined}
-                className={isCurrent ? "wb-scene-current" : undefined}
+                className={isCurrent ? "wb-scene wb-scene-current" : "wb-scene"}
                 onClick={() => onPick(scene.id)}
               >
                 {scene.title}

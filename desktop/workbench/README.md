@@ -12,7 +12,9 @@ The workbench is for development only. It never goes into a shipped build.
 ## Start the workbench
 
 1. Run `cd desktop && bun run workbench`.
-2. Open http://localhost:3021/workbench/.
+2. Open http://localhost:3021/workbench/. The startup output prints this link under Vite's own links.
+
+The address `/` (for example http://localhost:3021/) sends you to `/workbench/` and keeps the query. A frame of the app still gets the app at `/`.
 
 The workbench uses port 3021. The desktop app keeps port 3020. If port 3021 is busy, the server stops and does not pick another port.
 
@@ -50,15 +52,51 @@ A running workbench keeps its config. If you change `vite.workbench.config.ts` o
 
 The page has three columns:
 
-- On the left: **Import a log** and the scene list.
+- On the left: **Scenes** (a filter and the scene groups), and **Import a log** folded under them.
 - In the center: the window, the notices and the layout warnings.
-- On the right: Comment mode, the run controls, the Window panel and the panels that fold open.
+- On the right: **Run** (the run controls and the **?** keys help), **Window**, **Review** (Comment mode and Critique this screen) and the panels that fold open.
 
-The page uses the CopilotKit colors on a plain, quiet ground, with glass panels. The text uses the sans-serif font of your computer. Times, routes, JSON and code use its monospace font. The page loads no fonts from the web. When your computer uses a dark theme, the page is dark too. The look changes only the page around the window. The window and its contents show as the real app shows them.
+The page uses the CopilotKit colors on a plain, quiet ground, with glass panels. The text uses the sans-serif font of your computer, at 13 px. Panel titles are 16 px. Times, routes, JSON and code use its monospace font. The page loads no fonts from the web. When your computer uses a dark theme, the page is dark too. The look changes only the page around the window. The window and its contents show as the real app shows them.
+
+### Panel sizes
+
+A drag handle is between the columns, and one is above the layout warnings. Drag a handle to change the size:
+
+| Handle | Default | Limits |
+| --- | --- | --- |
+| Scene column width | 248 px | 180 to 420 px |
+| Right panel width | 280 px | 220 to 480 px |
+| Layout warnings height | 25% of the page height | 72 px to 70% of the page height |
+
+You can also press Tab to go to a handle and then use the arrow keys. Each press moves 8 px, and Shift moves 32 px. Home and End go to the limits. Double-click a handle, or press Enter on it, to go back to the default.
+
+The browser keeps the sizes for you only, in `localStorage`. They are not in the link. In a private window, the defaults apply.
+
+### Keys
+
+Press the **?** button next to **Run** to see the keys.
+
+| Key | Does |
+| --- | --- |
+| `/` | Puts the focus in the scene filter |
+| `↑` `↓` | Moves between the scenes in the list |
+| `Enter` | Opens the scene you moved to |
+| `Space` | Plays or pauses the run |
+| `.` | Steps to the next run step |
+| `←` `→` | Seeks 1 second back or on |
+| `C` | Turns Comment mode on or off |
+
+The keys do nothing while the focus is in a field that you type in. A focused slider or drag handle keeps its own arrow keys. Only `C` works while the focus is in the window.
 
 ## Scenes and runs
 
 A scene is one state of the window. The scene list groups the scenes. The desktop groups are Install, Update, Connected, Status, Move to Cloud, Shutting down and Security floor. The app groups are App: Home, App: Settings, App: Conversation and App: Account.
+
+The current scene has a gray fill. When the page opens, the list scrolls to it.
+
+Type in **Filter scenes** to show only the scenes whose title, id or group has the text. Press `↓` and `↑` in the filter to move between the matches, and `Enter` to open one. `Escape` clears the filter.
+
+Click a group name to fold the group or open it again. The number after the name is how many scenes the group has. **Collapse all** folds every group, and **Expand all** opens them. The group of the current scene always stays open, and a filter opens every group that has a match. The browser keeps the folded groups for you only, in `localStorage`.
 
 The desktop scenes come from three files in `scenes/`:
 
@@ -70,11 +108,11 @@ A **run** is a scene that plays over time. A scene with a run shows these contro
 
 - **Play** and **Pause** start and stop the clock.
 - **Step** jumps to the next run step.
-- The **Time** slider seeks to any second. Marks on the slider show the run steps.
+- The **Time** slider seeks to any second. Marks under the slider show the run steps.
 - **Speed** is ¼×, ½×, 1×, 10× or Max. Max runs as fast as the browser can go.
 - **Pause at each action**: when this is on, a play stops just before each click and type step. The run controls then show the next action, for example "Next: Click · Install".
 
-A run stops at its end, at every speed. A scene without a run shows only the time.
+A run stops at its end, at every speed. A scene without a run says "No run. The scene plays on its own." and shows the time.
 
 When a run clicks or types during a play or a step, a marker shows the element over the window for a short time. A seek shows no markers, so a CLI shot never shows them.
 
@@ -204,10 +242,10 @@ The Window panel sets how the frame looks:
 - **OS**: Mac or Windows. This changes the frame (traffic lights or Windows title bar). It also changes the user agent of the window. Windows also sets the answers the Windows setup needs.
 - **Active**: sets whether the window has focus. An inactive window has gray controls.
 - **Theme**: Light or Dark. The default is Dark.
-- **Zoom**: from 0.5 to 2.
+- **Zoom**: from 0.5 to 2, or **Fit**. Fit makes the window as big as the space for it, up to 100%. The button shows the zoom, for example "Fit (75%)". When the link has no `zoom`, Fit is on. When you type a zoom, Fit goes off. Press **Fit** to turn it on or off. With Fit on, the link has no `zoom`, so the link opens with Fit too. The CLI and the browser tests always give a `zoom`, so their shots never use Fit.
 - **Grid**: draws a 4 px grid over the window. You can change the grid color.
 
-For an app scene, the panel also has the **App** fieldset:
+Each setting has its name on the left. For an app scene, the panel also has an **App** section:
 
 - **Host**: OpenBot Desktop or Browser. With Browser, the frame shows a browser bar with the route that the app shows now. When the app goes to another route, for example after a redirect, the bar shows the new route.
 - **Signed in as**: As the scene says, Member, Admin or Owner.
@@ -219,15 +257,18 @@ When you move the pointer over the window, the inspector shows the box of the el
 
 ## Comment mode
 
-Use Comment mode to write a change request for a coding agent.
+Use Comment mode to write a prompt for a coding agent about one part of the window.
 
-1. Press the `C` key, or press the Comment button. The `C` key does nothing while the focus is in a text field.
+1. Press the `C` key, or press **Comment** in the Review section. The `C` key does nothing while the focus is in a text field.
 2. Click one element, or drag over an area of the window.
-3. Type your comment.
-4. Press **Copy as prompt**, or press Cmd+Enter (Ctrl+Enter on Windows).
-5. Paste the prompt into your agent.
+3. In **Ask for**, choose what you want: **Change request**, or an impeccable command (Critique, Audit, Layout, Typeset, Clarify or Polish). The browser keeps your last choice.
+4. Type your comment. A change request needs a comment. For an impeccable command, the comment is optional.
+5. Press **Copy as prompt**, or press Cmd+Enter (Ctrl+Enter on Windows).
+6. Paste the prompt into your agent.
 
 Press `Escape` or `C` to leave Comment mode.
+
+### Change request
 
 The prompt is a Markdown message. It holds:
 
@@ -240,6 +281,21 @@ The prompt is a Markdown message. It holds:
 - A short list of what to do. It names the 4 px grid and the `openbot-copy` and `openbot-screen-layout` rules.
 
 The component line names the React component and, when the workbench can find it, the source file and line. The workbench reads this from React internals and from source maps of the dev server. For an app scene, the file is under `app/src`. If the workbench cannot find a component, the line is missing. The prompt then tells the agent to search the repo.
+
+### An impeccable command
+
+With an impeccable command, the prompt is the same kind of prompt that `bun run workbench:critique` writes (see `critiquePrompt.ts`), but only for the part you picked:
+
+- The first line is `/impeccable <command> <target>`. The target is the source file that most of the picked elements have in their component chain. If there is none, it is the app route or the scene id.
+- The surface mode is Operate.
+- No image comes with the prompt. The prompt tells the agent to shoot the frame first with `bun run workbench:shot`, and not to use impeccable's own `shot`.
+- A Scope section names the element or the area and its box, and tells the agent not to change the rest of the screen.
+- The prompt lists the picked elements and only the layout warnings whose box touches the picked part.
+- Your comment, if you wrote one.
+
+### Critique this screen
+
+To ask about the whole window, choose a command next to **Critique this screen** and press the button. The workbench copies an impeccable prompt for the whole frame, with all of its elements (first 60) and all of its layout warnings. Paste it into your agent.
 
 ## Use a link
 
@@ -275,13 +331,13 @@ For an app scene, these panels fold open:
 
 - **Desktop commands** is the Commands panel for the page commands of the app.
 - **Calls** lists every call to the Desktop bridge.
-- **Requests** lists every `/api` request, newest first, with its time, status and source. The source is Scene answer, Stream, Extra, Spec example or No answer. Press **Answer this** to open the route in the API answers panel.
+- **Requests** lists every `/api` request, newest first. The first line has the time, the method, the route and the status. The route shows `…` in place of `/api/v2/organizations/default`. Hold the pointer on a row to see all of the route. The second line has the source and **Answer this**. The source is Scene answer, Stream, Extra, Spec example or No answer. Press **Answer this** to open the route in the API answers panel.
 - **API answers** sets the answer for a route. The modes are Value, Never, Fail, Delay and Offline. The workbench keeps your answers in the link.
 - **Stream and sockets** lists the open streams and sockets. You can send an AG-UI event to an agent, or a message to the sockets whose address contains a text.
 
 The app listens to no Tauri events, so an app scene has no Events panel.
 
-Under the window, the workbench lists layout warnings as the clock moves. The newest warning is first. A warning is one of these:
+Under the window, the workbench lists layout warnings as the clock moves. The list is in a fixed order: by time, then by the name of the element. A warning is one of these:
 
 - **moved**: an element moved more than 2 px between two checks. The warning names the cause, for example a command or a request. If most of the page moved by the same amount, one warning says "The whole page".
 - **cut off**: the content of an element is clipped.
@@ -289,13 +345,13 @@ Under the window, the workbench lists layout warnings as the clock moves. The ne
 
 The workbench checks after each native call and event. In an app scene, it also checks after each request, stream event and socket message. Elements that are hidden from view, such as labels for screen readers only, do not get warnings.
 
-Hold the pointer on a warning for 250 ms to jump to its time. The row says "Jumping…" while the window gets there. Then the workbench marks the warning over the window:
+Hold the pointer on a warning for 250 ms to jump to its time. The row says "Jumping…" while the window gets there, and the heading says where it goes, for example "Seeking to 0:44…". The list keeps its rows during the jump, so the row under the pointer stays. Then the workbench marks the warning over the window:
 
 - For **moved**: a dashed box where the element was, a solid box where it is, and an arrow between them. A label says how far it moved, for example "moved 157 px down".
 - For **cut off**: a box around the element, with a shaded strip for the hidden part. A label says "cut off by N px".
 - For **outside the window**: the part past the edge is shaded. A label says "N px outside the window".
 
-When the pointer leaves the list, the mark goes away. Click a warning to keep its mark. A kept mark stays until you click another warning. A play, a step, a seek or another scene removes every mark. The mark is outside the window, so a shot of the window does not show it.
+The row of the marked warning has a tint and a dot in the color of the mark. When the pointer leaves the list, the mark goes away. Click a warning to keep its mark. A kept mark stays until you click another warning. A play, a step, a seek or another scene removes every mark. The mark is outside the window, so a shot of the window does not show it.
 
 ## Import a log
 
@@ -303,8 +359,9 @@ You can make a scene from an OpenBot Desktop troubleshooting file. The scene pla
 
 To import a log in the browser:
 
-1. In **Import a log**, set **Start** to First run or Relaunch.
-2. Choose the troubleshooting file.
+1. Open **Import a log** under the scene list. It is folded until you import a scene.
+2. Set **Start** to First run or Relaunch.
+3. Choose the troubleshooting file.
 
 The scene shows under **Imported** and opens at once. It stays only in this browser tab. A link to it does not open it in another browser.
 

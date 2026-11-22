@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ApiControl, ApiRecord, ApiRoute, ApiSource } from "./appContract";
 import { formatTime } from "./RunControls";
+import { shortPath } from "./routeText";
 
 export type RequestLogProps = {
   api: ApiControl | null;
@@ -40,7 +41,6 @@ export function RequestLog(props: RequestLogProps) {
   if (api === null) {
     return (
       <section>
-        <h3>Requests</h3>
         <p>No window is loaded.</p>
       </section>
     );
@@ -55,37 +55,44 @@ export function RequestLog(props: RequestLogProps) {
 
   return (
     <section>
-      <h3>Requests</h3>
       <input
+        type="search"
         aria-label="Filter"
-        placeholder="Filter"
+        placeholder="Filter requests"
         value={filter}
         onChange={(event) => setFilter(event.target.value)}
       />
       {records.length === 0 ? (
         <p>No requests yet.</p>
       ) : (
-        <ul>
+        <ul className="wb-req-list">
           {records.map((record) => (
             <li
               key={record.id}
               data-testid="request"
+              title={`${record.method} ${record.path}`}
               className={
                 record.source === "none" ? "wb-request-missing" : undefined
               }
             >
-              <span>{formatTime(record.at)}</span>{" "}
-              <code>{`${record.method} ${record.path}`}</code>{" "}
-              <span>{statusText(record)}</span>{" "}
-              <em>{SOURCE_WORDS[record.source]}</em>
-              {onPick && (
-                <>
-                  {" "}
-                  <button type="button" onClick={() => onPick(routeOf(record))}>
+              <div className="wb-req-line">
+                <span className="wb-time">{formatTime(record.at)}</span>
+                <span className="wb-req-method">{record.method}</span>
+                <code className="wb-req-route">{shortPath(record.path)}</code>
+                <span className="wb-req-status">{statusText(record)}</span>
+              </div>
+              <div className="wb-req-meta">
+                <em>{SOURCE_WORDS[record.source]}</em>
+                {onPick && (
+                  <button
+                    type="button"
+                    className="wb-link-button"
+                    onClick={() => onPick(routeOf(record))}
+                  >
                     Answer this
                   </button>
-                </>
-              )}
+                )}
+              </div>
             </li>
           ))}
         </ul>

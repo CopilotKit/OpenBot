@@ -1,14 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  buildPrompt,
-  type CommentContext,
-  type CommentTarget,
-} from "./commentPrompt";
+  ASK_CHOICES,
+  ASK_LABELS,
+  type AskFor,
+  type AskFrame,
+  buildAskPrompt,
+  isAskFor,
+} from "./askPrompt";
+import type { CommentContext, CommentTarget } from "./commentPrompt";
 import type { Box } from "./geometry";
 import { Measurement, measure, type Reading } from "./Inspector";
 import { pickArea, pickElement } from "./pickElement";
 import { resolveTarget } from "./sourceLines";
 import type { WindowSettings } from "./urlState";
+import { readPref, writePref } from "./viewerPrefs";
 
 export type CommentLayerProps = {
   frame: HTMLIFrameElement | null;
@@ -19,7 +24,16 @@ export type CommentLayerProps = {
   /** Set for an app scene: the live route of the app frame and where the app runs. */
   app?: CommentContext["app"];
   gridStep?: number;
+  /** The kind and the layout warnings of the loaded window, for an impeccable prompt. */
+  frameInfo?: AskFrame;
 };
+
+/** Where the last "Ask for" choice is kept, for this viewer. */
+const ASK_PREF = "commentAsk";
+
+function isAskPref(value: unknown): value is AskFor {
+  return typeof value === "string" && isAskFor(value);
+}
 
 /** `resolved` is the target with source lines, read from the source maps after the pick. */
 type Selection = {
@@ -114,7 +128,11 @@ export function CommentLayer({
   window: settings,
   app,
   gridStep = 4,
+  frameInfo,
 }: CommentLayerProps) {
+  const [ask, setAsk] = useState<AskFor>(
+    () => readPref(ASK_PREF, isAskPref) ?? "change",
+  );
   const [hover, setHover] = useState<Reading | null>(null);
   const [drag, setDrag] = useState<Box | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -290,14 +308,19 @@ export function CommentLayer({
   const copy = async () => {
     if (!selection) return;
     const target = await selection.resolved;
-    const text = buildPrompt(target, {
-      comment,
-      scene,
-      atSeconds,
-      window: settings,
-      link: window.location.href,
-      app,
-    });
+    const text = buildAskPrompt(
+      ask,
+      target,
+      {
+        comment,
+        scene,
+        atSeconds,
+        window: settings,
+        link: window.location.href,
+        app,
+      },
+      frameInfo ?? { kind: app ? "app" : "desktop", warnings: [] },
+    );
     try {
       await navigator.clipboard.writeText(text);
       setStatus("Copied.");
@@ -412,28 +435,50 @@ export function CommentLayer({
           >
             {describeTarget(selection.target)}
           </div>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+            }}
+          >
+            Ask for
+            <select
+              value={ask}
+              onChange={(event) => {
+                const next = event.target.value;
+                if (!isAskFor(next)) return;
+                setAsk(next);
+                writePref(ASK_PREF, next);
+              }}
+              style={{ ...fieldStyle, flex: 1, minWidth: 0 }}
+            >
+              {ASK_CHOICES.map((choice) => (
+                <option key={choice} value={choice}>
+                  {choice === "change"
+                    ? ASK_LABELS[choice]
+                    : `${ASK_LABELS[choice]} (impeccable)`}
+                </option>
+              ))}
+            </select>
+          </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            What do you want to change?
+            {ask === "change"
+              ? "What do you want to change?"
+              : "Anything to add? (optional)"}
             <textarea
               ref={textRef}
               value={comment}
               rows={4}
               onChange={(event) => setComment(event.target.value)}
-              style={{
-                font: "inherit",
-                color: "inherit",
-                background: "transparent",
-                border: "1px solid var(--wb-border, #d4d4d8)",
-                borderRadius: 4,
-                padding: 8,
-                resize: "vertical",
-              }}
+              style={{ ...fieldStyle, padding: 8, resize: "vertical" }}
             />
           </label>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
               type="button"
-              disabled={comment.trim() === ""}
+              disabled={ask === "change" && comment.trim() === ""}
               onClick={() => void copy()}
               style={buttonStyle}
             >
@@ -453,6 +498,15 @@ export function CommentLayer({
     </div>
   );
 }
+
+const fieldStyle: React.CSSProperties = {
+  font: "inherit",
+  color: "inherit",
+  background: "var(--wb-panel, #fff)",
+  border: "1px solid var(--wb-border, #d4d4d8)",
+  borderRadius: 4,
+  padding: "4px 8px",
+};
 
 const buttonStyle: React.CSSProperties = {
   font: "inherit",

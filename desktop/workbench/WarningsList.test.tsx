@@ -53,7 +53,7 @@ test("describes each kind of warning", () => {
   ).toBe(`Menu is 12px outside the window at ${t}`);
 });
 
-test("lists newest first, later entries first on ties", () => {
+test("lists by time, then by label, in a fixed order", () => {
   const warnings: Warning[] = [
     clipped(100, "A"),
     clipped(300, "B"),
@@ -64,7 +64,7 @@ test("lists newest first, later entries first on ties", () => {
   );
   expect(getByText("Layout warnings (3)")).not.toBeNull();
   const labels = getAllByRole("button").map((b) => b.textContent ?? "");
-  expect(labels.map((l) => l[0])).toEqual(["C", "B", "A"]);
+  expect(labels.map((l) => l[0])).toEqual(["A", "B", "C"]);
 });
 
 test("clicking seeks to the warning time", () => {
@@ -114,7 +114,7 @@ test("a pointer that passes over a row does not show its warning", async () => {
       hoverDelay={20}
     />,
   );
-  const [b, a] = getAllByRole("button");
+  const [a, b] = getAllByRole("button");
   fireEvent.mouseMove(b, { clientX: 5, clientY: 5 });
   fireEvent.mouseLeave(b, { clientX: 5, clientY: 15 });
   fireEvent.mouseMove(a, { clientX: 5, clientY: 15 });
@@ -132,7 +132,7 @@ test("a move with the pointer in the same place is the list changing, not the po
       hoverDelay={20}
     />,
   );
-  const [b, a] = getAllByRole("button");
+  const [a, b] = getAllByRole("button");
   fireEvent.mouseMove(b, { clientX: 5, clientY: 5 });
   await wait(30);
   // The rows moved under a pointer that stayed still.
@@ -208,4 +208,28 @@ test("the shown warning's row says when it is jumping and when it is pinned", ()
   );
   expect(getByRole("button").textContent).not.toContain("Jumping…");
   expect(getByRole("button").getAttribute("aria-pressed")).toBe("true");
+});
+
+test("while the page seeks, the heading says where it goes and the list is busy", () => {
+  const { getByRole, container } = render(
+    <WarningsList
+      warnings={[clipped(44_000, "A")]}
+      onSeek={() => {}}
+      seekingTo={44_000}
+    />,
+  );
+  expect(getByRole("status").textContent).toBe("Seeking to 0:44…");
+  expect(container.querySelector("section")?.getAttribute("aria-busy")).toBe(
+    "true",
+  );
+});
+
+test("the same warning twice keeps two rows", () => {
+  const { getAllByRole } = render(
+    <WarningsList
+      warnings={[clipped(100, "A"), clipped(100, "A")]}
+      onSeek={() => {}}
+    />,
+  );
+  expect(getAllByRole("button")).toHaveLength(2);
 });

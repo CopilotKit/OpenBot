@@ -48,6 +48,15 @@ export type CritiqueContext = {
   /** The app route, for an app scene. */
   route?: string;
   link: string;
+  /**
+   * False for a prompt that the workbench page copies: no frame.png or frame.json comes with it, so
+   * the agent renders the frame first. Default true (`workbench:critique` writes both files).
+   */
+  files?: boolean;
+  /** Set when the review is about one part of the frame (a picked element or area). */
+  scope?: { what: string; box: Box };
+  /** The person's own words, from the Comment box. */
+  note?: string;
 };
 
 /** How many elements the prompt lists. */
@@ -190,6 +199,44 @@ function elementLines(elements: readonly FrameElement[]): string[] {
   return lines;
 }
 
+function visualTruth(context: CritiqueContext, command: string): string[] {
+  const avoid =
+    "Do NOT use impeccable's own `shot`: it opens a plain page without the fake state that makes this scene.";
+  if (context.files === false) {
+    return [
+      `No image comes with this prompt. First render the frame with \`${command}\`. It writes frame.png and frame.json. Use them as the visual truth, and run the same command again after changes.`,
+      avoid,
+      "frame.json has the elements, the layout warnings, the native calls and the API requests of this frame.",
+    ];
+  }
+  return [
+    `Use frame.png in this folder and \`${command}\` to re-render after changes.`,
+    avoid,
+    "frame.json in this folder has the elements, the layout warnings, the native calls and the API requests of this frame.",
+  ];
+}
+
+function scopeLines(context: CritiqueContext): string[] {
+  if (!context.scope) return [];
+  return [
+    "## Scope",
+    "",
+    `Review only this part of the frame: ${context.scope.what}, at ${formatBox(context.scope.box)}. The elements and the layout warnings below are the ones in this part. Do not change the rest of the screen.`,
+    "",
+  ];
+}
+
+function noteLines(context: CritiqueContext): string[] {
+  const note = context.note?.trim();
+  if (!note) return [];
+  return [
+    "## What the person asks",
+    "",
+    ...note.split("\n").map((line) => `> ${line}`),
+    "",
+  ];
+}
+
 /** prompt.md for one frame. */
 export function buildCritiquePrompt(
   report: FrameReport,
@@ -215,10 +262,10 @@ export function buildCritiquePrompt(
     "",
     "## Visual truth",
     "",
-    `Use frame.png in this folder and \`${command}\` to re-render after changes.`,
-    "Do NOT use impeccable's own `shot`: it opens a plain page without the fake state that makes this scene.",
-    "frame.json in this folder has the elements, the layout warnings, the native calls and the API requests of this frame.",
+    ...visualTruth(context, command),
     "",
+    ...scopeLines(context),
+    ...noteLines(context),
     "## Frame",
     "",
     `- Scene: ${context.scene.title} (\`${context.scene.id}\`)`,
