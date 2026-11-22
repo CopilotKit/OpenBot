@@ -35,8 +35,10 @@ import { personBody } from "./accounts-api";
  * - Somebody who finished onboarding before the step existed is sent to it as their only step, and
  *   its button takes them in without finishing onboarding again.
  * - Every provider the server signs in to offers its sign-in first and a key as the alternative,
- *   as the setup window does. A ChatGPT plan, xAI, Google and Unbiased AI sign in on their own
- *   pages and are read until approved; a Claude plan finishes with the code Claude's page shows.
+ *   as the setup window does. xAI, Google and Unbiased AI sign in on their own pages and are read
+ *   until approved; a Claude plan finishes with the code Claude's page shows, and a ChatGPT plan
+ *   with the address ChatGPT sends the browser to. ChatGPT can sign in with a code instead, read
+ *   until approved like xAI's.
  *   Failed and expired sign-ins say why and sign in again, and leaving the row stops the reading.
  *   Inside OpenBot Desktop the sign-in is still the server's, never Desktop's.
  * - Use an API key still connects every provider.
@@ -134,13 +136,22 @@ type SignIn = {
 };
 
 /**
- * A sign-in as the server starts it for each provider: the spec's own examples for ChatGPT, Claude
- * and Unbiased AI, and for xAI and Google the same shape with what their pages give. Both finish by
- * themselves (poll): xAI's device page asks for the code shown here, and Google's page sends the
- * person back to OpenBot, with no code at all.
+ * A sign-in as the server starts it for each provider: the spec's own examples for ChatGPT (in the
+ * browser, or with a code when `method` is device), Claude and Unbiased AI, and for xAI and Google
+ * the shape of ChatGPT's code sign-in with what their pages give. Both finish by themselves (poll):
+ * xAI's device page asks for the code shown here, and Google's page sends the person back to
+ * OpenBot, with no code at all.
  */
-function signInStarted(provider: AiConnectionProvider) {
-  if (provider === "openai") return example("AiSignInChatGptExample");
+function signInStarted(
+  provider: AiConnectionProvider,
+  method: "browser" | "device" | undefined,
+) {
+  if (provider === "openai")
+    return example(
+      method === "device"
+        ? "AiSignInChatGptExample"
+        : "AiSignInChatGptBrowserExample",
+    );
   if (provider === "anthropic") return example("AiSignInClaudeExample");
   if (provider === "xai")
     return {
@@ -163,8 +174,15 @@ function signInStarted(provider: AiConnectionProvider) {
 
 /** What finishes Claude's sign-in: the spec's example of the code Claude's page shows. */
 const CLAUDE_CODE = "Zm9vYmFyLWNvZGU#c3RhdGUtZXhhbXBsZQ";
+/**
+ * What finishes ChatGPT's sign-in in the browser: the address ChatGPT sends the browser to once the
+ * person approves, on the redirect the spec's example asks for, with its state.
+ */
+const CHATGPT_ADDRESS =
+  "http://localhost:1455/auth/callback?code=ac_ZXhhbXBsZS1jb2Rl&scope=openid+profile+email+offline_access&state=example";
 const GOOD_CODES: Partial<Record<AiConnectionProvider, string>> = {
   anthropic: CLAUDE_CODE,
+  openai: CHATGPT_ADDRESS,
 };
 /** What the server's sentences call each sign-in. */
 const SIGN_IN_NAMES: Record<string, string> = {
@@ -348,11 +366,15 @@ class FakeServer {
       expect(request.headers()["idempotency-key"]?.length ?? 0).toBeGreaterThan(
         0,
       );
-      const body = StartPersonalAiSignInBody.parse(request.postDataJSON());
-      this.signIns.push(body);
+      const sent = request.postDataJSON() as Record<string, unknown>;
+      const body = StartPersonalAiSignInBody.parse(sent);
+      // As sent: nothing the spec's schema doesn't name.
+      for (const key of Object.keys(sent))
+        expect(Object.keys(body)).toContain(key);
+      this.signIns.push(sent);
       // The spec's example, read again every second rather than five so the test is quick.
       const begun = StartPersonalAiSignInResponse.parse({
-        ...signInStarted(body.provider),
+        ...signInStarted(body.provider, body.method),
         interval: 1,
       });
       this.signIn = {
@@ -846,6 +868,12 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await chooser
           .getByRole("button", { name: "Sign in with OpenAI", exact: true })
           .click();
+        await chooser
+          .getByLabel("Address from your browser")
+          .fill(CHATGPT_ADDRESS);
+        await chooser
+          .getByRole("button", { name: "Finish", exact: true })
+          .click();
         await chooser.getByText("Signed in to OpenAI.").waitFor();
         expect(server.signIns).toEqual([{ provider: "openai" }]);
         await chooser.getByRole("button", { name: "Back" }).click();
@@ -1087,7 +1115,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
     }, 60_000);
 
   for (const engine of engines)
-    test(`a ChatGPT plan signs in with the code on OpenAI's page, connects, and Settings names it, in ${engine}`, async () => {
+    test(`a ChatGPT plan signs in in the browser with the address it lands on, connects, and Settings names it, in ${engine}`, async () => {
       const server = new FakeServer("none", true);
       const page = await open(
         "/onboarding?step=ai",
@@ -1101,20 +1129,67 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         const chooser = page.locator("[data-ai-chooser]");
         await chooser.getByRole("button", { name: /^OpenAI/ }).click();
         await chooser
-          .getByRole("button", { name: "Sign in with OpenAI", exact: true })
-          .click();
-        // The code to enter on OpenAI's page, and the page itself: opened, and linked.
-        await chooser.getByText("VU3W-87566").waitFor();
+          .getByText(
+            "OpenAI opens in your browser. After you approve, your browser lands on a page that doesn't load. Copy that page's address and paste it here.",
+          )
+          .waitFor();
+        const signIn = chooser.getByRole("button", {
+          name: "Sign in with OpenAI",
+          exact: true,
+        });
+        await signIn.click();
+        // ChatGPT's page, opened and linked, and the field for the address it sends the browser to.
+        const address = chooser.getByLabel("Address from your browser");
+        await address.waitFor();
+        // An address to paste here, never Claude's code.
+        expect(await chooser.getByLabel("Code from your browser").count()).toBe(
+          0,
+        );
+        const chatgpt = String(example("AiSignInChatGptBrowserExample").url);
         expect(
           await chooser
             .getByRole("link", { name: "Open the sign-in page" })
             .getAttribute("href"),
-        ).toBe("https://auth.openai.com/codex/device");
-        // Read every interval until OpenAI says it is approved: pending once, then approved.
+        ).toBe(chatgpt);
+        expect(server.opened).toContain(chatgpt);
+        // No code to enter at ChatGPT, and no way to the code sign-in while this one waits.
+        expect(await chooser.getByText("Verification code").count()).toBe(0);
+        expect(
+          await chooser
+            .getByRole("button", { name: "Sign in with a code instead" })
+            .count(),
+        ).toBe(0);
+
+        // An address ChatGPT didn't send: the server's sentence, and the way to sign in again.
+        await address.fill("http://localhost:1455/auth/callback?state=other");
+        await chooser
+          .getByRole("button", { name: "Finish", exact: true })
+          .click();
+        const alert = chooser.getByRole("alert");
+        await alert.waitFor();
+        expect(await alert.textContent()).toBe(
+          "ChatGPT didn't approve the sign-in. Sign in again.",
+        );
+        expect(
+          await chooser.getByRole("button", { name: "Connect" }).isDisabled(),
+        ).toBe(true);
+        await signIn.click();
+        await address.fill(`  ${CHATGPT_ADDRESS}  `);
+        await chooser
+          .getByRole("button", { name: "Finish", exact: true })
+          .click();
         await chooser.getByText("Signed in to OpenAI.").waitFor();
-        expect(server.signIns).toEqual([{ provider: "openai" }]);
-        expect(server.signIn?.reads).toBe(2);
-        expect(server.opened).toContain("https://auth.openai.com/codex/device");
+        // The browser sign-in, the default: no method asked for.
+        expect(server.signIns).toEqual([
+          { provider: "openai" },
+          { provider: "openai" },
+        ]);
+        expect(server.finishes).toEqual([
+          { code: "http://localhost:1455/auth/callback?state=other" },
+          { code: CHATGPT_ADDRESS },
+        ]);
+        // Finished by the address alone: never read in a loop.
+        expect(server.signInReads).toBe(0);
         await chooser.getByRole("button", { name: "Connect" }).click();
         const connected = chooser.getByRole("status");
         await connected.waitFor();
@@ -1140,6 +1215,67 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           )
           .waitFor();
         await dialog.getByText("ChatGPT plan", { exact: true }).waitFor();
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`a ChatGPT plan can sign in with a code instead, read until approved, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        await heading(page, "Connect your AI");
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^OpenAI/ }).click();
+        // The quieter way in, and what it needs at ChatGPT.
+        await chooser
+          .getByText(
+            "This needs device code sign-in turned on in ChatGPT's security settings.",
+          )
+          .waitFor();
+        await chooser
+          .getByRole("button", { name: "Sign in with a code instead" })
+          .click();
+        // The code to enter on ChatGPT's page, and the page itself: opened, and linked.
+        await chooser.getByText("VU3W-87566").waitFor();
+        await chooser
+          .getByText(
+            "OpenAI opens in your browser. Enter the code shown here, then approve. It finishes on its own.",
+          )
+          .waitFor();
+        const device = String(example("AiSignInChatGptExample").url);
+        expect(
+          await chooser
+            .getByRole("link", { name: "Open the sign-in page" })
+            .getAttribute("href"),
+        ).toBe(device);
+        expect(
+          await chooser.getByLabel("Address from your browser").count(),
+        ).toBe(0);
+        // Read every interval until ChatGPT says it is approved: pending once, then approved.
+        await chooser.getByText("Signed in to OpenAI.").waitFor();
+        expect(server.signIns).toEqual([
+          { provider: "openai", method: "device" },
+        ]);
+        expect(server.signIn?.reads).toBe(2);
+        expect(server.finishes).toEqual([]);
+        expect(server.opened).toContain(device);
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        const connected = chooser.getByRole("status");
+        await connected.waitFor();
+        expect(server.replaces).toEqual([
+          { provider: "openai", login: "plan" },
+        ]);
+        expect(await connected.textContent()).toContain(
+          "Signed in with your ChatGPT plan.",
+        );
       } finally {
         await page.close();
       }
@@ -1580,8 +1716,9 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         for (const theme of THEMES)
           for (const window of [WIDE, PHONE]) {
             const server = new FakeServer("none", true);
-            // ChatGPT stays waiting; Claude finishes by its code; Google signs in; xAI fails once.
-            server.outcomes = ["never", "approved", "never", "failed"];
+            // ChatGPT waits for its address, then with a code; Claude finishes by its code; Google
+            // stays waiting; xAI fails once.
+            server.outcomes = ["never", "never", "approved", "never", "failed"];
             const page = await open(
               "/onboarding?step=ai",
               server,
@@ -1606,8 +1743,16 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
               await chooser
                 .getByRole("button", { name: "Sign in with OpenAI" })
                 .click();
+              await chooser.getByLabel("Address from your browser").waitFor();
+              await look("sign-in-chatgpt-paste");
+              await chooser
+                .getByRole("button", { name: "Cancel sign-in" })
+                .click();
+              await chooser
+                .getByRole("button", { name: "Sign in with a code instead" })
+                .click();
               await chooser.getByText("VU3W-87566").waitFor();
-              await look("sign-in-chatgpt-waiting");
+              await look("sign-in-chatgpt-code-waiting");
               await back();
 
               await row(/^Anthropic/);
@@ -1712,11 +1857,11 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
                 .click();
               await settings
                 .getByRole("dialog")
-                .getByText("VU3W-87566")
+                .getByLabel("Address from your browser")
                 .waitFor();
               await shoot(
                 settings,
-                "settings-chatgpt-waiting",
+                "settings-chatgpt-paste",
                 engine,
                 theme,
                 window,

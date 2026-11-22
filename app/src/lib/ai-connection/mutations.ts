@@ -4,6 +4,7 @@ import type {
   AiConnectionInput,
   AiConnectionProvider,
   AiSignIn,
+  AiSignInInputMethod,
   AiSignInStatus,
   PersonalAiConnection,
 } from "@/lib/api/generated/model";
@@ -182,14 +183,18 @@ export function removePersonalAiMutationOptions(queryClient: QueryClient) {
  * What the provider hands back never comes to the browser. Once approved, connecting uses it: a
  * plan with `login: plan`, a Google or xAI sign-in with `login: oauth`, and Unbiased AI's key with
  * `useSavedKey`.
+ *
+ * `method` only for a provider with more than one way in: ChatGPT signs in in the browser unless
+ * asked for `device`, its code sign-in. Left out, the server's default.
  */
 export function startPersonalSignIn(
   provider: AiConnectionProvider,
+  method?: AiSignInInputMethod,
 ): Promise<AiSignIn> {
   return startPersonalAiSignIn(
     organizationId(),
     "me",
-    { provider },
+    method ? { provider, method } : { provider },
     { "Idempotency-Key": idempotencyKey() },
     { fallback: "Couldn't start the sign-in. Try again." },
   );
@@ -202,8 +207,9 @@ export function readPersonalSignIn(signInId: string): Promise<AiSignInStatus> {
 }
 
 /**
- * Finish a sign-in whose `finish` is `code` (a Claude plan): the code the provider's page showed
- * the person, as they pasted it. The answer says where the sign-in stands; never a key.
+ * Finish a sign-in whose `finish` is `code`: what the person pasted, as they pasted it. For a Claude
+ * plan the code Claude's page showed, for ChatGPT the address ChatGPT sent their browser to. The
+ * answer says where the sign-in stands; never a key.
  */
 export function finishPersonalSignIn(
   signInId: string,
