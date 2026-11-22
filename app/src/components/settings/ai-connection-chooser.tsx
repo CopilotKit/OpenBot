@@ -15,6 +15,14 @@ import {
   useState,
 } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
+import {
+  CHATGPT_DEAD_PAGE,
+  ChatGptCodeSteps,
+  ChatGptPaste,
+  ChatGptSettingsLink,
+  ChatGptSteps,
+  wrongPage,
+} from "@/components/settings/chatgpt-browser-sign-in";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -85,6 +93,7 @@ import type {
   AiSignInInputMethod,
 } from "@/lib/api/generated/model";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { ClientError } from "@/lib/client";
 import { markFor } from "@/lib/marks";
 import { queryClient } from "@/query-client";
 
@@ -304,6 +313,13 @@ type Waiting = {
   method?: AiSignInInputMethod;
 };
 
+/**
+ * How a ChatGPT plan signs in where the server runs it. `code` first: a code to enter at ChatGPT,
+ * which never lands on a page that won't load. `address`, the other way: the browser sign-in whose
+ * last page won't load, and whose address the person pastes back.
+ */
+type ChatGptWay = "code" | "address";
+
 const wait = (seconds: number) =>
   new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 
@@ -357,6 +373,7 @@ export function ChooseConnection({
   const [signedIn, setSignedIn] = useState(false);
   const [signInFailure, setSignInFailure] = useState<string | null>(null);
   const [signingIn, setSigningIn] = useState(false);
+  const [chatGptWay, setChatGptWay] = useState<ChatGptWay>("code");
   // The key an Unbiased AI sign-in in Desktop mints: held for the one request that sends it, never drawn.
   const minted = useRef<string | null>(null);
   const attempt = useRef<{ plan?: Plan; attemptId?: string } | null>(null);
@@ -397,7 +414,16 @@ export function ChooseConnection({
     setSignedIn(nextKept !== null);
     setSignInFailure(null);
     setSignInCode("");
+    setChatGptWay("code");
     minted.current = null;
+  }
+
+  /** Switch ChatGPT's way in, before a sign-in starts: what failed the other way no longer applies. */
+  function chooseChatGptWay(next: ChatGptWay) {
+    stopSignIn();
+    setSignInFailure(null);
+    setSignInCode("");
+    setChatGptWay(next);
   }
 
   function chooseLogin(next: AiConnectionLogin) {
@@ -494,7 +520,18 @@ export function ChooseConnection({
     current: () => boolean,
     method: AiSignInInputMethod | undefined,
   ): Promise<"approved" | "code" | false> {
-    const begun = await startPersonalSignIn(chosen.id, method);
+    const begun = await startPersonalSignIn(chosen.id, method).catch(
+      (error: unknown) => {
+        // OpenAI gave no code (the server's 422): most often, device code sign-in is off. Said so.
+        if (
+          method === "device" &&
+          error instanceof ClientError &&
+          error.status === 422
+        )
+          throw new Error(CHATGPT_NO_CODE);
+        throw error;
+      },
+    );
     if (!current()) return false;
     const codeBack = begun.finish === "code";
     setWaiting({
@@ -519,7 +556,7 @@ export function ChooseConnection({
     }
   }
 
-  /** `method`: ChatGPT's code sign-in (`device`) in place of its browser sign-in, the default. */
+  /** `method`: ChatGPT's code sign-in (`device`) in place of its browser sign-in, the server's default. */
   async function signIn(method?: AiSignInInputMethod) {
     if (!provider || !login) return;
     stopSignIn();
@@ -585,19 +622,31 @@ export function ChooseConnection({
     }
   }
 
-  /** Send the code the provider's page gave the person: to the server, or to Desktop's Claude plan. */
-  async function finishCode() {
+  /**
+   * Send the code the provider's page gave the person (`given`, when it came straight from a paste,
+   * or what is in the box): to the server, or to Desktop's Claude plan.
+   */
+  async function finishCode(given?: string) {
     const mine = run.current;
     const signInId = waiting?.signInId;
-    setSigningIn(true);
+    const pasted = (given ?? signInCode).trim();
+    if (!pasted) return;
     setSignInFailure(null);
+    // OpenAI's own sign-in page, pasted in place of the page it lands on: said here, nothing sent.
+    const wrong =
+      signInId && provider?.id === "openai" ? wrongPage(pasted) : null;
+    if (wrong) {
+      setSignInFailure(wrong);
+      return;
+    }
+    setSigningIn(true);
     try {
       if (signInId) {
-        const status = await finishPersonalSignIn(signInId, signInCode.trim());
+        const status = await finishPersonalSignIn(signInId, pasted);
         if (run.current !== mine) return;
         if (status.status !== "approved")
           throw new Error(status.detail ?? SIGN_IN_DIDNT_FINISH);
-      } else await finishPlanSignIn("claude", signInCode.trim());
+      } else await finishPlanSignIn("claude", pasted);
       if (run.current !== mine) return;
       attempt.current = null;
       setWaiting(null);
@@ -605,12 +654,18 @@ export function ChooseConnection({
       setSignedIn(true);
     } catch (error) {
       if (run.current !== mine) return;
-      // A refused code ends the attempt: the sign-in starts again.
+      const message =
+        error instanceof Error ? error.message : "Couldn't sign in. Try again.";
+      setSignInFailure(message);
+      /*
+       * The server refused what was pasted (400: from another sign-in, or with no code in it) and
+       * the sign-in waits on: the box stays open for the right one. Anything else, a sign-in that
+       * failed or expired, ends the attempt and it starts again.
+       */
+      if (signInId && error instanceof ClientError && error.status === 400)
+        return;
       attempt.current = null;
       setWaiting(null);
-      setSignInFailure(
-        error instanceof Error ? error.message : "Couldn't sign in. Try again.",
-      );
     } finally {
       if (run.current === mine) setSigningIn(false);
     }
@@ -767,14 +822,23 @@ export function ChooseConnection({
                 kept={kept !== null && signedIn}
                 login={login}
                 onCancel={stopSignIn}
-                onCode={setSignInCode}
+                onCode={(value) => {
+                  // A new paste or edit: what was wrong with the last one no longer applies.
+                  setSignInCode(value);
+                  setSignInFailure(null);
+                }}
                 onFinishCode={finishCode}
                 serverRun={serverRun}
-                onSignIn={() => signIn()}
-                onSignInWithCode={
-                  serverRun && provider.id === "openai"
-                    ? () => signIn("device")
-                    : undefined
+                chatGptWay={chatGptWay}
+                onChatGptWay={chooseChatGptWay}
+                onSignIn={() =>
+                  // ChatGPT's plan where the server runs it: a code first, the address the other way.
+                  serverRun &&
+                  provider.id === "openai" &&
+                  login === "plan" &&
+                  chatGptWay === "code"
+                    ? signIn("device")
+                    : signIn()
                 }
                 provider={provider}
                 signedIn={signedIn}
@@ -976,57 +1040,72 @@ const SIGN_IN_SAYS: Record<string, string> = {
     "Sign in or create an Unbiased AI account in your browser and approve the code shown here.",
 };
 
-/**
- * Where the server runs the sign-in for a person's own AI, the words that differ. ChatGPT's sign-in
- * in the browser ends on an address that doesn't load (Codex's own sign-in waits there), which the
- * person pastes here.
- */
-const PERSONAL_SIGN_IN_SAYS: Record<string, string> = {
-  openai:
-    "OpenAI opens in your browser. After you approve, your browser lands on a page that doesn't load. Copy that page's address and paste it here.",
-};
-
 /** ChatGPT's sign-in with a code (`device`): its page asks for the code shown here. */
 const CODE_SIGN_IN_SAYS =
   "OpenAI opens in your browser. Enter the code shown here, then approve. It finishes on its own.";
 
 const SIGN_IN_DIDNT_FINISH = "The sign-in didn't finish. Try again.";
 
+/** ChatGPT gave no code for its code sign-in: most often, device code sign-in is off. */
+const CHATGPT_NO_CODE =
+  "ChatGPT didn't give OpenBot a code. Device code sign-in is probably turned off. Turn it on in ChatGPT's security settings, then try again.";
+
 function SignInFields({
   busy,
+  chatGptWay,
   code,
   failure,
   kept,
   login,
   onCancel,
+  onChatGptWay,
   onCode,
   onFinishCode,
   onSignIn,
-  onSignInWithCode,
   serverRun,
   provider,
   signedIn,
   waiting,
 }: {
   busy: boolean;
+  /** How a ChatGPT plan the server runs signs in: a code first, or the address the other way. */
+  chatGptWay: ChatGptWay;
   code: string;
   failure: string | null;
   /** Signed in already: the admin's own sign-in, kept for them, to share as it is. */
   kept: boolean;
   login: AiConnectionLogin;
   onCancel: () => void;
+  onChatGptWay: (way: ChatGptWay) => void;
   onCode: (code: string) => void;
-  onFinishCode: () => void;
+  /** Send `text` when it came straight from a paste, or what is in the box. */
+  onFinishCode: (text?: string) => void;
+  /** Start the sign-in, or start it again: for ChatGPT, in the way chosen. */
   onSignIn: () => void;
-  /** The quieter second way in, where the provider has one: ChatGPT's sign-in with a code. */
-  onSignInWithCode?: () => void;
   /** The server runs the sign-in (a person's own AI, or an admin's shared one), not Desktop. */
   serverRun: boolean;
   provider: AiProvider;
   signedIn: boolean;
   waiting: Waiting | null;
 }) {
-  const signInName = provider.id === "google" ? "Google" : provider.name;
+  /*
+   * ChatGPT's plan where the server runs it has two ways in. First, a code to enter at ChatGPT
+   * (`chatGptCode`), which never shows a page that won't load but needs device code sign-in turned
+   * on in ChatGPT: the setting and its link come first. The other way, the browser sign-in
+   * (`chatGptInBrowser`), lands on a page that can't load, whose address the person brings back:
+   * its own steps first, and its own paste box. A sign-in under way keeps the way it started with.
+   */
+  const chatGptServer =
+    serverRun && provider.id === "openai" && login === "plan";
+  const chatGptInBrowser =
+    chatGptServer &&
+    (waiting ? waiting.method !== "device" : chatGptWay === "address");
+  const chatGptCode = chatGptServer && !chatGptInBrowser;
+  const signInName = chatGptServer
+    ? "ChatGPT"
+    : provider.id === "google"
+      ? "Google"
+      : provider.name;
   if (kept)
     return (
       <p className="flex items-center gap-2 text-sm">
@@ -1036,12 +1115,28 @@ function SignInFields({
     );
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-muted-foreground text-sm">
-        {waiting?.method === "device"
-          ? CODE_SIGN_IN_SAYS
-          : (serverRun && PERSONAL_SIGN_IN_SAYS[provider.id]) ||
-            SIGN_IN_SAYS[provider.id]}
-      </p>
+      {chatGptInBrowser ? (
+        signedIn ? null : waiting ? (
+          <p className="text-muted-foreground text-sm">
+            Approve the request in OpenAI's tab. When it says “
+            {CHATGPT_DEAD_PAGE}”, copy its address and paste it below.
+          </p>
+        ) : (
+          <ChatGptSteps />
+        )
+      ) : chatGptCode ? (
+        signedIn ? null : waiting ? (
+          <p className="text-muted-foreground text-sm">{CODE_SIGN_IN_SAYS}</p>
+        ) : (
+          <ChatGptCodeSteps />
+        )
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          {waiting?.method === "device"
+            ? CODE_SIGN_IN_SAYS
+            : SIGN_IN_SAYS[provider.id]}
+        </p>
+      )}
       {signedIn ? (
         <p className="flex items-center gap-2 text-sm">
           <IconCircleCheckFilled className="size-4 text-emerald-600 dark:text-emerald-400" />
@@ -1067,13 +1162,18 @@ function SignInFields({
               <IconExternalLink className="ml-0.5 inline size-3.5" />
             </a>
           </p>
-          {waiting.codeBack ? (
+          {waiting.codeBack && chatGptInBrowser ? (
+            <ChatGptPaste
+              busy={busy}
+              code={code}
+              failure={failure}
+              onCode={onCode}
+              onFinish={onFinishCode}
+            />
+          ) : waiting.codeBack ? (
             <Field>
-              {/* ChatGPT's sign-in ends on an address to paste; Claude's on a code. */}
               <FieldLabel htmlFor="ai-connection-code">
-                {provider.id === "openai"
-                  ? "Address from your browser"
-                  : "Code from your browser"}
+                Code from your browser
               </FieldLabel>
               <div className="flex gap-2">
                 <Input
@@ -1085,7 +1185,7 @@ function SignInFields({
                 />
                 <Button
                   disabled={busy || code.trim().length === 0}
-                  onClick={onFinishCode}
+                  onClick={() => onFinishCode()}
                   size="sm"
                   type="button"
                   variant="outline"
@@ -1099,10 +1199,33 @@ function SignInFields({
               Waiting for you to approve it in your browser…
             </p>
           )}
-          <div>
+          {/*
+           * With the setting off, OpenAI takes the code and says so only on its own page, and the
+           * code can't be used after. Turned on, a new code is one press away.
+           */}
+          {chatGptCode ? (
+            <p className="text-muted-foreground text-sm">
+              Does OpenAI say device code sign-in is off? Turn it on in{" "}
+              <ChatGptSettingsLink>
+                ChatGPT's security settings
+              </ChatGptSettingsLink>
+              , then get a new code.
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {chatGptCode ? (
+              <Button
+                onClick={onSignIn}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Get a new code
+              </Button>
+            ) : null}
             {/* Its words line up with the lines above; the ghost button's padding hangs outside. */}
             <Button
-              className="-ml-2.5"
+              className={chatGptCode ? undefined : "-ml-2.5"}
               onClick={onCancel}
               size="sm"
               type="button"
@@ -1111,6 +1234,20 @@ function SignInFields({
               Cancel sign-in
             </Button>
           </div>
+        </div>
+      ) : null}
+      {/* A sign-in that failed or expired: why, just above the button that starts it again. */}
+      {failure && !waiting && !signedIn ? (
+        <div className="flex flex-col gap-1 text-sm">
+          <p className="text-destructive" role="alert">
+            {failure}
+          </p>
+          {/* A code that didn't work: the setting it needs is the likeliest reason. */}
+          {chatGptCode ? (
+            <p>
+              <ChatGptSettingsLink />
+            </p>
+          ) : null}
         </div>
       ) : null}
       {signedIn || waiting ? null : (
@@ -1133,26 +1270,33 @@ function SignInFields({
           </Button>
         </div>
       )}
-      {signedIn || waiting || !onSignInWithCode ? null : (
-        <div className="flex flex-col items-start">
+      {/* ChatGPT's other way in, below the one chosen, before a sign-in starts. */}
+      {signedIn || waiting || !chatGptServer ? null : (
+        <div className="flex flex-col items-start gap-1 border-border border-t pt-3">
+          <p className="text-muted-foreground text-xs">
+            {chatGptWay === "code"
+              ? "Can't turn on device code sign-in? Your browser can sign in instead. Its last page won't load, and you paste that page's address here."
+              : "A code never shows a page that won't load. It needs device code sign-in turned on in ChatGPT."}
+          </p>
           {/* Its words line up with the lines above; the ghost button's padding hangs outside. */}
           <Button
-            className="-ml-2.5 text-muted-foreground"
+            className="-ml-2.5"
             disabled={busy}
-            onClick={onSignInWithCode}
+            onClick={() =>
+              onChatGptWay(chatGptWay === "code" ? "address" : "code")
+            }
             size="sm"
             type="button"
             variant="ghost"
           >
-            Sign in with a code instead
+            {chatGptWay === "code"
+              ? "Copy an address instead"
+              : "Sign in with a code instead"}
           </Button>
-          <p className="text-muted-foreground text-xs">
-            This needs device code sign-in turned on in ChatGPT's security
-            settings.
-          </p>
         </div>
       )}
-      {failure ? (
+      {/* A code the server refused while the sign-in waits on; ChatGPT's paste box says it itself. */}
+      {failure && waiting && !chatGptInBrowser ? (
         <p className="text-destructive text-sm" role="alert">
           {failure}
         </p>

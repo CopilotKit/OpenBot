@@ -113,6 +113,12 @@ const internal = location.search === "?internal";
 // The move to OpenBot Cloud, offered over an OpenBot (Self-Contained) found running: \`#move-choice\`
 // after an update, and the rest from Settings, at the screen each names (see \`moveAnswer\`).
 const move = location.hash.startsWith("#move-") ? location.hash.slice(6) : null;
+// \`#move-first\`: a relaunch after the update, OpenBot stopped and due an update of its own, with the
+// move due. The window asks before anything starts; the update runs until \`__fake.finishUpdate()\`.
+const moveFirst = move === "first";
+let finishUpdate;
+const updated = new Promise((resolve) => (finishUpdate = resolve));
+fake.finishUpdate = () => finishUpdate({ from: "1.1.3", to: "1.2.0", moved: true });
 // Found running by the launch is a relaunch too: an installation set up and started before.
 const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld || runningTooOld || launcherAhead || Boolean(move);
 const MOVE_APPS = [
@@ -136,12 +142,12 @@ const MOVE_PREVIEW = {
     { kind: "settings", count: 1 },
   ],
   apps: move === "confirm-many" ? MORE_APPS : MOVE_APPS,
-  footprintBytes: 18_400_000_000,
+  footprintBytes: 20_200_000_000,
   modelKeysAvailable: true,
 };
 function moveAnswer(command) {
   if (command === "move_offer")
-    return { due: true, fromSettings: move !== "choice", footprintBytes: 18_400_000_000 };
+    return { due: true, fromSettings: move !== "choice" && !moveFirst, footprintBytes: 20_200_000_000 };
   if (command === "move_preview")
     return move === "confirm-loading" ? new Promise(() => {}) : MOVE_PREVIEW;
   if (command !== "move_to_cloud") return undefined;
@@ -156,10 +162,14 @@ function moveAnswer(command) {
   if (move === "midway") return new Promise(() => {});
   if (move === "failed")
     throw { said: "OpenBot couldn't send your Bots to OpenBot Cloud. Check your internet connection, then try again.", kind: "move-failed" };
+  // \`#move-done-held\`: as on a Mac, the disk shows 4.5 of the 20.2 GB removed free so far.
+  // \`#move-done-ai\`: OpenBot Cloud still needs the person's AI, so the result leads with it.
   return {
-    freedBytes: 18_400_000_000,
+    connectAi: move === "done-ai",
+    removedBytes: 20_200_000_000,
+    diskGainedBytes: move === "done-held" ? 4_500_000_000 : 20_100_000_000,
     apps: MOVE_APPS,
-    notes: move === "done" ? ["Research runs on an ordinary computer here, because OpenBot Cloud has no isolated computers."] : [],
+    notes: move === "done" || move === "done-held" ? ["Research runs on an ordinary computer here, because OpenBot Cloud has no isolated computers."] : [],
     leftBehind: move === "done-left" ? ["Some of OpenBot's software is still on this computer. Restart your computer to finish removing it."] : [],
   };
 }
@@ -201,7 +211,7 @@ export async function invoke(command, args) {
   if (connectedProblem && command === "connection")
     return { mode: "connected", address: "https://openbot.example.com", signedIn: true };
   if (connectedProblem && command === "show_connected") throw connectedProblem;
-  if ((runningTooOld || runningFails || move) && command === "already_running") return true;
+  if ((runningTooOld || runningFails || (move && !moveFirst)) && command === "already_running") return true;
   if (move) {
     const answer = moveAnswer(command);
     if (answer !== undefined) return answer;
@@ -246,6 +256,10 @@ export async function invoke(command, args) {
           said: "There isn't room on this computer for the update, so nothing changed.",
           shortfall: { podman: true, cpu: false, memory: false, disk: true, diskGb: "7.4", wsl: true, drive: "C:", freeOnDrive: true, updating: true, neededGb: "13" },
         };
+      if (moveFirst) {
+        emit("setup:progress", { step: "release", ok: true, running: true, detail: "Updating OpenBot. Your Bots, sign-ins and data stay as they are." });
+        return updated;
+      }
       return new Promise(() => {});
     case "providers":
       // As provider::catalogue lists them.
@@ -3035,10 +3049,16 @@ describe.skipIf(!asked)(
       { hash: "#move-failed", heading: "The move didn't finish", move: true },
       { hash: "#move-done", heading: "You're on OpenBot Cloud", move: true },
       {
+        hash: "#move-done-held",
+        heading: "You're on OpenBot Cloud",
+        move: true,
+      },
+      {
         hash: "#move-done-left",
         heading: "You're on OpenBot Cloud",
         move: true,
       },
+      { hash: "#move-done-ai", heading: "You're on OpenBot Cloud", move: true },
     ];
     for (const colorScheme of ["light", "dark"] as const) {
       for (const screen of SCREENS) {
@@ -3088,11 +3108,230 @@ describe.skipIf(!asked)(
               pageScrolls: false,
               moveInView: true,
             });
+            // The result says the figure the move screens said, counted the same way.
+            const said = await page.evaluate(
+              () => document.querySelector("main")?.textContent ?? "",
+            );
+            if (screen.hash === "#move-choice")
+              expect(said).toContain(
+                "This removes about 20.2 GB of OpenBot files from this computer.",
+              );
+            if (screen.hash === "#move-confirm")
+              expect(said).toContain("Removes about 20.2 GB of OpenBot files.");
+            if (screen.hash.startsWith("#move-done"))
+              expect(said).toContain("20.2 GB of OpenBot files removed");
+            expect(said.includes("of that is free space on your disk")).toBe(
+              screen.hash === "#move-done-held",
+            );
+            // Still needing an AI: Connect your AI leads, and no Reconnect skips it.
+            if (screen.hash === "#move-done-ai") {
+              expect(said).toContain("Connect your AI first");
+              expect(said).toContain("Then reconnect your apps");
+              const buttons = await page.evaluate(() =>
+                [...document.querySelectorAll("main button")].map(
+                  (button) => button.textContent,
+                ),
+              );
+              expect(buttons).toEqual(["Connect your AI"]);
+            }
           } finally {
             await page.close();
           }
         }, 30_000);
       }
     }
+  },
+);
+
+/** The commands that start or update OpenBot or its backend on this computer. */
+const STARTS_OR_UPDATES = [
+  "wake_engine",
+  "run_local_eval",
+  "set_up_local_eval",
+  "connect_local_eval",
+  "upgrade_and_start",
+  "start_stack",
+];
+
+/** The native commands the window has asked for, in order. */
+const calls = (page: Page) =>
+  page.evaluate(
+    () =>
+      (globalThis as unknown as { __fake: { calls: string[] } }).__fake.calls,
+  );
+
+/** Every heading the window shows from now on, kept as it shows. */
+const watchHeadings = (page: Page) =>
+  page.evaluate(() => {
+    const seen: string[] = [];
+    (globalThis as unknown as { __headings: string[] }).__headings = seen;
+    const note = () => {
+      const heading = document.querySelector("main h1")?.textContent ?? "";
+      if (heading && seen[seen.length - 1] !== heading) seen.push(heading);
+    };
+    note();
+    new MutationObserver(note).observe(document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+    });
+  });
+
+const headingsSeen = (page: Page) =>
+  page.evaluate(
+    () => (globalThis as unknown as { __headings: string[] }).__headings,
+  );
+
+/*
+ * A dogfooding report on 1.2.0-rc.1: installed over OpenBot (Self-Contained) on a Mac, the window
+ * showed "Updating OpenBot (Self-Contained)" for about three minutes, and only then asked "Move to
+ * OpenBot Cloud?". OpenBot Cloud is the default, so the question comes first now, before anything
+ * starts or updates. Picking OpenBot Cloud updates and starts OpenBot under the move's own screen,
+ * which fills in what moves once it can read it; Keep runs the update as it always has. In
+ * Chromium, and with `OPENBOT_APP_ENGINE=webkit` in the engine the Mac window draws with.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each screen.
+ */
+describe.skipIf(!asked)(
+  "the move to OpenBot Cloud, due at a relaunch that would update OpenBot",
+  () => {
+    const shots = process.env.OPENBOT_APP_SHOTS;
+    const engine = process.env.OPENBOT_APP_ENGINE ?? "chromium";
+    const shoot = async (page: Page, name: string) => {
+      await page.mouse.move(0, 0);
+      await page.waitForTimeout(500);
+      if (shots)
+        await page.screenshot({
+          path: `${shots}/move-first-${name}-${engine}.png`,
+        });
+    };
+
+    test("OpenBot Cloud: asked before any update, then no Self-Contained update screen, and the move completes", async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 760 },
+      });
+      try {
+        await open(page, "#move-first", cloudBuilt);
+        await page
+          .getByRole("heading", { name: "Move to OpenBot Cloud?", exact: true })
+          .waitFor();
+        await watchHeadings(page);
+        await shoot(page, "choice");
+        // Nothing started or updated before the question.
+        expect(
+          (await calls(page)).filter((call) =>
+            STARTS_OR_UPDATES.includes(call),
+          ),
+        ).toEqual([]);
+
+        await page.getByRole("button", { name: "Continue" }).click();
+        await page
+          .getByText(
+            "Getting your Bots ready to move. This can take a few minutes.",
+          )
+          .waitFor();
+        // OpenBot updates behind the move's screen.
+        for (let i = 0; i < 50; i += 1) {
+          if ((await calls(page)).includes("upgrade_and_start")) break;
+          await page.waitForTimeout(100);
+        }
+        expect(await calls(page)).toContain("upgrade_and_start");
+        await shoot(page, "getting-ready");
+        expect(
+          await page.evaluate(
+            () => document.querySelector("main h1")?.textContent,
+          ),
+        ).toBe("Move to OpenBot Cloud");
+
+        await page.evaluate(() =>
+          (
+            globalThis as unknown as { __fake: { finishUpdate: () => void } }
+          ).__fake.finishUpdate(),
+        );
+        await page.getByRole("list", { name: "What moves" }).waitFor();
+        await shoot(page, "confirm");
+        await page
+          .getByRole("button", { name: "Move to OpenBot Cloud" })
+          .click();
+        await page
+          .getByRole("heading", { name: "You're on OpenBot Cloud" })
+          .waitFor();
+        await shoot(page, "done");
+
+        const made = await calls(page);
+        expect(made).toContain("move_preview");
+        expect(made).toContain("move_to_cloud");
+        expect(made).not.toContain("show_openbot");
+        expect(made).not.toContain("keep_self_contained");
+        // What moves was read only once OpenBot was up.
+        expect(made.indexOf("move_preview")).toBeGreaterThan(
+          made.indexOf("upgrade_and_start"),
+        );
+        const headings = await headingsSeen(page);
+        expect(headings).not.toContain("Updating OpenBot (Self-Contained)");
+        expect(headings).not.toContain("Starting OpenBot");
+        // Only the move's own screens, from the question to the end.
+        expect(
+          headings.filter(
+            (heading) =>
+              ![
+                "Move to OpenBot Cloud?",
+                "Move to OpenBot Cloud",
+                "Moving to OpenBot Cloud",
+                "You're on OpenBot Cloud",
+              ].includes(heading),
+          ),
+        ).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    }, 40_000);
+
+    test("Keep: asked before any update, then the update runs as before and OpenBot opens", async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 760 },
+      });
+      try {
+        await open(page, "#move-first", cloudBuilt);
+        await page
+          .getByRole("heading", { name: "Move to OpenBot Cloud?", exact: true })
+          .waitFor();
+        expect(
+          (await calls(page)).filter((call) =>
+            STARTS_OR_UPDATES.includes(call),
+          ),
+        ).toEqual([]);
+        await page
+          .getByText("Everything stays on this computer, as it is now.")
+          .click();
+        await shoot(page, "keep-picked");
+        await page
+          .getByRole("button", { name: "Keep OpenBot on this computer" })
+          .click();
+        await page
+          .getByRole("heading", { name: "Updating OpenBot (Self-Contained)" })
+          .waitFor();
+        await shoot(page, "keep-updating");
+        const made = await calls(page);
+        expect(made.indexOf("keep_self_contained")).toBeGreaterThan(-1);
+        expect(made.indexOf("upgrade_and_start")).toBeGreaterThan(
+          made.indexOf("keep_self_contained"),
+        );
+
+        await page.evaluate(() =>
+          (
+            globalThis as unknown as { __fake: { finishUpdate: () => void } }
+          ).__fake.finishUpdate(),
+        );
+        for (let i = 0; i < 50; i += 1) {
+          if ((await calls(page)).includes("show_openbot")) break;
+          await page.waitForTimeout(100);
+        }
+        const after = await calls(page);
+        expect(after).toContain("show_openbot");
+        expect(after).not.toContain("move_preview");
+      } finally {
+        await page.close();
+      }
+    }, 40_000);
   },
 );

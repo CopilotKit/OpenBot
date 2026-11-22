@@ -157,10 +157,8 @@ pub async fn move_preview<R: tauri::Runtime>(
                 detail,
             )
         })?;
-        // What the server keeps, or what this computer holds for all of OpenBot when that is more.
-        let footprint_bytes = footprint(&app)
-            .map(|here| here.max(estimate.stored_bytes))
-            .or(Some(estimate.stored_bytes).filter(|bytes| *bytes > 0));
+        // What the move removes, counted as the result counts it.
+        let footprint_bytes = footprint(&app);
         Ok(MovePreview {
             counts: estimate.counts,
             apps: estimate.reconnect,
@@ -298,6 +296,7 @@ fn move_now<R: tauri::Runtime>(
         app: app.clone(),
         address: session.address().to_owned(),
         organization: cloud.organization().to_owned(),
+        footprint: moving::Footprint::default(),
     };
     let source = source_name();
     let asked = moving::Asked {
@@ -305,12 +304,26 @@ fn move_now<R: tauri::Runtime>(
         source_name: &source,
         limits: moving::Limits::default(),
     };
-    moving::run(&mut local, &mut cloud, &mut here, &asked, &mut told).map_err(|failure| {
-        log::warn!("[move] {}: {}", failure.kind(), failure.detail());
-        let mut problem = Problem::with(failure.said(), failure.detail().to_owned());
-        problem.kind = Some(failure.kind());
-        problem
-    })
+    let mut moved =
+        moving::run(&mut local, &mut cloud, &mut here, &asked, &mut told).map_err(|failure| {
+            log::warn!("[move] {}: {}", failure.kind(), failure.detail());
+            let mut problem = Problem::with(failure.said(), failure.detail().to_owned());
+            problem.kind = Some(failure.kind());
+            problem
+        })?;
+    // The move has happened: whether OpenBot Cloud still needs the person's AI only decides what
+    // the result leads with, so a question it can't answer is logged and never fails the move.
+    moved.connect_ai = match cloud.needs_ai_connection() {
+        Ok(needs) => {
+            log::info!("[move] OpenBot Cloud needs the person's AI: {needs}");
+            Some(needs)
+        }
+        Err(detail) => {
+            log::warn!("[move] could not ask whether the person's AI is connected: {detail}");
+            None
+        }
+    };
+    Ok(moved)
 }
 
 /// Cancel while the browser sign-in waits.
@@ -319,7 +332,8 @@ pub async fn cancel_move<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     crate::desktop_connected::cancel_sign_in(&app);
 }
 
-/// OpenBot Cloud in the window once the move is done: its home, or `path` (`/connections`).
+/// OpenBot Cloud in the window once the move is done: its home, or `path` (`/reconnect`, the
+/// list of apps to reconnect, or `/reconnect/<app>`). A path the relay can't carry opens home.
 #[tauri::command]
 pub async fn open_moved_cloud<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -405,14 +419,24 @@ fn source_name() -> String {
 }
 
 /**
-What OpenBot takes on this computer: its installation folder's own files and its downloads
-(`uninstall::installation_parts`), and OpenBot's own Podman machine's disk when there is one, which
-holds the containers, the database, the backend and the images. On an engine that isn't OpenBot's
-own (Docker Desktop), the images and volumes there are not measured here: the server's own figure
-for its data (`storedBytes`) stands in for them in the preview. Podman itself too, when it goes
-with OpenBot (`own_podman`).
+What OpenBot takes on this computer, as the move screens say it and the result counts it
+(`parts`, measured by `moving::footprint`).
 */
 fn footprint<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<u64> {
+    let total = moving::footprint(&parts(app));
+    (total > 0).then_some(total)
+}
+
+/**
+OpenBot's own files on this computer, which the move removes: its installation folder's own files
+and its downloads (`uninstall::installation_parts`), OpenBot's own Podman machine's disk when there
+is one, which holds the containers, the database, the backend and the images, and Podman itself
+when it goes with OpenBot (`own_podman`). On an engine that isn't OpenBot's own (Docker Desktop),
+the images and volumes there are removed inside that engine's own disk, which OpenBot can't measure
+from here, so they are not counted. Nor is the server's figure for its data (`storedBytes`): it is
+in one of those, and counting it would promise space the result can't measure.
+*/
+fn parts<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<PathBuf> {
     let root = root(app);
     let mut parts = uninstall::installation_parts(&root, dirs::home_dir().as_deref());
     parts.extend(own_machine_disks());
@@ -420,8 +444,7 @@ fn footprint<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<u64> {
         &mut own_podman::ThisComputer,
         &downloads(&root),
     ));
-    let total = moving::footprint(&parts);
-    (total > 0).then_some(total)
+    parts
 }
 
 /// Where OpenBot ran Podman's installer from: the downloads folder of the installation at `root`,
@@ -465,11 +488,14 @@ struct ThisComputer<R: tauri::Runtime> {
     app: tauri::AppHandle<R>,
     address: String,
     organization: String,
+    /// OpenBot's files as found before the removal, measured again after it.
+    footprint: moving::Footprint,
 }
 
 impl<R: tauri::Runtime> moving::Here for ThisComputer<R> {
     fn footprint(&mut self) -> Option<u64> {
-        footprint(&self.app)
+        let app = &self.app;
+        self.footprint.measure(|| parts(app))
     }
 
     /// The disk the installation folder is on, which holds OpenBot's machine disk too wherever

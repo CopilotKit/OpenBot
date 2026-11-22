@@ -24,6 +24,7 @@ import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { OpenBotVersion } from "@/components/layout/openbot-version";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
+import { MovedAppsBanner } from "@/components/moves/moved-apps-notice";
 import {
   COMMAND_MENU_KEYS,
   openCommandMenu,
@@ -517,6 +518,7 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
           place={place}
         />
         <ConnectionBanner />
+        <MovedAppsBanner />
         <UpdateBanner />
         <SelfHostBanner />
         <div className="relative flex min-h-0 flex-1">

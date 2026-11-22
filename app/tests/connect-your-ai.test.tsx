@@ -36,9 +36,10 @@ import { personBody } from "./accounts-api";
  *   its button takes them in without finishing onboarding again.
  * - Every provider the server signs in to offers its sign-in first and a key as the alternative,
  *   as the setup window does. xAI, Google and Unbiased AI sign in on their own pages and are read
- *   until approved; a Claude plan finishes with the code Claude's page shows, and a ChatGPT plan
- *   with the address ChatGPT sends the browser to. ChatGPT can sign in with a code instead, read
- *   until approved like xAI's.
+ *   until approved; a Claude plan finishes with the code Claude's page shows. A ChatGPT plan signs
+ *   in with a code first, read until approved like xAI's, with the ChatGPT setting it needs and
+ *   its link said before it starts, and again when ChatGPT gives no code. The other way, below
+ *   it, finishes with the address ChatGPT sends the browser to.
  *   Failed and expired sign-ins say why and sign in again, and leaving the row stops the reading.
  *   Inside OpenBot Desktop the sign-in is still the server's, never Desktop's.
  * - Use an API key still connects every provider.
@@ -104,6 +105,11 @@ const REFUSED =
     "application/problem+json"
   ].examples.keyRefused?.value;
 if (!REFUSED) throw new Error("the spec has no keyRefused example");
+const UNREACHABLE =
+  spec.components.responses.AiConnectionRefused?.content[
+    "application/problem+json"
+  ].examples.unreachable?.value;
+if (!UNREACHABLE) throw new Error("the spec has no unreachable example");
 
 const GOOD_KEY = "sk-ant-api03-good";
 const BAD_KEY = "sk-ant-api03-refused";
@@ -182,8 +188,62 @@ const CHATGPT_ADDRESS =
   "http://localhost:1455/auth/callback?code=ac_ZXhhbXBsZS1jb2Rl&scope=openid+profile+email+offline_access&state=example";
 const GOOD_CODES: Partial<Record<AiConnectionProvider, string>> = {
   anthropic: CLAUDE_CODE,
-  openai: CHATGPT_ADDRESS,
 };
+/** The code inside CHATGPT_ADDRESS, and the state the spec's example sign-in started with. */
+const CHATGPT_CODE = "ac_ZXhhbXBsZS1jb2Rl";
+const CHATGPT_STATE = "example";
+
+/**
+ * The server's sentences for a ChatGPT paste it can't use. A paste from another sign-in, or with no
+ * code in it, is refused (400) and the sign-in waits on; one ChatGPT sent back with an error ends it.
+ */
+const CHATGPT_OTHER_SIGN_IN =
+  "That address is from another sign-in. Paste the address from the newest ChatGPT sign-in, or sign in again.";
+const CHATGPT_NO_CODE =
+  "That address has no sign-in code in it. Approve the sign-in at ChatGPT, then paste the whole address your browser went to.";
+const CHATGPT_NOT_APPROVED =
+  "The ChatGPT sign-in was not approved. Sign in again.";
+/** The server's sentence when OpenAI gives it no code for ChatGPT's code sign-in. */
+const CHATGPT_NO_START = "OpenBot could not start the sign-in with OpenAI.";
+/** What the person reads then: the setting that is most likely off. */
+const CHATGPT_DEVICE_OFF =
+  "ChatGPT didn't give OpenBot a code. Device code sign-in is probably turned off. Turn it on in ChatGPT's security settings, then try again.";
+/** ChatGPT's security settings, as OpenAI's help center links to them. */
+const CHATGPT_SECURITY_SETTINGS = "https://chatgpt.com/#settings/Security";
+
+/**
+ * What the server reads from a ChatGPT paste, as it reads it: the whole address, its query alone,
+ * or just the code, with the whitespace around it ignored.
+ */
+function chatGptPaste(pasted: string) {
+  const given = pasted.trim();
+  let query: URLSearchParams | null = null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(given))
+    query = new URL(given).searchParams;
+  else if (given.includes("?"))
+    query = new URLSearchParams(given.slice(given.indexOf("?") + 1));
+  else if (/(^|&)(code|state|error)=/.test(given))
+    query = new URLSearchParams(given);
+  if (!query) return { code: given || null, state: null, error: null };
+  const field = (name: string) => query.get(name)?.trim() || null;
+  return { code: field("code"), state: field("state"), error: field("error") };
+}
+
+/** A refusal in the spec's problem shape, as the server answers a 400. */
+function invalid(detail: string) {
+  return {
+    status: 400,
+    json: {
+      type: "https://open.bot/errors/validation-error",
+      title: "Request validation failed.",
+      status: 400,
+      detail,
+      code: "VALIDATION_ERROR",
+      category: "validation",
+      retryable: false,
+    },
+  };
+}
 /** What the server's sentences call each sign-in. */
 const SIGN_IN_NAMES: Record<string, string> = {
   anthropic: "Claude",
@@ -271,6 +331,11 @@ class FakeServer {
   finishes: unknown[] = [];
   /** Every page the app opened in a new tab. */
   opened: string[] = [];
+  /**
+   * OpenAI gives no code for ChatGPT's code sign-in: the server answers its 422 with its own
+   * sentence, as it does when OpenAI's device code endpoint refuses.
+   */
+  deviceOff = false;
 
   constructor(start: Start, onboarded = false) {
     this.personal = personalFor(start);
@@ -372,6 +437,15 @@ class FakeServer {
       for (const key of Object.keys(sent))
         expect(Object.keys(body)).toContain(key);
       this.signIns.push(sent);
+      if (
+        this.deviceOff &&
+        body.provider === "openai" &&
+        body.method === "device"
+      )
+        return {
+          status: 422,
+          json: { ...UNREACHABLE, detail: CHATGPT_NO_START },
+        };
       // The spec's example, read again every second rather than five so the test is quick.
       const begun = StartPersonalAiSignInResponse.parse({
         ...signInStarted(body.provider, body.method),
@@ -417,6 +491,29 @@ class FakeServer {
       const signIn = this.signIn;
       if (!signIn || path !== `${SIGN_INS}/${signIn.id}/code`)
         return { status: 404, json: { detail: "No such sign-in." } };
+      if (signIn.provider === "openai") {
+        const read = chatGptPaste(input.code);
+        if (read.state !== null && read.state !== CHATGPT_STATE)
+          return invalid(CHATGPT_OTHER_SIGN_IN);
+        if (read.error)
+          return {
+            status: 200,
+            json: FinishPersonalAiSignInResponse.parse({
+              ...signInStatus(signIn, "failed"),
+              detail: CHATGPT_NOT_APPROVED,
+            }),
+          };
+        if (!read.code) return invalid(CHATGPT_NO_CODE);
+        return {
+          status: 200,
+          json: FinishPersonalAiSignInResponse.parse(
+            signInStatus(
+              signIn,
+              read.code === CHATGPT_CODE ? "approved" : "failed",
+            ),
+          ),
+        };
+      }
       const good = GOOD_CODES[signIn.provider];
       return {
         status: 200,
@@ -595,7 +692,15 @@ beforeAll(async () => {
     browsers.set(
       engine,
       // The CI job installs full Chromium without the headless shell.
-      await type.launch(engine === "chromium" ? { channel: "chromium" } : {}),
+      // The page's origin counts as secure, as OpenBot Cloud's https is: the clipboard is offered.
+      await type.launch(
+        engine === "chromium"
+          ? {
+              channel: "chromium",
+              args: [`--unsafely-treat-insecure-origin-as-secure=${ORIGIN}`],
+            }
+          : {},
+      ),
     );
   }
 }, 120_000);
@@ -759,7 +864,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           "Use an API key",
         ]);
         await chooser
-          .getByRole("button", { name: "Sign in with OpenAI", exact: true })
+          .getByRole("button", { name: "Sign in with ChatGPT", exact: true })
           .waitFor();
         await chooser.getByRole("button", { name: "Back" }).click();
 
@@ -786,12 +891,13 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         ]);
         expect(await measured(page)).toEqual(FINE);
 
-        // Connected: the step's button is the way in, and it finishes onboarding.
+        // Connected: the step's button is the way in, and it finishes onboarding. In, to where
+        // they were headed when the gate sent them back: Settings.
         expect(await primary(page).textContent()).toContain("Get started");
         await primary(page).click();
-        await page.locator("[data-app-home]").waitFor();
+        await page.waitForURL((url) => url.pathname === "/settings");
+        await page.getByRole("heading", { name: "Your AI" }).waitFor();
         expect(server.completes).toBe(1);
-        expect(new URL(page.url()).pathname).toBe("/");
       } finally {
         await page.close();
       }
@@ -839,10 +945,119 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await chooser.getByRole("button", { name: "Connect" }).click();
         await chooser.getByRole("status").waitFor();
         await primary(page).click();
-        await page.locator("[data-app-home]").waitFor();
+        // On to Settings, where they were going when the gate stopped them.
+        await page.waitForURL((url) => url.pathname === "/settings");
+        await page.getByRole("heading", { name: "Your AI" }).waitFor();
         // Already finished: not finished again, and no place in it saved.
         expect(server.completes).toBe(0);
         expect(server.onboarding.step).toBe(1);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+  /*
+   * Reported on 1.2.0-rc.1: after the move to OpenBot Cloud, an app's Reconnect opened OpenBot
+   * Cloud, the gate asked for Connect your AI first, and its button then left the person on home,
+   * nowhere near the app. Where they were headed is kept through the step, and a reload on it.
+   */
+  for (const engine of engines)
+    test(`an app's Reconnect that meets Connect your AI opens that app once the AI is connected, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      const page = await open(
+        "/connections/gmail",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        await heading(page, "Connect your AI");
+        const asked = new URL(page.url());
+        expect(asked.pathname).toBe("/onboarding");
+        expect(asked.searchParams.get("step")).toBe("ai");
+        expect(asked.searchParams.get("next")).toBe("/connections/gmail");
+        await page.reload();
+        await heading(page, "Connect your AI");
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+        await chooser.getByRole("tab", { name: "Use an API key" }).click();
+        await chooser.getByLabel("Anthropic API key").fill(GOOD_KEY);
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        await chooser.getByRole("status").waitFor();
+        await primary(page).click();
+        await page.locator('[data-app-connect="gmail"]').waitFor();
+        expect(new URL(page.url()).pathname).toBe("/connections/gmail");
+        expect(await page.locator("[data-app-home]").count()).toBe(0);
+        expect(server.completes).toBe(0);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+  for (const engine of engines)
+    test(`a new person sent to onboarding on their way to an app's page goes on to it at the end, in ${engine}`, async () => {
+      const server = new FakeServer("none");
+      const page = await open(
+        "/connections/gmail",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        await heading(page, "Welcome to OpenBot");
+        expect(new URL(page.url()).searchParams.get("next")).toBe(
+          "/connections/gmail",
+        );
+        await page.waitForFunction(
+          () =>
+            !document
+              .querySelector("[data-onboarding-primary]")
+              ?.hasAttribute("disabled"),
+        );
+        await primary(page).click();
+        await heading(page, "Connect your AI");
+        expect(new URL(page.url()).searchParams.get("next")).toBe(
+          "/connections/gmail",
+        );
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+        await chooser.getByRole("tab", { name: "Use an API key" }).click();
+        await chooser.getByLabel("Anthropic API key").fill(GOOD_KEY);
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        await chooser.getByRole("status").waitFor();
+        await primary(page).click();
+        await page.locator('[data-app-connect="gmail"]').waitFor();
+        expect(new URL(page.url()).pathname).toBe("/connections/gmail");
+        expect(server.completes).toBe(1);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+  for (const engine of engines)
+    test(`an address that isn't a page of OpenBot is never followed out of onboarding, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      const page = await open(
+        `/onboarding?step=ai&next=${encodeURIComponent("//evil.example/x")}`,
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        await heading(page, "Connect your AI");
+        expect(new URL(page.url()).searchParams.get("next")).toBe(null);
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+        await chooser.getByRole("tab", { name: "Use an API key" }).click();
+        await chooser.getByLabel("Anthropic API key").fill(GOOD_KEY);
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        await chooser.getByRole("status").waitFor();
+        await primary(page).click();
+        await page.locator("[data-app-home]").waitFor();
+        expect(new URL(page.url()).pathname).toBe("/");
       } finally {
         await page.close();
       }
@@ -863,19 +1078,17 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await heading(page, "Connect your AI");
         const chooser = page.locator("[data-ai-chooser]");
         // The plan's sign-in is the server's, never Desktop's: Desktop answers nothing it is
-        // asked here, and the sign-in still reaches the server and finishes.
+        // asked here, and the sign-in still reaches the server and finishes. Being the server's,
+        // its browser sign-in would land on a page that won't load here too: a code first.
         await chooser.getByRole("button", { name: /^OpenAI/ }).click();
         await chooser
-          .getByRole("button", { name: "Sign in with OpenAI", exact: true })
+          .getByRole("button", { name: "Sign in with ChatGPT", exact: true })
           .click();
-        await chooser
-          .getByLabel("Address from your browser")
-          .fill(CHATGPT_ADDRESS);
-        await chooser
-          .getByRole("button", { name: "Finish", exact: true })
-          .click();
+        await chooser.getByText("VU3W-87566").waitFor();
         await chooser.getByText("Signed in to OpenAI.").waitFor();
-        expect(server.signIns).toEqual([{ provider: "openai" }]);
+        expect(server.signIns).toEqual([
+          { provider: "openai", method: "device" },
+        ]);
         await chooser.getByRole("button", { name: "Back" }).click();
         server.signIns = [];
 
@@ -1115,7 +1328,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
     }, 60_000);
 
   for (const engine of engines)
-    test(`a ChatGPT plan signs in in the browser with the address it lands on, connects, and Settings names it, in ${engine}`, async () => {
+    test(`the other way, a ChatGPT plan signs in in the browser with the address it lands on, connects, and Settings names it, in ${engine}`, async () => {
       const server = new FakeServer("none", true);
       const page = await open(
         "/onboarding?step=ai",
@@ -1128,19 +1341,44 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await heading(page, "Connect your AI");
         const chooser = page.locator("[data-ai-chooser]");
         await chooser.getByRole("button", { name: /^OpenAI/ }).click();
+        // The code comes first; copying the address is the other way, below it.
+        expect(
+          await chooser.getByText("This site can't be reached").count(),
+        ).toBe(0);
         await chooser
-          .getByText(
-            "OpenAI opens in your browser. After you approve, your browser lands on a page that doesn't load. Copy that page's address and paste it here.",
-          )
+          .getByRole("button", { name: "Copy an address instead" })
+          .click();
+        // Before OpenAI opens: what will happen, in order, and the page they will land on.
+        for (const step of [
+          "Sign in to ChatGPT and approve the request.",
+          "Your browser then shows “This site can't be reached”. That's expected.",
+          "Copy the address at the top of that page and paste it here.",
+        ])
+          await chooser
+            .getByRole("listitem")
+            .filter({ hasText: step })
+            .waitFor();
+        await chooser
+          .getByRole("img", {
+            name: "A browser tab that says “This site can't be reached”, with its address at the top marked to copy",
+          })
           .waitFor();
         const signIn = chooser.getByRole("button", {
-          name: "Sign in with OpenAI",
+          name: "Sign in with ChatGPT",
           exact: true,
         });
         await signIn.click();
         // ChatGPT's page, opened and linked, and the field for the address it sends the browser to.
         const address = chooser.getByLabel("Address from your browser");
         await address.waitFor();
+        await chooser
+          .getByText(
+            "Approve the request in OpenAI's tab. When it says “This site can't be reached”, copy its address and paste it below.",
+          )
+          .waitFor();
+        expect(await address.getAttribute("placeholder")).toBe(
+          "http://localhost:1455/auth/callback?code=…",
+        );
         // An address to paste here, never Claude's code.
         expect(await chooser.getByLabel("Code from your browser").count()).toBe(
           0,
@@ -1159,25 +1397,85 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
             .getByRole("button", { name: "Sign in with a code instead" })
             .count(),
         ).toBe(0);
-
-        // An address ChatGPT didn't send: the server's sentence, and the way to sign in again.
-        await address.fill("http://localhost:1455/auth/callback?state=other");
-        await chooser
-          .getByRole("button", { name: "Finish", exact: true })
-          .click();
         const alert = chooser.getByRole("alert");
+        const finish = chooser.getByRole("button", {
+          name: "Finish",
+          exact: true,
+        });
+
+        // The wrong tab's address (OpenAI's own sign-in page): said here, and nothing is sent.
+        await address.fill(chatgpt);
+        await finish.click();
         await alert.waitFor();
         expect(await alert.textContent()).toBe(
-          "ChatGPT didn't approve the sign-in. Sign in again.",
+          "That's the address of OpenAI's sign-in page. Finish signing in there, then copy the address of the page that won't load.",
         );
+        expect(server.finishes).toEqual([]);
+        expect(await address.getAttribute("aria-invalid")).toBe("true");
+
+        // The clipboard, as a person's copy leaves it. Chromium's, as CI runs it; elsewhere typed.
+        const clipboard = engine === "chromium";
+        if (clipboard)
+          await page
+            .context()
+            .grantPermissions(["clipboard-read", "clipboard-write"], {
+              origin: ORIGIN,
+            });
+        const copy = (text: string) =>
+          page.evaluate(
+            (copied) => navigator.clipboard.writeText(copied),
+            text,
+          );
+
+        // An address from another sign-in, pasted with the keyboard: sent at once, the server
+        // refuses it, and the box stays open for the right one.
+        const stale =
+          "http://localhost:1455/auth/callback?code=ac_older&state=older";
+        await address.fill("");
+        if (clipboard) {
+          await copy(stale);
+          await address.focus();
+          await page.keyboard.press("ControlOrMeta+V");
+        } else {
+          await address.fill(stale);
+          await finish.click();
+        }
+        await chooser.getByText(CHATGPT_OTHER_SIGN_IN).waitFor();
+        expect(await address.isVisible()).toBe(true);
+        expect(await address.inputValue()).toBe(stale);
         expect(
           await chooser.getByRole("button", { name: "Connect" }).isDisabled(),
         ).toBe(true);
+
+        // Back from OpenAI's tab with the box empty: the cursor waits in it.
+        await address.fill("");
+        await page.evaluate(() => {
+          (document.activeElement as HTMLElement | null)?.blur();
+          window.dispatchEvent(new Event("focus"));
+        });
+        expect(
+          await page.evaluate(() => document.activeElement?.id ?? null),
+        ).toBe("ai-connection-code");
+
+        // ChatGPT sent the browser back with an error: the sign-in is over, and starts again.
+        await address.fill(
+          "http://localhost:1455/auth/callback?error=access_denied&state=example",
+        );
+        await finish.click();
+        await chooser.getByText(CHATGPT_NOT_APPROVED).waitFor();
+        await signIn.waitFor();
+        expect(await address.count()).toBe(0);
         await signIn.click();
-        await address.fill(`  ${CHATGPT_ADDRESS}  `);
-        await chooser
-          .getByRole("button", { name: "Finish", exact: true })
-          .click();
+        await address.waitFor();
+
+        // The right address, with the spaces a copy brings, by Paste: it finishes at once.
+        if (clipboard) {
+          await copy(`  ${CHATGPT_ADDRESS}\n`);
+          await chooser.getByRole("button", { name: "Paste" }).click();
+        } else {
+          await address.fill(`  ${CHATGPT_ADDRESS}\n`);
+          await finish.click();
+        }
         await chooser.getByText("Signed in to OpenAI.").waitFor();
         // The browser sign-in, the default: no method asked for.
         expect(server.signIns).toEqual([
@@ -1185,7 +1483,10 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
           { provider: "openai" },
         ]);
         expect(server.finishes).toEqual([
-          { code: "http://localhost:1455/auth/callback?state=other" },
+          { code: stale },
+          {
+            code: "http://localhost:1455/auth/callback?error=access_denied&state=example",
+          },
           { code: CHATGPT_ADDRESS },
         ]);
         // Finished by the address alone: never read in a loop.
@@ -1221,8 +1522,10 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
     }, 90_000);
 
   for (const engine of engines)
-    test(`a ChatGPT plan can sign in with a code instead, read until approved, in ${engine}`, async () => {
+    test(`a ChatGPT plan signs in with a code first, the setting it needs said and linked, read until approved, in ${engine}`, async () => {
       const server = new FakeServer("none", true);
+      // The first code is never approved (the setting was off at ChatGPT); a new one is.
+      server.outcomes = ["never", "approved"];
       const page = await open(
         "/onboarding?step=ai",
         server,
@@ -1234,14 +1537,37 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await heading(page, "Connect your AI");
         const chooser = page.locator("[data-ai-chooser]");
         await chooser.getByRole("button", { name: /^OpenAI/ }).click();
-        // The quieter way in, and what it needs at ChatGPT.
+        // First: the setting ChatGPT needs, and the link straight to it. No page that won't load.
+        for (const step of [
+          "Turn on device code sign-in in ChatGPT. Under Security and login, switch on “Enable device code sign-in”.",
+          "Sign in with ChatGPT below to get a code.",
+          "Enter the code on OpenAI's page and approve. It finishes on its own.",
+        ])
+          await chooser
+            .getByRole("listitem")
+            .filter({ hasText: step })
+            .waitFor();
         await chooser
           .getByText(
-            "This needs device code sign-in turned on in ChatGPT's security settings.",
+            "On a Team or Enterprise workspace, your ChatGPT workspace admin turns it on.",
           )
           .waitFor();
+        const settings = chooser.getByRole("link", {
+          name: "Open ChatGPT's security settings",
+        });
+        expect(await settings.getAttribute("href")).toBe(
+          CHATGPT_SECURITY_SETTINGS,
+        );
+        expect(await settings.getAttribute("target")).toBe("_blank");
+        expect(
+          await chooser.getByText("This site can't be reached").count(),
+        ).toBe(0);
+        // The other way, below it.
         await chooser
-          .getByRole("button", { name: "Sign in with a code instead" })
+          .getByRole("button", { name: "Copy an address instead" })
+          .waitFor();
+        await chooser
+          .getByRole("button", { name: "Sign in with ChatGPT", exact: true })
           .click();
         // The code to enter on ChatGPT's page, and the page itself: opened, and linked.
         await chooser.getByText("VU3W-87566").waitFor();
@@ -1259,9 +1585,20 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         expect(
           await chooser.getByLabel("Address from your browser").count(),
         ).toBe(0);
+        // Waiting: if ChatGPT's page says the setting is off, the link to it, and a new code.
+        expect(
+          await chooser
+            .getByRole("link", { name: "ChatGPT's security settings" })
+            .getAttribute("href"),
+        ).toBe(CHATGPT_SECURITY_SETTINGS);
+        await chooser
+          .getByRole("button", { name: "Copy an address instead" })
+          .waitFor({ state: "detached" });
+        await chooser.getByRole("button", { name: "Get a new code" }).click();
         // Read every interval until ChatGPT says it is approved: pending once, then approved.
         await chooser.getByText("Signed in to OpenAI.").waitFor();
         expect(server.signIns).toEqual([
+          { provider: "openai", method: "device" },
           { provider: "openai", method: "device" },
         ]);
         expect(server.signIn?.reads).toBe(2);
@@ -1276,6 +1613,92 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         expect(await connected.textContent()).toContain(
           "Signed in with your ChatGPT plan.",
         );
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`ChatGPT giving no code says the setting is off and links to it, and the address is still a way in, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      server.deviceOff = true;
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        await heading(page, "Connect your AI");
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^OpenAI/ }).click();
+        const signIn = chooser.getByRole("button", {
+          name: "Sign in with ChatGPT",
+          exact: true,
+        });
+        await signIn.click();
+        // What is off, said plainly, never the server's own sentence, with the link to the setting.
+        const alert = chooser.getByRole("alert");
+        await alert.waitFor();
+        expect(await alert.textContent()).toBe(CHATGPT_DEVICE_OFF);
+        const links = chooser.getByRole("link", {
+          name: "Open ChatGPT's security settings",
+        });
+        // In the first step, and again under what went wrong.
+        expect(await links.count()).toBe(2);
+        for (const href of await links.evaluateAll((all) =>
+          all.map((link) => link.getAttribute("href")),
+        ))
+          expect(href).toBe(CHATGPT_SECURITY_SETTINGS);
+        expect(await chooser.getByText("VU3W-87566").count()).toBe(0);
+        expect(
+          await chooser.getByRole("button", { name: "Connect" }).isDisabled(),
+        ).toBe(true);
+        expect(server.signIns).toEqual([
+          { provider: "openai", method: "device" },
+        ]);
+
+        // The other way is still there: the address, with its steps first, and it finishes.
+        await chooser
+          .getByRole("button", { name: "Copy an address instead" })
+          .click();
+        expect(await alert.count()).toBe(0);
+        await chooser
+          .getByRole("listitem")
+          .filter({
+            hasText:
+              "Your browser then shows “This site can't be reached”. That's expected.",
+          })
+          .waitFor();
+        await signIn.click();
+        const address = chooser.getByLabel("Address from your browser");
+        await address.fill(CHATGPT_ADDRESS);
+        await chooser
+          .getByRole("button", { name: "Finish", exact: true })
+          .click();
+        await chooser.getByText("Signed in to OpenAI.").waitFor();
+        expect(server.signIns).toEqual([
+          { provider: "openai", method: "device" },
+          { provider: "openai" },
+        ]);
+        expect(server.finishes).toEqual([{ code: CHATGPT_ADDRESS }]);
+
+        // And back: the code is one press away, the address steps gone.
+        await chooser.getByRole("button", { name: "Back" }).click();
+        await chooser.getByRole("button", { name: /^OpenAI/ }).click();
+        await chooser
+          .getByRole("button", { name: "Copy an address instead" })
+          .click();
+        await chooser
+          .getByRole("button", { name: "Sign in with a code instead" })
+          .click();
+        await chooser
+          .getByRole("link", { name: "Open ChatGPT's security settings" })
+          .waitFor();
+        expect(
+          await chooser.getByText("This site can't be reached").count(),
+        ).toBe(0);
       } finally {
         await page.close();
       }
@@ -1716,8 +2139,8 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         for (const theme of THEMES)
           for (const window of [WIDE, PHONE]) {
             const server = new FakeServer("none", true);
-            // ChatGPT waits for its address, then with a code; Claude finishes by its code; Google
-            // stays waiting; xAI fails once.
+            // ChatGPT waits with its code, then gives none, then waits for its address; Claude
+            // finishes by its code; Google stays waiting; xAI fails once.
             server.outcomes = ["never", "never", "approved", "never", "failed"];
             const page = await open(
               "/onboarding?step=ai",
@@ -1740,19 +2163,38 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
 
               await row(/^OpenAI/);
               await look("sign-in-chatgpt");
-              await chooser
-                .getByRole("button", { name: "Sign in with OpenAI" })
-                .click();
-              await chooser.getByLabel("Address from your browser").waitFor();
-              await look("sign-in-chatgpt-paste");
+              const chatGpt = chooser.getByRole("button", {
+                name: "Sign in with ChatGPT",
+                exact: true,
+              });
+              await chatGpt.click();
+              await chooser.getByText("VU3W-87566").waitFor();
+              await look("sign-in-chatgpt-code-waiting");
               await chooser
                 .getByRole("button", { name: "Cancel sign-in" })
                 .click();
+              server.deviceOff = true;
+              await chatGpt.click();
+              await chooser.getByText(CHATGPT_DEVICE_OFF).waitFor();
+              await look("sign-in-chatgpt-code-off");
+              server.deviceOff = false;
               await chooser
-                .getByRole("button", { name: "Sign in with a code instead" })
+                .getByRole("button", { name: "Copy an address instead" })
                 .click();
-              await chooser.getByText("VU3W-87566").waitFor();
-              await look("sign-in-chatgpt-code-waiting");
+              await look("sign-in-chatgpt-address-steps");
+              await chatGpt.click();
+              await chooser.getByLabel("Address from your browser").waitFor();
+              await look("sign-in-chatgpt-paste");
+              await chooser
+                .getByLabel("Address from your browser")
+                .fill(
+                  "http://localhost:1455/auth/callback?code=ac_older&state=older",
+                );
+              await chooser
+                .getByRole("button", { name: "Finish", exact: true })
+                .click();
+              await chooser.getByText(CHATGPT_OTHER_SIGN_IN).waitFor();
+              await look("sign-in-chatgpt-wrong-paste");
               await back();
 
               await row(/^Anthropic/);
@@ -1815,6 +2257,8 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
                 endpointHost: null,
               },
             }) as PersonalAiConnection;
+            // ChatGPT's code and its address both stay waiting, to be seen.
+            own.outcomes = ["never", "never"];
             const settings = await open(
               "/settings",
               own,
@@ -1851,10 +2295,47 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
                 .getByRole("dialog")
                 .getByRole("button", { name: /^OpenAI/ })
                 .click();
+              await shoot(
+                settings,
+                "settings-chatgpt-steps",
+                engine,
+                theme,
+                window,
+              );
+              const dialogSignIn = settings
+                .getByRole("dialog")
+                .getByRole("button", {
+                  name: "Sign in with ChatGPT",
+                  exact: true,
+                });
+              await dialogSignIn.click();
               await settings
                 .getByRole("dialog")
-                .getByRole("button", { name: "Sign in with OpenAI" })
+                .getByText("VU3W-87566")
+                .waitFor();
+              await shoot(
+                settings,
+                "settings-chatgpt-code-waiting",
+                engine,
+                theme,
+                window,
+              );
+              await settings
+                .getByRole("dialog")
+                .getByRole("button", { name: "Cancel sign-in" })
                 .click();
+              await settings
+                .getByRole("dialog")
+                .getByRole("button", { name: "Copy an address instead" })
+                .click();
+              await shoot(
+                settings,
+                "settings-chatgpt-address-steps",
+                engine,
+                theme,
+                window,
+              );
+              await dialogSignIn.click();
               await settings
                 .getByRole("dialog")
                 .getByLabel("Address from your browser")

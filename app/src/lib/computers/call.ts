@@ -1,3 +1,4 @@
+import { COMPUTER_START_WAIT_MS } from "@openbot/shared/computer-start";
 import {
   clickComputer,
   listComputerFiles,
@@ -173,12 +174,67 @@ export async function callComputer(
    */
   init?: { method?: string; body?: unknown },
   signal?: AbortSignal,
+  clock: StartClock = REAL_CLOCK,
 ): Promise<ToolOutcome> {
   // Announce before the call so the screen can open while the action is running.
   const run = OFF_SCREEN_PATHS.has(path) ? null : reportComputerActivity(botId);
   const call = CALLS[path];
   // A call the API has no address for was not made.
   if (!call) return { ok: false, reason: "That did not work." };
+  /*
+   * ASKED AGAIN WHILE THE COMPUTER IS STILL STARTING, until COMPUTER_START_WAIT_MS has gone.
+   *
+   * One request is answered inside what an edge in front of the server lets it wait, which is less
+   * than a cold computer can take to come up. Its answer then says the computer is still starting
+   * and nothing was done, so asking again cannot do the thing twice. Asked again here, the Bot's call
+   * waits for the computer as long as a Bot's own turn does, and the line keeps saying the step is
+   * under way, rather than the model being told to try again and a plan reading that as a failure.
+   */
+  const startedAt = clock.now();
+  for (;;) {
+    const outcome = await callOnce(botId, call, run, init, signal);
+    if (outcome.starting !== true) return outcome;
+    const left = COMPUTER_START_WAIT_MS - (clock.now() - startedAt);
+    if (left <= 0) return outcome;
+    await clock.pause(Math.min(START_ASK_AGAIN_MS, left), signal);
+    if (signal?.aborted)
+      return { ok: false, reason: "Stopped.", stopped: true };
+  }
+}
+
+/** Time, as the start wait reads it. A test hands its own, so it need not wait minutes. */
+export type StartClock = {
+  now(): number;
+  /** Resolves after `ms`, or at once when `signal` is aborted. */
+  pause(ms: number, signal?: AbortSignal): Promise<void>;
+};
+
+const REAL_CLOCK: StartClock = {
+  now: () => Date.now(),
+  pause: (ms, signal) =>
+    new Promise((resolve) => {
+      if (signal?.aborted) return resolve();
+      const timer = setTimeout(done, ms);
+      function done() {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", done);
+        resolve();
+      }
+      signal?.addEventListener("abort", done, { once: true });
+    }),
+};
+
+/** The pause before asking again about a computer still starting. Each answer has already waited on it. */
+const START_ASK_AGAIN_MS = 2_000;
+
+/** One request for the call, and what the Bot is told about its answer. */
+async function callOnce(
+  botId: string,
+  call: (typeof CALLS)[string],
+  run: ReturnType<typeof reportComputerActivity> | null,
+  init: { method?: string; body?: unknown } | undefined,
+  signal: AbortSignal | undefined,
+): Promise<ToolOutcome> {
   try {
     const body = await call(
       botId,
