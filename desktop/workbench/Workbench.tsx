@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Answer, Call, NativeControl } from "../src/fakeNative/control";
-import { PAGE_COMMANDS } from "../src/fakeNative/pageRegistry";
+import {
+  HANDBACK_COMMANDS,
+  PAGE_COMMANDS,
+} from "../src/fakeNative/pageRegistry";
 import { COMMANDS } from "../src/fakeNative/registry";
 import {
   type ActionMark,
@@ -23,6 +26,7 @@ import { CommandsPanel } from "./CommandsPanel";
 import type { PageClock } from "./clock";
 import { EventsPanel } from "./EventsPanel";
 import { type FrameConfig, frameUrl } from "./frameConfig";
+import { appSceneAfter, desktopSceneFor, HANDBACK_WORDS } from "./handover";
 import { ImportLogPanel } from "./ImportLogPanel";
 import "./appPanels.css";
 import { describeElements, type Warning } from "./layoutWatch";
@@ -82,6 +86,8 @@ export type WorkbenchPage = {
   calls(): readonly Call[];
   /** True when the window has called `show_openbot` and the call resolved. */
   handedOver(): boolean;
+  /** The handback command the app window called and that resolved, or null. */
+  handedBack(): string | null;
   /** The layout warnings of the loaded window, oldest first. */
   warnings(): Warning[];
   /** The elements the layout warnings know in the loaded window, in document order. */
@@ -179,6 +185,16 @@ async function walkTo(
 }
 
 /** True when the window has handed over to OpenBot: a call to `show_openbot` resolved. */
+/** The buttons of a handover or handback card, in one row (workbench.css styles one button). */
+const HANDOVER_ACTIONS = { display: "flex", gap: 8, flexWrap: "wrap" } as const;
+
+const HANDBACK: readonly string[] = HANDBACK_COMMANDS;
+
+/** True for a call of a handback command that resolved: the app handed back to OpenBot Desktop. */
+function isHandback(call: Call): boolean {
+  return call.settled === "resolved" && HANDBACK.includes(call.command);
+}
+
 function handedOverIn(win: FrameWindow | undefined): boolean {
   const control = win?.__workbench;
   if (!control) return false;
@@ -376,6 +392,11 @@ export function WorkbenchLoaded({
   const [handedOver, setHandedOver] = useState(false);
   /** The person closed the handover overlay. It shows again after the window hands over again. */
   const [overlayClosed, setOverlayClosed] = useState(false);
+  /** The handback command the app window called, or null. A remount clears it. */
+  const [handedBack, setHandedBack] = useState<string | null>(null);
+  const handedBackRef = useRef<string | null>(null);
+  /** The person closed the handback card. */
+  const [handbackClosed, setHandbackClosed] = useState(false);
   /** Comment mode: a click or a drag in the window picks what a comment is about. */
   const [commenting, setCommenting] = useState(false);
   /** The loaded window, as state, so the C key also works with the focus in it. */
@@ -524,6 +545,9 @@ export function WorkbenchLoaded({
     setPlaying(false);
     setHandedOver(false);
     setOverlayClosed(false);
+    handedBackRef.current = null;
+    setHandedBack(null);
+    setHandbackClosed(false);
   }, [holdLayout, stopLoop]);
 
   /** Takes the window's clock to `target` in short steps; false when a newer walk took over. */
@@ -594,7 +618,19 @@ export function WorkbenchLoaded({
       // so a new call or answer reads the handover again too.
       const offChange = win.__workbench?.onChange((change) => {
         if (change.kind !== "emit") checkHandover();
+        // An app button that hands back to OpenBot Desktop.
+        if (app && change.kind === "settled" && isHandback(change.call)) {
+          handedBackRef.current = change.call.command;
+          setHandedBack(change.call.command);
+          setHandbackClosed(false);
+        }
       });
+      if (app) {
+        // A handback before this listener started (the window boots before attach).
+        const earlier = win.__workbench?.calls().find(isHandback);
+        handedBackRef.current = earlier?.command ?? null;
+        setHandedBack(handedBackRef.current);
+      }
       // A marker shows each action of a play or a step. A seek (and so a CLI shot) shows none.
       const offActions = win.__workbenchActions?.subscribe((action) => {
         if (clock.playing() || loopRef.current || steppingRef.current)
@@ -689,6 +725,7 @@ export function WorkbenchLoaded({
       seek,
       calls: () => liveRef.current?.win.__workbench?.calls() ?? [],
       handedOver: () => handedOverIn(liveRef.current?.win),
+      handedBack: () => handedBackRef.current,
       warnings: () => [...warningsRef.current],
       elements: () => {
         const doc = frameRef.current?.contentDocument;
@@ -864,6 +901,19 @@ export function WorkbenchLoaded({
     });
   };
 
+  /** The desktop scene the handback card opens, when the workbench has it. */
+  const handbackTarget =
+    handedBack === null ? null : desktopSceneFor(handedBack);
+  const handbackScene =
+    handbackTarget !== null && scenes.some((s) => s.id === handbackTarget)
+      ? handbackTarget
+      : null;
+  /** The app scene the handover card opens, when the workbench has it. */
+  const openbotTarget = appSceneAfter(state.scene);
+  const openbotScene = scenes.some((s) => s.id === openbotTarget)
+    ? openbotTarget
+    : null;
+
   const changeWindow = (patch: Partial<WindowSettingsValue>) => {
     update((prev) => ({ ...prev, window: { ...prev.window, ...patch } }));
     if (patch.theme) {
@@ -968,9 +1018,50 @@ export function WorkbenchLoaded({
                   The real window now shows OpenBot's own page. The workbench
                   shows only the setup window.
                 </p>
-                <button type="button" onClick={() => setOverlayClosed(true)}>
-                  Show the setup window
-                </button>
+                <div className="wb-handover-actions" style={HANDOVER_ACTIONS}>
+                  {openbotScene !== null && (
+                    <button
+                      type="button"
+                      onClick={() => pickScene(openbotScene)}
+                    >
+                      Open OpenBot
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setOverlayClosed(true)}>
+                    Show the setup window
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+          {appScene && handedBack !== null && !handbackClosed && (
+            // A sibling of the window, as the handover card, so a shot of the window does not show it.
+            <section
+              className="wb-handover"
+              aria-labelledby="wb-handback-heading"
+            >
+              <div className="wb-handover-card">
+                <h2 id="wb-handback-heading">
+                  OpenBot Desktop shows its setup window here
+                </h2>
+                <p>
+                  The app asked OpenBot Desktop to{" "}
+                  {HANDBACK_WORDS[handedBack] ?? handedBack}. The real window
+                  now shows the setup window.
+                </p>
+                <div className="wb-handover-actions" style={HANDOVER_ACTIONS}>
+                  {handbackScene !== null && (
+                    <button
+                      type="button"
+                      onClick={() => pickScene(handbackScene)}
+                    >
+                      Open the setup window
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setHandbackClosed(true)}>
+                    Show OpenBot
+                  </button>
+                </div>
               </div>
             </section>
           )}
