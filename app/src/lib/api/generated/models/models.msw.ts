@@ -79,6 +79,19 @@ export const getReplaceAiConnectionResponseMock = (): AiConnection => ({
   changedAt: "2026-11-17T09:00:00.000Z",
 });
 
+export const getDeleteAiConnectionResponseMock = (): AiConnection => ({
+  provider: null,
+  login: null,
+  model: null,
+  endpointHost: null,
+  keySet: false,
+  ready: false,
+  source: "none",
+  editable: true,
+  saved: [{ provider: "openai", login: "api-key", endpointHost: null }],
+  changedAt: "2026-11-21T09:30:00.000Z",
+});
+
 export const getGetPersonalAiConnectionResponseMock =
   (): PersonalAiConnection => ({
     connection: {
@@ -335,6 +348,32 @@ export const getReplaceAiConnectionMockHandler = (
   );
 };
 
+export const getDeleteAiConnectionMockHandler = (
+  overrideResponse?:
+    | AiConnection
+    | ((
+        info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+      ) => Promise<AiConnection> | AiConnection),
+  options?: RequestHandlerOptions,
+) => {
+  return http.delete<{ organizationId: string }>(
+    "*/api/v2/organizations/:organizationId/ai-connection",
+    async (
+      info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getDeleteAiConnectionResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
 export const getGetPersonalAiConnectionMockHandler = (
   overrideResponse?:
     | PersonalAiConnection
@@ -556,6 +595,7 @@ export const getModelsMock = () => [
   getReplaceModelChoiceMockHandler(),
   getGetAiConnectionMockHandler(),
   getReplaceAiConnectionMockHandler(),
+  getDeleteAiConnectionMockHandler(),
   getGetPersonalAiConnectionMockHandler(),
   getReplacePersonalAiConnectionMockHandler(),
   getDeletePersonalAiConnectionMockHandler(),

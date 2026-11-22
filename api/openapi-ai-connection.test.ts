@@ -104,8 +104,34 @@ test("an administrator reads and replaces the one AI connection, a replace takin
   );
 });
 
+test("an administrator disconnects the organization's AI, with an Idempotency-Key, and never where it is fixed", () => {
+  const disconnect = item.delete;
+  expect(disconnect?.operationId).toBe("deleteAiConnection");
+  expect(disconnect?.tags).toEqual(["Models"]);
+  expect(disconnect?.security).toContainEqual({
+    appOAuth: ["ai-connection:write"],
+  });
+  expect(disconnect?.responses["403"]?.$ref).toContain("AdminOnly");
+  expect(disconnect?.responses["409"]?.$ref).toContain("AiConnectionFixed");
+  expect(disconnect?.parameters?.map((p) => p.$ref)).toContainEqual(
+    expect.stringContaining("IdempotencyKey"),
+  );
+  const answers = Object.values(
+    disconnect?.responses["200"]?.content?.["application/json"]?.examples ??
+      {},
+  ).map(exampleValue);
+  expect(answers.length).toBe(1);
+  for (const answer of answers) {
+    const parsed = GetAiConnectionResponse.parse(answer);
+    // Nothing in use afterwards, and the other keys still kept.
+    expect(parsed.provider).toBeNull();
+    expect(parsed.source).toBe("none");
+    expect(parsed.saved.length).toBeGreaterThan(0);
+  }
+});
+
 test("no answer has a place for a key, and the key sent is write-only", () => {
-  for (const operation of [read, replace]) {
+  for (const operation of [read, replace, item.delete]) {
     const body =
       operation?.responses["200"]?.content?.["application/json"]?.schema;
     expect(body).toBeDefined();

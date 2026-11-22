@@ -30,6 +30,7 @@ import type {
   AiSignInStatus,
   ConversationNotFoundResponse,
   CredentialsUnavailableResponse,
+  DeleteAiConnectionHeaders,
   DeletePersonalAiConnectionHeaders,
   FinishPersonalAiSignInHeaders,
   GetModelCatalogueParams,
@@ -1074,6 +1075,147 @@ export const useReplaceAiConnection = <
 > => {
   return useMutation(
     getReplaceAiConnectionMutationOptions(options),
+    queryClient,
+  );
+};
+export const getDeleteAiConnectionUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/ai-connection`;
+};
+
+/**
+ * Stop the organization's Bots using the AI connection in use, with no restart, and revoke the key it used. Runs already going finish on it. Keys still kept for other connections stay kept (saved), so a switch to one of them needs no key pasted. Afterwards the organization has no AI: on OpenBot Cloud a person's runs use their own AI where they connected one, and nobody else's run until an administrator connects another (replaceAiConnection). Disconnecting a connection that isn't there changes nothing. Recorded on the audit trail, never with a key. Only an administrator of the organization may disconnect it, and not where whoever runs OpenBot sets the provider.
+ * @summary Disconnect OpenBot's AI provider
+ */
+export const deleteAiConnection = async (
+  organizationId: string,
+  headers: DeleteAiConnectionHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AiConnection> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<AiConnection>(getDeleteAiConnectionUrl(organizationId), {
+    ...options,
+    method: "DELETE",
+    headers: { ...headers, ...getHeaders(options?.headers) },
+  });
+};
+
+export const getDeleteAiConnectionMutationKey = () =>
+  ["deleteAiConnection"] as const;
+
+export const getDeleteAiConnectionMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | AiConnectionFixedResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteAiConnection>>,
+    TError,
+    DeleteAiConnectionMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteAiConnection>>,
+  TError,
+  DeleteAiConnectionMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDeleteAiConnectionMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteAiConnection>>,
+    DeleteAiConnectionMutationVariables
+  > = (props) => {
+    const { organizationId, headers } = props ?? {};
+
+    return deleteAiConnection(organizationId, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteAiConnectionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteAiConnection>>
+>;
+
+export type DeleteAiConnectionMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | OrganizationNotFoundResponse
+  | AiConnectionFixedResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type DeleteAiConnectionMutationVariables = {
+  organizationId: string;
+  headers: DeleteAiConnectionHeaders;
+};
+
+/**
+ * @summary Disconnect OpenBot's AI provider
+ */
+export const useDeleteAiConnection = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | AiConnectionFixedResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof deleteAiConnection>>,
+      TError,
+      DeleteAiConnectionMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof deleteAiConnection>>,
+  TError,
+  DeleteAiConnectionMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getDeleteAiConnectionMutationOptions(options),
     queryClient,
   );
 };

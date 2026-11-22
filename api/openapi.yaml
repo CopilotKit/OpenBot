@@ -4767,6 +4767,46 @@ paths:
           $ref: '#/components/responses/CredentialsUnavailable'
         default:
           $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags:
+        - Models
+      operationId: deleteAiConnection
+      summary: Disconnect OpenBot's AI provider
+      description: 'Stop the organization''s Bots using the AI connection in use, with no restart, and revoke the key it used. Runs already going finish on it. Keys still kept for other connections stay kept (saved), so a switch to one of them needs no key pasted. Afterwards the organization has no AI: on OpenBot Cloud a person''s runs use their own AI where they connected one, and nobody else''s run until an administrator connects another (replaceAiConnection). Disconnecting a connection that isn''t there changes nothing. Recorded on the audit trail, never with a key. Only an administrator of the organization may disconnect it, and not where whoever runs OpenBot sets the provider.'
+      security:
+        - webSession: []
+        - appOAuth:
+            - ai-connection:write
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The connection after it was disconnected. Never a key.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiConnection'
+              examples:
+                disconnected:
+                  $ref: '#/components/examples/AiConnectionDisconnectedExample'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AdminOnly'
+        '404':
+          $ref: '#/components/responses/OrganizationNotFound'
+        '409':
+          $ref: '#/components/responses/AiConnectionFixed'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/people/{personId}/ai-connection:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -46083,6 +46123,22 @@ components:
         editable: true
         saved: []
         changedAt: null
+    AiConnectionDisconnectedExample:
+      summary: Disconnected, with an OpenAI key still kept from before.
+      value:
+        provider: null
+        login: null
+        model: null
+        endpointHost: null
+        keySet: false
+        ready: false
+        source: none
+        editable: true
+        saved:
+          - provider: openai
+            login: api-key
+            endpointHost: null
+        changedAt: '2026-11-21T09:30:00.000Z'
     PersonalAiConnectionExample:
       summary: The person's own Anthropic key, ahead of the organization's OpenAI.
       value:
