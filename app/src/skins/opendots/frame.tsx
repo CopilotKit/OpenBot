@@ -123,8 +123,8 @@ function RailUserMenu() {
               className="gap-2 px-2 py-1.5"
               disabled={signOut.isPending}
               onClick={async () => {
-                await signOut.mutateAsync();
-                await navigate({ to: "/sign" });
+                const { leaving } = await signOut.mutateAsync();
+                if (!leaving) await navigate({ to: "/sign" });
               }}
               variant="destructive"
             >

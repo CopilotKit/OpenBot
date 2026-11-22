@@ -52,6 +52,11 @@ const ORGANIZATION = "org_acme";
 let openbot: ReturnType<typeof Bun.serve>;
 let signedIn: boolean;
 let requests: string[];
+/** Whether this OpenBot is a hosted one (`hostedSignIn`), signing people in with OpenBot by CopilotKit. */
+let hosted: boolean;
+/** Each address the browser was sent to as a page (`window.location.assign`), in order. */
+let left: string[];
+let assign: typeof window.location.assign;
 
 const problem = (status: number, code: string, detail: string) =>
   new NativeResponse(JSON.stringify({ status, code, detail, title: detail }), {
@@ -68,7 +73,7 @@ const deployment = () =>
       ...getGetDeploymentResponseMock(),
       edition: "team",
       authProviders: ["google"],
-      hostedSignIn: true,
+      hostedSignIn: hosted,
       ssoConfigured: false,
       ssoRequired: false,
     }),
@@ -135,6 +140,14 @@ beforeAll(() => {
 beforeEach(() => {
   signedIn = true;
   requests = [];
+  hosted = true;
+  left = [];
+  // The browser leaving for another page is where this test stops following it, as the person's browser would.
+  assign = window.location.assign;
+  window.location.assign = ((address: string) => {
+    requests.push(`leave for ${address}`);
+    left.push(address);
+  }) as typeof window.location.assign;
   setCurrentOrganization(undefined);
   queryClient.clear();
   const page = pageFetch();
@@ -154,6 +167,7 @@ afterEach(async () => {
   await settleReactWork();
   queryClient.clear();
   globalThis.fetch = nativeFetch;
+  window.location.assign = assign;
 });
 afterAll(async () => {
   await settleReactWork();
@@ -216,11 +230,40 @@ function openApp(start: string) {
   return { view, router, person: userEvent.setup({ document }) };
 }
 
+test("on a hosted OpenBot, signing out also signs this browser out of OpenBot by CopilotKit, then comes back to sign-in", async () => {
+  const { view, person } = openApp("/");
+  await view.findByText("The app");
+  await person.click(view.getByRole("button", { name: "Sign out" }));
+  await waitFor(() => expect(left).toHaveLength(1));
+  // OpenBot's own sign-out first, then the hosted one, which brings the browser back to the sign-in screen. Left
+  // signed in to OpenBot by CopilotKit, the next "Continue with OpenBot by CopilotKit" here signed the last person in.
+  const back = `${window.location.origin}/sign`;
+  expect(left).toEqual([
+    `/api/auth/hosted/sign-out?returnTo=${encodeURIComponent(back)}`,
+  ]);
+  const signedOutAt = requests.indexOf("POST /api/auth/sign-out");
+  expect(signedOutAt).toBeGreaterThanOrEqual(0);
+  expect(requests.indexOf(`leave for ${left[0]}`)).toBeGreaterThan(signedOutAt);
+}, 15_000);
+
+test("on an OpenBot that isn't hosted, signing out goes straight to the sign-in screen", async () => {
+  hosted = false;
+  const { view, router, person } = openApp("/");
+  await view.findByText("The app");
+  await person.click(view.getByRole("button", { name: "Sign out" }));
+  await waitFor(() => expect(requests).toContain("POST /api/auth/sign-out"));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/sign"));
+  expect(left).toEqual([]);
+}, 15_000);
+
 test("signed out of an organization that isn't default, the sign-in screen shows, not an error", async () => {
   const { view, router, person } = openApp("/");
   await view.findByText("The app");
   await person.click(view.getByRole("button", { name: "Sign out" }));
   await waitFor(() => expect(requests).toContain("POST /api/auth/sign-out"));
+  // The hosted sign-out brings the browser back here.
+  await waitFor(() => expect(left).toHaveLength(1));
+  await router.navigate({ to: "/sign" });
   await view.findByRole(
     "link",
     { name: "Continue with OpenBot by CopilotKit" },
