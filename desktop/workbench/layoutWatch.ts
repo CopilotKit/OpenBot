@@ -1,6 +1,9 @@
 import type { Box } from "./geometry";
 
 export type Snapshot = Map<string, { box: Box; label: string }>;
+/**
+ * A layout warning. The boxes are in the window's own CSS pixels, from the top left of the window.
+ */
 export type Warning =
   | {
       kind: "moved";
@@ -9,9 +12,21 @@ export type Warning =
       dx: number;
       dy: number;
       cause: string;
+      /** Where the element was before the move. */
+      from: Box;
+      /** Where the element is after the move. */
+      to: Box;
     }
-  | { kind: "clipped"; at: number; label: string }
-  | { kind: "outside"; at: number; label: string; overBy: number };
+  | {
+      kind: "clipped";
+      at: number;
+      label: string;
+      box: Box;
+      /** The width and height of all of the element's content, also the part that is cut off. */
+      scrollWidth: number;
+      scrollHeight: number;
+    }
+  | { kind: "outside"; at: number; label: string; overBy: number; box: Box };
 
 const TEXT_INPUTS = new Set([
   "",
@@ -258,7 +273,13 @@ export function compare(
   // A new screen (a new main heading) is not a reason to skip: an element that stays on the
   // screen across the change, such as the background row or the step list, must not jump. What
   // was only on the old screen has no key in the new one, so it is not compared.
-  const moves: { label: string; dx: number; dy: number }[] = [];
+  const moves: {
+    label: string;
+    dx: number;
+    dy: number;
+    from: Box;
+    to: Box;
+  }[] = [];
   let present = 0;
   for (const [key, was] of before) {
     const now = after.get(key);
@@ -267,10 +288,11 @@ export function compare(
     const dx = now.box.x - was.box.x;
     const dy = now.box.y - was.box.y;
     if (Math.abs(dx) > 2 || Math.abs(dy) > 2)
-      moves.push({ label: now.label, dx, dy });
+      moves.push({ label: now.label, dx, dy, from: was.box, to: now.box });
   }
   // Moves of the same amount go in one group; a group is first seen at its first move.
   const groups: { dx: number; dy: number; members: number[] }[] = [];
+  // The first move of a group stands for all of it: its boxes go on the group's warning.
   const groupOf = moves.map((move, index) => {
     const group = groups.find(
       (g) =>
@@ -300,6 +322,8 @@ export function compare(
         dx: group.dx,
         dy: group.dy,
         cause,
+        from: move.from,
+        to: move.to,
       });
   });
   return warnings;
@@ -325,7 +349,15 @@ export function clippedAndOutside(
           !scrolls(style.overflowX || style.overflow)) ||
         (element.scrollHeight > element.clientHeight + 1 &&
           !scrolls(style.overflowY || style.overflow));
-      if (overflowing) warnings.push({ kind: "clipped", at, label });
+      if (overflowing)
+        warnings.push({
+          kind: "clipped",
+          at,
+          label,
+          box,
+          scrollWidth: element.scrollWidth,
+          scrollHeight: element.scrollHeight,
+        });
     }
 
     let inScroller = false;
@@ -345,7 +377,7 @@ export function clippedAndOutside(
         -box.y,
       ),
     );
-    if (overBy > 0) warnings.push({ kind: "outside", at, label, overBy });
+    if (overBy > 0) warnings.push({ kind: "outside", at, label, overBy, box });
   }
   return warnings;
 }

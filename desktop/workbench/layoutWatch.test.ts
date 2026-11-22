@@ -28,7 +28,16 @@ test("a 3px shift is a move with its cause", () => {
   expect(
     compare(snap({ a: box(0, 0) }), snap({ a: box(3, 1) }), 5, "click"),
   ).toEqual([
-    { kind: "moved", at: 5, label: "a", dx: 3, dy: 1, cause: "click" },
+    {
+      kind: "moved",
+      at: 5,
+      label: "a",
+      dx: 3,
+      dy: 1,
+      cause: "click",
+      from: box(0, 0),
+      to: box(3, 1),
+    },
   ]);
 });
 
@@ -59,6 +68,9 @@ test("a group that moved by the same amount is one warning for the whole page", 
       dx: 0,
       dy: 100,
       cause: "clock",
+      // The first element of the group stands for all of it.
+      from: box(0, 0),
+      to: box(0, 100),
     },
   ]);
 });
@@ -112,6 +124,8 @@ test("a new main heading still reports what stayed on the screen and moved", () 
         dx: 0,
         dy: 157,
         cause: "clock",
+        from: { x: 0, y: 400, width: 10, height: 10 },
+        to: { x: 0, y: 557, width: 10, height: 10 },
       },
     ]);
   } finally {
@@ -133,7 +147,16 @@ test("a new main heading with most of the page moved is one warning for the whol
     c: box(0, 240),
   });
   expect(compare(before, after, 1, "x")).toEqual([
-    { kind: "moved", at: 1, label: WHOLE_PAGE, dx: 0, dy: 150, cause: "x" },
+    {
+      kind: "moved",
+      at: 1,
+      label: WHOLE_PAGE,
+      dx: 0,
+      dy: 150,
+      cause: "x",
+      from: box(0, 50),
+      to: box(0, 200),
+    },
   ]);
 });
 
@@ -156,6 +179,8 @@ test("one element that moved 13px alone stays a warning", () => {
       dx: 0,
       dy: 13,
       cause: "clock",
+      from: box(0, 50),
+      to: box(0, 63),
     },
   ]);
 });
@@ -267,6 +292,33 @@ test("text for screen readers only has no key for moves and no cut-off or outsid
           at: 3,
           label: 'button "New conversation"',
           overBy: 20,
+          box: { x: -20, y: 40, width: 80, height: 20 },
+        },
+      ],
+    );
+  });
+});
+
+test("a cut-off warning has the box and the full size of the content", () => {
+  withBoxes(() => {
+    const body = mount(
+      '<p data-box="10 20 100 16" style="white-space: nowrap; overflow: hidden">A long line</p>',
+    );
+    const p = body.querySelector("p") as HTMLElement;
+    // happy-dom has no layout: give the paragraph a client and a scroll size.
+    Object.defineProperty(p, "clientWidth", { value: 100 });
+    Object.defineProperty(p, "clientHeight", { value: 16 });
+    Object.defineProperty(p, "scrollWidth", { value: 160 });
+    Object.defineProperty(p, "scrollHeight", { value: 16 });
+    expect(clippedAndOutside(document, 9, { width: 800, height: 600 })).toEqual(
+      [
+        {
+          kind: "clipped",
+          at: 9,
+          label: 'p "A long line"',
+          box: { x: 10, y: 20, width: 100, height: 16 },
+          scrollWidth: 160,
+          scrollHeight: 16,
         },
       ],
     );

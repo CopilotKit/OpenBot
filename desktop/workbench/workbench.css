@@ -42,6 +42,10 @@
   --wb-border: var(--ck-border-container);
   --wb-current: var(--ck-white-70);
   --wb-notice: var(--ck-notice);
+  /* The highlight of a layout warning over the window: strong enough for light and dark windows. */
+  --wb-highlight-moved: #ff5a00;
+  --wb-highlight-bad: #e5132a;
+  --wb-highlight-halo: #ffffff;
 }
 
 /*
@@ -332,12 +336,16 @@ textarea {
 .wb-side nav button {
   display: block;
   width: 100%;
-  margin: 0 0 4px;
-  padding: 8px 12px;
+  margin: 0 0 2px;
+  padding: 4px 12px;
   text-align: left;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
-  line-height: 1.25;
+  line-height: 20px;
+  /* One line each, so the list is dense: a long title ends in an ellipsis. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   background: transparent;
   border: 0;
   border-radius: var(--ck-radius-xs);
@@ -443,6 +451,22 @@ textarea {
 
 .wb-under button:hover {
   background: var(--ck-white-50);
+}
+
+/* The warning shown over the window. */
+.wb-under button.wb-warning-current {
+  background: var(--ck-white-70);
+  box-shadow: inset 2px 0 0 var(--wb-highlight-moved);
+}
+
+.wb-under button[aria-pressed="true"] {
+  font-weight: 600;
+}
+
+.wb-warning-status {
+  margin-left: 8px;
+  color: var(--ck-text-secondary);
+  font-weight: 500;
 }
 
 .wb-fold {
@@ -694,4 +718,90 @@ textarea {
 
 .wb-side-right > .wb-time {
   padding: 0 4px;
+}
+
+/*
+ * The highlight of a layout warning, over the window and not in the window element, so a shot of
+ * the window does not show it. Each line has a white 1px halo, so it reads on light and dark windows.
+ */
+.wb-highlight {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  --wb-hl: var(--wb-highlight-bad);
+}
+
+.wb-highlight-moved {
+  --wb-hl: var(--wb-highlight-moved);
+}
+
+.wb-highlight-box,
+.wb-highlight-ghost,
+.wb-highlight-shade {
+  position: absolute;
+  border-radius: 2px;
+}
+
+.wb-highlight-box {
+  border: 2px solid var(--wb-hl);
+  box-shadow:
+    0 0 0 1px var(--wb-highlight-halo),
+    inset 0 0 0 1px var(--wb-highlight-halo);
+}
+
+.wb-highlight-ghost {
+  border: 2px dashed var(--wb-hl);
+  background: color-mix(in srgb, var(--wb-hl) 8%, transparent);
+  box-shadow: 0 0 0 1px var(--wb-highlight-halo);
+}
+
+/* What is cut off, or what is past the edge of the window. */
+.wb-highlight-shade {
+  background: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--wb-hl) 55%, transparent) 0 4px,
+    color-mix(in srgb, var(--wb-hl) 20%, transparent) 4px 8px
+  );
+  outline: 1px solid var(--wb-highlight-halo);
+}
+
+.wb-highlight-arrow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+}
+
+.wb-highlight-arrow line {
+  stroke: var(--wb-hl);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.wb-highlight-arrow polygon {
+  fill: var(--wb-hl);
+}
+
+.wb-highlight-arrow .wb-highlight-halo {
+  stroke: var(--wb-highlight-halo);
+  stroke-width: 4;
+  stroke-linejoin: round;
+  fill: var(--wb-highlight-halo);
+}
+
+.wb-highlight-label {
+  position: absolute;
+  transform: translateY(calc(-100% - 6px));
+  padding: 2px 6px;
+  border-radius: var(--ck-radius-xs);
+  background: var(--wb-hl);
+  color: #ffffff;
+  box-shadow: 0 0 0 1px var(--wb-highlight-halo);
+  font: 600 12px / 16px var(--ck-sans);
+  white-space: nowrap;
+}
+
+.wb-highlight-label-below {
+  transform: translateY(6px);
 }

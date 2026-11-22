@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { Answer, Call, NativeControl } from "../src/fakeNative/control";
 import {
   HANDBACK_COMMANDS,
@@ -58,7 +64,12 @@ import {
   type WorkbenchState,
 } from "./urlState";
 import { useLayoutWatch } from "./useLayoutWatch";
-import { WarningsList } from "./WarningsList";
+import {
+  type FrameOrigin,
+  frameOrigin,
+  WarningHighlight,
+} from "./WarningHighlight";
+import { WarningsList, warningKey } from "./WarningsList";
 import { WindowFrame } from "./WindowFrame";
 import {
   type AppWindowSettings,
@@ -467,6 +478,17 @@ function frameConfig(
 
 type Catalog = { scenes: SceneEntry[]; notices: string[] };
 
+/** A layout warning shown over the window. */
+type Highlight = {
+  id: number;
+  warning: Warning;
+  key: string;
+  /** A click keeps it when the pointer leaves the warnings list. */
+  pinned: boolean;
+  /** The seek to its time still runs. */
+  jumping: boolean;
+};
+
 /** Loads the scene catalog once, then shows the workbench. */
 export function Workbench() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -563,6 +585,14 @@ export function WorkbenchLoaded({
   /** The route the Requests panel picked, for the API answers panel. */
   const [pickedRoute, setPickedRoute] = useState<ApiRoute | null>(null);
   const answersFoldRef = useRef<HTMLDetailsElement | null>(null);
+  /** The layout warning shown over the window, from a hover or a click in the warnings list. */
+  const [highlight, setHighlight] = useState<Highlight | null>(null);
+  const highlightRef = useRef(highlight);
+  highlightRef.current = highlight;
+  /** Counts highlights, so a newer one or a clear stops an older jump from showing its highlight. */
+  const highlightIdRef = useRef(0);
+  /** Where the window is under the highlight; measured after the jump and when the window changes. */
+  const [origin, setOrigin] = useState<FrameOrigin | null>(null);
   const {
     warnings,
     flush: checkLayout,
@@ -843,9 +873,16 @@ export function WorkbenchLoaded({
     await nextFrame(live?.win ?? window);
   }, [noteNotQuiet]);
 
+  /** Removes the highlight of a layout warning. A play, a step, a new scene or a seek does this. */
+  const clearHighlight = useCallback(() => {
+    highlightIdRef.current += 1;
+    setHighlight(null);
+  }, []);
+
   const seek = useCallback(
     async (ms: number) => {
       const live = liveRef.current;
+      clearHighlight();
       // A seek lands paused.
       setNextAction(null);
       if (stopLoop()) setPlaying(false);
@@ -869,8 +906,68 @@ export function WorkbenchLoaded({
       }
       await whenReady();
     },
-    [checkHandover, detach, markReady, stopLoop, walk, whenReady, writeAt],
+    [
+      checkHandover,
+      clearHighlight,
+      detach,
+      markReady,
+      stopLoop,
+      walk,
+      whenReady,
+      writeAt,
+    ],
   );
+
+  /** Seeks to a warning's time, then shows the warning over the window. */
+  const showWarning = useCallback(
+    (warning: Warning, pinned: boolean) => {
+      // The seek clears the highlight before it waits, so the new one stays.
+      const done = seek(warning.at);
+      const id = ++highlightIdRef.current;
+      setHighlight({
+        id,
+        warning,
+        key: warningKey(warning),
+        pinned,
+        jumping: true,
+      });
+      done.then(
+        () => {
+          if (highlightIdRef.current !== id) return;
+          setHighlight((h) => (h?.id === id ? { ...h, jumping: false } : h));
+        },
+        () => {
+          if (highlightIdRef.current === id) clearHighlight();
+        },
+      );
+    },
+    [clearHighlight, seek],
+  );
+
+  const hoverWarning = (warning: Warning) => {
+    const current = highlightRef.current;
+    // A pinned warning stays until a click on another one; the same warning does not jump again.
+    if (current?.pinned || current?.key === warningKey(warning)) return;
+    showWarning(warning, false);
+  };
+
+  const pinWarning = (warning: Warning) => {
+    const current = highlightRef.current;
+    if (current?.key === warningKey(warning)) {
+      setHighlight({ ...current, pinned: true });
+      return;
+    }
+    showWarning(warning, true);
+  };
+
+  // Measures where the window is, after a jump and when the size, the zoom or the frame changes.
+  useLayoutEffect(() => {
+    if (!highlight || highlight.jumping) return;
+    const wrap = wrapRef.current;
+    setOrigin(
+      wrap && frameEl ? frameOrigin(wrap, frameEl, state.window.width) : null,
+    );
+  }, [highlight, state.window, frameEl]);
 
   useEffect(() => {
     window.__workbenchPage = {
@@ -992,6 +1089,7 @@ export function WorkbenchLoaded({
   const play = (next: Speed = speed) => {
     const live = liveRef.current;
     if (!live) return;
+    clearHighlight();
     const { clock } = live;
     setNextAction(null);
     stopLoop();
@@ -1018,6 +1116,7 @@ export function WorkbenchLoaded({
 
   const pickScene = (id: string) => {
     const scene = scenesRef.current.find((s) => s.id === id);
+    clearHighlight();
     setPickedRoute(null);
     update((prev) => ({
       ...prev,
@@ -1178,6 +1277,16 @@ export function WorkbenchLoaded({
               }}
             />
             <ActionMarkers marks={marks} next={nextAction} />
+            {highlight && !highlight.jumping && origin && (
+              <WarningHighlight
+                warning={highlight.warning}
+                origin={origin}
+                viewport={{
+                  width: state.window.width,
+                  height: state.window.height,
+                }}
+              />
+            )}
           </div>
           {handedOver && !overlayClosed && (
             // A sibling of the window, so a shot of the window does not show it.
@@ -1245,6 +1354,13 @@ export function WorkbenchLoaded({
             onSeek={(ms) => {
               void seek(ms);
             }}
+            onHover={hoverWarning}
+            onPin={pinWarning}
+            onLeave={() => {
+              if (highlightRef.current && !highlightRef.current.pinned)
+                clearHighlight();
+            }}
+            highlight={highlight}
           />
         </div>
       </main>
@@ -1276,6 +1392,7 @@ export function WorkbenchLoaded({
             onPause={pause}
             onStep={() => {
               setNextAction(null);
+              clearHighlight();
               steppingRef.current = true;
               try {
                 liveRef.current?.clock.stepToNext();

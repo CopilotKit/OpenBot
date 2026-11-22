@@ -19,6 +19,7 @@ const asked = process.env.OPENBOT_APP_BROWSER === "1";
 const PLAYWRIGHT: string = "playwright-core";
 type Locator = {
   click(): Promise<void>;
+  hover(): Promise<void>;
   waitFor(options?: { state?: "visible" | "hidden" }): Promise<void>;
 };
 type Frame = {
@@ -35,6 +36,7 @@ type Page = {
     run: ((arg: A) => T) | string,
     arg?: A,
   ): Promise<T>;
+  waitForSelector(selector: string): Promise<unknown>;
   frames(): Frame[];
   mainFrame(): Frame;
   close(): Promise<void>;
@@ -182,6 +184,60 @@ describe.skipIf(!asked)("the workbench's layout watch", () => {
         `install-mac to ${end} ms: ${warnings.length} warnings\n${warnings.map(warningText).join("\n")}`,
       );
       expect(Array.isArray(warnings)).toBe(true);
+    } finally {
+      await page.close();
+    }
+  }, 180_000);
+
+  test("a hover on a warning jumps to its time and shows the move over the window", async () => {
+    if (!browser) throw new Error("No browser.");
+    const page = await browser.newPage({
+      viewport: { width: 1600, height: 1000 },
+      reducedMotion: "reduce",
+    });
+    try {
+      await openScene(page, "install-mac");
+      const end = await windowFrame(page).evaluate(
+        () => globalThis.__workbenchRunInfo?.end ?? 0,
+      );
+      await page.evaluate((ms) => window.__workbenchPage?.seek(ms), end);
+      const warning = (await warningsOf(page)).find(
+        (w) =>
+          w.kind === "moved" &&
+          w.label.includes("Installing OpenBot in the background"),
+      );
+      if (warning?.kind !== "moved")
+        throw new Error("No move of the background row.");
+      // The warning has where the row was and where it went.
+      expect(warning.to.y - warning.from.y).toBe(warning.dy);
+
+      // The first move of the row is earlier than the end: the hover seeks back.
+      await page
+        .mainFrame()
+        .getByRole("button", { name: warningText(warning) })
+        .hover();
+      await page.waitForSelector(
+        "[data-workbench-highlight='moved'] .wb-highlight-label",
+      );
+      expect(await page.evaluate(() => window.__workbenchPage?.now())).toBe(
+        warning.at,
+      );
+      const shown = await page.evaluate(() => {
+        const root = document.querySelector("[data-workbench-highlight]");
+        return {
+          label: root?.querySelector(".wb-highlight-label")?.textContent,
+          boxes: [
+            ...(root?.querySelectorAll("[data-highlight-box]") ?? []),
+          ].map((el) => el.getAttribute("data-highlight-box")),
+          inWindow: root
+            ? root.closest("[data-workbench-window]") !== null
+            : null,
+        };
+      });
+      expect(shown.label).toMatch(/^moved \d+ px (down|up)/);
+      expect(shown.boxes).toEqual(["from", "to"]);
+      // Not in the window element, so a shot of the window does not show it.
+      expect(shown.inWindow).toBe(false);
     } finally {
       await page.close();
     }
