@@ -10,6 +10,10 @@
 // The process that starts the server writes the server's pid in `server.pid`. A server without
 // that file was started by a person (`bun run workbench`), and stop() never stops it.
 //
+// The workbench server starts the app server on port 3023 (see vite.workbench.config.ts), which
+// writes its pid in `app-server.pid`. ensureServer() also waits for the app server, and stop()
+// makes sure the app server stopped together with the workbench server.
+//
 // Set WORKBENCH_PORT to use a port other than 3021, for example to keep a run apart from others.
 import {
   closeSync,
@@ -30,6 +34,8 @@ export const WORKBENCH_URL = `http://localhost:${WORKBENCH_PORT}`;
 const CLIENT_URL = `${WORKBENCH_URL}/@vite/client`;
 const POLL_MS = 200;
 const START_TIMEOUT_MS = 30_000;
+const APP_CLIENT_URL = `${WORKBENCH_URL}/__app/@vite/client`;
+const APP_TIMEOUT_MS = 90_000;
 const STOP_TIMEOUT_MS = 5_000;
 
 // The desktop folder: this file is desktop/workbench/server.ts.
@@ -196,6 +202,47 @@ async function answers(): Promise<boolean> {
   }
 }
 
+/** Waits until the app server answers through the workbench server. False after 90 s. */
+async function waitForApp(): Promise<boolean> {
+  const deadline = Date.now() + APP_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      if ((await fetch(APP_CLIENT_URL)).ok) return true;
+    } catch {}
+    await Bun.sleep(POLL_MS);
+  }
+  return false;
+}
+
+/**
+ * After the workbench server stopped: stops the app server it started, if that one still runs
+ * (the workbench server was killed before it could stop it, for example).
+ */
+async function stopAppServer(dir: string): Promise<void> {
+  const path = join(dir, "app-server.pid");
+  let pid: number | null = null;
+  try {
+    pid = Number(readFileSync(path, "utf8").trim());
+  } catch {}
+  if (pid === null || !Number.isInteger(pid) || pid <= 0) return;
+  const deadline = Date.now() + STOP_TIMEOUT_MS;
+  while (isAlive(pid) && Date.now() < deadline) await Bun.sleep(50);
+  if (isAlive(pid)) {
+    // Its own process group: the app server's children stop too.
+    try {
+      process.kill(-pid, "SIGTERM");
+    } catch {}
+    const killDeadline = Date.now() + STOP_TIMEOUT_MS;
+    while (isAlive(pid) && Date.now() < killDeadline) await Bun.sleep(50);
+    if (isAlive(pid)) {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {}
+    }
+  }
+  rmSync(path, { force: true });
+}
+
 async function waitForExit(pid: number): Promise<void> {
   const deadline = Date.now() + STOP_TIMEOUT_MS;
   while (isAlive(pid) && Date.now() < deadline) await Bun.sleep(50);
@@ -217,6 +264,8 @@ export type WorkbenchServer = {
   url: string;
   /** True when this call started the server. */
   started: boolean;
+  /** True when the app server answered through the workbench server. */
+  app: boolean;
   /** Gives back the lease. Stops the server when no other live process holds a lease. */
   stop(): Promise<void>;
 };
@@ -238,14 +287,17 @@ export async function ensureServer(): Promise<WorkbenchServer> {
     if (pid !== null) signal(pid);
   };
   process.on("exit", onExit);
-  const handle = (started: boolean): WorkbenchServer => ({
+  // A reused server may still be starting the app server, so both paths wait for it.
+  const handle = async (started: boolean): Promise<WorkbenchServer> => ({
     url: WORKBENCH_URL,
     started,
+    app: await waitForApp(),
     stop: async () => {
       const pid = release();
       if (pid === null) return;
       signal(pid);
       await waitForExit(pid);
+      await stopAppServer(dir);
     },
   });
 

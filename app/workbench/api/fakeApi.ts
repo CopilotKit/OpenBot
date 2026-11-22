@@ -170,11 +170,16 @@ export function installFakeApi(
     input: string | URL | Request,
     init?: RequestInit,
   ): Promise<Response> => {
-    const request = toRequest(input, init, options.origin);
-    const url = new URL(request.url);
+    // Check the URL before building a Request: in a browser, new Request(input) takes the body of
+    // a Request input, so the real fetch could no longer send it.
+    const url = new URL(
+      input instanceof Request ? input.url : String(input),
+      options.origin,
+    );
     if (url.origin !== options.origin || !url.pathname.startsWith("/api/")) {
       return options.realFetch(input, init);
     }
+    const request = toRequest(input, init, options.origin);
     const record: ApiRecord = {
       id: nextId++,
       method: request.method,

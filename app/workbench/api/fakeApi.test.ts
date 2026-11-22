@@ -192,6 +192,30 @@ describe("installFakeApi", () => {
     expect(api.requests()).toEqual([]);
   });
 
+  test("a Request with a body outside /api reaches the real fetch as the same object", async () => {
+    const seen: unknown[] = [];
+    const target = { fetch: globalThis.fetch };
+    installFakeApi(target, {
+      origin: ORIGIN,
+      realFetch: (async (input: string | URL | Request) => {
+        seen.push(input);
+        return new Response("real");
+      }) as typeof fetch,
+      groups: [],
+      setTimer: () => {},
+      now: () => 0,
+    });
+    const request = new Request(`${ORIGIN}/upload`, {
+      method: "POST",
+      body: "payload",
+    });
+    expect(await (await target.fetch(request)).text()).toBe("real");
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBe(request);
+    expect(request.bodyUsed).toBe(false);
+    expect(await request.text()).toBe("payload");
+  });
+
   test("clearAnswer falls back to the groups", async () => {
     const { api, target, changes } = setup();
     const route = "GET /api/v2/organizations/:organizationId/bots" as const;
