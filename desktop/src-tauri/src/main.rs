@@ -98,15 +98,9 @@ struct Shell {
     stopped_container_root: Mutex<Option<PathBuf>>,
     /// A ChatGPT sign-in waiting for the browser redirect to complete it.
     ///
-    /// Held for the same reason the Claude one is: a person leaves and comes back in the middle.
-    /// Unlike that one, nothing is typed here — the callback finishes it.
+    /// Held across two commands because a person leaves and approves in the middle of it. The
+    /// callback finishes it. A Claude plan's sign-in keeps its own (`claude_sign_in`).
     signing_in_to_chatgpt: Mutex<Option<openbot_desktop_lib::plan::SigningInToChatGpt>>,
-    /// A plan sign-in waiting for the code from the browser.
-    ///
-    /// Held across two commands because a person has to leave and approve in the middle of it, and
-    /// the flow that showed the URL is the only one that can redeem the code: each start mints its
-    /// own PKCE challenge and state, so a second start invalidates the first.
-    signing_in: Mutex<Option<openbot_desktop_lib::plan::SigningIn>>,
     /// The configured setup destination, resolved using Tauri's build mode and platform.
     /// WebView2's current URL can still be about:blank during startup; it is never a setup source.
     setup_url: Mutex<Option<String>>,
@@ -4411,8 +4405,8 @@ async fn deployment_ready<R: tauri::Runtime>(
 /// Require completed local installation before starting an authentication container.
 ///
 /// With the sign-in's own image made present by `present`. Install pulls a plan's image only for an
-/// installation already on that plan (`preparation::PLAN_IMAGES`), so a sign-in downloads it when
-/// it is missing (`download_missing`).
+/// installation already on that plan (`preparation::PLAN_IMAGES`), so the ChatGPT plan's sign-in
+/// downloads it when it is missing (`download_missing`). The Claude plan's needs no image.
 fn prepared_sign_in_with(
     root: &Path,
     published: &str,
@@ -10674,10 +10668,8 @@ fn already_configured_for_root(root: String) -> AlreadyConfigured {
     }
 }
 
-/// Start a Claude plan sign-in and return the address a browser has to open.
-///
-/// Blocking work on a blocking thread: it starts a container and waits on its output, and doing
-/// that on the UI thread is a window that stops repainting mid-setup.
+/// Start a Claude plan sign-in, the setup window's own, and return the address a browser has to
+/// open. Always the loopback one: the setup window is the same build as this shell.
 #[tauri::command]
 async fn begin_claude_sign_in<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -10685,35 +10677,28 @@ async fn begin_claude_sign_in<R: tauri::Runtime>(
 ) -> Result<String, Problem> {
     let root = stack::root_from(&root);
     remember_selected_root(&app.state::<Shell>(), &root);
-    /*
-     * The image is decided here, not by the window, and it is the Claude Agent SDK harness whatever
-     * harness the person picked. It is not being used as a Bot: it is the container that happens to
-     * carry Anthropic's bundled CLI, which is what does the OAuth. Letting the screen name an image
-     * would make the sign-in depend on a choice that has nothing to do with it.
-     */
-    #[cfg(target_os = "linux")]
-    let service_app = app.clone();
-    // The sign-in's image downloads in its task, said to the window as Install says it.
-    let progress_app = app.clone();
-    let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
-        // Install pulls this image only for an installation already on a Claude plan
-        // (`preparation::PLAN_IMAGES`): a first sign-in downloads it here, shown as Install shows it.
-        let (address, image) = prepared_sign_in_with(
-            &root,
-            openbot_desktop_lib::plan::SIGN_IN_IMAGE,
-            |address, image| {
-                download_missing(&progress_app, address, std::slice::from_ref(image), || {
-                    Ok(())
-                })
-            },
-        )?;
-        #[cfg(target_os = "linux")]
-        {
-            let shell = service_app.state::<Shell>();
-            let _startup = shell.startup.lock().unwrap();
-            ensure_linux_podman_api(&shell, &address)?;
-        }
-        openbot_desktop_lib::plan::SigningIn::begin(&address, &image).map_err(Problem::from)
+    start_claude_sign_in(
+        &app,
+        openbot_desktop_lib::claude_sign_in::Redirect::Loopback,
+    )
+    .await
+}
+
+/**
+Start the native Claude plan sign-in (`claude_sign_in`) and send the browser to it. No image and no
+container: the browser comes back to a listener of this app's own.
+
+Opened here rather than by the window, because the window would need the shell plugin's JS half for
+the one call. The URL is returned as well, and the screen shows it: on Linux without a registered
+browser, and in a session where the open silently does nothing, a link somebody can copy is the
+difference between a stuck screen and a finished sign-in.
+*/
+async fn start_claude_sign_in<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    redirect: openbot_desktop_lib::claude_sign_in::Redirect,
+) -> Result<String, Problem> {
+    let url = tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::claude_sign_in::begin(redirect)
     })
     .await
     .map_err(|error| {
@@ -10721,40 +10706,33 @@ async fn begin_claude_sign_in<R: tauri::Runtime>(
             "The sign-in did not start. Try again.",
             format!("the sign-in task did not run: {error}"),
         )
-    })??;
-    *app.state::<Shell>().signing_in.lock().unwrap() = Some(signing);
-
-    /*
-     * Opened here rather than by the window, because the window would need the shell plugin's JS
-     * half for the one call. The URL is returned as well, and the screen shows it: on Linux without
-     * a registered browser, and in a session where the open silently does nothing, a link somebody
-     * can copy is the difference between a stuck screen and a finished sign-in.
-     */
-    let _ = tauri_plugin_opener::OpenerExt::opener(&app).open_url(&url, None::<&str>);
+    })?
+    .map_err(Problem::plain)?;
+    let _ = tauri_plugin_opener::OpenerExt::opener(app).open_url(&url, None::<&str>);
     Ok(url)
 }
 
 /**
-Redeem the code from the browser and return the plan token.
+Finish the Claude plan sign-in and return the plan token: with no code, once the browser comes back
+to this computer; with one, the `code#state` an older app page pasted from Claude's page.
 
 The token crosses to the window and comes back in the model choice, which is the same path a typed
-key takes. It is never logged, and the failure messages never carry the command's output: see
-`SigningIn::gave_up`.
+key takes. It is never logged, and no failure carries it.
 */
 #[tauri::command]
-async fn finish_claude_sign_in(app: tauri::AppHandle, code: String) -> Result<String, String> {
-    // Taken, not borrowed. A sign-in is single-use, and leaving it in place would let a second
-    // attempt write a code into a flow that has already finished.
-    let signing = app
-        .state::<Shell>()
-        .signing_in
-        .lock()
-        .unwrap()
-        .take()
-        .ok_or_else(|| "That sign-in is no longer running. Start it again.".to_string())?;
-    tauri::async_runtime::spawn_blocking(move || signing.finish(&code))
-        .await
-        .map_err(|error| format!("The sign-in did not finish: {error}"))?
+async fn finish_claude_sign_in(code: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::claude_sign_in::finish(code.as_deref())
+    })
+    .await
+    .map_err(|error| format!("The sign-in did not finish: {error}"))?
+}
+
+/// Stop a Claude plan sign-in the person has left: another provider, Back, Escape. Whoever waits
+/// in `finish_claude_sign_in` hears it stopped, and its port is given back.
+#[tauri::command]
+async fn cancel_claude_sign_in() {
+    openbot_desktop_lib::claude_sign_in::cancel();
 }
 
 /// Start a ChatGPT plan sign-in and return the address a browser has to open.
@@ -13004,16 +12982,35 @@ fn sign_in_root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf,
         .unwrap_or_else(|_| cleanup_root(&app.state::<Shell>(), &stack::default_root())))
 }
 
-/// Start a plan's sign-in, the setup window's own, and the address the browser was sent to.
+/**
+Start a plan's sign-in, the setup window's own, and the address the browser was sent to.
+
+`loopback`: the page finishes a Claude plan's sign-in on its own, with no code. An app page older
+than that sends nothing, and gets the manual flow it pastes a code from, as it always has. It tells
+the two apart by the address it is given (its `redirect_uri`).
+*/
 pub(crate) async fn begin_plan_sign_in_now(
     app: tauri::AppHandle,
     plan: openbot_desktop_lib::ai_connection::Plan,
+    loopback: bool,
 ) -> Result<String, String> {
     use openbot_desktop_lib::ai_connection::Plan;
-    let root = sign_in_root(&app)?.to_string_lossy().into_owned();
+    use openbot_desktop_lib::claude_sign_in::Redirect;
+    let root = sign_in_root(&app)?;
     match plan {
-        Plan::Claude => begin_claude_sign_in(app, root).await,
-        Plan::ChatGpt => begin_chatgpt_sign_in(app, root).await,
+        Plan::Claude => {
+            remember_selected_root(
+                &app.state::<Shell>(),
+                &stack::root_from(&root.to_string_lossy()),
+            );
+            let redirect = if loopback {
+                Redirect::Loopback
+            } else {
+                Redirect::Manual
+            };
+            start_claude_sign_in(&app, redirect).await
+        }
+        Plan::ChatGpt => begin_chatgpt_sign_in(app, root.to_string_lossy().into_owned()).await,
     }
     .map_err(|problem| problem.said)
 }
@@ -13032,7 +13029,7 @@ pub(crate) async fn finish_plan_sign_in_now(
     let root = sign_in_root(&app)?;
     match plan {
         Plan::Claude => {
-            let token = finish_claude_sign_in(app, code.unwrap_or_default()).await?;
+            let token = finish_claude_sign_in(code).await?;
             tauri::async_runtime::spawn_blocking(move || {
                 openbot_desktop_lib::vault::remember(&root, "CLAUDE_CODE_OAUTH_TOKEN", &token)
             })
@@ -13063,11 +13060,8 @@ pub(crate) async fn cancel_plan_sign_in_now(
     use openbot_desktop_lib::ai_connection::Plan;
     match plan {
         Plan::Claude => {
-            // Dropping a sign-in that was started removes its container.
-            let held = app.state::<Shell>().signing_in.lock().unwrap().take();
-            tauri::async_runtime::spawn_blocking(move || drop(held))
-                .await
-                .map_err(|error| error.to_string())
+            cancel_claude_sign_in().await;
+            Ok(())
         }
         Plan::ChatGpt => cancel_chatgpt_sign_in(app).await,
     }
@@ -14281,6 +14275,7 @@ fn main() {
             already_configured,
             begin_claude_sign_in,
             finish_claude_sign_in,
+            cancel_claude_sign_in,
             begin_chatgpt_sign_in,
             begin_model_oauth,
             finish_model_oauth,
@@ -24477,7 +24472,7 @@ fn main() {
     }
 
     /*
-     * A sign-in to a plan on an installation that installed without that plan's image: the
+     * A sign-in to a ChatGPT plan on an installation that installed without that plan's image: the
      * sign-in runs in that image, so it downloads it first, showing the download as Install shows
      * it, and then starts the sign-in's container from it. Before, it refused the sign-in as an
      * unfinished install. The fixture engine refuses the container itself, so the flow stops there,
@@ -24508,10 +24503,7 @@ fn main() {
         std::env::set_var("OPENBOT_TEST_ENGINE_MISSING_IMAGE", &image);
         let app = tauri::test::mock_builder()
             .manage(Shell::default())
-            .invoke_handler(tauri::generate_handler![
-                begin_claude_sign_in,
-                begin_chatgpt_sign_in
-            ])
+            .invoke_handler(tauri::generate_handler![begin_chatgpt_sign_in])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
         let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
@@ -24584,19 +24576,6 @@ fn main() {
         );
         drop(path);
         let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_first_claude_plan_sign_in_downloads_its_image() {
-        if crate::test_support::isolated_process(
-            "tests::a_first_claude_plan_sign_in_downloads_its_image",
-        ) {
-            return;
-        }
-        plan_sign_in_ipc_case(
-            "begin_claude_sign_in",
-            openbot_desktop_lib::plan::SIGN_IN_IMAGE,
-        );
     }
 
     #[test]

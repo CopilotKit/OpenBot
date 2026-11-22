@@ -3686,6 +3686,11 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
   setupRootConfiguration("/tmp/local-eval-plan", async () =>
     emptyConfiguration(),
   );
+  // The browser comes back to Desktop when the person approves: held until the test says so.
+  let approve: (token: string) => void = () => {};
+  const approved = new Promise<string>((resolve) => {
+    approve = resolve;
+  });
   withLocalCli({
     providers: [
       {
@@ -3698,7 +3703,7 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
       },
     ],
     begin_claude_sign_in: "https://claude.example/authorize",
-    finish_claude_sign_in: "synthetic-plan-token",
+    finish_claude_sign_in: () => approved,
     set_up_local_eval: localStatus("starting", "valid"),
     connect_local_eval: localConnection,
     run_local_eval: localStatus("ready", "valid"),
@@ -3709,18 +3714,15 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
   await userEvent.click(
     await view.findByRole("button", { name: "Sign in with Anthropic" }),
   );
-  await userEvent.type(
-    await view.findByLabelText("Code from your browser"),
-    "synthetic-code",
-  );
+  await view.findByText("Open the sign-in page");
+  // Nothing to paste: Claude's sign-in finishes on its own.
+  expect(view.queryByLabelText("Code from your browser")).toBeNull();
   // Intelligence is ready and waiting before the sign-in finishes, as on a real machine. The
   // finished sign-in then moves on by itself, from an effect rather than a click, and Start must
   // still get the model it chose (it once got null: Start ran before the choice had rendered).
   await waitFor(() => expect(localSequence()).toContain("run_local_eval"));
   await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
-  await userEvent.click(
-    view.getByRole("button", { name: "Finish signing in" }),
-  );
+  await act(async () => approve("synthetic-plan-token"));
   // A tick for a second, then on by itself. (The install's row under it has a tick of its own.)
   await waitFor(() =>
     expect(
@@ -8058,15 +8060,6 @@ for (const provider of [
         await userEvent.click(
           view.getByRole("button", { name: `Sign in with ${provider.name}` }),
         );
-        if (provider.id === "anthropic") {
-          await userEvent.type(
-            await view.findByLabelText("Code from your browser"),
-            "synthetic-code",
-          );
-          await userEvent.click(
-            view.getByRole("button", { name: "Finish signing in" }),
-          );
-        }
       }
       // A fresh sign-in moves on by itself; a saved one is only offered, so it waits for Continue.
       if (session === "saved") {

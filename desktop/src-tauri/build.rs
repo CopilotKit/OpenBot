@@ -77,6 +77,11 @@ fn main() {
                     "begin_provider_sign_in",
                     "finish_provider_sign_in",
                     "cancel_provider_sign_in",
+                    // A provider's redirect caught on this computer for OpenBot Cloud's sign-in.
+                    // See `src/sign_in_redirect.rs`.
+                    "begin_sign_in_redirect",
+                    "await_sign_in_redirect",
+                    "cancel_sign_in_redirect",
                     "prepare_ai_connection",
                     "settle_ai_connection",
                     // Settings' Share usage data. See `src/usage_data.rs`.
