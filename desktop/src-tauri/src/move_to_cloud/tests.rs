@@ -641,7 +641,7 @@ fn a_macs_machine_disk_is_found_through_its_provider() {
     assert!(machine_disks(&inspected, "openbot", None).is_empty());
     assert_eq!(
         machine_disks(&inspected, "openbot", Some(&data)),
-        [disk.clone()]
+        std::slice::from_ref(&disk)
     );
     assert!(footprint(&machine_disks(&inspected, "openbot", Some(&data))) >= 8192);
     let _ = std::fs::remove_dir_all(home);
