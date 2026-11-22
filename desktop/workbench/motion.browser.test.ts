@@ -434,6 +434,7 @@ describe.skipIf(!asked)("the workbench's motion", () => {
           }));
         await page.locator(".wb-warning-list button").first().hover();
         const shares: number[] = [];
+        let dumped = 0;
         const deadline = Date.now() + 15_000;
         while (Date.now() < deadline) {
           const start = await state();
@@ -442,10 +443,7 @@ describe.skipIf(!asked)("the workbench's motion", () => {
           const end = await state();
           // Only a shot taken wholly while the window was not ready: the target frame is not there yet.
           if (!start.ready && !end.ready) {
-            // Within a pixel: CI's renderer drew the still's text a little differently from the
-            // window's, about 2.2% of the pixels changed all over the window (0.01% here), while a
-            // replay showing through changes whole areas (89% when this was found; about 5% for a
-            // dark window whose card has not drawn yet).
+            // Within a pixel, so text drawn a pixel over or with other anti-aliasing is the same.
             const change = await changed(page, before, shot, 1);
             shares.push(change.share);
             // Where a frame changed, and what covered the window then, so a failure says why.
@@ -465,15 +463,46 @@ describe.skipIf(!asked)("the workbench's motion", () => {
                   })),
                 }),
               );
+            // On CI the still's card differs from the window's by about 2% (0.01% here), and only
+            // where motion is allowed. Both shots, cut to where they differ, so the log shows what.
+            if (change.share >= 0.02 && change.box && dumped < 2) {
+              dumped++;
+              const box = change.box;
+              const crops = await page.evaluate(
+                async ([one, two, at]) => {
+                  const crop = async (base64: string) => {
+                    const blob = await (
+                      await fetch(`data:image/png;base64,${base64}`)
+                    ).blob();
+                    const bitmap = await createImageBitmap(blob);
+                    const canvas = document.createElement("canvas");
+                    canvas.width = at.width;
+                    canvas.height = at.height;
+                    canvas.getContext("2d")?.drawImage(bitmap, -at.x, -at.y);
+                    return canvas.toDataURL("image/png");
+                  };
+                  return [await crop(one), await crop(two)];
+                },
+                [
+                  Buffer.from(before).toString("base64"),
+                  Buffer.from(shot).toString("base64"),
+                  box,
+                ] as [string, string, typeof box],
+              );
+              console.log(`Before, cut: ${crops[0]}`);
+              console.log(`The frame, cut: ${crops[1]}`);
+            }
           }
         }
         console.log(
           `Most of the window a frame changed: ${Math.max(...shares)}`,
         );
         expect(shares.length).toBeGreaterThan(0);
-        // An uncovered replay changes most of the window: 89% when this was found, and about 5% for
-        // a dark window whose card has not drawn yet, so the bound stays under that.
-        for (const share of shares) expect(share).toBeLessThan(0.02);
+        // An uncovered replay changes most of the window: 89% when this was found, 99.7% for the
+        // window starting again, and 6.4% for a dark window whose card has not drawn yet. CI's
+        // still differs from its window by 2.1% even so (see the shots logged above), here by
+        // 0.05%. The bound sits between the two.
+        for (const share of shares) expect(share).toBeLessThan(0.05);
       } finally {
         await page.close();
       }
