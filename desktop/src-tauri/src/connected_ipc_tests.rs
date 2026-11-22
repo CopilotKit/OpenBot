@@ -786,4 +786,40 @@ mod connected_ipc {
         assert!(chosen
             .contains("\"stop\" | \"status\" | \"logs\" if desktop_connected::is_connected(app) => {}"));
     }
+
+    /// Sign-out sends the browser the sign-in went through to end its session at the OpenBot, when
+    /// the OpenBot publishes where (the library's tests drive that against an OpenBot stand-in).
+    /// Here, the wiring: the sign-in and both of `sign_out_now`'s sign-outs, which the menu, the
+    /// page's and the setup window's Sign Out, Change and Use This Computer all go through, hand
+    /// the library the same opener. Only a sign-in the app could not use leaves the browser alone.
+    /// Read as text: a test opens no browser.
+    #[test]
+    fn every_sign_out_opens_the_browser_the_sign_in_used() {
+        let source = include_str!("desktop_connected.rs");
+        let body = |name: &str| {
+            let start = source.find(&format!("fn {name}")).unwrap();
+            let rest = &source[start..];
+            &rest[..rest.find("\n}\n").unwrap()]
+        };
+        let connect = body("connect_now");
+        assert!(connect.contains("open_in_browser(authorize)"));
+        assert_eq!(connect.matches(".sign_out(keep_browser)").count(), 2);
+        let sign_out = body("sign_out_now");
+        assert!(sign_out.contains("live.session.sign_out(open_in_browser)"));
+        let saved = &sign_out[sign_out.find("sign_in::sign_out_saved(").unwrap()..];
+        assert!(saved[..saved.find(") {").unwrap()].contains("open_in_browser"));
+        assert_eq!(source.matches("tauri_plugin_opener::open_url(").count(), 1);
+        assert!(body("open_in_browser").contains("if cfg!(test) {"));
+        for caller in [
+            "sign_out_of_openbot",
+            "use_this_computer",
+            "change_connection_now",
+            "sign_out_from_menu",
+        ] {
+            assert!(body(caller).contains("sign_out_now("), "{caller}");
+        }
+        let page = include_str!("desktop_page.rs");
+        let page = &page[page.find("async fn sign_out(").unwrap()..];
+        assert!(page[..page.find("\n}\n").unwrap()].contains("sign_out_now(&app)"));
+    }
 }
