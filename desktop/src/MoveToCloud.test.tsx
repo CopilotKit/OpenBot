@@ -138,7 +138,8 @@ const PREVIEW = {
 };
 
 const MOVED = {
-  freedBytes: GB,
+  removedBytes: GB,
+  diskGainedBytes: GB - 200_000_000,
   apps: APPS,
   notes: [
     "Research runs on an ordinary computer here, because OpenBot Cloud has no isolated computers.",
@@ -183,7 +184,7 @@ async function atConfirm() {
   return view;
 }
 
-test("after the update, OpenBot (Self-Contained) asks once, before showing OpenBot, with the space it would free", async () => {
+test("after the update, OpenBot (Self-Contained) asks once, before showing OpenBot, with what the move removes", async () => {
   selfContainedRunning({ due: true });
   const view = await launch();
   await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
@@ -198,7 +199,7 @@ test("after the update, OpenBot (Self-Contained) asks once, before showing OpenB
   expect(cloud.checked).toBe(true);
   expect(cloud.closest("label")?.textContent).toContain("Recommended");
   expect(cloud.closest("label")?.textContent).toContain(
-    "Your Bots, conversations, memory, skills, routines and files move to your OpenBot Cloud account. This frees about 18.4 GB on this computer.",
+    "Your Bots, conversations, memory, skills, routines and files move to your OpenBot Cloud account. This removes about 18.4 GB of OpenBot files from this computer.",
   );
   expect(
     view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
@@ -301,7 +302,9 @@ test("before the move, the apps that must be reconnected are listed by name, abo
     ).checked,
   ).toBe(true);
   expect(
-    view.getByText(/Frees about 18\.4 GB\. Nothing is removed/),
+    view.getByText(
+      /Removes about 18\.4 GB of OpenBot files\. Nothing is removed/,
+    ),
   ).toBeTruthy();
 });
 
@@ -388,14 +391,17 @@ test("the move shows each stage, and Cancel while signing in goes back with noth
   expect(view.queryByRole("button", { name: "Cancel" })).toBe(null);
 });
 
-test("a finished move shows the space freed and one Reconnect per app, each opening OpenBot Cloud's connections", async () => {
+test("a finished move says what it removed and one Reconnect per app, each opening OpenBot Cloud's connections", async () => {
   const view = await atConfirm();
   answers.move_to_cloud = MOVED;
   await userEvent.click(
     view.getByRole("button", { name: "Move to OpenBot Cloud" }),
   );
   await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
-  expect(view.getByText("18.4 GB freed")).toBeTruthy();
+  // The figure the move screen promised, said the same way.
+  expect(view.getByText("18.4 GB of OpenBot files removed")).toBeTruthy();
+  // The disk showed nearly all of it free: nothing more to say.
+  expect(view.queryByText(/of that is free space on your disk/)).toBe(null);
   expect(view.getByText(MOVED.notes[0] as string)).toBeTruthy();
   const reconnect = view.getAllByRole("button", { name: /^Reconnect / });
   expect(reconnect.map((button) => button.getAttribute("aria-label"))).toEqual([
@@ -415,7 +421,8 @@ test("a finished move shows the space freed and one Reconnect per app, each open
 test("Open OpenBot opens OpenBot Cloud's home, and what couldn't be removed is said calmly", async () => {
   const view = await atConfirm();
   answers.move_to_cloud = {
-    freedBytes: 640_000_000,
+    removedBytes: 640_000_000,
+    diskGainedBytes: null,
     apps: [],
     notes: [],
     leftBehind: [
@@ -426,7 +433,7 @@ test("Open OpenBot opens OpenBot Cloud's home, and what couldn't be removed is s
     view.getByRole("button", { name: "Move to OpenBot Cloud" }),
   );
   await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
-  expect(view.getByText("640 MB freed")).toBeTruthy();
+  expect(view.getByText("640 MB of OpenBot files removed")).toBeTruthy();
   expect(view.getByRole("status").textContent).toContain(
     "Some of OpenBot's software is still on this computer.",
   );
@@ -435,6 +442,43 @@ test("Open OpenBot opens OpenBot Cloud's home, and what couldn't be removed is s
   expect(called("open_moved_cloud").map((call) => call.args)).toEqual([
     { path: "/" },
   ]);
+});
+
+/**
+ * Seen on a Mac: the move screen said "Frees about 20.2 GB", the result "4.5 GB freed". The result
+ * says the figure the move screen said, and the disk's own figure under it, plainly, when the disk
+ * shows much less of it free so far.
+ */
+test("the result says what the move screen said it removes, and what the disk shows free so far when that is much less", async () => {
+  selfContainedRunning({ due: false, fromSettings: true });
+  answers.move_preview = { ...PREVIEW, footprintBytes: 20_200_000_000 };
+  const view = await launch();
+  await view.findByText(
+    /Removes about 20\.2 GB of OpenBot files\. Nothing is removed/,
+  );
+  answers.move_to_cloud = {
+    ...MOVED,
+    removedBytes: 20_200_000_000,
+    diskGainedBytes: 4_500_000_000,
+  };
+  await waitFor(() =>
+    expect(
+      (
+        view.getByRole("button", {
+          name: "Move to OpenBot Cloud",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false),
+  );
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
+  expect(view.getByText("20.2 GB of OpenBot files removed")).toBeTruthy();
+  expect(
+    view.getByText(/So far, 4\.5 GB of that is free space on your disk\./),
+  ).toBeTruthy();
+  expect(view.queryByText(/freed/)).toBe(null);
 });
 
 test("counts keep the kinds there are words for, in order, and skip zeros; space reads in GB or MB", () => {

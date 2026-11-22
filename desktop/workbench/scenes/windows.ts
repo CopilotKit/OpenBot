@@ -398,7 +398,8 @@ const MOVE_APPS: ReconnectApp[] = [
 ];
 
 const MOVED = {
-  freedBytes: 18_400_000_000,
+  removedBytes: 20_200_000_000,
+  diskGainedBytes: 20_100_000_000,
   apps: MOVE_APPS,
   notes: [],
   leftBehind: [],

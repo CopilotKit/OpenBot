@@ -106,7 +106,13 @@ export const STATE_NAMES: readonly {
   { hash: "#move-midway", search: "", title: "Move: midway" },
   { hash: "#move-failed", search: "", title: "Move: failed" },
   { hash: "#move-done", search: "", title: "Move: done" },
+  {
+    hash: "#move-done-held",
+    search: "",
+    title: "Move: done, disk space still held",
+  },
   { hash: "#move-done-left", search: "", title: "Move: done, some left" },
+  { hash: "#move-first", search: "", title: "Move: asked before an update" },
   { hash: "#status", search: "", title: "Status: running" },
   { hash: "#status", search: "?stopped", title: "Status: stopped" },
   { hash: "#status", search: "?updating", title: "Status: updating" },
@@ -117,6 +123,7 @@ type States = {
   answer: FallbackAnswer;
   finishSetUp: () => void;
   finishInstall: () => void;
+  finishUpdate: () => void;
 };
 
 type MoveApp = {
@@ -196,6 +203,14 @@ function createStates(where: Where): States {
   // `#move-choice` after an update, and the rest from Settings, at the screen each names (see
   // `moveAnswer`).
   const move = where.hash.startsWith("#move-") ? where.hash.slice(6) : null;
+  // `#move-first`: a relaunch after the update, OpenBot stopped and due an update of its own, with
+  // the move due. The window asks before anything starts; the update runs until
+  // `__fake.finishUpdate()`.
+  const moveFirst = move === "first";
+  let finishUpdate: (value: unknown) => void = () => {};
+  const updated = new Promise((resolve) => {
+    finishUpdate = resolve;
+  });
   // Found running by the launch is a relaunch too: an installation set up and started before.
   const relaunch =
     where.hash === "#start" ||
@@ -219,15 +234,15 @@ function createStates(where: Where): States {
       { kind: "settings", count: 1 },
     ],
     apps: move === "confirm-many" ? MORE_APPS : MOVE_APPS,
-    footprintBytes: 18_400_000_000,
+    footprintBytes: 20_200_000_000,
     modelKeysAvailable: true,
   };
   function moveAnswer(command: string): unknown {
     if (command === "move_offer")
       return {
         due: true,
-        fromSettings: move !== "choice",
-        footprintBytes: 18_400_000_000,
+        fromSettings: move !== "choice" && !moveFirst,
+        footprintBytes: 20_200_000_000,
       };
     if (command === "move_preview")
       return move === "confirm-loading" ? new Promise(() => {}) : MOVE_PREVIEW;
@@ -247,11 +262,13 @@ function createStates(where: Where): States {
         said: "OpenBot couldn't send everything to OpenBot Cloud. Check your internet connection and try again.",
         kind: "move-failed",
       } satisfies Problem;
+    // `#move-done-held`: as on a Mac, the disk shows 4.5 of the 20.2 GB removed free so far.
     return {
-      freedBytes: 18_400_000_000,
+      removedBytes: 20_200_000_000,
+      diskGainedBytes: move === "done-held" ? 4_500_000_000 : 20_100_000_000,
       apps: MOVE_APPS,
       notes:
-        move === "done"
+        move === "done" || move === "done-held"
           ? [
               "Research runs on an ordinary computer here, because OpenBot Cloud has no isolated computers.",
             ]
@@ -316,7 +333,7 @@ function createStates(where: Where): States {
     if (connectedProblem && command === "show_connected")
       throw connectedProblem;
     if (
-      (runningTooOld || runningFails || move) &&
+      (runningTooOld || runningFails || (move && !moveFirst)) &&
       command === "already_running"
     )
       return true;
@@ -399,6 +416,16 @@ function createStates(where: Where): States {
               neededGb: "13",
             },
           };
+        if (moveFirst) {
+          emit("setup:progress", {
+            step: "release",
+            ok: true,
+            running: true,
+            detail:
+              "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
+          });
+          return updated;
+        }
         return new Promise(() => {});
       case "providers":
         // As provider::catalogue lists them.
@@ -601,6 +628,8 @@ function createStates(where: Where): States {
     answer,
     finishSetUp: () => finishSetUp(status("starting", "valid")),
     finishInstall: () => finishInstall(null),
+    finishUpdate: () =>
+      finishUpdate({ from: "1.1.3", to: "1.2.0", moved: true }),
   };
 }
 
@@ -613,8 +642,8 @@ export function stateAnswer(where: Where): FallbackAnswer {
  * Makes the page's state, by its own hash and search, the control's fallback answer.
  * `__fake.finishSetUp` ends the rest of OpenBot setting up behind the AI step, and
  * `__fake.finishInstall` ends the install at `#licence-installing`. `__fake.download` is what the
- * download poll answers, and `__fake.up` brings the Status window's services up at
- * `?started#status`.
+ * download poll answers, `__fake.up` brings the Status window's services up at
+ * `?started#status`, and `__fake.finishUpdate` ends the update at `#move-first`.
  */
 export function installStates(): void {
   const states = createStates({
@@ -626,5 +655,6 @@ export function installStates(): void {
   const fake = globalThis.__fake;
   fake.finishSetUp = states.finishSetUp;
   fake.finishInstall = states.finishInstall;
+  fake.finishUpdate = states.finishUpdate;
   fake.download ??= null;
 }

@@ -55,12 +55,17 @@ import { setComputerStateMutationOptions } from "@/lib/computers/mutations";
 import {
   type ComputerProfile,
   computerFleetQueryOptions,
+  workspaceSnapshotsQueryOptions,
 } from "@/lib/computers/queries";
 import {
   deploymentCapabilitiesQueryOptions,
   useNoBotComputers,
 } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
+import {
+  RestoreComputerDialog,
+  WorkspaceSnapshotsSection,
+} from "./workspace-snapshots-section";
 
 /** One row's identity: the computer, and on a shared computer the Bot's seat on it. */
 function rowId(computer: ComputerProfile): string {
@@ -132,6 +137,8 @@ export function ComputersPage({
   /** Updating restarts a running computer mid-task, so it is confirmed too. */
   const update = useConfirmation();
   const confirmingUpdate = update.about;
+  /** An admin looking at another person's computer's saved copies. */
+  const restoreOther = useConfirmation();
   const queryClient = useQueryClient();
   const nameFor = useBotNames();
   /*
@@ -156,6 +163,20 @@ export function ComputersPage({
     ...computerFleetQueryOptions(),
     enabled: (agentId === undefined || admin) && noComputers === false,
   });
+  /*
+   * The copies of the computer this Bot runs on for the person reading: its own section draws them,
+   * and its answer names that computer, so an admin's Restore is offered only on the others' rows.
+   */
+  const ownCopies = useQuery({
+    ...workspaceSnapshotsQueryOptions(agentId ?? ""),
+    enabled: agentId !== undefined && noComputers === false,
+  });
+  const restorable = (computer: ComputerProfile): boolean =>
+    agentId !== undefined &&
+    admin &&
+    ownCopies.data?.available === true &&
+    computer.computer !== ownCopies.data.computer &&
+    !isOwnBrowser(computer);
   const hostAccess = useQuery(hostAccessQueryOptions());
   const hosted =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
@@ -235,6 +256,17 @@ export function ComputersPage({
         : `${person}'s computer`;
     }
     return computer.botId ? nameFor(computer.botId) : computer.computer;
+  };
+
+  /** Whose computer a row is, for the dialog that lists its saved copies. */
+  const ownerOf = (computer: ComputerProfile): string => {
+    if (computer.kind === "bot")
+      return computer.botId
+        ? `${nameFor(computer.botId)}'s computer`
+        : "This Bot's computer";
+    const person =
+      computer.person?.name ?? computer.person?.email ?? computer.personId;
+    return person ? `${person}'s computer` : "A person's computer";
   };
 
   /** What a row carries, said once before its state. */
@@ -372,7 +404,12 @@ export function ComputersPage({
               {computers.map((computer, index) => (
                 <StaggerItem index={index} key={rowId(computer)}>
                   <Item size="sm">
-                    <ItemContent>
+                    {/*
+                     * Up to three buttons sit beside the words. Held to a width a name can be read in,
+                     * so on a narrow window the buttons wrap under the words on every row alike,
+                     * instead of squeezing the name to one word a line.
+                     */}
+                    <ItemContent className="min-w-56">
                       <ItemTitle title={computer.computer}>
                         {titleOf(computer)}
                       </ItemTitle>
@@ -392,6 +429,15 @@ export function ComputersPage({
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>
+                      {restorable(computer) ? (
+                        <Button
+                          onClick={() => restoreOther.ask(computer)}
+                          size="sm"
+                          variant="outline"
+                        >
+                          Restore…
+                        </Button>
+                      ) : null}
                       {computer.updateAvailable ? (
                         <Button
                           disabled={busy === rowId(computer)}
@@ -441,6 +487,18 @@ export function ComputersPage({
           )}
         </PageSection>
       )}
+
+      {agentId && restoreOther.about ? (
+        <RestoreComputerDialog
+          botId={agentId}
+          computer={restoreOther.about.computer}
+          name={ownerOf(restoreOther.about)}
+          onOpenChange={(open) => {
+            if (!open) restoreOther.close();
+          }}
+          open={restoreOther.open}
+        />
+      ) : null}
 
       {/*
        * A DIALOG RATHER THAN AN INLINE CONFIRM. Resetting signs a Bot out of everything it has ever
@@ -574,6 +632,13 @@ export function ComputersPage({
           .
         </p>
       )}
+      {/* Below the words about the list's buttons, which are about the list above them. */}
+      {agentId ? (
+        <WorkspaceSnapshotsSection
+          botId={agentId}
+          enabled={noComputers === false}
+        />
+      ) : null}
       {children}
     </>
   );

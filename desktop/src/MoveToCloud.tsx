@@ -35,7 +35,8 @@ import {
  * Whether this window offers the move to OpenBot Cloud, as the shell answers `move_offer`. `due`:
  * OpenBot is set up and runs on this computer, and the person has never answered. `fromSettings`:
  * Settings' "Move to OpenBot Cloud" sent the window here, answered once. `footprintBytes`: what
- * OpenBot takes on this computer now, or null when it couldn't be measured.
+ * OpenBot's own files take on this computer now, which the move removes, or null when it couldn't
+ * be measured. The finished move's `removedBytes` counts the same files the same way.
  */
 export type MoveOffer = {
   due: boolean;
@@ -63,7 +64,10 @@ export type MovePreview = {
 
 /** What a finished move answers (`move_to_cloud`). */
 export type Moved = {
-  freedBytes: number | null;
+  /** What the move removed of OpenBot's files, counted as `footprintBytes` counts them. */
+  removedBytes: number | null;
+  /** How much more free space the disk showed right after, which can be less for a while. */
+  diskGainedBytes: number | null;
   apps: ReconnectApp[];
   /** Plain sentences from OpenBot Cloud about things that moved differently. */
   notes: string[];
@@ -158,6 +162,28 @@ export function countLines(
   });
 }
 
+/**
+ * What the move removes, as the choice says it. The result says the same figure, counted the same
+ * way: "OpenBot files", never "frees", because the disk can show less of it free for a while.
+ */
+export function removesSaid(bytes: number): string {
+  return `This removes about ${formatSpace(bytes)} of OpenBot files from this computer.`;
+}
+
+/**
+ * Whether the disk showed much less free space than the move removed. Seen on a Mac: 20.2 GB of
+ * files removed and 4.5 GB more free at once, the rest most likely kept by a local snapshot taken a
+ * few minutes before. A gap of a tenth or so (12.0 GB removed, 10.8 GB more free on a Windows box)
+ * is the disk's own bookkeeping and isn't said.
+ */
+export function heldBack(moved: Moved): boolean {
+  return (
+    moved.removedBytes != null &&
+    moved.diskGainedBytes != null &&
+    moved.diskGainedBytes < moved.removedBytes * 0.75
+  );
+}
+
 /** Disk space as a person reads it: "18.4 GB", or "640 MB" under a gigabyte. */
 export function formatSpace(bytes: number): string {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
@@ -241,6 +267,22 @@ function stageRows(stages: Stages): Progress[] {
   });
 }
 
+/**
+ * The OpenBot on this computer, as the move needs it, when the move is offered before it started:
+ * what moves is read from it, so it starts once the person picks OpenBot Cloud, updated to this
+ * app's release on the way. `stopped`: not started yet. `starting`: starting for the move. `up`:
+ * running, so what moves can be read. `failed`: it didn't start, and why.
+ */
+export type MoveHere =
+  | { at: "stopped" }
+  | { at: "starting" }
+  | { at: "up" }
+  | { at: "failed"; problem: Problem };
+
+/** Said on the confirm screen while OpenBot starts for the move, which can take minutes. */
+export const GETTING_READY_TO_MOVE =
+  "Getting your Bots ready to move. This can take a few minutes.";
+
 type Screen =
   | { at: "choice" }
   | { at: "confirm" }
@@ -255,7 +297,8 @@ type Screen =
  * 1. The choice: OpenBot Cloud, recommended and picked to begin with, or keep everything here. With
  *    the space the move frees. Keep is recorded and never asked again (`onKeep`).
  * 2. What moves, from the OpenBot running here (`move_preview`), and the app connections that can't
- *    move, by name, to reconnect in OpenBot Cloud. Settings opens here.
+ *    move, by name, to reconnect in OpenBot Cloud. Settings opens here. Offered at launch, before
+ *    OpenBot started (`here`), it starts now (`onGetReady`), and the figures arrive once it is up.
  * 3. The move (`move_to_cloud`): sign in through the browser, pack up, send, add, check, and only
  *    then remove OpenBot from this computer, each a row (`move:progress`).
  * 4. A move that stopped removed nothing: the sentence, Try again, or keep OpenBot here.
@@ -265,10 +308,16 @@ type Screen =
 export function MoveToCloud({
   offer,
   onKeep,
+  here,
+  onGetReady,
 }: {
   offer: MoveOffer;
-  /** Keep OpenBot here: recorded, then OpenBot shows. */
+  /** Keep OpenBot here: recorded, then OpenBot shows, or starts as it would have. */
   onKeep: () => Promise<void>;
+  /** The OpenBot here, when the move was offered before it started. Absent: it is running. */
+  here?: MoveHere;
+  /** Start the OpenBot here for the move: the person picked OpenBot Cloud. */
+  onGetReady?: () => void;
 }) {
   const [screen, setScreen] = useState<Screen>(
     offer.fromSettings ? { at: "confirm" } : { at: "choice" },
@@ -306,13 +355,20 @@ export function MoveToCloud({
         if (alive.current) setPreviewProblem(asProblem(error));
       });
   }, []);
-  const wantsPreview = screen.at !== "choice" && preview === null;
+  // Read from the OpenBot here, so only once it is up.
+  const up = !here || here.at === "up";
+  const wantsPreview = screen.at !== "choice" && preview === null && up;
   const asked = useRef(false);
   useEffect(() => {
     if (!wantsPreview || asked.current) return;
     asked.current = true;
     loadPreview();
   }, [wantsPreview, loadPreview]);
+  // OpenBot Cloud picked: the OpenBot here starts for the move, if it hasn't yet.
+  const toConfirm = () => {
+    setScreen({ at: "confirm" });
+    if (here?.at === "stopped") onGetReady?.();
+  };
   const [includeKeys, setIncludeKeys] = useState(true);
 
   const [stages, setStages] = useState<Stages>(freshStages);
@@ -357,7 +413,7 @@ export function MoveToCloud({
       <Choice
         footprintBytes={offer.footprintBytes}
         keeping={keeping}
-        onCloud={() => setScreen({ at: "confirm" })}
+        onCloud={toConfirm}
         onKeep={() => void keep()}
       />
     );
@@ -365,12 +421,15 @@ export function MoveToCloud({
     return (
       <Confirm
         preview={preview}
-        problem={previewProblem}
+        problem={here?.at === "failed" ? here.problem : previewProblem}
+        gettingReady={here?.at === "starting" || here?.at === "stopped"}
         footprintBytes={preview?.footprintBytes ?? offer.footprintBytes}
         includeKeys={includeKeys}
         onIncludeKeys={setIncludeKeys}
         keeping={keeping}
-        onRetryPreview={loadPreview}
+        onRetryPreview={
+          here?.at === "failed" ? () => onGetReady?.() : loadPreview
+        }
         onMove={() => void move()}
         onKeep={() => void keep()}
       />
@@ -509,8 +568,7 @@ function Choice({
           </span>
           <span className="tile-summary">
             {WHAT_MOVES} move to your OpenBot Cloud account.
-            {footprintBytes != null &&
-              ` This frees about ${formatSpace(footprintBytes)} on this computer.`}
+            {footprintBytes != null && ` ${removesSaid(footprintBytes)}`}
           </span>
         </label>
         <label className={rowClass(picked === "keep")}>
@@ -557,6 +615,7 @@ function Choice({
 function Confirm({
   preview,
   problem,
+  gettingReady,
   footprintBytes,
   includeKeys,
   onIncludeKeys,
@@ -567,6 +626,8 @@ function Confirm({
 }: {
   preview: MovePreview | null;
   problem: Problem | null;
+  /** The OpenBot here is starting for the move, so what moves can't be read yet. */
+  gettingReady: boolean;
   footprintBytes: number | null;
   includeKeys: boolean;
   onIncludeKeys: (include: boolean) => void;
@@ -593,6 +654,8 @@ function Confirm({
             </button>
           </div>
         </div>
+      ) : gettingReady ? (
+        <StatusLine>{GETTING_READY_TO_MOVE}</StatusLine>
       ) : !preview ? (
         <StatusLine>Looking at what's on this computer…</StatusLine>
       ) : (
@@ -664,7 +727,7 @@ function Confirm({
         ) : (
           <p className="footnote">
             {footprintBytes != null &&
-              `Frees about ${formatSpace(footprintBytes)}. `}
+              `Removes about ${formatSpace(footprintBytes)} of OpenBot files. `}
             {NOTHING_REMOVED_UNTIL_CHECKED}
           </p>
         )}
@@ -740,14 +803,25 @@ function Done({ moved }: { moved: Moved }) {
       <p className="lede">
         {WHAT_MOVES} are in your OpenBot Cloud account now.
       </p>
-      {moved.freedBytes != null && moved.freedBytes > 0 && (
-        <p className="move-freed">
+      {moved.removedBytes != null && moved.removedBytes > 0 && (
+        <div className="move-freed">
           <IconCircleCheck stroke={1.75} aria-hidden="true" />
-          <span>
-            <strong>{formatSpace(moved.freedBytes)} freed</strong> on this
-            computer
-          </span>
-        </p>
+          <div>
+            <p>
+              <strong>
+                {formatSpace(moved.removedBytes)} of OpenBot files removed
+              </strong>{" "}
+              from this computer
+            </p>
+            {heldBack(moved) && moved.diskGainedBytes != null && (
+              <p className="move-freed-held">
+                So far, {formatSpace(moved.diskGainedBytes)} of that is free
+                space on your disk. Your computer can keep deleted files in a
+                backup snapshot for a while before it frees their space.
+              </p>
+            )}
+          </div>
+        </div>
       )}
       {moved.apps.length > 0 && (
         <section

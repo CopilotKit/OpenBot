@@ -266,7 +266,8 @@ test("signed out of an organization that isn't default, the sign-in screen shows
   await router.navigate({ to: "/sign" });
   await view.findByRole(
     "link",
-    { name: "Continue with OpenBot by CopilotKit" },
+    // OpenBot Cloud's sign-in screen (components/auth/cloud-sign-in.tsx).
+    { name: "Sign in or create an account" },
     { timeout: 5_000 },
   );
   expect(router.state.location.pathname).toBe("/sign");

@@ -1541,7 +1541,7 @@ export const DeletePersonalAiConnectionResponse = zod
   );
 
 /**
- * Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the person approves, copies the code Claude's page shows them or the address ChatGPT sends their browser to, and sends it back with finishPersonalAiSignIn. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: an Unbiased AI key as a saved key (connect with useSavedKey), a Claude or ChatGPT plan's sign-in (connect with login plan), or a Google or xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true.
+ * Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the person approves, copies the code Claude's page shows them or the address ChatGPT sends their browser to, and sends it back with finishPersonalAiSignIn. Inside OpenBot Desktop nobody copies anything: Desktop listens on the person's own computer for the provider's redirect and the app sends what arrives with finishPersonalAiSignIn. For Claude, loopbackPort names the port Desktop listens on; ChatGPT's browser sign-in always redirects to localhost:1455. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: an Unbiased AI key as a saved key (connect with useSavedKey), a Claude or ChatGPT plan's sign-in (connect with login plan), or a Google or xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true.
  * @summary Start signing in to an AI provider
  */
 
@@ -1578,6 +1578,9 @@ export const StartPersonalAiSignInHeader = zod.object({
     ),
 });
 
+export const startPersonalAiSignInBodyLoopbackPortMin = 1024;
+export const startPersonalAiSignInBodyLoopbackPortMax = 65535;
+
 export const StartPersonalAiSignInBody = zod.object({
   provider: zod
     .enum([
@@ -1596,6 +1599,14 @@ export const StartPersonalAiSignInBody = zod.object({
     .optional()
     .describe(
       "How to sign in, for a provider that offers more than one way. openai: browser (the default) approves in the browser and finishes with the address ChatGPT sends the browser to; device shows a code to enter at ChatGPT instead, which works only once the person has turned on device code sign-in in ChatGPT's security settings. Every other provider has one way and ignores it.",
+    ),
+  loopbackPort: zod
+    .int()
+    .min(startPersonalAiSignInBodyLoopbackPortMin)
+    .max(startPersonalAiSignInBodyLoopbackPortMax)
+    .optional()
+    .describe(
+      "anthropic only: the port OpenBot Desktop listens on, on the person's own computer, for Claude's redirect. Claude then sends the browser to http://localhost:{loopbackPort}/callback instead of a page that shows a code, and the app sends the code and state that arrive there (code#state) with finishPersonalAiSignIn, so the person copies nothing. Absent, Claude's page shows the code to copy. Every other provider ignores it.",
     ),
 });
 

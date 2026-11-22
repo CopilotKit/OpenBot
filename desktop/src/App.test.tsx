@@ -4828,6 +4828,209 @@ test("relaunch upgrades an older installation to this app's release as part of S
   });
 });
 
+/** The commands that start or update OpenBot or its backend on this computer. */
+const STARTS_OR_UPDATES = [
+  "wake_engine",
+  "run_local_eval",
+  "set_up_local_eval",
+  "connect_local_eval",
+  "upgrade_and_start",
+  "start_stack",
+];
+
+function startsOrUpdates() {
+  return invokeCalls
+    .map((call) => call.command)
+    .filter((command) => STARTS_OR_UPDATES.includes(command));
+}
+
+/** The move to OpenBot Cloud due at this launch, as the shell answers it after the update. */
+function withMoveDue() {
+  const preview = deferred<unknown>();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "move_offer")
+      return { due: true, fromSettings: false, footprintBytes: 20_200_000_000 };
+    if (command === "move_preview") return preview.promise;
+    if (command === "keep_self_contained") return null;
+    if (command === "move_to_cloud")
+      return {
+        removedBytes: 20_200_000_000,
+        diskGainedBytes: 20_100_000_000,
+        apps: [],
+        notes: [],
+        leftBehind: [],
+      };
+    return previous(command, args);
+  };
+  return preview;
+}
+
+/*
+ * A dogfooding report on 1.2.0-rc.1: installed over OpenBot (Self-Contained), the window spent about
+ * three minutes on "Updating OpenBot (Self-Contained)" before it asked "Move to OpenBot Cloud?".
+ * OpenBot Cloud is the default, so the question comes first now, before anything starts or updates.
+ */
+describe("the move to OpenBot Cloud, due at a launch that would update OpenBot", () => {
+  test("asks before any update or start", async () => {
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-first",
+      localStatus("ready", "valid"),
+    );
+    withOlderDeployment(() => new Promise(() => {}));
+    withMoveDue();
+    const view = await renderApp();
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(startsOrUpdates()).toEqual([]);
+    expect(
+      view.queryByRole("heading", {
+        name: "Updating OpenBot (Self-Contained)",
+      }),
+    ).toBeNull();
+  });
+
+  test("OpenBot Cloud: OpenBot updates and starts under the move's screen, which fills in and moves", async () => {
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-cloud",
+      localStatus("ready", "valid"),
+    );
+    const updating = deferred<unknown>();
+    withOlderDeployment(() => updating.promise);
+    const preview = withMoveDue();
+    const view = await renderApp();
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    // The confirm screen, saying it is getting ready while OpenBot updates and starts behind it.
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud" });
+    expect(
+      view.getByText(
+        "Getting your Bots ready to move. This can take a few minutes.",
+      ),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(startsOrUpdates()).toContain("upgrade_and_start"),
+    );
+    await emitProgress({
+      step: "release",
+      ok: true,
+      running: true,
+      detail:
+        "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
+    });
+    expect(
+      view.queryByRole("heading", {
+        name: "Updating OpenBot (Self-Contained)",
+      }),
+    ).toBeNull();
+    expect(
+      view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+    ).toHaveProperty("disabled", true);
+    // What moves is read only once OpenBot is up.
+    expect(invokeCalls.some((call) => call.command === "move_preview")).toBe(
+      false,
+    );
+    await act(async () =>
+      updating.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
+    );
+    await waitFor(() =>
+      expect(invokeCalls.some((call) => call.command === "move_preview")).toBe(
+        true,
+      ),
+    );
+    await act(async () =>
+      preview.resolve({
+        counts: [{ kind: "bots", count: 3 }],
+        apps: [],
+        footprintBytes: 20_200_000_000,
+        modelKeysAvailable: false,
+      }),
+    );
+    await view.findByText("3 Bots");
+    // The window stays on the move: OpenBot is not shown over it.
+    expect(invokeCalls.some((call) => call.command === "show_openbot")).toBe(
+      false,
+    );
+    await userEvent.click(
+      view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+    );
+    await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
+    expect(
+      invokeCalls.some((call) => call.command === "keep_self_contained"),
+    ).toBe(false);
+  });
+
+  test("Keep: OpenBot updates and opens as it always has", async () => {
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-keep",
+      localStatus("ready", "valid"),
+    );
+    const updating = deferred<unknown>();
+    withOlderDeployment(() => updating.promise);
+    withMoveDue();
+    const view = await renderApp();
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    expect(startsOrUpdates()).toEqual([]);
+    await userEvent.click(view.getByRole("radio", { name: /Self-Contained/ }));
+    await userEvent.click(
+      view.getByRole("button", { name: "Keep OpenBot on this computer" }),
+    );
+    await waitFor(() =>
+      expect(startsOrUpdates()).toContain("upgrade_and_start"),
+    );
+    expect(
+      invokeCalls.some((call) => call.command === "keep_self_contained"),
+    ).toBe(true);
+    await emitProgress({
+      step: "release",
+      ok: true,
+      running: true,
+      detail:
+        "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
+    });
+    expect(
+      view.getByRole("heading", { name: "Updating OpenBot (Self-Contained)" }),
+    ).toBeTruthy();
+    await act(async () =>
+      updating.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
+    );
+    await expectHandover();
+    expect(invokeCalls.some((call) => call.command === "move_preview")).toBe(
+      false,
+    );
+  });
+
+  test("a start for the move that fails is said there, and Keep carries on here", async () => {
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-fails",
+      localStatus("ready", "valid"),
+    );
+    let attempts = 0;
+    withOlderDeployment(() => {
+      attempts += 1;
+      if (attempts === 1)
+        throw { said: "OpenBot couldn't update. Try again in a moment." };
+      return new Promise(() => {});
+    });
+    withMoveDue();
+    const view = await renderApp();
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    await view.findByText("OpenBot couldn't update. Try again in a moment.");
+    expect(
+      view.getByRole("heading", { name: "Move to OpenBot Cloud" }),
+    ).toBeTruthy();
+    await userEvent.click(
+      view.getByRole("button", { name: "Keep OpenBot on this computer" }),
+    );
+    // Back to this computer's own screens, with the failure and Start's way on, as today.
+    await view.findByText("OpenBot couldn't update. Try again in a moment.");
+    expect(
+      view.queryByRole("heading", { name: "Move to OpenBot Cloud" }),
+    ).toBeNull();
+  });
+});
+
 /*
  * A dogfooding report: an app that shows a screen while it updates is unusual, and the screen said
  * nothing of why. It is headed as the self-contained OpenBot's update now, and under the progress
