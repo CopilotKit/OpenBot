@@ -14,6 +14,7 @@ function fakeApi(records: ApiRecord[]) {
     setAnswer() {},
     clearAnswer() {},
     answers: () => new Map(),
+    answerFor: () => null,
     requests: () => records,
     onChange(listener) {
       listeners.add(listener);

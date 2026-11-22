@@ -7,6 +7,7 @@ import {
   highlightShapes,
   movementLabel,
   outsideParts,
+  stillHtml,
   WarningHighlight,
 } from "./WarningHighlight";
 
@@ -122,4 +123,28 @@ test("the highlight of a move draws two boxes, an arrow and its label", () => {
   ).toEqual(["from", "to"]);
   expect(container.querySelector("svg line")).not.toBeNull();
   expect(container.textContent).toBe("moved 157 px down");
+});
+
+test("the still of the window keeps its styles, content and typed values, and runs no script", () => {
+  document.head.innerHTML =
+    "<style>.card { color: red; }</style><script>window.ran = true;</script>";
+  document.body.innerHTML =
+    '<div class="card">Set up</div><input id="key" value=""><textarea id="note"></textarea><input type="checkbox" id="agree">';
+  (document.getElementById("key") as HTMLInputElement).value = "sk-typed";
+  (document.getElementById("note") as HTMLTextAreaElement).value = "a note";
+  (document.getElementById("agree") as HTMLInputElement).checked = true;
+
+  const html = stillHtml(document);
+  expect(html.startsWith("<!doctype html>")).toBe(true);
+  expect(html).toContain(".card { color: red; }");
+  expect(html).toContain('<div class="card">Set up</div>');
+  expect(html).toContain('value="sk-typed"');
+  expect(html).toContain(">a note</textarea>");
+  expect(html).toMatch(/id="agree"[^>]*checked|checked[^>]*id="agree"/);
+  expect(html).not.toContain("<script");
+  expect(html).toContain("<base href=");
+  // The live document is not changed.
+  expect(document.querySelector("script")).not.toBeNull();
+  document.head.innerHTML = "";
+  document.body.innerHTML = "";
 });

@@ -16,7 +16,10 @@ import {
   type ActionMark,
   ActionMarkers,
   boxOverFrame,
+  followMarks,
+  followTarget,
   MARKER_MS,
+  sameBox,
 } from "./ActionMarkers";
 import { ApiAnswersPanel } from "./ApiAnswersPanel";
 import type {
@@ -75,9 +78,12 @@ import { clamp, isNumber, readPref, writePref } from "./viewerPrefs";
 import {
   type FrameOrigin,
   frameOrigin,
+  stillHtml,
   WarningHighlight,
+  WindowStill,
+  type WindowStillShot,
 } from "./WarningHighlight";
-import { WarningsList, warningKey } from "./WarningsList";
+import { mergeRunWarnings, WarningsList, warningKey } from "./WarningsList";
 import { WindowFrame } from "./WindowFrame";
 import {
   type AppWindowSettings,
@@ -182,6 +188,8 @@ const QUIET_FRAMES = 2;
 const QUIET_LIMIT_MS = 3000;
 /** A frame that does not draw (a hidden tab) still lets the quiet wait count. */
 const FRAME_FALLBACK_MS = 100;
+/** How long a backward warning jump waits for the still of the window before it goes on. */
+const STILL_WAIT_MS = 500;
 
 /** One animation frame of the window, or FRAME_FALLBACK_MS of real time when it does not draw. */
 function frameOrFallback(win: Window): Promise<void> {
@@ -194,41 +202,14 @@ function frameOrFallback(win: Window): Promise<void> {
   });
 }
 
-/** True when an API route ("GET /api/x/:id", "ALL /api/*") matches a request. */
-function routeMatches(route: string, method: string, path: string): boolean {
-  const space = route.indexOf(" ");
-  const routeMethod = route.slice(0, space);
-  if (routeMethod !== "ALL" && routeMethod !== method) return false;
-  const pattern = route
-    .slice(space + 1)
-    .split("/")
-    .map((part) =>
-      part === "*"
-        ? ".*"
-        : part.startsWith(":")
-          ? "[^/]+"
-          : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-    )
-    .join("/");
-  const pathname = path.split("?")[0] ?? path;
-  return new RegExp(`^${pattern}$`).test(pathname);
-}
-
 /**
  * True when a pending request waits on the page clock or on a person: its answer is "delay" or
  * "never". Moving the clock (or a new answer) ends the wait, so the quiet wait does not wait for it.
+ * The fake API says which answer the request gets, with the same route matching that answers it.
  */
-function waitsOnClock(
-  record: ApiRecord,
-  answers: readonly (readonly [string, ApiAnswer])[],
-): boolean {
-  // The newest answer wins, as in the fake API.
-  for (let i = answers.length - 1; i >= 0; i--) {
-    const [route, answer] = answers[i];
-    if (!routeMatches(route, record.method, record.path)) continue;
-    return answer.mode === "delay" || answer.mode === "never";
-  }
-  return false;
+function waitsOnClock(record: ApiRecord, api: ApiControl): boolean {
+  const mode = api.answerFor(record)?.answer.mode;
+  return mode === "delay" || mode === "never";
 }
 
 type RouterLike = {
@@ -250,11 +231,10 @@ function liveRouteOf(win: Window): string {
  */
 function frameBusy(win: FrameWindow): boolean {
   const api = win.__workbenchApi;
-  const answers = api ? [...api.answers()] : [];
   let waitsForClock = false;
   for (const record of api?.requests() ?? []) {
     if (record.state !== "pending") continue;
-    if (!waitsOnClock(record, answers)) return true;
+    if (!waitsOnClock(record, api as ApiControl)) return true;
     waitsForClock = true;
   }
   // A native call ends in the same task unless its answer waits on the clock or never comes.
@@ -681,6 +661,15 @@ export function WorkbenchLoaded({
   const highlightIdRef = useRef(0);
   /** Where the window is under the highlight; measured after the jump and when the window changes. */
   const [origin, setOrigin] = useState<FrameOrigin | null>(null);
+  /**
+   * The still of the window over it while a warning hover seeks back, so the replay under it does
+   * not show. It belongs to the jump that made it, or to a newer jump that took it over.
+   */
+  const [still, setStill] = useState<
+    (WindowStillShot & { scene: string }) | null
+  >(null);
+  const stillOwnerRef = useRef(0);
+  const stillShownRef = useRef<(() => void) | null>(null);
   const {
     warnings,
     flush: checkLayout,
@@ -798,6 +787,7 @@ export function WorkbenchLoaded({
         id,
         label: actionLabel(action),
         box: boxOf(action.target),
+        target: action.target,
       };
       setMarks((all) => [...all, mark]);
       // The parent's own timer: the window's clock does not move it.
@@ -1005,8 +995,47 @@ export function WorkbenchLoaded({
     setHighlight(null);
   }, []);
 
+  /**
+   * Puts a still of the window over it, and resolves when the still shows (or after a short
+   * wait, when it does not load). The caller removes it.
+   */
+  const coverWithStill = useCallback((live: Live): Promise<void> => {
+    const wrap = wrapRef.current;
+    const iframe = frameRef.current;
+    if (!wrap || !iframe) return Promise.resolve();
+    const outer = wrap.getBoundingClientRect();
+    const rect = iframe.getBoundingClientRect();
+    const { width, height } = stateRef.current.window;
+    let html: string;
+    try {
+      html = stillHtml(live.doc);
+    } catch {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(done, STILL_WAIT_MS);
+      function done() {
+        clearTimeout(timer);
+        stillShownRef.current = null;
+        resolve();
+      }
+      stillShownRef.current = done;
+      setStill({
+        scene: stateRef.current.scene,
+        html,
+        x: rect.left - outer.left,
+        y: rect.top - outer.top,
+        width,
+        height,
+        scale: width > 0 && rect.width > 0 ? rect.width / width : 1,
+        scrollX: live.win.scrollX,
+        scrollY: live.win.scrollY,
+      });
+    });
+  }, []);
+
   const seek = useCallback(
-    async (ms: number) => {
+    async (ms: number, options?: { cover?: boolean }) => {
       const live = liveRef.current;
       clearHighlight();
       // A seek lands paused.
@@ -1024,7 +1053,9 @@ export function WorkbenchLoaded({
           markReady();
         }
       } else {
-        // The clock runs only forward: the window starts again and goes to the time.
+        // The clock runs only forward: the window starts again and goes to the time. A warning
+        // hover first covers the window with a still of it, so the replay does not show.
+        if (options?.cover && live) await coverWithStill(live);
         targetRef.current = target;
         bootFailedRef.current = false;
         detach();
@@ -1035,6 +1066,7 @@ export function WorkbenchLoaded({
     [
       checkHandover,
       clearHighlight,
+      coverWithStill,
       detach,
       markReady,
       stopLoop,
@@ -1048,8 +1080,10 @@ export function WorkbenchLoaded({
   const showWarning = useCallback(
     (warning: Warning, pinned: boolean) => {
       // The seek clears the highlight before it waits, so the new one stays.
-      const done = seek(warning.at);
+      const done = seek(warning.at, { cover: true });
       const id = ++highlightIdRef.current;
+      // A still that an older jump put up is this jump's now: it goes when this one ends.
+      stillOwnerRef.current = id;
       setHighlight({
         id,
         warning,
@@ -1057,12 +1091,18 @@ export function WorkbenchLoaded({
         pinned,
         jumping: true,
       });
+      // The still goes in the same update that shows the window's new state: one step.
+      const dropStill = () => {
+        if (stillOwnerRef.current === id) setStill(null);
+      };
       done.then(
         () => {
+          dropStill();
           if (highlightIdRef.current !== id) return;
           setHighlight((h) => (h?.id === id ? { ...h, jumping: false } : h));
         },
         () => {
+          dropStill();
           if (highlightIdRef.current === id) clearHighlight();
         },
       );
@@ -1085,6 +1125,47 @@ export function WorkbenchLoaded({
     }
     showWarning(warning, true);
   };
+
+  // While markers show, each follows its element on every animation frame, or goes at once when
+  // the element left the screen: a marker never points at a place where its element is not.
+  const hasMarks = marks.length > 0;
+  useEffect(() => {
+    if (!hasMarks) return;
+    let handle = 0;
+    const tick = () => {
+      setMarks((all) => {
+        const next = followMarks(all, (target) => boxOf(target));
+        return next === all ? all : [...next];
+      });
+      handle = requestAnimationFrame(tick);
+    };
+    handle = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(handle);
+  }, [hasMarks, boxOf]);
+
+  // The paused "Next:" marker is measured again when the zoom, the window or the stage changes
+  // (Fit, a size, a splitter drag), so it stays on its element.
+  const nextTarget = nextAction?.target ?? null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new zoom or window moves the element, so it is measured again
+  useLayoutEffect(() => {
+    if (!nextTarget) return;
+    const measure = () =>
+      setNextAction((mark) => {
+        if (!mark?.target) return mark;
+        const step = followTarget(mark.target, () =>
+          boxOf(mark.target ?? null),
+        );
+        if (step.drop) return null;
+        return sameBox(step.box, mark.box) ? mark : { ...mark, box: step.box };
+      });
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    for (const el of [frameEl, wrapRef.current, stageRef.current]) {
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [nextTarget, zoom, state.window, frameEl, boxOf]);
 
   // Measures where the window is, after a jump and when the size, the zoom or the frame changes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new zoom (Fit) moves the window, so it is measured again
@@ -1163,7 +1244,9 @@ export function WorkbenchLoaded({
     return () => observer.disconnect();
   }, []);
 
-  // C turns Comment mode on and off, when the focus is not in a text field.
+  // C turns Comment mode on and off, when the focus is not in a text field. The frame's listener
+  // goes on again at each load: a full reload or a navigation in the frame (a sign-out) gives the
+  // same iframe a new document, and frameEl does not change.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "c" && event.key !== "C") return;
@@ -1172,11 +1255,18 @@ export function WorkbenchLoaded({
       event.preventDefault();
       setCommenting((on) => !on);
     };
-    const doc = frameEl?.contentDocument;
+    let doc: Document | null = null;
+    const attach = () => {
+      doc?.removeEventListener("keydown", onKey);
+      doc = frameEl?.contentDocument ?? null;
+      doc?.addEventListener("keydown", onKey);
+    };
     window.addEventListener("keydown", onKey);
-    doc?.addEventListener("keydown", onKey);
+    attach();
+    frameEl?.addEventListener("load", attach);
     return () => {
       window.removeEventListener("keydown", onKey);
+      frameEl?.removeEventListener("load", attach);
       doc?.removeEventListener("keydown", onKey);
     };
   }, [frameEl]);
@@ -1257,6 +1347,7 @@ export function WorkbenchLoaded({
         id: 0,
         label: actionLabel(action),
         box: boxOf(target),
+        target,
       });
     });
   };
@@ -1470,9 +1561,33 @@ export function WorkbenchLoaded({
     setTimeout(() => setScreenStatus(null), 2000);
   };
 
-  /** While a hover jumps to a warning, the list keeps the rows it had, so the row under the pointer stays. */
-  const shownWarningsRef = useRef(warnings);
-  if (!highlight?.jumping) shownWarningsRef.current = warnings;
+  /**
+   * The list keeps every row of the run: after a seek back, the rows that the replay has not
+   * reached show muted, not removed, so the list does not shrink under the pointer. While a hover jumps to a
+   * warning, it keeps the rows it had, so the row under the pointer stays. A new scene, window,
+   * answers or settings is a new run, and starts the rows again.
+   */
+  const runKey = JSON.stringify([
+    state.scene,
+    state.answers,
+    state.env,
+    state.app,
+    { ...state.window, zoom: 0, grid: false },
+  ]);
+  const shownWarningsRef = useRef<{
+    run: string;
+    warnings: readonly Warning[];
+  }>({ run: runKey, warnings });
+  if (shownWarningsRef.current.run !== runKey)
+    shownWarningsRef.current = { run: runKey, warnings };
+  else if (!highlight?.jumping)
+    shownWarningsRef.current.warnings = mergeRunWarnings(
+      shownWarningsRef.current.warnings,
+      warnings,
+    );
+  /** The rows the run found up to now; frozen with the rows while a hover jumps. */
+  const foundWarningsRef = useRef(warnings);
+  if (!highlight?.jumping) foundWarningsRef.current = warnings;
 
   const pageStyle = {
     "--wb-left": `${leftWidth}px`,
@@ -1590,6 +1705,12 @@ export function WorkbenchLoaded({
                 else void attach(iframe);
               }}
             />
+            {still && still.scene === state.scene && (
+              <WindowStill
+                still={still}
+                onReady={() => stillShownRef.current?.()}
+              />
+            )}
             <ActionMarkers marks={marks} next={nextAction} />
             {highlight && !highlight.jumping && origin && (
               <WarningHighlight
@@ -1689,7 +1810,8 @@ export function WorkbenchLoaded({
           }
         >
           <WarningsList
-            warnings={shownWarningsRef.current}
+            warnings={shownWarningsRef.current.warnings}
+            found={foundWarningsRef.current}
             seekingTo={highlight?.jumping ? highlight.warning.at : null}
             onSeek={(ms) => {
               void seek(ms);

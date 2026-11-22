@@ -58,10 +58,21 @@ export type ApiChange =
   | { kind: "settled"; record: ApiRecord }
   | { kind: "answer"; route: ApiRoute };
 
+/** The sentence of the fake API's 404 for a request that nothing answers. */
+export const NO_ANSWER_DETAIL = "The workbench has no answer for this request.";
+
 export interface ApiControl {
   setAnswer(route: ApiRoute, answer: ApiAnswer): void;
   clearAnswer(route: ApiRoute): void;
   answers(): ReadonlyMap<ApiRoute, ApiAnswer>;
+  /**
+   * The set answer that a request (its method and path with the query) gets now, newest first,
+   * by the fake API's own route matching. Null when no answer matches.
+   */
+  answerFor(request: {
+    method: string;
+    path: string;
+  }): { route: ApiRoute; answer: ApiAnswer } | null;
   requests(): readonly ApiRecord[];
   onChange(listener: (change: ApiChange) => void): () => void;
 }

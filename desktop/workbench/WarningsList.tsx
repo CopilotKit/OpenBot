@@ -19,6 +19,19 @@ export function warningKey(warning: Warning): string {
   return `${warning.kind}|${warning.at}|${warning.label}`;
 }
 
+/**
+ * The rows of a run after the run found `current` again (a seek back replays it from the start):
+ * every row it found now, and every row it had before that it has not found yet. The list then
+ * does not shrink under the pointer; the rows not found yet show muted (see `found`).
+ */
+export function mergeRunWarnings(
+  kept: readonly Warning[],
+  current: readonly Warning[],
+): Warning[] {
+  const now = new Set(current.map(warningKey));
+  return [...current, ...kept.filter((w) => !now.has(warningKey(w)))];
+}
+
 /** How long the pointer stays on a row before the row's warning shows, in milliseconds. */
 export const HOVER_DELAY_MS = 250;
 
@@ -42,6 +55,12 @@ export type WarningsListProps = {
    * (the page passes them), and the heading says where it goes.
    */
   seekingTo?: number | null;
+  /**
+   * The warnings the run found up to now. A row of `warnings` that is not here is from before a
+   * seek back, later than the time: it shows muted, and a click still seeks to it. Not given:
+   * every row shows as found.
+   */
+  found?: readonly Warning[];
 };
 
 /** A fixed order, so a seek that finds the warnings again does not move a row under the pointer: by time, then by label. */
@@ -63,7 +82,9 @@ export function WarningsList({
   highlight = null,
   hoverDelay = HOVER_DELAY_MS,
   seekingTo = null,
+  found,
 }: WarningsListProps) {
+  const foundKeys = found ? new Set(found.map(warningKey)) : null;
   const timerRef = useRef<{
     key: string;
     handle: ReturnType<typeof setTimeout>;
@@ -144,11 +165,24 @@ export function WarningsList({
           {rows.map(({ warning, rowKey }) => {
             const key = warningKey(warning);
             const current = highlight?.key === key ? highlight : null;
+            const later = foundKeys !== null && !foundKeys.has(key);
+            const className =
+              [
+                current ? "wb-warning-current" : "",
+                later ? "wb-warning-later" : "",
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined;
             return (
               <li key={rowKey}>
                 <button
                   type="button"
-                  className={current ? "wb-warning-current" : undefined}
+                  className={className}
+                  title={
+                    later
+                      ? "Later in the run: the run has not got there since the seek."
+                      : undefined
+                  }
                   aria-pressed={onPin ? current?.pinned === true : undefined}
                   onMouseMove={(event) => rest(event, warning)}
                   onMouseLeave={(event) => {

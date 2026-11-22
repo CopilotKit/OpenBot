@@ -260,3 +260,103 @@ export function frameOrigin(
     scale: frameWidth > 0 && frame.width > 0 ? frame.width / frameWidth : 1,
   };
 }
+
+/** A still of the window: what it showed last, kept over it while a warning hover seeks back. */
+export type WindowStillShot = {
+  html: string;
+  /** Where the window's frame was, in the wrapper's coordinates. */
+  x: number;
+  y: number;
+  /** The window's size in its own pixels, and the wrapper pixels one of them takes. */
+  width: number;
+  height: number;
+  scale: number;
+  scrollX: number;
+  scrollY: number;
+};
+
+/**
+ * The window's document as HTML that shows the same picture with no script: its styles and its
+ * content now, with the values typed into fields, and a base address so its files still load.
+ */
+export function stillHtml(doc: Document): string {
+  const clone = doc.documentElement.cloneNode(true) as HTMLElement;
+  // Typed values live in the fields' properties, which HTML does not keep: copy them over.
+  const from = doc.documentElement.querySelectorAll("input, textarea, select");
+  const to = clone.querySelectorAll("input, textarea, select");
+  from.forEach((field, i) => {
+    const copy = to[i];
+    if (!copy) return;
+    // By tag name: the fields are of the window's realm, not of this page's.
+    if (field.tagName === "INPUT") {
+      const input = field as HTMLInputElement;
+      if (input.type === "checkbox" || input.type === "radio")
+        copy.toggleAttribute("checked", input.checked);
+      else copy.setAttribute("value", input.value);
+    } else if (field.tagName === "TEXTAREA") {
+      copy.textContent = (field as HTMLTextAreaElement).value;
+    } else {
+      const options = copy.querySelectorAll("option");
+      Array.from((field as HTMLSelectElement).options).forEach((option, n) => {
+        options[n]?.toggleAttribute("selected", option.selected);
+      });
+    }
+  });
+  for (const script of clone.querySelectorAll("script")) script.remove();
+  const head = clone.querySelector("head");
+  // Style sheets made in script are not in the HTML: write their rules out.
+  try {
+    const rules = Array.from(doc.adoptedStyleSheets ?? [])
+      .flatMap((sheet) => Array.from(sheet.cssRules, (rule) => rule.cssText))
+      .join("\n");
+    if (rules && head) {
+      const style = doc.createElement("style");
+      style.textContent = rules;
+      head.append(style);
+    }
+  } catch {}
+  if (head) {
+    const base = doc.createElement("base");
+    base.href = doc.baseURI;
+    head.prepend(base);
+  }
+  return `<!doctype html>${clone.outerHTML}`;
+}
+
+/**
+ * The still over the window. It runs no script (sandbox), takes no pointer, and is the size and
+ * the zoom of the window it covers. `onReady` runs when it shows.
+ */
+export function WindowStill({
+  still,
+  onReady,
+}: {
+  still: WindowStillShot;
+  onReady(): void;
+}) {
+  return (
+    <iframe
+      className="wb-still"
+      data-workbench-still
+      title="The window as it was before the seek"
+      aria-hidden="true"
+      tabIndex={-1}
+      sandbox="allow-same-origin"
+      srcDoc={still.html}
+      style={{
+        left: still.x,
+        top: still.y,
+        width: still.width,
+        height: still.height,
+        transform: `scale(${still.scale})`,
+      }}
+      onLoad={(event) => {
+        event.currentTarget.contentWindow?.scrollTo(
+          still.scrollX,
+          still.scrollY,
+        );
+        onReady();
+      }}
+    />
+  );
+}

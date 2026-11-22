@@ -29,6 +29,7 @@ function fakeApi(initial: [ApiRoute, ApiAnswer][] = []) {
     setAnswer,
     clearAnswer,
     answers: () => new Map(map),
+    answerFor: () => null,
     requests: () => [],
     onChange(listener) {
       listeners.add(listener);

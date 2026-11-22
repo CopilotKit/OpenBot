@@ -3,7 +3,12 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import type { Warning } from "./layoutWatch";
 import { formatTime } from "./RunControls";
-import { WarningsList, warningKey, warningText } from "./WarningsList";
+import {
+  mergeRunWarnings,
+  WarningsList,
+  warningKey,
+  warningText,
+} from "./WarningsList";
 
 beforeAll(() =>
   GlobalRegistrator.register({
@@ -232,4 +237,38 @@ test("the same warning twice keeps two rows", () => {
     />,
   );
   expect(getAllByRole("button")).toHaveLength(2);
+});
+
+test("mergeRunWarnings keeps the rows a seek back has not found again", () => {
+  const early = clipped(1000, "Title");
+  const late = clipped(9000, "Footer");
+  const found = clipped(1000, "Title");
+  // A seek back to 0:02 found only the early warning again: the late row stays.
+  expect(mergeRunWarnings([early, late], [found])).toEqual([found, late]);
+  expect(mergeRunWarnings([], [found])).toEqual([found]);
+});
+
+test("after a seek back the list keeps its rows: the ones not reached show muted, in the same place", () => {
+  const early = clipped(1000, "Title");
+  const late = clipped(9000, "Footer");
+  const full = render(
+    <WarningsList warnings={[early, late]} onSeek={() => {}} />,
+  );
+  const before = [...full.container.querySelectorAll("li")].map(
+    (li) => li.textContent,
+  );
+  full.unmount();
+
+  const view = render(
+    <WarningsList
+      warnings={mergeRunWarnings([early, late], [early])}
+      found={[early]}
+      onSeek={() => {}}
+    />,
+  );
+  const rows = [...view.container.querySelectorAll("li button")];
+  expect(rows.map((row) => row.textContent)).toEqual(before);
+  expect(rows[0]?.className ?? "").not.toContain("wb-warning-later");
+  expect(rows[1]?.className).toContain("wb-warning-later");
+  expect(view.getByText(/Layout warnings \(2\)/)).toBeTruthy();
 });

@@ -8,7 +8,22 @@
 // local, approximate and differ per computer, so it skips them unless `--include-imported` is set.
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { ApiRecord, AppHost, Role } from "./appContract";
+import { NO_ANSWER_DETAIL } from "./appContract";
+import {
+  type Browser,
+  type Chromium,
+  FRAME_FLAGS_USAGE,
+  type FrameArgs,
+  fail,
+  messageOf,
+  nextFrame,
+  openScenePage,
+  PLAYWRIGHT,
+  parseFrameArgs,
+  readPageReport,
+  seekTo,
+  unknownScene,
+} from "./cliPage";
 import {
   isApp,
   loadScenesInBun,
@@ -17,19 +32,9 @@ import {
   sceneSteps,
 } from "./sceneCatalog";
 import { SCENES as BUILT_IN_SCENES } from "./scenes";
-import { SCENE_GROUPS, type Scene } from "./scenes/types";
+import { isScene } from "./scenes/imported";
+import type { Scene } from "./scenes/types";
 import { ensureServer } from "./server";
-import {
-  type AppSettings,
-  DEFAULT_APP,
-  DEFAULT_WINDOW,
-  encodeState,
-  type WindowSettings,
-  type WorkbenchState,
-} from "./urlState";
-
-/** The sentence of the fake API's 404 (app/workbench/api/fakeApi.ts NO_ANSWER_DETAIL). */
-const NO_ANSWER_DETAIL = "The workbench has no answer for this request.";
 
 const IMPORTED_DIR = join(import.meta.dir, "scenes", "imported");
 
@@ -60,23 +65,6 @@ export function loadImportedScenes(dir: string = IMPORTED_DIR): Scene[] {
     else console.warn(`Skipped ${name}: it is not a scene.`);
   }
   return scenes;
-}
-
-function isScene(value: unknown): value is Scene {
-  if (typeof value !== "object" || value === null) return false;
-  const scene = value as Partial<Record<keyof Scene, unknown>>;
-  const start = scene.start as Record<string, unknown> | null | undefined;
-  return (
-    typeof scene.id === "string" &&
-    scene.id !== "" &&
-    typeof scene.title === "string" &&
-    SCENE_GROUPS.includes(scene.group as Scene["group"]) &&
-    typeof start === "object" &&
-    start !== null &&
-    typeof start.hash === "string" &&
-    typeof start.search === "string" &&
-    (scene.run === undefined || Array.isArray(scene.run))
-  );
 }
 
 const IMPORTED_SCENES: readonly Scene[] = loadImportedScenes().filter(
@@ -113,137 +101,35 @@ export function scenesForAll<T extends { id: string }>(
   return { scenes: kept, skipped: scenes.length - kept.length };
 }
 
-const USAGE =
-  "Usage: bun run workbench:shot <scene> [--at <seconds>] [--grid] [--size <w>x<h>] [--os mac|windows] [--theme light|dark] [--host desktop|browser] [--role member|admin|owner] [--out <dir>] [--all] [--check] [--include-imported]";
+const USAGE = `Usage: bun run workbench:shot <scene> ${FRAME_FLAGS_USAGE} [--grid] [--all] [--check] [--include-imported]`;
 
-const PLAYWRIGHT: string = "playwright-core";
-type Page = {
-  goto(url: string): Promise<unknown>;
-  waitForFunction(run: () => unknown): Promise<unknown>;
-  evaluate<T, A = undefined>(run: (arg: A) => T, arg?: A): Promise<T>;
-  locator(selector: string): {
-    screenshot(options: { path: string }): Promise<unknown>;
-  };
-  on(event: "console", listener: (message: ConsoleMessage) => void): void;
-  close(): Promise<void>;
-};
-type ConsoleMessage = { text(): string };
-type Browser = {
-  newPage(options: {
-    viewport: { width: number; height: number };
-    reducedMotion: "reduce";
-    locale: string;
-    timezoneId: string;
-  }): Promise<Page>;
-  close(): Promise<void>;
-};
-type Chromium = { launch(options: { channel: string }): Promise<Browser> };
-
-type Options = {
-  scene: string;
-  at: number;
+type Options = FrameArgs & {
   all: boolean;
   check: boolean;
   includeImported: boolean;
-  out: string;
-  window: WindowSettings;
-  app: AppSettings;
 };
 
-const HOSTS: readonly AppHost[] = ["desktop", "browser"];
-const ROLES: readonly Role[] = ["member", "admin", "owner"];
-
-function fail(message: string): never {
-  console.error(message);
-  process.exit(2);
-}
-
 function parseArgs(argv: string[]): Options {
-  const window: WindowSettings = { ...DEFAULT_WINDOW };
-  const app: AppSettings = { ...DEFAULT_APP };
-  let scene = "";
-  let at = 0;
   let all = false;
   let check = false;
   let includeImported = false;
-  let out = resolve(process.cwd(), "workbench-shots");
-  const value = (i: number): string => {
-    const v = argv[i + 1];
-    if (v === undefined || v.startsWith("--")) fail(USAGE);
-    return v;
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i] as string;
-    switch (arg) {
-      case "--at": {
-        const n = Number(value(i++));
-        if (!Number.isFinite(n) || n < 0) fail(USAGE);
-        at = n;
-        break;
-      }
-      case "--grid":
-        window.grid = true;
-        break;
-      case "--all":
-        all = true;
-        break;
-      case "--check":
-        check = true;
-        break;
-      case "--include-imported":
-        includeImported = true;
-        break;
-      case "--size": {
-        const m = /^(\d+)x(\d+)$/.exec(value(i++));
-        if (!m) fail(USAGE);
-        window.width = Number(m[1]);
-        window.height = Number(m[2]);
-        break;
-      }
-      case "--os": {
-        const v = value(i++);
-        if (v !== "mac" && v !== "windows") fail(USAGE);
-        window.os = v;
-        break;
-      }
-      case "--theme": {
-        const v = value(i++);
-        if (v !== "light" && v !== "dark") fail(USAGE);
-        window.theme = v;
-        break;
-      }
-      case "--host": {
-        const v = value(i++);
-        const host = HOSTS.find((h) => h === v);
-        if (!host) fail(USAGE);
-        app.host = host;
-        break;
-      }
-      case "--role": {
-        const v = value(i++);
-        const role = ROLES.find((r) => r === v);
-        if (!role) fail(USAGE);
-        app.role = role;
-        break;
-      }
-      case "--out":
-        out = resolve(process.cwd(), value(i++));
-        break;
-      default:
-        if (arg.startsWith("--") || scene !== "") fail(USAGE);
-        scene = arg;
-    }
-  }
-  if (!all && scene === "") fail(USAGE);
-  return { scene, at, all, check, includeImported, out, window, app };
-}
-
-function unknownScene(id: string, scenes: readonly { id: string }[]): never {
-  fail(
-    [`There is no scene "${id}". Scenes:`, ...scenes.map((s) => s.id)].join(
-      "\n",
-    ),
+  let grid = false;
+  const args = parseFrameArgs(
+    argv,
+    USAGE,
+    resolve(process.cwd(), "workbench-shots"),
+    (arg) => {
+      if (arg === "--grid") grid = true;
+      else if (arg === "--all") all = true;
+      else if (arg === "--check") check = true;
+      else if (arg === "--include-imported") includeImported = true;
+      else return false;
+      return true;
+    },
   );
+  if (grid) args.window.grid = true;
+  if (!all && args.scene === "") fail(USAGE);
+  return { ...args, all, check, includeImported };
 }
 
 /** One thing `--check` found: a run that went wrong in a scene at a time. */
@@ -257,45 +143,28 @@ async function takeShots(
   times: number[],
   problems: Problem[],
 ): Promise<void> {
-  const page = await browser.newPage({
-    viewport: { width: 1800, height: 1200 },
-    reducedMotion: "reduce",
-    locale: "en-US",
-    timezoneId: "UTC",
-  });
   const sceneId = scene.id;
   let now = 0;
   const problem = (message: string): void => {
     problems.push({ scene: sceneId, at: now, message });
   };
-  if (options.check) {
+  const page = await openScenePage(browser, url, sceneId, options, (page) => {
+    if (!options.check) return;
     // The page's console includes its frame's.
     page.on("console", (message) => {
       const text = message.text();
       if (text.startsWith("Run step:")) problem(text);
     });
-  }
-  const state: WorkbenchState = {
-    scene: sceneId,
-    at: 0,
-    answers: {},
-    env: {},
-    window: options.window,
-    app: options.app,
-  };
-  await page.goto(`${url}/workbench/?${encodeState(state)}`);
-  await page.waitForFunction(() => window.__workbenchPage?.ready === true);
+  });
   const last = times[times.length - 1];
   for (const at of times) {
     now = at;
     let stalled = false;
     try {
-      await page.evaluate((ms) => window.__workbenchPage?.seek(ms), at * 1000);
+      await seekTo(page, at);
     } catch (error) {
       stalled = true;
-      problem(
-        `The run stalled: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      problem(`The run stalled: ${messageOf(error)}`);
     }
     if (options.check && !stalled) {
       const error = await page.evaluate(() => {
@@ -308,31 +177,14 @@ async function takeShots(
       if (error !== "") problem(`The run stalled: ${error}`);
     }
     if (stalled) break;
-    await page.evaluate(
-      () => new Promise((done) => requestAnimationFrame(done)),
-    );
+    await nextFrame(page);
     // With --check only the end of a run is saved: the steps before it are there to be walked.
     if (options.check && at !== last) continue;
     const base = `${options.out}/${sceneId}@${at}s`;
     await page.locator("[data-workbench-window]").screenshot({
       path: `${base}.png`,
     });
-    const report = await page.evaluate(() => {
-      const p = window.__workbenchPage;
-      const handedBack = (
-        p as { handedBack?: () => unknown } | undefined
-      )?.handedBack?.();
-      return {
-        kind: p?.kind ?? "desktop",
-        handedOver: p?.handedOver() ?? false,
-        handedBack: handedBack ?? null,
-        elements: p?.elements?.() ?? [],
-        warnings: p?.warnings?.() ?? [],
-        calls: p?.calls() ?? [],
-        requests: p?.requests?.() ?? ([] as readonly ApiRecord[]),
-        errors: p?.errors?.() ?? ([] as readonly string[]),
-      };
-    });
+    const report = await readPageReport(page);
     if (options.check && isApp(scene)) {
       for (const record of report.requests) {
         if (record.source === "none") {

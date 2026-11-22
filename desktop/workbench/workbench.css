@@ -782,6 +782,12 @@ kbd {
   background: color-mix(in srgb, var(--wb-highlight-moved) 12%, transparent);
 }
 
+/* A row from before a seek back that the replay has not reached yet: kept, muted. */
+.wb-under button.wb-warning-later {
+  color: var(--wb-muted);
+  opacity: 0.7;
+}
+
 .wb-under button.wb-warning-current::before {
   content: "";
   display: inline-block;
@@ -947,6 +953,16 @@ kbd {
   position: relative;
   display: inline-block;
   vertical-align: top;
+}
+
+/* The still of the window while a warning hover seeks back: the run replays under it. */
+.wb-still {
+  position: absolute;
+  z-index: 3;
+  border: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+  background: transparent;
 }
 
 .wb-actions {

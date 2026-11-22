@@ -22,7 +22,8 @@ function load(): Record<string, unknown> {
   }
 }
 
-function isScene(value: unknown): value is Scene {
+/** True when a value read from an imported file is a scene. The shot CLI checks with it too. */
+export function isScene(value: unknown): value is Scene {
   if (typeof value !== "object" || value === null) return false;
   const scene = value as Partial<Record<keyof Scene, unknown>>;
   const start = scene.start as Record<string, unknown> | null | undefined;

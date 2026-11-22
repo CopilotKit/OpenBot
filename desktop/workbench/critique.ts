@@ -2,17 +2,33 @@
 //
 //   bun run workbench:critique <scene> [--at <seconds>]
 //     [--command critique|audit|layout|typeset|clarify|polish] [--size <w>x<h>]
-//     [--os mac|windows] [--theme light|dark] [--host desktop|browser] [--out <dir>] [--all]
+//     [--os mac|windows] [--theme light|dark] [--host desktop|browser] [--role member|admin|owner]
+//     [--out <dir>] [--all]
 //
 // For each frame it writes `<out>/<scene>@<at>s/` with frame.png, frame.json and prompt.md.
 // `--all` does every committed scene at its end, and each app scene at each run step too, and
 // writes index.md. The scenes imported from troubleshooting logs are left out of `--all`.
 //
-// shot.ts drives one page per scene in the same way. Its `takeShots` is not exported, so the page
-// driving below is a short copy of it, with the component chains added to the elements.
+// It drives the page as shot.ts does (cliPage.ts), and adds the component chains to the elements.
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { ApiRecord, AppHost } from "./appContract";
+import type { ApiRecord } from "./appContract";
+import {
+  type Browser,
+  type Chromium,
+  FRAME_FLAGS_USAGE,
+  type FrameArgs,
+  fail,
+  frameState,
+  messageOf,
+  nextFrame,
+  openScenePage,
+  PLAYWRIGHT,
+  parseFrameArgs,
+  readPageReport,
+  seekTo,
+  unknownScene,
+} from "./cliPage";
 import {
   buildCritiquePrompt,
   buildIndex,
@@ -33,134 +49,32 @@ import {
 } from "./sceneCatalog";
 import { ensureServer, WORKBENCH_URL } from "./server";
 import { loadImportedScenes } from "./shot";
-import {
-  type AppSettings,
-  DEFAULT_APP,
-  DEFAULT_WINDOW,
-  encodeState,
-  type WindowSettings,
-  type WorkbenchState,
-} from "./urlState";
+import { encodeState, type WindowSettings } from "./urlState";
 
-const USAGE = `Usage: bun run workbench:critique <scene> [--at <seconds>] [--command ${CRITIQUE_COMMANDS.join("|")}] [--size <w>x<h>] [--os mac|windows] [--theme light|dark] [--host desktop|browser] [--out <dir>] [--all]`;
+const USAGE = `Usage: bun run workbench:critique <scene> ${FRAME_FLAGS_USAGE} [--command ${CRITIQUE_COMMANDS.join("|")}] [--all]`;
 
-const PLAYWRIGHT: string = "playwright-core";
-type Page = {
-  goto(url: string): Promise<unknown>;
-  waitForFunction(run: () => unknown): Promise<unknown>;
-  evaluate<T, A = undefined>(
-    run: ((arg: A) => T) | string,
-    arg?: A,
-  ): Promise<T>;
-  locator(selector: string): {
-    screenshot(options: { path: string }): Promise<unknown>;
-  };
-  close(): Promise<void>;
-};
-type Browser = {
-  newPage(options: {
-    viewport: { width: number; height: number };
-    reducedMotion: "reduce";
-    locale: string;
-    timezoneId: string;
-  }): Promise<Page>;
-  close(): Promise<void>;
-};
-type Chromium = { launch(options: { channel: string }): Promise<Browser> };
-
-type Options = {
-  scene: string;
-  at: number;
-  command: CritiqueCommand;
-  all: boolean;
-  out: string;
-  window: WindowSettings;
-  app: AppSettings;
-};
-
-const HOSTS: readonly AppHost[] = ["desktop", "browser"];
-
-function fail(message: string): never {
-  console.error(message);
-  process.exit(2);
-}
+type Options = FrameArgs & { command: CritiqueCommand; all: boolean };
 
 export function parseArgs(argv: readonly string[]): Options {
-  const window: WindowSettings = { ...DEFAULT_WINDOW };
-  const app: AppSettings = { ...DEFAULT_APP };
-  let scene = "";
-  let at = 0;
   let command: CritiqueCommand = "critique";
   let all = false;
-  let out = resolve(process.cwd(), "workbench-shots", "critique");
-  const value = (i: number): string => {
-    const v = argv[i + 1];
-    if (v === undefined || v.startsWith("--")) fail(USAGE);
-    return v;
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i] as string;
-    switch (arg) {
-      case "--at": {
-        const n = Number(value(i++));
-        if (!Number.isFinite(n) || n < 0) fail(USAGE);
-        at = n;
-        break;
-      }
-      case "--command": {
-        const v = value(i++);
+  const args = parseFrameArgs(
+    argv,
+    USAGE,
+    resolve(process.cwd(), "workbench-shots", "critique"),
+    (arg, value) => {
+      if (arg === "--all") all = true;
+      else if (arg === "--command") {
+        const v = value();
         const found = CRITIQUE_COMMANDS.find((c) => c === v);
         if (!found) fail(USAGE);
         command = found;
-        break;
-      }
-      case "--all":
-        all = true;
-        break;
-      case "--size": {
-        const m = /^(\d+)x(\d+)$/.exec(value(i++));
-        if (!m) fail(USAGE);
-        window.width = Number(m[1]);
-        window.height = Number(m[2]);
-        break;
-      }
-      case "--os": {
-        const v = value(i++);
-        if (v !== "mac" && v !== "windows") fail(USAGE);
-        window.os = v;
-        break;
-      }
-      case "--theme": {
-        const v = value(i++);
-        if (v !== "light" && v !== "dark") fail(USAGE);
-        window.theme = v;
-        break;
-      }
-      case "--host": {
-        const v = value(i++);
-        const host = HOSTS.find((h) => h === v);
-        if (!host) fail(USAGE);
-        app.host = host;
-        break;
-      }
-      case "--out":
-        out = resolve(process.cwd(), value(i++));
-        break;
-      default:
-        if (arg.startsWith("--") || scene !== "") fail(USAGE);
-        scene = arg;
-    }
-  }
-  if (all === (scene !== "")) fail(USAGE);
-  return { scene, at, command, all, out, window, app };
-}
-
-function unknownScene(id: string, scenes: readonly { id: string }[]): never {
-  fail(
-    [`There is no scene "${id}". Scenes:`, ...scenes.map((s) => s.id)].join(
-      "\n",
-    ),
+      } else return false;
+      return true;
+    },
   );
+  if (all === (args.scene !== "")) fail(USAGE);
+  return { ...args, command, all };
 }
 
 /**
@@ -220,57 +134,26 @@ async function critiqueScene(
   times: readonly number[],
   entries: IndexEntry[],
 ): Promise<void> {
-  const page = await browser.newPage({
-    viewport: { width: 1800, height: 1200 },
-    reducedMotion: "reduce",
-    locale: "en-US",
-    timezoneId: "UTC",
-  });
-  const state = (at: number): WorkbenchState => ({
-    scene: scene.id,
-    at,
-    answers: {},
-    env: {},
-    window: options.window,
-    app: options.app,
-  });
-  await page.goto(`${url}/workbench/?${encodeState(state(0))}`);
-  await page.waitForFunction(() => window.__workbenchPage?.ready === true);
+  const state = (at: number) => frameState(scene.id, at, options);
+  const page = await openScenePage(browser, url, scene.id, options);
   for (const at of times) {
     try {
-      await page.evaluate((ms) => window.__workbenchPage?.seek(ms), at * 1000);
+      await seekTo(page, at);
     } catch (error) {
       process.exitCode = 1;
       console.error(
-        `${scene.id} at ${at}s: the run stalled: ${error instanceof Error ? error.message : String(error)}`,
+        `${scene.id} at ${at}s: the run stalled: ${messageOf(error)}`,
       );
       break;
     }
-    await page.evaluate(
-      () => new Promise((done) => requestAnimationFrame(done)),
-    );
+    await nextFrame(page);
     const folder = folderName(scene.id, at);
     const dir = join(options.out, folder);
     mkdirSync(dir, { recursive: true });
     await page.locator("[data-workbench-window]").screenshot({
       path: join(dir, "frame.png"),
     });
-    const base = await page.evaluate(() => {
-      const p = window.__workbenchPage;
-      const handedBack = (
-        p as { handedBack?: () => unknown } | undefined
-      )?.handedBack?.();
-      return {
-        kind: p?.kind ?? "desktop",
-        handedOver: p?.handedOver() ?? false,
-        handedBack: (handedBack ?? null) as string | null,
-        elements: p?.elements?.() ?? [],
-        warnings: p?.warnings?.() ?? [],
-        calls: (p?.calls() ?? []) as unknown[],
-        requests: p?.requests?.() ?? ([] as readonly ApiRecord[]),
-        errors: p?.errors?.() ?? ([] as readonly string[]),
-      };
-    });
+    const base = await readPageReport(page);
     const chains =
       await page.evaluate<{ key: string; chain: FrameElement["chain"] }[]>(
         ELEMENTS_WITH_CHAINS,

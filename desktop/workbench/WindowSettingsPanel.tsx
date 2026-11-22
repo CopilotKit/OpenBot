@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { MIN_WINDOW } from "./urlState";
 
 export type WindowSettingsValue = {
   width: number;
@@ -97,8 +98,9 @@ function AppFields(props: {
   );
 }
 
-const MIN_WIDTH = 720;
-const MIN_HEIGHT = 560;
+// The smallest window the address can hold (urlState.ts clamps to the same).
+const MIN_WIDTH = MIN_WINDOW.width;
+const MIN_HEIGHT = MIN_WINDOW.height;
 
 function SizeInput(props: {
   label: string;

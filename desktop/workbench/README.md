@@ -18,7 +18,7 @@ The address `/` (for example http://localhost:3021/) sends you to `/workbench/` 
 
 The workbench uses port 3021. The desktop app keeps port 3020. If port 3021 is busy, the server stops and does not pick another port.
 
-The workbench also starts the app server on port 3023. The app scenes use it through `/__app/` on the workbench port. You do not start the app server yourself. When the workbench server stops, the app server stops too.
+The workbench also starts the app server on port 3023 (the workbench port + 2). The app scenes use it through `/__app/` on the workbench port. You do not start the app server yourself. When the workbench server stops, the app server stops too. A workbench never uses an app server that it did not start: if the app server's port is busy, the server log says so.
 
 If the app server does not start, the desktop scenes still work. A notice says that the app scenes did not load.
 
@@ -34,9 +34,9 @@ WORKBENCH_PORT=4100 WORKBENCH_APP_PORT=4103 bun run workbench
 | Setting | Port | Default |
 | --- | --- | --- |
 | `WORKBENCH_PORT`, or `bun run workbench --port <port>` | The workbench page | 3021 |
-| `WORKBENCH_APP_PORT` | The app server | 3023 |
+| `WORKBENCH_APP_PORT` | The app server | The workbench port + 2 (3023) |
 
-Then open http://localhost:4100/workbench/.
+Then open http://localhost:4100/workbench/. With `--port 4100` alone, the app server uses port 4102.
 
 If a port is busy, the workbench stops with one line. The line names the port and tells you how to pick another.
 
@@ -114,7 +114,7 @@ A **run** is a scene that plays over time. A scene with a run shows these contro
 
 A run stops at its end, at every speed. A scene without a run says "No run. The scene plays on its own." and shows the time.
 
-When a run clicks or types during a play or a step, a marker shows the element over the window for a short time. A seek shows no markers, so a CLI shot never shows them.
+When a run clicks or types during a play or a step, a marker shows the element over the window for a short time (at most 1.2 s). The marker follows its element, and goes at once when the element leaves the screen, is hidden or has no size, at every speed. The paused "Next:" marker is measured again when the zoom, the window or the stage changes. A seek shows no markers, so a CLI shot never shows them.
 
 ### Handover and handback
 
@@ -345,7 +345,7 @@ Under the window, the workbench lists layout warnings as the clock moves. The li
 
 The workbench checks after each native call and event. In an app scene, it also checks after each request, stream event and socket message. Elements that are hidden from view, such as labels for screen readers only, do not get warnings.
 
-Hold the pointer on a warning for 250 ms to jump to its time. The row says "Jumping…" while the window gets there, and the heading says where it goes, for example "Seeking to 0:44…". The list keeps its rows during the jump, so the row under the pointer stays. Then the workbench marks the warning over the window:
+Hold the pointer on a warning for 250 ms to jump to its time. The row says "Jumping…" while the window gets there, and the heading says where it goes, for example "Seeking to 0:44…". The list keeps its rows during the jump, so the row under the pointer stays. When the jump goes back in time, the window starts again under a still of what it showed, so the replay does not show; the new state shows in one step. After a seek back, the rows that the replay has not reached yet stay in the list, muted. Then the workbench marks the warning over the window:
 
 - For **moved**: a dashed box where the element was, a solid box where it is, and an arrow between them. A label says how far it moved, for example "moved 157 px down".
 - For **cut off**: a box around the element, with a shaded strip for the hidden part. A label says "cut off by N px".
@@ -502,13 +502,17 @@ OPENBOT_APP_BROWSER=1 bun test workbench/shot.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/appFrame.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/appDeterminism.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/appShot.browser.test.ts
+OPENBOT_APP_BROWSER=1 bun test workbench/critique.browser.test.ts
+OPENBOT_APP_BROWSER=1 bun test workbench/motion.browser.test.ts
 ```
 
 - `appFrame.browser.test.ts` checks the app frame: it boots, the bridge and the fake API answer, and Vite does not load it two times. It also checks that a seek ends when the frame loads again.
 - `appDeterminism.browser.test.ts` checks that an app frame is the same after a seek back and after a reload.
 - `appShot.browser.test.ts` runs the CLI on an app scene and on an unknown scene.
+- `critique.browser.test.ts` runs `workbench:critique` and checks the folder it writes: `frame.png`, `frame.json` and `prompt.md`.
+- `motion.browser.test.ts` checks that the paused "Next:" marker stays on its element after Fit and a splitter drag, and that a warning hover that seeks back keeps a still of the window over the replay.
 
-You can also run all seven files in one `bun test` command, as CI does. Each file gets the workbench server in its `beforeAll` hook and gives it back with `stop()` in its `afterAll` hook. The hooks have their own time limits, because bun gives a hook only 5 seconds. `bun test` does not send the process `exit` event, so a file that does not call `stop()` leaves the server running.
+You can also run all nine files in one `bun test` command, as CI does. Each file gets the workbench server in its `beforeAll` hook and gives it back with `stop()` in its `afterAll` hook. The hooks have their own time limits, because bun gives a hook only 5 seconds. `bun test` does not send the process `exit` event, so a file that does not call `stop()` leaves the server running.
 
 `desktop/workbench/shippedBuild.test.ts` runs a full build. It takes up to three minutes. To run the full build check of the app, run this in the repository root:
 
@@ -521,6 +525,6 @@ OPENBOT_APP_BUILD_GUARD=1 bun test app/workbench/shippedBuild.test.ts
 The CI job "app (real browser, desktop setup window)" runs the workbench checks. It runs when a change touches code that is not a test or a doc. The job does these steps:
 
 1. It runs `bun run generate:app-config`.
-2. It runs the seven browser tests in the Playwright image.
-3. It runs `bun run workbench:check` in the Playwright image.
-4. It runs the full build check of the app with `OPENBOT_APP_BUILD_GUARD=1`.
+2. It runs the full build check of the app with `OPENBOT_APP_BUILD_GUARD=1`, on the runner. It runs before the steps in the image: those run as root, and after them the build cannot write its config into `app/node_modules/.vite-temp`.
+3. It runs the nine browser tests in the Playwright image.
+4. It runs `bun run workbench:check` in the Playwright image.

@@ -134,6 +134,73 @@ describe("installFakeApi", () => {
     expect(await response.json()).toEqual({ late: true });
   });
 
+  test("answerFor names the answer a request gets, newest first, query and all", () => {
+    const { api } = setup();
+    expect(api.answerFor({ method: "GET", path: BOTS })).toBeNull();
+    api.setAnswer("GET /api/v2/organizations/:organizationId/bots", {
+      mode: "never",
+    });
+    api.setAnswer("ALL /api/*", { mode: "delay", ms: 5, body: null });
+    expect(api.answerFor({ method: "GET", path: `${BOTS}?x=1` })).toEqual({
+      route: "ALL /api/*",
+      answer: { mode: "delay", ms: 5, body: null },
+    });
+    api.clearAnswer("ALL /api/*");
+    expect(api.answerFor({ method: "GET", path: BOTS })?.answer.mode).toBe(
+      "never",
+    );
+    expect(api.answerFor({ method: "POST", path: BOTS })).toBeNull();
+  });
+
+  test("a never request wakes for a newer matching answer on another route", async () => {
+    const { api, target } = setup();
+    api.setAnswer("GET /api/v2/organizations/:organizationId/bots", {
+      mode: "never",
+    });
+    const pending = target.fetch(BOTS);
+    await flush();
+    // Another key that matches too: newest first, it wins, and the waiting request sees it.
+    api.setAnswer("ALL /api/v2/organizations/:organizationId/bots", {
+      mode: "value",
+      body: { woke: true },
+    });
+    expect(await (await pending).json()).toEqual({ woke: true });
+  });
+
+  test("an aborted never or delay request rejects with AbortError and is recorded as failed", async () => {
+    const { api, target, timers } = setup();
+    api.setAnswer("GET /api/v2/organizations/:organizationId/bots", {
+      mode: "never",
+    });
+    const never = new AbortController();
+    const waiting = target.fetch(BOTS, { signal: never.signal });
+    await flush();
+    never.abort();
+    await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+    expect(api.requests()[0].state).toBe("failed");
+
+    api.setAnswer("GET /api/*", { mode: "delay", ms: 300, body: {} });
+    const delay = new AbortController();
+    const slow = target.fetch(BOTS, { signal: delay.signal });
+    await flush();
+    delay.abort();
+    await expect(slow).rejects.toMatchObject({ name: "AbortError" });
+    // The timer that runs later finds nothing to settle.
+    timers[0]?.run();
+    await flush();
+    expect(api.requests().map((record) => record.state)).toEqual([
+      "failed",
+      "failed",
+    ]);
+
+    // Aborted before it was sent: rejected at once, as a real fetch does.
+    const early = new AbortController();
+    early.abort();
+    await expect(
+      target.fetch(BOTS, { signal: early.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   test("a delay answer waits for the timer", async () => {
     const { api, target, timers } = setup();
     api.setAnswer("GET /api/*", { mode: "delay", ms: 300, body: { slow: 1 } });

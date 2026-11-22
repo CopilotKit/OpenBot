@@ -12,6 +12,7 @@ import {
   pickSession,
   toScene,
 } from "./logImport";
+import { WORKBENCH_URL } from "./server";
 
 const USAGE =
   "Usage: bun run workbench:import <file> [--start first-run|relaunch] [--session <n>] [--id <id>]";
@@ -103,6 +104,6 @@ console.log(`
 Session ${picked?.index ?? "none"}: ${rows} setup rows. ${scene.title}
 Scene: ${id}
 Written: ${out}
-Open (the workbench must be running, "bun run workbench"): http://localhost:3021/workbench/?scene=${id}
+Open (the workbench must be running, "bun run workbench"): ${WORKBENCH_URL}/workbench/?scene=${id}
 Screenshot: bun run workbench:shot ${id}
 The scene is approximate: the log has the rows' words and times, not the download bytes.`);

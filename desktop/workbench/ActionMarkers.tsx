@@ -1,6 +1,6 @@
 import type { Box } from "./geometry";
 
-/** How long a marker for an action stays, in real milliseconds. */
+/** How long a marker for an action stays at most, in real milliseconds. */
 export const MARKER_MS = 1200;
 
 export type ActionMark = {
@@ -8,7 +8,69 @@ export type ActionMark = {
   label: string;
   /** Over the window, in the coordinates of the wrapper around it; null when the step found nothing. */
   box: Box | null;
+  /** The element the action acted on, measured again while the marker shows. */
+  target?: Element | null;
 };
+
+/** The part of an element that followTarget reads. */
+export type Followed = {
+  isConnected: boolean;
+  checkVisibility?: () => boolean;
+};
+
+/**
+ * What a marker does on an animation frame. A marker stays on the element it names, or goes:
+ * "drop" when its element left the document (a new screen, a reload), is hidden, or has no size;
+ * else its new box. A marker without an element (the step found nothing) keeps its box.
+ */
+export function followTarget(
+  target: Followed | null | undefined,
+  measure: () => Box | null,
+): { drop: true } | { drop: false; box: Box | null } {
+  if (!target) return { drop: false, box: null };
+  if (!target.isConnected) return { drop: true };
+  if (target.checkVisibility && !target.checkVisibility())
+    return { drop: true };
+  const box = measure();
+  if (!box || box.width <= 0 || box.height <= 0) return { drop: true };
+  return { drop: false, box };
+}
+
+/** True when two boxes are the same to the pixel, so a frame with no change sets no state. */
+export function sameBox(a: Box | null, b: Box | null): boolean {
+  if (a === null || b === null) return a === b;
+  return (
+    Math.abs(a.x - b.x) < 0.5 &&
+    Math.abs(a.y - b.y) < 0.5 &&
+    Math.abs(a.width - b.width) < 0.5 &&
+    Math.abs(a.height - b.height) < 0.5
+  );
+}
+
+/**
+ * One animation frame for all markers: each follows its element or goes. Gives the same array
+ * when nothing changed.
+ */
+export function followMarks(
+  marks: readonly ActionMark[],
+  measure: (target: Element) => Box | null,
+): readonly ActionMark[] {
+  let changed = false;
+  const next: ActionMark[] = [];
+  for (const mark of marks) {
+    const target = mark.target;
+    const step = followTarget(target, () => (target ? measure(target) : null));
+    if (step.drop) {
+      changed = true;
+      continue;
+    }
+    if (target && !sameBox(step.box, mark.box)) {
+      changed = true;
+      next.push({ ...mark, box: step.box });
+    } else next.push(mark);
+  }
+  return changed ? next : marks;
+}
 
 /**
  * The box of `target` (an element in the window's iframe) in the coordinates of `wrap`, an element

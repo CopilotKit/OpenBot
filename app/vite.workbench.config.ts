@@ -8,23 +8,20 @@ import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+import { noConfigRestart } from "../desktop/workbench/noConfigRestart";
+import {
+  appPort,
+  busyPortMessage,
+  workbenchPort,
+} from "../desktop/workbench/server";
 import { routeCodeSplittingOptions } from "./vite.config";
 import { readDesktopPageScripts } from "./workbench/rustScripts";
 
-/** The port in the env variable `name`, or `fallback`. A bad value is an error. */
-function envPort(name: string, fallback: number): number {
-  const value = process.env[name];
-  if (value === undefined || value === "") return fallback;
-  const port = Number(value);
-  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error(`${name} must be a port number, not "${value}".`);
-  }
-  return port;
-}
-
-const APP_PORT = envPort("WORKBENCH_APP_PORT", 3023);
-// The app's HMR socket goes through the workbench server's /__app/ proxy.
-const WORKBENCH_PORT = envPort("WORKBENCH_PORT", 3021);
+// The ports, the busy-port message and the no-restart plugin are the desktop workbench's own, so
+// the two servers never disagree on a port or a message.
+const WORKBENCH_PORT = workbenchPort(process.env.WORKBENCH_PORT);
+// The desktop workbench sets WORKBENCH_APP_PORT when it starts this server.
+const APP_PORT = appPort(process.env.WORKBENCH_APP_PORT, WORKBENCH_PORT);
 
 // A busy port ends the run with one line, not a stack.
 function busyPort(): Plugin {
@@ -38,38 +35,12 @@ function busyPort(): Plugin {
           return await listen(...args);
         } catch (error) {
           if (/already in use/.test(String((error as Error)?.message))) {
-            console.error(
-              `Workbench: port ${APP_PORT} for the app server is busy. Stop the program that uses it, or pick another port: WORKBENCH_APP_PORT=<port> bun run workbench.`,
-            );
+            console.error(busyPortMessage(APP_PORT, "app"));
             process.exit(1);
           }
           throw error;
         }
       };
-    },
-  };
-}
-
-// Vite restarts this server when the config file or a file it imports changes. A restart closes
-// the port for a moment, so the runs of other processes that share the workbench fail. The server
-// keeps its config instead and says once that a restart is needed.
-function noConfigRestart(): Plugin {
-  return {
-    name: "workbench-no-config-restart",
-    apply: "serve",
-    configureServer(server) {
-      const deps = [...server.config.configFileDependencies];
-      (server.config.configFileDependencies as string[]).length = 0;
-      if (server.config.configFile)
-        server.watcher.unwatch(server.config.configFile);
-      const told = new Set<string>();
-      server.watcher.on("change", (file) => {
-        if (!deps.includes(file) || told.has(file)) return;
-        told.add(file);
-        server.config.logger.warn(
-          `Workbench: ${file} changed. Stop and start the workbench to use the change.`,
-        );
-      });
     },
   };
 }

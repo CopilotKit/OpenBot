@@ -5,16 +5,17 @@
  * Pattern: desktop/src/fakeNative/control.ts (answer modes, waiting list, onChange).
  */
 import { getResponse, matchRequestUrl, type RequestHandler } from "msw";
-import type {
-  ApiAnswer,
-  ApiChange,
-  ApiControl,
-  ApiRecord,
-  ApiRoute,
-  ApiSource,
+import {
+  type ApiAnswer,
+  type ApiChange,
+  type ApiControl,
+  type ApiRecord,
+  type ApiRoute,
+  type ApiSource,
+  NO_ANSWER_DETAIL,
 } from "../../../desktop/workbench/appContract";
 
-export const NO_ANSWER_DETAIL = "The workbench has no answer for this request.";
+export { NO_ANSWER_DETAIL };
 
 const FAILED_DETAIL = "The request failed.";
 
@@ -58,6 +59,40 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
+/** What a real fetch rejects with when its signal aborts. */
+function abortError(signal: AbortSignal): unknown {
+  return (
+    signal.reason ?? new DOMException("The request was aborted.", "AbortError")
+  );
+}
+
+/**
+ * Waits until `register` calls its `done`, or rejects as a real fetch does when the request's
+ * signal aborts (TanStack Query aborts on unmount and on a route change). `register` gives back
+ * how to stop waiting.
+ */
+function waitOrAbort(
+  signal: AbortSignal,
+  register: (done: () => void) => () => void,
+): Promise<void> {
+  return new Promise<void>((done, fail) => {
+    if (signal.aborted) {
+      fail(abortError(signal));
+      return;
+    }
+    let stop = () => {};
+    const onAbort = () => {
+      stop();
+      fail(abortError(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    stop = register(() => {
+      signal.removeEventListener("abort", onAbort);
+      done();
+    });
+  });
+}
+
 function toRequest(
   input: string | URL | Request,
   init: RequestInit | undefined,
@@ -75,25 +110,29 @@ export function installFakeApi(
   const answers = new Map<ApiRoute, ApiAnswer>();
   const records: ApiRecord[] = [];
   const listeners = new Set<(change: ApiChange) => void>();
-  /** Requests that wait on a "never" answer, by route. */
-  const waiting = new Map<ApiRoute, (() => void)[]>();
+  /**
+   * Requests that wait on a "never" answer. Any change of the answers wakes all of them: a newer
+   * answer on another route (`ALL /api/x` over `GET /api/x`) can match a request too, and each
+   * one looks for its answer again.
+   */
+  const waiting = new Set<() => void>();
   let nextId = 1;
 
   const notify = (change: ApiChange) => {
     for (const listener of [...listeners]) listener(change);
   };
 
-  const wake = (route: ApiRoute) => {
-    const list = waiting.get(route);
-    if (!list) return;
-    waiting.delete(route);
+  const wake = () => {
+    const list = [...waiting];
+    waiting.clear();
     for (const resume of list) resume();
   };
 
-  const matchingAnswer = (
-    request: Request,
-  ): { route: ApiRoute; answer: ApiAnswer } | null => {
-    const url = new URL(request.url);
+  const matchingAnswer = (request: {
+    method: string;
+    url: string;
+  }): { route: ApiRoute; answer: ApiAnswer } | null => {
+    const url = new URL(request.url, options.origin);
     const entries = [...answers.entries()];
     for (let i = entries.length - 1; i >= 0; i--) {
       const [route, answer] = entries[i];
@@ -107,6 +146,7 @@ export function installFakeApi(
   };
 
   const resolve = async (request: Request): Promise<Outcome> => {
+    if (request.signal.aborted) throw abortError(request.signal);
     const found = matchingAnswer(request);
     if (found) {
       const { route, answer } = found;
@@ -129,7 +169,16 @@ export function installFakeApi(
             route,
           };
         case "delay":
-          await new Promise<void>((done) => options.setTimer(done, answer.ms));
+          await waitOrAbort(request.signal, (done) => {
+            // The page clock's timer cannot be cleared: after an abort it only finds nothing to do.
+            let live = true;
+            options.setTimer(() => {
+              if (live) done();
+            }, answer.ms);
+            return () => {
+              live = false;
+            };
+          });
           return {
             kind: "response",
             response: jsonResponse(answer.status ?? 200, answer.body),
@@ -139,10 +188,9 @@ export function installFakeApi(
         case "offline":
           return { kind: "offline", route };
         case "never":
-          await new Promise<void>((done) => {
-            const list = waiting.get(route) ?? [];
-            list.push(done);
-            waiting.set(route, list);
+          await waitOrAbort(request.signal, (done) => {
+            waiting.add(done);
+            return () => waiting.delete(done);
           });
           return resolve(request);
       }
@@ -226,14 +274,15 @@ export function installFakeApi(
       answers.delete(route);
       answers.set(route, answer);
       notify({ kind: "answer", route });
-      wake(route);
+      wake();
     },
     clearAnswer(route) {
       answers.delete(route);
       notify({ kind: "answer", route });
-      wake(route);
+      wake();
     },
     answers: () => new Map(answers),
+    answerFor: ({ method, path }) => matchingAnswer({ method, url: path }),
     requests: () => records.map((record) => ({ ...record })),
     onChange(listener) {
       listeners.add(listener);

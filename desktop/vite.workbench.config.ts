@@ -1,8 +1,8 @@
 // Workbench only. The shipped build uses vite.config.ts and never this file.
 // Port 3021 because 3020 belongs to the app. WORKBENCH_PORT or --port picks another port, and
-// WORKBENCH_APP_PORT picks the app server's port (3023 by default).
+// WORKBENCH_APP_PORT picks the app server's port (the workbench port + 2 by default, so 3023).
 import { type ChildProcess, spawn } from "node:child_process";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
@@ -14,13 +14,24 @@ import {
   type ViteDevServer,
 } from "vite";
 import { APP_PREFIX } from "./workbench/appContract";
+import { noConfigRestart } from "./workbench/noConfigRestart";
 import {
+  APP_PID_FILE,
+  appPort,
   busyPortMessage,
   isAlive,
   leaseDir,
-  WORKBENCH_APP_PORT,
+  livePid,
+  portArg,
+  readPidFile,
   WORKBENCH_PORT,
+  writePidFile,
 } from "./workbench/server";
+
+// `--port` wins over WORKBENCH_PORT. Read here too, so that the dependency cache, the app server's
+// port and its pid file belong to the port this server listens on, not to 3021.
+const PORT = portArg(process.argv) ?? WORKBENCH_PORT;
+const APP_PORT = appPort(process.env.WORKBENCH_APP_PORT, PORT);
 
 const desktopDir = fileURLToPath(new URL(".", import.meta.url));
 const srcDir = `${normalizePath(desktopDir).replace(/\/$/, "")}/src/`;
@@ -55,13 +66,12 @@ function workbenchEnv(mode: string): Plugin {
   };
 }
 
-const APP_ORIGIN = `http://127.0.0.1:${WORKBENCH_APP_PORT}`;
+const APP_ORIGIN = `http://127.0.0.1:${APP_PORT}`;
 const APP_HTML_URL = `${APP_ORIGIN}${APP_PREFIX}`;
 const APP_CLIENT_URL = `${APP_ORIGIN}${APP_PREFIX}@vite/client`;
 const APP_POLL_MS = 250;
 const APP_START_TIMEOUT_MS = 90_000;
 const APP_STDERR_KEEP = 4096;
-const APP_PID_FILE = "app-server.pid";
 
 // The workbench's own paths. An iframe navigation to any other path is a route of the app.
 const WORKBENCH_PATH = /^\/(?:workbench|src|node_modules|__app)(?:\/|$)|^\/@/;
@@ -103,7 +113,7 @@ function appFrames(): Plugin {
           res.statusCode = 502;
           res.setHeader("content-type", "text/plain; charset=utf-8");
           res.end(
-            `The app server does not answer on port ${WORKBENCH_APP_PORT}. Run bun run workbench in app/.`,
+            `The app server does not answer on port ${APP_PORT}. Look in ${join(leaseDir(PORT), "server.log")}, then stop and start the workbench.`,
           );
         }
       });
@@ -141,40 +151,11 @@ function workbenchHome(): Plugin {
       const printUrls = server.printUrls.bind(server);
       server.printUrls = () => {
         printUrls();
-        const port = server.config.server.port ?? WORKBENCH_PORT;
+        const port = server.config.server.port ?? PORT;
         server.config.logger.info(
           `\n  Workbench: http://localhost:${port}${HOME}\n`,
         );
       };
-    },
-  };
-}
-
-// Vite restarts the server when the config file or a file it imports changes. A restart closes the
-// port for a moment and stops and starts the app server, so the runs of other processes that share
-// this server fail (ERR_CONNECTION_REFUSED, then 502 on /__app/ until the app is back). The server
-// keeps its config instead and says once that a restart is needed. The imported files still get
-// normal HMR: appContract.ts, for example, is also a module of the page.
-function noConfigRestart(): Plugin {
-  return {
-    name: "workbench-no-config-restart",
-    apply: "serve",
-    configureServer(server) {
-      const configFile = server.config.configFile;
-      const deps = [...server.config.configFileDependencies];
-      (server.config.configFileDependencies as string[]).length = 0;
-      if (configFile) server.watcher.unwatch(configFile);
-      const told = new Set<string>();
-      const tell = (file: string) => {
-        if (told.has(file)) return;
-        told.add(file);
-        server.config.logger.warn(
-          `Workbench: ${file} changed. Stop and start the workbench to use the change.`,
-        );
-      };
-      server.watcher.on("change", (file) => {
-        if (deps.includes(file)) tell(file);
-      });
     },
   };
 }
@@ -195,21 +176,14 @@ function killGroup(pid: number): void {
   } catch {}
 }
 
-function readPid(path: string): number | null {
-  try {
-    const pid = Number(readFileSync(path, "utf8").trim());
-    return Number.isInteger(pid) && pid > 0 ? pid : null;
-  } catch {
-    return null;
-  }
-}
-
 // An app server that an earlier workbench run started and did not stop (it was killed with
-// SIGKILL, for example) is stopped, so a run never reuses a server with old settings.
+// SIGKILL, for example) is stopped, so a run never reuses a server with old settings. A pid file
+// whose process is gone, or whose pid now belongs to another process, is only removed.
 async function stopEarlierAppServer(pidPath: string): Promise<void> {
-  const pid = readPid(pidPath);
-  if (pid === null) return;
-  if (isAlive(pid) && (await appAnswers())) {
+  const record = readPidFile(pidPath);
+  if (record === null) return;
+  const pid = livePid(record, isAlive);
+  if (pid !== null && (await appAnswers())) {
     killGroup(pid);
     const deadline = Date.now() + 5_000;
     while (Date.now() < deadline && (await appAnswers()))
@@ -234,7 +208,7 @@ function appServer(): Plugin {
         try {
           await listen(...args);
         } catch (error) {
-          const port = server.config.server.port ?? WORKBENCH_PORT;
+          const port = server.config.server.port ?? PORT;
           if (/already in use/.test(String((error as Error)?.message))) {
             console.error(busyPortMessage(port, "workbench"));
             process.exit(1);
@@ -252,18 +226,25 @@ function appServer(): Plugin {
 async function startAppServer(server: ViteDevServer): Promise<void> {
   const logger = server.config.logger;
   // The resolved port, so `--port` alone is enough.
-  const port = server.config.server.port ?? WORKBENCH_PORT;
-  const pidPath = join(leaseDir(port), APP_PID_FILE);
+  const port = server.config.server.port ?? PORT;
+  const dir = leaseDir(port);
+  const pidPath = join(dir, APP_PID_FILE);
   await stopEarlierAppServer(pidPath);
-  if (await appAnswers()) return;
+  // Not ours: another workbench's app server, or another program. Reusing it would stop it with
+  // this server, or leave it running when its owner thinks it stopped.
+  if (await appAnswers()) {
+    logger.error(busyPortMessage(APP_PORT, "app"));
+    return;
+  }
 
   const child: ChildProcess = spawn("bun", ["run", "workbench"], {
     cwd: join(desktopDir, "..", "app"),
     env: {
       ...process.env,
       WORKBENCH_PORT: String(port),
-      WORKBENCH_APP_PORT: String(WORKBENCH_APP_PORT),
-      // The same dependency cache hash for every app server (see spawnShared in server.ts).
+      WORKBENCH_APP_PORT: String(APP_PORT),
+      // `bun test` sets NODE_ENV=test, and Vite puts NODE_ENV in its dependency cache hash: the
+      // same value for every app server keeps one cache (spawnShared in server.ts does the same).
       NODE_ENV: "development",
     },
     detached: true,
@@ -274,8 +255,11 @@ async function startAppServer(server: ViteDevServer): Promise<void> {
     logger.error("Workbench: the app server did not start.");
     return;
   }
+  // A server that a person started has no lease folder yet: without the folder the pid file was
+  // never written, and nothing could stop an app server that outlived this server.
   try {
-    writeFileSync(pidPath, String(pid));
+    mkdirSync(dir, { recursive: true });
+    writePidFile(pidPath, pid);
   } catch {}
 
   let stderr = "";
@@ -309,12 +293,13 @@ async function startAppServer(server: ViteDevServer): Promise<void> {
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
     server.httpServer?.off("close", onExit);
+    // The pid file stays until the app server exits: if it does not end on this SIGTERM,
+    // ensureServer()'s stop() (or the next start) still finds it and stops it.
     if (!exited) killGroup(pid as number);
-    rmSync(pidPath, { force: true });
   }
   child.on("exit", (code, signal) => {
     exited = true;
-    if (readPid(pidPath) === pid) rmSync(pidPath, { force: true });
+    if (readPidFile(pidPath)?.pid === pid) rmSync(pidPath, { force: true });
     // An app server that ends while this server runs leaves every app frame without its files.
     if (!stopped)
       logger.error(
@@ -333,7 +318,7 @@ async function startAppServer(server: ViteDevServer): Promise<void> {
   }
   if (stopped) return;
   logger.error(
-    `Workbench: the app server did not answer on port ${WORKBENCH_APP_PORT}. The desktop scenes still work.\n${stderr}`,
+    `Workbench: the app server did not answer on port ${APP_PORT}. The desktop scenes still work.\n${stderr}`,
   );
 }
 
@@ -349,15 +334,10 @@ export default defineConfig(({ mode }) => ({
   root: desktopDir,
   // A dependency cache for each port: a second workbench (another port, the same checkout) never
   // optimizes the dependencies again in the folder that this server serves them from.
-  cacheDir: join(
-    desktopDir,
-    "node_modules",
-    ".vite-workbench",
-    String(WORKBENCH_PORT),
-  ),
+  cacheDir: join(desktopDir, "node_modules", ".vite-workbench", String(PORT)),
   clearScreen: false,
   server: {
-    port: WORKBENCH_PORT,
+    port: PORT,
     strictPort: true,
     proxy: { "/__app": { target: APP_ORIGIN, ws: true } },
   },

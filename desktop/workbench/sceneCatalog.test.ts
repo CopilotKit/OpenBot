@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { AppScene } from "./appContract";
 import {
   APP_SCENES_URL,
+  APP_SERVER_HINT,
   isApp,
   loadScenes,
   pickAppScenes,
@@ -53,7 +54,7 @@ describe("loadScenes", () => {
     const out = await loadScenes(() => Promise.reject(new Error("No server")));
     expect(out.scenes).toEqual([...SCENES]);
     expect(out.notices).toEqual([
-      'The app scenes did not load: No server. Start the app server with "bun run workbench" in app/.',
+      `The app scenes did not load: No server. ${APP_SERVER_HINT}`,
     ]);
   });
 

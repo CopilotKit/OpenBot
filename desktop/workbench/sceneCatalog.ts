@@ -11,6 +11,10 @@ export type SceneEntry = DesktopSceneEntry | AppScene;
 
 export const APP_SCENES_URL = "/__app/workbench/scenes/index.ts";
 
+/** What to do when the app scenes did not load. The workbench starts the app server itself. */
+export const APP_SERVER_HINT =
+  "The app server did not start or does not answer. Look in the workbench server's log (the terminal of bun run workbench, or <tmpdir>/openbot-workbench-<port>/server.log when the CLI or a test started it), then stop and start the workbench.";
+
 export const ALL_SCENE_GROUPS: readonly string[] = [
   ...SCENE_GROUPS,
   ...APP_SCENE_GROUPS,
@@ -82,7 +86,7 @@ export async function loadScenes(
     return {
       scenes: desktop,
       notices: [
-        `The app scenes did not load: ${messageOf(error)}. Start the app server with "bun run workbench" in app/.`,
+        `The app scenes did not load: ${messageOf(error)}. ${APP_SERVER_HINT}`,
       ],
     };
   }
