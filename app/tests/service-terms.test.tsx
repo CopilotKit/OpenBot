@@ -388,6 +388,30 @@ async function shoot(
   });
 }
 
+/** The screen as a phone shows it scrolled to the end: the viewport, not the whole page. */
+async function shootEnd(
+  page: Page,
+  screen: string,
+  engine: string,
+  theme: Theme,
+  window: Window,
+) {
+  if (!shots) return;
+  await style(page);
+  await page.evaluate(() => {
+    const root = document.documentElement;
+    root.scrollTop = root.scrollHeight;
+  });
+  await page.waitForTimeout(100);
+  mkdirSync(shots, { recursive: true });
+  await page.screenshot({
+    path: join(
+      shots,
+      `terms-${screen}-end-${engine}-${theme}-${window.width}.png`,
+    ),
+  });
+}
+
 /** What a person would see wrong: sideways scroll, or a control cut off at the side. */
 async function measured(page: Page) {
   await style(page);
@@ -412,6 +436,34 @@ async function measured(page: Page) {
 }
 
 const FINE = { sideways: false, cut: [] };
+
+/**
+ * On a phone, scrolled to the end, how far the step's last content reaches into the fade above the
+ * pinned buttons, in px (0 when it is clear of it). The fade is the footer's `before:`, 32px tall,
+ * which says there is more below while there is; at the end there is no more, so nothing belongs
+ * under it. The carousel's dots sat there, half hidden.
+ */
+async function underTheFade(page: Page): Promise<number> {
+  await style(page);
+  return page.evaluate(() => {
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    const footer = document.querySelector("footer");
+    if (!footer) throw new Error("no footer");
+    const fadeTop =
+      footer.getBoundingClientRect().top -
+      Number.parseFloat(getComputedStyle(footer, "::before").height || "0");
+    const bottoms = [
+      ...document.querySelectorAll(
+        "[data-onboarding-demo] *, [data-onboarding-intro] *",
+      ),
+    ]
+      .map((element) => element.getBoundingClientRect())
+      .filter((rect) => rect.width > 0 && rect.height > 0)
+      .map((rect) => rect.bottom);
+    return Math.max(0, Math.round(Math.max(...bottoms) - fadeTop));
+  });
+}
+
 const primary = (page: Page) => page.locator("[data-onboarding-primary]");
 const agree = (page: Page) =>
   page.getByRole("checkbox", {
@@ -597,6 +649,45 @@ describe.skipIf(!asked)("The terms on OpenBot Cloud", () => {
     }, 60_000);
 });
 
+describe.skipIf(!asked)("On a phone", () => {
+  for (const engine of engines)
+    test(`nothing at the end of the terms or of Welcome sits under the fade above the buttons, in ${engine}`, async () => {
+      const found: Record<string, number> = {};
+      // Welcome as it was before the terms, on an OpenBot with none.
+      const welcome = await open(
+        "/",
+        new FakeServer("none"),
+        engine,
+        "light",
+        PHONE,
+      );
+      try {
+        await heading(welcome, "Welcome to OpenBot");
+        found.welcome = await underTheFade(welcome);
+      } finally {
+        await welcome.close();
+      }
+      const page = await open(
+        "/",
+        new FakeServer("toAgree"),
+        engine,
+        "light",
+        PHONE,
+      );
+      try {
+        await heading(page, "Agree to the terms");
+        found.terms = await underTheFade(page);
+        await tick(page);
+        await primary(page).click();
+        await heading(page, "Welcome to OpenBot");
+        found.welcomeAfterTerms = await underTheFade(page);
+      } finally {
+        await page.close();
+      }
+      expect(found).toEqual({ welcome: 0, terms: 0, welcomeAfterTerms: 0 });
+    }, 60_000);
+});
+
 describe.skipIf(!asked)("No terms to agree to", () => {
   for (const engine of engines)
     test(`a self-hosted OpenBot never shows the terms, in ${engine}`, async () => {
@@ -661,6 +752,7 @@ test.skipIf(!asked || !shots)(
           try {
             await heading(before, "Welcome to OpenBot");
             await shoot(before, "compare-welcome", engine, theme, window);
+            await shootEnd(before, "compare-welcome", engine, theme, window);
           } finally {
             await before.close();
           }
@@ -676,11 +768,13 @@ test.skipIf(!asked || !shots)(
             await heading(page, "Agree to the terms");
             expect(await measured(page)).toEqual(FINE);
             await shoot(page, "screen", engine, theme, window);
+            await shootEnd(page, "screen", engine, theme, window);
             await tick(page);
             await shoot(page, "screen-ticked", engine, theme, window);
             await primary(page).click();
             await heading(page, "Welcome to OpenBot");
             await shoot(page, "after-welcome", engine, theme, window);
+            await shootEnd(page, "after-welcome", engine, theme, window);
           } finally {
             await page.close();
           }
