@@ -35,6 +35,7 @@ export * from "./aiConnectionLogin";
 export * from "./aiConnectionProvider";
 export * from "./aiConnectionRefusedResponse";
 export * from "./aiConnectionSaved";
+export * from "./aiConnectionSharedSignIn";
 export * from "./aiConnectionSource";
 export * from "./aiSignIn";
 export * from "./aiSignInCodeInput";

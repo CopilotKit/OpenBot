@@ -377,13 +377,38 @@ export const GetAiConnectionResponse = zod
       .datetime({ offset: true })
       .nullable()
       .describe("When it was last changed. Null if never."),
+    sharedSignIn: zod
+      .union([
+        zod
+          .object({
+            personId: zod.string().describe("The person's id."),
+            name: zod
+              .string()
+              .describe(
+                "Their name as OpenBot shows it, or their email address where they have none.",
+              ),
+            ready: zod
+              .boolean()
+              .describe(
+                "Whether their sign-in is still kept and can run a Bot. False once they removed it or the provider stopped renewing it.",
+              ),
+          })
+          .describe(
+            "The person whose own sign-in the organization's AI shares. Never a token.",
+          ),
+        zod.null(),
+      ])
+      .optional()
+      .describe(
+        "Whose plan or provider sign-in the organization's AI runs on, when an administrator shared their own on OpenBot Cloud. Null for a key, an address, a sign-in held on this computer, or none. A server older than this field leaves it out.",
+      ),
   })
   .describe(
     "How OpenBot reaches its AI provider: who, how it signs in, and whether a run can use it now. Never a key.",
   );
 
 /**
- * Switch the AI provider OpenBot's Bots run on, with no restart. OpenBot checks the connection with the provider first: a key, an address or a sign-in it can't use is refused, nothing is saved, and the connection in use keeps running. Once saved, the next run uses it, and runs already going finish on the one they started with. A key goes into the organization's vault and is never sent back; the key of the connection it replaces stays kept, so it can be used again (saved). Recorded on the audit trail, never with a key. Only an administrator of the organization may change it, and not where whoever runs OpenBot sets the provider.
+ * Switch the AI provider OpenBot's Bots run on, with no restart. OpenBot checks the connection with the provider first: a key, an address or a sign-in it can't use is refused, nothing is saved, and the connection in use keeps running. Once saved, the next run uses it, and runs already going finish on the one they started with. A key goes into the organization's vault and is never sent back; the key of the connection it replaces stays kept, so it can be used again (saved). Recorded on the audit trail, never with a key. Only an administrator of the organization may change it, and not where whoever runs OpenBot sets the provider. On OpenBot Cloud an administrator may also share their own plan (openai, anthropic) or provider sign-in (google, xai) as the organization's AI: send that login once they have signed in to the provider through OpenBot (startPersonalAiSignIn) and the sign-in is kept for them. Bots across the organization then run on that sign-in for everyone with no AI of their own, and sharedSignIn names whose it is. It stops working if that person removes their own sign-in; another administrator can switch it at any time.
  * @summary Change how OpenBot reaches its AI provider
  */
 
@@ -572,6 +597,31 @@ export const ReplaceAiConnectionResponse = zod
       .datetime({ offset: true })
       .nullable()
       .describe("When it was last changed. Null if never."),
+    sharedSignIn: zod
+      .union([
+        zod
+          .object({
+            personId: zod.string().describe("The person's id."),
+            name: zod
+              .string()
+              .describe(
+                "Their name as OpenBot shows it, or their email address where they have none.",
+              ),
+            ready: zod
+              .boolean()
+              .describe(
+                "Whether their sign-in is still kept and can run a Bot. False once they removed it or the provider stopped renewing it.",
+              ),
+          })
+          .describe(
+            "The person whose own sign-in the organization's AI shares. Never a token.",
+          ),
+        zod.null(),
+      ])
+      .optional()
+      .describe(
+        "Whose plan or provider sign-in the organization's AI runs on, when an administrator shared their own on OpenBot Cloud. Null for a key, an address, a sign-in held on this computer, or none. A server older than this field leaves it out.",
+      ),
   })
   .describe(
     "How OpenBot reaches its AI provider: who, how it signs in, and whether a run can use it now. Never a key.",
@@ -701,6 +751,31 @@ export const DeleteAiConnectionResponse = zod
       .datetime({ offset: true })
       .nullable()
       .describe("When it was last changed. Null if never."),
+    sharedSignIn: zod
+      .union([
+        zod
+          .object({
+            personId: zod.string().describe("The person's id."),
+            name: zod
+              .string()
+              .describe(
+                "Their name as OpenBot shows it, or their email address where they have none.",
+              ),
+            ready: zod
+              .boolean()
+              .describe(
+                "Whether their sign-in is still kept and can run a Bot. False once they removed it or the provider stopped renewing it.",
+              ),
+          })
+          .describe(
+            "The person whose own sign-in the organization's AI shares. Never a token.",
+          ),
+        zod.null(),
+      ])
+      .optional()
+      .describe(
+        "Whose plan or provider sign-in the organization's AI runs on, when an administrator shared their own on OpenBot Cloud. Null for a key, an address, a sign-in held on this computer, or none. A server older than this field leaves it out.",
+      ),
   })
   .describe(
     "How OpenBot reaches its AI provider: who, how it signs in, and whether a run can use it now. Never a key.",
@@ -836,6 +911,31 @@ export const GetPersonalAiConnectionResponse = zod
           .datetime({ offset: true })
           .nullable()
           .describe("When it was last changed. Null if never."),
+        sharedSignIn: zod
+          .union([
+            zod
+              .object({
+                personId: zod.string().describe("The person's id."),
+                name: zod
+                  .string()
+                  .describe(
+                    "Their name as OpenBot shows it, or their email address where they have none.",
+                  ),
+                ready: zod
+                  .boolean()
+                  .describe(
+                    "Whether their sign-in is still kept and can run a Bot. False once they removed it or the provider stopped renewing it.",
+                  ),
+              })
+              .describe(
+                "The person whose own sign-in the organization's AI shares. Never a token.",
+              ),
+            zod.null(),
+          ])
+          .optional()
+          .describe(
+            "Whose plan or provider sign-in the organization's AI runs on, when an administrator shared their own on OpenBot Cloud. Null for a key, an address, a sign-in held on this computer, or none. A server older than this field leaves it out.",
+          ),
       })
       .describe(
         "How OpenBot reaches its AI provider: who, how it signs in, and whether a run can use it now. Never a key.",
@@ -1112,6 +1212,31 @@ export const ReplacePersonalAiConnectionResponse = zod
           .datetime({ offset: true })
           .nullable()
           .describe("When it was last changed. Null if never."),
+        sharedSignIn: zod
+          .union([
+            zod
+              .object({
+                personId: zod.string().describe("The person's id."),
+                name: zod
+                  .string()
+                  .describe(
+                    "Their name as OpenBot shows it, or their email address where they have none.",
+                  ),
+                ready: zod
+                  .boolean()
+                  .describe(
+                    "Whether their sign-in is still kept and can run a Bot. False once they removed it or the provider stopped renewing it.",
+                  ),
+              })
+              .describe(
+                "The person whose own sign-in the organization's AI shares. Never a token.",
+              ),
+            zod.null(),
+          ])
+          .optional()
+          .describe(
+            "Whose plan or provider sign-in the organization's AI runs on, when an administrator shared their own on OpenBot Cloud. Null for a key, an address, a sign-in held on this computer, or none. A server older than this field leaves it out.",
+          ),
       })
       .describe(
         "How OpenBot reaches its AI provider: who, how it signs in, and whether a run can use it now. Never a key.",
@@ -1322,6 +1447,31 @@ export const DeletePersonalAiConnectionResponse = zod
           .datetime({ offset: true })
           .nullable()
           .describe("When it was last changed. Null if never."),
+        sharedSignIn: zod
+          .union([
+            zod
+              .object({
+                personId: zod.string().describe("The person's id."),
+                name: zod
+                  .string()
+                  .describe(
+                    "Their name as OpenBot shows it, or their email address where they have none.",
+                  ),
+                ready: zod
+                  .boolean()
+                  .describe(
+                    "Whether their sign-in is still kept and can run a Bot. False once they removed it or the provider stopped renewing it.",
+                  ),
+              })
+              .describe(
+                "The person whose own sign-in the organization's AI shares. Never a token.",
+              ),
+            zod.null(),
+          ])
+          .optional()
+          .describe(
+            "Whose plan or provider sign-in the organization's AI runs on, when an administrator shared their own on OpenBot Cloud. Null for a key, an address, a sign-in held on this computer, or none. A server older than this field leaves it out.",
+          ),
       })
       .describe(
         "How OpenBot reaches its AI provider: who, how it signs in, and whether a run can use it now. Never a key.",

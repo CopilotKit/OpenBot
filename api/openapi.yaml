@@ -4693,7 +4693,7 @@ paths:
         - Models
       operationId: replaceAiConnection
       summary: Change how OpenBot reaches its AI provider
-      description: 'Switch the AI provider OpenBot''s Bots run on, with no restart. OpenBot checks the connection with the provider first: a key, an address or a sign-in it can''t use is refused, nothing is saved, and the connection in use keeps running. Once saved, the next run uses it, and runs already going finish on the one they started with. A key goes into the organization''s vault and is never sent back; the key of the connection it replaces stays kept, so it can be used again (saved). Recorded on the audit trail, never with a key. Only an administrator of the organization may change it, and not where whoever runs OpenBot sets the provider.'
+      description: 'Switch the AI provider OpenBot''s Bots run on, with no restart. OpenBot checks the connection with the provider first: a key, an address or a sign-in it can''t use is refused, nothing is saved, and the connection in use keeps running. Once saved, the next run uses it, and runs already going finish on the one they started with. A key goes into the organization''s vault and is never sent back; the key of the connection it replaces stays kept, so it can be used again (saved). Recorded on the audit trail, never with a key. Only an administrator of the organization may change it, and not where whoever runs OpenBot sets the provider. On OpenBot Cloud an administrator may also share their own plan (openai, anthropic) or provider sign-in (google, xai) as the organization''s AI: send that login once they have signed in to the provider through OpenBot (startPersonalAiSignIn) and the sign-in is kept for them. Bots across the organization then run on that sign-in for everyone with no AI of their own, and sharedSignIn names whose it is. It stops working if that person removes their own sign-in; another administrator can switch it at any time.'
       security:
         - webSession: []
         - appOAuth:
@@ -4749,6 +4749,8 @@ paths:
                   $ref: '#/components/examples/AiConnectionExample'
                 endpoint:
                   $ref: '#/components/examples/AiConnectionEndpointExample'
+                sharedPlan:
+                  $ref: '#/components/examples/AiConnectionSharedPlanExample'
         '400':
           $ref: '#/components/responses/InvalidAiConnection'
         '401':
@@ -26747,6 +26749,23 @@ components:
             - string
             - 'null'
           description: The host of its address, for an endpoint. Null for an API key.
+    AiConnectionSharedSignIn:
+      type: object
+      description: The person whose own sign-in the organization's AI shares. Never a token.
+      required:
+        - personId
+        - name
+        - ready
+      properties:
+        personId:
+          type: string
+          description: The person's id.
+        name:
+          type: string
+          description: Their name as OpenBot shows it, or their email address where they have none.
+        ready:
+          type: boolean
+          description: Whether their sign-in is still kept and can run a Bot. False once they removed it or the provider stopped renewing it.
     AiConnection:
       type: object
       description: 'How OpenBot reaches its AI provider: who, how it signs in, and whether a run can use it now. Never a key.'
@@ -26809,6 +26828,11 @@ components:
             - 'null'
           format: date-time
           description: When it was last changed. Null if never.
+        sharedSignIn:
+          description: Whose plan or provider sign-in the organization's AI runs on, when an administrator shared their own on OpenBot Cloud. Null for a key, an address, a sign-in held on this computer, or none. A server older than this field leaves it out.
+          oneOf:
+            - $ref: '#/components/schemas/AiConnectionSharedSignIn'
+            - type: 'null'
     AiConnectionInput:
       type: object
       additionalProperties: false
@@ -46123,6 +46147,23 @@ components:
         editable: true
         saved: []
         changedAt: null
+    AiConnectionSharedPlanExample:
+      summary: On OpenBot Cloud, an administrator's own Claude plan, shared as the organization's AI.
+      value:
+        provider: anthropic
+        login: plan
+        model: null
+        endpointHost: null
+        keySet: false
+        ready: true
+        source: stored
+        editable: true
+        saved: []
+        changedAt: '2026-11-22T09:00:00.000Z'
+        sharedSignIn:
+          personId: 01a20142-2410-79b4-8c4d-f64c84c10a87
+          name: Dana Reyes
+          ready: true
     AiConnectionDisconnectedExample:
       summary: Disconnected, with an OpenAI key still kept from before.
       value:
