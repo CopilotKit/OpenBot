@@ -6,9 +6,12 @@ import { compile } from "tailwindcss";
 import { parse } from "yaml";
 import type {
   AiConnection,
+  AiConnectionProvider,
   PersonalAiConnection,
 } from "@/lib/api/generated/model";
 import {
+  FinishPersonalAiSignInBody,
+  FinishPersonalAiSignInResponse,
   GetAiConnectionResponse,
   GetPersonalAiConnectionResponse,
   GetPersonalAiSignInResponse,
@@ -31,8 +34,12 @@ import { personBody } from "./accounts-api";
  * - A new person whose organization has an AI never sees the step.
  * - Somebody who finished onboarding before the step existed is sent to it as their only step, and
  *   its button takes them in without finishing onboarding again.
- * - Inside OpenBot Desktop the chooser still offers no plan, and Unbiased AI signs in through the
- *   server: the code, Open the sign-in page, then Connect with the key the server kept.
+ * - Every provider the server signs in to offers its sign-in first and a key as the alternative,
+ *   as the setup window does. A ChatGPT plan, xAI, Google and Unbiased AI sign in on their own
+ *   pages and are read until approved; a Claude plan finishes with the code Claude's page shows.
+ *   Failed and expired sign-ins say why and sign in again, and leaving the row stops the reading.
+ *   Inside OpenBot Desktop the sign-in is still the server's, never Desktop's.
+ * - Use an API key still connects every provider.
  * - Settings shows Your AI: theirs, which can be removed, back to the organization's.
  *
  * The server is served as routes at the API's address, answering as api/openapi.yaml says: the
@@ -101,15 +108,96 @@ const BAD_KEY = "sk-ant-api03-refused";
 
 type Start = "none" | "organization";
 
-/** The person's AI connection as the spec's example for `start` says it. */
+/**
+ * The person's AI connection as the spec's example for `start` says it, on a server set up for
+ * Google's sign-in as well (the examples' server is not, so lists the other four).
+ */
 function personalFor(start: Start): PersonalAiConnection {
-  return GetPersonalAiConnectionResponse.parse(
-    example(
-      start === "none"
-        ? "PersonalAiConnectionNoneExample"
-        : "PersonalAiConnectionOrganizationExample",
+  const found = example(
+    start === "none"
+      ? "PersonalAiConnectionNoneExample"
+      : "PersonalAiConnectionOrganizationExample",
+  ) as { signIns: string[] };
+  return GetPersonalAiConnectionResponse.parse({
+    ...found,
+    signIns: [...found.signIns, "google"],
+  }) as PersonalAiConnection;
+}
+
+/** How a sign-in the server runs ends: `never` stays pending for as long as it is read. */
+type Outcome = "approved" | "failed" | "expired" | "never";
+type SignIn = {
+  id: string;
+  provider: AiConnectionProvider;
+  outcome: Outcome;
+  reads: number;
+};
+
+/**
+ * A sign-in as the server starts it for each provider: the spec's own examples for ChatGPT, Claude
+ * and Unbiased AI, and for xAI and Google the same shape with what their pages give. Both finish by
+ * themselves (poll): xAI's device page asks for the code shown here, and Google's page sends the
+ * person back to OpenBot, with no code at all.
+ */
+function signInStarted(provider: AiConnectionProvider) {
+  if (provider === "openai") return example("AiSignInChatGptExample");
+  if (provider === "anthropic") return example("AiSignInClaudeExample");
+  if (provider === "xai")
+    return {
+      ...example("AiSignInChatGptExample"),
+      id: "eGFpLXNpZ24taW4",
+      provider,
+      url: "https://accounts.x.ai/oauth2/device?user_code=MQ7T-WD4X",
+      userCode: "MQ7T-WD4X",
+    };
+  if (provider === "google")
+    return {
+      ...example("AiSignInChatGptExample"),
+      id: "Z29vZ2xlLXNpZ24taW4",
+      provider,
+      url: "https://accounts.google.com/o/oauth2/v2/auth?client_id=example&redirect_uri=https%3A%2F%2Fopenbot.test%2Fapi%2Fexample-callback&response_type=code&state=example",
+      userCode: null,
+    };
+  return example("AiSignInExample");
+}
+
+/** What finishes Claude's sign-in: the spec's example of the code Claude's page shows. */
+const CLAUDE_CODE = "Zm9vYmFyLWNvZGU#c3RhdGUtZXhhbXBsZQ";
+const GOOD_CODES: Partial<Record<AiConnectionProvider, string>> = {
+  anthropic: CLAUDE_CODE,
+};
+/** What the server's sentences call each sign-in. */
+const SIGN_IN_NAMES: Record<string, string> = {
+  anthropic: "Claude",
+  google: "Google",
+  openai: "ChatGPT",
+  xai: "xAI",
+  unbiased: "Unbiased AI",
+};
+
+/** Where a sign-in stands, in the spec's shape, with the server's sentence when it is over. */
+function signInStatus(
+  signIn: SignIn,
+  status: "pending" | "approved" | "failed" | "expired",
+) {
+  const name = SIGN_IN_NAMES[signIn.provider];
+  return GetPersonalAiSignInResponse.parse({
+    ...example(
+      status === "approved"
+        ? "AiSignInApprovedExample"
+        : "AiSignInPendingExample",
     ),
-  ) as PersonalAiConnection;
+    id: signIn.id,
+    provider: signIn.provider,
+    status,
+    detail:
+      status === "failed"
+        ? `${name} didn't approve the sign-in. Sign in again.`
+        : status === "expired"
+          ? `The ${name} sign-in expired. Sign in again.`
+          : null,
+    interval: 1,
+  });
 }
 
 /**
@@ -157,6 +245,14 @@ class FakeServer {
   signIns: unknown[] = [];
   signInReads = 0;
   signOuts = 0;
+  /** How each sign-in started from now on ends, in order; approved once these run out. */
+  outcomes: Outcome[] = [];
+  /** The sign-in under way, as the server keeps it. */
+  signIn: SignIn | null = null;
+  /** Every code sent to finish a sign-in, as its body was checked. */
+  finishes: unknown[] = [];
+  /** Every page the app opened in a new tab. */
+  opened: string[] = [];
 
   constructor(start: Start, onboarded = false) {
     this.personal = personalFor(start);
@@ -249,29 +345,65 @@ class FakeServer {
       return { status: 200, json: this.personal };
     }
     if (path === SIGN_INS && method === "POST") {
+      expect(request.headers()["idempotency-key"]?.length ?? 0).toBeGreaterThan(
+        0,
+      );
       const body = StartPersonalAiSignInBody.parse(request.postDataJSON());
       this.signIns.push(body);
       // The spec's example, read again every second rather than five so the test is quick.
-      return {
-        status: 201,
-        json: StartPersonalAiSignInResponse.parse({
-          ...example("AiSignInExample"),
-          interval: 1,
-        }),
+      const begun = StartPersonalAiSignInResponse.parse({
+        ...signInStarted(body.provider),
+        interval: 1,
+      });
+      this.signIn = {
+        id: begun.id,
+        provider: body.provider,
+        outcome: this.outcomes.shift() ?? "approved",
+        reads: 0,
       };
+      return { status: 201, json: begun };
     }
     if (path.startsWith(`${SIGN_INS}/`) && method === "GET") {
       this.signInReads += 1;
+      const signIn = this.signIn;
+      if (!signIn || !path.endsWith(`/${signIn.id}`))
+        return { status: 404, json: { detail: "No such sign-in." } };
+      signIn.reads += 1;
       return {
         status: 200,
-        json: GetPersonalAiSignInResponse.parse({
-          ...example(
-            this.signInReads < 2
-              ? "AiSignInPendingExample"
-              : "AiSignInApprovedExample",
+        json: signInStatus(
+          signIn,
+          signIn.reads < 2 || signIn.outcome === "never"
+            ? "pending"
+            : signIn.outcome,
+        ),
+      };
+    }
+    if (
+      path.startsWith(`${SIGN_INS}/`) &&
+      path.endsWith("/code") &&
+      method === "POST"
+    ) {
+      expect(request.headers()["idempotency-key"]?.length ?? 0).toBeGreaterThan(
+        0,
+      );
+      const body = request.postDataJSON() as Record<string, unknown>;
+      const input = FinishPersonalAiSignInBody.parse(body);
+      for (const key of Object.keys(body))
+        expect(Object.keys(input)).toContain(key);
+      this.finishes.push(input);
+      const signIn = this.signIn;
+      if (!signIn || path !== `${SIGN_INS}/${signIn.id}/code`)
+        return { status: 404, json: { detail: "No such sign-in." } };
+      const good = GOOD_CODES[signIn.provider];
+      return {
+        status: 200,
+        json: FinishPersonalAiSignInResponse.parse(
+          signInStatus(
+            signIn,
+            good && input.code.trim() === good ? "approved" : "failed",
           ),
-          interval: 1,
-        }),
+        ),
       };
     }
     if (path === ME && method === "GET")
@@ -476,6 +608,14 @@ async function open(
       };
     });
   const inter = join(packageDir("@fontsource-variable/inter"), "files");
+  // A provider's sign-in page, opened in a new tab: recorded, and never fetched from the provider.
+  await page.context().route(
+    (url) => url.origin !== ORIGIN,
+    (route) => {
+      server.opened.push(route.request().url());
+      return route.fulfill({ contentType: "text/html", body: "" });
+    },
+  );
   await page.route(`${ORIGIN}/**`, (route) => {
     const where = new URL(route.request().url()).pathname;
     if (where === "/screens.js")
@@ -590,13 +730,19 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         expect(new URL(page.url()).pathname).toBe("/onboarding");
 
         const chooser = page.locator("[data-ai-chooser]");
-        // A key for every provider, and no plan: the server runs this person's Bots.
+        // The plan's sign-in first, which the server runs, and a key as the alternative.
         await chooser.getByRole("button", { name: /^OpenAI/ }).click();
-        await chooser.getByLabel("OpenAI API key").waitFor();
-        expect(await chooser.getByText("Sign in with my plan").count()).toBe(0);
+        expect(await chooser.getByRole("tab").allTextContents()).toEqual([
+          "Sign in with my plan",
+          "Use an API key",
+        ]);
+        await chooser
+          .getByRole("button", { name: "Sign in with OpenAI", exact: true })
+          .waitFor();
         await chooser.getByRole("button", { name: "Back" }).click();
 
         await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+        await chooser.getByRole("tab", { name: "Use an API key" }).click();
         const key = chooser.getByLabel("Anthropic API key");
         await key.fill(BAD_KEY);
         await chooser.getByRole("button", { name: "Connect" }).click();
@@ -666,6 +812,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         expect(await page.locator("[data-onboarding-steps]").count()).toBe(0);
         const chooser = page.locator("[data-ai-chooser]");
         await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+        await chooser.getByRole("tab", { name: "Use an API key" }).click();
         await chooser.getByLabel("Anthropic API key").fill(GOOD_KEY);
         await chooser.getByRole("button", { name: "Connect" }).click();
         await chooser.getByRole("status").waitFor();
@@ -680,7 +827,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
     }, 60_000);
 
   for (const engine of engines)
-    test(`inside OpenBot Desktop: no plan, and Unbiased AI signs in through the server, in ${engine}`, async () => {
+    test(`inside OpenBot Desktop: the plan and Unbiased AI sign in through the server, in ${engine}`, async () => {
       const server = new FakeServer("none", true);
       const page = await open(
         "/onboarding?step=ai",
@@ -693,11 +840,16 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
       try {
         await heading(page, "Connect your AI");
         const chooser = page.locator("[data-ai-chooser]");
+        // The plan's sign-in is the server's, never Desktop's: Desktop answers nothing it is
+        // asked here, and the sign-in still reaches the server and finishes.
         await chooser.getByRole("button", { name: /^OpenAI/ }).click();
-        await chooser.getByLabel("OpenAI API key").waitFor();
-        expect(await chooser.getByRole("tab").count()).toBe(0);
-        expect(await chooser.getByText("Sign in with my plan").count()).toBe(0);
+        await chooser
+          .getByRole("button", { name: "Sign in with OpenAI", exact: true })
+          .click();
+        await chooser.getByText("Signed in to OpenAI.").waitFor();
+        expect(server.signIns).toEqual([{ provider: "openai" }]);
         await chooser.getByRole("button", { name: "Back" }).click();
+        server.signIns = [];
 
         await chooser.getByRole("button", { name: /^Unbiased AI/ }).click();
         // Sign-in first, a key as the alternative.
@@ -934,6 +1086,353 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
       }
     }, 60_000);
 
+  for (const engine of engines)
+    test(`a ChatGPT plan signs in with the code on OpenAI's page, connects, and Settings names it, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        await heading(page, "Connect your AI");
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^OpenAI/ }).click();
+        await chooser
+          .getByRole("button", { name: "Sign in with OpenAI", exact: true })
+          .click();
+        // The code to enter on OpenAI's page, and the page itself: opened, and linked.
+        await chooser.getByText("VU3W-87566").waitFor();
+        expect(
+          await chooser
+            .getByRole("link", { name: "Open the sign-in page" })
+            .getAttribute("href"),
+        ).toBe("https://auth.openai.com/codex/device");
+        // Read every interval until OpenAI says it is approved: pending once, then approved.
+        await chooser.getByText("Signed in to OpenAI.").waitFor();
+        expect(server.signIns).toEqual([{ provider: "openai" }]);
+        expect(server.signIn?.reads).toBe(2);
+        expect(server.opened).toContain("https://auth.openai.com/codex/device");
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        const connected = chooser.getByRole("status");
+        await connected.waitFor();
+        expect(server.replaces).toEqual([
+          { provider: "openai", login: "plan" },
+        ]);
+        expect(await connected.textContent()).toContain(
+          "Signed in with your ChatGPT plan.",
+        );
+
+        await primary(page).click();
+        await page.locator("[data-app-home]").waitFor();
+        await page.goto(`${ORIGIN}/settings`);
+        await page
+          .getByRole("button", {
+            name: /OpenAI.*Signed in with your ChatGPT plan\./,
+          })
+          .click();
+        const dialog = page.getByRole("dialog");
+        await dialog
+          .getByText(
+            "Bots use OpenAI when they work for you. It's yours alone, and OpenBot keeps you signed in.",
+          )
+          .waitFor();
+        await dialog.getByText("ChatGPT plan", { exact: true }).waitFor();
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`a Claude plan signs in with the code Claude's page shows, in Settings, in ${engine}`, async () => {
+      const server = new FakeServer("organization", true);
+      const page = await open("/settings", server, engine, "light", WIDE);
+      try {
+        await page
+          .getByRole("button", { name: /Your organization's AI/ })
+          .click();
+        const dialog = page.getByRole("dialog");
+        await dialog.getByRole("button", { name: /^Anthropic/ }).waitFor();
+        // Styled, so the dialog sits over its backdrop as it does in the app.
+        await style(page);
+        await dialog.getByRole("button", { name: /^Anthropic/ }).click();
+        expect(await dialog.getByRole("tab").allTextContents()).toEqual([
+          "Sign in with my plan",
+          "Use an API key",
+        ]);
+        const signIn = dialog.getByRole("button", {
+          name: "Sign in with Anthropic",
+          exact: true,
+        });
+        await signIn.click();
+        const code = dialog.getByLabel("Code from your browser");
+        await code.waitFor();
+        expect(
+          await dialog
+            .getByRole("link", { name: "Open the sign-in page" })
+            .getAttribute("href"),
+        ).toBe(String(example("AiSignInClaudeExample").url));
+
+        // A code Claude didn't give: the server's sentence, and the way to sign in again.
+        await code.fill("not-the-code");
+        await dialog
+          .getByRole("button", { name: "Finish", exact: true })
+          .click();
+        const alert = dialog.getByRole("alert");
+        await alert.waitFor();
+        expect(await alert.textContent()).toBe(
+          "Claude didn't approve the sign-in. Sign in again.",
+        );
+        await signIn.click();
+        await code.fill(`  ${CLAUDE_CODE}  `);
+        await dialog
+          .getByRole("button", { name: "Finish", exact: true })
+          .click();
+        await dialog.getByText("Signed in to Anthropic.").waitFor();
+        expect(server.signIns).toEqual([
+          { provider: "anthropic" },
+          { provider: "anthropic" },
+        ]);
+        expect(server.finishes).toEqual([
+          { code: "not-the-code" },
+          { code: CLAUDE_CODE },
+        ]);
+        // Finished by the code alone: never read in a loop.
+        expect(server.signInReads).toBe(0);
+
+        await dialog.getByRole("button", { name: "Connect" }).click();
+        await dialog.getByText("Connected to Anthropic").waitFor();
+        expect(server.replaces).toEqual([
+          { provider: "anthropic", login: "plan" },
+        ]);
+        await dialog.getByRole("button", { name: "Done" }).click();
+        await page
+          .getByRole("button", {
+            name: /Anthropic.*Signed in with your Claude plan\./,
+          })
+          .waitFor();
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`xAI signs in with the code on its page, and Google on its own page, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        await heading(page, "Connect your AI");
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^xAI/ }).click();
+        expect(await chooser.getByRole("tab").allTextContents()).toEqual([
+          "Sign in",
+          "Use an API key",
+        ]);
+        await chooser
+          .getByRole("button", { name: "Sign in with xAI", exact: true })
+          .click();
+        await chooser.getByText("MQ7T-WD4X").waitFor();
+        await chooser.getByText("Signed in to xAI.").waitFor();
+        expect(await chooser.getByLabel("Model name").inputValue()).toBe(
+          "grok-4.7",
+        );
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        const connected = chooser.getByRole("status");
+        await connected.waitFor();
+        expect(server.replaces).toEqual([
+          { provider: "xai", login: "oauth", model: "grok-4.7" },
+        ]);
+        expect(await connected.textContent()).toContain(
+          "Signed in with your xAI account. Model: grok-4.7",
+        );
+      } finally {
+        await page.close();
+      }
+
+      const google = new FakeServer("none", true);
+      const second = await open(
+        "/onboarding?step=ai",
+        google,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        await heading(second, "Connect your AI");
+        const chooser = second.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^Google Gemini/ }).click();
+        expect(await chooser.getByRole("tab").allTextContents()).toEqual([
+          "Sign in",
+          "Use an API key",
+        ]);
+        // Google's own words beside its G: "Sign in with Google".
+        await chooser
+          .getByRole("button", { name: "Sign in with Google", exact: true })
+          .click();
+        // Google's page sends the person back to OpenBot: no code to check or paste, only the wait.
+        await chooser
+          .getByText("Waiting for you to approve it in your browser…")
+          .waitFor();
+        expect(await chooser.getByText("Verification code").count()).toBe(0);
+        expect(await chooser.getByLabel("Code from your browser").count()).toBe(
+          0,
+        );
+        await chooser.getByText("Signed in to Google Gemini.").waitFor();
+        expect(google.signIns).toEqual([{ provider: "google" }]);
+        expect(google.finishes).toEqual([]);
+        expect(google.opened[0]).toStartWith(
+          "https://accounts.google.com/o/oauth2/v2/auth",
+        );
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        const connected = chooser.getByRole("status");
+        await connected.waitFor();
+        expect(google.replaces).toEqual([
+          { provider: "google", login: "oauth", model: "gemini-3.8-flash" },
+        ]);
+        expect(await connected.textContent()).toContain(
+          "Signed in with your Google account. Model: gemini-3.8-flash",
+        );
+      } finally {
+        await second.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`a failed or expired sign-in says why and signs in again, and leaving the row stops reading it, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      server.outcomes = ["failed", "expired", "approved", "never"];
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        await heading(page, "Connect your AI");
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^xAI/ }).click();
+        const signIn = chooser.getByRole("button", {
+          name: "Sign in with xAI",
+          exact: true,
+        });
+        const alert = chooser.getByRole("alert");
+        await signIn.click();
+        await alert.waitFor();
+        expect(await alert.textContent()).toBe(
+          "xAI didn't approve the sign-in. Sign in again.",
+        );
+        // Nothing to connect yet.
+        expect(
+          await chooser.getByRole("button", { name: "Connect" }).isDisabled(),
+        ).toBe(true);
+        await signIn.click();
+        await chooser
+          .getByText("The xAI sign-in expired. Sign in again.")
+          .waitFor();
+        await signIn.click();
+        await chooser.getByText("Signed in to xAI.").waitFor();
+        expect(await alert.count()).toBe(0);
+        expect(server.signIns).toHaveLength(3);
+
+        // A sign-in still waiting stops being read once the person leaves the row.
+        await chooser.getByRole("button", { name: "Back" }).click();
+        await chooser.getByRole("button", { name: /^xAI/ }).click();
+        await signIn.click();
+        await page.waitForFunction(
+          () => document.body.textContent?.includes("MQ7T-WD4X") ?? false,
+        );
+        await page.waitForTimeout(1_500);
+        await chooser.getByRole("button", { name: "Back" }).click();
+        const reads = server.signIn?.reads ?? 0;
+        expect(reads).toBeGreaterThan(0);
+        await page.waitForTimeout(2_500);
+        expect(server.signIn?.reads).toBe(reads);
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`Use an API key still connects each provider, in ${engine}`, async () => {
+      const keys: [RegExp, string, Record<string, unknown>][] = [
+        [
+          /^OpenAI/,
+          "OpenAI API key",
+          { provider: "openai", login: "api-key", apiKey: "sk-typed-key" },
+        ],
+        [
+          /^Anthropic/,
+          "Anthropic API key",
+          { provider: "anthropic", login: "api-key", apiKey: "sk-typed-key" },
+        ],
+        [
+          /^Google Gemini/,
+          "Google Gemini API key",
+          {
+            provider: "google",
+            login: "endpoint",
+            baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+            model: "gemini-3.8-flash",
+            apiKey: "sk-typed-key",
+          },
+        ],
+        [
+          /^xAI/,
+          "xAI API key",
+          {
+            provider: "xai",
+            login: "endpoint",
+            baseUrl: "https://api.x.ai/v1",
+            model: "grok-4.7",
+            apiKey: "sk-typed-key",
+          },
+        ],
+        [
+          /^Unbiased AI/,
+          "Unbiased AI API key",
+          {
+            provider: "unbiased",
+            login: "endpoint",
+            baseUrl: "https://api.unbiased.ai/v1",
+            model: "pareto",
+            apiKey: "sk-typed-key",
+          },
+        ],
+      ];
+      for (const [row, label, body] of keys) {
+        const server = new FakeServer("none", true);
+        const page = await open(
+          "/onboarding?step=ai",
+          server,
+          engine,
+          "light",
+          WIDE,
+        );
+        try {
+          await heading(page, "Connect your AI");
+          const chooser = page.locator("[data-ai-chooser]");
+          await chooser.getByRole("button", { name: row }).click();
+          await chooser.getByRole("tab", { name: "Use an API key" }).click();
+          await chooser.getByLabel(label).fill("sk-typed-key");
+          await chooser.getByRole("button", { name: "Connect" }).click();
+          await chooser.getByRole("status").waitFor();
+          expect(server.replaces).toEqual([body]);
+          expect(server.signIns).toEqual([]);
+        } finally {
+          await page.close();
+        }
+      }
+    }, 120_000);
+
   // Every screen this adds, light and dark, wide and at a phone's width, beside the screens from
   // before they should match: onboarding's Welcome and Settings' AI connection dialog.
   test.skipIf(!shots)(
@@ -1067,6 +1566,163 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
               await shoot(setup, "org-setup-dialog", engine, theme, window);
             } finally {
               await setup.close();
+            }
+          }
+    },
+    600_000,
+  );
+
+  // Each sign-in state, on the step and in Settings, light and dark, wide and at a phone's width.
+  test.skipIf(!shots)(
+    "screenshots of every sign-in state, on the step and in Settings",
+    async () => {
+      for (const engine of engines)
+        for (const theme of THEMES)
+          for (const window of [WIDE, PHONE]) {
+            const server = new FakeServer("none", true);
+            // ChatGPT stays waiting; Claude finishes by its code; Google signs in; xAI fails once.
+            server.outcomes = ["never", "approved", "never", "failed"];
+            const page = await open(
+              "/onboarding?step=ai",
+              server,
+              engine,
+              theme,
+              window,
+            );
+            const look = async (screen: string) => {
+              expect(await measured(page)).toEqual(FINE);
+              await shoot(page, screen, engine, theme, window);
+            };
+            try {
+              await heading(page, "Connect your AI");
+              const chooser = page.locator("[data-ai-chooser]");
+              const row = (name: RegExp) =>
+                chooser.getByRole("button", { name }).click();
+              const back = () =>
+                chooser.getByRole("button", { name: "Back" }).click();
+
+              await row(/^OpenAI/);
+              await look("sign-in-chatgpt");
+              await chooser
+                .getByRole("button", { name: "Sign in with OpenAI" })
+                .click();
+              await chooser.getByText("VU3W-87566").waitFor();
+              await look("sign-in-chatgpt-waiting");
+              await back();
+
+              await row(/^Anthropic/);
+              await chooser
+                .getByRole("button", { name: "Sign in with Anthropic" })
+                .click();
+              await chooser.getByLabel("Code from your browser").waitFor();
+              await look("sign-in-claude-code");
+              await chooser
+                .getByLabel("Code from your browser")
+                .fill(CLAUDE_CODE);
+              await chooser
+                .getByRole("button", { name: "Finish", exact: true })
+                .click();
+              await chooser.getByText("Signed in to Anthropic.").waitFor();
+              await look("sign-in-claude-signed-in");
+              await back();
+
+              await row(/^Google Gemini/);
+              await look("sign-in-google");
+              await chooser
+                .getByRole("button", { name: "Sign in with Google" })
+                .click();
+              await chooser
+                .getByText("Waiting for you to approve it in your browser…")
+                .waitFor();
+              await look("sign-in-google-waiting");
+              await back();
+
+              await row(/^xAI/);
+              await chooser
+                .getByRole("button", { name: "Sign in with xAI" })
+                .click();
+              await chooser.getByRole("alert").waitFor();
+              await look("sign-in-xai-failed");
+              await chooser
+                .getByRole("button", { name: "Sign in with xAI" })
+                .click();
+              await chooser.getByText("Signed in to xAI.").waitFor();
+              await look("sign-in-xai-signed-in");
+              await chooser.getByRole("button", { name: "Connect" }).click();
+              await chooser.getByRole("status").waitFor();
+              await look("sign-in-xai-connected");
+            } finally {
+              await page.close();
+            }
+
+            // Settings, on a Claude plan the server signed in to.
+            const own = new FakeServer("organization", true);
+            const mine = example("PersonalAiConnectionExample") as {
+              connection: Record<string, unknown>;
+            };
+            own.personal = GetPersonalAiConnectionResponse.parse({
+              ...mine,
+              connection: {
+                ...mine.connection,
+                provider: "anthropic",
+                login: "plan",
+                model: null,
+                endpointHost: null,
+              },
+            }) as PersonalAiConnection;
+            const settings = await open(
+              "/settings",
+              own,
+              engine,
+              theme,
+              window,
+            );
+            try {
+              await settings
+                .getByRole("button", {
+                  name: /Anthropic.*Signed in with your Claude plan\./,
+                })
+                .waitFor();
+              expect(await measured(settings)).toEqual(FINE);
+              await shoot(settings, "settings-plan", engine, theme, window);
+              await settings
+                .getByRole("button", {
+                  name: /Anthropic.*Signed in with your Claude plan\./,
+                })
+                .click();
+              await settings.getByRole("dialog").waitFor();
+              await shoot(
+                settings,
+                "settings-plan-dialog",
+                engine,
+                theme,
+                window,
+              );
+              await settings
+                .getByRole("dialog")
+                .getByRole("button", { name: "Change", exact: true })
+                .click();
+              await settings
+                .getByRole("dialog")
+                .getByRole("button", { name: /^OpenAI/ })
+                .click();
+              await settings
+                .getByRole("dialog")
+                .getByRole("button", { name: "Sign in with OpenAI" })
+                .click();
+              await settings
+                .getByRole("dialog")
+                .getByText("VU3W-87566")
+                .waitFor();
+              await shoot(
+                settings,
+                "settings-chatgpt-waiting",
+                engine,
+                theme,
+                window,
+              );
+            } finally {
+              await settings.close();
             }
           }
     },
