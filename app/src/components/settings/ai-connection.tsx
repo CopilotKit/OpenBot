@@ -21,6 +21,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { describeConnection } from "@/lib/ai-connection/describe";
+import { disconnectAiMutationOptions } from "@/lib/ai-connection/mutations";
 import { providerById } from "@/lib/ai-connection/providers";
 import {
   aiConnectionQueryOptions,
@@ -34,6 +35,7 @@ import {
   desktopAiConnectionQueryOptions,
 } from "@/lib/desktop/queries";
 import { desktopShell } from "@/lib/desktop/shell";
+import { queryClient } from "@/query-client";
 import {
   ChooseConnection,
   Connected,
@@ -91,7 +93,11 @@ export function AiModelSection({
   );
 }
 
-function AiConnectionRow({
+/**
+ * The organization's AI connection as one row that opens its dialog: what it is, Change, and
+ * Disconnect. Settings → General draws it, and so does Admin → Providers.
+ */
+export function AiConnectionRow({
   connection,
   inDesktop,
   organizationWide,
@@ -169,6 +175,12 @@ function AiConnectionDialog({
   const [step, setStep] = useState<Step>(
     described ? { at: "current" } : { at: "choose" },
   );
+  const disconnect = useMutation(disconnectAiMutationOptions(queryClient));
+  /*
+   * Not inside OpenBot Desktop, where a plan's engine runs beside the connection and the switch
+   * settles it: there the way off a connection is Change.
+   */
+  const canDisconnect = described !== null && !inDesktop;
   if (step.at === "done")
     return (
       <DialogContent>
@@ -212,12 +224,41 @@ function AiConnectionDialog({
             ? "You can switch to another provider or key at any time. Runs that start after that use it."
             : "You can switch to another provider or key while OpenBot keeps running. Your next message uses the new connection."}
         </p>
+        {canDisconnect ? (
+          <p className="text-muted-foreground">
+            {organizationWide
+              ? "Disconnect it and Bots work only for people who connected their own AI."
+              : "Disconnect it and Bots can't run until you connect another."}
+          </p>
+        ) : null}
+        {disconnect.error ? (
+          <p className="text-destructive" role="alert">
+            {disconnect.error.message}
+          </p>
+        ) : null}
       </DialogBody>
       <DialogFooter className="mt-4">
+        {canDisconnect ? (
+          <Button
+            className="mr-auto"
+            disabled={disconnect.isPending}
+            onClick={() =>
+              disconnect.mutate(undefined, { onSuccess: () => onClose() })
+            }
+            size="sm"
+            variant="destructive"
+          >
+            {disconnect.isPending ? "Disconnecting…" : "Disconnect"}
+          </Button>
+        ) : null}
         <Button onClick={onClose} size="sm" variant="ghost">
           Cancel
         </Button>
-        <Button onClick={() => setStep({ at: "choose" })} size="sm">
+        <Button
+          disabled={disconnect.isPending}
+          onClick={() => setStep({ at: "choose" })}
+          size="sm"
+        >
           Change
         </Button>
       </DialogFooter>

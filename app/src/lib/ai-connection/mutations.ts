@@ -9,6 +9,7 @@ import type {
   PersonalAiConnection,
 } from "@/lib/api/generated/model";
 import {
+  deleteAiConnection,
   deletePersonalAiConnection,
   finishPersonalAiSignIn,
   getAiConnection,
@@ -134,6 +135,23 @@ function invalidateAiConnection(queryClient: QueryClient) {
     queryClient.invalidateQueries({ queryKey: modelKeys.all }),
     queryClient.invalidateQueries({ queryKey: desktopKeys.aiConnection }),
   ]);
+}
+
+/**
+ * Disconnect the organization's AI (deleteAiConnection). The server revokes the key it used and
+ * keeps the others for a later switch. Everyone's runs then use their own AI where they connected
+ * one (OpenBot Cloud), and nobody else's run until an admin connects another.
+ */
+export function disconnectAiMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (): Promise<AiConnection> =>
+      deleteAiConnection(
+        organizationId(),
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't disconnect the AI. Try again." },
+      ),
+    onSuccess: () => invalidateAiConnection(queryClient),
+  });
 }
 
 const PERSONAL_FALLBACK = "Couldn't connect your AI. Try again.";
