@@ -1,24 +1,82 @@
+/*
+ * The workbench chrome in the CopilotKit theme (copilotkit-ui-theme skill): a lavender-gray
+ * ground with six blur circles, glass panels with white borders, Plus Jakarta Sans and
+ * Spline Sans Mono, a 4px grid. The fonts load from a <link> in index.html.
+ * The window frame (windowFrame.css) stays neutral and is not themed here.
+ */
 :root {
   color-scheme: light dark;
-  --wb-bg: #f6f6f7;
-  --wb-panel: #ffffff;
-  --wb-text: #1c1c1e;
-  --wb-muted: #6b6b70;
-  --wb-border: #d4d4d8;
-  --wb-current: #e4e8ff;
-  --wb-notice: #fff4cc;
+  /* CopilotKit tokens */
+  --ck-surface-main: #dedee9;
+  --ck-surface-container: #ffffff;
+  --ck-surface-hovered: #fafcfa;
+  --ck-border-default: #ffffff;
+  --ck-border-container: #dbdbe5;
+  --ck-text-primary: #010507;
+  --ck-text-secondary: #57575b;
+  --ck-text-disabled: #838389;
+  --ck-text-invert: #ffffff;
+  --ck-white-50: rgba(255, 255, 255, 0.5);
+  --ck-white-65: rgba(255, 255, 255, 0.65);
+  --ck-white-70: rgba(255, 255, 255, 0.7);
+  --ck-grey-200: #f0f0f4;
+  --ck-elevation-sm: 0px 1px 3px 0px rgba(1, 5, 7, 0.08);
+  --ck-elevation-md: 0px 6px 6px -2px rgba(1, 5, 7, 0.08);
+  --ck-elevation-lg: 0px 16px 24px -8px rgba(1, 5, 7, 0.12);
+  --ck-radius-xs: 4px;
+  --ck-radius-sm: 8px;
+  --ck-radius-full: 9999px;
+  --ck-circle-orange: rgba(255, 172, 77, 0.2);
+  --ck-circle-yellow: rgba(255, 243, 136, 0.3);
+  --ck-circle-grey: #c9c9da;
+  --ck-circle-white: #f3f3fc;
+  --ck-notice: #fff3b0;
+  --ck-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --ck-mono: "Spline Sans Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* The names the rest of the workbench uses (CommentLayer.tsx reads these). */
+  --wb-bg: var(--ck-surface-main);
+  --wb-panel: var(--ck-surface-container);
+  --wb-text: var(--ck-text-primary);
+  --wb-muted: var(--ck-text-disabled);
+  --wb-border: var(--ck-border-container);
+  --wb-current: var(--ck-white-70);
+  --wb-notice: var(--ck-notice);
 }
 
+/*
+ * Dark: derived from the same tokens. The ground keeps the lavender hue (240deg) at low
+ * lightness; the glass is a dim white; text uses the light end of the grey scale; the blur
+ * circles keep their colors at a lower strength.
+ */
 @media (prefers-color-scheme: dark) {
   :root {
-    --wb-bg: #151517;
-    --wb-panel: #1e1e21;
-    --wb-text: #ececef;
-    --wb-muted: #9a9aa2;
-    --wb-border: #3a3a40;
-    --wb-current: #2c3360;
-    --wb-notice: #4a3f12;
+    --ck-surface-main: #1b1b23;
+    --ck-surface-container: #26262f;
+    --ck-surface-hovered: #2e2e38;
+    --ck-border-default: rgba(255, 255, 255, 0.1);
+    --ck-border-container: rgba(255, 255, 255, 0.12);
+    --ck-text-primary: #f0f0f4;
+    --ck-text-secondary: #afafb7;
+    --ck-text-disabled: #838389;
+    --ck-text-invert: #010507;
+    --ck-white-50: rgba(255, 255, 255, 0.05);
+    --ck-white-65: rgba(255, 255, 255, 0.08);
+    --ck-white-70: rgba(255, 255, 255, 0.1);
+    --ck-grey-200: #33333d;
+    --ck-elevation-sm: 0px 1px 3px 0px rgba(0, 0, 0, 0.3);
+    --ck-elevation-md: 0px 6px 6px -2px rgba(0, 0, 0, 0.3);
+    --ck-elevation-lg: 0px 16px 24px -8px rgba(0, 0, 0, 0.45);
+    --ck-circle-orange: rgba(255, 172, 77, 0.08);
+    --ck-circle-yellow: rgba(255, 243, 136, 0.06);
+    --ck-circle-grey: #2a2a3a;
+    --ck-circle-white: #30304a;
+    --ck-notice: #4a3f12;
   }
+}
+
+* {
+  box-sizing: border-box;
 }
 
 html,
@@ -29,69 +87,273 @@ body,
 }
 
 body {
-  background: var(--wb-bg);
-  color: var(--wb-text);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: 13px;
+  background: var(--ck-surface-main);
+  color: var(--ck-text-primary);
+  font-family: var(--ck-sans);
+  font-size: 12px;
+  line-height: 16px;
+  -webkit-font-smoothing: antialiased;
 }
 
+code,
+kbd,
+pre,
+textarea {
+  font-family: var(--ck-mono);
+}
+
+.wb-mono,
+.wb-time {
+  font-family: var(--ck-mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* The page wrapper holds the blur circles, so it clips them and stacks the columns over them. */
 .wb-page {
+  position: relative;
+  overflow: hidden;
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr) 260px;
+  gap: 8px;
   height: 100%;
+  padding: 8px;
+}
+
+/* Six blur circles behind the content (CopilotCloud Figma specs). */
+.wb-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.wb-bg > span {
+  position: absolute;
+  z-index: 0;
+  border-radius: 50%;
+  filter: blur(103px);
+}
+
+.wb-bg > span:nth-child(1) {
+  width: 446px;
+  height: 446px;
+  left: 1040px;
+  top: 11px;
+  background: var(--ck-circle-orange);
+}
+
+.wb-bg > span:nth-child(2) {
+  width: 609px;
+  height: 609px;
+  left: 1339px;
+  top: 625px;
+  background: var(--ck-circle-grey);
+}
+
+.wb-bg > span:nth-child(3) {
+  width: 609px;
+  height: 609px;
+  left: 670px;
+  top: -365px;
+  background: var(--ck-circle-grey);
+}
+
+.wb-bg > span:nth-child(4) {
+  width: 609px;
+  height: 609px;
+  left: 508px;
+  top: 702px;
+  background: var(--ck-circle-white);
+}
+
+.wb-bg > span:nth-child(5) {
+  width: 446px;
+  height: 446px;
+  left: 128px;
+  top: 331px;
+  background: var(--ck-circle-yellow);
+}
+
+.wb-bg > span:nth-child(6) {
+  width: 446px;
+  height: 446px;
+  left: -205px;
+  top: 803px;
+  background: var(--ck-circle-orange);
+}
+
+.wb-page > :not(.wb-bg) {
+  position: relative;
+  z-index: 1;
+}
+
+/* Glass panels: the scene list column, the right panel and the warnings area. */
+.wb-side,
+.wb-under {
+  background: var(--ck-white-50);
+  border: 2px solid var(--ck-border-default);
+  border-radius: var(--ck-radius-sm);
 }
 
 .wb-side {
   overflow-y: auto;
-  padding: 12px;
-  background: var(--wb-panel);
+  padding: 16px;
 }
 
-.wb-side-left {
-  border-right: 1px solid var(--wb-border);
-}
-
-.wb-side-right {
-  border-left: 1px solid var(--wb-border);
-}
-
+/* Panel titles: "Import a log", "Scenes", "Window". Light, as the CopilotKit app title. */
 .wb-side h2 {
   margin: 0 0 8px;
-  font-size: 14px;
+  padding: 0 4px;
+  font-size: 18px;
+  line-height: 20px;
+  font-weight: 300;
 }
 
-.wb-side h3 {
-  margin: 12px 0 4px;
-  font-size: 11px;
+/* Section title with an extending line. */
+.wb-side h3,
+.wb-under h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 8px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: 400;
   text-transform: uppercase;
-  color: var(--wb-muted);
+  letter-spacing: 0.05em;
+  color: var(--ck-text-secondary);
+  white-space: nowrap;
 }
 
+.wb-side h3::after,
+.wb-under h3::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--ck-border-container);
+}
+
+/* Buttons: inline tabs on the glass. Pressed is the selected-tag pattern (dark fill, light text). */
 .wb-side button,
-.wb-side input,
-.wb-side select,
-.wb-notice button {
+.wb-notice button,
+.wb-handover-card button {
   font: inherit;
-  color: inherit;
-  background: var(--wb-panel);
-  border: 1px solid var(--wb-border);
-  border-radius: 4px;
-  padding: 4px 8px;
-}
-
-.wb-side button {
-  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--ck-text-primary);
+  background: var(--ck-white-65);
+  border: 1px solid var(--ck-border-default);
+  border-radius: var(--ck-radius-sm);
+  padding: 4px 12px;
   cursor: pointer;
 }
 
+.wb-side button:hover,
+.wb-notice button:hover,
+.wb-handover-card button:hover {
+  background: var(--ck-surface-container);
+}
+
+.wb-side button {
+  margin: 0 0 4px;
+}
+
+.wb-side button[aria-pressed="true"] {
+  background: var(--ck-text-primary);
+  border-color: var(--ck-text-primary);
+  color: var(--ck-text-invert);
+}
+
+/* Inputs and dropdowns: the dropdown pattern. */
+.wb-side input,
+.wb-side select,
+.wb-side textarea {
+  font: inherit;
+  font-size: 12px;
+  color: var(--ck-text-primary);
+  background: var(--ck-surface-container);
+  border: 1px solid var(--ck-border-container);
+  border-radius: var(--ck-radius-xs);
+  padding: 4px 8px;
+}
+
+/* Dropdowns carry the dropdown shadow. */
+.wb-side select {
+  box-shadow: var(--ck-elevation-md);
+}
+
+.wb-side input[type="number"] {
+  font-family: var(--ck-mono);
+}
+
+.wb-side input:focus-visible,
+.wb-side select:focus-visible,
+.wb-side textarea:focus-visible {
+  outline: none;
+  border-color: var(--ck-text-secondary);
+  box-shadow: var(--ck-elevation-md);
+}
+
+.wb-side input[type="checkbox"],
+.wb-side input[type="range"],
+.wb-side input[type="color"] {
+  accent-color: var(--ck-text-primary);
+}
+
+.wb-side input[type="range"] {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.wb-side input[type="color"] {
+  padding: 2px;
+}
+
+.wb-side fieldset {
+  margin: 0;
+  padding: 8px 12px 12px;
+  border: 1px solid var(--ck-border-container);
+  border-radius: var(--ck-radius-sm);
+}
+
+.wb-side legend {
+  padding: 0 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ck-text-secondary);
+}
+
+/* Scene rows: the list item pattern. */
 .wb-side nav button {
   display: block;
   width: 100%;
+  margin: 0 0 4px;
+  padding: 8px 12px;
   text-align: left;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.25;
+  background: transparent;
+  border: 0;
+  border-radius: var(--ck-radius-xs);
 }
 
-.wb-side button.wb-scene-current {
-  background: var(--wb-current);
+.wb-side nav button:hover {
+  background: var(--ck-white-50);
+}
+
+.wb-side nav button.wb-scene-current {
+  background: var(--ck-white-70);
+}
+
+/* "Window" follows the run controls; give it the section spacing. */
+.wb-side-right section > h2 {
+  margin-top: 16px;
 }
 
 .wb-side-right section {
@@ -111,11 +373,8 @@ body {
 
 .wb-comment-toggle p {
   margin: 0;
-  color: var(--wb-muted);
-}
-
-.wb-side button[aria-pressed="true"] {
-  background: var(--wb-current);
+  padding: 0 4px;
+  color: var(--ck-text-disabled);
 }
 
 .wb-side-right label {
@@ -123,6 +382,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 0 4px;
 }
 
 .wb-side-right label input[type="number"] {
@@ -134,6 +394,7 @@ body {
   position: relative;
   display: flex;
   flex-direction: column;
+  gap: 8px;
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
@@ -145,7 +406,7 @@ body {
   flex: none;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 24px;
+  padding: 16px;
 }
 
 /* Below the window. The warnings scroll on their own, so the column does not grow as they grow. */
@@ -153,37 +414,55 @@ body {
   flex: none;
   max-height: 40vh;
   overflow-y: auto;
-  padding: 0 24px 12px;
-  border-top: 1px solid var(--wb-border);
+  padding: 0 12px 12px;
 }
 
-.wb-under h3 {
-  margin: 12px 0 4px;
-  font-size: 11px;
-  text-transform: uppercase;
-  color: var(--wb-muted);
+.wb-under p {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--ck-text-disabled);
 }
 
+.wb-under li {
+  margin: 0 0 4px;
+}
+
+/* A warning row: the list item pattern. */
 .wb-under button {
   font: inherit;
+  font-size: 12px;
+  line-height: 16px;
   color: inherit;
-  background: none;
+  background: transparent;
   border: 0;
-  padding: 2px 0;
+  border-radius: var(--ck-radius-xs);
+  padding: 4px 8px;
   text-align: left;
   cursor: pointer;
 }
 
+.wb-under button:hover {
+  background: var(--ck-white-50);
+}
+
 .wb-fold {
   margin-top: 12px;
-  border-top: 1px solid var(--wb-border);
+  border-top: 1px solid var(--ck-border-container);
   padding-top: 8px;
 }
 
 .wb-fold > summary {
+  padding: 4px;
+  border-radius: var(--ck-radius-xs);
   cursor: pointer;
-  font-weight: 600;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
   overflow-wrap: anywhere;
+}
+
+.wb-fold > summary:hover {
+  background: var(--ck-white-50);
 }
 
 .wb-fold ul {
@@ -196,15 +475,10 @@ body {
 }
 
 .wb-side-right textarea {
-  font:
-    12px ui-monospace,
-    monospace;
-  color: inherit;
-  background: var(--wb-panel);
-  border: 1px solid var(--wb-border);
-  border-radius: 4px;
+  font-family: var(--ck-mono);
+  font-size: 12px;
+  line-height: 1.5;
   width: 100%;
-  box-sizing: border-box;
 }
 
 .wb-notices {
@@ -223,10 +497,11 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 6px 10px;
+  padding: 8px 12px;
   background: var(--wb-notice);
-  border: 1px solid var(--wb-border);
-  border-radius: 4px;
+  border: 2px solid var(--ck-border-default);
+  border-radius: var(--ck-radius-sm);
+  box-shadow: var(--ck-elevation-md);
 }
 
 /* Covers the stage, not the window element, so a shot of the window does not show it. */
@@ -238,35 +513,30 @@ body {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: color-mix(in srgb, var(--wb-bg) 80%, transparent);
+  background: color-mix(in srgb, var(--ck-surface-main) 80%, transparent);
 }
 
 .wb-handover-card {
   max-width: 360px;
   padding: 16px 20px;
-  background: var(--wb-panel);
-  border: 1px solid var(--wb-border);
-  border-radius: 8px;
+  background: var(--ck-surface-container);
+  border: 2px solid var(--ck-border-default);
+  border-radius: var(--ck-radius-sm);
+  box-shadow: var(--ck-elevation-lg);
 }
 
 .wb-handover-card h2 {
   margin: 0 0 8px;
-  font-size: 16px;
+  font-size: 18px;
+  line-height: 20px;
+  font-weight: 300;
 }
 
 .wb-handover-card p {
   margin: 0 0 12px;
-  color: var(--wb-muted);
-}
-
-.wb-handover-card button {
-  font: inherit;
-  color: inherit;
-  background: var(--wb-panel);
-  border: 1px solid var(--wb-border);
-  border-radius: 4px;
-  padding: 4px 8px;
-  cursor: pointer;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--ck-text-secondary);
 }
 
 /* Holds the window and the action markers over it; the markers are not in the window element. */
@@ -335,12 +605,10 @@ body {
   left: -3px;
   bottom: calc(100% + 6px);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--ck-radius-xs);
   background: var(--wb-action);
   color: #fff;
-  font:
-    600 12px / 1.4 system-ui,
-    sans-serif;
+  font: 600 12px / 1.4 var(--ck-sans);
   white-space: nowrap;
 }
 
@@ -355,16 +623,17 @@ body {
 
 .wb-next-action {
   margin: 4px 0 12px;
+  padding: 0 4px;
   font-weight: 600;
 }
 
 .wb-import {
   margin-bottom: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid var(--wb-border);
+  border-bottom: 1px solid var(--ck-border-container);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .wb-import label {
@@ -372,12 +641,26 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 0 4px;
 }
 
 .wb-import input[type="file"] {
   max-width: 100%;
   border: 0;
-  padding: 0;
+  padding: 0 4px;
+  background: transparent;
+}
+
+.wb-import input[type="file"]::file-selector-button {
+  margin-right: 8px;
+  font: inherit;
+  font-weight: 500;
+  color: var(--ck-text-primary);
+  background: var(--ck-white-65);
+  border: 1px solid var(--ck-border-default);
+  border-radius: var(--ck-radius-sm);
+  padding: 4px 12px;
+  cursor: pointer;
 }
 
 .wb-import p {
@@ -387,22 +670,28 @@ body {
 .wb-import code {
   display: block;
   overflow-wrap: anywhere;
-  font:
-    12px ui-monospace,
-    monospace;
+  padding: 8px;
+  font: 12px / 1.5 var(--ck-mono);
+  background: var(--ck-white-65);
+  border-radius: var(--ck-radius-xs);
 }
 
 .wb-import-save > summary {
+  padding: 0 4px;
   cursor: pointer;
 }
 
 .wb-import-save p {
   margin: 4px 0;
-  color: var(--wb-muted);
+  color: var(--ck-text-disabled);
 }
 
 .wb-import nav button {
   display: block;
   width: 100%;
   text-align: left;
+}
+
+.wb-side-right > .wb-time {
+  padding: 0 4px;
 }

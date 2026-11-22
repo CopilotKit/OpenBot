@@ -1091,6 +1091,15 @@ export function WorkbenchLoaded({
 
   return (
     <div className="wb-page">
+      {/* The six CopilotKit blur circles behind the columns (workbench.css). */}
+      <div className="wb-bg" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
       <aside className="wb-side wb-side-left">
         <ImportLogPanel
           scenes={imported}
@@ -1291,7 +1300,7 @@ export function WorkbenchLoaded({
             next={nextAction?.label ?? null}
           />
         ) : (
-          <div>{`Time ${formatTime(now)}`}</div>
+          <div className="wb-time">{`Time ${formatTime(now)}`}</div>
         )}
         <WindowSettingsPanel
           value={state.window}

@@ -34,8 +34,8 @@ export function CallLog(props: CallLogProps) {
               // biome-ignore lint/suspicious/noArrayIndexKey: calls have no other identity
               key={index}
             >
-              <span>{formatTime(call.at)}</span> <code>{call.command}</code>{" "}
-              <span>{showArgs(call.args)}</span>
+              <span className="wb-time">{formatTime(call.at)}</span>{" "}
+              <code>{call.command}</code> <span>{showArgs(call.args)}</span>
               {!call.known && <em> Not in the registry</em>}
             </li>
           ))}

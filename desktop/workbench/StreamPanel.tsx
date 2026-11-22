@@ -90,7 +90,8 @@ function StreamsSection({ streams }: { streams: StreamControl | null }) {
         <ul>
           {list.map((stream) => (
             <li key={stream.id} data-testid="stream">
-              <code>{stream.agent}</code> <span>{stream.path}</span>{" "}
+              <code>{stream.agent}</code>{" "}
+              <span className="wb-mono">{stream.path}</span>{" "}
               <span>{stream.open ? "Open" : "Closed"}</span>{" "}
               <span>{`${stream.sent} sent`}</span>
             </li>

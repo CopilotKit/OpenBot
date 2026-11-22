@@ -97,7 +97,7 @@ export function RunControls(props: RunControlsProps) {
           </option>
         ))}
       </select>
-      <span>{`${formatTime(now)} / ${formatTime(end)}`}</span>
+      <span className="wb-time">{`${formatTime(now)} / ${formatTime(end)}`}</span>
       {props.onPauseAtActions && (
         <label className="wb-pause-at-actions">
           <input

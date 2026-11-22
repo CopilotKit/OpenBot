@@ -6,8 +6,8 @@
 }
 
 .wb-app-fold li {
-  padding: 4px 0;
-  border-bottom: 1px solid var(--wb-border);
+  padding: 4px;
+  border-bottom: 1px solid var(--ck-border-container);
 }
 
 .wb-app-fold li:last-child {
@@ -15,25 +15,25 @@
 }
 
 .wb-app-fold code {
-  font:
-    12px ui-monospace,
-    monospace;
+  font: 500 12px / 16px var(--ck-mono);
   overflow-wrap: anywhere;
 }
 
 .wb-app-fold em {
   font-style: normal;
-  color: var(--wb-muted);
+  color: var(--ck-text-disabled);
 }
 
 .wb-app-fold li button {
-  padding: 0 6px;
+  margin: 0;
+  padding: 0 8px;
   font-size: 12px;
 }
 
 .wb-app-fold p {
   margin: 0;
-  color: var(--wb-muted);
+  padding: 0 4px;
+  color: var(--ck-text-disabled);
 }
 
 /* A request that no scene answer, stream or handler answered: a real server would not fail it. */
