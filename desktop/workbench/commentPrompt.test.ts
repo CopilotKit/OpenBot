@@ -199,3 +199,61 @@ test("leaves out empty styles", () => {
   );
   expect(prompt).toContain("- Styles: font-size: 14px\n");
 });
+
+describe("buildPrompt, app scenes", () => {
+  const element = el("button.save", 40, {
+    gaps: { top: 8, right: null, bottom: null, left: null },
+    styles: { "font-size": "14px" },
+    text: "Save",
+  });
+
+  test("without app, the prompt is the same as before", () => {
+    expect(buildPrompt({ kind: "element", element }, context)).toBe(
+      '# Change request from the OpenBot Desktop workbench\n\n> This should be centered\n\n## Where\n\n- Scene: Setup welcome (`setup-welcome`)\n- Time: 1:15\n- Window: 1000×800, OS mac, theme dark\n- Link: http://localhost:5173/#abc\n\nTo see it: `cd desktop && bun run workbench:shot setup-welcome --at 75 --size 1000x800 --os mac --theme dark --grid`\nOr open the link with `bun run workbench` running.\n\n## Element\n\n- Label: `button.save`\n- Component: Row · desktop/src/Row.tsx:12\n- Box: x 0, y 40, 100×20\n- Gaps to the nearest neighbour: top 8\n- Styles: font-size: 14px\n- Text: "Save"\n\n## What to do\n\n1. Find the component in the file named above. Search the repo if no file is named.\n2. Make the change the comment asks for.\n3. Keep the 4px grid.\n4. Follow the repo\'s `openbot-copy` and `openbot-screen-layout` rules where they apply.\n5. Shoot the same frame again with `cd desktop && bun run workbench:shot setup-welcome --at 75 --size 1000x800 --os mac --theme dark --grid`. Compare it with the first frame.\n',
+    );
+  });
+
+  const appContext = (host: "desktop" | "browser"): CommentContext => ({
+    ...context,
+    scene: { id: "app-home-bots", title: "Home with Bots" },
+    app: { route: "/settings/computer", host },
+  });
+
+  test("names the route and the host", () => {
+    const desktop = buildPrompt(
+      { kind: "element", element },
+      appContext("desktop"),
+    );
+    expect(desktop).toContain(
+      "- Route: /settings/computer\n- Host: OpenBot Desktop\n",
+    );
+    const browser = buildPrompt(
+      { kind: "element", element },
+      appContext("browser"),
+    );
+    expect(browser).toContain("- Route: /settings/computer\n- Host: Browser\n");
+  });
+
+  test("the shot command names the browser host only for the browser", () => {
+    expect(
+      buildPrompt({ kind: "element", element }, appContext("browser")),
+    ).toContain(
+      "bun run workbench:shot app-home-bots --at 75 --size 1000x800 --os mac --theme dark --host browser --grid",
+    );
+    expect(
+      buildPrompt({ kind: "element", element }, appContext("desktop")),
+    ).toContain(
+      "bun run workbench:shot app-home-bots --at 75 --size 1000x800 --os mac --theme dark --grid",
+    );
+  });
+
+  test("the to-do list names app/src and the data access rules", () => {
+    const prompt = buildPrompt(
+      { kind: "element", element },
+      appContext("desktop"),
+    );
+    expect(prompt).toContain(
+      "5. The app's files are under `app/src`. If the change loads or changes server data, follow the repo's `openbot-data-access` rules.\n6. Shoot the same frame again with",
+    );
+  });
+});

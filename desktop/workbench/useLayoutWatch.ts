@@ -98,9 +98,20 @@ export function useLayoutWatch(
       if (!clock || !control) return;
       const offTick = clock.onTick(() => pend("clock"));
       const offChange = control.onChange((change) => pend(causeOf(change)));
+      // An app frame also has the fake `/api`, the streams and the sockets.
+      const offApi = win.__workbenchApi?.onChange((change) => {
+        if (change.kind === "settled") {
+          pend(`request ${change.record.method} ${change.record.path}`);
+        }
+      });
+      const offStreams = win.__workbenchStreams?.onChange(() => pend("stream"));
+      const offSockets = win.__workbenchSockets?.onChange(() => pend("socket"));
       off = () => {
         offTick();
         offChange();
+        offApi?.();
+        offStreams?.();
+        offSockets?.();
       };
       check();
     };

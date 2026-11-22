@@ -1,6 +1,7 @@
 // Builds the prompt for the "Copy as prompt" button of the workbench Comment
 // mode. The prompt is a self-contained markdown message for a coding agent.
 
+import type { AppHost } from "./appContract";
 import { type ComponentInfo, formatChain } from "./componentChain";
 import type { Box } from "./geometry";
 import type { WindowSettings } from "./urlState";
@@ -30,6 +31,8 @@ export type CommentContext = {
   atSeconds: number;
   window: WindowSettings;
   link: string;
+  /** Set for an app scene: the route of the app frame and where the app runs. */
+  app?: { route: string; host: AppHost };
 };
 
 const MAX_TEXT = 200;
@@ -66,7 +69,8 @@ function cell(text: string): string {
 
 function shotCommand(context: CommentContext): string {
   const w = context.window;
-  return `cd desktop && bun run workbench:shot ${context.scene.id} --at ${context.atSeconds} --size ${w.width}x${w.height} --os ${w.os} --theme ${w.theme} --grid`;
+  const host = context.app?.host === "browser" ? " --host browser" : "";
+  return `cd desktop && bun run workbench:shot ${context.scene.id} --at ${context.atSeconds} --size ${w.width}x${w.height} --os ${w.os} --theme ${w.theme}${host} --grid`;
 }
 
 function describeElement(el: PickedElement): string[] {
@@ -196,6 +200,12 @@ function describeArea(area: Box, elements: PickedElement[]): string[] {
   return lines;
 }
 
+function appLines(context: CommentContext): string[] {
+  if (!context.app) return [];
+  const host = context.app.host === "browser" ? "Browser" : "OpenBot Desktop";
+  return [`- Route: ${context.app.route}`, `- Host: ${host}`];
+}
+
 export function buildPrompt(
   target: CommentTarget,
   context: CommentContext,
@@ -218,6 +228,7 @@ export function buildPrompt(
     `- Scene: ${context.scene.title} (\`${context.scene.id}\`)`,
     `- Time: ${formatTime(context.atSeconds)}`,
     `- Window: ${w.width}×${w.height}, OS ${w.os}, theme ${w.theme}`,
+    ...appLines(context),
     `- Link: ${context.link}`,
     "",
     `To see it: \`${command}\``,
@@ -239,7 +250,14 @@ export function buildPrompt(
     "2. Make the change the comment asks for.",
     "3. Keep the 4px grid.",
     "4. Follow the repo's `openbot-copy` and `openbot-screen-layout` rules where they apply.",
-    `5. Shoot the same frame again with \`${command}\`. Compare it with the first frame.`,
+  );
+  if (context.app) {
+    lines.push(
+      "5. The app's files are under `app/src`. If the change loads or changes server data, follow the repo's `openbot-data-access` rules.",
+    );
+  }
+  lines.push(
+    `${context.app ? 6 : 5}. Shoot the same frame again with \`${command}\`. Compare it with the first frame.`,
     "",
   );
   return lines.join("\n");

@@ -1,0 +1,53 @@
+/* The panels of an app scene: Requests, API answers, and Stream and sockets. */
+
+.wb-app-fold ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.wb-app-fold li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--wb-border);
+}
+
+.wb-app-fold li:last-child {
+  border-bottom: 0;
+}
+
+.wb-app-fold code {
+  font:
+    12px ui-monospace,
+    monospace;
+  overflow-wrap: anywhere;
+}
+
+.wb-app-fold em {
+  font-style: normal;
+  color: var(--wb-muted);
+}
+
+.wb-app-fold li button {
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.wb-app-fold p {
+  margin: 0;
+  color: var(--wb-muted);
+}
+
+/* A request that no scene answer, stream or handler answered: a real server would not fail it. */
+.wb-side .wb-request-missing {
+  color: #b42318;
+  font-weight: 600;
+}
+
+.wb-side .wb-request-missing em {
+  color: inherit;
+}
+
+@media (prefers-color-scheme: dark) {
+  .wb-side .wb-request-missing {
+    color: #ff8a80;
+  }
+}

@@ -8,7 +8,15 @@ import {
   boxOverFrame,
   MARKER_MS,
 } from "./ActionMarkers";
-import type { ApiRecord } from "./appContract";
+import { ApiAnswersPanel } from "./ApiAnswersPanel";
+import type {
+  ApiAnswer,
+  ApiControl,
+  ApiRecord,
+  ApiRoute,
+  SocketControl,
+  StreamControl,
+} from "./appContract";
 import { appFrameConfig } from "./appFrameConfig";
 import { CallLog } from "./CallLog";
 import { CommandsPanel } from "./CommandsPanel";
@@ -16,7 +24,9 @@ import type { PageClock } from "./clock";
 import { EventsPanel } from "./EventsPanel";
 import { type FrameConfig, frameUrl } from "./frameConfig";
 import { ImportLogPanel } from "./ImportLogPanel";
+import "./appPanels.css";
 import { describeElements, type Warning } from "./layoutWatch";
+import { RequestLog } from "./RequestLog";
 import { formatTime, RunControls, type Speed } from "./RunControls";
 import {
   actionLabel,
@@ -26,6 +36,7 @@ import {
   runActions,
 } from "./runner";
 import { SceneList } from "./SceneList";
+import { StreamPanel } from "./StreamPanel";
 import {
   ALL_SCENE_GROUPS,
   type DesktopSceneEntry,
@@ -36,11 +47,17 @@ import {
   sceneSteps,
 } from "./sceneCatalog";
 import type { Scene } from "./scenes/types";
-import { decodeState, encodeState, type WorkbenchState } from "./urlState";
+import {
+  DEFAULT_APP,
+  decodeState,
+  encodeState,
+  type WorkbenchState,
+} from "./urlState";
 import { useLayoutWatch } from "./useLayoutWatch";
 import { WarningsList } from "./WarningsList";
 import { WindowFrame } from "./WindowFrame";
 import {
+  type AppWindowSettings,
   WindowSettingsPanel,
   type WindowSettingsValue,
 } from "./WindowSettingsPanel";
@@ -365,6 +382,13 @@ export function WorkbenchLoaded({
   const [frameEl, setFrameEl] = useState<HTMLIFrameElement | null>(null);
   /** The loaded window's fake native side, for the commands, calls and events panels. */
   const [frameControl, setFrameControl] = useState<NativeControl | null>(null);
+  /** The loaded app window's fake API, streams and sockets, for the app panels. */
+  const [frameApi, setFrameApi] = useState<ApiControl | null>(null);
+  const [frameStreams, setFrameStreams] = useState<StreamControl | null>(null);
+  const [frameSockets, setFrameSockets] = useState<SocketControl | null>(null);
+  /** The route the Requests panel picked, for the API answers panel. */
+  const [pickedRoute, setPickedRoute] = useState<ApiRoute | null>(null);
+  const answersFoldRef = useRef<HTMLDetailsElement | null>(null);
   const {
     warnings,
     flush: checkLayout,
@@ -494,6 +518,9 @@ export function WorkbenchLoaded({
     liveRef.current?.off();
     liveRef.current = null;
     setFrameControl(null);
+    setFrameApi(null);
+    setFrameStreams(null);
+    setFrameSockets(null);
     setPlaying(false);
     setHandedOver(false);
     setOverlayClosed(false);
@@ -574,6 +601,9 @@ export function WorkbenchLoaded({
           showAction(action);
       });
       setFrameControl(win.__workbench ?? null);
+      setFrameApi(win.__workbenchApi ?? null);
+      setFrameStreams(win.__workbenchStreams ?? null);
+      setFrameSockets(win.__workbenchSockets ?? null);
       const live: Live = {
         win,
         clock,
@@ -787,6 +817,7 @@ export function WorkbenchLoaded({
 
   const pickScene = (id: string) => {
     const scene = scenesRef.current.find((s) => s.id === id);
+    setPickedRoute(null);
     update((prev) => ({
       ...prev,
       scene: id,
@@ -809,6 +840,28 @@ export function WorkbenchLoaded({
     if (frame) frame.answers = { ...frame.answers, [command]: answer };
     const appFrame = window.__workbenchAppFrame;
     if (appFrame) appFrame.answers = { ...appFrame.answers, [command]: answer };
+  };
+
+  /** The API answers panel already set the answer on the live window: keep it for the URL and the next remount. */
+  const keepApi = (route: ApiRoute, answer: ApiAnswer | null) => {
+    const apply = (
+      all: Partial<Record<ApiRoute, ApiAnswer>> | undefined,
+    ): Partial<Record<ApiRoute, ApiAnswer>> => {
+      const next = { ...all };
+      if (answer === null) delete next[route];
+      else next[route] = answer;
+      return next;
+    };
+    update((prev) => ({ ...prev, api: apply(prev.api) }));
+    const appFrame = window.__workbenchAppFrame;
+    if (appFrame) appFrame.api = apply(appFrame.api);
+  };
+
+  /** A new host, role or motion remounts the window (the frame key has them). */
+  const changeApp = (patch: Partial<AppWindowSettings>) => {
+    update((prev) => {
+      return { ...prev, app: { ...(prev.app ?? DEFAULT_APP), ...patch } };
+    });
   };
 
   const changeWindow = (patch: Partial<WindowSettingsValue>) => {
@@ -990,6 +1043,16 @@ export function WorkbenchLoaded({
           gridColor={gridColor}
           onChange={changeWindow}
           onGridColor={setGridColor}
+          app={
+            appConfig
+              ? {
+                  host: appConfig.host,
+                  role: appConfig.role,
+                  motion: appConfig.motion,
+                }
+              : undefined
+          }
+          onAppChange={appConfig ? changeApp : undefined}
           onCopyLink={() => {
             void navigator.clipboard.writeText(window.location.href);
             if (imported.some((s) => s.id === state.scene))
@@ -999,20 +1062,64 @@ export function WorkbenchLoaded({
               ]);
           }}
         />
-        <details className="wb-fold">
-          <summary>
-            {`Commands (${Object.keys(state.answers).join(", ") || "none set"})`}
-          </summary>
-          <CommandsPanel control={frameControl} onAnswer={keepAnswer} />
-        </details>
-        <details className="wb-fold">
-          <summary>Calls</summary>
-          <CallLog control={frameControl} />
-        </details>
-        <details className="wb-fold">
-          <summary>Events</summary>
-          <EventsPanel control={frameControl} />
-        </details>
+        {appConfig ? (
+          <>
+            <details className="wb-fold">
+              <summary>
+                {`Desktop commands (${Object.keys(state.answers).join(", ") || "none set"})`}
+              </summary>
+              <CommandsPanel
+                control={frameControl}
+                onAnswer={keepAnswer}
+                commands={PAGE_COMMANDS}
+              />
+            </details>
+            <details className="wb-fold">
+              <summary>Calls</summary>
+              <CallLog control={frameControl} />
+            </details>
+            <details className="wb-fold wb-app-fold">
+              <summary>Requests</summary>
+              <RequestLog
+                api={frameApi}
+                onPick={(route) => {
+                  setPickedRoute(route);
+                  if (answersFoldRef.current)
+                    answersFoldRef.current.open = true;
+                }}
+              />
+            </details>
+            <details className="wb-fold wb-app-fold" ref={answersFoldRef}>
+              <summary>API answers</summary>
+              <ApiAnswersPanel
+                api={frameApi}
+                picked={pickedRoute}
+                onAnswer={keepApi}
+              />
+            </details>
+            <details className="wb-fold wb-app-fold">
+              <summary>Stream and sockets</summary>
+              <StreamPanel streams={frameStreams} sockets={frameSockets} />
+            </details>
+          </>
+        ) : (
+          <>
+            <details className="wb-fold">
+              <summary>
+                {`Commands (${Object.keys(state.answers).join(", ") || "none set"})`}
+              </summary>
+              <CommandsPanel control={frameControl} onAnswer={keepAnswer} />
+            </details>
+            <details className="wb-fold">
+              <summary>Calls</summary>
+              <CallLog control={frameControl} />
+            </details>
+            <details className="wb-fold">
+              <summary>Events</summary>
+              <EventsPanel control={frameControl} />
+            </details>
+          </>
+        )}
       </aside>
     </div>
   );

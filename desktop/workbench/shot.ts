@@ -1,16 +1,35 @@
 // The agent CLI: saves a screenshot and a JSON report of a workbench scene.
 //
 //   bun run workbench:shot <scene> [--at <seconds>] [--grid] [--size <w>x<h>]
-//     [--os mac|windows] [--theme light|dark] [--out <dir>] [--all] [--check] [--include-imported]
+//     [--os mac|windows] [--theme light|dark] [--host desktop|browser] [--role member|admin|owner]
+//     [--out <dir>] [--all] [--check] [--include-imported]
 //
 // `--all --check` walks only the committed scenes. Scenes imported from troubleshooting logs are
 // local, approximate and differ per computer, so it skips them unless `--include-imported` is set.
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import type { ApiRecord, AppHost, Role } from "./appContract";
+import {
+  isApp,
+  loadScenesInBun,
+  type SceneEntry,
+  sceneEnd,
+  sceneSteps,
+} from "./sceneCatalog";
 import { SCENES as BUILT_IN_SCENES } from "./scenes";
 import { SCENE_GROUPS, type Scene } from "./scenes/types";
 import { ensureServer } from "./server";
-import { DEFAULT_WINDOW, encodeState, type WindowSettings } from "./urlState";
+import {
+  type AppSettings,
+  DEFAULT_APP,
+  DEFAULT_WINDOW,
+  encodeState,
+  type WindowSettings,
+  type WorkbenchState,
+} from "./urlState";
+
+/** The sentence of the fake API's 404 (app/workbench/api/fakeApi.ts NO_ANSWER_DETAIL). */
+const NO_ANSWER_DETAIL = "The workbench has no answer for this request.";
 
 const IMPORTED_DIR = join(import.meta.dir, "scenes", "imported");
 
@@ -64,18 +83,30 @@ const IMPORTED_SCENES: readonly Scene[] = loadImportedScenes().filter(
   (scene) => !BUILT_IN_SCENES.some((s) => s.id === scene.id),
 );
 
-/** The built-in scenes, then the imported ones. Under Vite the built-in list already has them. */
-const SCENES: readonly Scene[] = [...BUILT_IN_SCENES, ...IMPORTED_SCENES];
+/**
+ * The scene catalog (the desktop scenes, then the app scenes), then the imported scenes that the
+ * catalog does not have. Under Vite the built-in list already has them. The catalog's notices go
+ * to stderr.
+ */
+async function loadAllScenes(): Promise<SceneEntry[]> {
+  const catalog = await loadScenesInBun();
+  for (const notice of catalog.notices) console.error(notice);
+  const ids = new Set(catalog.scenes.map((s) => s.id));
+  return [
+    ...catalog.scenes,
+    ...IMPORTED_SCENES.filter((scene) => !ids.has(scene.id)),
+  ];
+}
 
 /**
  * The scenes `--all` shoots. With `--check` it leaves out the imported scenes, unless
  * `includeImported` is set. `skipped` is how many it left out.
  */
-export function scenesForAll(
-  scenes: readonly Scene[],
+export function scenesForAll<T extends { id: string }>(
+  scenes: readonly T[],
   importedIds: ReadonlySet<string>,
   options: { check: boolean; includeImported: boolean },
-): { scenes: Scene[]; skipped: number } {
+): { scenes: T[]; skipped: number } {
   if (!options.check || options.includeImported)
     return { scenes: [...scenes], skipped: 0 };
   const kept = scenes.filter((scene) => !importedIds.has(scene.id));
@@ -83,7 +114,7 @@ export function scenesForAll(
 }
 
 const USAGE =
-  "Usage: bun run workbench:shot <scene> [--at <seconds>] [--grid] [--size <w>x<h>] [--os mac|windows] [--theme light|dark] [--out <dir>] [--all] [--check] [--include-imported]";
+  "Usage: bun run workbench:shot <scene> [--at <seconds>] [--grid] [--size <w>x<h>] [--os mac|windows] [--theme light|dark] [--host desktop|browser] [--role member|admin|owner] [--out <dir>] [--all] [--check] [--include-imported]";
 
 const PLAYWRIGHT: string = "playwright-core";
 type Page = {
@@ -101,6 +132,8 @@ type Browser = {
   newPage(options: {
     viewport: { width: number; height: number };
     reducedMotion: "reduce";
+    locale: string;
+    timezoneId: string;
   }): Promise<Page>;
   close(): Promise<void>;
 };
@@ -114,7 +147,11 @@ type Options = {
   includeImported: boolean;
   out: string;
   window: WindowSettings;
+  app: AppSettings;
 };
+
+const HOSTS: readonly AppHost[] = ["desktop", "browser"];
+const ROLES: readonly Role[] = ["member", "admin", "owner"];
 
 function fail(message: string): never {
   console.error(message);
@@ -123,6 +160,7 @@ function fail(message: string): never {
 
 function parseArgs(argv: string[]): Options {
   const window: WindowSettings = { ...DEFAULT_WINDOW };
+  const app: AppSettings = { ...DEFAULT_APP };
   let scene = "";
   let at = 0;
   let all = false;
@@ -174,6 +212,20 @@ function parseArgs(argv: string[]): Options {
         window.theme = v;
         break;
       }
+      case "--host": {
+        const v = value(i++);
+        const host = HOSTS.find((h) => h === v);
+        if (!host) fail(USAGE);
+        app.host = host;
+        break;
+      }
+      case "--role": {
+        const v = value(i++);
+        const role = ROLES.find((r) => r === v);
+        if (!role) fail(USAGE);
+        app.role = role;
+        break;
+      }
       case "--out":
         out = resolve(process.cwd(), value(i++));
         break;
@@ -183,12 +235,12 @@ function parseArgs(argv: string[]): Options {
     }
   }
   if (!all && scene === "") fail(USAGE);
-  return { scene, at, all, check, includeImported, out, window };
+  return { scene, at, all, check, includeImported, out, window, app };
 }
 
-function unknownScene(id: string): never {
+function unknownScene(id: string, scenes: readonly { id: string }[]): never {
   fail(
-    [`There is no scene "${id}". Scenes:`, ...SCENES.map((s) => s.id)].join(
+    [`There is no scene "${id}". Scenes:`, ...scenes.map((s) => s.id)].join(
       "\n",
     ),
   );
@@ -201,14 +253,17 @@ async function takeShots(
   browser: Browser,
   url: string,
   options: Options,
-  sceneId: string,
+  scene: SceneEntry,
   times: number[],
   problems: Problem[],
 ): Promise<void> {
   const page = await browser.newPage({
     viewport: { width: 1800, height: 1200 },
     reducedMotion: "reduce",
+    locale: "en-US",
+    timezoneId: "UTC",
   });
+  const sceneId = scene.id;
   let now = 0;
   const problem = (message: string): void => {
     problems.push({ scene: sceneId, at: now, message });
@@ -220,12 +275,13 @@ async function takeShots(
       if (text.startsWith("Run step:")) problem(text);
     });
   }
-  const state = {
+  const state: WorkbenchState = {
     scene: sceneId,
     at: 0,
     answers: {},
     env: {},
     window: options.window,
+    app: options.app,
   };
   await page.goto(`${url}/workbench/?${encodeState(state)}`);
   await page.waitForFunction(() => window.__workbenchPage?.ready === true);
@@ -263,13 +319,32 @@ async function takeShots(
     });
     const report = await page.evaluate(() => {
       const p = window.__workbenchPage;
+      const handedBack = (
+        p as { handedBack?: () => unknown } | undefined
+      )?.handedBack?.();
       return {
+        kind: p?.kind ?? "desktop",
         handedOver: p?.handedOver() ?? false,
+        handedBack: handedBack ?? null,
         elements: p?.elements?.() ?? [],
         warnings: p?.warnings?.() ?? [],
         calls: p?.calls() ?? [],
+        requests: p?.requests?.() ?? ([] as readonly ApiRecord[]),
+        errors: p?.errors?.() ?? ([] as readonly string[]),
       };
     });
+    if (options.check && isApp(scene)) {
+      for (const record of report.requests) {
+        if (record.source === "none") {
+          problem(`No answer for ${record.method} ${record.path}`);
+        }
+      }
+      for (const message of report.errors) {
+        if (!message.includes(NO_ANSWER_DETAIL)) {
+          problem(`Error in the app: ${message}`);
+        }
+      }
+    }
     await Bun.write(
       `${base}.json`,
       `${JSON.stringify({ scene: sceneId, at, window: options.window, ...report }, null, 2)}\n`,
@@ -282,9 +357,9 @@ async function takeShots(
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
-  if (!options.all && !SCENES.some((s) => s.id === options.scene)) {
-    unknownScene(options.scene);
-  }
+  const scenes = await loadAllScenes();
+  const chosen = scenes.find((s) => s.id === options.scene);
+  if (!options.all && !chosen) unknownScene(options.scene, scenes);
   mkdirSync(options.out, { recursive: true });
 
   const problems: Problem[] = [];
@@ -297,7 +372,7 @@ async function main(): Promise<void> {
     browser = await chromium.launch({ channel: "chromium" });
     if (options.all) {
       const picked = scenesForAll(
-        SCENES,
+        scenes,
         new Set(IMPORTED_SCENES.map((s) => s.id)),
         options,
       );
@@ -307,24 +382,18 @@ async function main(): Promise<void> {
         );
       }
       for (const scene of picked.scenes) {
-        const steps = (scene.run ?? []).map((s) => s.at);
-        const end = steps.length > 0 ? Math.max(...steps) : 0;
-        const times = [...new Set([...steps, end])].sort((a, b) => a - b);
-        await takeShots(
-          browser,
-          server.url,
-          options,
-          scene.id,
-          times,
-          problems,
+        const steps = sceneSteps(scene).map((s) => s.at);
+        const times = [...new Set([...steps, sceneEnd(scene)])].sort(
+          (a, b) => a - b,
         );
+        await takeShots(browser, server.url, options, scene, times, problems);
       }
-    } else {
+    } else if (chosen) {
       await takeShots(
         browser,
         server.url,
         options,
-        options.scene,
+        chosen,
         [options.at],
         problems,
       );
