@@ -120,12 +120,21 @@ function showsOpenBotOnThisComputer(): Promise<boolean> {
  * Inside OpenBot Desktop, on the OpenBot on this computer, it is asked with the page's cookies,
  * which that OpenBot needs; the person is in `default` there. Told "not found" all the same, it is
  * asked in one of their own.
+ *
+ * `asNobody` asks it as nobody whatever organization the app last knew: the sign-in screen's read.
+ * Just signed out, the app still knows the organization the person worked in (it is forgotten once
+ * the sign-in screen shows, never while their pages are still on screen), and asked there as
+ * somebody no longer signed in, the server answers that it can't find it.
  */
-export async function readDeployment(options: {
+export async function readDeployment({
+  asNobody = false,
+  ...options
+}: {
   signal?: AbortSignal;
   fallback: string;
+  asNobody?: boolean;
 }): Promise<Deployment> {
-  const known = currentOrganizationId();
+  const known = asNobody ? undefined : currentOrganizationId();
   if (known !== undefined) return getDeployment(known, options);
   if (!(await showsOpenBotOnThisComputer()))
     return getDeployment(DEPLOYMENT_ORGANIZATION, {

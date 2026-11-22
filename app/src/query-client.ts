@@ -22,6 +22,7 @@ import {
 import {
   currentOrganizationId,
   onOrganizationChange,
+  setCurrentOrganization,
 } from "@/lib/organizations/current";
 import { inNoOrganization } from "@/lib/organizations/in-no-organization";
 
@@ -169,6 +170,24 @@ export const queryClient = new OpenBotQueryClient({
 });
 
 holdReadsWhileConnectionLost(queryClient);
+
+/**
+ * Nobody is signed in: forget the organization the last person worked in, with everything the app
+ * held for it and their list of organizations, so the next person to sign in on this browser reads
+ * nothing the last one was shown, and nothing is asked in an organization nobody here is in.
+ *
+ * Only once no page of theirs is on screen (the sign-in screen calls it). Forgotten while their
+ * pages still show, those pages are drawn again in no organization and fail.
+ */
+export function forgetOrganization(): void {
+  if (currentOrganizationId() === undefined) return;
+  setCurrentOrganization(undefined);
+  queryClient.removeQueries({
+    predicate: (query) =>
+      belongsToOrganization(query.queryKey) ||
+      query.queryKey[0] === "organizations",
+  });
+}
 
 /**
  * Moving from one organization to another drops everything the app held for the one left, in

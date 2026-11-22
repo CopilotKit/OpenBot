@@ -6,9 +6,6 @@ import {
   invokeDesktop,
 } from "@/lib/desktop/queries";
 import { desktopShell } from "@/lib/desktop/shell";
-import { setCurrentOrganization } from "@/lib/organizations/current";
-import { organizationKeys } from "@/lib/organizations/queries";
-import { belongsToOrganization } from "@/query-client";
 import { clearSkin } from "@/skins/store";
 import { authClient } from "./client";
 import { authKeys } from "./queries";
@@ -69,23 +66,9 @@ export function signOutMutationOptions(queryClient: QueryClient) {
       await signOut();
       return { leaving: false };
     },
-    /*
-     * NOBODY IS SIGNED IN, SO NO ORGANIZATION IS KNOWN. The one the person worked in is forgotten,
-     * with everything the app held for it. Kept, the sign-in screen asked for the deployment there
-     * (lib/deployment/queries.ts, `readDeployment`), as somebody no longer signed in, and the server
-     * answered that it couldn't find that organization: the sign-in screen became an error screen
-     * until a reload. Forgotten, it is asked at `default` as nobody, as on a fresh load; and the
-     * next person to sign in on this browser reads nothing the last one was shown.
-     */
     onSuccess: () => {
       clearSkin();
       queryClient.removeQueries({ queryKey: authKeys.all });
-      setCurrentOrganization(undefined);
-      queryClient.removeQueries({
-        predicate: (query) =>
-          belongsToOrganization(query.queryKey) ||
-          query.queryKey[0] === organizationKeys.all[0],
-      });
     },
   });
 }

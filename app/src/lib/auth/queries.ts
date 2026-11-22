@@ -49,7 +49,12 @@ export function needsOnboarding(user: AuthenticatedUser): boolean {
 export const authKeys = {
   all: ["auth"] as const,
   currentUser: () => [...authKeys.all, "current-user"] as const,
-  providers: () => [...authKeys.all, "providers"] as const,
+  /*
+   * Under `deployment`, not `auth`: what the sign-in screen offers is the deployment's, read as
+   * nobody, the same in every organization (query-client.ts). So it is neither dropped nor asked
+   * again when the sign-in screen forgets the organization the last person worked in.
+   */
+  providers: () => ["deployment", "sign-in"] as const,
 };
 
 /** An identity provider this deployment can sign somebody in with. */
@@ -73,7 +78,11 @@ export type SignInOptions = {
 
 async function signInOptions(): Promise<SignInOptions> {
   // The API's `deployment`, which answers before anybody has signed in, and after in their own.
-  const body = await readDeployment({ fallback: "Could not load sign-in" });
+  // As nobody: this is what somebody signing in is offered, and just signed out, nobody is.
+  const body = await readDeployment({
+    fallback: "Could not load sign-in",
+    asNobody: true,
+  });
   return {
     providers: body.authProviders,
     hosted: body.hostedSignIn === true,

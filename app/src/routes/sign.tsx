@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { CopilotKitMark, ProviderLogo } from "@/components/auth/provider-logo";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import { appConfig } from "@/lib/generated/application-config";
 import { inNoOrganization } from "@/lib/organizations/in-no-organization";
 import { searchTextEntry } from "@/lib/search-text";
 import { cn } from "@/lib/utils";
+import { forgetOrganization } from "@/query-client";
 import {
   type AuthProviderId,
   authProvidersQueryOptions,
@@ -87,6 +88,12 @@ function SignScreen() {
   >(null);
   const [error, setError] = useState<string | null>(null);
   const { data: options } = useQuery(authProvidersQueryOptions());
+  /*
+   * Nobody is signed in here, so the organization the last person worked in is forgotten, with what
+   * the app held for it. Here, once the sign-in screen shows, never at Sign out itself: the pages of
+   * the app are still on screen then, and forgetting under them draws them again in no organization.
+   */
+  useEffect(() => forgetOrganization(), []);
   const providers = options?.providers ?? [];
   const hosted = options?.hosted === true;
   const [email, setEmail] = useState("");

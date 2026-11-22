@@ -23,7 +23,13 @@ import { useSignOut } from "@/components/app-sidebar/use-sign-out";
 import { getGetDeploymentResponseMock } from "@/lib/api/generated/organization-settings/organization-settings.msw";
 import { GetDeploymentResponse } from "@/lib/api/generated/organization-settings/organization-settings.zod";
 import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
-import { setCurrentOrganization } from "@/lib/organizations/current";
+import { OrganizationBoundary } from "@/components/organizations/organization-boundary";
+import { organizationId } from "@/lib/api/request";
+import {
+  currentOrganizationId,
+  onOrganizationChange,
+  setCurrentOrganization,
+} from "@/lib/organizations/current";
 import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
 import { Route as AuthedRoute } from "@/routes/_authed";
@@ -141,16 +147,27 @@ afterAll(async () => {
   openbot.stop(true);
 });
 
-/** Home with the account menu's Sign out: the same hook every Sign out in the app runs. */
+/** A screen that reads the organization it is drawn in, as the app's screens do. */
+function WorkingIn() {
+  return <p>Working in {organizationId()}</p>;
+}
+
+/**
+ * Home with the account menu's Sign out (the same hook every Sign out in the app runs), inside the
+ * app's own boundary, which draws its pages again whenever the organization changes.
+ */
 function Home() {
   const signOut = useSignOut();
   return (
-    <main>
-      <p>The app</p>
-      <button onClick={signOut.run} type="button">
-        Sign out
-      </button>
-    </main>
+    <OrganizationBoundary>
+      <main>
+        <p>The app</p>
+        <WorkingIn />
+        <button onClick={signOut.run} type="button">
+          Sign out
+        </button>
+      </main>
+    </OrganizationBoundary>
   );
 }
 
@@ -215,4 +232,33 @@ test("signing out from an organization of their own lands on the sign-in screen,
     expect(view.queryByText(/Couldn't find that organization/)).toBeNull(),
   );
   expect(view.queryByText(/Something went wrong/)).toBeNull();
+});
+
+test("signing out from the account menu leaves the app's pages before the organization is forgotten", async () => {
+  // Whether the app's pages were still on screen when the organization was forgotten.
+  const appShownWhenForgotten: boolean[] = [];
+  const stop = onOrganizationChange((next) => {
+    if (next === undefined)
+      appShownWhenForgotten.push(
+        document.body.textContent?.includes("The app") === true,
+      );
+  });
+  try {
+    const view = openApp();
+    await view.findByText(`Working in ${ORGANIZATION}`);
+    await userEvent.click(view.getByRole("button", { name: "Sign out" }));
+
+    await view.findByRole(
+      "button",
+      { name: /Continue with Google/ },
+      { timeout: 5_000 },
+    );
+    expect(view.queryByText(/Something went wrong/)).toBeNull();
+    expect(view.queryByText(/The organization is not known yet/)).toBeNull();
+    // Forgotten once, on the sign-in screen, with nothing of the app left to draw in no organization.
+    await waitFor(() => expect(currentOrganizationId()).toBeUndefined());
+    expect(appShownWhenForgotten).toEqual([false]);
+  } finally {
+    stop();
+  }
 });
