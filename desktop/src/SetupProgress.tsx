@@ -68,6 +68,11 @@ export type Progress = {
   /** The step waits on the person, not on work: no spinner, and its status says so. */
   waiting?: boolean;
   /**
+   * The step hasn't started and comes later in a list shown whole from the start (the move to
+   * OpenBot Cloud): an empty mark, its name in the quieter ink, and no status.
+   */
+  pending?: boolean;
+  /**
    * The step holds until there is room on the disk (`early_downloads::wait_for_room`): no spinner
    * and no time running on, and its status says "Paused".
    */
@@ -328,6 +333,23 @@ export function plainInstallSteps(
 }
 
 function SetupProgressRow({
+  step,
+  showElapsed,
+}: {
+  step: Progress;
+  showElapsed: boolean;
+}) {
+  if (step.pending)
+    return (
+      <li className="step pending" aria-label={label(step.step)}>
+        <span className="mark pending" aria-hidden="true" />
+        <span className="step-label">{label(step.step)}</span>
+      </li>
+    );
+  return <StartedRow step={step} showElapsed={showElapsed} />;
+}
+
+function StartedRow({
   step,
   showElapsed,
 }: {

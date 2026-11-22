@@ -110,8 +110,59 @@ const runningFails = location.hash === "#local-running-fails";
 const offered = location.search === "?offer";
 // A build that never updates itself (internal, candidate, or without the updater).
 const internal = location.search === "?internal";
+// The move to OpenBot Cloud, offered over an OpenBot (Self-Contained) found running: \`#move-choice\`
+// after an update, and the rest from Settings, at the screen each names (see \`moveAnswer\`).
+const move = location.hash.startsWith("#move-") ? location.hash.slice(6) : null;
 // Found running by the launch is a relaunch too: an installation set up and started before.
-const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld || runningTooOld || launcherAhead;
+const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld || runningTooOld || launcherAhead || Boolean(move);
+const MOVE_APPS = [
+  { appId: "gmail", appName: "Gmail", accountLabel: "sam@example.com", botNames: ["Inbox helper", "Standup"] },
+  { appId: "slack", appName: "Slack", accountLabel: "Northwind" },
+  { appId: "google-drive", appName: "Google Drive" },
+];
+const MORE_APPS = [
+  ...MOVE_APPS,
+  { appId: "notion", appName: "Notion" },
+  { appId: "github", appName: "GitHub", accountLabel: "sam-codes" },
+  { appId: "linear", appName: "Linear" },
+  { appId: "google-calendar", appName: "Google Calendar", accountLabel: "sam@example.com" },
+  { appId: "hubspot", appName: "HubSpot" },
+];
+const MOVE_PREVIEW = {
+  counts: [
+    { kind: "bots", count: 3 }, { kind: "skills", count: 9 }, { kind: "conversations", count: 37 },
+    { kind: "messages", count: 2814 }, { kind: "memories", count: 52 }, { kind: "routines", count: 3 },
+    { kind: "goals", count: 1 }, { kind: "check-ins", count: 2 }, { kind: "files", count: 64 },
+    { kind: "settings", count: 1 },
+  ],
+  apps: move === "confirm-many" ? MORE_APPS : MOVE_APPS,
+  footprintBytes: 18_400_000_000,
+  modelKeysAvailable: true,
+};
+function moveAnswer(command) {
+  if (command === "move_offer")
+    return { due: true, fromSettings: move !== "choice", footprintBytes: 18_400_000_000 };
+  if (command === "move_preview")
+    return move === "confirm-loading" ? new Promise(() => {}) : MOVE_PREVIEW;
+  if (command !== "move_to_cloud") return undefined;
+  const progress = (stage, state, share) => emit("move:progress", { stage, state, progress: share });
+  if (move === "signin") {
+    progress("sign-in", "running");
+    return new Promise(() => {});
+  }
+  progress("sign-in", "done");
+  progress("export", "done");
+  progress("upload", "running", 0.42);
+  if (move === "midway") return new Promise(() => {});
+  if (move === "failed")
+    throw { said: "OpenBot couldn't send your Bots to OpenBot Cloud. Check your internet connection, then try again.", kind: "move-failed" };
+  return {
+    freedBytes: 18_400_000_000,
+    apps: MOVE_APPS,
+    notes: move === "done" ? ["Research runs on an ordinary computer here, because OpenBot Cloud has no isolated computers."] : [],
+    leftBehind: move === "done-left" ? ["Some of OpenBot's software is still on this computer. Restart your computer to finish removing it."] : [],
+  };
+}
 const signingIn = location.hash === "#signin";
 const installing = location.hash === "#licence-installing";
 const pausing = location.hash === "#pause-podman";
@@ -150,7 +201,11 @@ export async function invoke(command, args) {
   if (connectedProblem && command === "connection")
     return { mode: "connected", address: "https://openbot.example.com", signedIn: true };
   if (connectedProblem && command === "show_connected") throw connectedProblem;
-  if ((runningTooOld || runningFails) && command === "already_running") return true;
+  if ((runningTooOld || runningFails || move) && command === "already_running") return true;
+  if (move) {
+    const answer = moveAnswer(command);
+    if (answer !== undefined) return answer;
+  }
   if (runningFails && command === "show_openbot")
     throw { said: "Part of OpenBot needs recovery. Try starting OpenBot once more." };
   if (localSecurity && command === "show_openbot")
@@ -2944,6 +2999,100 @@ describe.skipIf(!asked)(
           await page.close();
         }
       }, 40_000);
+    }
+  },
+);
+
+/*
+ * The move to OpenBot Cloud, each of its screens at the window's size less a title bar (1000x760),
+ * in the first screen's card: every common case fits with nothing scrolled inside the card, and the
+ * page never scrolls either way. Only a long list of apps to reconnect scrolls, inside the card,
+ * with Move still in view. `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each, light and dark,
+ * taken before anything is asserted.
+ */
+describe.skipIf(!asked)(
+  "the move to OpenBot Cloud at the window's size",
+  () => {
+    const shots = process.env.OPENBOT_APP_SHOTS;
+    const engine = process.env.OPENBOT_APP_ENGINE ?? "chromium";
+    const SCREENS: {
+      hash: string;
+      heading: string;
+      /** Pressed on the confirm screen, once what moves has loaded. */
+      move?: boolean;
+      scrolls?: boolean;
+    }[] = [
+      { hash: "#move-choice", heading: "Move to OpenBot Cloud?" },
+      { hash: "#move-confirm", heading: "Move to OpenBot Cloud" },
+      { hash: "#move-confirm-loading", heading: "Move to OpenBot Cloud" },
+      {
+        hash: "#move-confirm-many",
+        heading: "Move to OpenBot Cloud",
+        scrolls: true,
+      },
+      { hash: "#move-signin", heading: "Moving to OpenBot Cloud", move: true },
+      { hash: "#move-midway", heading: "Moving to OpenBot Cloud", move: true },
+      { hash: "#move-failed", heading: "The move didn't finish", move: true },
+      { hash: "#move-done", heading: "You're on OpenBot Cloud", move: true },
+      {
+        hash: "#move-done-left",
+        heading: "You're on OpenBot Cloud",
+        move: true,
+      },
+    ];
+    for (const colorScheme of ["light", "dark"] as const) {
+      for (const screen of SCREENS) {
+        test(`${screen.hash.slice(1)} fits the window (${colorScheme})`, async () => {
+          const page = await browser.newPage({
+            viewport: { width: 1000, height: 760 },
+            colorScheme,
+          });
+          try {
+            await open(page, screen.hash, cloudBuilt);
+            if (screen.move) {
+              await page.getByRole("list", { name: "What moves" }).waitFor();
+              await page
+                .getByRole("button", { name: "Move to OpenBot Cloud" })
+                .click();
+            }
+            await page
+              .getByRole("heading", { name: screen.heading, exact: true })
+              .waitFor();
+            if (screen.hash === "#move-confirm")
+              await page.getByRole("list", { name: "What moves" }).waitFor();
+            // The card's entrance over, and the pointer off whatever it pressed.
+            await page.mouse.move(0, 0);
+            await page.waitForTimeout(600);
+            if (shots)
+              await page.screenshot({
+                path: `${shots}/${screen.hash.slice(1)}-${colorScheme}-${engine}.png`,
+              });
+            const fit = await page.evaluate(() => {
+              const sheet = document.querySelector("main > .sheet");
+              const move = [...document.querySelectorAll("button")].find(
+                (button) => button.textContent === "Move to OpenBot Cloud",
+              );
+              const bottom = move?.getBoundingClientRect().bottom ?? 0;
+              return {
+                cardScrolls: sheet
+                  ? sheet.scrollHeight > sheet.clientHeight + 1
+                  : true,
+                pageScrolls:
+                  document.documentElement.scrollHeight > window.innerHeight ||
+                  document.documentElement.scrollWidth > window.innerWidth,
+                moveInView: !move || bottom <= window.innerHeight,
+              };
+            });
+            expect(fit).toEqual({
+              cardScrolls: screen.scrolls === true,
+              pageScrolls: false,
+              moveInView: true,
+            });
+          } finally {
+            await page.close();
+          }
+        }, 30_000);
+      }
     }
   },
 );
