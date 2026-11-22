@@ -29,6 +29,6 @@ export interface AiSignIn {
    * @maximum 600
    */
   interval: number;
-  /** How the sign-in finishes. poll: read it (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. code: once the person approves it, the provider shows them a code (Claude) or sends their browser to an address that doesn't load (Google), and they send that code or address back with finishPersonalAiSignIn. */
+  /** How the sign-in finishes. poll: read it (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. code: the provider's page shows the person a code once they approve it, which they send back with finishPersonalAiSignIn. */
   finish: string;
 }
