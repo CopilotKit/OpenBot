@@ -113,18 +113,21 @@ function markerInWindow(page: Page) {
 
 /**
  * The share of pixels that differ between two PNG shots of the same size, decoded in the page, and
- * the box the changed pixels lie in (null when none did).
+ * the box the changed pixels lie in (null when none did). With `near` 1, a pixel that matches one
+ * within a pixel of it in the other shot has not changed: text drawn a pixel over, or with other
+ * anti-aliasing, is the same text.
  */
 async function changed(
   page: Page,
   a: Uint8Array,
   b: Uint8Array,
+  near = 0,
 ): Promise<{
   share: number;
   box: { x: number; y: number; width: number; height: number } | null;
 }> {
   return page.evaluate(
-    async ([one, two]) => {
+    async ([one, two, radius]) => {
       const pixels = async (base64: string) => {
         const blob = await (
           await fetch(`data:image/png;base64,${base64}`)
@@ -139,22 +142,39 @@ async function changed(
       const [x, y] = await Promise.all([pixels(one), pixels(two)]);
       if (x.width !== y.width || x.height !== y.height)
         return { share: 1, box: null };
+      const { width, height } = x;
+      // A pixel counts as the same past a small difference (anti-aliasing, the caret).
+      const same = (from: ImageData, i: number, to: ImageData, j: number) =>
+        Math.abs((from.data[i] ?? 0) - (to.data[j] ?? 0)) <= 24 &&
+        Math.abs((from.data[i + 1] ?? 0) - (to.data[j + 1] ?? 0)) <= 24 &&
+        Math.abs((from.data[i + 2] ?? 0) - (to.data[j + 2] ?? 0)) <= 24;
+      const matched = (
+        from: ImageData,
+        to: ImageData,
+        px: number,
+        py: number,
+      ) => {
+        const i = (py * width + px) * 4;
+        for (let dy = -radius; dy <= radius; dy++) {
+          for (let dx = -radius; dx <= radius; dx++) {
+            const qx = px + dx;
+            const qy = py + dy;
+            if (qx < 0 || qy < 0 || qx >= width || qy >= height) continue;
+            if (same(from, i, to, (qy * width + qx) * 4)) return true;
+          }
+        }
+        return false;
+      };
       let changed = 0;
       let left = Infinity;
       let top = Infinity;
       let right = -1;
       let bottom = -1;
-      for (let i = 0; i < x.data.length; i += 4) {
-        // A pixel counts as changed past a small difference (anti-aliasing, the caret).
-        if (
-          Math.abs((x.data[i] ?? 0) - (y.data[i] ?? 0)) > 24 ||
-          Math.abs((x.data[i + 1] ?? 0) - (y.data[i + 1] ?? 0)) > 24 ||
-          Math.abs((x.data[i + 2] ?? 0) - (y.data[i + 2] ?? 0)) > 24
-        ) {
+      for (let at = 0; at < width * height; at++) {
+        const px = at % width;
+        const py = Math.floor(at / width);
+        if (!matched(x, y, px, py) || !matched(y, x, px, py)) {
           changed++;
-          const at = i / 4;
-          const px = at % x.width;
-          const py = Math.floor(at / x.width);
           left = Math.min(left, px);
           top = Math.min(top, py);
           right = Math.max(right, px);
@@ -162,7 +182,7 @@ async function changed(
         }
       }
       return {
-        share: changed / (x.width * x.height),
+        share: changed / (width * height),
         box:
           right < 0
             ? null
@@ -174,10 +194,11 @@ async function changed(
               },
       };
     },
-    [Buffer.from(a).toString("base64"), Buffer.from(b).toString("base64")] as [
-      string,
-      string,
-    ],
+    [
+      Buffer.from(a).toString("base64"),
+      Buffer.from(b).toString("base64"),
+      near,
+    ] as [string, string, number],
   );
 }
 
@@ -421,14 +442,19 @@ describe.skipIf(!asked)("the workbench's motion", () => {
           const end = await state();
           // Only a shot taken wholly while the window was not ready: the target frame is not there yet.
           if (!start.ready && !end.ready) {
-            const change = await changed(page, before, shot);
+            // Within a pixel: CI's renderer drew the still's text a little differently from the
+            // window's, about 2.2% of the pixels changed all over the window (0.01% here), while a
+            // replay showing through changes whole areas (89% when this was found; about 5% for a
+            // dark window whose card has not drawn yet).
+            const change = await changed(page, before, shot, 1);
             shares.push(change.share);
             // Where a frame changed, and what covered the window then, so a failure says why.
-            if (change.share >= 0.02)
+            if (change.share >= 0.005)
               console.log(
                 "A frame changed:",
                 JSON.stringify({
                   ...change,
+                  exact: await changedShare(page, before, shot),
                   ...(await page.evaluate(() => {
                     const still = document.querySelector<HTMLIFrameElement>(
                       "[data-workbench-still]",

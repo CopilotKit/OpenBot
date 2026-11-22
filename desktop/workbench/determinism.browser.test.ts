@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { PLAN_CODE } from "./scenes/install";
+import { PLAN_APPROVED, PLAN_WAITING } from "./scenes/install";
 import {
   ensureServer,
   HOOK_START_MS,
@@ -141,7 +141,7 @@ describe.skipIf(!asked)("the workbench clock", () => {
     }
   }, 60_000);
 
-  test("install-anthropic-plan's type step fills the code field in the real window", async () => {
+  test("install-anthropic-plan waits for the browser, then goes on to Finishing setup by itself", async () => {
     if (!browser || !server) throw new Error("No browser or server.");
     const page = await browser.newPage({
       viewport: { width: 1600, height: 1000 },
@@ -161,26 +161,21 @@ describe.skipIf(!asked)("the workbench clock", () => {
     try {
       await page.goto(`${server.url}/workbench/?${query}`);
       await waitReady(page);
-      // Just after the type step, before Finish signing in.
+      // The address is open: the window waits, with nothing to type.
       await page.evaluate(
         (ms) => window.__workbenchPage?.seek(ms),
-        PLAN_CODE * 1000 + 1500,
+        PLAN_WAITING * 1000 + 1500,
       );
-      const shot = await read(page);
-      expect(shot.text).toContain("Code from your browser");
-      const value = await windowFrame(page).evaluate(() => {
-        for (const label of document.querySelectorAll("label")) {
-          if (!(label.textContent ?? "").includes("Code from your browser"))
-            continue;
-          const id = label.getAttribute("for");
-          const field = (
-            id ? document.getElementById(id) : label.querySelector("input")
-          ) as HTMLInputElement | null;
-          if (field) return field.value;
-        }
-        return null;
-      });
-      expect(value).toBe("abc123#xyz");
+      const waiting = await read(page);
+      expect(waiting.text).toContain("Approve the request in your browser.");
+      expect(waiting.text).not.toContain("Code from your browser");
+      // Approved in the browser: the window goes on with no click.
+      await page.evaluate(
+        (ms) => window.__workbenchPage?.seek(ms),
+        PLAN_APPROVED * 1000 + 3000,
+      );
+      const after = await read(page);
+      expect(after.headings).toContain("Finishing setup");
       expect(missed).toEqual([]);
     } finally {
       await page.close();

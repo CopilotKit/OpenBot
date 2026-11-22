@@ -123,15 +123,18 @@ describe("install scenes", () => {
       expect(step.at).toBeLessThan(settled?.at ?? 0);
   });
 
-  test("install-anthropic-plan types the code before it presses Finish signing in", () => {
+  test("install-anthropic-plan's sign-in finishes on its own once the address is open, with nothing typed", () => {
     const steps = scene("install-anthropic-plan").run ?? [];
-    const typed = steps.find((step) => "type" in step);
-    const finish = steps.find(
-      (step) => "click" in step && step.click === "Finish signing in",
+    expect(steps.some((step) => "type" in step)).toBe(false);
+    const begun = steps.find(
+      (step) => "settle" in step && step.settle === "begin_claude_sign_in",
     );
-    expect(typed).toBeDefined();
-    expect(finish).toBeDefined();
-    expect((typed?.at ?? 99999) < (finish?.at ?? 0)).toBe(true);
+    const finished = steps.find(
+      (step) => "settle" in step && step.settle === "finish_claude_sign_in",
+    );
+    expect(begun).toBeDefined();
+    expect(finished).toBeDefined();
+    expect((begun?.at ?? 99999) < (finished?.at ?? 0)).toBe(true);
     const times = steps.map((step) => step.at);
     expect(times).toEqual([...times].sort((a, b) => a - b));
   });

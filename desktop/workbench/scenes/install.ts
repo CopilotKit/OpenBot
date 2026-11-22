@@ -869,9 +869,13 @@ const PLAN_SIGN_IN = 74;
 const PLAN_DOWNLOAD_FROM = PLAN_SIGN_IN + 1;
 const PLAN_DOWNLOAD_TO =
   Math.round((PLAN_DOWNLOAD_FROM + SIGN_IN_IMAGE / PLAN_SPEED) * 10) / 10;
-/** When the person types the code. The determinism test seeks to just after it. */
-export const PLAN_CODE = PLAN_DOWNLOAD_TO + 8;
-const PLAN_FINISH = PLAN_CODE + 2;
+/** When the address is open in the browser: the window waits for the person to approve. */
+export const PLAN_WAITING = PLAN_DOWNLOAD_TO + 3;
+/**
+ * When the person has approved in the browser and the browser came back to Desktop's own
+ * listener, so `finish_claude_sign_in` answers. Nothing is typed in the window.
+ */
+export const PLAN_APPROVED = PLAN_WAITING + 10;
 const PLAN_SET_UP = PLAN_ACCEPT + 188;
 /** The address `SigningIn::begin` gives back once the sign-in container has started. */
 const CLAUDE_SIGN_IN_PAGE =
@@ -928,7 +932,7 @@ function claudeSignIn(click: number): RunStep[] {
     }),
     // The sign-in container starts, and gives the address to open.
     {
-      at: PLAN_DOWNLOAD_TO + 3,
+      at: PLAN_WAITING,
       settle: "begin_claude_sign_in",
       value: CLAUDE_SIGN_IN_PAGE satisfies string,
     },
@@ -960,16 +964,10 @@ const INSTALL_ANTHROPIC_PLAN: Scene = {
       // The plan is the first way in, so "Sign in with my plan" is already chosen.
       { at: PLAN_PICK, click: "Anthropic" },
       { at: PLAN_SIGN_IN, click: "Sign in with Anthropic" },
-      // The person pastes the code the browser shows, and presses Finish signing in. The code here
-      // is made up.
+      // The person approves in the browser, which comes back to Desktop's own listener: the sign-in
+      // finishes on its own, with nothing typed or pressed in the window.
       {
-        at: PLAN_CODE,
-        type: "abc123#xyz" satisfies string,
-        into: "Code from your browser",
-      },
-      { at: PLAN_FINISH, click: "Finish signing in" },
-      {
-        at: PLAN_FINISH + 1.5,
+        at: PLAN_APPROVED,
         settle: "finish_claude_sign_in",
         value: "example-claude-plan-token" satisfies string,
       },

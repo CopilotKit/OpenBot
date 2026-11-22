@@ -63,7 +63,9 @@ describe.skipIf(!asked)("workbench:shot", () => {
     // Each problem is one line: "<scene> at <s>s: <message>".
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
-  }, 300_000);
+    // Every committed scene, walked to its end: 155 s here and 299 s on CI's runner before three more
+    // move scenes, so CI's limit of 300 s was reached. Three times CI's time, as scenes keep coming.
+  }, 900_000);
 
   test("refuses an unknown scene", async () => {
     const result = await run(["no-such-scene"]);
