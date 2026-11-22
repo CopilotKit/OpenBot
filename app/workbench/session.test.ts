@@ -59,6 +59,35 @@ describe("sessionApi", () => {
     });
   });
 
+  test("signed in: answers what a Desktop install shows, not random extras", () => {
+    const api = sessionApi(DEFAULT_SESSION);
+    // No trial bar: the plan is not required (app/src/lib/plan/queries.ts NOT_REQUIRED).
+    expect(body(api[SESSION_ROUTES.plan])).toEqual({
+      required: false,
+      status: "not_required",
+      trialEndsAt: null,
+      renewsAt: null,
+      addCardUrl: null,
+    });
+    // No "Company sign-in" section.
+    expect(body(api[SESSION_ROUTES.companySignIn])).toEqual({
+      required: false,
+      met: true,
+      providers: [],
+    });
+    // No "Your AI" section.
+    expect(body(api[SESSION_ROUTES.aiConnection])).toMatchObject({
+      available: false,
+      signIns: [],
+    });
+  });
+
+  test("signed out: no Desktop defaults, only the sign-in page's answers", () => {
+    const api = sessionApi({ signedIn: false });
+    expect(api[SESSION_ROUTES.plan]).toBeUndefined();
+    expect(api[SESSION_ROUTES.companySignIn]).toBeUndefined();
+  });
+
   test("signed out: people/me is a 401, and the deployment answers", () => {
     const api = sessionApi({ signedIn: false });
     expect(api[SESSION_ROUTES.person]).toEqual({

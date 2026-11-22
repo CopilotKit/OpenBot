@@ -12,15 +12,12 @@
  * key needs no `prepare_ai_connection` (only a plan does); the server checks the key and saves it
  * (PUT ai-connection); then Desktop settles to it (`settle_ai_connection`, its default answer). A
  * refusal from the server makes Desktop settle back to the connection the server still reports.
+ * The session (../session.ts) answers that no one brings their own AI and that the organization
+ * needs no company sign-in, as OpenBot Desktop runs it.
  * Pattern: app/tests/ai-connection-dialog.test.tsx.
  */
 
-import type {
-  AiConnection,
-  CompanySignIn,
-  PersonalAiConnection,
-} from "@/lib/api/generated/model";
-import { getGetPersonalAiConnectionResponseMock } from "@/lib/api/generated/models/models.msw";
+import type { AiConnection } from "@/lib/api/generated/model";
 import type {
   DesktopAiConnection,
   DesktopUsageData,
@@ -39,11 +36,6 @@ const AI_CONNECTION_GET =
   "GET /api/v2/organizations/:organizationId/ai-connection" satisfies ApiRoute;
 const AI_CONNECTION_PUT =
   "PUT /api/v2/organizations/:organizationId/ai-connection" satisfies ApiRoute;
-
-const PERSONAL_AI_CONNECTION_GET =
-  "GET /api/v2/organizations/:organizationId/people/me/ai-connection" satisfies ApiRoute;
-const COMPANY_SIGN_IN_GET =
-  "GET /api/v2/organizations/:organizationId/people/me/company-sign-in" satisfies ApiRoute;
 
 const AI_CONNECTION_COMMAND = "plugin:openbot-desktop|ai_connection";
 const USAGE_DATA_COMMAND = "plugin:openbot-desktop|usage_data";
@@ -95,27 +87,6 @@ function desktopAnswer(connection: DesktopAiConnection): Answer {
   return { mode: "value", value: connection };
 }
 
-/*
- * OpenBot on this computer, as OpenBot Desktop runs it: no one brings their own AI (that is OpenBot
- * Cloud, your-ai.tsx draws nothing when `available` is false), and the organization needs no
- * company sign-in (company-sign-in.tsx draws nothing with no providers). The generated answers say
- * otherwise at random, and both sections push the AI model row down.
- */
-const ON_THIS_COMPUTER = {
-  [PERSONAL_AI_CONNECTION_GET]: value({
-    ...getGetPersonalAiConnectionResponseMock(),
-    uses: "organization",
-    required: false,
-    available: false,
-    signIns: [],
-  } satisfies PersonalAiConnection),
-  [COMPANY_SIGN_IN_GET]: value({
-    required: false,
-    met: true,
-    providers: [],
-  } satisfies CompanySignIn),
-};
-
 /** An admin, so that the AI model row is one they may change, as most installs have it. */
 const ADMIN = { ...DEFAULT_SESSION, role: "admin" } as const;
 
@@ -124,7 +95,7 @@ function start(): AppSceneStart {
     route: "/settings",
     host: "desktop",
     session: ADMIN,
-    api: { ...ON_THIS_COMPUTER, [AI_CONNECTION_GET]: value(CLAUDE_PLAN) },
+    api: { [AI_CONNECTION_GET]: value(CLAUDE_PLAN) },
     answers: {
       [AI_CONNECTION_COMMAND]: desktopAnswer({
         kind: "claude-plan",

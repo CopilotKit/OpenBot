@@ -149,6 +149,46 @@ describe("installFakeApi", () => {
     expect(await (await pending).json()).toEqual({ slow: 1 });
   });
 
+  test("a request that waits on an answer names it, not 'none'", async () => {
+    const { api, target, timers, changes } = setup();
+    const never = "GET /api/v2/organizations/:organizationId/bots" as const;
+    const delay = "GET /api/v2/people/*" as const;
+    api.setAnswer(never, { mode: "never" });
+    api.setAnswer(delay, { mode: "delay", ms: 300, body: {} });
+    const waiting = target.fetch(BOTS);
+    const slow = target.fetch("/api/v2/people/me/organizations");
+    await flush();
+    for (const record of api.requests()) {
+      expect(record.state).toBe("pending");
+      expect(record.source).toBe("answer");
+    }
+    expect(api.requests().map((record) => record.route)).toEqual([
+      never,
+      delay,
+    ]);
+    const first = changes.find((change) => change.kind === "request");
+    expect(first?.kind === "request" && first.record.source).toBe("answer");
+    // A cleared "never" answer falls through to the handlers, and the settled record says so.
+    api.clearAnswer(never);
+    await waiting;
+    timers[0].run();
+    await slow;
+    expect(api.requests().map((record) => record.source)).toEqual([
+      "spec",
+      "answer",
+    ]);
+  });
+
+  test("a request with no answer is 'none' only once it settles", async () => {
+    const { api, target } = setup();
+    await target.fetch("/api/v2/nothing-here");
+    expect(api.requests()[0]).toMatchObject({
+      source: "none",
+      state: "answered",
+      status: 404,
+    });
+  });
+
   test("a fail answer gives its status and the default body", async () => {
     const { api, target } = setup();
     api.setAnswer("GET /api/*", { mode: "fail", status: 422 });

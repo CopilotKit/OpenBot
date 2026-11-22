@@ -180,13 +180,17 @@ export function installFakeApi(
       return options.realFetch(input, init);
     }
     const request = toRequest(input, init, options.origin);
+    // A request that waits on a set answer ("delay", "never") names that answer while it waits, so
+    // that no reader takes it for one with no answer. Only a settled "none" is a missing answer.
+    // The settled outcome sets both again (a "never" answer that is cleared falls through).
+    const found = matchingAnswer(request);
     const record: ApiRecord = {
       id: nextId++,
       method: request.method,
       path: url.pathname + url.search,
       at: options.now(),
-      source: "none",
-      route: null,
+      source: found ? "answer" : "none",
+      route: found?.route ?? null,
       status: null,
       state: "pending",
     };
