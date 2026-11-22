@@ -267,6 +267,22 @@ function stageRows(stages: Stages): Progress[] {
   });
 }
 
+/**
+ * The OpenBot on this computer, as the move needs it, when the move is offered before it started:
+ * what moves is read from it, so it starts once the person picks OpenBot Cloud, updated to this
+ * app's release on the way. `stopped`: not started yet. `starting`: starting for the move. `up`:
+ * running, so what moves can be read. `failed`: it didn't start, and why.
+ */
+export type MoveHere =
+  | { at: "stopped" }
+  | { at: "starting" }
+  | { at: "up" }
+  | { at: "failed"; problem: Problem };
+
+/** Said on the confirm screen while OpenBot starts for the move, which can take minutes. */
+export const GETTING_READY_TO_MOVE =
+  "Getting your Bots ready to move. This can take a few minutes.";
+
 type Screen =
   | { at: "choice" }
   | { at: "confirm" }
@@ -281,7 +297,8 @@ type Screen =
  * 1. The choice: OpenBot Cloud, recommended and picked to begin with, or keep everything here. With
  *    the space the move frees. Keep is recorded and never asked again (`onKeep`).
  * 2. What moves, from the OpenBot running here (`move_preview`), and the app connections that can't
- *    move, by name, to reconnect in OpenBot Cloud. Settings opens here.
+ *    move, by name, to reconnect in OpenBot Cloud. Settings opens here. Offered at launch, before
+ *    OpenBot started (`here`), it starts now (`onGetReady`), and the figures arrive once it is up.
  * 3. The move (`move_to_cloud`): sign in through the browser, pack up, send, add, check, and only
  *    then remove OpenBot from this computer, each a row (`move:progress`).
  * 4. A move that stopped removed nothing: the sentence, Try again, or keep OpenBot here.
@@ -291,10 +308,16 @@ type Screen =
 export function MoveToCloud({
   offer,
   onKeep,
+  here,
+  onGetReady,
 }: {
   offer: MoveOffer;
-  /** Keep OpenBot here: recorded, then OpenBot shows. */
+  /** Keep OpenBot here: recorded, then OpenBot shows, or starts as it would have. */
   onKeep: () => Promise<void>;
+  /** The OpenBot here, when the move was offered before it started. Absent: it is running. */
+  here?: MoveHere;
+  /** Start the OpenBot here for the move: the person picked OpenBot Cloud. */
+  onGetReady?: () => void;
 }) {
   const [screen, setScreen] = useState<Screen>(
     offer.fromSettings ? { at: "confirm" } : { at: "choice" },
@@ -332,13 +355,20 @@ export function MoveToCloud({
         if (alive.current) setPreviewProblem(asProblem(error));
       });
   }, []);
-  const wantsPreview = screen.at !== "choice" && preview === null;
+  // Read from the OpenBot here, so only once it is up.
+  const up = !here || here.at === "up";
+  const wantsPreview = screen.at !== "choice" && preview === null && up;
   const asked = useRef(false);
   useEffect(() => {
     if (!wantsPreview || asked.current) return;
     asked.current = true;
     loadPreview();
   }, [wantsPreview, loadPreview]);
+  // OpenBot Cloud picked: the OpenBot here starts for the move, if it hasn't yet.
+  const toConfirm = () => {
+    setScreen({ at: "confirm" });
+    if (here?.at === "stopped") onGetReady?.();
+  };
   const [includeKeys, setIncludeKeys] = useState(true);
 
   const [stages, setStages] = useState<Stages>(freshStages);
@@ -383,7 +413,7 @@ export function MoveToCloud({
       <Choice
         footprintBytes={offer.footprintBytes}
         keeping={keeping}
-        onCloud={() => setScreen({ at: "confirm" })}
+        onCloud={toConfirm}
         onKeep={() => void keep()}
       />
     );
@@ -391,12 +421,15 @@ export function MoveToCloud({
     return (
       <Confirm
         preview={preview}
-        problem={previewProblem}
+        problem={here?.at === "failed" ? here.problem : previewProblem}
+        gettingReady={here?.at === "starting" || here?.at === "stopped"}
         footprintBytes={preview?.footprintBytes ?? offer.footprintBytes}
         includeKeys={includeKeys}
         onIncludeKeys={setIncludeKeys}
         keeping={keeping}
-        onRetryPreview={loadPreview}
+        onRetryPreview={
+          here?.at === "failed" ? () => onGetReady?.() : loadPreview
+        }
         onMove={() => void move()}
         onKeep={() => void keep()}
       />
@@ -582,6 +615,7 @@ function Choice({
 function Confirm({
   preview,
   problem,
+  gettingReady,
   footprintBytes,
   includeKeys,
   onIncludeKeys,
@@ -592,6 +626,8 @@ function Confirm({
 }: {
   preview: MovePreview | null;
   problem: Problem | null;
+  /** The OpenBot here is starting for the move, so what moves can't be read yet. */
+  gettingReady: boolean;
   footprintBytes: number | null;
   includeKeys: boolean;
   onIncludeKeys: (include: boolean) => void;
@@ -618,6 +654,8 @@ function Confirm({
             </button>
           </div>
         </div>
+      ) : gettingReady ? (
+        <StatusLine>{GETTING_READY_TO_MOVE}</StatusLine>
       ) : !preview ? (
         <StatusLine>Looking at what's on this computer…</StatusLine>
       ) : (

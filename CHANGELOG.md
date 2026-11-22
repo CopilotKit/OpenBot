@@ -119,7 +119,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
     the address itself.
 - **Move OpenBot (Self-Contained) to OpenBot Cloud.** After the update, a computer that runs OpenBot
   (Self-Contained) is asked once whether to move to OpenBot Cloud, with how much of OpenBot's files
-  the move removes, and Settings offers Move to OpenBot Cloud until it has moved. The move lists
+  the move removes, and Settings offers Move to OpenBot Cloud until it has moved. The question comes
+  as Desktop opens, before OpenBot (Self-Contained) updates or starts. Choosing OpenBot Cloud
+  updates and starts it behind the move's own screen, which shows what moves once it can read it;
+  keeping it here runs the update as before. The move lists
   what moves (Bots, skills, conversations, memories, routines, goals, check-ins and files) and the
   app connections to connect again, which never move. Your AI key comes along, sealed so only your
   OpenBot Cloud account can read it, unless you untick it. Desktop signs in to OpenBot Cloud, packs
