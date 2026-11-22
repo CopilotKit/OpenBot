@@ -19,7 +19,8 @@ export const Route = createFileRoute("/_authed/admin/providers")({
  * to go.
  *
  * One person on their own machine is offered every model the credential lists, so there is nothing
- * to allow and no allowlist is shown. A team picks among the models an admin allows here.
+ * to allow and no allowlist is shown. A team picks from every listed model too, until an admin
+ * narrows it here.
  */
 export function ProvidersPage() {
   const available = useQuery(availableModelsQueryOptions());

@@ -132,9 +132,20 @@ function ProviderRow({ listing }: { listing: AvailableModels }) {
 }
 
 /**
- * Admin, Providers: what people pick from in a conversation. Everything the credential lists for
- * one person on their own machine; in a team, the models allowed below, and until there are any,
- * the default only. No switch: what is allowed says it.
+ * Whether the model allowlist narrows what people pick and what Bots run on: only with Only allowed
+ * models on AND at least one model allowed. Off, or on with nothing allowed yet, every listed model
+ * stays open. The server keeps the same rule for the composer's picker and for every run.
+ */
+export function allowlistNarrows(allowlist: {
+  enabled: boolean;
+  models: readonly string[];
+}): boolean {
+  return allowlist.enabled && allowlist.models.length > 0;
+}
+
+/**
+ * Admin, Providers: what people pick from in a conversation. Every model the credential lists,
+ * until a team's admin narrows it below; then the models allowed there, with the default.
  */
 export function ModelChoiceSection() {
   const available = useQuery(availableModelsQueryOptions());
@@ -149,17 +160,21 @@ export function ModelChoiceSection() {
     enabled: data?.exposure === "allowed",
   });
   if (!data) return null;
+  const allowlist = overview.data?.settings.modelAllowlist;
   const allowed =
-    overview.data?.settings.modelAllowlist.models.filter((name) =>
+    allowlist?.models.filter((name) =>
       data.models.some((model) => `${data.provider}/${model.id}` === name),
     ).length ?? 0;
   if (data.exposure === "allowed" && overview.isPending) return null;
+  // Open unless an admin narrowed it: one person, or a team whose allowlist narrows nothing.
+  const open =
+    data.exposure === "all" || !allowlist || !allowlistNarrows(allowlist);
   return (
     <PageSection
       description={
-        data.exposure === "all"
+        open
           ? `People can pick any model your provider lists, and its thinking level, in each conversation. Bots run on ${data.default} until somebody picks another.`
-          : `People pick among the models you allow below, and their thinking level, in each conversation. Until you allow one, every conversation runs on ${data.default}.`
+          : `People pick among the models you allow below, and their thinking level, in each conversation. Bots run on ${data.default} until somebody picks another.`
       }
       title="In conversations"
     >
@@ -175,17 +190,17 @@ export function ModelChoiceSection() {
             </ItemMedia>
             <ItemContent>
               <ItemTitle>
-                {data.exposure === "all"
+                {open
                   ? "Every listed model"
                   : allowed === 0
-                    ? "No models allowed yet"
+                    ? "No allowed model is listed"
                     : `${allowed} ${allowed === 1 ? "model" : "models"} allowed`}
               </ItemTitle>
               <ItemDescription>
-                {data.exposure === "all"
+                {open
                   ? `${data.models.length} models, kept current from your provider.`
                   : allowed === 0
-                    ? "People don't see a model picker. Allow models below to offer them."
+                    ? `Your provider doesn't list any model you allowed, so people only get ${data.default}.`
                     : "People see them in the composer's model picker, with the default."}
               </ItemDescription>
             </ItemContent>
@@ -208,7 +223,7 @@ export function ModelAllowlistSection() {
   const [open, setOpen] = useState(false);
   return (
     <ControlsSection
-      description="The models people may pick in each conversation. With Only allowed models on, a Bot on any other model is refused before it runs, and a remote Bot's own model is checked too."
+      description="Every listed model is open until you narrow it. Turn on Only allowed models and allow some, and people pick among those. A Bot on any other model is then refused before it runs, and a remote Bot's own model is checked too."
       title="Allowed models"
     >
       {({ data, setSetting, saving }) => {
@@ -223,9 +238,11 @@ export function ModelAllowlistSection() {
                 <ItemContent>
                   <ItemTitle>Only allowed models</ItemTitle>
                   <ItemDescription>
-                    {modelAllowlist.enabled
-                      ? "Bots can only run on the models listed below."
-                      : "Off. Runs on other models, a remote Bot's own included, aren't refused."}
+                    {allowlistNarrows(modelAllowlist)
+                      ? "People pick among the models listed below, and Bots only run on them."
+                      : modelAllowlist.enabled
+                        ? "On, but no model is allowed yet, so every model stays open. Allow models below to narrow it."
+                        : "Off. People can pick any listed model, and no run is refused for its model."}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
