@@ -138,6 +138,7 @@ tags:
   - { name: Memory, description: "The facts a person's Bots remember about them, and the app actions those facts are read in from. Each person's are theirs alone: an administrator can't read them either." }
   - { name: Agents, description: "The agents an organization's Bots hand work to: OpenBot's own, a framework OpenBot runs, or an agent somebody runs at its own address. An administrator adds the organization's, and anybody may add a private one for their own Bots. A Bot's delegation says whether it works on one agent or hands work to several, and which." }
   - { name: CopilotKit management, description: "Connecting a self-hosted OpenBot to CopilotKit's management service, which keeps it up to date in the company's own cluster through an agent installed there. Only the administrators of the organization `default` manage it, and only on the team edition a company runs itself." }
+  - { name: Moving to OpenBot Cloud, description: "Moving what a person has in an OpenBot on their own computer to an organization on OpenBot Cloud: exporting it there as a bundle, importing the bundle on Cloud, and checking that everything arrived before anything is removed. Connections to apps never carry their sign-in, and a model key moves only when the person chooses, sealed to the import." }
 paths:
   /api/v2/organizations/{organizationId}/reactions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reactions' }
   /api/v2/organizations/{organizationId}/bots: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots' }
@@ -493,6 +494,15 @@ paths:
   /api/v2/organizations/{organizationId}/bots/{botId}/delegation: { $ref: './agents.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1delegation' }
   /api/v2/organizations/{organizationId}/management: { $ref: './management.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1management' }
   /api/v2/organizations/{organizationId}/management/enrollment: { $ref: './management.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1management~1enrollment' }
+  /api/v2/organizations/{organizationId}/export-estimate: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1export-estimate' }
+  /api/v2/organizations/{organizationId}/exports: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1exports' }
+  /api/v2/organizations/{organizationId}/exports/{exportId}: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1exports~1{exportId}' }
+  /api/v2/organizations/{organizationId}/exports/{exportId}/parts/{partNumber}: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1exports~1{exportId}~1parts~1{partNumber}' }
+  /api/v2/organizations/{organizationId}/imports: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports' }
+  /api/v2/organizations/{organizationId}/imports/{importId}: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}' }
+  /api/v2/organizations/{organizationId}/imports/{importId}/parts/{partNumber}: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}~1parts~1{partNumber}' }
+  /api/v2/organizations/{organizationId}/imports/{importId}/apply: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}~1apply' }
+  /api/v2/organizations/{organizationId}/imports/{importId}/verification: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}~1verification' }
 components:
   securitySchemes:
     webSession:
@@ -659,6 +669,10 @@ components:
             memories:write: Write, change and forget the signed-in person's memories, and add, change, sync and remove their memory sources.
             bot-agents:read: Read the agents the signed-in person's Bots may hand work to, and for an administrator every agent in the organization.
             bot-agents:write: Add, change and delete the signed-in person's own agents and their callback tokens, and for an administrator the organization's.
+            exports:read: Read and download the signed-in person's exports for moving to OpenBot Cloud, and what one would hold.
+            exports:write: Start and remove the signed-in person's exports for moving to OpenBot Cloud.
+            imports:read: Read the signed-in person's imports into OpenBot Cloud and check what arrived.
+            imports:write: Start an import into OpenBot Cloud as the signed-in person, upload its bundle and import it.
     apiKey:
       type: http
       scheme: bearer
