@@ -27,10 +27,13 @@ info:
 
 
     An OpenBot install holds one or more organizations, and a person may be a
-    member of several. Where an install allows more than one, everybody has
-    an organization of their own, made for them when they first sign in, and
-    joins others by invitation. Otherwise, and on an install for one person
-    with no sign-in, everybody works in the organization `default`.
+    member of several. Where an install allows more than one, people create
+    others and join them by invitation. On a self-hosted install everybody
+    who signs in is a member of `default`, the one organization they share,
+    unless the install gives everybody an organization of their own as they
+    first sign in, as OpenBot Cloud does. Otherwise, and on an install for
+    one person with no sign-in, everybody works in the organization
+    `default`.
     organizationId is an organization's id or its slug, and the caller must
     be a member of it: an organization the caller is not in answers exactly
     as one that does not exist, `default` included.

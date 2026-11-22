@@ -167,12 +167,12 @@ paths:
       operationId: revokePersonAccess
       summary: Remove a person's access
       description: >-
-        Remove a person from the organization. Where everybody has an
-        organization of their own (an OpenBot whose list of organizations
-        answers canCreate true), this ends their membership of this
-        organization alone: they lose its Bots and conversations from their
-        next request, and their account, sessions, API keys, their own
-        organization and any other they belong to are unchanged. Restoring
+        Remove a person from the organization. Where OpenBot keeps more than
+        one organization (its list of organizations answers canCreate true),
+        this ends their membership of this organization alone: they lose its
+        Bots and conversations from their next request, and their account,
+        sessions, API keys and any other organization they belong to are
+        unchanged. Restoring
         them puts the membership back with its role and teams. Where OpenBot
         keeps one organization, it stops the person using OpenBot: their
         address can't sign in again, and the sessions, API keys and app
@@ -225,8 +225,8 @@ paths:
       operationId: restorePersonAccess
       summary: Give a person their access back
       description: >-
-        Give a removed person their access back. Where everybody has an
-        organization of their own, this puts back their membership of this
+        Give a removed person their access back. Where OpenBot keeps more than
+        one organization, this puts back their membership of this
         organization with the role and teams it had; their sessions and API
         keys, which were never ended, work here again from their next request.
         Where OpenBot keeps one organization, it lets them sign in again, and
