@@ -6,6 +6,9 @@
     "dev": "vite",
     "workbench": "vite --config vite.workbench.config.ts",
     "build": "vite build",
+    "workbench:shot": "bun workbench/shot.ts",
+    "workbench:check": "bun workbench/shot.ts --all --check --out workbench-shots/check",
+    "workbench:import": "bun workbench/importLog.ts",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri"
   },

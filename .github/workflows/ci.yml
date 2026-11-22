@@ -418,7 +418,7 @@ jobs:
 
   # The desktop setup window's, for the same reason as the list above: the AI step's form holding
   # still while the install behind it comes and goes. It bundles the window from the desktop's own
-  # dependencies. One file, so it is its own job rather than one of the list's workers. In the
+  # dependencies. A few files, so it is its own job rather than one of the list's workers. In the
   # image, as above.
   app-browser-desktop:
     name: app (real browser, desktop setup window)
@@ -443,7 +443,15 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 \
             "$PLAYWRIGHT_IMAGE" \
-            bun test src/setupLayout.browser.test.ts
+            bun test src/setupLayout.browser.test.ts workbench/determinism.browser.test.ts workbench/layoutWatch.browser.test.ts workbench/shot.browser.test.ts
+      # The workbench's run check: every scene's run walked to its end, failing on a step that has
+      # nothing to click or type into, or a run that stalls.
+      - run: |
+          docker run --rm --ipc=host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE/desktop" \
+            --volume "$(command -v bun):/usr/local/bin/bun:ro" \
+            "$PLAYWRIGHT_IMAGE" \
+            bun run workbench:check
 
   # The suite in shards, one runner each, so the run takes as long as its slowest shard rather than
   # as long as every file one after another. `bun test --shard` does the split, cut by the per-file
