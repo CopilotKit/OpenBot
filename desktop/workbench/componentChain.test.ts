@@ -146,6 +146,32 @@ describe("componentChain", () => {
     ]);
   });
 
+  test("names app files served under /__app/src/", () => {
+    const fiber = chainOf(named("UsageData"));
+    fiber._debugStack = stackError(
+      "Error\n    at UsageData (http://localhost:3021/__app/src/components/settings/usage-data.tsx?t=1:40:7)",
+    );
+    const [info] = componentChain(dom(fiber));
+    expect(info?.file).toBe("app/src/components/settings/usage-data.tsx");
+    expect(info?.at?.line).toBe(40);
+  });
+
+  test("skips other files served under /__app/", () => {
+    const fiber = chainOf(named("Boot"));
+    fiber._debugStack = stackError(
+      "Error\n    at boot (/__app/workbench/frameBoot.ts:3:1)",
+    );
+    expect(componentChain(dom(fiber))).toEqual([{ name: "Boot" }]);
+  });
+
+  test("still names desktop files under /src/", () => {
+    const fiber = chainOf(named("App"));
+    fiber._debugStack = stackError("Error\n    at App (/src/App.tsx:9:2)");
+    const [info] = componentChain(dom(fiber));
+    expect(info?.file).toBe("desktop/src/App.tsx");
+    expect(info?.at?.line).toBe(9);
+  });
+
   test("accepts _debugSource", () => {
     const fiber = chainOf(named("StepRow"));
     fiber._debugSource = {

@@ -60,3 +60,44 @@ test("a click calls onPick with the id", () => {
   fireEvent.click(getByText("Cloud one"));
   expect(onPick).toHaveBeenCalledWith("c1");
 });
+
+function headingsWith(container: HTMLElement) {
+  return Array.from(container.querySelectorAll("section")).map((section) => ({
+    group: section.querySelector("h3")?.textContent,
+    items: Array.from(section.querySelectorAll("button")).map(
+      (b) => b.textContent,
+    ),
+  }));
+}
+
+test("with a list of groups, an app scene shows under its app group", () => {
+  const items = [
+    ...scenes,
+    { id: "app-home", title: "Home empty", group: "App: Home" },
+  ];
+  const { container } = render(
+    <SceneList
+      scenes={items}
+      current="i1"
+      onPick={() => {}}
+      groups={["Install", "App: Home"]}
+    />,
+  );
+  expect(headingsWith(container)).toEqual([
+    { group: "Install", items: ["Install one", "Install two"] },
+    { group: "App: Home", items: ["Home empty"] },
+    { group: "Other", items: ["Cloud one"] },
+  ]);
+});
+
+test("a scene with an unknown group shows under Other, last", () => {
+  const items = [...scenes, { id: "x1", title: "Lost one", group: "Nowhere" }];
+  const { container } = render(
+    <SceneList scenes={items} current="i1" onPick={() => {}} />,
+  );
+  expect(headingsWith(container)).toEqual([
+    { group: "Install", items: ["Install one", "Install two"] },
+    { group: "Connected", items: ["Cloud one"] },
+    { group: "Other", items: ["Lost one"] },
+  ]);
+});

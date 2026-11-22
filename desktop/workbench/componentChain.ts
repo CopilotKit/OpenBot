@@ -79,6 +79,10 @@ function repoPath(fileName: string): string | undefined {
     path = fileName.split("?")[0] ?? fileName;
   }
   path = decodeURIComponent(path);
+  // The app frame's modules are served under /__app/: only its src/ is app source.
+  const app = path.indexOf("/__app/src/");
+  if (app !== -1) return `app/src/${path.slice(app + "/__app/src/".length)}`;
+  if (path.includes("/__app/")) return undefined;
   const index = path.indexOf("/src/");
   if (index === -1 || path.includes("/node_modules/")) return undefined;
   return `desktop${path.slice(index)}`;

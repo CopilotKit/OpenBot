@@ -3,13 +3,18 @@
  * answer when the desktop window runs in a plain browser (the browser test and the workbench).
  * One per page, kept on `globalThis.__workbench`, so every copy of this module shares it.
  */
-import type { Problem } from "../Problem";
 import { COMMANDS } from "./registry";
+
+/**
+ * Structural, so that app's tsc can check this file without desktop/src/Problem.tsx and the
+ * desktop's React code. Problem fits it.
+ */
+export type FailProblem = { said: string; [field: string]: unknown };
 
 export type Answer =
   | { mode: "value"; value: unknown }
   | { mode: "never" }
-  | { mode: "fail"; problem: Problem }
+  | { mode: "fail"; problem: FailProblem }
   | { mode: "delay"; ms: number; value: unknown }
   | {
       mode: "script";

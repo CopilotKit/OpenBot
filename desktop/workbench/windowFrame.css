@@ -82,3 +82,36 @@
   height: 100%;
   font-size: 14px;
 }
+
+.wb-window-bar-browser {
+  height: 36px;
+  gap: 12px;
+  padding: 0 12px;
+  background: #ececec;
+  color: #3c3c3c;
+  border-bottom: 1px solid #d4d4d4;
+}
+
+.wb-browser-dots {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+.wb-browser-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #b8b8b8;
+}
+
+.wb-browser-address {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

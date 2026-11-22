@@ -15,6 +15,10 @@ export type WindowFrameProps = {
   zoom: number;
   grid: boolean;
   gridColor: string;
+  /** Who hosts the page: OpenBot Desktop (default) or a browser. */
+  host?: "desktop" | "browser";
+  /** The path the browser bar shows, for host "browser". Default "/". */
+  address?: string;
   /** Comment mode: set, the comment layer replaces the inspector. */
   comment?: Omit<CommentLayerProps, "frame"> | null;
   onFrame?(iframe: HTMLIFrameElement | null): void;
@@ -55,6 +59,21 @@ function WindowsBar({ active }: { active: boolean }) {
   );
 }
 
+const BROWSER_ORIGIN = "http://localhost:3010";
+
+function BrowserBar({ address }: { address: string }) {
+  return (
+    <div className="wb-window-bar wb-window-bar-browser" aria-hidden="true">
+      <span className="wb-browser-dots">
+        <span className="wb-browser-dot" />
+        <span className="wb-browser-dot" />
+        <span className="wb-browser-dot" />
+      </span>
+      <span className="wb-browser-address">{`${BROWSER_ORIGIN}${address}`}</span>
+    </div>
+  );
+}
+
 /** A window of the desktop app: the OS frame around an iframe of exact size, with the grid and the inspector (or the comment layer) over it. */
 export function WindowFrame({
   src,
@@ -67,9 +86,12 @@ export function WindowFrame({
   zoom,
   grid,
   gridColor,
+  host = "desktop",
+  address,
   comment,
   onFrame,
 }: WindowFrameProps) {
+  const browser = host === "browser";
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
   const ref = useRef<HTMLIFrameElement | null>(null);
   const onFrameRef = useRef(onFrame);
@@ -95,7 +117,8 @@ export function WindowFrame({
       className={`wb-window wb-window-${os}`}
       style={{ zoom }}
     >
-      {os === "windows" && <WindowsBar active={active} />}
+      {browser && <BrowserBar address={address ?? "/"} />}
+      {!browser && os === "windows" && <WindowsBar active={active} />}
       <div className="wb-window-content" style={{ width, height }}>
         <iframe
           data-workbench-frame
@@ -106,7 +129,7 @@ export function WindowFrame({
           onLoad={() => onFrameRef.current?.(ref.current)}
           style={{ width, height, border: 0, colorScheme: theme }}
         />
-        {os === "mac" && <MacBar active={active} />}
+        {!browser && os === "mac" && <MacBar active={active} />}
         {grid && (
           <GridOverlay
             width={width}

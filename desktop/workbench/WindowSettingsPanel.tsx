@@ -10,13 +10,80 @@ export type WindowSettingsValue = {
   grid: boolean;
 };
 
+/** The app frame's settings: who hosts it, who is signed in, and the motion. */
+export type AppWindowSettings = {
+  host: "desktop" | "browser";
+  role: "member" | "admin" | "owner" | null;
+  motion: "still" | "real";
+};
+
 export type WindowSettingsPanelProps = {
   value: WindowSettingsValue;
   gridColor: string;
   onChange(patch: Partial<WindowSettingsValue>): void;
   onGridColor(color: string): void;
   onCopyLink(): void;
+  /** Set for an app scene: shows the App fields. */
+  app?: AppWindowSettings;
+  onAppChange?(patch: Partial<AppWindowSettings>): void;
 };
+
+/** The select value for "As the scene says" (role null). */
+const SCENE_ROLE = "scene";
+
+function toRole(value: string): AppWindowSettings["role"] {
+  return value === "member" || value === "admin" || value === "owner"
+    ? value
+    : null;
+}
+
+function AppFields(props: {
+  app: AppWindowSettings;
+  onAppChange?(patch: Partial<AppWindowSettings>): void;
+}) {
+  const { app } = props;
+  return (
+    <fieldset>
+      <legend>App</legend>
+      <select
+        aria-label="Host"
+        value={app.host}
+        onChange={(event) =>
+          props.onAppChange?.({
+            host: event.target.value === "browser" ? "browser" : "desktop",
+          })
+        }
+      >
+        <option value="desktop">OpenBot Desktop</option>
+        <option value="browser">Browser</option>
+      </select>
+      <select
+        aria-label="Signed in as"
+        value={app.role ?? SCENE_ROLE}
+        onChange={(event) =>
+          props.onAppChange?.({ role: toRole(event.target.value) })
+        }
+      >
+        <option value={SCENE_ROLE}>As the scene says</option>
+        <option value="member">Member</option>
+        <option value="admin">Admin</option>
+        <option value="owner">Owner</option>
+      </select>
+      <select
+        aria-label="Motion"
+        value={app.motion}
+        onChange={(event) =>
+          props.onAppChange?.({
+            motion: event.target.value === "real" ? "real" : "still",
+          })
+        }
+      >
+        <option value="still">Still</option>
+        <option value="real">Real</option>
+      </select>
+    </fieldset>
+  );
+}
 
 const MIN_WIDTH = 720;
 const MIN_HEIGHT = 560;
@@ -146,6 +213,9 @@ export function WindowSettingsPanel(props: WindowSettingsPanelProps) {
       <button type="button" onClick={props.onCopyLink}>
         Copy link
       </button>
+      {props.app && (
+        <AppFields app={props.app} onAppChange={props.onAppChange} />
+      )}
     </section>
   );
 }

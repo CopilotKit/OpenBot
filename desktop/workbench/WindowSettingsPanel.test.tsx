@@ -92,3 +92,56 @@ test("Grid color calls onGridColor", () => {
   change(view.getByLabelText("Grid color"), "#00ff00");
   expect(p.onGridColor).toHaveBeenCalledWith("#00ff00");
 });
+
+test("without app there is no App fieldset", () => {
+  const view = render(<WindowSettingsPanel {...props()} />);
+  expect(view.container.querySelector("fieldset")).toBeNull();
+  expect(view.queryByLabelText("Host")).toBeNull();
+});
+
+function appProps() {
+  const onAppChange = mock();
+  const p: WindowSettingsPanelProps = {
+    ...props(),
+    app: { host: "desktop", role: null, motion: "still" },
+    onAppChange,
+  };
+  return { p, onAppChange };
+}
+
+test("with app the App fieldset shows the three selects", () => {
+  const { p } = appProps();
+  const view = render(<WindowSettingsPanel {...p} />);
+  expect(view.container.querySelector("legend")?.textContent).toBe("App");
+  expect((view.getByLabelText("Host") as HTMLSelectElement).value).toBe(
+    "desktop",
+  );
+  expect(view.getByText("As the scene says")).not.toBeNull();
+  expect((view.getByLabelText("Motion") as HTMLSelectElement).value).toBe(
+    "still",
+  );
+});
+
+test("Host sends only host", () => {
+  const { p, onAppChange } = appProps();
+  const view = render(<WindowSettingsPanel {...p} />);
+  change(view.getByLabelText("Host"), "browser");
+  expect(onAppChange).toHaveBeenCalledWith({ host: "browser" });
+  expect(p.onChange).not.toHaveBeenCalled();
+});
+
+test("Signed in as sends the role, and As the scene says sends null", () => {
+  const { p, onAppChange } = appProps();
+  const view = render(<WindowSettingsPanel {...p} />);
+  change(view.getByLabelText("Signed in as"), "admin");
+  expect(onAppChange).toHaveBeenLastCalledWith({ role: "admin" });
+  change(view.getByLabelText("Signed in as"), "scene");
+  expect(onAppChange).toHaveBeenLastCalledWith({ role: null });
+});
+
+test("Motion sends only motion", () => {
+  const { p, onAppChange } = appProps();
+  const view = render(<WindowSettingsPanel {...p} />);
+  change(view.getByLabelText("Motion"), "real");
+  expect(onAppChange).toHaveBeenCalledWith({ motion: "real" });
+});
