@@ -374,6 +374,123 @@ paths:
           $ref: './common.yaml#/components/responses/ServerError'
         default:
           $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/terms:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    get:
+      tags: [People]
+      operationId: getServiceTerms
+      summary: Read the terms a person has to agree to
+      description: >-
+        Return the terms of service this OpenBot asks people to agree to
+        before they use it, the version the person last agreed to and when,
+        and whether they have to agree now. OpenBot Cloud has terms: a
+        Terms of Service and an Acceptable Use Policy, published at the
+        addresses given, under one version. When the version changes,
+        acceptanceNeeded is true again until the person agrees to the new
+        one, and the apps ask them before anything else. An agreement is the
+        person's own, not an organization's: it holds in every organization
+        they are in. A self-hosted OpenBot and OpenBot Desktop on its own have
+        no terms: current is null and acceptanceNeeded is false. Only the
+        person themselves may read it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [people:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The current terms, the person's last agreement, and whether they have to agree now.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceTerms'
+              examples:
+                toAgree:
+                  $ref: '#/components/examples/ServiceTermsToAgreeExample'
+                agreed:
+                  $ref: '#/components/examples/ServiceTermsAgreedExample'
+                changed:
+                  $ref: '#/components/examples/ServiceTermsChangedExample'
+                none:
+                  $ref: '#/components/examples/ServiceTermsNoneExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/PersonNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/terms/accept:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+    post:
+      tags: [People]
+      operationId: acceptServiceTerms
+      summary: Agree to the current terms
+      description: >-
+        Record that the person agreed to the terms of service, by the version
+        they were shown, and when. The version sent must be the current one
+        (getServiceTerms' current.version): an older one is refused with the
+        code SERVICE_TERMS_CHANGED, so nobody is recorded as agreeing to terms
+        they never saw. Agreeing again to the version already agreed to keeps
+        the first time. Every agreement is kept, each version with its own
+        time, and recorded on the audit trail. Where this OpenBot has no terms
+        it answers 409 with the code SERVICE_TERMS_NONE. Only the person
+        themselves may agree.
+      security:
+        - webSession: []
+        - appOAuth: [people:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptServiceTermsRequest'
+            examples:
+              current:
+                value:
+                  version: '2026-11-21'
+      responses:
+        '200':
+          description: The terms, with the person's agreement recorded.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceTerms'
+              examples:
+                agreed:
+                  $ref: '#/components/examples/ServiceTermsAgreedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: './common.yaml#/components/responses/PersonNotFound'
+        '409':
+          $ref: '#/components/responses/ServiceTermsConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
   /api/v2/organizations/{organizationId}/people/{personId}/instructions:
     parameters:
       - $ref: './common.yaml#/components/parameters/OrganizationId'
@@ -1332,6 +1449,67 @@ components:
           type: [string, 'null']
           format: date-time
           description: When they finished it. Null until they do, which the apps read as onboarding still to do.
+    ServiceTermsVersionId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: ^[A-Za-z0-9._-]+$
+      description: A version of the terms, such as 2026-11-21. Compared as written, never ordered.
+      example: '2026-11-21'
+    ServiceTermsVersion:
+      type: object
+      description: One version of the terms people agree to before they use OpenBot, and where each part is published.
+      required: [version, termsOfServiceUrl, acceptableUseUrl]
+      properties:
+        version:
+          $ref: '#/components/schemas/ServiceTermsVersionId'
+        termsOfServiceUrl:
+          type: string
+          format: uri
+          description: Where the Terms of Service are published.
+        acceptableUseUrl:
+          type: string
+          format: uri
+          description: Where the Acceptable Use Policy is published.
+    ServiceTermsAcceptance:
+      type: object
+      description: A version of the terms the person agreed to, and when.
+      required: [version, acceptedAt]
+      properties:
+        version:
+          $ref: '#/components/schemas/ServiceTermsVersionId'
+        acceptedAt:
+          type: string
+          format: date-time
+          description: When they agreed to it.
+    ServiceTerms:
+      type: object
+      description: >-
+        The terms this OpenBot asks people to agree to, and where the person
+        stands. acceptanceNeeded is the server's verdict; a client renders it
+        and never recomputes it.
+      required: [current, accepted, acceptanceNeeded]
+      properties:
+        current:
+          description: The terms in force. Null where this OpenBot has no terms to agree to (a self-hosted OpenBot, OpenBot Desktop on its own).
+          oneOf:
+            - $ref: '#/components/schemas/ServiceTermsVersion'
+            - type: 'null'
+        accepted:
+          description: The version the person last agreed to, which may be older than current. Null if they never agreed to any.
+          oneOf:
+            - $ref: '#/components/schemas/ServiceTermsAcceptance'
+            - type: 'null'
+        acceptanceNeeded:
+          type: boolean
+          description: Whether the person has to agree to the current terms before they use OpenBot. True while there are terms and accepted isn't the current version. The apps ask them first and let them in once they agree.
+    AcceptServiceTermsRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version:
+          $ref: '#/components/schemas/ServiceTermsVersionId'
     Person:
       type: object
       description: >-
@@ -2022,6 +2200,50 @@ components:
           saml: '#/components/schemas/SamlIdentityProviderRequest'
           oidc: '#/components/schemas/OidcIdentityProviderRequest'
   responses:
+    ServiceTermsConflict:
+      description: >-
+        The version sent isn't the current one, so the person has to read the
+        new terms first (SERVICE_TERMS_CHANGED). Or this OpenBot has no terms to
+        agree to (SERVICE_TERMS_NONE). Or the Idempotency-Key was already used
+        for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            changed:
+              value:
+                type: https://open.bot/errors/service-terms-changed
+                title: The terms have changed.
+                status: 409
+                detail: The terms have changed since you opened them. Read the new version and agree again.
+                code: SERVICE_TERMS_CHANGED
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            none:
+              value:
+                type: https://open.bot/errors/service-terms-none
+                title: There are no terms to agree to.
+                status: 409
+                detail: This OpenBot has no terms to agree to.
+                code: SERVICE_TERMS_NONE
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            reused:
+              value:
+                type: https://open.bot/errors/idempotency-key-conflict
+                title: That Idempotency-Key was used for a different request.
+                status: 409
+                detail: That Idempotency-Key was used for a different request.
+                code: IDEMPOTENCY_KEY_CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
     InvalidPerson:
       description: >-
         The change is empty, names something a person doesn't have, or the
@@ -2473,6 +2695,43 @@ components:
                 requestId: req_example
                 traceId: trace_example
   examples:
+    ServiceTermsToAgreeExample:
+      summary: OpenBot Cloud, for somebody who hasn't agreed yet.
+      value:
+        current:
+          version: '2026-11-21'
+          termsOfServiceUrl: https://open.bot/legal/terms
+          acceptableUseUrl: https://open.bot/legal/acceptable-use
+        accepted: null
+        acceptanceNeeded: true
+    ServiceTermsAgreedExample:
+      summary: OpenBot Cloud, for somebody who agreed to the current version.
+      value:
+        current:
+          version: '2026-11-21'
+          termsOfServiceUrl: https://open.bot/legal/terms
+          acceptableUseUrl: https://open.bot/legal/acceptable-use
+        accepted:
+          version: '2026-11-21'
+          acceptedAt: '2026-11-21T18:04:00.000Z'
+        acceptanceNeeded: false
+    ServiceTermsChangedExample:
+      summary: OpenBot Cloud, after the terms changed. The person agreed to an older version.
+      value:
+        current:
+          version: '2027-03-01'
+          termsOfServiceUrl: https://open.bot/legal/terms
+          acceptableUseUrl: https://open.bot/legal/acceptable-use
+        accepted:
+          version: '2026-11-21'
+          acceptedAt: '2026-11-21T18:04:00.000Z'
+        acceptanceNeeded: true
+    ServiceTermsNoneExample:
+      summary: A self-hosted OpenBot, or OpenBot Desktop on its own. There are no terms.
+      value:
+        current: null
+        accepted: null
+        acceptanceNeeded: false
     PersonPageLast:
       summary: An administrator's list, on one page.
       value:

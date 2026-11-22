@@ -3,6 +3,8 @@
  */
 
 export * from "./acceptInvitationHeaders";
+export * from "./acceptServiceTermsHeaders";
+export * from "./acceptServiceTermsRequest";
 export * from "./accountDisconnection";
 export * from "./accountLinkStart";
 export * from "./actionAuthorization";
@@ -1337,6 +1339,11 @@ export * from "./sentConversationMessage";
 export * from "./sentryTriggerConfig";
 export * from "./sentryTriggerConfigKind";
 export * from "./serverErrorResponse";
+export * from "./serviceTerms";
+export * from "./serviceTermsAcceptance";
+export * from "./serviceTermsConflictResponse";
+export * from "./serviceTermsVersion";
+export * from "./serviceTermsVersionId";
 export * from "./serviceUnavailableResponse";
 export * from "./session";
 export * from "./sessionNotFoundResponse";
