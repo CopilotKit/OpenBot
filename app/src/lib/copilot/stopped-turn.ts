@@ -35,8 +35,23 @@ export function stoppedReason(reported: unknown): string {
   const unreachable = backEndUnreachable(said);
   if (unreachable) return unreachable;
   if (RUNNER_DROPPED.test(said.trim())) return TURN_CUT_OFF;
+  if (CONNECTION_CUT.test(said.trim())) {
+    console.warn("A Bot's connection was cut part way through a turn.", said);
+    return TURN_CUT_OFF;
+  }
   return said.trim() || "The Bot stopped without saying why.";
 }
+
+/**
+ * A fetch's own words for a connection that was cut part way: Bun's ("ECONNRESET: The socket
+ * connection was closed unexpectedly. For more information, pass `verbose: true` in the second
+ * argument to fetch()"), Node's ("socket hang up", "read ECONNRESET") and undici's ("terminated",
+ * "other side closed"). Found on a Cloud dogfood: a Bot's connection to its model was cut, and the
+ * run ended with Bun's sentence, which the conversation showed word for word, in red, with no way
+ * on. Nothing in it is the person's to act on; the turn was cut off, and Carry on picks it up.
+ */
+const CONNECTION_CUT =
+  /ECONNRESET|socket connection was closed unexpectedly|^socket hang up$|^other side closed$|^terminated$/i;
 
 /**
  * Whether the server ended the turn asking the person to have the Bot carry on: a reply that came

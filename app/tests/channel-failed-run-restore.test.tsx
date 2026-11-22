@@ -690,6 +690,54 @@ test("a turn that failed after it had done some work keeps its message sent, and
   ).toHaveLength(1);
 });
 
+/*
+ * FOUND ON A CLOUD 1.2.0-rc.1 DOGFOOD. A Bot's connection to its model was cut part way, and the run
+ * ended with the fetch's own words, which the conversation showed in red: no sentence saying the
+ * turn ended, no Carry on. Sent again, the next turn was cut before it did anything, and the words
+ * were put back in the box as if the message had never gone.
+ */
+const SOCKET_CLOSED =
+  "ECONNRESET: The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()";
+
+test("a turn whose connection is cut never shows the raw words: it says the Bot stopped, keeps the message sent, and Carry on finishes it", async () => {
+  plans = [
+    { kind: "fails", message: SOCKET_CLOSED },
+    { kind: "answers", text: "Both pages say the app is free." },
+  ];
+  const live = open();
+  await send(live, "Compare the home page and the pricing page");
+  const stopped = await live.findByTestId("transcript-stopped");
+  expect(within(stopped).getByRole("alert").textContent).toBe(TURN_CUT_OFF);
+  expect(live.queryByText(/ECONNRESET|socket connection/)).toBeNull();
+  await waitFor(() =>
+    expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
+  // The message went: it is not handed back to send again.
+  expect(typed(live)).toBe("");
+  expect(
+    live.getAllByText("Compare the home page and the pricing page"),
+  ).toHaveLength(1);
+
+  const user = userEvent.setup({ document: live.container.ownerDocument });
+  await user.click(within(stopped).getByRole("button", { name: "Carry on" }));
+  await live.findByText("Both pages say the app is free.");
+  expect(live.queryByTestId("transcript-stopped")).toBeNull();
+});
+
+test("a turn the server says to carry on keeps its message sent, even before it did anything", async () => {
+  const DROPPED = "The connection to Claude dropped. Ask the Bot to carry on.";
+  plans = [{ kind: "fails", message: DROPPED }];
+  const live = open();
+  await send(live, "Compare the home page and the pricing page");
+  const stopped = await live.findByTestId("transcript-stopped");
+  expect(within(stopped).getByRole("alert").textContent).toBe(DROPPED);
+  within(stopped).getByRole("button", { name: "Carry on" });
+  await waitFor(() =>
+    expect(live.queryByRole("button", { name: "Stop the Bot" })).toBeNull(),
+  );
+  expect(typed(live)).toBe("");
+});
+
 test("a turn that failed before it did anything hands the words back to send again", async () => {
   plans = [{ kind: "fails", message: REJECTED }];
   const live = open();

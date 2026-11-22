@@ -2678,7 +2678,8 @@ main > .sheet > .step-footer > .row:first-child:empty:has(+ .behind-slot) {
   flex: 1;
 }
 
-.local-alert .move-app-name {
+.local-alert .move-app-name,
+.move-then .move-app-name {
   color: var(--text-primary);
   font-size: var(--text-sm);
   line-height: 20px;
@@ -2756,10 +2757,11 @@ p.move-key-none {
   margin-top: 16px;
 }
 
-/* The space the move freed: one line in the success colour's mark. */
+/* What the move removed: one line in the success colour's mark, and under it, when the disk shows
+   much less of it free so far, a smaller line that says so. */
 .move-freed {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   margin: 0;
   font-size: var(--text-base);
@@ -2767,11 +2769,22 @@ p.move-key-none {
   color: var(--text-secondary);
 }
 
+.move-freed p {
+  margin: 0;
+}
+
 .move-freed svg {
   width: 20px;
   height: 20px;
+  margin-top: 1px;
   flex: none;
   color: var(--good);
+}
+
+.move-freed .move-freed-held {
+  margin-top: 4px;
+  font-size: var(--text-sm);
+  line-height: 20px;
 }
 
 .move-freed strong {
@@ -2797,10 +2810,27 @@ p.move-key-none {
   margin-top: 6px;
 }
 
+/* After Connect your AI: the apps to reconnect, named as the next step in the bordered group the
+   counts are drawn in, with nothing on them to press yet. */
+.move-then {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+}
+
+.move-then p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
 /*
  * The blocks under a move screen's lede, each apart from the one above it by the same 12px, and
  * the last one's foot left to the buttons' own gap. Last, so they outrank each block's own rule.
  */
+.move-sheet > .move-then,
 .move-sheet > .move-apps-notice,
 .move-sheet > .move-key,
 .move-sheet > .move-key-none,

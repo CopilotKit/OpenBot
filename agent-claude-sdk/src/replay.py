@@ -16,14 +16,19 @@ running (it outlived the query's bound, or the process restarted); see `OpenBotC
 
 import asyncio
 import json
+import logging
 import math
 import os
+import signal
+import subprocess
 import tempfile
 from contextlib import suppress
 from datetime import datetime
 
 from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent, StateSnapshotEvent
 from ag_ui_claude_sdk.session import SessionWorker
+
+logger = logging.getLogger(__name__)
 
 # How long a query may go without an event: the model endpoint's own, and the full harness's through
 # upstream's `query_timeout_seconds`, which defaults to 300 seconds. A client tool or the person can
@@ -357,6 +362,149 @@ def system_prompt_in_file(options):
     return path
 
 
+# How long ending a query waits for Claude Code to take the interrupt. The SDK itself waits 60
+# seconds for the answer, and a Claude Code blocked on a tool call may never give one.
+INTERRUPT_SECONDS = 10
+# How long `SessionWorker.stop` may take to close the query the SDK's way: stop its in-process MCP
+# servers (5 seconds for a stuck tool), close Claude Code's stdin and give it 5 seconds to exit,
+# then terminate it.
+STOP_SECONDS = 20
+# How long Claude Code is given to exit after SIGTERM before it is sent SIGKILL.
+TERMINATE_SECONDS = 5
+
+# The ends of queries still under way, held so none is collected before it finishes.
+_ENDING = set()
+
+
+def finish_regardless(coroutine):
+    """Run `coroutine` to its end even if whoever awaits it is cancelled.
+
+    Ending a query is a run of awaits (interrupt Claude Code, close the SDK client, wait for the
+    process), and a cancellation that reaches any of them leaves Claude Code running. The SDK's
+    own close says so: an asyncio cancellation that arrives while it closes skips its terminate and
+    kill. The cancellations come from the run itself: a second stop, the person's next message, a
+    request that closed (whose cleanup Starlette cancels again at every await). Awaited through
+    this, the caller can still be cancelled; the work it started finishes anyway.
+    """
+    task = asyncio.ensure_future(coroutine)
+    _ENDING.add(task)
+    task.add_done_callback(_ended)
+    return asyncio.shield(task)
+
+
+def _ended(task):
+    _ENDING.discard(task)
+    if not task.cancelled() and task.exception() is not None:
+        logger.error("Ending a Claude query failed", exc_info=task.exception())
+
+
+def _cli_transport(worker):
+    """The SDK transport that started this worker's Claude Code, while the worker holds it."""
+    return getattr(getattr(worker, "_client", None), "_transport", None)
+
+
+def _descendants(pid):
+    """The process ids under `pid`: whatever Claude Code itself started."""
+    children = {}
+    try:
+        if os.path.isdir("/proc"):
+            for entry in os.listdir("/proc"):
+                if not entry.isdigit():
+                    continue
+                with suppress(OSError, IndexError, ValueError):
+                    with open(f"/proc/{entry}/stat", encoding="utf-8") as stat:
+                        # The command name is in parentheses and may hold spaces; the parent follows it.
+                        ppid = int(stat.read().rsplit(")", 1)[1].split()[1])
+                    children.setdefault(ppid, []).append(int(entry))
+        else:
+            listing = subprocess.run(
+                ["ps", "-A", "-o", "pid=", "-o", "ppid="],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=True,
+            ).stdout
+            for line in listing.splitlines():
+                child, parent = (int(field) for field in line.split())
+                children.setdefault(parent, []).append(child)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+    found, pending = [], [pid]
+    while pending:
+        for child in children.get(pending.pop(), []):
+            found.append(child)
+            pending.append(child)
+    return found
+
+
+async def end_cli_process(process):
+    """Make sure a query's Claude Code, and anything it started, is no longer running.
+
+    The SDK's close does this itself when it is allowed to finish, and then leaves nothing here to
+    do. When it was cut short, Claude Code is still running with its stdin open, waiting on a tool
+    call or for its next message, and nothing else will ever end it.
+    """
+    if process is None or process.returncode is not None:
+        return
+    logger.warning("Claude Code outlived its query's close; ending it (pid %s)", process.pid)
+    descendants = await asyncio.to_thread(_descendants, process.pid)
+    with suppress(ProcessLookupError):
+        process.terminate()
+    try:
+        async with asyncio.timeout(TERMINATE_SECONDS):
+            await process.wait()
+    except TimeoutError:
+        with suppress(ProcessLookupError):
+            process.kill()
+        with suppress(TimeoutError):
+            async with asyncio.timeout(TERMINATE_SECONDS):
+                await process.wait()
+    for pid in descendants:
+        with suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, signal.SIGKILL)
+    # Its pipes, which the SDK keeps open for as long as it keeps the process.
+    with suppress(Exception):
+        async with asyncio.timeout(TERMINATE_SECONDS):
+            await process.aclose()
+
+
+async def end_query(adapter, worker, thread, run, turn, transport, prompt_file):
+    """End one query: interrupt Claude Code, close its SDK client, and make sure it has exited.
+
+    Runs through `finish_regardless`, so a cancellation of the run that started it cannot cut it
+    short. Each SDK step is bounded, and whatever they leave running is ended here.
+    """
+    transport = _cli_transport(worker) or transport
+    try:
+        # Stop the CLI before cancelling any unresolved PostToolUse hooks; no placeholder result
+        # may reach Claude.
+        with suppress(TimeoutError):
+            async with asyncio.timeout(INTERRUPT_SECONDS):
+                await worker.interrupt()
+        if turn:
+            for result in turn.results.values():
+                if not result.done():
+                    result.cancel()
+        # Only this query's own entries: a newer query on the thread may already be running.
+        if (adapter._workers.get(thread) or {}).get("worker") is worker:
+            adapter._workers.pop(thread, None)
+            adapter._per_thread_state.pop(thread, None)
+        adapter._per_run_result.pop((thread, run), None)
+        transport = _cli_transport(worker) or transport
+        try:
+            async with asyncio.timeout(STOP_SECONDS):
+                await worker.stop()
+        except TimeoutError:
+            logger.warning("Claude Code's SDK client did not close within %ss", STOP_SECONDS)
+    finally:
+        try:
+            await end_cli_process(getattr(transport, "_process", None))
+        finally:
+            if prompt_file:
+                with suppress(FileNotFoundError):
+                    os.unlink(prompt_file)
+
+
 async def run_replayed_query(adapter, input_data, fit_results=False):
     thread, run = input_data.thread_id, input_data.run_id
     model_only = adapter._model_only
@@ -394,6 +542,9 @@ async def run_replayed_query(adapter, input_data, fit_results=False):
             "parent_tool_use_id": None,
         }
 
+    # Read again as the query ends; kept from its first message in case the worker has let go.
+    transport = None
+
     try:
         await worker.start()
         if state is not None:
@@ -406,7 +557,9 @@ async def run_replayed_query(adapter, input_data, fit_results=False):
         async with asyncio.timeout(timeout) as deadline:
 
             async def moving(messages):
+                nonlocal transport
                 async for message in messages:
+                    transport = transport or _cli_transport(worker)
                     if timeout is not None:
                         deadline.reschedule(asyncio.get_running_loop().time() + timeout)
                     yield message
@@ -431,20 +584,16 @@ async def run_replayed_query(adapter, input_data, fit_results=False):
             else f"The Claude query timed out after {timeout}s."
         )
     finally:
-        # Also runs on HTTP cancellation. Stop the CLI before cancelling any
-        # unresolved PostToolUse hooks; no placeholder result may reach Claude.
-        await worker.interrupt()
-        turn = adapter._turns.get(thread)
-        if turn:
-            for result in turn.results.values():
-                if not result.done():
-                    result.cancel()
-        adapter._workers.pop(thread, None)
-        adapter._per_thread_state.pop(thread, None)
-        adapter._per_run_result.pop((thread, run), None)
-        try:
-            await worker.stop()
-        finally:
-            if prompt_file:
-                with suppress(FileNotFoundError):
-                    os.unlink(prompt_file)
+        # Also runs on HTTP cancellation, and may itself be cancelled again: the query is ended in a
+        # task of its own, which finishes whatever happens to this one (see `finish_regardless`).
+        await finish_regardless(
+            end_query(
+                adapter,
+                worker,
+                thread,
+                run,
+                adapter._turns.get(thread),
+                transport or _cli_transport(worker),
+                prompt_file,
+            )
+        )

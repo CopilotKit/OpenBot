@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { COMPUTER_START_WAIT_MS } from "@openbot/shared/computer-start";
+import type { StartClock } from "../src/lib/computers/call";
 import { callComputer } from "../src/lib/copilot/computer-tools";
 
 /**
@@ -57,28 +59,131 @@ const click = () =>
     body: { ref: "e1", snapshotId: 1 },
   });
 
+/**
+ * Time the start wait reads, moved on by hand: a pause moves it by the pause, and the server's own
+ * wait on a cold computer moves it by that wait (`serverWaits`).
+ */
+function fakeClock(): StartClock & { at: number } {
+  const clock = {
+    at: 0,
+    now: () => clock.at,
+    pause: async (ms: number) => {
+      clock.at += ms;
+    },
+  };
+  return clock;
+}
+
+/** What the server says about a computer still starting, as it says it. */
+const STILL_STARTING =
+  "The computer is still starting. This call was not performed. Try it again in a moment.";
+
+/**
+ * The API in front of a computer that comes up `readyAt` ms after the first ask. Each ask before
+ * then is held for the server's own wait (45 s) and answered "still starting", as the server answers
+ * one; an ask once it is up is done. Counts the asks, and the clicks that reached the computer.
+ */
+function coldComputer(clock: StartClock & { at: number }, readyAt: number) {
+  const seen = { asks: 0, done: 0, keys: new Set<string>() };
+  globalThis.fetch = (async (
+    url: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    if (String(url) !== CLICK || init?.method !== "POST")
+      return Response.json({ error: "Not found." }, { status: 404 });
+    seen.asks += 1;
+    seen.keys.add(new Headers(init.headers).get("idempotency-key") ?? "");
+    if (clock.at < readyAt) {
+      clock.at = Math.min(clock.at + 45_000, readyAt);
+      if (clock.at < readyAt)
+        return new Response(
+          JSON.stringify({
+            type: "https://open.bot/errors/computer-starting",
+            title: "The computer is still starting.",
+            status: 503,
+            code: "COMPUTER_STARTING",
+            detail: STILL_STARTING,
+          }),
+          {
+            status: 503,
+            headers: { "content-type": "application/problem+json" },
+          },
+        );
+    }
+    seen.done += 1;
+    return Response.json({ ok: true, clicked: "e1" });
+  }) as unknown as typeof fetch;
+  return seen;
+}
+
 describe("a computer still starting", () => {
   /*
-   * A cold start that outlasted the server's wait. The model has to be told the call did nothing and
-   * is worth repeating; read as an ordinary failure it apologised and gave up on a computer that was
-   * seconds from ready.
+   * A cold start that outlasted the server's wait for one request. The call asks again while the
+   * computer comes up, for as long as a Bot's call waits for a start; the model is told the call did
+   * nothing only once that is spent, and never as an ordinary failure, which it read as a computer
+   * that was broken.
    */
-  test("is reported as starting and not performed, in the server's own words", async () => {
-    serverAnswering(503, {
-      code: "COMPUTER_STARTING",
-      detail:
-        "The computer is still starting. This call was not performed. Try it again in a moment.",
-    });
+  test("a computer that comes up after 100 s lets the call go through", async () => {
+    const clock = fakeClock();
+    const seen = coldComputer(clock, 100_000);
 
-    const outcome = await click();
+    const outcome = await callComputer(
+      "bot-1",
+      "/click",
+      { method: "POST", body: { ref: "e1", snapshotId: 1 } },
+      undefined,
+      clock,
+    );
+
+    expect(outcome).toEqual({ ok: true, clicked: "e1" });
+    // Asked again while it started, each time as a new request, and done once.
+    expect(seen.asks).toBe(3);
+    expect(seen.keys.size).toBe(3);
+    expect(seen.done).toBe(1);
+    expect(clock.at).toBeGreaterThanOrEqual(100_000);
+  });
+
+  test("one that never comes up is reported as starting and not performed once the wait is spent", async () => {
+    const clock = fakeClock();
+    const seen = coldComputer(clock, Number.POSITIVE_INFINITY);
+
+    const outcome = await callComputer(
+      "bot-1",
+      "/click",
+      { method: "POST", body: { ref: "e1", snapshotId: 1 } },
+      undefined,
+      clock,
+    );
 
     expect(outcome).toEqual({
       ok: false,
       starting: true,
       notPerformed: true,
-      reason:
-        "The computer is still starting. This call was not performed. Try it again in a moment.",
+      reason: STILL_STARTING,
     });
+    expect(seen.done).toBe(0);
+    // Not before the wait, and not long past it: the last ask is one request's wait.
+    expect(clock.at).toBeGreaterThanOrEqual(COMPUTER_START_WAIT_MS);
+    expect(clock.at).toBeLessThanOrEqual(COMPUTER_START_WAIT_MS + 45_000);
+  });
+
+  test("a Stop while it waits stops the call", async () => {
+    const clock = fakeClock();
+    coldComputer(clock, Number.POSITIVE_INFINITY);
+    const stop = new AbortController();
+    clock.pause = async () => {
+      stop.abort();
+    };
+
+    const outcome = await callComputer(
+      "bot-1",
+      "/click",
+      { method: "POST", body: { ref: "e1", snapshotId: 1 } },
+      stop.signal,
+      clock,
+    );
+
+    expect(outcome).toEqual({ ok: false, reason: "Stopped.", stopped: true });
   });
 
   test("an ordinary unavailable computer is not mistaken for one starting", async () => {

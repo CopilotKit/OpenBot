@@ -1,5 +1,6 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import type { BotBrowserApiState } from "@openbot/shared/bot-browser";
+import { COMPUTER_START_WAIT_MS } from "@openbot/shared/computer-start";
 import { IconLock, IconWorld, IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -130,9 +131,10 @@ function capitalise(text: string): string {
  * GENEROUS ON PURPOSE. A first start pulls an image, schedules a pod and launches a browser, and a
  * minute is ordinary. The panel used to call the first frameless poll a problem, so every cold start
  * opened on "Can't show the screen right now… ask an admin", in front of a person whose computer was
- * doing exactly what it should. Past the server's own wait for a cold start, with room to spare.
+ * doing exactly what it should. Past the wait a Bot's call gives a cold start (COMPUTER_START_WAIT_MS),
+ * with room to spare: until that wait is over, the Bot's step is still waiting, and so is the panel.
  */
-const STARTUP_GRACE_MS = 150_000;
+const STARTUP_GRACE_MS = COMPUTER_START_WAIT_MS + 30_000;
 
 /** How often a computer that has not drawn a frame yet is asked where it is. */
 const STATUS_POLL_MS = 2_000;

@@ -20,6 +20,7 @@ import {
 import { CopilotProvider } from "../lib/copilot/provider";
 import { ReportedErrorComponent } from "../lib/error-reporting";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
+import { onboardingDestination } from "../lib/onboarding/destination";
 import { rememberInvitationLink } from "../lib/organizations/invitation-link";
 import { learnShortenedToolNames } from "../lib/plugins/tool-names";
 import { serviceTermsRequired } from "../lib/service-terms/queries";
@@ -56,10 +57,15 @@ export const Route = createFileRoute("/_authed")({
      * Somebody who has not finished onboarding goes there and nowhere else. Here rather than in
      * `_app`, so admin and settings are behind the same gate; checked against the destination so
      * the onboarding route itself stays reachable.
+     *
+     * This gate and the next keep where the person was headed (`?next=`), an invitation's link
+     * included, and onboarding's last button takes them there: an app's Reconnect after the move to
+     * OpenBot Cloud runs Connect your AI and then opens that app, never home
+     * (lib/onboarding/destination.ts).
      */
+    const next = onboardingDestination(location.href);
     if (needsOnboarding(user) && location.pathname !== "/onboarding") {
-      rememberInvitationLink(location.pathname);
-      throw redirect({ to: "/onboarding" });
+      throw redirect({ to: "/onboarding", search: next ? { next } : {} });
     }
     /*
      * Where OpenBot provides no AI (OpenBot Cloud), somebody whose runs have none, neither their own
@@ -71,8 +77,10 @@ export const Route = createFileRoute("/_authed")({
       location.pathname !== "/onboarding" &&
       (await aiConnectionRequired(context.queryClient))
     ) {
-      rememberInvitationLink(location.pathname);
-      throw redirect({ to: "/onboarding", search: { step: "ai" } });
+      throw redirect({
+        to: "/onboarding",
+        search: next ? { step: "ai", next } : { step: "ai" },
+      });
     }
     // Before any conversation is drawn, so a long-named action's step never shows its cut name.
     await learnShortenedToolNames(context.queryClient);
