@@ -213,12 +213,15 @@ test("an app page answers with the page for somebody in no organization: the sen
   expect(view.queryByText(/Something went wrong/)).toBeNull();
 });
 
-test("the sign-in screen shows as for anybody, with the hosted sign-in", async () => {
+/** OpenBot Cloud's sign-in screen's way in (components/auth/cloud-sign-in.tsx). */
+const CLOUD_SIGN_IN = "Sign in or create an account";
+
+test("the sign-in screen shows as for anybody, with OpenBot Cloud's sign-in", async () => {
   const { view } = openApp("/sign");
-  await view.findByRole("link", { name: HOSTED });
-  expect(
-    view.getByRole("button", { name: /Continue with Google/ }),
-  ).toBeTruthy();
+  const signIn = await view.findByRole("link", { name: CLOUD_SIGN_IN });
+  expect(signIn.getAttribute("href")).toBe(
+    `/api/auth/hosted/sign-in?returnTo=${encodeURIComponent(location.origin)}`,
+  );
   expect(view.queryByText(/Something went wrong/)).toBeNull();
   // What it offers anybody was read as nobody, once the session's own read was not found.
   expect(requests).toContain("GET /api/v2/organizations/default/deployment");
@@ -242,7 +245,7 @@ test("Sign out signs out of OpenBot and OpenBot by CopilotKit, and comes back to
       ]),
     );
     await router.navigate({ to: "/sign" });
-    await view.findByRole("button", { name: /Continue with Google/ });
+    await view.findByRole("link", { name: CLOUD_SIGN_IN });
   } finally {
     window.location.assign = assign;
   }
