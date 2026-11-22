@@ -190,6 +190,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `finish` says whether one finishes by polling or with a code, and `method` (`browser`, the
   default, or `device`) chooses ChatGPT's. `replacePersonalAiConnection` takes `login: plan`
   (openai, anthropic) and `login: oauth` (google, xai) once that sign-in is approved.
+  `startPersonalAiSignIn` also takes an optional `loopbackPort` (1024 to 65535): for Claude, the
+  server then sends the browser to `http://localhost:{loopbackPort}/callback`, where OpenBot Desktop
+  listens, instead of Claude's page with a code to copy. Every other provider ignores it.
 - **Disconnect the organization's AI.** `deleteAiConnection`
   (`DELETE /api/v2/organizations/{organizationId}/ai-connection`), admin only, refused with
   `AI_CONNECTION_FIXED` where whoever runs OpenBot sets the provider, and recorded on the trail.
