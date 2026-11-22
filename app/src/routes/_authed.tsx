@@ -22,6 +22,7 @@ import { ReportedErrorComponent } from "../lib/error-reporting";
 import { AppHotkeys } from "../lib/hotkeys/app-hotkeys";
 import { rememberInvitationLink } from "../lib/organizations/invitation-link";
 import { learnShortenedToolNames } from "../lib/plugins/tool-names";
+import { serviceTermsRequired } from "../lib/service-terms/queries";
 import { SkinAccountSync } from "../skins/account-sync";
 import { useActiveSkin } from "../skins/registry";
 
@@ -41,6 +42,15 @@ export const Route = createFileRoute("/_authed")({
         await signOutThroughDesktop().catch(() => undefined);
       }
       throw redirect({ to: "/sign" });
+    }
+    /*
+     * Terms to agree to (OpenBot Cloud), before onboarding and everything else: from anywhere to
+     * the terms screen, which remembers where they were headed. The terms screen itself is let
+     * through here, past the gates after this one, until they agree.
+     */
+    if (await serviceTermsRequired(context.queryClient)) {
+      if (location.pathname === "/terms") return;
+      throw redirect({ to: "/terms", search: { next: location.href } });
     }
     /*
      * Somebody who has not finished onboarding goes there and nowhere else. Here rather than in
