@@ -11,13 +11,14 @@ export type SceneGroup =
   | "Security floor"
   | "Connected";
 
-/** `at` is in seconds from the scene start; `click` clicks the frame's button with that accessible name. */
+/** `at` is in seconds from the scene start; `click` clicks the frame's button with that accessible name; `type` types the text into the field with the name `into`. */
 export type RunStep =
   | { at: number; emit: string; payload: unknown }
   | { at: number; answer: string; with: Answer }
   | { at: number; settle: string; value: unknown }
   | { at: number; fail: string; problem: Problem }
-  | { at: number; click: string };
+  | { at: number; click: string }
+  | { at: number; type: string; into: string };
 
 export type Scene = {
   id: string;

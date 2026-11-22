@@ -125,6 +125,7 @@ body {
 }
 
 .wb-stage {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -155,4 +156,44 @@ body {
   background: var(--wb-notice);
   border: 1px solid var(--wb-border);
   border-radius: 4px;
+}
+
+/* Covers the stage, not the window element, so a shot of the window does not show it. */
+.wb-handover {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--wb-bg) 80%, transparent);
+}
+
+.wb-handover-card {
+  max-width: 360px;
+  padding: 16px 20px;
+  background: var(--wb-panel);
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+}
+
+.wb-handover-card h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.wb-handover-card p {
+  margin: 0 0 12px;
+  color: var(--wb-muted);
+}
+
+.wb-handover-card button {
+  font: inherit;
+  color: inherit;
+  background: var(--wb-panel);
+  border: 1px solid var(--wb-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
 }
