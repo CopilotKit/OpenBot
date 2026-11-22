@@ -224,11 +224,28 @@ test("the sign-in screen shows as for anybody, with the hosted sign-in", async (
   expect(requests).toContain("GET /api/v2/organizations/default/deployment");
 });
 
-test("Sign out signs out and shows the sign-in screen", async () => {
-  const { view, person } = openApp("/");
-  await person.click(await view.findByRole("button", { name: "Sign out" }));
-  await waitFor(() => expect(requests).toContain("POST /api/auth/sign-out"));
-  await view.findByRole("button", { name: /Continue with Google/ });
+test("Sign out signs out of OpenBot and OpenBot by CopilotKit, and comes back to the sign-in screen", async () => {
+  const left: string[] = [];
+  const assign = window.location.assign;
+  // The browser leaving for another page is where this test stops following it, as the person's browser would.
+  window.location.assign = ((address: string) => {
+    left.push(address);
+  }) as typeof window.location.assign;
+  try {
+    const { view, router, person } = openApp("/");
+    await person.click(await view.findByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(requests).toContain("POST /api/auth/sign-out"));
+    // A hosted OpenBot: the browser goes on to sign out of OpenBot by CopilotKit too, and is sent back here.
+    await waitFor(() =>
+      expect(left).toEqual([
+        `/api/auth/hosted/sign-out?returnTo=${encodeURIComponent(`${location.origin}/sign`)}`,
+      ]),
+    );
+    await router.navigate({ to: "/sign" });
+    await view.findByRole("button", { name: /Continue with Google/ });
+  } finally {
+    window.location.assign = assign;
+  }
 });
 
 test("added to an organization again, Try again opens the app", async () => {
