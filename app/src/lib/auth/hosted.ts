@@ -4,10 +4,25 @@
 export const HOSTED_SIGN_IN_PATH = "/api/auth/hosted/sign-in";
 
 /**
+ * Where a hosted OpenBot's sign-out ends: the server signs this browser out of OpenBot by CopilotKit too, then
+ * sends it back. Without it, the next person to choose "Continue with OpenBot by CopilotKit" in this browser is
+ * signed straight back in as the person who just signed out.
+ */
+export const HOSTED_SIGN_OUT_PATH = "/api/auth/hosted/sign-out";
+
+/**
  * The address that signs somebody in through the hosted sign-in and brings them back to `returnTo`,
  * an address on this OpenBot. Opened as a page, not fetched: the browser leaves for the hosted
  * sign-in. The server sends a person back only to its own origin, whatever this says.
  */
 export function hostedSignInAddress(returnTo: string): string {
   return `${HOSTED_SIGN_IN_PATH}?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
+/**
+ * The address that signs this browser out of OpenBot by CopilotKit and brings it back to `returnTo`, an address
+ * on this OpenBot. Opened as a page, like the sign-in. The server sends the browser back only to its own origin.
+ */
+export function hostedSignOutAddress(returnTo: string): string {
+  return `${HOSTED_SIGN_OUT_PATH}?returnTo=${encodeURIComponent(returnTo)}`;
 }
