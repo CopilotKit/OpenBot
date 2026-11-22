@@ -845,6 +845,51 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
     }, 90_000);
 
   for (const engine of engines)
+    for (const theme of THEMES)
+      test(`at a phone's width, scrolled to the end, Sign out clears the buttons' fade, in ${engine}, ${theme}`, async () => {
+        const server = new FakeServer("none", true);
+        server.acme = personalFor("organization");
+        const page = await open("/", server, engine, theme, PHONE);
+        try {
+          await heading(page, "Connect your AI");
+          await page.getByText("Acme").first().waitFor();
+          await style(page);
+          await page.evaluate(() =>
+            window.scrollTo(0, document.documentElement.scrollHeight),
+          );
+          await page.waitForTimeout(100);
+          const room = await page.evaluate(() => {
+            const footer = document.querySelector("footer");
+            const signOut = [...document.querySelectorAll("button")].find(
+              (button) =>
+                button.textContent?.trim() === "Sign out" &&
+                button.getBoundingClientRect().height > 0,
+            );
+            if (!footer || !signOut) return null;
+            // The fade is drawn 32px above the footer (`before:-top-8 before:h-8`).
+            return (
+              footer.getBoundingClientRect().top -
+              32 -
+              signOut.getBoundingClientRect().bottom
+            );
+          });
+          expect(room).not.toBeNull();
+          expect(room ?? -1).toBeGreaterThanOrEqual(0);
+          if (shots) {
+            mkdirSync(shots, { recursive: true });
+            await page.screenshot({
+              path: join(
+                shots,
+                `connect-ai-step-bottom-${engine}-${theme}-${PHONE.width}.png`,
+              ),
+            });
+          }
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
+
+  for (const engine of engines)
     test(`on Cloud the organization's AI is said to be the organization's, in ${engine}`, async () => {
       const server = new FakeServer("organization", true);
       server.personal = GetPersonalAiConnectionResponse.parse(
