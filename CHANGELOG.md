@@ -73,6 +73,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Cloud
 
+- **OpenBot Cloud's sign-in screen: sign in, or OpenBot for Business.** Signed out, OpenBot Cloud
+  offers Sign in or create an account, through its own sign-in, which makes an account for somebody
+  new, and OpenBot for Business, your own cloud or on-prem, with the same words and Book a demo as
+  OpenBot Desktop's first screen. Under them, "Already have OpenBot at work?" takes your company's
+  OpenBot address and sends the browser there to sign in. Nothing offers OpenBot (Self-Contained) or
+  installing OpenBot on a computer. Every other OpenBot keeps its sign-in screen.
 - **Agree to the terms before using OpenBot Cloud.** The signed-in gate sends a person who has to
   agree to the Terms of Service and Acceptable Use Policy to a terms screen, before onboarding, and
   again whenever their version changes, then returns them to where they were headed. Continue waits
