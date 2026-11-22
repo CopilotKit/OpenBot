@@ -120,6 +120,28 @@ function handedOverIn(win: FrameWindow | undefined): boolean {
   return control.calls().some((call) => call.command === "show_openbot");
 }
 
+/** True for a field that takes typed text, where the C key must type a letter. */
+function isTextField(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (el?.nodeType !== 1) return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName.toLowerCase();
+  if (tag === "textarea" || tag === "select") return true;
+  if (tag !== "input") return false;
+  const type = (el.getAttribute("type") ?? "text").toLowerCase();
+  return ![
+    "button",
+    "checkbox",
+    "radio",
+    "range",
+    "color",
+    "submit",
+    "reset",
+    "image",
+    "file",
+  ].includes(type);
+}
+
 /** Waits until the window's boot script has set up its clock. */
 async function booted(win: FrameWindow): Promise<boolean> {
   const deadline = Date.now() + BOOT_TIMEOUT_MS;
@@ -164,6 +186,10 @@ export function Workbench() {
   const [handedOver, setHandedOver] = useState(false);
   /** The person closed the handover overlay. It shows again after the window hands over again. */
   const [overlayClosed, setOverlayClosed] = useState(false);
+  /** Comment mode: a click or a drag in the window picks what a comment is about. */
+  const [commenting, setCommenting] = useState(false);
+  /** The loaded window, as state, so the C key also works with the focus in it. */
+  const [frameEl, setFrameEl] = useState<HTMLIFrameElement | null>(null);
   const speedRef = useRef<Speed>(speed);
   speedRef.current = speed;
   const stateRef = useRef(state);
@@ -368,6 +394,24 @@ export function Workbench() {
     [],
   );
 
+  // C turns Comment mode on and off, when the focus is not in a text field.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "c" && event.key !== "C") return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.defaultPrevented || isTextField(event.target)) return;
+      event.preventDefault();
+      setCommenting((on) => !on);
+    };
+    const doc = frameEl?.contentDocument;
+    window.addEventListener("keydown", onKey);
+    doc?.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      doc?.removeEventListener("keydown", onKey);
+    };
+  }, [frameEl]);
+
   const play = (next: Speed = speed) => {
     const clock = liveRef.current?.clock;
     if (!clock) return;
@@ -446,8 +490,18 @@ export function Workbench() {
             zoom={state.window.zoom}
             grid={state.window.grid}
             gridColor={gridColor}
+            comment={
+              commenting && scene
+                ? {
+                    scene: { id: scene.id, title: scene.title },
+                    atSeconds: toSeconds(now),
+                    window: state.window,
+                  }
+                : null
+            }
             onFrame={(iframe) => {
               frameRef.current = iframe;
+              setFrameEl(iframe);
               if (iframe === null) detach();
               else void attach(iframe);
             }}
@@ -474,6 +528,22 @@ export function Workbench() {
         <div className="wb-under" />
       </main>
       <aside className="wb-side wb-side-right">
+        <section className="wb-comment-toggle">
+          <button
+            type="button"
+            aria-pressed={commenting}
+            aria-keyshortcuts="C"
+            title="Comment (C)"
+            onClick={() => setCommenting((on) => !on)}
+          >
+            Comment
+          </button>
+          <p>
+            {commenting
+              ? "Click an element or drag over an area in the window. Press C to stop."
+              : "Press C to comment on a part of the window."}
+          </p>
+        </section>
         {run.length > 0 ? (
           <RunControls
             now={now}

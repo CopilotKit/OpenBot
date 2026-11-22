@@ -79,7 +79,9 @@ function describeElement(el: PickedElement): string[] {
       `- Off the 4px grid by: x ${round(el.offGrid.x)}, y ${round(el.offGrid.y)}`,
     );
   }
-  const styles = Object.entries(el.styles).map(([k, v]) => `${k}: ${v}`);
+  const styles = Object.entries(el.styles)
+    .filter(([, v]) => v !== "")
+    .map(([k, v]) => `${k}: ${v}`);
   if (styles.length > 0) lines.push(`- Styles: ${styles.join("; ")}`);
   const text = cut(el.text);
   if (text) lines.push(`- Text: "${text}"`);
@@ -107,13 +109,43 @@ function formatCounts(counts: Map<string, number>): string {
   return [...counts.entries()].map(([k, n]) => `${k} (${n})`).join(", ");
 }
 
+function contains(outer: Box, inner: Box): boolean {
+  return (
+    outer.x <= inner.x &&
+    outer.y <= inner.y &&
+    outer.x + outer.width >= inner.x + inner.width &&
+    outer.y + outer.height >= inner.y + inner.height
+  );
+}
+
+function overlapsHorizontally(a: Box, b: Box): boolean {
+  return Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) > 0;
+}
+
+/**
+ * For each box, the gap to the nearest box above it that shares some of its columns and is not
+ * around it or in it. Boxes side by side on one row and nested boxes give no gap, and boxes that
+ * overlap give no negative gap.
+ */
+export function verticalGaps(boxes: readonly Box[]): number[] {
+  const result: number[] = [];
+  for (const box of boxes) {
+    let nearest: number | null = null;
+    for (const other of boxes) {
+      if (other === box || other.y >= box.y) continue;
+      if (!overlapsHorizontally(box, other)) continue;
+      if (contains(other, box) || contains(box, other)) continue;
+      const gap = box.y - (other.y + other.height);
+      if (gap >= 0 && (nearest === null || gap < nearest)) nearest = gap;
+    }
+    if (nearest !== null) result.push(nearest);
+  }
+  return result;
+}
+
 function spacingSummary(sorted: PickedElement[]): string[] {
   const lines = ["### Spacing in this area", ""];
-  const gapsBetween: number[] = [];
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = sorted[i - 1].box;
-    gapsBetween.push(sorted[i].box.y - (prev.y + prev.height));
-  }
+  const gapsBetween = verticalGaps(sorted.map((e) => e.box));
   if (gapsBetween.length > 0) {
     const ordered = [...gapsBetween].sort((a, b) => a - b);
     lines.push(

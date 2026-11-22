@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CommentLayer, type CommentLayerProps } from "./CommentLayer";
 import { GridOverlay } from "./GridOverlay";
 import { Inspector } from "./Inspector";
 import "./windowFrame.css";
@@ -14,6 +15,8 @@ export type WindowFrameProps = {
   zoom: number;
   grid: boolean;
   gridColor: string;
+  /** Comment mode: set, the comment layer replaces the inspector. */
+  comment?: Omit<CommentLayerProps, "frame"> | null;
   onFrame?(iframe: HTMLIFrameElement | null): void;
 };
 
@@ -52,7 +55,7 @@ function WindowsBar({ active }: { active: boolean }) {
   );
 }
 
-/** A window of the desktop app: the OS frame around an iframe of exact size, with the grid and the inspector over it. */
+/** A window of the desktop app: the OS frame around an iframe of exact size, with the grid and the inspector (or the comment layer) over it. */
 export function WindowFrame({
   src,
   frameKey,
@@ -64,6 +67,7 @@ export function WindowFrame({
   zoom,
   grid,
   gridColor,
+  comment,
   onFrame,
 }: WindowFrameProps) {
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
@@ -111,7 +115,11 @@ export function WindowFrame({
             color={gridColor}
           />
         )}
-        <Inspector frame={frame} />
+        {comment ? (
+          <CommentLayer frame={frame} {...comment} />
+        ) : (
+          <Inspector frame={frame} />
+        )}
       </div>
     </div>
   );

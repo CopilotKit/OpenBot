@@ -1,50 +1,33 @@
 import { useEffect, useState } from "react";
 import { type Box, gaps, offGrid } from "./geometry";
+import { neighbourBoxes, toBox, visibleBoxes } from "./pickElement";
 
 export type InspectorProps = {
   frame: HTMLIFrameElement | null;
   gridStep?: number;
 };
 
-type Reading = {
+export type Reading = {
   box: Box;
   gaps: ReturnType<typeof gaps>;
   off: { x: number; y: number };
 };
 
-const COLOR = "#ff3d81";
-
-function toBox(rect: DOMRect): Box {
-  return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-}
+export const INSPECTOR_COLOR = "#ff3d81";
+const COLOR = INSPECTOR_COLOR;
 
 function round(value: number) {
   return Math.round(value * 10) / 10;
 }
 
-function measure(
+/** The box, the gaps to the visible neighbours and the distance from the grid of an element. */
+export function measure(
   target: Element,
   gridStep: number,
   doc: Document,
-): Reading | null {
-  const rect = target.getBoundingClientRect();
-  const box = toBox(rect);
-  const others: Box[] = [];
-  for (const el of doc.body?.querySelectorAll("*") ?? []) {
-    if (el === target || el.contains(target) || target.contains(el)) continue;
-    const r = el.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) continue;
-    const style = doc.defaultView?.getComputedStyle(el);
-    if (
-      style &&
-      (style.display === "none" ||
-        style.visibility === "hidden" ||
-        style.opacity === "0")
-    ) {
-      continue;
-    }
-    others.push(toBox(r));
-  }
+): Reading {
+  const box = toBox(target.getBoundingClientRect());
+  const others = neighbourBoxes(target, visibleBoxes(doc));
   return { box, gaps: gaps(box, others), off: offGrid(box, gridStep) };
 }
 
@@ -97,6 +80,11 @@ export function Inspector({ frame, gridStep = 4 }: InspectorProps) {
   }, [frame, gridStep]);
 
   if (!reading) return null;
+  return <Measurement reading={reading} />;
+}
+
+/** Draws a reading: the outline, the size, the distance from the grid and the gaps. */
+export function Measurement({ reading }: { reading: Reading }) {
   const { box, gaps: g, off } = reading;
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;

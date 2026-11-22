@@ -105,6 +105,19 @@ body {
   gap: 4px;
 }
 
+.wb-comment-toggle {
+  margin-bottom: 12px;
+}
+
+.wb-comment-toggle p {
+  margin: 0;
+  color: var(--wb-muted);
+}
+
+.wb-side button[aria-pressed="true"] {
+  background: var(--wb-current);
+}
+
 .wb-side-right label {
   display: flex;
   align-items: center;

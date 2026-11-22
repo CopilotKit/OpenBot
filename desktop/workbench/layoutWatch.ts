@@ -123,12 +123,18 @@ export function elementKey(element: Element): string | null {
   return identify(element)?.key ?? null;
 }
 
+/** The words a person sees for an element, as the warnings name it, or null when it has no key. */
+export function elementLabel(element: Element): string | null {
+  return identify(element)?.label ?? null;
+}
+
 function boxOf(element: Element): Box {
   const { x, y, width, height } = element.getBoundingClientRect();
   return { x, y, width, height };
 }
 
-function visibleElements(root: Document) {
+/** The elements with a key and a box that is not empty, in document order. */
+export function visibleElements(root: Document) {
   const body = root.body;
   if (!body) return [];
   return Array.from(body.querySelectorAll("*")).flatMap((element) => {

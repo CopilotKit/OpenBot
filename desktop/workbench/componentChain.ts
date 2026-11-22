@@ -2,7 +2,21 @@
 // the workbench. It reads React's private fiber fields, so it is best effort
 // and never throws.
 
-export type ComponentInfo = { name: string; file?: string; line?: number };
+/**
+ * `file` is a repo path. `line` is a line of that source file. `at` is a position in the module
+ * the dev server served, as a stack gives it: `resolveLines` (sourceLines.ts) turns it into a
+ * `line` with the module's source map.
+ */
+export type ComponentInfo = {
+  name: string;
+  file?: string;
+  line?: number;
+  at?: ServedPosition;
+};
+
+export type ServedPosition = { url: string; line: number; column: number };
+
+type Source = { file?: string; line?: number; at?: ServedPosition };
 
 const INTERNAL_NAMES = new Set([
   "Suspense",
@@ -70,9 +84,7 @@ function repoPath(fileName: string): string | undefined {
   return `desktop${path.slice(index)}`;
 }
 
-function parseFrame(
-  stack: string,
-): { file: string; line?: number } | undefined {
+function parseFrame(stack: string): Source | undefined {
   for (const raw of stack.split("\n")) {
     const match = raw.match(
       /(https?:\/\/[^\s()]+|file:\/\/[^\s()]+|\/[^\s()]+)/,
@@ -84,15 +96,23 @@ function parseFrame(
     const url = parts?.[1] ?? text;
     const file = repoPath(url);
     if (!file) continue;
-    const line = parts?.[2] ? Number(parts[2]) : undefined;
-    return { file, line };
+    // A stack gives the line in the served module, not in the source file: keep it as `at`.
+    if (!parts?.[2]) return { file };
+    return {
+      file,
+      at: {
+        url,
+        line: Number(parts[2]),
+        column: parts[3] ? Number(parts[3]) : 1,
+      },
+    };
   }
   return undefined;
 }
 
-// Where this element was created: React 19 records the stack of the JSX call
+// Where this fiber was created: React 19 records the stack of the JSX call
 // site, which is the render of the owner. Older React gives _debugSource.
-function sourceOf(fiber: Loose): { file?: string; line?: number } {
+function sourceOf(fiber: Loose): Source {
   try {
     const source = fiber._debugSource;
     if (isObject(source) && typeof source.fileName === "string") {
@@ -117,24 +137,38 @@ function sourceOf(fiber: Loose): { file?: string; line?: number } {
   return {};
 }
 
+/**
+ * Where a component draws the path to the element: the nearest fiber under it on the path that
+ * its own render created (its `_debugOwner`). For the innermost component that is the JSX of the
+ * element itself. Without owners, where the component itself was created.
+ */
+function locationOf(component: Loose, below: readonly Loose[]): Source {
+  const owned = below.find((f) => f._debugOwner === component);
+  const source = owned ? sourceOf(owned) : {};
+  return source.file ? source : sourceOf(component);
+}
+
 export function componentChain(element: Element, max = 6): ComponentInfo[] {
   try {
     const chain: ComponentInfo[] = [];
+    const below: Loose[] = [];
     let fiber = findFiber(element);
     let guard = 0;
     while (fiber && chain.length < max && guard++ < 5000) {
       const name = nameOf(fiber.type);
       if (name && !name.startsWith("_") && !INTERNAL_NAMES.has(name)) {
         if (chain[chain.length - 1]?.name !== name) {
-          const { file, line } = sourceOf(fiber);
+          const { file, line, at } = locationOf(fiber, below);
           const info: ComponentInfo = { name };
           if (file) {
             info.file = file;
             if (line !== undefined) info.line = line;
+            if (at) info.at = at;
           }
           chain.push(info);
         }
       }
+      below.push(fiber);
       const next: unknown = fiber.return;
       fiber = isObject(next) ? next : undefined;
     }

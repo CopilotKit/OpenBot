@@ -4,6 +4,7 @@ import { componentChain, formatChain } from "./componentChain";
 type FakeFiber = {
   type: unknown;
   return: FakeFiber | null;
+  _debugOwner?: FakeFiber;
   _debugStack?: Error;
   _debugSource?: unknown;
 };
@@ -105,8 +106,43 @@ describe("componentChain", () => {
     fiber._debugStack = stackError(
       "Error: react-stack-top-frame\n    at jsxDEV (http://localhost:3021/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=1:200:5)\n    at SetupProgress (http://localhost:3021/src/SetupProgress.tsx?t=123:45:12)",
     );
+    // The line is in the served module, so it stays a served position until a source map reads it.
     expect(componentChain(dom(fiber))).toEqual([
-      { name: "StepRow", file: "desktop/src/SetupProgress.tsx", line: 45 },
+      {
+        name: "StepRow",
+        file: "desktop/src/SetupProgress.tsx",
+        at: {
+          url: "http://localhost:3021/src/SetupProgress.tsx?t=123",
+          line: 45,
+          column: 12,
+        },
+      },
+    ]);
+  });
+
+  test("names where each component draws the path, from the owners", () => {
+    // span (made by StepRow) › StepRow (made by SetupProgress) › SetupProgress
+    const setup: FakeFiber = { type: named("SetupProgress"), return: null };
+    const row: FakeFiber = {
+      type: named("StepRow"),
+      return: setup,
+      _debugOwner: setup,
+      _debugStack: stackError(
+        "Error\n    at SetupProgress (http://localhost:3021/src/SetupProgress.tsx:20:5)",
+      ),
+    };
+    const span: FakeFiber = {
+      type: "span",
+      return: row,
+      _debugOwner: row,
+      _debugStack: stackError(
+        "Error\n    at StepRow (http://localhost:3021/src/StepRow.tsx:9:7)",
+      ),
+    };
+    const chain = componentChain(dom(span));
+    expect(chain.map((c) => [c.name, c.file, c.at?.line])).toEqual([
+      ["StepRow", "desktop/src/StepRow.tsx", 9],
+      ["SetupProgress", "desktop/src/SetupProgress.tsx", 20],
     ]);
   });
 
