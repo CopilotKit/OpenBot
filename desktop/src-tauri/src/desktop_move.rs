@@ -458,6 +458,12 @@ impl<R: tauri::Runtime> moving::Here for ThisComputer<R> {
         footprint(&self.app)
     }
 
+    /// The disk the installation folder is on, which holds OpenBot's machine disk too wherever
+    /// OpenBot put it (`<root>\engine` on Windows, the home folder on a Mac).
+    fn free_space(&mut self) -> Option<u64> {
+        openbot_desktop_lib::early_downloads::free_space(&root(&self.app))
+    }
+
     /// Kept before anything goes: the answer, and the app connected to OpenBot Cloud from the
     /// next launch on, so a removal cut short never offers the move again.
     fn moved(&mut self) -> Result<(), String> {

@@ -531,6 +531,32 @@ fn a_failed_import_is_applied_once_more() {
     assert!(here.removed);
 }
 
+/// The freed figure is what the files measured, held to what the disk gained: box B's files measured
+/// 12.0 GB while its disk gained 10.8 GB, and the screen said 12.0. A disk that didn't move (another
+/// program wrote meanwhile) or couldn't be read leaves the files' figure.
+#[test]
+fn the_space_freed_is_never_more_than_the_disk_gained() {
+    const GB: u64 = 1_000_000_000;
+    assert_eq!(
+        freed(
+            (Some(12 * GB), Some(0)),
+            (Some(106_810_000_000), Some(117_610_000_000))
+        ),
+        Some(10_800_000_000)
+    );
+    assert_eq!(
+        freed((Some(12 * GB), Some(0)), (Some(100 * GB), Some(115 * GB))),
+        Some(12 * GB)
+    );
+    assert_eq!(
+        freed((Some(12 * GB), Some(0)), (Some(100 * GB), Some(99 * GB))),
+        Some(12 * GB)
+    );
+    assert_eq!(freed((Some(12 * GB), None), (None, None)), Some(12 * GB));
+    assert_eq!(freed((None, None), (Some(GB), Some(3 * GB))), Some(2 * GB));
+    assert_eq!(freed((None, None), (None, None)), None);
+}
+
 // ------------------------------------------------------------------------------------------------
 // Footprint.
 

@@ -221,6 +221,35 @@ pub trait Here {
     fn moved(&mut self) -> Result<(), String>;
     /// OpenBot's software and data removed from this computer. What couldn't be, in plain words.
     fn remove(&mut self) -> Vec<String>;
+    /// The space free on the disk OpenBot is on, when the system says.
+    fn free_space(&mut self) -> Option<u64> {
+        None
+    }
+}
+
+/**
+What removing OpenBot freed: what it measured of its own files before and after, but never more
+than the disk itself gained when the disk says. On two Windows boxes the files measured 12.2 and
+12.0 GB while the disk gained 11.4 and 10.8 GB (Podman's own helper stays, and a deleted disk
+image does not hand back every byte its length claims), and the person reads the claim against
+the disk.
+*/
+pub fn freed(
+    footprint: (Option<u64>, Option<u64>),
+    free_space: (Option<u64>, Option<u64>),
+) -> Option<u64> {
+    let measured = footprint
+        .0
+        .map(|before| before.saturating_sub(footprint.1.unwrap_or(0)));
+    let gained = match free_space {
+        (Some(before), Some(after)) if after > before => Some(after - before),
+        _ => None,
+    };
+    match (measured, gained) {
+        (Some(measured), Some(gained)) => Some(measured.min(gained)),
+        (measured, None) => measured,
+        (None, gained) => gained,
+    }
 }
 
 /// The move's steps, for the setup window's progress rows.
@@ -392,8 +421,10 @@ pub fn run(
     progress.running(Stage::Remove, None);
     here.moved().map_err(failed(Stage::Verify))?;
     let before = here.footprint();
+    let free_before = here.free_space();
     let left_behind = here.remove();
     let after = here.footprint();
+    let free_after = here.free_space();
     progress.done(Stage::Remove);
 
     let apps = if verification.reconnect.is_empty() {
@@ -402,7 +433,7 @@ pub fn run(
         verification.reconnect
     };
     Ok(Moved {
-        freed_bytes: before.map(|before| before.saturating_sub(after.unwrap_or(0))),
+        freed_bytes: freed((before, after), (free_before, free_after)),
         apps,
         notes: verification
             .notes
