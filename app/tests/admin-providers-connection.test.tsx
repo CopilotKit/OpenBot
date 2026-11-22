@@ -10,10 +10,15 @@ import type {
 } from "@/lib/api/generated/model";
 import {
   DeleteAiConnectionResponse,
+  FinishPersonalAiSignInBody,
+  FinishPersonalAiSignInResponse,
   GetAiConnectionResponse,
   GetModelCatalogueResponse,
   GetPersonalAiConnectionResponse,
+  GetPersonalAiSignInResponse,
   ReplaceAiConnectionBody,
+  StartPersonalAiSignInBody,
+  StartPersonalAiSignInResponse,
 } from "@/lib/api/generated/models/models.zod";
 import { personBody } from "./accounts-api";
 import {
@@ -59,6 +64,7 @@ const ORIGIN = "http://openbot.test";
 const ORGANIZATION = "/api/v2/organizations/default";
 const AI_CONNECTION = `${ORGANIZATION}/ai-connection`;
 const PERSONAL_AI_CONNECTION = `${ORGANIZATION}/people/me/ai-connection`;
+const SIGN_INS = `${PERSONAL_AI_CONNECTION}/sign-ins`;
 const MODEL_CATALOGUE = `${ORGANIZATION}/model-catalogue`;
 
 const WIDE = { width: 1440, height: 900 };
@@ -107,7 +113,25 @@ function ownClaudePlan(): PersonalAiConnection {
   };
 }
 
+/** The admin's own ChatGPT plan, kept for them and working. */
+function ownChatGptPlan(): PersonalAiConnection {
+  const own = ownClaudePlan();
+  return {
+    ...own,
+    connection: { ...own.connection, provider: "openai", login: "plan" },
+  };
+}
+
 const GOOD_KEY = "sk-ant-api03-good";
+/** What finishes Claude's sign-in: the code Claude's page shows, `<code>#<state>`. */
+const CLAUDE_CODE = "Zm9vYmFyLWNvZGU#c3RhdGUtZXhhbXBsZQ";
+/** Claude's sign-in as the spec's example starts it: finished by that code, never read in a loop. */
+const CLAUDE_SIGN_IN = StartPersonalAiSignInResponse.parse(
+  spec.components.examples.AiSignInClaudeExample?.value,
+);
+
+/** The admin these screens are signed in as. */
+const ME = { id: "dana", name: "Dana Whitfield", email: "dana@example.com" };
 
 /** One OpenBot's server, as far as these screens ask it. */
 class FakeServer {
@@ -138,6 +162,16 @@ class FakeServer {
         organization: { ready: false, provider: null },
       };
   }
+  /** Every sign-in the admin started for themselves, as its body was checked. */
+  signIns: unknown[] = [];
+  /** Every code sent to finish one. */
+  finishes: unknown[] = [];
+  /** The sign-in under way. */
+  signIn: { id: string; provider: string } | null = null;
+  /** The providers whose sign-in the server keeps for the admin, approved through OpenBot. */
+  kept = new Set<string>();
+  /** Every page the app opened in a new tab. */
+  opened: string[] = [];
 
   constructor() {
     // The organization's: OpenAI, by key, with Anthropic's key kept from before.
@@ -195,15 +229,28 @@ class FakeServer {
         const input = ReplaceAiConnectionBody.parse(body);
         for (const key of Object.keys(body))
           expect(Object.keys(input)).toContain(key);
+        // A plan or a sign-in is the admin's own, kept for them: shared, and named as theirs.
+        const signIn = input.login === "plan" || input.login === "oauth";
+        if (signIn) {
+          const own = this.personal?.connection;
+          const keptAsOwn =
+            own?.ready &&
+            own.provider === input.provider &&
+            own.login === input.login;
+          expect(keptAsOwn || this.kept.has(input.provider)).toBe(true);
+        }
         this.connection = GetAiConnectionResponse.parse({
           provider: input.provider,
           login: input.login,
           model: input.model ?? null,
           endpointHost: null,
-          keySet: true,
+          keySet: !signIn,
           ready: true,
           source: "stored",
           editable: true,
+          sharedSignIn: signIn
+            ? { personId: ME.id, name: ME.name, ready: true }
+            : null,
           saved: [
             ...this.connection.saved.filter(
               (saved) => saved.provider !== input.provider,
@@ -223,6 +270,60 @@ class FakeServer {
           };
         return { status: 200, json: this.connection };
       }
+    }
+    if (path === SIGN_INS && method === "POST") {
+      expect(request.headers()["idempotency-key"]?.length ?? 0).toBeGreaterThan(
+        0,
+      );
+      const sent = request.postDataJSON() as Record<string, unknown>;
+      const body = StartPersonalAiSignInBody.parse(sent);
+      for (const key of Object.keys(sent))
+        expect(Object.keys(body)).toContain(key);
+      this.signIns.push(sent);
+      // Claude's, as the spec's example starts it: finished by the code Claude's page shows.
+      expect(body.provider).toBe("anthropic");
+      const begun = CLAUDE_SIGN_IN;
+      this.signIn = { id: begun.id, provider: body.provider };
+      return { status: 201, json: begun };
+    }
+    if (path.startsWith(`${SIGN_INS}/`) && method === "GET") {
+      // Claude's sign-in finishes by its code alone: never read in a loop.
+      return { status: 500, json: { detail: "Read in a loop." } };
+    }
+    if (
+      path.startsWith(`${SIGN_INS}/`) &&
+      path.endsWith("/code") &&
+      method === "POST"
+    ) {
+      expect(request.headers()["idempotency-key"]?.length ?? 0).toBeGreaterThan(
+        0,
+      );
+      const body = request.postDataJSON() as Record<string, unknown>;
+      const input = FinishPersonalAiSignInBody.parse(body);
+      for (const key of Object.keys(body))
+        expect(Object.keys(input)).toContain(key);
+      this.finishes.push(input);
+      const signIn = this.signIn;
+      if (!signIn || path !== `${SIGN_INS}/${signIn.id}/code`)
+        return { status: 404, json: { detail: "No such sign-in." } };
+      const approved = input.code.trim() === CLAUDE_CODE;
+      if (approved) this.kept.add(signIn.provider);
+      return {
+        status: 200,
+        json: FinishPersonalAiSignInResponse.parse(
+          GetPersonalAiSignInResponse.parse({
+            ...(spec.components.examples.AiSignInApprovedExample?.value as {
+              [key: string]: unknown;
+            }),
+            id: signIn.id,
+            provider: signIn.provider,
+            status: approved ? "approved" : "failed",
+            detail: approved
+              ? null
+              : "Claude didn't approve the sign-in. Sign in again.",
+          }),
+        ),
+      };
     }
     if (path === PERSONAL_AI_CONNECTION) {
       if (!this.personal)
@@ -279,12 +380,7 @@ class FakeServer {
       return {
         status: 200,
         json: {
-          person: personBody({
-            id: "dana",
-            name: "Dana Whitfield",
-            email: "dana@example.com",
-            role: this.role,
-          }),
+          person: personBody({ ...ME, role: this.role }),
           openbotVersion: "v1.2.0",
         },
       };
@@ -425,6 +521,7 @@ async function open(
   engine: string,
   theme: Theme,
   window: Window,
+  desktop = false,
 ): Promise<Page> {
   const browser = browsers.get(engine);
   if (!browser) throw new Error(`no ${engine}`);
@@ -434,6 +531,32 @@ async function open(
     reducedMotion: "reduce",
   });
   page.on("pageerror", (error) => console.error(error));
+  if (desktop)
+    /*
+     * OpenBot Desktop's window, as the page sees it: Tauri's IPC, recording each command. A Claude
+     * plan's sign-in starts there with the page Claude opens at; everything else answers nothing.
+     */
+    await page.addInitScript(() => {
+      const invoked: string[] = [];
+      (window as unknown as Record<string, unknown>).__invoked = invoked;
+      (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+        transformCallback: () => 1,
+        invoke: async (command: string) => {
+          invoked.push(command);
+          return command.endsWith("|begin_plan_sign_in")
+            ? { url: "https://claude.ai/oauth/authorize?code=true" }
+            : null;
+        },
+      };
+    });
+  // A provider's sign-in page, opened in a new tab: recorded, and never fetched from the provider.
+  await page.context().route(
+    (url) => url.origin !== ORIGIN,
+    (route) => {
+      server.opened.push(route.request().url());
+      return route.fulfill({ contentType: "text/html", body: "" });
+    },
+  );
   const inter = join(packageDir("@fontsource-variable/inter"), "files");
   await page.route(`${ORIGIN}/**`, async (route) => {
     const where = new URL(route.request().url()).pathname;
@@ -707,11 +830,20 @@ describe.skipIf(!asked)("Admin → Providers: the organization's AI", () => {
           expect(await measured(page)).toEqual(FINE);
           await shoot(page, "dialog-current", engine, theme, window);
 
-          // Change: the same chooser as Settings, keys in a browser.
+          // Change: the same chooser as Settings, a key in place of the admin's own sign-in.
           await dialog
             .getByRole("button", { name: "Change", exact: true })
             .click();
           await dialog.getByRole("button", { name: /^Anthropic/ }).click();
+          // Their own Claude plan is kept for them: shared as it is, no sign-in again.
+          await dialog
+            .getByText("You're signed in with your Claude plan.")
+            .waitFor();
+          await style(page);
+          await shoot(page, "share-kept", engine, theme, window);
+          await dialog
+            .getByRole("tab", { name: "Use an API key", exact: true })
+            .click();
           await dialog
             .getByRole("checkbox", { name: "Use the saved key" })
             .click();
@@ -749,6 +881,9 @@ describe.skipIf(!asked)("Admin → Providers: the organization's AI", () => {
             .getByRole("button", { name: /Not chosen yet/ })
             .click();
           await dialog.getByRole("button", { name: /^OpenAI/ }).click();
+          await dialog
+            .getByRole("tab", { name: "Use an API key", exact: true })
+            .click();
           const saved = dialog.getByRole("checkbox", {
             name: "Use the saved key",
           });
@@ -899,6 +1034,35 @@ describe.skipIf(!asked)("Admin → Providers: the organization's AI", () => {
               }
               expect(await measured(page)).toEqual(FINE);
               await shoot(page, state, engine, theme, window);
+              if (state === "self-hosted") {
+                // Off OpenBot Cloud nothing changes: keys in a browser, no sign-in, nothing shared.
+                await section(page, "AI provider")
+                  .getByRole("button", { name: /^OpenAI/ })
+                  .click();
+                const dialog = page.getByRole("dialog");
+                await dialog.waitFor();
+                await style(page);
+                await dialog
+                  .getByRole("button", { name: "Change", exact: true })
+                  .click();
+                await dialog
+                  .getByRole("button", { name: /^Anthropic/ })
+                  .click();
+                // Anthropic's key, kept from before: the key is the only way in.
+                await dialog
+                  .getByRole("checkbox", { name: "Use the saved key" })
+                  .waitFor();
+                expect(await dialog.getByRole("tab").count()).toBe(0);
+                expect(
+                  await dialog
+                    .getByRole("button", { name: /^Sign in/ })
+                    .count(),
+                ).toBe(0);
+                expect(await dialog.getByText(/for everyone/).count()).toBe(0);
+                expect(server.signIns).toEqual([]);
+                await page.keyboard.press("Escape");
+                await dialog.waitFor({ state: "hidden" });
+              }
               if (state === "self-hosted" && window === PHONE) {
                 await section(page, "AI provider")
                   .getByRole("button", { name: /^OpenAI/ })
@@ -921,3 +1085,310 @@ describe.skipIf(!asked)("Admin → Providers: the organization's AI", () => {
           }
     }, 240_000);
 });
+
+/**
+ * On OpenBot Cloud an admin shares their own plan or provider sign-in as the organization's AI:
+ * they sign in exactly as Connect your AI signs them in (the server runs it and keeps it for them),
+ * or share the one they already have in one press. Providers then says whose it is, and says when
+ * it stopped working. Inside OpenBot Desktop the chooser keeps Desktop's own plan sign-ins.
+ */
+describe.skipIf(!asked)(
+  "Admin → Providers: an admin's own sign-in, shared as the organization's AI",
+  () => {
+    for (const engine of engines)
+      for (const theme of THEMES)
+        for (const window of [WIDE, PHONE])
+          test(`an admin signs in to Claude and shares it, in ${engine}, ${theme}, ${window.width}`, async () => {
+            const server = new FakeServer();
+            // Nothing of their own: their runs use the organization's OpenAI key.
+            server.personal = personalExample(
+              "PersonalAiConnectionOrganizationExample",
+            );
+            const page = await open(
+              "/admin/providers",
+              server,
+              engine,
+              theme,
+              window,
+            );
+            try {
+              const organization = section(page, "Organization's AI");
+              await organization
+                .getByRole("button", { name: /^OpenAI/ })
+                .click();
+              const dialog = page.getByRole("dialog");
+              await dialog
+                .getByRole("button", { name: "Change", exact: true })
+                .waitFor();
+              await style(page);
+              await dialog
+                .getByRole("button", { name: "Change", exact: true })
+                .click();
+              // No sign-in of their own yet: nothing to share in one press.
+              await dialog
+                .getByRole("button", { name: /^Anthropic/ })
+                .waitFor();
+              expect(
+                await dialog
+                  .getByRole("button", { name: /for everyone/ })
+                  .count(),
+              ).toBe(0);
+              // Sign-in first, as Connect your AI offers it, with the key second.
+              expect(
+                await dialog
+                  .getByRole("button", { name: /^Anthropic/ })
+                  .textContent(),
+              ).toContain(
+                "Sign in with a Claude Pro, Max, Team or Enterprise plan.",
+              );
+              await style(page);
+              expect(await measured(page)).toEqual(FINE);
+              await shoot(page, "share-list", engine, theme, window);
+              await dialog.getByRole("button", { name: /^Anthropic/ }).click();
+              expect(await dialog.getByRole("tab").allTextContents()).toEqual([
+                "Sign in with my plan",
+                "Use an API key",
+              ]);
+              // What sharing does, said before anything is connected.
+              await dialog
+                .getByText(
+                  "Bots across your organization will run on your Claude plan for everyone who hasn't connected their own AI.",
+                )
+                .waitFor();
+              const share = dialog.getByRole("button", {
+                name: "Use my Claude plan for everyone",
+              });
+              expect(await share.isDisabled()).toBe(true);
+              await style(page);
+              expect(await measured(page)).toEqual(FINE);
+              await shoot(page, "share-sign-in", engine, theme, window);
+
+              await dialog
+                .getByRole("button", {
+                  name: "Sign in with Anthropic",
+                  exact: true,
+                })
+                .click();
+              const code = dialog.getByLabel("Code from your browser");
+              await code.waitFor();
+              await code.fill(`  ${CLAUDE_CODE}  `);
+              await style(page);
+              await shoot(page, "share-code", engine, theme, window);
+              await dialog
+                .getByRole("button", { name: "Finish", exact: true })
+                .click();
+              await dialog.getByText("Signed in to Anthropic.").waitFor();
+              // Claude's own page, opened where the server's sign-in said.
+              expect(server.opened).toContain(CLAUDE_SIGN_IN.url);
+              await style(page);
+              expect(await measured(page)).toEqual(FINE);
+              await shoot(page, "share-signed-in", engine, theme, window);
+              await share.click();
+              await dialog.getByText("Connected to Anthropic").waitFor();
+              await dialog
+                .getByRole("status")
+                .getByText("Shared from your Claude plan.")
+                .waitFor();
+              await style(page);
+              await shoot(page, "share-connected", engine, theme, window);
+              await dialog.getByRole("button", { name: "Done" }).click();
+              // The row says whose it is and what it does.
+              await organization
+                .getByRole("button", {
+                  name: /Anthropic.*Shared from your Claude plan\. Bots across the organization run on it for everyone who hasn't connected their own AI\./,
+                })
+                .waitFor();
+              expect(await measured(page)).toEqual(FINE);
+              await shoot(page, "shared", engine, theme, window);
+
+              // The admin's own sign-in through OpenBot, then the organization's AI on it.
+              expect(server.signIns).toEqual([{ provider: "anthropic" }]);
+              expect(server.finishes).toEqual([{ code: CLAUDE_CODE }]);
+              expect(
+                server.writes.map((write) => [write.method, write.body]),
+              ).toEqual([["PUT", { provider: "anthropic", login: "plan" }]]);
+              // Their own AI never changed: still the organization's.
+              expect(server.personal?.uses).toBe("organization");
+            } finally {
+              await page.close();
+            }
+          }, 90_000);
+
+    for (const engine of engines)
+      for (const theme of THEMES)
+        for (const window of [WIDE, PHONE])
+          test(`an admin with their own ChatGPT plan shares it in one step, in ${engine}, ${theme}, ${window.width}`, async () => {
+            const server = new FakeServer();
+            server.personal = ownChatGptPlan();
+            const page = await open(
+              "/admin/providers",
+              server,
+              engine,
+              theme,
+              window,
+            );
+            try {
+              const organization = section(page, "Organization's AI");
+              await organization
+                .getByRole("button", { name: /^OpenAI/ })
+                .click();
+              const dialog = page.getByRole("dialog");
+              await dialog
+                .getByRole("button", { name: "Change", exact: true })
+                .waitFor();
+              await style(page);
+              await dialog
+                .getByRole("button", { name: "Change", exact: true })
+                .click();
+              const share = dialog.getByRole("button", {
+                name: "Use my ChatGPT plan for everyone",
+              });
+              await share.waitFor();
+              await dialog
+                .getByText(
+                  "Bots across your organization will run on your ChatGPT plan for everyone who hasn't connected their own AI.",
+                )
+                .waitFor();
+              await style(page);
+              expect(await measured(page)).toEqual(FINE);
+              await shoot(page, "share-mine", engine, theme, window);
+              await share.click();
+              await dialog.getByText("Connected to OpenAI").waitFor();
+              await dialog.getByRole("button", { name: "Done" }).click();
+              await organization
+                .getByRole("button", {
+                  name: /OpenAI.*Shared from your ChatGPT plan\./,
+                })
+                .waitFor();
+              // No sign-in again: the one kept for them, shared as it is.
+              expect(server.signIns).toEqual([]);
+              expect(
+                server.writes.map((write) => [write.method, write.body]),
+              ).toEqual([["PUT", { provider: "openai", login: "plan" }]]);
+            } finally {
+              await page.close();
+            }
+          }, 60_000);
+
+    for (const engine of engines)
+      for (const theme of THEMES)
+        for (const window of [WIDE, PHONE])
+          test(`Providers says whose sign-in it is and when it stopped working, in ${engine}, ${theme}, ${window.width}`, async () => {
+            const server = new FakeServer();
+            server.connection = GetAiConnectionResponse.parse(
+              spec.components.examples.AiConnectionSharedPlanExample?.value,
+            ) as AiConnection;
+            const page = await open(
+              "/admin/providers",
+              server,
+              engine,
+              theme,
+              window,
+            );
+            try {
+              const organization = section(page, "Organization's AI");
+              await organization
+                .getByRole("button", {
+                  name: /Anthropic.*Shared from Dana Reyes's Claude plan\. Bots across the organization run on it for everyone who hasn't connected their own AI\./,
+                })
+                .waitFor();
+              expect(await measured(page)).toEqual(FINE);
+              await shoot(page, "shared-ready", engine, theme, window);
+              await page.close();
+
+              // Dana removed her own sign-in: it stopped working, and the row says what to do.
+              const sharedSignIn = server.connection.sharedSignIn;
+              if (!sharedSignIn) throw new Error("the example shares nothing");
+              server.connection = GetAiConnectionResponse.parse({
+                ...server.connection,
+                ready: false,
+                sharedSignIn: { ...sharedSignIn, ready: false },
+              }) as AiConnection;
+              const again = await open(
+                "/admin/providers",
+                server,
+                engine,
+                theme,
+                window,
+              );
+              try {
+                const row = section(again, "Organization's AI").getByRole(
+                  "button",
+                  {
+                    name: /Anthropic.*Shared from Dana Reyes's Claude plan\. It stopped working\. Change it to sign in again or use another provider\./,
+                  },
+                );
+                await row.waitFor();
+                expect(await measured(again)).toEqual(FINE);
+                await shoot(again, "shared-stopped", engine, theme, window);
+                await row.click();
+                const dialog = again.getByRole("dialog");
+                await dialog
+                  .getByRole("alert")
+                  .getByText(
+                    "It stopped working. Change it to sign in again or use another provider.",
+                  )
+                  .waitFor();
+                await style(again);
+                expect(await measured(again)).toEqual(FINE);
+                await shoot(
+                  again,
+                  "shared-stopped-dialog",
+                  engine,
+                  theme,
+                  window,
+                );
+              } finally {
+                await again.close();
+              }
+            } finally {
+              if (!page.isClosed()) await page.close();
+            }
+          }, 60_000);
+
+    for (const engine of engines)
+      test(`inside OpenBot Desktop the chooser keeps Desktop's own plan sign-ins, in ${engine}`, async () => {
+        const server = new FakeServer();
+        server.personal = ownChatGptPlan();
+        const page = await open(
+          "/admin/providers",
+          server,
+          engine,
+          "light",
+          WIDE,
+          true,
+        );
+        try {
+          const organization = section(page, "Organization's AI");
+          await organization.getByRole("button", { name: /^OpenAI/ }).click();
+          const dialog = page.getByRole("dialog");
+          await dialog
+            .getByRole("button", { name: "Change", exact: true })
+            .waitFor();
+          await style(page);
+          await dialog
+            .getByRole("button", { name: "Change", exact: true })
+            .click();
+          await dialog.getByRole("button", { name: /^Anthropic/ }).click();
+          // Nothing shared from the person: Desktop signs in and holds it, as it always has.
+          expect(await dialog.getByText(/for everyone/).count()).toBe(0);
+          await dialog
+            .getByRole("button", {
+              name: "Sign in with Anthropic",
+              exact: true,
+            })
+            .click();
+          await dialog.getByLabel("Code from your browser").waitFor();
+          const invoked = (await page.evaluate(
+            () => (window as unknown as { __invoked: string[] }).__invoked,
+          )) as string[];
+          expect(
+            invoked.some((command) => command.endsWith("|begin_plan_sign_in")),
+          ).toBe(true);
+          expect(server.signIns).toEqual([]);
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
+  },
+);

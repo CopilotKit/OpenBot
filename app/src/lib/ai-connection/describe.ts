@@ -10,7 +10,17 @@ export type AiConnectionWords = {
   /** The row's second line: how OpenBot signs in, and the model when one was named. */
   summary: string;
   details: AiConnectionDetail[];
+  /**
+   * Whose own sign-in the organization's AI shares, on OpenBot Cloud: "Dana Reyes's Claude plan",
+   * or "your Claude plan" when it is the reader's. `ready` false once it stopped working.
+   */
+  shared: { words: string; ready: boolean } | null;
 };
+
+/** "Dana Reyes's", by the name OpenBot shows for them. */
+function possessive(name: string): string {
+  return `${name}'s`;
+}
 
 /**
  * Whose key or sign-in it is, in the row's words. `organization` beside a person's own AI (OpenBot
@@ -23,11 +33,13 @@ export type AiConnectionOwner = "you" | "organization";
 export function describeConnection(
   connection: Pick<
     AiConnection,
-    "provider" | "login" | "model" | "endpointHost"
+    "provider" | "login" | "model" | "endpointHost" | "sharedSignIn"
   >,
   owner: AiConnectionOwner = "you",
+  /** The reader's person id, so a sign-in they shared reads as theirs. */
+  viewerId?: string,
 ): AiConnectionWords | null {
-  const { provider: id, login, model, endpointHost } = connection;
+  const { provider: id, login, model, endpointHost, sharedSignIn } = connection;
   if (!id || !login) return null;
   const provider = providerById(id)?.name ?? id;
   const your = owner === "organization" ? "your organization's" : "your";
@@ -58,6 +70,19 @@ export function describeConnection(
       }
       break;
   }
+  // A plan or a sign-in an admin shared from their own: whose it is, never "your organization's".
+  const shared =
+    sharedSignIn && (login === "plan" || login === "oauth")
+      ? {
+          words: `${
+            sharedSignIn.personId === viewerId
+              ? "your"
+              : possessive(sharedSignIn.name)
+          } ${signIn}`,
+          ready: sharedSignIn.ready,
+        }
+      : null;
+  if (shared) said = `Shared from ${shared.words}.`;
   const details: AiConnectionDetail[] = [
     { label: "Provider", value: provider },
     {
@@ -65,7 +90,9 @@ export function describeConnection(
         login === "endpoint" && id === "openai-compatible"
           ? "Address"
           : "Sign-in",
-      value: signIn,
+      value: shared
+        ? `${shared.words.charAt(0).toUpperCase()}${shared.words.slice(1)}`
+        : signIn,
     },
   ];
   if (model) details.push({ label: "Model", value: model });
@@ -73,5 +100,6 @@ export function describeConnection(
     provider,
     summary: model ? `${said} Model: ${model}` : said,
     details,
+    shared,
   };
 }
