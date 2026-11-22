@@ -1,17 +1,8 @@
 import { IconBuilding, IconChevronRight } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { useSignOut } from "@/components/app-sidebar/use-sign-out";
 import { useSwitchOrganization } from "@/components/organizations/use-switch-organization";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemMedia,
-  ItemTitle,
-} from "@/components/ui/item";
-import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { useOrganizationChoices } from "@/lib/organizations/queries";
 import {
   ChooseConnection,
   ChooserCard,
@@ -19,9 +10,19 @@ import {
 } from "@/components/settings/ai-connection-chooser";
 import { Button } from "@/components/ui/button";
 import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import {
   type PersonalAiConnection,
+  personalAiConnectionInQueryOptions,
   personalAiConnectionQueryOptions,
 } from "@/lib/ai-connection/queries";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { StepIntro } from "./onboarding-frame";
 import type { OnboardingStep } from "./onboarding-wizard";
 
@@ -90,6 +91,11 @@ export function useAiStep(): OnboardingStep {
  * one they are working in has no AI, while another of theirs has one for everyone: they can work
  * there instead, by the same switch as the account menu's. And anybody can sign out. Both sit with
  * the words, under the sentence, as Welcome's one setting does.
+ *
+ * ONLY AN ORGANIZATION WITH AN AI FOR EVERYONE IS OFFERED, by what the server says of each at its
+ * own address. Offering every other one sent people round between organizations that all had no
+ * AI, held at this step in each (reported on 1.2.0-rc.2). The list waits for every answer, so it
+ * is drawn once and never grows row by row; one that can't be read is left out.
  */
 function WayOut() {
   const headingId = useId();
@@ -97,8 +103,16 @@ function WayOut() {
   const switching = useSwitchOrganization();
   const signOut = useSignOut();
   const email = useQuery(currentUserQueryOptions()).data?.email;
-  const others =
+  const elsewhere =
     choices?.organizations.filter((one) => one.id !== choices.currentId) ?? [];
+  const answers = useQueries({
+    queries: elsewhere.map((one) => personalAiConnectionInQueryOptions(one.id)),
+  });
+  const others = answers.some((answer) => answer.isPending)
+    ? []
+    : elsewhere.filter(
+        (_, at) => answers[at]?.data?.organization.ready === true,
+      );
   return (
     <section
       aria-label="Other ways on"
@@ -111,7 +125,7 @@ function WayOut() {
               Or work in another organization
             </h2>
             <p className="text-pretty text-muted-foreground">
-              If one of them has an AI for everyone, Bots can use it there.
+              Bots can use the AI set up for everyone there.
             </p>
           </div>
           <fieldset
