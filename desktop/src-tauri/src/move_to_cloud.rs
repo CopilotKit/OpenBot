@@ -959,17 +959,26 @@ fn allocated(meta: &std::fs::Metadata) -> u64 {
     meta.len()
 }
 
+/// What a Podman machine's disk image is called by its end.
+const DISK_IMAGES: [&str; 4] = [".raw", ".vhdx", ".qcow2", ".img"];
+
 /**
-The disk images of a Podman machine, from what `podman machine inspect` printed for it: every
-existing file named under any key whose value is a path to a machine disk image (`.raw`, `.vhdx`,
-`.qcow2`, `.img`, `.tar`), wherever this Podman puts it in the JSON.
+The disk images of the Podman machine `machine`, from what `podman machine inspect` printed for
+it: every existing file named under any key whose value is a path to a disk image, wherever a
+Podman puts one in the JSON, and the machine's own images in its provider's data folder under
+`data_home` (`~/.local/share` on a Mac).
+
+Podman 6.1 on a Mac names no disk in inspect at all: it says the provider only through
+`ConfigDir` (`~/.config/containers/podman/machine/libkrun`), and keeps the disk at
+`~/.local/share/containers/podman/machine/libkrun/openbot-arm64.raw`, 9 GB used of a 60 GB sparse
+file on the cloud Mac. Measuring without it, the move offered to free 168 MB.
 */
-pub fn machine_disks(inspected: &str) -> Vec<PathBuf> {
+pub fn machine_disks(inspected: &str, machine: &str, data_home: Option<&Path>) -> Vec<PathBuf> {
     fn walk(value: &serde_json::Value, found: &mut Vec<PathBuf>) {
         match value {
             serde_json::Value::String(text) => {
                 let lower = text.to_ascii_lowercase();
-                if [".raw", ".vhdx", ".qcow2", ".img"]
+                if DISK_IMAGES
                     .iter()
                     .any(|extension| lower.ends_with(extension))
                 {
@@ -985,8 +994,54 @@ pub fn machine_disks(inspected: &str) -> Vec<PathBuf> {
         }
     }
     let mut found = Vec::new();
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(inspected) {
-        walk(&value, &mut found);
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(inspected) else {
+        return found;
+    };
+    walk(&value, &mut found);
+    // The provider, from the machine's configuration folder, and its images in the data folder.
+    let entry = value
+        .as_array()
+        .and_then(|machines| {
+            machines
+                .iter()
+                .find(|entry| entry.get("Name").and_then(|name| name.as_str()) == Some(machine))
+        })
+        .unwrap_or(&value);
+    let provider = entry
+        .pointer("/ConfigDir/Path")
+        .and_then(|path| path.as_str())
+        .and_then(|path| Path::new(path).file_name())
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty() && *name != "..");
+    if let (Some(provider), Some(data_home)) = (provider, data_home) {
+        let folder = data_home
+            .join("containers")
+            .join("podman")
+            .join("machine")
+            .join(provider);
+        if let Ok(entries) = std::fs::read_dir(&folder) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+                let Some(stem) = DISK_IMAGES
+                    .iter()
+                    .find_map(|extension| name.strip_suffix(extension))
+                else {
+                    continue;
+                };
+                // `openbot.raw` or `openbot-arm64.raw`; never `openbot-s1-arm64.raw`, which is
+                // another machine's.
+                let machine = machine.to_ascii_lowercase();
+                let own = stem == machine
+                    || stem
+                        .strip_prefix(&format!("{machine}-"))
+                        .is_some_and(|arch| {
+                            matches!(arch, "arm64" | "aarch64" | "amd64" | "x86_64")
+                        });
+                if own && entry.file_type().is_ok_and(|kind| kind.is_file()) {
+                    found.push(entry.path());
+                }
+            }
+        }
     }
     found.sort();
     found.dedup();

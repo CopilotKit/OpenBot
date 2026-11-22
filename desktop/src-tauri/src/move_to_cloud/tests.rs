@@ -571,9 +571,54 @@ fn a_machines_disk_is_found_in_what_inspect_prints() {
         "Elsewhere": [root.join("gone.raw").display().to_string()]
     }])
     .to_string();
-    assert_eq!(machine_disks(&inspected), [disk]);
-    assert!(machine_disks("not json").is_empty());
+    assert_eq!(machine_disks(&inspected, "openbot", None), [disk]);
+    assert!(machine_disks("not json", "openbot", None).is_empty());
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// The cloud Mac: Podman 6.1.1's inspect names no disk, only the provider through ConfigDir, and
+/// the move offered to free 168 MB of a 9 GB machine. The machine's disk is found in that
+/// provider's data folder, and another machine's beside it is not.
+#[test]
+fn a_macs_machine_disk_is_found_through_its_provider() {
+    let home = crate::test_support::temp_root("move-mac-disk");
+    let data = home.join(".local/share");
+    let folder = data.join("containers/podman/machine/libkrun");
+    std::fs::create_dir_all(folder.join("cache")).unwrap();
+    let disk = folder.join("openbot-arm64.raw");
+    std::fs::write(&disk, vec![1u8; 8192]).unwrap();
+    std::fs::write(folder.join("openbot-s1-arm64.raw"), vec![1u8; 8192]).unwrap();
+    std::fs::write(
+        folder.join("podman-machine-default-arm64.raw"),
+        vec![1u8; 8192],
+    )
+    .unwrap();
+    // As Podman 6.1.1 printed it on the cloud Mac, paths moved under the test's home.
+    let inspected = serde_json::json!([{
+        "ConfigDir": { "Path": home.join(".config/containers/podman/machine/libkrun").display().to_string() },
+        "ConnectionInfo": { "PodmanSocket": { "Path": "/tmp/podman/openbot-api.sock" }, "PodmanPipe": null },
+        "Created": "2026-11-22T00:14:08.925059Z",
+        "LastUp": "2026-11-22T01:06:40.153517Z",
+        "Name": "openbot",
+        "Resources": { "CPUs": 4, "DiskSize": 60, "Memory": 6144, "USBs": [] },
+        "SSHConfig": {
+            "IdentityPath": data.join("containers/podman/machine/machine").display().to_string(),
+            "Port": 49812,
+            "RemoteUsername": "core"
+        },
+        "State": "running",
+        "UserModeNetworking": true,
+        "Rootful": true,
+        "Rosetta": false
+    }])
+    .to_string();
+    assert!(machine_disks(&inspected, "openbot", None).is_empty());
+    assert_eq!(
+        machine_disks(&inspected, "openbot", Some(&data)),
+        [disk.clone()]
+    );
+    assert!(footprint(&machine_disks(&inspected, "openbot", Some(&data))) >= 8192);
+    let _ = std::fs::remove_dir_all(home);
 }
 
 // ------------------------------------------------------------------------------------------------

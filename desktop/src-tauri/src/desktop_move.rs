@@ -426,13 +426,22 @@ fn own_machine_disks() -> Vec<PathBuf> {
     else {
         return Vec::new();
     };
-    let output = std::process::Command::new(podman)
-        .args(["machine", "inspect", openbot_desktop_lib::acquire::MACHINE])
-        .output();
+    let machine = openbot_desktop_lib::acquire::MACHINE;
+    let output = openbot_desktop_lib::quiet::output_within(
+        openbot_desktop_lib::quiet::command(podman).args(["machine", "inspect", machine]),
+        std::time::Duration::from_secs(30),
+    );
+    // Where Podman keeps a machine's disk: its data folder, `~/.local/share` unless XDG says.
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| dirs::home_dir().map(|home| home.join(".local").join("share")));
     match output {
-        Ok(output) if output.status.success() => {
-            moving::machine_disks(&String::from_utf8_lossy(&output.stdout))
-        }
+        Ok(output) if output.status.success() => moving::machine_disks(
+            &String::from_utf8_lossy(&output.stdout),
+            machine,
+            data_home.as_deref(),
+        ),
         _ => Vec::new(),
     }
 }
