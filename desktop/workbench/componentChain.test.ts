@@ -1,0 +1,161 @@
+import { describe, expect, test } from "bun:test";
+import { componentChain, formatChain } from "./componentChain";
+
+type FakeFiber = {
+  type: unknown;
+  return: FakeFiber | null;
+  _debugStack?: Error;
+  _debugSource?: unknown;
+};
+
+function named(name: string): () => null {
+  const fn = () => null;
+  Object.defineProperty(fn, "name", { value: name });
+  return fn;
+}
+
+function stackError(stack: string): Error {
+  const error = new Error("x");
+  error.stack = stack;
+  return error;
+}
+
+function dom(fiber: FakeFiber | null, parent?: Element): Element {
+  const el: Record<string, unknown> = { parentElement: parent ?? null };
+  if (fiber) el["__reactFiber$abc"] = fiber;
+  return el as unknown as Element;
+}
+
+function chainOf(...types: unknown[]): FakeFiber {
+  // types are listed innermost first.
+  let outer: FakeFiber | null = null;
+  for (const type of [...types].reverse()) outer = { type, return: outer };
+  return outer as FakeFiber;
+}
+
+describe("componentChain", () => {
+  test("returns [] without a fiber", () => {
+    expect(componentChain(dom(null))).toEqual([]);
+  });
+
+  test("lists names innermost first and skips host nodes, internals and anonymous", () => {
+    const fiber = chainOf(
+      "div",
+      named("StepRow"),
+      named("Fragment"),
+      named("_Hidden"),
+      () => null,
+      named("SetupProgress"),
+      { $$typeof: 1, type: named("App") },
+    );
+    expect(componentChain(dom(fiber)).map((c) => c.name)).toEqual([
+      "StepRow",
+      "SetupProgress",
+      "App",
+    ]);
+  });
+
+  test("reads memo and forwardRef wrappers", () => {
+    const fiber = chainOf(
+      { type: named("Memoed") },
+      { render: named("Forwarded") },
+    );
+    expect(componentChain(dom(fiber)).map((c) => c.name)).toEqual([
+      "Memoed",
+      "Forwarded",
+    ]);
+  });
+
+  test("prefers displayName", () => {
+    const fn = named("inner");
+    (fn as unknown as { displayName: string }).displayName = "Shown";
+    expect(componentChain(dom(chainOf(fn))).map((c) => c.name)).toEqual([
+      "Shown",
+    ]);
+  });
+
+  test("uses the nearest ancestor that has a fiber", () => {
+    const parent = dom(chainOf(named("Outer")));
+    const child = dom(null, parent);
+    expect(componentChain(child).map((c) => c.name)).toEqual(["Outer"]);
+  });
+
+  test("drops consecutive duplicates and respects max", () => {
+    const fiber = chainOf(
+      named("A"),
+      named("A"),
+      named("B"),
+      named("C"),
+      named("D"),
+    );
+    expect(componentChain(dom(fiber)).map((c) => c.name)).toEqual([
+      "A",
+      "B",
+      "C",
+      "D",
+    ]);
+    expect(componentChain(dom(fiber), 2).map((c) => c.name)).toEqual([
+      "A",
+      "B",
+    ]);
+  });
+
+  test("parses a Vite URL from _debugStack", () => {
+    const fiber = chainOf(named("StepRow"));
+    fiber._debugStack = stackError(
+      "Error: react-stack-top-frame\n    at jsxDEV (http://localhost:3021/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=1:200:5)\n    at SetupProgress (http://localhost:3021/src/SetupProgress.tsx?t=123:45:12)",
+    );
+    expect(componentChain(dom(fiber))).toEqual([
+      { name: "StepRow", file: "desktop/src/SetupProgress.tsx", line: 45 },
+    ]);
+  });
+
+  test("accepts _debugSource", () => {
+    const fiber = chainOf(named("StepRow"));
+    fiber._debugSource = {
+      fileName: "/Users/x/repo/desktop/src/StepRow.tsx",
+      lineNumber: 7,
+    };
+    expect(componentChain(dom(fiber))).toEqual([
+      { name: "StepRow", file: "desktop/src/StepRow.tsx", line: 7 },
+    ]);
+  });
+
+  test("leaves file undefined when nothing matches", () => {
+    const fiber = chainOf(named("StepRow"));
+    fiber._debugStack = stackError(
+      "Error\n    at x (http://localhost:3021/node_modules/foo.js:1:1)",
+    );
+    expect(componentChain(dom(fiber))).toEqual([{ name: "StepRow" }]);
+  });
+
+  test("never throws", () => {
+    const bad = {
+      get type(): unknown {
+        throw new Error("boom");
+      },
+      return: null,
+    };
+    expect(componentChain(dom(bad as unknown as FakeFiber))).toEqual([]);
+  });
+});
+
+describe("formatChain", () => {
+  test("joins names and adds the first file", () => {
+    expect(
+      formatChain([
+        { name: "StepRow" },
+        {
+          name: "SetupProgress",
+          file: "desktop/src/SetupProgress.tsx",
+          line: 12,
+        },
+        { name: "App", file: "desktop/src/App.tsx", line: 3 },
+      ]),
+    ).toBe("StepRow › SetupProgress › App · desktop/src/SetupProgress.tsx:12");
+  });
+
+  test("omits the file part without a file", () => {
+    expect(formatChain([{ name: "A" }, { name: "B" }])).toBe("A › B");
+  });
+});
