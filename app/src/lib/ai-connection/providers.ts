@@ -120,23 +120,25 @@ export function loginsHere(
 }
 
 /**
- * The ways in for a person's own AI: the provider's sign-in first where the server can run it
- * itself (`signIns`, and a preset address its key is for), then the provider's key or address.
- * Never a plan or a sign-in OpenBot Desktop holds, even inside Desktop: the server runs the
- * person's Bots, and can't use a credential kept on one computer.
+ * The ways in for a person's own AI: the provider's sign-in first where the server runs it itself
+ * (`signIns`), then the provider's key or address. The sign-in is the one the setup window offers
+ * for that provider: a ChatGPT or Claude plan (`plan`), or a Google, xAI or Unbiased AI sign-in
+ * (`oauth`). The server keeps it for the person and renews it, so it is never one OpenBot Desktop
+ * holds, even inside Desktop: the server runs the person's Bots.
  */
 export function personalLogins(
   provider: AiProvider,
   signIns: readonly AiConnectionProvider[],
 ): AiConnectionLogin[] {
-  const signIn =
-    signIns.includes(provider.id) &&
-    provider.logins.includes("oauth") &&
-    ENDPOINT_PRESETS[provider.id] !== undefined;
-  return [
-    ...(signIn ? (["oauth"] as const) : []),
-    ...loginsHere(provider, false),
-  ];
+  const signIn = signIns.includes(provider.id)
+    ? provider.logins.find((login) => login === "plan" || login === "oauth")
+    : undefined;
+  return [...(signIn ? [signIn] : []), ...loginsHere(provider, false)];
+}
+
+/** Whether a way in is a sign-in in the browser: a plan or a provider's own. */
+export function isSignIn(login: AiConnectionLogin | null): boolean {
+  return login === "plan" || login === "oauth";
 }
 
 export function providerById(

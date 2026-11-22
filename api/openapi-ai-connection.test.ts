@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import {
+  FinishPersonalAiSignInBody,
+  FinishPersonalAiSignInResponse,
   GetAiConnectionResponse,
   GetPersonalAiConnectionResponse,
   GetPersonalAiSignInResponse,
@@ -199,6 +201,7 @@ const PERSONAL =
 const personal = spec.paths[PERSONAL] ?? {};
 const signIns = spec.paths[`${PERSONAL}/sign-ins`] ?? {};
 const signIn = spec.paths[`${PERSONAL}/sign-ins/{signInId}`] ?? {};
+const signInCode = spec.paths[`${PERSONAL}/sign-ins/{signInId}/code`] ?? {};
 
 test("a person's own AI connection is theirs alone: only they read, set, sign in to or remove it", () => {
   const operations = [
@@ -207,6 +210,7 @@ test("a person's own AI connection is theirs alone: only they read, set, sign in
     personal.delete,
     signIns.post,
     signIn.get,
+    signInCode.post,
   ];
   expect(operations.map((operation) => operation?.operationId)).toEqual([
     "getPersonalAiConnection",
@@ -214,6 +218,7 @@ test("a person's own AI connection is theirs alone: only they read, set, sign in
     "deletePersonalAiConnection",
     "startPersonalAiSignIn",
     "getPersonalAiSignIn",
+    "finishPersonalAiSignIn",
   ]);
   for (const operation of operations) {
     expect(operation?.responses["403"]?.$ref).toContain("OwnOnly");
@@ -224,7 +229,12 @@ test("a person's own AI connection is theirs alone: only they read, set, sign in
       scopes?.every((scope) => scope.startsWith("personal-ai-connection:")),
     ).toBe(true);
   }
-  for (const write of [personal.put, personal.delete, signIns.post]) {
+  for (const write of [
+    personal.put,
+    personal.delete,
+    signIns.post,
+    signInCode.post,
+  ]) {
     expect(write?.parameters?.map((p) => p.$ref)).toContainEqual(
       expect.stringContaining("IdempotencyKey"),
     );
@@ -238,6 +248,7 @@ test("no answer about a person's own AI has a place for a key, and every example
     personal.delete,
     signIns.post,
     signIn.get,
+    signInCode.post,
   ]) {
     const success = operation?.responses["200"] ?? operation?.responses["201"];
     const names = propertyNames(success?.content?.["application/json"]?.schema);
@@ -261,6 +272,13 @@ test("no answer about a person's own AI has a place for a key, and every example
   parses(personal.get, "200", GetPersonalAiConnectionResponse);
   parses(signIns.post, "201", StartPersonalAiSignInResponse);
   parses(signIn.get, "200", GetPersonalAiSignInResponse);
+  parses(signInCode.post, "200", FinishPersonalAiSignInResponse);
+  for (const example of Object.values(
+    signInCode.post?.requestBody?.content["application/json"]?.examples ?? {},
+  ))
+    expect(
+      FinishPersonalAiSignInBody.safeParse(exampleValue(example)).success,
+    ).toBe(true);
   for (const example of Object.values(
     personal.put?.requestBody?.content["application/json"]?.examples ?? {},
   ))

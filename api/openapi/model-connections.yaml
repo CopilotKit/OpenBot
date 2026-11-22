@@ -566,10 +566,14 @@ paths:
         model it can't use is refused and nothing is saved. Once saved, the
         person's next run uses it, ahead of the organization's. The key is
         encrypted and kept for the person alone, never in the organization's
-        vault, and never sent back. A plan or a sign-in held on one computer
-        is refused (login plan or oauth): the server runs the person's Bots
-        and can't use it. Recorded on the audit trail, never with a key. Only
-        the person themselves may set it, and only where available is true.
+        vault, and never sent back. A plan (openai, anthropic) or a provider
+        sign-in (google, xai) is accepted only once the person has signed in
+        to that provider through OpenBot (startPersonalAiSignIn) and the
+        sign-in was approved: the server keeps that sign-in for them alone
+        and renews it itself. Without one it is refused, since the server
+        runs the person's Bots and can't use a sign-in held on a computer.
+        Recorded on the audit trail, never with a key. Only the person
+        themselves may set it, and only where available is true.
       security:
         - webSession: []
         - appOAuth: [personal-ai-connection:write]
@@ -595,6 +599,15 @@ paths:
                   baseUrl: https://api.unbiased.ai/v1
                   model: pareto
                   useSavedKey: true
+              chatgptPlan:
+                value:
+                  provider: openai
+                  login: plan
+              xaiSignIn:
+                value:
+                  provider: xai
+                  login: oauth
+                  model: grok-4.7
       responses:
         '200':
           description: The person's own AI connection, as saved and in use. Never a key.
@@ -679,13 +692,18 @@ paths:
       description: >-
         Start a sign-in to an AI provider that the server runs itself, for a
         provider PersonalAiConnection lists in signIns. The answer holds the
-        address the person approves it at, in their browser, and the code to
-        check there. Then read the sign-in (getPersonalAiSignIn) every
-        interval seconds until it is approved, failed or expired. Approved, the
-        key the provider handed OpenBot is kept for the person as a saved key,
-        never sent to the browser, and connecting with useSavedKey uses it.
-        Only the person themselves may sign in, and only where available is
-        true.
+        address the person approves it at, in their browser, the code to
+        check there where the provider shows one, and how it finishes. With
+        finish poll, read the sign-in (getPersonalAiSignIn) every interval
+        seconds until it is approved, failed or expired. With finish code,
+        the provider's page shows the person a code once they approve, and
+        they send it back with finishPersonalAiSignIn. Approved, what the
+        provider handed OpenBot is kept for the person alone, never sent to
+        the browser: an Unbiased AI key as a saved key (connect with
+        useSavedKey), a Claude or ChatGPT plan's sign-in (connect with login
+        plan), or a Google or xAI sign-in (connect with login oauth). The
+        server renews a sign-in that expires itself. Only the person
+        themselves may sign in, and only where available is true.
       security:
         - webSession: []
         - appOAuth: [personal-ai-connection:write]
@@ -702,6 +720,12 @@ paths:
               unbiased:
                 value:
                   provider: unbiased
+              chatgpt:
+                value:
+                  provider: openai
+              claude:
+                value:
+                  provider: anthropic
       responses:
         '201':
           description: The sign-in, waiting for the person to approve it.
@@ -715,6 +739,10 @@ paths:
               examples:
                 waiting:
                   $ref: '#/components/examples/AiSignInExample'
+                chatgpt:
+                  $ref: '#/components/examples/AiSignInChatGptExample'
+                claude:
+                  $ref: '#/components/examples/AiSignInClaudeExample'
         '400':
           $ref: '#/components/responses/InvalidAiConnection'
         '401':
@@ -743,8 +771,8 @@ paths:
       description: >-
         Ask the provider once whether the person approved the sign-in, and
         say where it stands. pending: not yet, read it again after interval
-        seconds. approved: the provider's key is kept for the person as a
-        saved key, never in this answer. failed or expired: it is over, and
+        seconds. approved: what the provider handed OpenBot is kept for the
+        person, never in this answer. failed or expired: it is over, and
         detail says why in OpenBot's own words; start another. Reading it
         again after it is approved answers approved and asks the provider
         nothing. Only the person who started it may read it.
@@ -775,6 +803,66 @@ paths:
           $ref: './common.yaml#/components/responses/OwnOnly'
         '404':
           $ref: '#/components/responses/AiSignInNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins/{signInId}/code:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: './common.yaml#/components/parameters/PersonId'
+      - $ref: '#/components/parameters/SignInId'
+    post:
+      tags: [Models]
+      operationId: finishPersonalAiSignIn
+      summary: Finish a sign-in with the provider's code
+      description: >-
+        Finish a sign-in whose finish is code: send the code the provider's
+        page showed the person once they approved it. OpenBot hands it to the
+        provider at once and answers where the sign-in stands: approved, with
+        what the provider handed back kept for the person and never in this
+        answer, or failed with detail saying why in OpenBot's own words. A
+        sign-in that is already approved answers approved and sends nothing.
+        Only the person who started it may finish it.
+      security:
+        - webSession: []
+        - appOAuth: [personal-ai-connection:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiSignInCodeInput'
+            examples:
+              claude:
+                value:
+                  code: Zm9vYmFyLWNvZGU#c3RhdGUtZXhhbXBsZQ
+      responses:
+        '200':
+          description: Where the sign-in stands. Never a key.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiSignInStatus'
+              examples:
+                approved:
+                  $ref: '#/components/examples/AiSignInClaudeApprovedExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: './common.yaml#/components/responses/OwnOnly'
+        '404':
+          $ref: '#/components/responses/AiSignInNotFound'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
         '500':
           $ref: './common.yaml#/components/responses/ServerError'
         default:
@@ -1253,8 +1341,10 @@ components:
           type: array
           description: >-
             The providers the server can sign the person in to itself
-            (startPersonalAiSignIn). Every other provider connects with a key
-            or an address.
+            (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan
+            (anthropic), Google and xAI sign-ins, and Unbiased AI, each where
+            this server is set up for it. Each still connects with a key or an
+            address too, and every provider not listed connects only that way.
           items:
             $ref: '#/components/schemas/AiConnectionProvider'
     OrganizationAiSummary:
@@ -1279,10 +1369,24 @@ components:
       properties:
         provider:
           $ref: '#/components/schemas/AiConnectionProvider'
+    AiSignInCodeInput:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          pattern: \S
+          writeOnly: true
+          description: >-
+            The code the provider's page showed the person once they approved
+            the sign-in, as they copied it. Trimmed. Never sent back.
     AiSignIn:
       type: object
       description: A sign-in to an AI provider, waiting for the person to approve it in their browser.
-      required: [id, provider, url, userCode, expiresAt, interval]
+      required: [id, provider, url, userCode, expiresAt, interval, finish]
       properties:
         id:
           type: string
@@ -1307,6 +1411,14 @@ components:
           minimum: 1
           maximum: 600
           description: How many seconds to wait between reads.
+        finish:
+          type: string
+          x-extensible-enum: [poll, code]
+          description: >-
+            How the sign-in finishes. poll: read it (getPersonalAiSignIn)
+            every interval seconds until it is approved, failed or expired.
+            code: the provider's page shows the person a code once they
+            approve it, which they send back with finishPersonalAiSignIn.
     AiSignInStatus:
       type: object
       description: Where a sign-in to an AI provider stands. Never a key.
@@ -1322,8 +1434,9 @@ components:
           type: string
           x-extensible-enum: [pending, approved, failed, expired]
           description: >-
-            pending: not approved yet. approved: the provider's key is kept for
-            the person as a saved key. failed or expired: over; start another.
+            pending: not approved yet. approved: what the provider handed
+            OpenBot (a key, or a sign-in the server renews) is kept for the
+            person. failed or expired: over; start another.
         detail:
           type: [string, 'null']
           description: Why it failed or expired, in OpenBot's own words. Null otherwise.
@@ -1692,7 +1805,7 @@ components:
         uses: personal
         required: true
         available: true
-        signIns: [unbiased]
+        signIns: [openai, anthropic, xai, unbiased]
     PersonalAiConnectionOrganizationExample:
       summary: Nothing of their own, so their runs use the organization's.
       value:
@@ -1713,7 +1826,7 @@ components:
         uses: organization
         required: true
         available: true
-        signIns: [unbiased]
+        signIns: [openai, anthropic, xai, unbiased]
     PersonalAiConnectionNoneExample:
       summary: Neither theirs nor the organization's, so they connect one first.
       value:
@@ -1734,7 +1847,7 @@ components:
         uses: none
         required: true
         available: true
-        signIns: [unbiased]
+        signIns: [openai, anthropic, xai, unbiased]
     AiSignInExample:
       summary: An Unbiased AI sign-in, waiting for approval.
       value:
@@ -1743,6 +1856,35 @@ components:
         url: https://platform.unbiased.ai/activate?user_code=BCDF-GHJK
         userCode: BCDF-GHJK
         expiresAt: '2026-11-21T09:10:00.000Z'
+        interval: 5
+        finish: poll
+    AiSignInChatGptExample:
+      summary: A ChatGPT plan sign-in, waiting for the person to enter the code.
+      value:
+        id: Y2hhdGdwdC1zaWduLWlu
+        provider: openai
+        url: https://auth.openai.com/codex/device
+        userCode: VU3W-87566
+        expiresAt: '2026-11-21T09:15:00.000Z'
+        interval: 5
+        finish: poll
+    AiSignInClaudeExample:
+      summary: A Claude plan sign-in, finished with the code Claude's page shows.
+      value:
+        id: Y2xhdWRlLXNpZ24taW4
+        provider: anthropic
+        url: https://claude.com/cai/oauth/authorize?code=true&client_id=example&response_type=code&scope=user%3Ainference&code_challenge=example&code_challenge_method=S256&state=example
+        userCode: null
+        expiresAt: '2026-11-21T09:15:00.000Z'
+        interval: 5
+        finish: code
+    AiSignInClaudeApprovedExample:
+      summary: The Claude plan sign-in, approved and kept for the person.
+      value:
+        id: Y2xhdWRlLXNpZ24taW4
+        provider: anthropic
+        status: approved
+        detail: null
         interval: 5
     AiSignInPendingExample:
       summary: Not approved yet.

@@ -9,6 +9,7 @@ import type {
 } from "@/lib/api/generated/model";
 import {
   deletePersonalAiConnection,
+  finishPersonalAiSignIn,
   getAiConnection,
   getPersonalAiSignIn,
   replaceAiConnection,
@@ -137,8 +138,8 @@ function invalidateAiConnection(queryClient: QueryClient) {
 const PERSONAL_FALLBACK = "Couldn't connect your AI. Try again.";
 
 /**
- * Connect the person's own AI: a key, an address, or the key a sign-in through OpenBot kept for
- * them (`useSavedKey`). The server checks it with the provider before it saves anything; a refusal
+ * Connect the person's own AI: a key, an address, or a sign-in through OpenBot the server kept for
+ * them (a plan, a provider's sign-in, or Unbiased AI's key with `useSavedKey`). The server checks it with the provider before it saves anything; a refusal
  * throws its one sentence and nothing changes. Never Desktop's engines: the server runs this
  * person's Bots, so `desktop` and its phases have nothing to do here.
  */
@@ -178,7 +179,9 @@ export function removePersonalAiMutationOptions(queryClient: QueryClient) {
 /**
  * A sign-in to an AI provider that the server runs itself, for the person's own AI. Not a cached
  * read nor a write somebody asked to keep: a step on the way to connecting, so plain functions.
- * The provider's key never comes back; once approved, connecting with `useSavedKey` uses it.
+ * What the provider hands back never comes to the browser. Once approved, connecting uses it: a
+ * plan with `login: plan`, a Google or xAI sign-in with `login: oauth`, and Unbiased AI's key with
+ * `useSavedKey`.
  */
 export function startPersonalSignIn(
   provider: AiConnectionProvider,
@@ -196,4 +199,22 @@ export function readPersonalSignIn(signInId: string): Promise<AiSignInStatus> {
   return getPersonalAiSignIn(organizationId(), "me", signInId, {
     fallback: "Couldn't check the sign-in. Try again.",
   });
+}
+
+/**
+ * Finish a sign-in whose `finish` is `code` (a Claude plan): the code the provider's page showed
+ * the person, as they pasted it. The answer says where the sign-in stands; never a key.
+ */
+export function finishPersonalSignIn(
+  signInId: string,
+  code: string,
+): Promise<AiSignInStatus> {
+  return finishPersonalAiSignIn(
+    organizationId(),
+    "me",
+    signInId,
+    { code },
+    { "Idempotency-Key": idempotencyKey() },
+    { fallback: "Couldn't check the code. Try again." },
+  );
 }

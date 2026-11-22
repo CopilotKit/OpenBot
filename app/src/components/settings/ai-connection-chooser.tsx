@@ -55,10 +55,11 @@ import {
   type Plan,
 } from "@/lib/ai-connection/desktop";
 import {
-  type ConnectPhase,
   type Connected as ConnectedResult,
+  type ConnectPhase,
   connectAiMutationOptions,
   connectPersonalAiMutationOptions,
+  finishPersonalSignIn,
   readPersonalSignIn,
   startPersonalSignIn,
 } from "@/lib/ai-connection/mutations";
@@ -68,6 +69,7 @@ import {
   ENDPOINT_PRESETS,
   hostOf,
   isEndpointAddress,
+  isSignIn,
   loginsHere,
   personalLogins,
   providerById,
@@ -90,8 +92,10 @@ import { queryClient } from "@/query-client";
  * TWO KINDS OF CONNECTION. `organization` is the AI every Bot in the organization runs on, which an
  * admin changes in Settings; inside OpenBot Desktop it may be a plan or a provider sign-in Desktop
  * holds. `personal` is a person's own AI on OpenBot Cloud: a key or an address for every provider,
- * and a provider's sign-in only where the server can run it itself (`signIns`). Never a plan or a
- * Desktop-held sign-in there, even inside Desktop: the server runs the person's Bots.
+ * and first the setup window's sign-in (a ChatGPT or Claude plan, a Google, xAI or Unbiased AI
+ * sign-in) wherever the server runs it itself (`signIns`). The server keeps that sign-in for the
+ * person and renews it, so never a Desktop-held one there, even inside Desktop: the server runs
+ * the person's Bots.
  *
  * TWO SURFACES. In a dialog (Settings) it draws the dialog's header, body and footer. On a page
  * (onboarding) it draws the same body and buttons inside a card, under the page's own heading.
@@ -237,13 +241,23 @@ function loginsFor(provider: AiProvider, mode: ChooserMode) {
 function providerSummary(provider: AiProvider, mode: ChooserMode) {
   if (mode.kind === "organization")
     return mode.inDesktop ? provider.summary : provider.keySummary;
-  return personalLogins(provider, mode.signIns).includes("oauth")
+  return isSignIn(personalLogins(provider, mode.signIns)[0] ?? null)
     ? provider.summary
     : provider.keySummary;
 }
 
-/** A sign-in in the browser, while it waits for the person to approve it there. */
-type Waiting = { url: string; code?: string | null; attemptId?: string };
+/**
+ * A sign-in in the browser, while it waits for the person to approve it there. `codeBack`: the
+ * provider's page then shows a code to paste here (a Claude plan). `signInId`: the server's own
+ * sign-in, for a person's own AI.
+ */
+type Waiting = {
+  url: string;
+  code?: string | null;
+  attemptId?: string;
+  signInId?: string;
+  codeBack?: boolean;
+};
 
 const wait = (seconds: number) =>
   new Promise((resolve) => setTimeout(resolve, seconds * 1000));
@@ -377,8 +391,11 @@ export function ChooseConnection({
             ? { apiKey: typedKey }
             : {}),
       };
-    // A sign-in the server ran: its key is kept for the person, for the provider's own address.
-    if (login === "oauth" && personal && preset)
+    /*
+     * Unbiased AI's sign-in, run by the server: its key is kept for the person, for the provider's
+     * own address. A plan or a Google or xAI sign-in the server ran connects as itself, below.
+     */
+    if (login === "oauth" && personal && provider.id === "unbiased" && preset)
       return {
         provider: provider.id,
         login: "endpoint",
@@ -403,25 +420,35 @@ export function ChooseConnection({
   }
 
   /**
-   * The server's own sign-in: start it, open the provider's page, and read where it stands every
-   * `interval` seconds until it is approved, failed or expired. Its key stays on the server.
+   * The server's own sign-in: start it and open the provider's page. With `finish` poll, read where
+   * it stands every `interval` seconds until it is approved, failed or expired. With `finish` code,
+   * stop and wait for the person to paste what the provider's page gave them (`finishCode`). What
+   * the provider hands back stays on the server.
    */
-  async function serverSignIn(chosen: AiProvider, current: () => boolean) {
+  async function serverSignIn(
+    chosen: AiProvider,
+    current: () => boolean,
+  ): Promise<"approved" | "code" | false> {
     const begun = await startPersonalSignIn(chosen.id);
     if (!current()) return false;
-    setWaiting({ url: begun.url, code: begun.userCode });
+    const codeBack = begun.finish === "code";
+    setWaiting({
+      url: begun.url,
+      code: begun.userCode,
+      signInId: begun.id,
+      codeBack,
+    });
     window.open(begun.url, "_blank", "noopener");
+    if (codeBack) return "code";
     let interval = begun.interval;
     for (;;) {
       await wait(interval);
       if (!current()) return false;
       const status = await readPersonalSignIn(begun.id);
       if (!current()) return false;
-      if (status.status === "approved") return true;
+      if (status.status === "approved") return "approved";
       if (status.status === "failed" || status.status === "expired")
-        throw new Error(
-          status.detail ?? "The sign-in didn't finish. Try again.",
-        );
+        throw new Error(status.detail ?? SIGN_IN_DIDNT_FINISH);
       interval = status.interval;
     }
   }
@@ -436,13 +463,19 @@ export function ChooseConnection({
     setSignedIn(false);
     try {
       if (personal) {
-        if (!(await serverSignIn(provider, current))) return;
+        const reached = await serverSignIn(provider, current);
+        if (!reached) return;
+        // The provider's page gives the person a code to paste here; the field waits for it.
+        if (reached === "code") {
+          setSigningIn(false);
+          return;
+        }
       } else if (login === "plan") {
         const plan: Plan = provider.id === "anthropic" ? "claude" : "chatgpt";
         attempt.current = { plan };
         const { url } = await beginPlanSignIn(plan);
         if (!current()) return;
-        setWaiting({ url });
+        setWaiting({ url, codeBack: plan === "claude" });
         window.open(url, "_blank", "noopener");
         // Claude's sign-in hands back a code to paste here; ChatGPT's finishes in the browser.
         if (plan === "claude") {
@@ -485,12 +518,19 @@ export function ChooseConnection({
     }
   }
 
-  async function finishClaude() {
+  /** Send the code the provider's page gave the person: to the server, or to Desktop's Claude plan. */
+  async function finishCode() {
     const mine = run.current;
+    const signInId = waiting?.signInId;
     setSigningIn(true);
     setSignInFailure(null);
     try {
-      await finishPlanSignIn("claude", signInCode.trim());
+      if (signInId) {
+        const status = await finishPersonalSignIn(signInId, signInCode.trim());
+        if (run.current !== mine) return;
+        if (status.status !== "approved")
+          throw new Error(status.detail ?? SIGN_IN_DIDNT_FINISH);
+      } else await finishPlanSignIn("claude", signInCode.trim());
       if (run.current !== mine) return;
       attempt.current = null;
       setWaiting(null);
@@ -628,10 +668,10 @@ export function ChooseConnection({
                 busy={busy || signingIn}
                 code={signInCode}
                 failure={signInFailure}
-                login={login}
                 onCancel={stopSignIn}
                 onCode={setSignInCode}
-                onFinishCode={finishClaude}
+                onFinishCode={finishCode}
+                personal={personal}
                 onSignIn={signIn}
                 provider={provider}
                 signedIn={signedIn}
@@ -823,15 +863,26 @@ const SIGN_IN_SAYS: Record<string, string> = {
     "Sign in or create an Unbiased AI account in your browser and approve the code shown here.",
 };
 
+/**
+ * Where the server runs the sign-in for a person's own AI, the words that differ: ChatGPT's page
+ * asks for the code shown here.
+ */
+const PERSONAL_SIGN_IN_SAYS: Record<string, string> = {
+  openai:
+    "OpenAI opens in your browser. Enter the code shown here, then approve. It finishes on its own.",
+};
+
+const SIGN_IN_DIDNT_FINISH = "The sign-in didn't finish. Try again.";
+
 function SignInFields({
   busy,
   code,
   failure,
-  login,
   onCancel,
   onCode,
   onFinishCode,
   onSignIn,
+  personal,
   provider,
   signedIn,
   waiting,
@@ -839,21 +890,21 @@ function SignInFields({
   busy: boolean;
   code: string;
   failure: string | null;
-  login: "plan" | "oauth";
   onCancel: () => void;
   onCode: (code: string) => void;
   onFinishCode: () => void;
   onSignIn: () => void;
+  personal: boolean;
   provider: AiProvider;
   signedIn: boolean;
   waiting: Waiting | null;
 }) {
-  const claude = login === "plan" && provider.id === "anthropic";
   const signInName = provider.id === "google" ? "Google" : provider.name;
   return (
     <div className="flex flex-col gap-3">
       <p className="text-muted-foreground text-sm">
-        {SIGN_IN_SAYS[provider.id]}
+        {(personal && PERSONAL_SIGN_IN_SAYS[provider.id]) ||
+          SIGN_IN_SAYS[provider.id]}
       </p>
       {signedIn ? (
         <p className="flex items-center gap-2 text-sm">
@@ -880,7 +931,7 @@ function SignInFields({
               <IconExternalLink className="ml-0.5 inline size-3.5" />
             </a>
           </p>
-          {claude ? (
+          {waiting.codeBack ? (
             <Field>
               <FieldLabel htmlFor="ai-connection-code">
                 Code from your browser
@@ -910,7 +961,14 @@ function SignInFields({
             </p>
           )}
           <div>
-            <Button onClick={onCancel} size="sm" type="button" variant="ghost">
+            {/* Its words line up with the lines above; the ghost button's padding hangs outside. */}
+            <Button
+              className="-ml-2.5"
+              onClick={onCancel}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
               Cancel sign-in
             </Button>
           </div>

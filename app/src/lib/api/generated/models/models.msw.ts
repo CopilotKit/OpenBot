@@ -8,6 +8,7 @@ import type {
   AiConnection,
   AiConnectionInput,
   AiSignIn,
+  AiSignInCodeInput,
   AiSignInInput,
   AiSignInStatus,
   ModelCatalogue,
@@ -96,7 +97,7 @@ export const getGetPersonalAiConnectionResponseMock =
     uses: "personal",
     required: true,
     available: true,
-    signIns: ["unbiased"],
+    signIns: ["openai", "anthropic", "xai", "unbiased"],
   });
 
 export const getReplacePersonalAiConnectionResponseMock =
@@ -117,7 +118,7 @@ export const getReplacePersonalAiConnectionResponseMock =
     uses: "personal",
     required: true,
     available: true,
-    signIns: ["unbiased"],
+    signIns: ["openai", "anthropic", "xai", "unbiased"],
   });
 
 export const getDeletePersonalAiConnectionResponseMock =
@@ -138,7 +139,7 @@ export const getDeletePersonalAiConnectionResponseMock =
     uses: "organization",
     required: true,
     available: true,
-    signIns: ["unbiased"],
+    signIns: ["openai", "anthropic", "xai", "unbiased"],
   });
 
 export const getStartPersonalAiSignInResponseMock = (): AiSignIn => ({
@@ -148,12 +149,21 @@ export const getStartPersonalAiSignInResponseMock = (): AiSignIn => ({
   userCode: "BCDF-GHJK",
   expiresAt: "2026-11-21T09:10:00.000Z",
   interval: 5,
+  finish: "poll",
 });
 
 export const getGetPersonalAiSignInResponseMock = (): AiSignInStatus => ({
   id: "c2lnbi1pbi1leGFtcGxl",
   provider: "unbiased",
   status: "pending",
+  detail: null,
+  interval: 5,
+});
+
+export const getFinishPersonalAiSignInResponseMock = (): AiSignInStatus => ({
+  id: "Y2xhdWRlLXNpZ24taW4",
+  provider: "anthropic",
+  status: "approved",
   detail: null,
   interval: 5,
 });
@@ -501,6 +511,45 @@ export const getGetPersonalAiSignInMockHandler = (
     options,
   );
 };
+
+export const getFinishPersonalAiSignInMockHandler = (
+  overrideResponse?:
+    | AiSignInStatus
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; personId: string; signInId: string },
+            AiSignInCodeInput
+          >
+        >[0],
+      ) => Promise<AiSignInStatus> | AiSignInStatus),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<
+    { organizationId: string; personId: string; signInId: string },
+    AiSignInCodeInput
+  >(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connection/sign-ins/:signInId/code",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; personId: string; signInId: string },
+          AiSignInCodeInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getFinishPersonalAiSignInResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
 export const getModelsMock = () => [
   getGetModelCatalogueMockHandler(),
   getGetModelChoiceMockHandler(),
@@ -512,4 +561,5 @@ export const getModelsMock = () => [
   getDeletePersonalAiConnectionMockHandler(),
   getStartPersonalAiSignInMockHandler(),
   getGetPersonalAiSignInMockHandler(),
+  getFinishPersonalAiSignInMockHandler(),
 ];
