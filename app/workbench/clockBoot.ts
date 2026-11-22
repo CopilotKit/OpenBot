@@ -11,8 +11,11 @@ import { mulberry32 } from "./random";
 
 declare global {
   var __workbenchClock: PageClock | undefined;
+  /** The browser's own setTimeout, kept before the page clock replaces it (appBoot.ts uses it). */
+  var __workbenchRealSetTimeout: typeof setTimeout | undefined;
 }
 
+globalThis.__workbenchRealSetTimeout = setTimeout.bind(globalThis);
 const clock = installClock(SCENE_EPOCH);
 globalThis.__workbenchClock = clock;
 Math.random = mulberry32(1);

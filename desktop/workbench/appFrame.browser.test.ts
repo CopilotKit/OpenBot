@@ -240,6 +240,40 @@ describe.skipIf(!asked)("the app frame in the workbench page", () => {
     }
   }, 120_000);
 
+  test("a delayed answer before the first screen still boots the frame", async () => {
+    if (!server) throw new Error("No server.");
+    const route = "GET /api/v2/people/me/organizations";
+    const page = await openPage();
+    try {
+      // The answer the scene gives at once, to give it again after a delay.
+      await page.goto(`${server.url}/workbench/?scene=app-home-bots`);
+      await waitReady(page);
+      const body = await appFrame(page).evaluate(() =>
+        fetch("/api/v2/people/me/organizations").then((r) => r.json()),
+      );
+      // The app waits for this answer before it draws, and the delay runs on the paused clock.
+      const api = JSON.stringify({ [route]: { mode: "delay", ms: 500, body } });
+      await page.goto(
+        `${server.url}/workbench/?scene=app-home-bots&api=${encodeURIComponent(api)}`,
+      );
+      await waitReady(page);
+      await page.evaluate(() => window.__workbenchPage?.seek(1500));
+      // The fetch and the renders after the delay run on real time, so read the text when the
+      // screen has drawn (up to 5 s).
+      const frame = appFrame(page);
+      let text = "";
+      for (let i = 0; i < 50 && !text.includes("Start a conversation"); i++) {
+        text = await frame.evaluate(() => document.body.innerText.trim());
+        if (!text.includes("Start a conversation"))
+          await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(text).not.toBe("");
+      expect(text).toContain("Start a conversation");
+    } finally {
+      await page.close();
+    }
+  }, 120_000);
+
   test("the browser host has no Desktop bridge", async () => {
     if (!server) throw new Error("No server.");
     const page = await openPage();
