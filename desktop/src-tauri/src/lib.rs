@@ -33,6 +33,7 @@ pub mod move_to_cloud;
 pub mod native_alert;
 pub mod netavark_rules;
 pub mod own_machine;
+pub mod own_podman;
 pub mod paths;
 pub mod plan;
 pub mod podman_default;

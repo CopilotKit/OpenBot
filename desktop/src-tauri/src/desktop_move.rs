@@ -19,7 +19,7 @@ The work is in `openbot_desktop_lib::move_to_cloud`. This is the wiring:
 
 use crate::{Problem, Shell};
 use openbot_desktop_lib::move_to_cloud::{self as moving, Answer, Stage};
-use openbot_desktop_lib::{stack, uninstall};
+use openbot_desktop_lib::{own_podman, stack, uninstall};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -409,14 +409,28 @@ What OpenBot takes on this computer: its installation folder's own files and its
 (`uninstall::installation_parts`), and OpenBot's own Podman machine's disk when there is one, which
 holds the containers, the database, the backend and the images. On an engine that isn't OpenBot's
 own (Docker Desktop), the images and volumes there are not measured here: the server's own figure
-for its data (`storedBytes`) stands in for them in the preview.
+for its data (`storedBytes`) stands in for them in the preview. Podman itself too, when it goes
+with OpenBot (`own_podman`).
 */
 fn footprint<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<u64> {
     let root = root(app);
     let mut parts = uninstall::installation_parts(&root, dirs::home_dir().as_deref());
     parts.extend(own_machine_disks());
+    parts.extend(own_podman::parts(
+        &mut own_podman::ThisComputer,
+        &downloads(&root),
+    ));
     let total = moving::footprint(&parts);
     (total > 0).then_some(total)
+}
+
+/// Where OpenBot ran Podman's installer from: the downloads folder of the installation at `root`,
+/// and of the default one, which is where setup installs the engine from.
+fn downloads(root: &Path) -> Vec<PathBuf> {
+    vec![
+        openbot_desktop_lib::acquire::download_dir(root),
+        openbot_desktop_lib::acquire::download_dir(&stack::default_root()),
+    ]
 }
 
 /// OpenBot's own Podman machine's disk images, from `podman machine inspect`, when it has one.
@@ -476,7 +490,8 @@ impl<R: tauri::Runtime> moving::Here for ThisComputer<R> {
     /**
     OpenBot removed from this computer: stopped as Stop stops it, then everything the uninstaller's
     "Delete the application data" removes (`uninstall::stop_with`): the backend OpenBot created,
-    OpenBot's volumes and images, OpenBot's own Podman machine, and its files and downloads. Only
+    OpenBot's volumes and images, OpenBot's own Podman machine, and its files and downloads. Then
+    Podman itself, when OpenBot installed it and nothing else uses it (`own_podman`). Only
     OpenBot's own: the person's machines, containers, images and files stay.
     */
     fn remove(&mut self) -> Vec<String> {
@@ -490,6 +505,10 @@ impl<R: tauri::Runtime> moving::Here for ThisComputer<R> {
             &root,
             uninstall::Asked { delete_data: true },
             &mut |line| log::info!("[move] {line}"),
+        ));
+        left.extend(own_podman::remove(
+            &mut own_podman::ThisComputer,
+            &downloads(&root),
         ));
         forget_root(&self.app, &root);
         left
