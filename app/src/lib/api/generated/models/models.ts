@@ -24,12 +24,14 @@ import type {
   AiConnectionInput,
   AiConnectionRefusedResponse,
   AiSignIn,
+  AiSignInCodeInput,
   AiSignInInput,
   AiSignInNotFoundResponse,
   AiSignInStatus,
   ConversationNotFoundResponse,
   CredentialsUnavailableResponse,
   DeletePersonalAiConnectionHeaders,
+  FinishPersonalAiSignInHeaders,
   GetModelCatalogueParams,
   IdempotencyConflictResponse,
   InvalidAiConnectionResponse,
@@ -1319,7 +1321,7 @@ export const getReplacePersonalAiConnectionUrl = (
 };
 
 /**
- * Connect the AI a person's runs use, with their own key or an address, or a key a sign-in through OpenBot kept for them (useSavedKey). OpenBot checks the connection with the provider first: a key, an address or a model it can't use is refused and nothing is saved. Once saved, the person's next run uses it, ahead of the organization's. The key is encrypted and kept for the person alone, never in the organization's vault, and never sent back. A plan or a sign-in held on one computer is refused (login plan or oauth): the server runs the person's Bots and can't use it. Recorded on the audit trail, never with a key. Only the person themselves may set it, and only where available is true.
+ * Connect the AI a person's runs use, with their own key or an address, or a key a sign-in through OpenBot kept for them (useSavedKey). OpenBot checks the connection with the provider first: a key, an address or a model it can't use is refused and nothing is saved. Once saved, the person's next run uses it, ahead of the organization's. The key is encrypted and kept for the person alone, never in the organization's vault, and never sent back. A plan (openai, anthropic) or a provider sign-in (google, xai) is accepted only once the person has signed in to that provider through OpenBot (startPersonalAiSignIn) and the sign-in was approved: the server keeps that sign-in for them alone and renews it itself. Without one it is refused, since the server runs the person's Bots and can't use a sign-in held on a computer. Recorded on the audit trail, never with a key. Only the person themselves may set it, and only where available is true.
  * @summary Set a person's own AI connection
  */
 export const replacePersonalAiConnection = async (
@@ -1638,7 +1640,7 @@ export const getStartPersonalAiSignInUrl = (
 };
 
 /**
- * Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, and the code to check there. Then read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. Approved, the key the provider handed OpenBot is kept for the person as a saved key, never sent to the browser, and connecting with useSavedKey uses it. Only the person themselves may sign in, and only where available is true.
+ * Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the provider's page shows the person a code once they approve, and they send it back with finishPersonalAiSignIn. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: an Unbiased AI key as a saved key (connect with useSavedKey), a Claude or ChatGPT plan's sign-in (connect with login plan), or a Google or xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true.
  * @summary Start signing in to an AI provider
  */
 export const startPersonalAiSignIn = async (
@@ -1804,7 +1806,7 @@ export const getGetPersonalAiSignInUrl = (
 };
 
 /**
- * Ask the provider once whether the person approved the sign-in, and say where it stands. pending: not yet, read it again after interval seconds. approved: the provider's key is kept for the person as a saved key, never in this answer. failed or expired: it is over, and detail says why in OpenBot's own words; start another. Reading it again after it is approved answers approved and asks the provider nothing. Only the person who started it may read it.
+ * Ask the provider once whether the person approved the sign-in, and say where it stands. pending: not yet, read it again after interval seconds. approved: what the provider handed OpenBot is kept for the person, never in this answer. failed or expired: it is over, and detail says why in OpenBot's own words; start another. Reading it again after it is approved answers approved and asks the provider nothing. Only the person who started it may read it.
  * @summary Read a sign-in to an AI provider
  */
 export const getPersonalAiSignIn = async (
@@ -2041,3 +2043,170 @@ export function useGetPersonalAiSignIn<
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+export const getFinishPersonalAiSignInUrl = (
+  organizationId: string,
+  personId: string,
+  signInId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/ai-connection/sign-ins/${encodeURIComponent(String(signInId))}/code`;
+};
+
+/**
+ * Finish a sign-in whose finish is code: send the code the provider's page showed the person once they approved it. OpenBot hands it to the provider at once and answers where the sign-in stands: approved, with what the provider handed back kept for the person and never in this answer, or failed with detail saying why in OpenBot's own words. A sign-in that is already approved answers approved and sends nothing. Only the person who started it may finish it.
+ * @summary Finish a sign-in with the provider's code
+ */
+export const finishPersonalAiSignIn = async (
+  organizationId: string,
+  personId: string,
+  signInId: string,
+  aiSignInCodeInput: AiSignInCodeInput,
+  headers: FinishPersonalAiSignInHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AiSignInStatus> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<AiSignInStatus>(
+    getFinishPersonalAiSignInUrl(organizationId, personId, signInId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(aiSignInCodeInput),
+    },
+  );
+};
+
+export const getFinishPersonalAiSignInMutationKey = () =>
+  ["finishPersonalAiSignIn"] as const;
+
+export const getFinishPersonalAiSignInMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | AiSignInNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof finishPersonalAiSignIn>>,
+    TError,
+    FinishPersonalAiSignInMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof finishPersonalAiSignIn>>,
+  TError,
+  FinishPersonalAiSignInMutationVariables,
+  TContext
+> => {
+  const mutationKey = getFinishPersonalAiSignInMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof finishPersonalAiSignIn>>,
+    FinishPersonalAiSignInMutationVariables
+  > = (props) => {
+    const { organizationId, personId, signInId, data, headers } = props ?? {};
+
+    return finishPersonalAiSignIn(
+      organizationId,
+      personId,
+      signInId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type FinishPersonalAiSignInMutationResult = NonNullable<
+  Awaited<ReturnType<typeof finishPersonalAiSignIn>>
+>;
+export type FinishPersonalAiSignInMutationBody = AiSignInCodeInput;
+export type FinishPersonalAiSignInMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | OwnOnlyResponse
+  | AiSignInNotFoundResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type FinishPersonalAiSignInMutationVariables = {
+  organizationId: string;
+  personId: string;
+  signInId: string;
+  data: AiSignInCodeInput;
+  headers: FinishPersonalAiSignInHeaders;
+};
+
+/**
+ * @summary Finish a sign-in with the provider's code
+ */
+export const useFinishPersonalAiSignIn = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | AiSignInNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof finishPersonalAiSignIn>>,
+      TError,
+      FinishPersonalAiSignInMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof finishPersonalAiSignIn>>,
+  TError,
+  FinishPersonalAiSignInMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getFinishPersonalAiSignInMutationOptions(options),
+    queryClient,
+  );
+};

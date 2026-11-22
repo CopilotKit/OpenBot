@@ -13,7 +13,7 @@ export interface AiSignInStatus {
    */
   id: string;
   provider: AiConnectionProvider;
-  /** pending: not approved yet. approved: the provider's key is kept for the person as a saved key. failed or expired: over; start another. */
+  /** pending: not approved yet. approved: what the provider handed OpenBot (a key, or a sign-in the server renews) is kept for the person. failed or expired: over; start another. */
   status: string;
   /**
    * Why it failed or expired, in OpenBot's own words. Null otherwise.
