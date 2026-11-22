@@ -1,0 +1,158 @@
+:root {
+  color-scheme: light dark;
+  --wb-bg: #f6f6f7;
+  --wb-panel: #ffffff;
+  --wb-text: #1c1c1e;
+  --wb-muted: #6b6b70;
+  --wb-border: #d4d4d8;
+  --wb-current: #e4e8ff;
+  --wb-notice: #fff4cc;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --wb-bg: #151517;
+    --wb-panel: #1e1e21;
+    --wb-text: #ececef;
+    --wb-muted: #9a9aa2;
+    --wb-border: #3a3a40;
+    --wb-current: #2c3360;
+    --wb-notice: #4a3f12;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--wb-bg);
+  color: var(--wb-text);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+
+.wb-page {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 260px;
+  height: 100%;
+}
+
+.wb-side {
+  overflow-y: auto;
+  padding: 12px;
+  background: var(--wb-panel);
+}
+
+.wb-side-left {
+  border-right: 1px solid var(--wb-border);
+}
+
+.wb-side-right {
+  border-left: 1px solid var(--wb-border);
+}
+
+.wb-side h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.wb-side h3 {
+  margin: 12px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--wb-muted);
+}
+
+.wb-side button,
+.wb-side input,
+.wb-side select,
+.wb-notice button {
+  font: inherit;
+  color: inherit;
+  background: var(--wb-panel);
+  border: 1px solid var(--wb-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.wb-side button {
+  margin: 0 0 2px;
+  cursor: pointer;
+}
+
+.wb-side nav button {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
+.wb-side button.wb-scene-current {
+  background: var(--wb-current);
+}
+
+.wb-side-right section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wb-side-right section > div {
+  display: flex;
+  gap: 4px;
+}
+
+.wb-side-right label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wb-side-right label input[type="number"] {
+  width: 90px;
+}
+
+.wb-center {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.wb-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
+}
+
+.wb-under {
+  flex: none;
+}
+
+.wb-notices {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wb-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  background: var(--wb-notice);
+  border: 1px solid var(--wb-border);
+  border-radius: 4px;
+}

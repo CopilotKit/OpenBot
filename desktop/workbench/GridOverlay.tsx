@@ -38,7 +38,7 @@ export function GridOverlay({ width, height, zoom, color }: GridOverlayProps) {
             d={`M ${minorSize} 0 L 0 0 0 ${minorSize}`}
             fill="none"
             stroke={color}
-            strokeOpacity={0.25}
+            strokeOpacity={0.12}
             strokeWidth={1}
           />
         </pattern>
@@ -52,7 +52,7 @@ export function GridOverlay({ width, height, zoom, color }: GridOverlayProps) {
             d={`M ${majorSize} 0 L 0 0 0 ${majorSize}`}
             fill="none"
             stroke={color}
-            strokeOpacity={0.5}
+            strokeOpacity={0.28}
             strokeWidth={1}
           />
         </pattern>
