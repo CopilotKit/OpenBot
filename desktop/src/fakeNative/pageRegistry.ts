@@ -48,6 +48,19 @@ export const PAGE_COMMANDS = [
 export type PageCommand = (typeof PAGE_COMMANDS)[number];
 
 /**
+ * Commands the app calls that desktop_page.rs does not register yet: the sign-in redirect
+ * (app/src/lib/ai-connection/sign-in-redirect.ts), which falls back to a paste or a code when
+ * Desktop refuses it, as an OpenBot Desktop from before it could listen does. The fake refuses
+ * them too, as Tauri refuses an unknown command. Once desktop_page.rs registers one, the Rust test
+ * in pageRegistry.test.ts fails until it moves to PAGE_COMMANDS.
+ */
+export const NOT_YET_IN_DESKTOP = [
+  "plugin:openbot-desktop|await_sign_in_redirect",
+  "plugin:openbot-desktop|begin_sign_in_redirect",
+  "plugin:openbot-desktop|cancel_sign_in_redirect",
+] as const;
+
+/**
  * A resolved call to one of these sends the real window back to the setup screens
  * (app/src/lib/desktop/mutations.ts).
  */

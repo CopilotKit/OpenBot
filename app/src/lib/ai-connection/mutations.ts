@@ -204,15 +204,25 @@ export function removePersonalAiMutationOptions(queryClient: QueryClient) {
  *
  * `method` only for a provider with more than one way in: ChatGPT signs in in the browser unless
  * asked for `device`, its code sign-in. Left out, the server's default.
+ *
+ * `loopbackPort`, for Claude inside OpenBot Desktop: the port Desktop listens on for Claude's
+ * redirect (sign-in-redirect.ts), so the person pastes nothing.
  */
 export function startPersonalSignIn(
   provider: AiConnectionProvider,
   method?: AiSignInInputMethod,
+  options?: { loopbackPort?: number },
 ): Promise<AiSignIn> {
   return startPersonalAiSignIn(
     organizationId(),
     "me",
-    method ? { provider, method } : { provider },
+    {
+      provider,
+      ...(method ? { method } : {}),
+      ...(options?.loopbackPort !== undefined
+        ? { loopbackPort: options.loopbackPort }
+        : {}),
+    },
     { "Idempotency-Key": idempotencyKey() },
     { fallback: "Couldn't start the sign-in. Try again." },
   );

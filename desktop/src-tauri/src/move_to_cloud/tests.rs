@@ -1255,3 +1255,68 @@ fn a_real_move_whose_check_doesnt_match_deletes_nothing() {
     }
     let _ = std::fs::remove_dir_all(home);
 }
+
+/// OpenBot Cloud's answer about the person's own AI (`getPersonalAiConnection`), as the API says it
+/// answers: `uses` and `required` beside the connection itself.
+fn personal_ai(uses: &str, required: bool) -> serde_json::Value {
+    serde_json::json!({
+        "connection": {"configured": uses == "personal"},
+        "organization": {"configured": uses == "organization"},
+        "uses": uses,
+        "required": required,
+        "available": true,
+        "signIns": ["openai", "anthropic"],
+    })
+}
+
+/**
+Seen on 1.2.0-rc.1: the move's result offered only Reconnect, and OpenBot Cloud sent the person to
+Connect your AI instead. After the move, Cloud is asked whether the person still needs an AI, in
+their own organization, and only "required, and nothing to run on" says they do.
+*/
+#[test]
+fn after_the_move_cloud_is_asked_whether_the_person_still_needs_an_ai() {
+    for (answer, needs) in [
+        (personal_ai("none", true), true),
+        (personal_ai("personal", true), false),
+        (personal_ai("organization", true), false),
+        // A self-hosted OpenBot never requires one.
+        (personal_ai("none", false), false),
+        // A value a later server adds is not "none".
+        (personal_ai("shared", true), false),
+    ] {
+        let said = answer.to_string();
+        let address = serve(move |request| {
+            if request.headers.get("authorization").map(String::as_str)
+                != Some(&format!("Bearer {BEARER}"))
+            {
+                return json_response(401, serde_json::json!({"code": "UNAUTHENTICATED"}));
+            }
+            match (request.method.as_str(), request.path.as_str()) {
+                ("GET", "/api/v2/people/me/organizations") => json_response(
+                    200,
+                    serde_json::json!({"organizations": [
+                        {"id": "org_mine", "slug": "sam", "name": "Sam", "role": "owner", "active": true, "personal": true}
+                    ], "canCreate": true, "nextCursor": null}),
+                ),
+                ("GET", "/api/v2/organizations/org_mine/people/me/ai-connection") => {
+                    json_response(200, answer.clone())
+                }
+                _ => json_response(404, serde_json::json!({"code": "NOT_FOUND"})),
+            }
+        });
+        let cloud = Api::open(&address, Box::new(Bearer), their_own_organization).unwrap();
+        assert_eq!(cloud.needs_ai_connection(), Ok(needs), "{said}");
+    }
+
+    // A Cloud that can't say is an error the move logs, never a yes or a no.
+    let address = serve(|request| match request.path.as_str() {
+        "/api/v2/people/me/organizations" => json_response(
+            200,
+            serde_json::json!({"organizations": [{"id": "org_mine", "personal": true}]}),
+        ),
+        _ => json_response(404, serde_json::json!({"code": "NOT_FOUND"})),
+    });
+    let cloud = Api::open(&address, Box::new(Bearer), their_own_organization).unwrap();
+    assert!(cloud.needs_ai_connection().is_err());
+}

@@ -304,12 +304,26 @@ fn move_now<R: tauri::Runtime>(
         source_name: &source,
         limits: moving::Limits::default(),
     };
-    moving::run(&mut local, &mut cloud, &mut here, &asked, &mut told).map_err(|failure| {
-        log::warn!("[move] {}: {}", failure.kind(), failure.detail());
-        let mut problem = Problem::with(failure.said(), failure.detail().to_owned());
-        problem.kind = Some(failure.kind());
-        problem
-    })
+    let mut moved =
+        moving::run(&mut local, &mut cloud, &mut here, &asked, &mut told).map_err(|failure| {
+            log::warn!("[move] {}: {}", failure.kind(), failure.detail());
+            let mut problem = Problem::with(failure.said(), failure.detail().to_owned());
+            problem.kind = Some(failure.kind());
+            problem
+        })?;
+    // The move has happened: whether OpenBot Cloud still needs the person's AI only decides what
+    // the result leads with, so a question it can't answer is logged and never fails the move.
+    moved.connect_ai = match cloud.needs_ai_connection() {
+        Ok(needs) => {
+            log::info!("[move] OpenBot Cloud needs the person's AI: {needs}");
+            Some(needs)
+        }
+        Err(detail) => {
+            log::warn!("[move] could not ask whether the person's AI is connected: {detail}");
+            None
+        }
+    };
+    Ok(moved)
 }
 
 /// Cancel while the browser sign-in waits.
@@ -318,7 +332,8 @@ pub async fn cancel_move<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     crate::desktop_connected::cancel_sign_in(&app);
 }
 
-/// OpenBot Cloud in the window once the move is done: its home, or `path` (`/connections`).
+/// OpenBot Cloud in the window once the move is done: its home, or `path` (`/reconnect`, the
+/// list of apps to reconnect, or `/reconnect/<app>`). A path the relay can't carry opens home.
 #[tauri::command]
 pub async fn open_moved_cloud<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,

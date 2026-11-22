@@ -112,6 +112,7 @@ export const STATE_NAMES: readonly {
     title: "Move: done, disk space still held",
   },
   { hash: "#move-done-left", search: "", title: "Move: done, some left" },
+  { hash: "#move-done-ai", search: "", title: "Move: done, AI still needed" },
   { hash: "#move-first", search: "", title: "Move: asked before an update" },
   { hash: "#status", search: "", title: "Status: running" },
   { hash: "#status", search: "?stopped", title: "Status: stopped" },
@@ -263,7 +264,9 @@ function createStates(where: Where): States {
         kind: "move-failed",
       } satisfies Problem;
     // `#move-done-held`: as on a Mac, the disk shows 4.5 of the 20.2 GB removed free so far.
+    // `#move-done-ai`: OpenBot Cloud still needs the person's AI, so the result leads with it.
     return {
+      connectAi: move === "done-ai",
       removedBytes: 20_200_000_000,
       diskGainedBytes: move === "done-held" ? 4_500_000_000 : 20_100_000_000,
       apps: MOVE_APPS,

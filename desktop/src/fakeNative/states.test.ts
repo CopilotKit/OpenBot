@@ -102,6 +102,7 @@ test("STATE_NAMES holds every state once", () => {
     "#move-done",
     "#move-done-held",
     "#move-done-left",
+    "#move-done-ai",
     "#move-first",
     "#signin",
     "#licence",
