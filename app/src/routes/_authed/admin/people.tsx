@@ -116,8 +116,7 @@ function nameOf(person: Person): string {
 
 /**
  * The organization a removal takes somebody out of, where that is all it does: an OpenBot where
- * everybody has an organization of their own and may create others (`canCreate`, the server's
- * verdict). There, Remove ends the person's membership of this organization alone, and their
+ * people may create organizations (`canCreate`, the server's verdict). There, Remove ends the person's membership of this organization alone, and their
  * account, sessions, API keys and other organizations stay theirs. Undefined where OpenBot keeps one
  * organization, where removing somebody still takes them out of OpenBot.
  */
@@ -383,8 +382,8 @@ function RemovePersonDialog({
             <DialogDescription>
               They lose access to {organization}'s Bots and conversations, and
               the apps they connected here are disconnected. They keep their
-              account, their own organization and any other they're in. Restore
-              puts them back with their role and teams.
+              account and any other organization they're in. Restore puts them
+              back with their role and teams.
             </DialogDescription>
           ) : (
             <DialogDescription>
