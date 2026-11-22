@@ -696,8 +696,9 @@ paths:
         check there where the provider shows one, and how it finishes. With
         finish poll, read the sign-in (getPersonalAiSignIn) every interval
         seconds until it is approved, failed or expired. With finish code,
-        the provider's page shows the person a code once they approve, and
-        they send it back with finishPersonalAiSignIn. Approved, what the
+        the person approves, copies the code Claude's page shows them or
+        the address ChatGPT sends their browser to, and sends it back with
+        finishPersonalAiSignIn. Approved, what the
         provider handed OpenBot is kept for the person alone, never sent to
         the browser: an Unbiased AI key as a saved key (connect with
         useSavedKey), a Claude or ChatGPT plan's sign-in (connect with login
@@ -723,6 +724,10 @@ paths:
               chatgpt:
                 value:
                   provider: openai
+              chatgptWithACode:
+                value:
+                  provider: openai
+                  method: device
               claude:
                 value:
                   provider: anthropic
@@ -741,6 +746,8 @@ paths:
                   $ref: '#/components/examples/AiSignInExample'
                 chatgpt:
                   $ref: '#/components/examples/AiSignInChatGptExample'
+                chatgptWithACode:
+                  $ref: '#/components/examples/AiSignInChatGptDeviceExample'
                 claude:
                   $ref: '#/components/examples/AiSignInClaudeExample'
         '400':
@@ -1369,6 +1376,17 @@ components:
       properties:
         provider:
           $ref: '#/components/schemas/AiConnectionProvider'
+        method:
+          type: string
+          enum: [browser, device]
+          description: >-
+            How to sign in, for a provider that offers more than one way.
+            openai: browser (the default) approves in the browser and
+            finishes with the address ChatGPT sends the browser to; device
+            shows a code to enter at ChatGPT instead, which works only once
+            the person has turned on device code sign-in in ChatGPT's
+            security settings. Every other provider has one way and ignores
+            it.
     AiSignInCodeInput:
       type: object
       additionalProperties: false
@@ -1381,8 +1399,10 @@ components:
           pattern: \S
           writeOnly: true
           description: >-
-            The code the provider's page showed the person once they approved
-            the sign-in, as they copied it. Trimmed. Never sent back.
+            What the person copied once they approved the sign-in: the code
+            the provider's page showed (Claude), or the whole address the
+            provider sent their browser to (ChatGPT). Trimmed. Never sent
+            back.
     AiSignIn:
       type: object
       description: A sign-in to an AI provider, waiting for the person to approve it in their browser.
@@ -1417,8 +1437,10 @@ components:
           description: >-
             How the sign-in finishes. poll: read it (getPersonalAiSignIn)
             every interval seconds until it is approved, failed or expired.
-            code: the provider's page shows the person a code once they
-            approve it, which they send back with finishPersonalAiSignIn.
+            code: once the person approves it, the provider shows them a
+            code (Claude) or sends their browser to an address that doesn't
+            load (ChatGPT), and they send that code or address back with
+            finishPersonalAiSignIn.
     AiSignInStatus:
       type: object
       description: Where a sign-in to an AI provider stands. Never a key.
@@ -1859,7 +1881,17 @@ components:
         interval: 5
         finish: poll
     AiSignInChatGptExample:
-      summary: A ChatGPT plan sign-in, waiting for the person to enter the code.
+      summary: A ChatGPT plan sign-in in the browser, finished with the address ChatGPT sends it to.
+      value:
+        id: Y2hhdGdwdC1icm93c2Vy
+        provider: openai
+        url: https://auth.openai.com/oauth/authorize?client_id=example&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&scope=openid+profile+email+offline_access&code_challenge=example&code_challenge_method=S256&state=example
+        userCode: null
+        expiresAt: '2026-11-21T09:15:00.000Z'
+        interval: 5
+        finish: code
+    AiSignInChatGptDeviceExample:
+      summary: A ChatGPT plan sign-in with a code, waiting for the person to enter it at ChatGPT.
       value:
         id: Y2hhdGdwdC1zaWduLWlu
         provider: openai

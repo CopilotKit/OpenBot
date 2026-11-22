@@ -1262,7 +1262,7 @@ export const DeletePersonalAiConnectionResponse = zod
   );
 
 /**
- * Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the provider's page shows the person a code once they approve, and they send it back with finishPersonalAiSignIn. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: an Unbiased AI key as a saved key (connect with useSavedKey), a Claude or ChatGPT plan's sign-in (connect with login plan), or a Google or xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true.
+ * Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the person approves, copies the code Claude's page shows them or the address ChatGPT sends their browser to, and sends it back with finishPersonalAiSignIn. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: an Unbiased AI key as a saved key (connect with useSavedKey), a Claude or ChatGPT plan's sign-in (connect with login plan), or a Google or xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true.
  * @summary Start signing in to an AI provider
  */
 
@@ -1312,6 +1312,12 @@ export const StartPersonalAiSignInBody = zod.object({
     .describe(
       "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI's API, at an address given.",
     ),
+  method: zod
+    .enum(["browser", "device"])
+    .optional()
+    .describe(
+      "How to sign in, for a provider that offers more than one way. openai: browser (the default) approves in the browser and finishes with the address ChatGPT sends the browser to; device shows a code to enter at ChatGPT instead, which works only once the person has turned on device code sign-in in ChatGPT's security settings. Every other provider has one way and ignores it.",
+    ),
 });
 
 export const startPersonalAiSignInResponseIdMax = 4096;
@@ -1360,7 +1366,7 @@ export const StartPersonalAiSignInResponse = zod
     finish: zod
       .string()
       .describe(
-        "How the sign-in finishes. poll: read it (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. code: the provider's page shows the person a code once they approve it, which they send back with finishPersonalAiSignIn.",
+        "How the sign-in finishes. poll: read it (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. code: once the person approves it, the provider shows them a code (Claude) or sends their browser to an address that doesn't load (ChatGPT), and they send that code or address back with finishPersonalAiSignIn.",
       ),
   })
   .describe(
@@ -1510,7 +1516,7 @@ export const FinishPersonalAiSignInBody = zod.object({
     .max(finishPersonalAiSignInBodyCodeMax)
     .regex(finishPersonalAiSignInBodyCodeRegExp)
     .describe(
-      "The code the provider's page showed the person once they approved the sign-in, as they copied it. Trimmed. Never sent back.",
+      "What the person copied once they approved the sign-in: the code the provider's page showed (Claude), or the whole address the provider sent their browser to (ChatGPT). Trimmed. Never sent back.",
     ),
 });
 
