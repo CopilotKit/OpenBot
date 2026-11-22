@@ -9,6 +9,7 @@ import {
   IconSearch,
   IconShieldLock,
   IconSparkles,
+  IconUsers,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -289,11 +290,31 @@ export function allowlistNarrows(allowlist: {
 }
 
 /**
+ * On OpenBot Cloud, whether the organization has no AI of its own yet. Each person's runs then use
+ * their own AI, so there is no organization list of models: the catalogue an admin reads here
+ * holds only the deployment's own model, which nobody in the organization is offered. Read from
+ * the organization's connection (getAiConnection), or the summary a person's own carries
+ * (getPersonalAiConnection) where that can't be read. Undefined until both have answered.
+ */
+export function useNoOrganizationAi(): boolean | undefined {
+  const connection = useQuery(aiConnectionQueryOptions());
+  const personal = useQuery(personalAiConnectionQueryOptions());
+  if (connection.isPending || personal.isPending) return undefined;
+  // Each person brings their own AI only on OpenBot Cloud: the server's verdict, never guessed.
+  if (personal.data?.available !== true) return false;
+  const provider =
+    connection.data?.provider ?? personal.data.organization.provider;
+  return provider === null;
+}
+
+/**
  * Admin, Providers: what people pick from in a conversation. Every model the credential lists,
- * until a team's admin narrows it below; then the models allowed there, with the default.
+ * until a team's admin narrows it below; then the models allowed there, with the default. On
+ * OpenBot Cloud with no organization AI, every model each person's own AI lists.
  */
 export function ModelChoiceSection() {
   const available = useQuery(availableModelsQueryOptions());
+  const noOrganizationAi = useNoOrganizationAi();
   const data = available.data;
   /*
    * The allowlist is read only where models are picked from it. Everything else here is the model
@@ -304,13 +325,22 @@ export function ModelChoiceSection() {
     ...enterpriseOverviewQueryOptions(),
     enabled: data?.exposure === "allowed",
   });
-  if (!data) return null;
+  if (!data || noOrganizationAi === undefined) return null;
   const allowlist = overview.data?.settings.modelAllowlist;
   const allowed =
     allowlist?.models.filter((name) =>
       data.models.some((model) => `${data.provider}/${model.id}` === name),
     ).length ?? 0;
   if (data.exposure === "allowed" && overview.isPending) return null;
+  if (noOrganizationAi)
+    return (
+      <OwnModelsChoice
+        allowed={
+          allowlist && allowlistNarrows(allowlist) ? allowlist.models : null
+        }
+        failed={overview.error !== null}
+      />
+    );
   // Open unless an admin narrowed it: one person, or a team whose allowlist narrows nothing.
   const open =
     data.exposure === "all" || !allowlist || !allowlistNarrows(allowlist);
@@ -356,6 +386,57 @@ export function ModelChoiceSection() {
   );
 }
 
+/**
+ * "In conversations" on OpenBot Cloud with no organization AI: each person picks from what their
+ * own AI lists, every model open until an admin narrows it. Nothing here comes from the model
+ * catalogue, which then holds only the deployment's own model.
+ */
+function OwnModelsChoice({
+  allowed,
+  failed,
+}: {
+  /** The models an admin allowed, when the allowlist narrows anything. Null while it is open. */
+  allowed: readonly string[] | null;
+  failed: boolean;
+}) {
+  return (
+    <PageSection
+      description={
+        allowed
+          ? "People pick among the models you allow below, from those their own AI lists, in each conversation."
+          : "Each person picks from the models their own AI lists, and their thinking level, in each conversation. Your organization has no AI of its own yet."
+      }
+      title="In conversations"
+    >
+      {failed ? (
+        <p className="mt-4 text-destructive text-sm" role="alert">
+          Couldn't load these settings. Try again in a moment.
+        </p>
+      ) : (
+        <PageRows>
+          <Item size="sm">
+            <ItemMedia variant="icon">
+              <IconUsers />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>
+                {allowed
+                  ? `${allowed.length} ${allowed.length === 1 ? "model" : "models"} allowed`
+                  : "Each person's own AI"}
+              </ItemTitle>
+              <ItemDescription>
+                {allowed
+                  ? "Each person sees the ones their own AI lists."
+                  : "Every model a person's own AI lists is open to them. There's no organization list yet."}
+              </ItemDescription>
+            </ItemContent>
+          </Item>
+        </PageRows>
+      )}
+    </PageSection>
+  );
+}
+
 /** What the allowed-models row says: the models themselves, the first few by name. */
 export function allowedSummary(models: readonly string[]): string {
   if (models.length === 0) return "None listed";
@@ -366,9 +447,16 @@ export function allowedSummary(models: readonly string[]): string {
 /** Admin, Providers: the allowlist every Bot's model is checked against. */
 export function ModelAllowlistSection() {
   const [open, setOpen] = useState(false);
+  // With no organization AI, each person's own AI lists their models: there is no list here.
+  const noOrganizationAi = useNoOrganizationAi();
+  if (noOrganizationAi === undefined) return null;
   return (
     <ControlsSection
-      description="Every listed model is open until you narrow it. Turn on Only allowed models and allow some, and people pick among those. A Bot on any other model is then refused before it runs, and a remote Bot's own model is checked too."
+      description={
+        noOrganizationAi
+          ? "Every model each person's own AI lists is open until you narrow it. Turn on Only allowed models and allow some, and people pick among those. A Bot on any other model is then refused before it runs, and a remote Bot's own model is checked too."
+          : "Every listed model is open until you narrow it. Turn on Only allowed models and allow some, and people pick among those. A Bot on any other model is then refused before it runs, and a remote Bot's own model is checked too."
+      }
       title="Allowed models"
     >
       {({ data, setSetting, saving }) => {
@@ -387,7 +475,9 @@ export function ModelAllowlistSection() {
                       ? "People pick among the models listed below, and Bots only run on them."
                       : modelAllowlist.enabled
                         ? "On, but no model is allowed yet, so every model stays open. Allow models below to narrow it."
-                        : "Off. People can pick any listed model, and no run is refused for its model."}
+                        : noOrganizationAi
+                          ? "Off. People can pick any model their own AI lists, and no run is refused for its model."
+                          : "Off. People can pick any listed model, and no run is refused for its model."}
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
@@ -428,6 +518,7 @@ export function ModelAllowlistSection() {
               <AllowedModelsDialog
                 builtInModel={data.builtInModel}
                 initial={modelAllowlist.models}
+                listsModels={!noOrganizationAi}
                 onClose={() => setOpen(false)}
                 onSave={(models) =>
                   setSetting("modelAllowlist", { ...modelAllowlist, models })
@@ -449,11 +540,15 @@ const FULL_NAME = /^[^\s/]+\/\S+$/;
  * Pick the allowed models from what the provider or gateway lists, newest first, with the
  * deployment's own model marked. A model the listing does not have (a remote Bot's own, say) is
  * added by its full name and listed with the rest.
+ *
+ * With no organization AI (`listsModels` false) there is nothing to list: the catalogue holds only
+ * the deployment's own model, which nobody is offered. Every model is then added by its full name.
  */
 export function AllowedModelsDialog({
   open,
   initial,
   builtInModel,
+  listsModels = true,
   onSave,
   onClose,
 }: {
@@ -462,19 +557,23 @@ export function AllowedModelsDialog({
   initial: readonly string[];
   /** The deployment's model, as `provider/model`. */
   builtInModel: string | null;
+  /** Whether the organization's AI lists models to pick from. */
+  listsModels?: boolean;
   onSave: (models: string[]) => void;
   onClose: () => void;
 }) {
   const available = useQuery({
     ...availableModelsQueryOptions(),
-    enabled: open,
+    enabled: open && listsModels,
   });
   const [selected, setSelected] = useState<string[]>([...initial]);
   const [search, setSearch] = useState("");
   const [other, setOther] = useState("");
 
+  // The catalogue is cached from the page, so it is set aside here, not only left unread.
   const listed: { name: string; label: string; model?: ModelOption }[] = (
-    available.data?.models ?? []
+    (listsModels && available.data?.models) ||
+    []
   ).map((model) => ({
     name: `${available.data?.provider}/${model.id}`,
     label: model.label,
@@ -482,9 +581,12 @@ export function AllowedModelsDialog({
   }));
   const listedNames = new Set(listed.map((model) => model.name));
   // The default as the list says it today: the operator's model, or the middle of the line.
-  const defaultName = available.data
-    ? `${available.data.provider}/${available.data.default}`
-    : builtInModel;
+  // With no organization AI there is none: each person's own AI has its own.
+  const defaultName = !listsModels
+    ? null
+    : available.data
+      ? `${available.data.provider}/${available.data.default}`
+      : builtInModel;
   // Saved models the listing no longer (or never) had, so they can still be seen and removed.
   const extra: { name: string; label: string; model?: ModelOption }[] = selected
     .filter((name) => !listedNames.has(name))
@@ -517,13 +619,21 @@ export function AllowedModelsDialog({
           <DialogTitle>Allowed models</DialogTitle>
         </DialogHeader>
         <DialogBody className="mt-4 flex flex-col gap-3 overflow-y-auto">
-          <Input
-            aria-label="Search models"
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search models"
-            value={search}
-          />
-          {available.isPending ? null : available.error ? (
+          {/* Nothing listed and nothing added yet: nothing to search. */}
+          {listsModels || selected.length > 0 ? (
+            <Input
+              aria-label="Search models"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search models"
+              value={search}
+            />
+          ) : null}
+          {!listsModels ? (
+            <p className="text-muted-foreground text-sm">
+              Your organization has no AI yet, so no models are listed. Add each
+              model by its full name.
+            </p>
+          ) : available.isPending ? null : available.error ? (
             <p className="text-destructive text-sm" role="alert">
               {available.error.message}
             </p>
@@ -534,7 +644,10 @@ export function AllowedModelsDialog({
             </p>
           ) : null}
           {rows.length === 0 ? (
-            <PageEmpty icon={IconSearch} title="No matches" />
+            // With nothing listed and nothing searched for, the note above says why.
+            listsModels || needle ? (
+              <PageEmpty icon={IconSearch} title="No matches" />
+            ) : null
           ) : (
             <div className="flex flex-col gap-px">
               {rows.map((model) => (
