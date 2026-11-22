@@ -39,6 +39,7 @@ export * from "./aiConnectionSource";
 export * from "./aiSignIn";
 export * from "./aiSignInCodeInput";
 export * from "./aiSignInInput";
+export * from "./aiSignInInputMethod";
 export * from "./aiSignInNotFoundResponse";
 export * from "./aiSignInStatus";
 export * from "./allowBotComponentHeaders";

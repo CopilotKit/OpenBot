@@ -4,7 +4,7 @@
 
 export interface AiSignInCodeInput {
   /**
-   * The code the provider's page showed the person once they approved the sign-in, as they copied it. Trimmed. Never sent back.
+   * What the person copied once they approved the sign-in: the code the provider's page showed (Claude), or the whole address the provider sent their browser to (ChatGPT). Trimmed. Never sent back.
    * @minLength 1
    * @maxLength 4096
    * @pattern \S
