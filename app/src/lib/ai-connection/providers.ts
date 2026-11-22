@@ -119,6 +119,26 @@ export function loginsHere(
   );
 }
 
+/**
+ * The ways in for a person's own AI: the provider's sign-in first where the server can run it
+ * itself (`signIns`, and a preset address its key is for), then the provider's key or address.
+ * Never a plan or a sign-in OpenBot Desktop holds, even inside Desktop: the server runs the
+ * person's Bots, and can't use a credential kept on one computer.
+ */
+export function personalLogins(
+  provider: AiProvider,
+  signIns: readonly AiConnectionProvider[],
+): AiConnectionLogin[] {
+  const signIn =
+    signIns.includes(provider.id) &&
+    provider.logins.includes("oauth") &&
+    ENDPOINT_PRESETS[provider.id] !== undefined;
+  return [
+    ...(signIn ? (["oauth"] as const) : []),
+    ...loginsHere(provider, false),
+  ];
+}
+
 export function providerById(
   id: AiConnectionProvider | null | undefined,
 ): AiProvider | undefined {
