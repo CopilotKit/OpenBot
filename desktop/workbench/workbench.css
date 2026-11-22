@@ -145,8 +145,63 @@ body {
   padding: 24px;
 }
 
+/* The warnings scroll on their own, so the window above them does not move as they grow. */
 .wb-under {
   flex: none;
+  max-height: 30%;
+  overflow-y: auto;
+  padding: 0 24px 12px;
+  border-top: 1px solid var(--wb-border);
+}
+
+.wb-under h3 {
+  margin: 12px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--wb-muted);
+}
+
+.wb-under button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-fold {
+  margin-top: 12px;
+  border-top: 1px solid var(--wb-border);
+  padding-top: 8px;
+}
+
+.wb-fold > summary {
+  cursor: pointer;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.wb-fold ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.wb-fold li {
+  overflow-wrap: anywhere;
+}
+
+.wb-side-right textarea {
+  font:
+    12px ui-monospace,
+    monospace;
+  color: inherit;
+  background: var(--wb-panel);
+  border: 1px solid var(--wb-border);
+  border-radius: 4px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .wb-notices {

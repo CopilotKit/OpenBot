@@ -1,0 +1,135 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Change } from "../src/fakeNative/control";
+import {
+  clippedAndOutside,
+  compare,
+  type Snapshot,
+  snapshot,
+  type Warning,
+} from "./layoutWatch";
+
+type Viewport = { width: number; height: number };
+
+/** How many changes name the cause of a check. */
+const MAX_CAUSES = 3;
+
+function causeOf(change: Change): string {
+  switch (change.kind) {
+    case "call":
+      return `call ${change.call.command}`;
+    case "emit":
+      return `event ${change.event}`;
+    case "answer":
+      return `answer ${change.command}`;
+    default:
+      return `settled ${change.call.command}`;
+  }
+}
+
+/** The key that says a clipped or outside warning is the same one as before. */
+function stillKey(warning: Warning): string {
+  return `${warning.kind}|${warning.label}`;
+}
+
+/**
+ * Watches the layout of a loaded window. After each change of the fake native side or of the
+ * clock, one frame later, it compares the window with how it was before, and finds text that is
+ * cut off and elements outside the window. While `hold(true)` is in force (a seek walks the
+ * clock), it checks only when `flush` is called: at each stop of the walk, where a frame may not
+ * come between two moves of the clock, and where the window is the same each time.
+ */
+export function useLayoutWatch(
+  frame: HTMLIFrameElement | null,
+  viewport: Viewport,
+): { warnings: Warning[]; flush(): void; hold(on: boolean): void } {
+  const [warnings, setWarnings] = useState<Warning[]>([]);
+  const viewportRef = useRef(viewport);
+  viewportRef.current = viewport;
+  const flushRef = useRef<() => void>(() => {});
+  const heldRef = useRef(false);
+
+  useEffect(() => {
+    setWarnings([]);
+    const win = frame?.contentWindow as (Window & typeof globalThis) | null;
+    if (!frame || !win) return;
+    let stopped = false;
+    let off: (() => void) | null = null;
+    let last: Snapshot | null = null;
+    let active = new Set<string>();
+    let causes: string[] = [];
+    let handle: number | null = null;
+    let dirty = false;
+
+    const check = () => {
+      if (handle !== null) win.cancelAnimationFrame(handle);
+      handle = null;
+      dirty = false;
+      const clock = win.__workbenchClock;
+      const doc = frame.contentDocument;
+      if (stopped || !clock || !doc) return;
+      const at = clock.now();
+      const cause = causes.join(", ");
+      causes = [];
+      const next = snapshot(doc);
+      const found: Warning[] = last ? compare(last, next, at, cause) : [];
+      last = next;
+      const now = new Set<string>();
+      for (const warning of clippedAndOutside(doc, at, viewportRef.current)) {
+        const key = stillKey(warning);
+        if (now.has(key)) continue;
+        now.add(key);
+        if (!active.has(key)) found.push(warning);
+      }
+      active = now;
+      if (found.length > 0) setWarnings((all) => [...all, ...found]);
+    };
+
+    const pend = (cause: string) => {
+      if (causes.length < MAX_CAUSES && !causes.includes(cause))
+        causes.push(cause);
+      dirty = true;
+      if (handle === null && !heldRef.current)
+        handle = win.requestAnimationFrame(check);
+    };
+
+    const start = () => {
+      const clock = win.__workbenchClock;
+      const control = win.__workbench;
+      if (!clock || !control) return;
+      const offTick = clock.onTick(() => pend("clock"));
+      const offChange = control.onChange((change) => pend(causeOf(change)));
+      off = () => {
+        offTick();
+        offChange();
+      };
+      check();
+    };
+
+    // The boot script sets up the clock before the window's own code; wait for it if needed.
+    let poll: ReturnType<typeof setTimeout> | null = null;
+    const wait = () => {
+      poll = null;
+      if (stopped || win.closed) return;
+      if (win.__workbenchBooted) start();
+      else poll = setTimeout(wait, 10);
+    };
+    wait();
+    flushRef.current = () => {
+      if (dirty) check();
+    };
+
+    return () => {
+      stopped = true;
+      if (poll !== null) clearTimeout(poll);
+      if (handle !== null) win.cancelAnimationFrame(handle);
+      off?.();
+      flushRef.current = () => {};
+    };
+  }, [frame]);
+
+  const flush = useCallback(() => flushRef.current(), []);
+  const hold = useCallback((on: boolean) => {
+    heldRef.current = on;
+  }, []);
+  return { warnings, flush, hold };
+}

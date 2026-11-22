@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Call } from "../src/fakeNative/control";
+import type { Answer, Call, NativeControl } from "../src/fakeNative/control";
 import { COMMANDS } from "../src/fakeNative/registry";
+import { CallLog } from "./CallLog";
+import { CommandsPanel } from "./CommandsPanel";
 import type { PageClock } from "./clock";
+import { EventsPanel } from "./EventsPanel";
 import { type FrameConfig, frameUrl } from "./frameConfig";
+import { describeElements, type Warning } from "./layoutWatch";
 import { formatTime, RunControls, type Speed } from "./RunControls";
 import { SceneList } from "./SceneList";
 import { SCENES } from "./scenes";
 import { decodeState, encodeState, type WorkbenchState } from "./urlState";
+import { useLayoutWatch } from "./useLayoutWatch";
+import { WarningsList } from "./WarningsList";
 import { WindowFrame } from "./WindowFrame";
 import {
   WindowSettingsPanel,
@@ -29,8 +35,12 @@ export type WorkbenchPage = {
   /** Resolves when the window is ready at `ms` and has drawn one frame. */
   seek(ms: number): Promise<void>;
   calls(): readonly Call[];
-  /** True when the window has called `show_openbot` and the call did not fail. */
+  /** True when the window has called `show_openbot` and the call resolved. */
   handedOver(): boolean;
+  /** The layout warnings of the loaded window, oldest first. */
+  warnings(): Warning[];
+  /** The elements the layout warnings know in the loaded window, in document order. */
+  elements(): ReturnType<typeof describeElements>;
 };
 
 type RunInfo = { end: number; nextAt(ms: number): number | null };
@@ -90,34 +100,38 @@ async function walkTo(
   live: Live,
   target: number,
   stopped: () => boolean,
+  onStop: () => void,
 ): Promise<boolean> {
   const { clock, info, win } = live;
   await settle(win);
   if (stopped()) return false;
+  onStop();
   // Steps due now run before the first move.
   clock.advanceTo(clock.now());
   while (clock.now() < target) {
     await settle(win);
     if (stopped()) return false;
+    onStop();
     const now = clock.now();
     const boundary = (Math.floor(now / WALK_STEP_MS) + 1) * WALK_STEP_MS;
     const mark = info.nextAt(now) ?? Number.POSITIVE_INFINITY;
     clock.advanceTo(Math.min(target, boundary, mark));
   }
   await settle(win);
-  return !stopped();
+  if (stopped()) return false;
+  onStop();
+  return true;
 }
 
-/**
- * True when the window has handed over to OpenBot: it called `show_openbot`, and the answer for it
- * is not a fail answer. The call log does not record how a call ended, so a fallback that fails
- * (a state in `states.ts`) still counts.
- */
+/** True when the window has handed over to OpenBot: a call to `show_openbot` resolved. */
 function handedOverIn(win: FrameWindow | undefined): boolean {
   const control = win?.__workbench;
   if (!control) return false;
-  if (control.answers().get("show_openbot")?.mode === "fail") return false;
-  return control.calls().some((call) => call.command === "show_openbot");
+  return control
+    .calls()
+    .some(
+      (call) => call.command === "show_openbot" && call.settled === "resolved",
+    );
 }
 
 /** True for a field that takes typed text, where the C key must type a letter. */
@@ -190,6 +204,18 @@ export function Workbench() {
   const [commenting, setCommenting] = useState(false);
   /** The loaded window, as state, so the C key also works with the focus in it. */
   const [frameEl, setFrameEl] = useState<HTMLIFrameElement | null>(null);
+  /** The loaded window's fake native side, for the commands, calls and events panels. */
+  const [frameControl, setFrameControl] = useState<NativeControl | null>(null);
+  const {
+    warnings,
+    flush: checkLayout,
+    hold: holdLayout,
+  } = useLayoutWatch(frameEl, {
+    width: state.window.width,
+    height: state.window.height,
+  });
+  const warningsRef = useRef(warnings);
+  warningsRef.current = warnings;
   const speedRef = useRef<Speed>(speed);
   speedRef.current = speed;
   const stateRef = useRef(state);
@@ -248,21 +274,37 @@ export function Workbench() {
 
   const detach = useCallback(() => {
     walkRef.current += 1;
+    holdLayout(false);
     readyRef.current = false;
     liveRef.current?.off();
     liveRef.current = null;
+    setFrameControl(null);
     setPlaying(false);
     setHandedOver(false);
     setOverlayClosed(false);
-  }, []);
+  }, [holdLayout]);
 
   /** Takes the window's clock to `target` in short steps; false when a newer walk took over. */
-  const walk = useCallback(async (live: Live, target: number) => {
-    const id = ++walkRef.current;
-    readyRef.current = false;
-    const ok = await walkTo(live, target, () => walkRef.current !== id);
-    return ok && walkRef.current === id;
-  }, []);
+  const walk = useCallback(
+    async (live: Live, target: number) => {
+      const id = ++walkRef.current;
+      readyRef.current = false;
+      // The layout is checked at each stop of the walk, and not at frames in between.
+      holdLayout(true);
+      try {
+        const ok = await walkTo(
+          live,
+          target,
+          () => walkRef.current !== id,
+          checkLayout,
+        );
+        return ok && walkRef.current === id;
+      } finally {
+        if (walkRef.current === id) holdLayout(false);
+      }
+    },
+    [checkLayout, holdLayout],
+  );
 
   const attach = useCallback(
     async (iframe: HTMLIFrameElement) => {
@@ -309,6 +351,7 @@ export function Workbench() {
       const offChange = win.__workbench?.onChange((change) => {
         if (change.kind !== "emit") checkHandover();
       });
+      setFrameControl(win.__workbench ?? null);
       const live = {
         win,
         clock,
@@ -382,6 +425,11 @@ export function Workbench() {
       seek,
       calls: () => liveRef.current?.win.__workbench?.calls() ?? [],
       handedOver: () => handedOverIn(liveRef.current?.win),
+      warnings: () => [...warningsRef.current],
+      elements: () => {
+        const doc = frameRef.current?.contentDocument;
+        return doc ? describeElements(doc) : [];
+      },
     };
   }, [seek]);
 
@@ -436,6 +484,16 @@ export function Workbench() {
       answers: {},
       window: { ...prev.window, os: scene?.start.os ?? prev.window.os },
     }));
+  };
+
+  /** The commands panel already set the answer on the live window: keep it for the URL and the next remount. */
+  const keepAnswer = (command: string, answer: Answer) => {
+    update((prev) => ({
+      ...prev,
+      answers: { ...prev.answers, [command]: answer },
+    }));
+    const frame = window.__workbenchFrame;
+    if (frame) frame.answers = { ...frame.answers, [command]: answer };
   };
 
   const changeWindow = (patch: Partial<WindowSettingsValue>) => {
@@ -525,7 +583,14 @@ export function Workbench() {
             </section>
           )}
         </div>
-        <div className="wb-under" />
+        <div className="wb-under">
+          <WarningsList
+            warnings={warnings}
+            onSeek={(ms) => {
+              void seek(ms);
+            }}
+          />
+        </div>
       </main>
       <aside className="wb-side wb-side-right">
         <section className="wb-comment-toggle">
@@ -576,6 +641,20 @@ export function Workbench() {
             void navigator.clipboard.writeText(window.location.href);
           }}
         />
+        <details className="wb-fold">
+          <summary>
+            {`Commands (${Object.keys(state.answers).join(", ") || "none set"})`}
+          </summary>
+          <CommandsPanel control={frameControl} onAnswer={keepAnswer} />
+        </details>
+        <details className="wb-fold">
+          <summary>Calls</summary>
+          <CallLog control={frameControl} />
+        </details>
+        <details className="wb-fold">
+          <summary>Events</summary>
+          <EventsPanel control={frameControl} />
+        </details>
       </aside>
     </div>
   );

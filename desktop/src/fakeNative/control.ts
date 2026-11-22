@@ -22,12 +22,15 @@ export type Call = {
   args?: Record<string, unknown>;
   at: number;
   known: boolean;
+  /** How the call ended; undefined while it is pending. */
+  settled?: "resolved" | "rejected";
 };
 
 export type Change =
   | { kind: "call"; call: Call }
   | { kind: "emit"; event: string; payload: unknown }
-  | { kind: "answer"; command: string };
+  | { kind: "answer"; command: string }
+  | { kind: "settled"; call: Call };
 
 export type FallbackAnswer = (
   command: string,
@@ -143,7 +146,7 @@ function create(): Workbench {
       const n = (counts.get(command) ?? 0) + 1;
       counts.set(command, n);
       notify({ kind: "call", call });
-      return new Promise((resolve, reject) => {
+      const pending = new Promise((resolve, reject) => {
         const answer = answerMap.get(command);
         if (answer === undefined) {
           if (fallback === null) {
@@ -162,6 +165,18 @@ function create(): Workbench {
         }
         settle(answer, { resolve, reject }, args, n);
       });
+      return pending.then(
+        (value) => {
+          call.settled = "resolved";
+          notify({ kind: "settled", call });
+          return value;
+        },
+        (reason) => {
+          call.settled = "rejected";
+          notify({ kind: "settled", call });
+          throw reason;
+        },
+      );
     },
     listen(event, handler) {
       const wrapper: Listener = (e) => handler(e);

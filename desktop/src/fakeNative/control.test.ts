@@ -139,8 +139,14 @@ test("onChange hears every call and every emit", async () => {
   await callNative("default_root");
   await callNative("providers");
   nativeControl().emit("setup:progress", 1);
-  expect(changes.map((c) => c.kind)).toEqual(["call", "call", "emit"]);
-  expect(changes[2]).toEqual({
+  expect(changes.map((c) => c.kind)).toEqual([
+    "call",
+    "settled",
+    "call",
+    "settled",
+    "emit",
+  ]);
+  expect(changes[4]).toEqual({
     kind: "emit",
     event: "setup:progress",
     payload: 1,
@@ -155,4 +161,40 @@ test("__fake keeps the command names and the opened addresses", async () => {
     "plugin:opener|open_url",
   ]);
   expect(globalThis.__fake?.opened).toEqual(["https://example.com"]);
+});
+
+test("a call records how it ended, and a settled change follows the call change", async () => {
+  const control = nativeControl();
+  const changes: Change[] = [];
+  control.onChange((change) => changes.push(change));
+  control.setAnswer("default_root", { mode: "value", value: "/x" });
+  const promise = callNative("default_root");
+  expect(control.calls()[0]?.settled).toBeUndefined();
+  await promise;
+  expect(control.calls()[0]?.settled).toBe("resolved");
+  expect(changes.map((c) => c.kind)).toEqual(["answer", "call", "settled"]);
+  expect(changes[2]).toEqual({ kind: "settled", call: control.calls()[0] });
+});
+
+test("a fail answer and a throwing fallback end as rejected", async () => {
+  const control = nativeControl();
+  control.setAnswer("start_stack", { mode: "fail", problem: { said: "No." } });
+  await callNative("start_stack").catch(() => {});
+  expect(control.calls()[0]?.settled).toBe("rejected");
+  control.setFallback(() => {
+    throw new Error("no state");
+  });
+  await callNative("show_openbot").catch(() => {});
+  expect(control.calls()[1]?.settled).toBe("rejected");
+});
+
+test("a never call stays unsettled until setAnswer settles it", async () => {
+  const control = nativeControl();
+  control.setAnswer("default_root", { mode: "never" });
+  const promise = callNative("default_root");
+  await Bun.sleep(0);
+  expect(control.calls()[0]?.settled).toBeUndefined();
+  control.setAnswer("default_root", { mode: "value", value: "/y" });
+  expect(await promise).toBe("/y");
+  expect(control.calls()[0]?.settled).toBe("resolved");
 });
