@@ -53,7 +53,9 @@ mock.module("./Mark", () => ({
 }));
 
 const { App } = await import("./App");
-const { countLines, formatSpace } = await import("./MoveToCloud");
+const { countLines, formatSpace, reconnectPage } = await import(
+  "./MoveToCloud"
+);
 
 beforeAll(() => GlobalRegistrator.register());
 afterAll(() => GlobalRegistrator.unregister());
@@ -391,9 +393,9 @@ test("the move shows each stage, and Cancel while signing in goes back with noth
   expect(view.queryByRole("button", { name: "Cancel" })).toBe(null);
 });
 
-test("a finished move says what it removed and one Reconnect per app, each opening OpenBot Cloud's connections", async () => {
+test("a finished move says what it removed and one Reconnect per app, each opening that app in OpenBot Cloud's connections", async () => {
   const view = await atConfirm();
-  answers.move_to_cloud = MOVED;
+  answers.move_to_cloud = { ...MOVED, connectAi: false };
   await userEvent.click(
     view.getByRole("button", { name: "Move to OpenBot Cloud" }),
   );
@@ -409,13 +411,91 @@ test("a finished move says what it removed and one Reconnect per app, each openi
     "Reconnect Slack",
     "Reconnect Google Drive",
   ]);
+  // Slack's own reconnect, which connects it and comes back to the list of the rest.
   await userEvent.click(reconnect[1] as HTMLElement);
   expect(called("open_moved_cloud").map((call) => call.args)).toEqual([
-    { path: "/connections" },
+    { path: "/reconnect/slack" },
   ]);
   await userEvent.click(view.getByRole("button", { name: "Open OpenBot" }));
   // Opening already: the window is on its way to OpenBot Cloud.
   expect(called("open_moved_cloud")).toHaveLength(1);
+});
+
+test("Open OpenBot after a move that left apps to reconnect opens the list of them", async () => {
+  const view = await atConfirm();
+  answers.move_to_cloud = { ...MOVED, connectAi: null };
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
+  expect(view.getAllByRole("button", { name: /^Reconnect / })).toHaveLength(3);
+  await userEvent.click(view.getByRole("button", { name: "Open OpenBot" }));
+  expect(called("open_moved_cloud").map((call) => call.args)).toEqual([
+    { path: "/reconnect" },
+  ]);
+});
+
+/**
+ * The shell opens only a plain lowercase path of at most 100 characters (`relay::app_page`), and
+ * anything else opens home. An app id it can't carry opens the list, never home.
+ */
+test("an app's reconnect is a path the shell will open, or the list", () => {
+  const page = (appId: string) => reconnectPage({ appId, appName: appId });
+  expect(page("gmail")).toBe("/reconnect/gmail");
+  expect(page("google-drive")).toBe("/reconnect/google-drive");
+  expect(page("google_calendar")).toBe("/reconnect/google_calendar");
+  for (const appId of [
+    "GitHub",
+    "ms.teams",
+    "a/b",
+    "notion?x=1",
+    "café",
+    "",
+    "x".repeat(100),
+  ])
+    expect(page(appId)).toBe("/reconnect");
+});
+
+/**
+ * Seen on 1.2.0-rc.1: the result listed the apps with Reconnect and nothing else to do, so the
+ * person read the move as done but for the apps. Reconnect landed on Connect your AI, which then
+ * dropped them on home with no app connected. A person OpenBot Cloud still needs an AI from is taken
+ * there first, and the apps wait as the step after it.
+ */
+test("a finished move that still needs the person's AI leads with Connect your AI, and no Reconnect skips it", async () => {
+  const view = await atConfirm();
+  answers.move_to_cloud = { ...MOVED, connectAi: true };
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
+  expect(view.getByText("18.4 GB of OpenBot files removed")).toBeTruthy();
+  const first = view.getByRole("heading", { name: "Connect your AI first" });
+  const then = view.getByRole("heading", { name: "Then reconnect your apps" });
+  expect(
+    first.compareDocumentPosition(then) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  // The apps are still named, as what comes next, with nothing on them to press.
+  const apps = view.getByRole("list", { name: "Apps to reconnect" });
+  expect([...apps.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+    "Gmail, sam@example.comUsed by Inbox helper",
+    "Slack",
+    "Google Drive",
+  ]);
+  expect(
+    view.getByText(/reconnect each one from a list in OpenBot Cloud/),
+  ).toBeTruthy();
+  expect(view.queryByRole("button", { name: /^Reconnect/ })).toBe(null);
+  // No way past the step: Connect your AI is the one button.
+  expect(view.queryByRole("button", { name: "Open OpenBot" })).toBe(null);
+  expect(
+    view.getAllByRole("button").map((button) => button.textContent),
+  ).toEqual(["Connect your AI"]);
+  // OpenBot Cloud runs Connect your AI first, then lands on the list of apps to reconnect.
+  await userEvent.click(view.getByRole("button", { name: "Connect your AI" }));
+  expect(called("open_moved_cloud").map((call) => call.args)).toEqual([
+    { path: "/reconnect" },
+  ]);
 });
 
 test("Open OpenBot opens OpenBot Cloud's home, and what couldn't be removed is said calmly", async () => {

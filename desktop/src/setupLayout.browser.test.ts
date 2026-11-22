@@ -163,7 +163,9 @@ function moveAnswer(command) {
   if (move === "failed")
     throw { said: "OpenBot couldn't send your Bots to OpenBot Cloud. Check your internet connection, then try again.", kind: "move-failed" };
   // \`#move-done-held\`: as on a Mac, the disk shows 4.5 of the 20.2 GB removed free so far.
+  // \`#move-done-ai\`: OpenBot Cloud still needs the person's AI, so the result leads with it.
   return {
+    connectAi: move === "done-ai",
     removedBytes: 20_200_000_000,
     diskGainedBytes: move === "done-held" ? 4_500_000_000 : 20_100_000_000,
     apps: MOVE_APPS,
@@ -3056,6 +3058,7 @@ describe.skipIf(!asked)(
         heading: "You're on OpenBot Cloud",
         move: true,
       },
+      { hash: "#move-done-ai", heading: "You're on OpenBot Cloud", move: true },
     ];
     for (const colorScheme of ["light", "dark"] as const) {
       for (const screen of SCREENS) {
@@ -3120,6 +3123,17 @@ describe.skipIf(!asked)(
             expect(said.includes("of that is free space on your disk")).toBe(
               screen.hash === "#move-done-held",
             );
+            // Still needing an AI: Connect your AI leads, and no Reconnect skips it.
+            if (screen.hash === "#move-done-ai") {
+              expect(said).toContain("Connect your AI first");
+              expect(said).toContain("Then reconnect your apps");
+              const buttons = await page.evaluate(() =>
+                [...document.querySelectorAll("main button")].map(
+                  (button) => button.textContent,
+                ),
+              );
+              expect(buttons).toEqual(["Connect your AI"]);
+            }
           } finally {
             await page.close();
           }

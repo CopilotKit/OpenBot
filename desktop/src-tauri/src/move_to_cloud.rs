@@ -353,6 +353,9 @@ pub struct Moved {
     pub notes: Vec<String>,
     /// What of OpenBot couldn't be removed from this computer.
     pub left_behind: Vec<String>,
+    /// Whether OpenBot Cloud still needs the person's AI before their Bots can run
+    /// (`Api::needs_ai_connection`), asked once the move is done. None when it couldn't be asked.
+    pub connect_ai: Option<bool>,
 }
 
 /// How long the move waits on each side, and how often it asks.
@@ -472,6 +475,7 @@ pub fn run(
             .map(|note| note.message)
             .collect(),
         left_behind,
+        connect_ai: None,
     })
 }
 
@@ -711,6 +715,17 @@ impl Api {
         format!("/api/v2/organizations/{}{path}", self.organization)
     }
 
+    /// Whether the person still has to connect their AI here before their Bots can run
+    /// (`getPersonalAiConnection`, read as `PersonalAi::needs_connecting` reads it).
+    pub fn needs_ai_connection(&self) -> Result<bool, String> {
+        let personal: PersonalAi = self.json(
+            reqwest::Method::GET,
+            &self.in_organization("/people/me/ai-connection"),
+            None,
+        )?;
+        Ok(personal.needs_connecting())
+    }
+
     fn send(
         &self,
         method: reqwest::Method,
@@ -826,6 +841,23 @@ fn idempotency_key() -> String {
     use rand::Rng;
     let bytes: [u8; 16] = rand::rng().random();
     hex(&bytes)
+}
+
+/// The person's own AI connection, as far as the move reads it (`PersonalAiConnection`).
+#[derive(Clone, Debug, Deserialize)]
+pub struct PersonalAi {
+    /// The AI their next run uses: `personal`, `organization`, or `none`.
+    pub uses: String,
+    /// Whether they must have an AI before they use OpenBot (true on OpenBot Cloud).
+    pub required: bool,
+}
+
+impl PersonalAi {
+    /// The server's two verdicts, never recomputed: required, and nothing to run on yet. The same
+    /// rule as the web app's `needsAiConnection`.
+    pub fn needs_connecting(&self) -> bool {
+        self.required && self.uses == "none"
+    }
 }
 
 /// One organization in the caller's list.
