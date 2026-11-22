@@ -46,7 +46,7 @@ import { personBody } from "./accounts-api";
  *   Claude's is sent to Desktop's port and finishes with code#state, ChatGPT's browser sign-in comes
  *   first and finishes with the address it was sent to, and cancelling or leaving stops Desktop
  *   listening. Where Desktop can't listen, the server refuses the port, or the page isn't sent to
- *   Desktop, the paste, exactly as in a browser.
+ *   Desktop, what the person gets today: Claude's paste, and ChatGPT's code sign-in first.
  * - Use an API key still connects every provider.
  * - Settings shows Your AI: theirs, which can be removed, back to the organization's.
  *
@@ -1231,26 +1231,21 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await heading(page, "Connect your AI");
         const chooser = page.locator("[data-ai-chooser]");
         // The plan's sign-in is the server's, never Desktop's. This Desktop is from before it
-        // could take the sign-in's redirect and answers nothing it is asked: ChatGPT's browser
-        // sign-in, first inside Desktop, falls back to the paste, and still finishes.
+        // could take the sign-in's redirect and answers nothing it is asked: ChatGPT signs in as
+        // it does there today, with a code, never the address paste, and still finishes.
         await chooser.getByRole("button", { name: /^OpenAI/ }).click();
         await chooser
           .getByRole("button", { name: "Sign in with ChatGPT", exact: true })
           .click();
-        const address = chooser.getByLabel("Address from your browser");
-        await address.waitFor();
-        await chooser
-          .getByText(
-            "Approve the request in OpenAI's tab. When it says “This site can't be reached”, copy its address and paste it below.",
-          )
-          .waitFor();
-        await address.fill(CHATGPT_ADDRESS);
-        await chooser
-          .getByRole("button", { name: "Finish", exact: true })
-          .click();
+        await chooser.getByText("VU3W-87566").waitFor();
         await chooser.getByText("Signed in to OpenAI.").waitFor();
-        expect(server.signIns).toEqual([{ provider: "openai" }]);
-        expect(server.finishes).toEqual([{ code: CHATGPT_ADDRESS }]);
+        expect(server.signIns).toEqual([
+          { provider: "openai", method: "device" },
+        ]);
+        expect(
+          await chooser.getByLabel("Address from your browser").count(),
+        ).toBe(0);
+        expect(server.finishes).toEqual([]);
         await chooser.getByRole("button", { name: "Back" }).click();
         server.signIns = [];
 
@@ -1528,7 +1523,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
     }, 90_000);
 
   for (const engine of engines)
-    test(`inside OpenBot Desktop, Claude falls back to today's paste when Desktop can't listen, the server refuses the port, or the page isn't Desktop's, in ${engine}`, async () => {
+    test(`inside OpenBot Desktop, Claude falls back to today's paste when Desktop can't listen, the server refuses the port, or the page isn't Desktop's, and ChatGPT to its code sign-in, in ${engine}`, async () => {
       const cases: {
         name: string;
         listens: boolean;
@@ -1633,8 +1628,11 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         }
       }
 
-      // ChatGPT, where Desktop can't listen: the browser sign-in's paste, with its warnings.
+      // ChatGPT, where Desktop can't listen: what it does today, its code sign-in first, started at
+      // once, with the address paste still the other way. Never the address paste first.
       const server = new FakeServer("none", true);
+      // The first code waits, to be seen and cancelled; the next is approved.
+      server.outcomes = ["never", "approved"];
       const page = await open(
         "/onboarding?step=ai",
         server,
@@ -1647,24 +1645,64 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await heading(page, "Connect your AI");
         const chooser = page.locator("[data-ai-chooser]");
         await chooser.getByRole("button", { name: /^OpenAI/ }).click();
-        await chooser
-          .getByRole("button", { name: "Sign in with ChatGPT", exact: true })
-          .click();
-        const address = chooser.getByLabel("Address from your browser");
-        await address.waitFor();
+        const signIn = chooser.getByRole("button", {
+          name: "Sign in with ChatGPT",
+          exact: true,
+        });
+        await signIn.click();
+        await chooser.getByText("VU3W-87566").waitFor();
         await chooser
           .getByText(
-            "Approve the request in OpenAI's tab. When it says “This site can't be reached”, copy its address and paste it below.",
+            "OpenAI opens in your browser. Enter the code shown here, then approve. It finishes on its own.",
           )
           .waitFor();
-        expect(server.signIns).toEqual([{ provider: "openai" }]);
+        expect(server.signIns).toEqual([
+          { provider: "openai", method: "device" },
+        ]);
+        expect(
+          await chooser.getByLabel("Address from your browser").count(),
+        ).toBe(0);
+        expect(
+          await chooser.getByText("This site can't be reached").count(),
+        ).toBe(0);
+        expect(await desktopCalls(page)).toEqual([
+          { command: "begin_sign_in_redirect", args: { provider: "openai" } },
+        ]);
         expect(await measured(page)).toEqual(FINE);
         await shoot(page, "desktop-fallback-chatgpt", engine, "light", WIDE);
-        await address.fill(CHATGPT_ADDRESS);
+
+        // Stopped: today's code steps, with the address paste offered below as the other way.
+        await chooser.getByRole("button", { name: "Cancel sign-in" }).click();
         await chooser
-          .getByRole("button", { name: "Finish", exact: true })
-          .click();
+          .getByRole("listitem")
+          .filter({ hasText: "Sign in with ChatGPT below to get a code." })
+          .waitFor();
+        await chooser
+          .getByText(
+            "Can't turn on device code sign-in? Your browser can sign in instead. Its last page won't load, and you paste that page's address here.",
+          )
+          .waitFor();
+        await chooser
+          .getByRole("button", { name: "Copy an address instead" })
+          .waitFor();
+        expect(await measured(page)).toEqual(FINE);
+        await shoot(
+          page,
+          "desktop-fallback-chatgpt-other-way",
+          engine,
+          "light",
+          WIDE,
+        );
+
+        // Again: the code straight away, Desktop not asked again, and it finishes.
+        await signIn.click();
         await chooser.getByText("Signed in to OpenAI.").waitFor();
+        expect(server.signIns).toEqual([
+          { provider: "openai", method: "device" },
+          { provider: "openai", method: "device" },
+        ]);
+        expect(server.finishes).toEqual([]);
+        expect((await desktopCalls(page)).length).toBe(1);
       } finally {
         await page.close();
       }

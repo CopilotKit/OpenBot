@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  fallbackMethod,
   finishingText,
   loopbackState,
   type RedirectArrival,
@@ -83,6 +84,13 @@ describe("whether Desktop takes the redirect", () => {
     expect(
       takesRedirect({ ...base, provider: "anthropic", pasteBack: true }),
     ).toBe(false);
+  });
+});
+
+describe("where Desktop can't take it, what the person gets today", () => {
+  test("Claude: its code to paste; ChatGPT: its code sign-in first, never the address paste", () => {
+    expect(fallbackMethod("anthropic")).toBeUndefined();
+    expect(fallbackMethod("openai")).toBe("device");
   });
 });
 

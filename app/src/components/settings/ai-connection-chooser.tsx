@@ -89,6 +89,7 @@ import {
   awaitSignInRedirect,
   beginSignInRedirect,
   cancelSignInRedirect,
+  fallbackMethod,
   signInThroughDesktop,
   takesRedirect,
 } from "@/lib/ai-connection/sign-in-redirect";
@@ -591,8 +592,14 @@ export function ChooseConnection({
       });
       if (through.outcome === "stopped") return false;
       if (through.outcome === "approved") return "approved";
-      // Desktop can't take it here: this provider's sign-in is pasted back from now on.
+      // Desktop can't take it here: from now on this provider signs in as it does today.
       setPasteBack(true);
+      const instead = fallbackMethod(redirectProvider);
+      if (instead === "device") {
+        // ChatGPT: today's first way, its code sign-in, started now; the address stays the other way.
+        setChatGptWay("code");
+        return serverSignIn(chosen, current, instead);
+      }
       started = through.begun;
     }
     const begun =

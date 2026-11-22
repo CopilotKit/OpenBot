@@ -22,8 +22,8 @@ import { invokeDesktop } from "@/lib/desktop/queries";
  *   listens. What arrives goes on as that whole address, as a person would paste it.
  *
  * Anything that stops this way (an OpenBot Desktop from before it could listen, a busy port, a
- * server from before it took the port, a redirect that isn't Desktop's) falls back to the paste,
- * never a dead end.
+ * server from before it took the port, a redirect that isn't Desktop's) falls back to what the
+ * person gets today, never a dead end: Claude's paste, ChatGPT's code sign-in (`fallbackMethod`).
  */
 
 export type RedirectProvider = "anthropic" | "openai";
@@ -113,6 +113,17 @@ export function takesRedirect({
   if (!inDesktop || !serverRun || pasteBack || login !== "plan") return false;
   if (provider === "anthropic") return true;
   return provider === "openai" && method !== "device";
+}
+
+/**
+ * How a sign-in Desktop can't take starts instead: what that person gets today. Claude's code to
+ * paste (its only way), and for ChatGPT its code sign-in (`device`), the first way outside Desktop,
+ * never the address paste first.
+ */
+export function fallbackMethod(
+  provider: RedirectProvider,
+): AiSignInInputMethod | undefined {
+  return provider === "openai" ? "device" : undefined;
 }
 
 /** The redirect Desktop listens at for this provider. */
