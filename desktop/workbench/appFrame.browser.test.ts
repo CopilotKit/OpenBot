@@ -13,7 +13,10 @@ const asked = process.env.OPENBOT_APP_BROWSER === "1";
 // Playwright comes from the root install, so the module is named by a variable (see
 // determinism.browser.test.ts) and only the part used here is typed.
 const PLAYWRIGHT: string = "playwright-core";
-type Frame = { evaluate<T>(run: () => T): Promise<T> };
+type Frame = {
+  evaluate<T>(run: () => T): Promise<T>;
+  evaluate<T, A>(run: (arg: A) => T, arg: A): Promise<T>;
+};
 type Response = { status(): number; url(): string };
 type ConsoleMessage = {
   type(): string;
@@ -258,21 +261,57 @@ describe.skipIf(!asked)("the app frame in the workbench page", () => {
       );
       await waitReady(page);
       await page.evaluate(() => window.__workbenchPage?.seek(1500));
-      // The fetch and the renders after the delay run on real time, so read the text when the
-      // screen has drawn (up to 5 s).
-      const frame = appFrame(page);
-      let text = "";
-      for (let i = 0; i < 50 && !text.includes("Start a conversation"); i++) {
-        text = await frame.evaluate(() => document.body.innerText.trim());
-        if (!text.includes("Start a conversation"))
-          await new Promise((resolve) => setTimeout(resolve, 100));
-      }
+      // Read at once, with no wait: a seek resolves only when the frame is quiet, so the fetch
+      // and the renders after the delay (on real time) are done.
+      const text = await appFrame(page).evaluate(() =>
+        document.body.innerText.trim(),
+      );
       expect(text).not.toBe("");
       expect(text).toContain("Start a conversation");
     } finally {
       await page.close();
     }
   }, 120_000);
+
+  // Motion asks for a draw only when its time moved, and the page clock stands still. Still
+  // motion must still draw the final values, also of entrances with variants and staggered
+  // children (sign) and of elements that mount late in a run (the conversation header).
+  for (const [scene, selector, text] of [
+    ["app-signed-out", "h1", "Sign in to OpenBot"],
+    ["app-conversation-tools", "span", "Plan for today"],
+  ] as const) {
+    test(`still motion: in ${scene} at its end, "${text}" is drawn at its final values`, async () => {
+      if (!server) throw new Error("No server.");
+      const page = await openPage();
+      try {
+        await page.goto(`${server.url}/workbench/?scene=${scene}`);
+        await waitReady(page);
+        const end = await appFrame(page).evaluate(
+          () => globalThis.__workbenchRunInfo?.end ?? 0,
+        );
+        await page.evaluate((ms) => window.__workbenchPage?.seek(ms), end);
+        const found = await appFrame(page).evaluate(
+          ([selector, text]) =>
+            Array.from(document.querySelectorAll(selector))
+              .filter((element) => element.textContent?.trim() === text)
+              .map((element) => {
+                const style = getComputedStyle(element);
+                return { opacity: style.opacity, transform: style.transform };
+              }),
+          [selector, text],
+        );
+        expect(found.length).toBeGreaterThan(0);
+        for (const style of found) {
+          expect(style.opacity).toBe("1");
+          expect(["none", "matrix(1, 0, 0, 1, 0, 0)"]).toContain(
+            style.transform,
+          );
+        }
+      } finally {
+        await page.close();
+      }
+    }, 120_000);
+  }
 
   test("the browser host has no Desktop bridge", async () => {
     if (!server) throw new Error("No server.");

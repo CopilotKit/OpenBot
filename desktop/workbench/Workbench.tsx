@@ -81,7 +81,10 @@ export type WorkbenchPage = {
   readonly kind: "desktop" | "app";
   /** Milliseconds from the scene start, on the window's clock. */
   now(): number;
-  /** Resolves when the window is ready at `ms` and has drawn one frame. */
+  /**
+   * Resolves when the window is ready at `ms` and has drawn one frame. An app window must also be
+   * quiet: no request on its way, no route that loads and no change for two frames (at most 3 s).
+   */
   seek(ms: number): Promise<void>;
   calls(): readonly Call[];
   /** True when the window has called `show_openbot` and the call resolved. */
@@ -152,6 +155,156 @@ async function settle(win: FrameWindow): Promise<void> {
   }
 }
 
+/** Animation frames in a row without a change after which an app frame is quiet. */
+const QUIET_FRAMES = 2;
+/** The longest real time a stop waits for an app frame to be quiet. Then the walk goes on. */
+const QUIET_LIMIT_MS = 3000;
+/** A frame that does not draw (a hidden tab) still lets the quiet wait count. */
+const FRAME_FALLBACK_MS = 100;
+
+/** One animation frame of the window, or FRAME_FALLBACK_MS of real time when it does not draw. */
+function frameOrFallback(win: Window): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, FRAME_FALLBACK_MS);
+    win.requestAnimationFrame(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+/** True when an API route ("GET /api/x/:id", "ALL /api/*") matches a request. */
+function routeMatches(route: string, method: string, path: string): boolean {
+  const space = route.indexOf(" ");
+  const routeMethod = route.slice(0, space);
+  if (routeMethod !== "ALL" && routeMethod !== method) return false;
+  const pattern = route
+    .slice(space + 1)
+    .split("/")
+    .map((part) =>
+      part === "*"
+        ? ".*"
+        : part.startsWith(":")
+          ? "[^/]+"
+          : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    )
+    .join("/");
+  const pathname = path.split("?")[0] ?? path;
+  return new RegExp(`^${pattern}$`).test(pathname);
+}
+
+/**
+ * True when a pending request waits on the page clock or on a person: its answer is "delay" or
+ * "never". Moving the clock (or a new answer) ends the wait, so the quiet wait does not wait for it.
+ */
+function waitsOnClock(
+  record: ApiRecord,
+  answers: readonly (readonly [string, ApiAnswer])[],
+): boolean {
+  // The newest answer wins, as in the fake API.
+  for (let i = answers.length - 1; i >= 0; i--) {
+    const [route, answer] = answers[i];
+    if (!routeMatches(route, record.method, record.path)) continue;
+    return answer.mode === "delay" || answer.mode === "never";
+  }
+  return false;
+}
+
+type RouterLike = { state?: { status?: string; isLoading?: boolean } };
+
+/**
+ * True while the app frame still works on real time: a request to the fake API is on its way, or
+ * the router loads a route (its chunks come from the dev server). A request or a native call that
+ * waits on the clock is not work on real time, and a router that waits on one is not either.
+ */
+function frameBusy(win: FrameWindow): boolean {
+  const api = win.__workbenchApi;
+  const answers = api ? [...api.answers()] : [];
+  let waitsForClock = false;
+  for (const record of api?.requests() ?? []) {
+    if (record.state !== "pending") continue;
+    if (!waitsOnClock(record, answers)) return true;
+    waitsForClock = true;
+  }
+  // A native call ends in the same task unless its answer waits on the clock or never comes.
+  if (win.__workbench?.calls().some((call) => call.settled === undefined))
+    waitsForClock = true;
+  const router = (win as { __TSR_ROUTER__?: RouterLike }).__TSR_ROUTER__;
+  const loading =
+    router?.state?.status === "pending" || router?.state?.isLoading === true;
+  return loading && !waitsForClock;
+}
+
+/**
+ * Waits until an app frame is quiet: no request on its way, no route that loads, and no change to
+ * its page, its requests or its loaded files for QUIET_FRAMES animation frames in a row. The app
+ * does that work on real time (a fetch that resolves, a route chunk, React commits), and the clock
+ * must not move while it runs: a timer that the work starts must start at the same clock time
+ * each way the walk gets there. False when the frame was not quiet after QUIET_LIMIT_MS.
+ */
+async function waitQuiet(
+  win: FrameWindow,
+  stopped: () => boolean,
+): Promise<boolean> {
+  let changed = false;
+  const mark = () => {
+    changed = true;
+  };
+  const observer = new win.MutationObserver(mark);
+  observer.observe(win.document, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+  });
+  const offApi = win.__workbenchApi?.onChange(mark);
+  let files: PerformanceObserver | null = null;
+  try {
+    files = new win.PerformanceObserver(mark);
+    files.observe({ type: "resource" });
+  } catch {
+    files = null;
+  }
+  const deadline = Date.now() + QUIET_LIMIT_MS;
+  try {
+    let quietFrames = 0;
+    while (quietFrames < QUIET_FRAMES) {
+      if (stopped()) return true;
+      if (Date.now() > deadline) return false;
+      await frameOrFallback(win);
+      if (changed || frameBusy(win)) {
+        changed = false;
+        quietFrames = 0;
+      } else quietFrames++;
+    }
+    return true;
+  } finally {
+    observer.disconnect();
+    offApi?.();
+    files?.disconnect();
+  }
+}
+
+/** What a walk tells the page at each stop. */
+type WalkHooks = {
+  /** True when a newer walk took over. */
+  stopped(): boolean;
+  /** The clock stopped and the window settled. */
+  onStop(): void;
+  /** An app frame was still not quiet after QUIET_LIMIT_MS at this clock time. */
+  onNotQuiet(ms: number): void;
+};
+
+/** Lets the window settle at a stop: a desktop window until its page stops changing, an app window until it is quiet. */
+async function settleStop(live: Live, hooks: WalkHooks): Promise<void> {
+  if (!live.app) {
+    await settle(live.win);
+    return;
+  }
+  if (!(await waitQuiet(live.win, hooks.stopped)) && !hooks.stopped())
+    hooks.onNotQuiet(live.clock.now());
+}
+
 /**
  * Takes the clock forward to `target`, stopping at each run step and at each multiple of
  * WALK_STEP_MS to let the window settle. One jump would run every step before the window draws
@@ -160,17 +313,17 @@ async function settle(win: FrameWindow): Promise<void> {
 async function walkTo(
   live: Live,
   target: number,
-  stopped: () => boolean,
-  onStop: () => void,
+  hooks: WalkHooks,
 ): Promise<boolean> {
-  const { clock, info, win } = live;
-  await settle(win);
+  const { clock, info } = live;
+  const { stopped, onStop } = hooks;
+  await settleStop(live, hooks);
   if (stopped()) return false;
   onStop();
   // Steps due now run before the first move.
   clock.advanceTo(clock.now());
   while (clock.now() < target) {
-    await settle(win);
+    await settleStop(live, hooks);
     if (stopped()) return false;
     onStop();
     const now = clock.now();
@@ -178,7 +331,7 @@ async function walkTo(
     const mark = info.nextAt(now) ?? Number.POSITIVE_INFINITY;
     clock.advanceTo(Math.min(target, boundary, mark));
   }
-  await settle(win);
+  await settleStop(live, hooks);
   if (stopped()) return false;
   onStop();
   return true;
@@ -550,6 +703,13 @@ export function WorkbenchLoaded({
     setHandbackClosed(false);
   }, [holdLayout, stopLoop]);
 
+  /** Tells the person once per clock time that a shot there can show a screen that still draws. */
+  const noteNotQuiet = useCallback((ms: number) => {
+    const text = `The app window still changed after 3 seconds at ${formatTime(ms)}. A shot or check at this time can show a screen that is not fully drawn.`;
+    console.warn(text);
+    setNotices((all) => (all.includes(text) ? all : [...all, text]));
+  }, []);
+
   /** Takes the window's clock to `target` in short steps; false when a newer walk took over. */
   const walk = useCallback(
     async (live: Live, target: number) => {
@@ -558,18 +718,17 @@ export function WorkbenchLoaded({
       // The layout is checked at each stop of the walk, and not at frames in between.
       holdLayout(true);
       try {
-        const ok = await walkTo(
-          live,
-          target,
-          () => walkRef.current !== id,
-          checkLayout,
-        );
+        const ok = await walkTo(live, target, {
+          stopped: () => walkRef.current !== id,
+          onStop: checkLayout,
+          onNotQuiet: noteNotQuiet,
+        });
         return ok && walkRef.current === id;
       } finally {
         if (walkRef.current === id) holdLayout(false);
       }
     },
-    [checkLayout, holdLayout],
+    [checkLayout, holdLayout, noteNotQuiet],
   );
 
   const attach = useCallback(
@@ -676,8 +835,13 @@ export function WorkbenchLoaded({
       );
     const live = liveRef.current;
     if (live) await fontsReady(live);
+    // An app frame does work on real time after the clock stops: ready only when it is quiet.
+    if (live?.app) {
+      const quiet = await waitQuiet(live.win, () => liveRef.current !== live);
+      if (!quiet && liveRef.current === live) noteNotQuiet(live.clock.now());
+    }
     await nextFrame(live?.win ?? window);
-  }, []);
+  }, [noteNotQuiet]);
 
   const seek = useCallback(
     async (ms: number) => {

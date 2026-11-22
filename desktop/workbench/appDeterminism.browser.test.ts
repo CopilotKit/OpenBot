@@ -146,4 +146,44 @@ describe.skipIf(!asked)("the workbench clock in an app frame", () => {
       await page.close();
     }
   }, 180_000);
+
+  test("app-connection-lost records each request at the same time on each seek path", async () => {
+    if (!browser || !server) throw new Error("No browser or server.");
+    // The navigate at 3 s loads the /settings route on real time, and the connection line's 5 s
+    // check starts when that route draws. A walk that moved the clock before the route drew put
+    // the check at 8.5 s or 9.5 s instead of 8 s.
+    const end = 13_000;
+    const times = async (query: string, seeks: number[]) => {
+      if (!browser || !server) throw new Error("No browser or server.");
+      const page = await browser.newPage({
+        viewport: { width: 1600, height: 1000 },
+        locale: "en-US",
+        timezoneId: "UTC",
+        reducedMotion: "reduce",
+      });
+      try {
+        await page.goto(
+          `${server.url}/workbench/?scene=app-connection-lost${query}`,
+        );
+        await waitReady(page);
+        for (const ms of seeks)
+          await page.evaluate((to) => window.__workbenchPage?.seek(to), ms);
+        return await page.evaluate(() =>
+          (window.__workbenchPage?.requests() ?? []).map(
+            (r) => `${r.at} ${r.method} ${r.path}`,
+          ),
+        );
+      } finally {
+        await page.close();
+      }
+    };
+    const direct = await times(`&at=${end / 1000}`, []);
+    const walked = await times("", [0, end]);
+    // Stops off the 500 ms grid, and one just before the navigate step.
+    const stopped = await times("", [1900, 2600, 3100, end]);
+    expect(walked).toEqual(direct);
+    expect(stopped).toEqual(direct);
+    // The first check after the line appears: 5 s after the /settings route drew at 3 s.
+    expect(direct.some((r) => r.startsWith("8000 GET"))).toBe(true);
+  }, 180_000);
 });
