@@ -14,7 +14,8 @@
 // writes its pid in `app-server.pid`. ensureServer() also waits for the app server, and stop()
 // makes sure the app server stopped together with the workbench server.
 //
-// Set WORKBENCH_PORT to use a port other than 3021, for example to keep a run apart from others.
+// Set WORKBENCH_PORT to use a port other than 3021, and WORKBENCH_APP_PORT to use a port other
+// than 3023 for the app server, for example to keep a run apart from others.
 import {
   closeSync,
   mkdirSync,
@@ -28,7 +29,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+export const DEFAULT_WORKBENCH_PORT = 3021;
+export const DEFAULT_APP_PORT = 3023;
+
 export const WORKBENCH_PORT = workbenchPort(process.env.WORKBENCH_PORT);
+export const WORKBENCH_APP_PORT = appPort(process.env.WORKBENCH_APP_PORT);
 export const WORKBENCH_URL = `http://localhost:${WORKBENCH_PORT}`;
 
 const CLIENT_URL = `${WORKBENCH_URL}/@vite/client`;
@@ -41,14 +46,37 @@ const STOP_TIMEOUT_MS = 5_000;
 // The desktop folder: this file is desktop/workbench/server.ts.
 const DESKTOP_DIR = `${import.meta.dir}/..`;
 
-/** The port from WORKBENCH_PORT, or 3021 when it is not set. A bad value is an error. */
-export function workbenchPort(value: string | undefined): number {
-  if (value === undefined || value === "") return 3021;
+function portFrom(
+  name: string,
+  value: string | undefined,
+  fallback: number,
+): number {
+  if (value === undefined || value === "") return fallback;
   const port = Number(value);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error(`WORKBENCH_PORT must be a port number, not "${value}".`);
+    throw new Error(`${name} must be a port number, not "${value}".`);
   }
   return port;
+}
+
+/** The port from WORKBENCH_PORT, or 3021 when it is not set. A bad value is an error. */
+export function workbenchPort(value: string | undefined): number {
+  return portFrom("WORKBENCH_PORT", value, DEFAULT_WORKBENCH_PORT);
+}
+
+/** The app server's port from WORKBENCH_APP_PORT, or 3023 when it is not set. A bad value is an error. */
+export function appPort(value: string | undefined): number {
+  return portFrom("WORKBENCH_APP_PORT", value, DEFAULT_APP_PORT);
+}
+
+/** The one-line message when the port of the workbench server or of the app server is busy. */
+export function busyPortMessage(
+  port: number,
+  server: "workbench" | "app",
+): string {
+  return server === "workbench"
+    ? `Workbench: port ${port} is busy. Stop the program that uses it, or pick another port: WORKBENCH_PORT=<port> bun run workbench, or bun run workbench --port <port>.`
+    : `Workbench: port ${port} for the app server is busy. Stop the program that uses it, or pick another port: WORKBENCH_APP_PORT=<port> bun run workbench.`;
 }
 
 /** The folder of the leases, `server.pid` and the start lock of one port. */
@@ -327,16 +355,40 @@ export async function ensureServer(): Promise<WorkbenchServer> {
   }
 }
 
+/**
+ * Starts a process that other processes share, with its output in `logPath`.
+ *
+ * The process gets its own process group. Without that, it is in the group of the process that
+ * started it, and a signal to that group (Ctrl+C, or a tool that stops a command and its group at
+ * a timeout) also stops it, while other processes still hold leases on it.
+ */
+export function spawnShared(
+  cmd: string[],
+  cwd: string,
+  logPath: string,
+): Bun.Subprocess {
+  const log = Bun.file(logPath);
+  const proc = Bun.spawn(cmd, {
+    cwd,
+    env: { ...process.env, WORKBENCH_APP_PORT: String(WORKBENCH_APP_PORT) },
+    detached: true,
+    stdin: "ignore",
+    stdout: log,
+    stderr: log,
+  });
+  proc.unref();
+  return proc;
+}
+
 /** Starts Vite and writes its pid in `server.pid`. The server outlives this process if others hold leases. */
 async function start(dir: string, deadline: number): Promise<void> {
   // The server writes to a file, not to pipes: a pipe would break when this process exits
   // while other processes still use the server.
   const logPath = join(dir, "server.log");
   writeFileSync(logPath, "");
-  const log = Bun.file(logPath);
   // `bun x vite` finds node_modules/.bin/vite of the desktop package from this cwd. --port wins
   // over the port in the config file.
-  const proc = Bun.spawn(
+  const proc = spawnShared(
     [
       "bun",
       "x",
@@ -347,9 +399,9 @@ async function start(dir: string, deadline: number): Promise<void> {
       String(WORKBENCH_PORT),
       "--strictPort",
     ],
-    { cwd: DESKTOP_DIR, stdin: "ignore", stdout: log, stderr: log },
+    DESKTOP_DIR,
+    logPath,
   );
-  proc.unref();
   writeFileSync(join(dir, "server.pid"), String(proc.pid));
 
   while (Date.now() < deadline) {

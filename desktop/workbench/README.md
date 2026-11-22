@@ -11,6 +11,34 @@ The workbench is for development only. It never goes into the shipped app.
 
 The workbench uses port 3021. The app keeps port 3020. If port 3021 is busy, the server stops and does not pick another port.
 
+The workbench also starts the app server on port 3023. The app scenes use it through `/__app/` on the workbench port.
+
+## Choose the ports
+
+To use other ports, set them when you start the workbench:
+
+```sh
+cd desktop
+WORKBENCH_PORT=4100 WORKBENCH_APP_PORT=4103 bun run workbench
+```
+
+| Setting | Port | Default |
+| --- | --- | --- |
+| `WORKBENCH_PORT`, or `bun run workbench --port <port>` | The workbench page | 3021 |
+| `WORKBENCH_APP_PORT` | The app server | 3023 |
+
+Then open http://localhost:4100/workbench/.
+
+If a port is busy, the workbench stops with one line. The line names the port and tells you how to pick another.
+
+The CLI (`workbench:shot`, `workbench:check`) and the browser tests read the same two settings. Set them to keep your run apart from the runs of other people or agents:
+
+```sh
+WORKBENCH_PORT=4100 WORKBENCH_APP_PORT=4103 bun run workbench:check
+```
+
+A running workbench keeps its config. If you change `vite.workbench.config.ts` or a file that it imports, the server tells you so. Stop and start the workbench to use the change.
+
 ## Scenes and runs
 
 A scene is one state of the window. The scene list on the left groups the scenes: Install, Update, Connected, Status, Move to Cloud, Shutting down and Security floor.
@@ -103,7 +131,7 @@ Click a warning to seek to its time.
 
 ## Run the CLI
 
-Agents use `workbench:shot` to get a picture and a report of a frame. It does not need you to start the server. It uses a server on port 3021 if one runs. If not, it starts one and stops it at the end.
+Agents use `workbench:shot` to get a picture and a report of a frame. It does not need you to start the server. It uses a server on port 3021 (or `WORKBENCH_PORT`) if one runs. If not, it starts one and stops it at the end.
 
 ```sh
 cd desktop

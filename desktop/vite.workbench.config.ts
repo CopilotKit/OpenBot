@@ -1,5 +1,6 @@
 // Workbench only. The shipped build uses vite.config.ts and never this file.
-// Port 3021 because 3020 belongs to the app.
+// Port 3021 because 3020 belongs to the app. WORKBENCH_PORT or --port picks another port, and
+// WORKBENCH_APP_PORT picks the app server's port (3023 by default).
 import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -12,8 +13,14 @@ import {
   type Plugin,
   type ViteDevServer,
 } from "vite";
-import { APP_PREFIX, APP_SERVER_PORT } from "./workbench/appContract";
-import { isAlive, leaseDir } from "./workbench/server";
+import { APP_PREFIX } from "./workbench/appContract";
+import {
+  busyPortMessage,
+  isAlive,
+  leaseDir,
+  WORKBENCH_APP_PORT,
+  WORKBENCH_PORT,
+} from "./workbench/server";
 
 const desktopDir = fileURLToPath(new URL(".", import.meta.url));
 const srcDir = `${normalizePath(desktopDir).replace(/\/$/, "")}/src/`;
@@ -48,7 +55,7 @@ function workbenchEnv(mode: string): Plugin {
   };
 }
 
-const APP_ORIGIN = `http://127.0.0.1:${APP_SERVER_PORT}`;
+const APP_ORIGIN = `http://127.0.0.1:${WORKBENCH_APP_PORT}`;
 const APP_HTML_URL = `${APP_ORIGIN}${APP_PREFIX}`;
 const APP_CLIENT_URL = `${APP_ORIGIN}${APP_PREFIX}@vite/client`;
 const APP_POLL_MS = 250;
@@ -96,9 +103,38 @@ function appFrames(): Plugin {
           res.statusCode = 502;
           res.setHeader("content-type", "text/plain; charset=utf-8");
           res.end(
-            `The app server does not answer on port ${APP_SERVER_PORT}. Run bun run workbench in app/.`,
+            `The app server does not answer on port ${WORKBENCH_APP_PORT}. Run bun run workbench in app/.`,
           );
         }
+      });
+    },
+  };
+}
+
+// Vite restarts the server when the config file or a file it imports changes. A restart closes the
+// port for a moment and stops and starts the app server, so the runs of other processes that share
+// this server fail (ERR_CONNECTION_REFUSED, then 502 on /__app/ until the app is back). The server
+// keeps its config instead and says once that a restart is needed. The imported files still get
+// normal HMR: appContract.ts, for example, is also a module of the page.
+function noConfigRestart(): Plugin {
+  return {
+    name: "workbench-no-config-restart",
+    apply: "serve",
+    configureServer(server) {
+      const configFile = server.config.configFile;
+      const deps = [...server.config.configFileDependencies];
+      (server.config.configFileDependencies as string[]).length = 0;
+      if (configFile) server.watcher.unwatch(configFile);
+      const told = new Set<string>();
+      const tell = (file: string) => {
+        if (told.has(file)) return;
+        told.add(file);
+        server.config.logger.warn(
+          `Workbench: ${file} changed. Stop and start the workbench to use the change.`,
+        );
+      };
+      server.watcher.on("change", (file) => {
+        if (deps.includes(file)) tell(file);
       });
     },
   };
@@ -146,27 +182,49 @@ async function stopEarlierAppServer(pidPath: string): Promise<void> {
 // Starts the app server (`bun run workbench` in app/) when it does not answer, so
 // `bun run workbench` in desktop/ is still the one command. The app server stops when this server
 // closes or this process ends. When the app server does not start, the desktop scenes still work.
+//
+// It starts only after this server listens: a second run on a busy port must not touch the app
+// server of the run that has the port. A busy port ends the run with one line, not a stack.
 function appServer(): Plugin {
   return {
     name: "workbench-app-server",
     apply: "serve",
     configureServer(server) {
-      // Not awaited: this server listens at once, and ensureServer() waits for the app separately.
-      void startAppServer(server);
+      const listen = server.listen.bind(server);
+      server.listen = async (...args) => {
+        try {
+          await listen(...args);
+        } catch (error) {
+          const port = server.config.server.port ?? WORKBENCH_PORT;
+          if (/already in use/.test(String((error as Error)?.message))) {
+            console.error(busyPortMessage(port, "workbench"));
+            process.exit(1);
+          }
+          throw error;
+        }
+        // Not awaited: ensureServer() waits for the app separately.
+        void startAppServer(server);
+        return server;
+      };
     },
   };
 }
 
 async function startAppServer(server: ViteDevServer): Promise<void> {
   const logger = server.config.logger;
-  const port = server.config.server.port ?? 3021;
+  // The resolved port, so `--port` alone is enough.
+  const port = server.config.server.port ?? WORKBENCH_PORT;
   const pidPath = join(leaseDir(port), APP_PID_FILE);
   await stopEarlierAppServer(pidPath);
   if (await appAnswers()) return;
 
   const child: ChildProcess = spawn("bun", ["run", "workbench"], {
     cwd: join(desktopDir, "..", "app"),
-    env: { ...process.env, WORKBENCH_PORT: String(port) },
+    env: {
+      ...process.env,
+      WORKBENCH_PORT: String(port),
+      WORKBENCH_APP_PORT: String(WORKBENCH_APP_PORT),
+    },
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -222,16 +280,22 @@ async function startAppServer(server: ViteDevServer): Promise<void> {
   }
   if (stopped) return;
   logger.error(
-    `Workbench: the app server did not answer on port ${APP_SERVER_PORT}. The desktop scenes still work.\n${stderr}`,
+    `Workbench: the app server did not answer on port ${WORKBENCH_APP_PORT}. The desktop scenes still work.\n${stderr}`,
   );
 }
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), workbenchEnv(mode), appFrames(), appServer()],
+  plugins: [
+    react(),
+    workbenchEnv(mode),
+    noConfigRestart(),
+    appFrames(),
+    appServer(),
+  ],
   root: desktopDir,
   clearScreen: false,
   server: {
-    port: 3021,
+    port: WORKBENCH_PORT,
     strictPort: true,
     proxy: { "/__app": { target: APP_ORIGIN, ws: true } },
   },

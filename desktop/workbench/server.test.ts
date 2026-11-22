@@ -3,7 +3,10 @@ import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  appPort,
+  busyPortMessage,
   type IsAlive,
+  isAlive,
   leaseDir,
   leasePid,
   releaseLease,
@@ -34,6 +37,25 @@ describe("workbenchPort", () => {
   test("refuses a value that is not a port", () => {
     expect(() => workbenchPort("abc")).toThrow("WORKBENCH_PORT");
     expect(() => workbenchPort("70000")).toThrow("WORKBENCH_PORT");
+  });
+
+  test("appPort is 3023 when WORKBENCH_APP_PORT is not set, and reads it", () => {
+    expect(appPort(undefined)).toBe(3023);
+    expect(appPort("")).toBe(3023);
+    expect(appPort("4103")).toBe(4103);
+    expect(() => appPort("x")).toThrow("WORKBENCH_APP_PORT");
+  });
+
+  test("the busy-port message is one line that names the port and how to pick another", () => {
+    const workbench = busyPortMessage(4100, "workbench");
+    expect(workbench).not.toContain("\n");
+    expect(workbench).toContain("4100");
+    expect(workbench).toContain("WORKBENCH_PORT=");
+    expect(workbench).toContain("--port");
+    const app = busyPortMessage(4103, "app");
+    expect(app).not.toContain("\n");
+    expect(app).toContain("4103");
+    expect(app).toContain("WORKBENCH_APP_PORT=");
   });
 
   test("each port has its own lease folder", () => {
@@ -133,5 +155,42 @@ describe("takeStartLock", () => {
     const dir = tempDir();
     expect(takeStartLock(dir, aliveSet(10), 10)).toBe(true);
     expect(takeStartLock(dir, aliveSet(20), 20)).toBe(true);
+  });
+});
+
+describe("spawnShared", () => {
+  // A worker's command stops with a signal to its whole process group (Ctrl+C, or a timeout).
+  // The shared server that this command started must keep running for the other lease holders.
+  test("a signal to the starter's process group does not stop the shared process", async () => {
+    const dir = tempDir();
+    const script = join(dir, "starter.ts");
+    writeFileSync(
+      script,
+      `import { spawnShared } from ${JSON.stringify(join(import.meta.dir, "server.ts"))};
+const proc = spawnShared(["sleep", "30"], ${JSON.stringify(dir)}, ${JSON.stringify(join(dir, "log"))});
+console.log(proc.pid);
+await Bun.sleep(30_000);
+`,
+    );
+    // The starter gets its own group too, so the signal below reaches only the starter's group.
+    const starter = Bun.spawn(["bun", script], {
+      detached: true,
+      stdout: "pipe",
+      stderr: "inherit",
+    });
+    const reader = starter.stdout.getReader();
+    const first = await reader.read();
+    const sharedPid = Number(new TextDecoder().decode(first.value).trim());
+    expect(Number.isInteger(sharedPid) && sharedPid > 0).toBe(true);
+    try {
+      process.kill(-starter.pid, "SIGTERM");
+      await starter.exited;
+      await Bun.sleep(100);
+      expect(isAlive(sharedPid)).toBe(true);
+    } finally {
+      try {
+        process.kill(sharedPid, "SIGKILL");
+      } catch {}
+    }
   });
 });
