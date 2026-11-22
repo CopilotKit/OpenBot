@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { type Answer, nativeControl } from "../src/fakeNative/control";
+import { PAGE_COMMANDS } from "../src/fakeNative/pageRegistry";
 import { CommandsPanel } from "./CommandsPanel";
 
 beforeAll(() => GlobalRegistrator.register());
@@ -81,4 +82,31 @@ test("with no control the Apply buttons are disabled", () => {
   );
   expect(buttons.length).toBeGreaterThan(0);
   expect(buttons.every((b) => b.disabled)).toBe(true);
+});
+
+test("with the page commands, the search filters that list", () => {
+  const control = nativeControl();
+  control.reset();
+  const view = render(
+    <CommandsPanel
+      control={control}
+      onAnswer={mock()}
+      commands={PAGE_COMMANDS}
+    />,
+  );
+  type(view.getByLabelText("Search commands"), "usage");
+  const shown = [...document.querySelectorAll("[data-command]")].map((el) =>
+    el.getAttribute("data-command"),
+  );
+  expect(shown).toContain("plugin:openbot-desktop|usage_data");
+  expect(shown).toContain("plugin:openbot-desktop|set_usage_data");
+  expect(shown).not.toContain("default_root");
+  for (const name of shown) {
+    expect(name?.startsWith("plugin:openbot-desktop|")).toBe(true);
+  }
+  type(view.getByLabelText("Search commands"), "");
+  const all = [...document.querySelectorAll("[data-command]")].map((el) =>
+    el.getAttribute("data-command"),
+  );
+  expect(all).toEqual([...PAGE_COMMANDS]);
 });

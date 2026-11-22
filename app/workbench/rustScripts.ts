@@ -12,7 +12,19 @@ export type DesktopPageScript = {
   code: string;
 };
 
-export const DESKTOP_PAGE_SCRIPT_SOURCES = [
+type DesktopPageScriptSource = {
+  /** The script's name in the workbench. Also the Rust constant's name unless `constant` says. */
+  name: string;
+  /** The Rust constant's name, when it is not `name` (a short name such as `PAGE`). */
+  constant?: string;
+  file: string;
+  /** Which OS runs it: one OS, "any" for every OS, or a list (one script for each OS). */
+  os: DesktopPageScript["os"] | readonly ("mac" | "windows")[];
+  /** Text that Rust puts before the constant when it injects it (a `format!` around it). */
+  prefix?: (os: DesktopPageScript["os"]) => string;
+};
+
+export const DESKTOP_PAGE_SCRIPT_SOURCES: readonly DesktopPageScriptSource[] = [
   {
     name: "OVERLAY_TITLE_BAR_PAGE",
     file: "desktop/src-tauri/src/main.rs",
@@ -24,7 +36,23 @@ export const DESKTOP_PAGE_SCRIPT_SOURCES = [
     file: "desktop/src-tauri/src/desktop_page.rs",
     os: "windows",
   },
-] as const;
+  // zoom::shortcut_page(): `window.__openbotZoomMenu = <macOS>;\n` and then SHORTCUT_PAGE.
+  {
+    name: "ZOOM_SHORTCUT_PAGE",
+    constant: "SHORTCUT_PAGE",
+    file: "desktop/src-tauri/src/zoom.rs",
+    os: ["mac", "windows"],
+    prefix: (os) => `window.__openbotZoomMenu = ${os === "mac"};\n`,
+  },
+  // outside_links::page_for(connected): the app frame is never the relay's page, so not connected.
+  {
+    name: "OUTSIDE_LINKS_PAGE",
+    constant: "PAGE",
+    file: "desktop/src-tauri/src/outside_links.rs",
+    os: "any",
+    prefix: () => "window.__openbotConnected = false;\n",
+  },
+];
 
 function escapeName(name: string): string {
   return name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -54,23 +82,35 @@ export function rustIncludeStr(source: string, name: string): string | null {
   return found ? (found[1] ?? null) : null;
 }
 
-/** Reads each Desktop page script. Throws when one is not where the list says. */
+function readCode(repoRoot: string, name: string, file: string): string {
+  const path = join(repoRoot, file);
+  const source = readFileSync(path, "utf8");
+  const raw = rustRawString(source, name);
+  if (raw !== null) return raw;
+  const included = rustIncludeStr(source, name);
+  if (included !== null) {
+    return readFileSync(join(dirname(path), included), "utf8");
+  }
+  throw new Error(
+    `Workbench: ${name} is not in ${file}. The desktop page scripts moved: update app/workbench/rustScripts.ts.`,
+  );
+}
+
+/**
+ * Reads each Desktop page script. Throws when one is not where the list says. A source with a list
+ * of OSes gives one script for each of them, each with the prefix that OS gets.
+ */
 export function readDesktopPageScripts(repoRoot: string): DesktopPageScript[] {
-  return DESKTOP_PAGE_SCRIPT_SOURCES.map(({ name, file, os }) => {
-    const path = join(repoRoot, file);
-    const source = readFileSync(path, "utf8");
-    const raw = rustRawString(source, name);
-    if (raw !== null) return { name, os, code: raw };
-    const included = rustIncludeStr(source, name);
-    if (included !== null) {
-      return {
+  return DESKTOP_PAGE_SCRIPT_SOURCES.flatMap(
+    ({ name, constant, file, os, prefix }) => {
+      const code = readCode(repoRoot, constant ?? name, file);
+      const systems: readonly DesktopPageScript["os"][] =
+        typeof os === "string" ? [os] : os;
+      return systems.map((one) => ({
         name,
-        os,
-        code: readFileSync(join(dirname(path), included), "utf8"),
-      };
-    }
-    throw new Error(
-      `Workbench: ${name} is not in ${file}. The desktop page scripts moved: update app/workbench/rustScripts.ts.`,
-    );
-  });
+        os: one,
+        code: prefix ? prefix(one) + code : code,
+      }));
+    },
+  );
 }

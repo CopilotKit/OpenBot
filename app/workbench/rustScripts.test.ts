@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -51,10 +57,49 @@ describe("readDesktopPageScripts on the real Rust source", () => {
   const byName = new Map(scripts.map((script) => [script.name, script]));
 
   test("every listed script has code", () => {
-    expect(scripts.map((script) => script.name)).toEqual(
+    expect([...new Set(scripts.map((script) => script.name))]).toEqual(
       DESKTOP_PAGE_SCRIPT_SOURCES.map((source) => source.name),
     );
     for (const script of scripts) expect(script.code.trim()).not.toBe("");
+  });
+
+  test("a source with a list of OSes gives one script for each", () => {
+    expect(
+      scripts.map((script) => `${script.name} ${script.os}`).sort(),
+    ).toEqual(
+      [
+        "APP_THEME_PAGE any",
+        "OUTSIDE_LINKS_PAGE any",
+        "OVERLAY_TITLE_BAR_PAGE mac",
+        "QUIT_SHORTCUT_PAGE windows",
+        "ZOOM_SHORTCUT_PAGE mac",
+        "ZOOM_SHORTCUT_PAGE windows",
+      ].sort(),
+    );
+  });
+
+  test("the zoom shortcut starts with whether the View menu answers, as zoom::shortcut_page() does", () => {
+    const zoom = scripts.filter(
+      (script) => script.name === "ZOOM_SHORTCUT_PAGE",
+    );
+    const mac = zoom.find((script) => script.os === "mac")?.code ?? "";
+    const windows = zoom.find((script) => script.os === "windows")?.code ?? "";
+    expect(mac.startsWith("window.__openbotZoomMenu = true;\n")).toBe(true);
+    expect(windows.startsWith("window.__openbotZoomMenu = false;\n")).toBe(
+      true,
+    );
+    expect(mac).toContain("window.__openbotZoomMenu === true");
+    const body = readFileSync(
+      join(root, "desktop", "src-tauri", "src", "zoom-shortcut.js"),
+      "utf8",
+    );
+    expect(mac).toBe(`window.__openbotZoomMenu = true;\n${body}`);
+  });
+
+  test("the outside links script is not the relay's, as outside_links::page_for(false) gives", () => {
+    const links = byName.get("OUTSIDE_LINKS_PAGE")?.code ?? "";
+    expect(links.startsWith("window.__openbotConnected = false;\n")).toBe(true);
+    expect(links).toContain("window.__openbotConnected === true");
   });
 
   test("each script is the one the name says", () => {

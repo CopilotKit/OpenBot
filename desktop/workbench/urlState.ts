@@ -1,6 +1,14 @@
 import type { Answer } from "../src/fakeNative/control";
+import {
+  type ApiAnswer,
+  type ApiRoute,
+  type AppHost,
+  isApiRoute,
+  type Motion,
+  parseApiAnswer,
+  type Role,
+} from "./appContract";
 import type { EnvValues, Os } from "./frameConfig";
-import type { Scene } from "./scenes/types";
 
 export type WindowSettings = {
   width: number;
@@ -19,7 +27,27 @@ export type WorkbenchState = {
   answers: Record<string, Answer>;
   env: EnvValues;
   window: WindowSettings;
+  /** API answers from the link. They come after the scene's own answers. */
+  api?: Partial<Record<ApiRoute, ApiAnswer>>;
+  app?: AppSettings;
 };
+
+/** App frame settings. `null` means: use what the scene says. */
+export type AppSettings = {
+  host: AppHost | null;
+  role: Role | null;
+  motion: Motion;
+};
+
+export const DEFAULT_APP: AppSettings = {
+  host: null,
+  role: null,
+  motion: "still",
+};
+
+const HOSTS: readonly AppHost[] = ["desktop", "browser"];
+const ROLES: readonly Role[] = ["member", "admin", "owner"];
+const MOTIONS: readonly Motion[] = ["still", "real"];
 
 export const DEFAULT_WINDOW: WindowSettings = {
   width: 1000,
@@ -50,6 +78,13 @@ export function encodeState(state: WorkbenchState): string {
     if (answer.mode !== "script") answers[name] = answer;
   }
   params.set("answers", JSON.stringify(answers));
+  if (state.api && Object.keys(state.api).length > 0) {
+    params.set("api", JSON.stringify(state.api));
+  }
+  const app = state.app ?? DEFAULT_APP;
+  if (app.host !== null) params.set("host", app.host);
+  if (app.role !== null) params.set("role", app.role);
+  if (app.motion === "real") params.set("motion", app.motion);
   return params.toString();
 }
 
@@ -98,7 +133,7 @@ function parseNumber(text: string | null): number | null {
 
 export function decodeState(
   query: string,
-  scenes: readonly Scene[],
+  scenes: readonly { id: string }[],
   commands: readonly string[],
 ): { state: WorkbenchState; notices: string[] } {
   const params = new URLSearchParams(
@@ -221,5 +256,62 @@ export function decodeState(
       );
   }
 
-  return { state: { scene, at, answers, env, window: win }, notices };
+  const api: Partial<Record<ApiRoute, ApiAnswer>> = {};
+  const apiText = params.get("api");
+  if (apiText !== null) {
+    const parsed = parseJson(apiText);
+    if (parsed.ok && isRecord(parsed.value)) {
+      for (const [route, raw] of Object.entries(parsed.value)) {
+        if (!isApiRoute(route)) {
+          notices.push(
+            `"${route}" is not an API route. Write a method and a path, for example GET /api/v2/organizations/:organizationId/bots. The workbench ignores it.`,
+          );
+          continue;
+        }
+        const answer = parseApiAnswer(raw);
+        if (answer) api[route] = answer;
+        else
+          notices.push(
+            `The API answer for "${route}" is not valid. The workbench ignores it.`,
+          );
+      }
+    } else
+      notices.push(
+        "The api value is not valid JSON. The workbench ignores it.",
+      );
+  }
+
+  const app: AppSettings = { ...DEFAULT_APP };
+  const host = params.get("host");
+  if (host !== null) {
+    const found = HOSTS.find((h) => h === host);
+    if (found) app.host = found;
+    else
+      notices.push(
+        `The host "${host}" is not valid. The workbench uses the scene's host.`,
+      );
+  }
+  const role = params.get("role");
+  if (role !== null) {
+    const found = ROLES.find((r) => r === role);
+    if (found) app.role = found;
+    else
+      notices.push(
+        `The role "${role}" is not valid. The workbench uses the scene's role.`,
+      );
+  }
+  const motion = params.get("motion");
+  if (motion !== null) {
+    const found = MOTIONS.find((m) => m === motion);
+    if (found) app.motion = found;
+    else
+      notices.push(
+        `The motion "${motion}" is not valid. The workbench uses "${DEFAULT_APP.motion}".`,
+      );
+  }
+
+  return {
+    state: { scene, at, answers, env, window: win, api, app },
+    notices,
+  };
 }

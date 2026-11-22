@@ -6,6 +6,8 @@ import { parseAnswer } from "./answerEditor";
 export type CommandsPanelProps = {
   control: NativeControl | null;
   onAnswer(command: string, answer: Answer): void;
+  /** The commands to list. Default: the setup window's commands. */
+  commands?: readonly string[];
 };
 
 type Mode = Exclude<Answer["mode"], "script">;
@@ -123,7 +125,11 @@ function CommandRow({
 }
 
 /** Search the commands and set how each one answers. */
-export function CommandsPanel({ control, onAnswer }: CommandsPanelProps) {
+export function CommandsPanel({
+  control,
+  onAnswer,
+  commands = COMMANDS,
+}: CommandsPanelProps) {
   const [query, setQuery] = useState("");
   const [answers, setAnswers] = useState<Map<string, Answer>>(
     () => new Map(control?.answers() ?? []),
@@ -141,7 +147,7 @@ export function CommandsPanel({ control, onAnswer }: CommandsPanelProps) {
   }, [control]);
 
   const needle = query.toLowerCase();
-  const shown = COMMANDS.filter((name) => name.toLowerCase().includes(needle));
+  const shown = commands.filter((name) => name.toLowerCase().includes(needle));
 
   return (
     <section>

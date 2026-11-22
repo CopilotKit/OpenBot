@@ -3,6 +3,7 @@
  * answer when the desktop window runs in a plain browser (the browser test and the workbench).
  * One per page, kept on `globalThis.__workbench`, so every copy of this module shares it.
  */
+import { PAGE_COMMANDS } from "./pageRegistry";
 import { COMMANDS } from "./registry";
 
 /**
@@ -84,7 +85,7 @@ declare global {
   var __fake: FakeGlobal | undefined;
 }
 
-const KNOWN: readonly string[] = COMMANDS;
+const KNOWN: readonly string[] = [...COMMANDS, ...PAGE_COMMANDS];
 
 function create(): Workbench {
   globalThis.__fake ??= { listeners: {}, download: null };
