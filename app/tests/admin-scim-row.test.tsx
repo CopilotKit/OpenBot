@@ -18,9 +18,9 @@ import { settleReactWork } from "./settle-react-work";
 
 /*
  * Admin, Identity providers, SCIM provisioning: what the company's directory deactivating somebody
- * does, said to the admin who set it up. Where everybody has an organization of their own, it takes
- * the person out of this organization alone; where OpenBot keeps one, it ends their access to
- * OpenBot. Answers are set on the app's one query client as the API gives them.
+ * does, said to the admin who set it up. Where people may create organizations, it takes the person
+ * out of this organization alone; where OpenBot keeps one, it ends their access to OpenBot. Answers
+ * are set on the app's one query client as the API gives them.
  */
 
 beforeAll(() => GlobalRegistrator.register());
