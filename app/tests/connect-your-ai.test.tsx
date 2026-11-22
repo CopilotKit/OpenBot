@@ -846,7 +846,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
 
   for (const engine of engines)
     for (const theme of THEMES)
-      test(`at a phone's width, scrolled to the end, Sign out clears the buttons' fade, in ${engine}, ${theme}`, async () => {
+      test(`at a phone's width, scrolled to the end, Sign out stops just above the buttons' fade as every step's last line does, in ${engine}, ${theme}`, async () => {
         const server = new FakeServer("none", true);
         server.acme = personalFor("organization");
         const page = await open("/", server, engine, theme, PHONE);
@@ -874,7 +874,11 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
             );
           });
           expect(room).not.toBeNull();
-          expect(room ?? -1).toBeGreaterThanOrEqual(0);
+          // Clear of the fade, and no further: the frame keeps the fade's height above the
+          // buttons for every step, so a step adding room of its own doubles the gap. Within a
+          // pixel, for the sub-pixel sizes text is drawn at (styles.css scales it by 15/16).
+          expect(room ?? -2).toBeGreaterThanOrEqual(-1);
+          expect(room ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(8);
           if (shots) {
             mkdirSync(shots, { recursive: true });
             await page.screenshot({
