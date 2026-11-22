@@ -10,8 +10,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 **Before upgrading.**
 
-- **Migrations run at start: eight, and none removes anything.** The database moves from
-  `0151_sign_up_switch`, where 1.1.3 left it, to `0161_ai_connection_shared_sign_in`. Every one is
+- **Migrations run at start: nine, and none removes anything.** The database moves from
+  `0151_sign_up_switch`, where 1.1.3 left it, to `0162_computer_restores`. Every one is
   an expand: a 1.1.3 server works against the new schema, so 1.1.3 upgrades with its servers
   rolling one by one, with no downtime. There is no `0154` or `0155`.
   - `0152_bot_run_client_and_outcome` keeps, for each Bot run, which app asked for it (web,
@@ -30,13 +30,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
     it does with no row.
   - `0161_ai_connection_shared_sign_in` keeps whose sign-in an organization's AI is, where an admin
     shares their own (below).
+  - `0162_computer_restores` keeps each restore of a computer from a saved copy (below): who asked,
+    which copy, and how it ended.
+- **Product analytics are on by default.** While an install is connected to CopilotKit management,
+  it sends a daily rollup of counts with its health metrics: how many people, organizations and Bots
+  there are, how many people are active, how many come back, and how many Bot runs there were. It is
+  never an email, a name, an id or any text. An install that isn't connected sends nothing.
+  `config.productAnalytics: false` (on the bundle, `openbot.config.productAnalytics: false`) turns it
+  off, whatever else is set.
 - **An empty model allowlist no longer narrows anything.** People pick from, and Bots run on, every
   model the AI connection lists until an admin narrows it: Only allowed models on and at least one
   model allowed. Before, an organization with Only allowed models off offered only its default model
   and showed no model picker, and one with it on and nothing allowed refused every run. An
   organization that has allowed models is unchanged.
 - Nothing in a Helm values file has to change. Every new chart value (under Kubernetes) is off or
-  empty by default.
+  empty by default, except `config.productAnalytics` (above).
 
 ### Your own AI on OpenBot Cloud
 
@@ -51,9 +59,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   OpenBot and OpenBot (Self-Contained) are unchanged.
 - **Sign in to ChatGPT, Claude, Google or xAI, or use a key.** Each provider's sign-in comes first,
   as OpenBot Desktop's setup window offers it, with Use an API key (or an address) as the
-  alternative. ChatGPT signs in in the browser, and the address the browser lands on is pasted back;
-  Sign in with a code instead uses ChatGPT's device code, which needs device code sign-in turned on
-  in ChatGPT's security settings. A Claude plan finishes with the code Claude's page shows. Google,
+  alternative. On the web, ChatGPT signs in with a code first. Turn on device code sign-in in
+  ChatGPT's security settings (the step links there; on a Team or Enterprise workspace its admin
+  turns it on), then enter the code OpenBot shows on OpenAI's page, and the sign-in finishes by
+  itself. Where OpenAI's page says the setting is off, the step links to it again with Get a new
+  code, and where ChatGPT gives no code at all, it says the setting is probably off. Copy an address
+  instead signs in in the browser: the steps say first that the browser ends on a page that can't
+  load, and that page's address is pasted back, by keyboard or the Paste button. A wrong address
+  keeps the box open with the reason. OpenBot Desktop's setup window still signs in to ChatGPT in
+  the browser first. A Claude plan finishes with the code Claude's page shows. Google,
   xAI and Unbiased AI finish by themselves. The server runs each sign-in, keeps what the provider
   hands back sealed for that person, renews it itself, and never sends it to the browser. Every
   model call of the person's runs goes through the model gateway with their credential.
@@ -99,6 +113,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   is restarted at a moment no run is using it (below). An operator can stop the computers of an
   organization, a person or one computer; a routine of a stopped scope fails saying so, and is never
   switched off.
+- **A saved copy of each computer every day, and restoring one when you ask.** OpenBot Cloud saves
+  every computer's files and browser sign-ins once a day and keeps the last 7. A Bot's Computer page
+  lists them under Saved copies, newest first, with Restore on each for the person whose computer it
+  is when they own the Bot, and for an admin. Restore says what it does before it starts: every file
+  and sign-in on that computer goes back to that day for every Bot on it, OpenBot saves the computer
+  as it is now first (listed as "Before restore", kept 7 days) so it can be undone, and the computer
+  restarts while routines wait. Nothing is ever restored unless somebody asks. On the same page, an
+  admin sees Restore… on each other person's row under Its computer, for that person's copies.
+  Self-hosted OpenBot keeps copies once `computers.sandbox.snapshots` is on (below).
 
 ### OpenBot Desktop
 
@@ -131,9 +154,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   The result says how much it removed, counted as the move screen counted it. When the disk shows
   much less of that free so far (a Mac can keep deleted files in a local snapshot for a while), it
   says that too. Any failure before that removes nothing. A moved person skips first-run setup in
-  OpenBot Cloud; the terms and their own AI still ask. On Windows, the Podman that OpenBot installed is removed
-  too when nothing else uses it; a Podman you installed or use stays. Keep OpenBot on this computer
-  is remembered and never asked again at launch.
+  OpenBot Cloud; the terms and their own AI still ask. When OpenBot Cloud still needs your AI, the
+  result asks you to connect it first and names the apps as the next step. OpenBot Cloud then keeps
+  a Reconnect list of the apps that moved, and Connections points to it while any is left. Each
+  app's Reconnect opens that app, and connecting it brings you back to the list with the app marked
+  reconnected. An app you don't want can be dismissed, on every device. Onboarding and Connect your
+  AI now keep where you were headed, and take you there once they're done. On Windows, the Podman
+  that OpenBot installed is removed too when nothing else uses it; a Podman you installed or use
+  stays. Keep OpenBot on this computer is remembered and never asked again at launch.
 - **Sign-out ends the browser's session at a hosted OpenBot.** A connected Desktop signs in through
   the system browser, which stayed signed in after sign-out, so the next sign-in on that computer
   came back as the previous person. Desktop now opens the OpenBot's `end_session_endpoint`, where it
@@ -183,6 +211,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   OpenBot session and its OpenBot by CopilotKit session, and the hosted authorization server
   metadata names it as `end_session_endpoint`. `GET /api/auth/hosted/sign-in` takes
   `invitationTicket` and `organizationId`.
+- **A computer's saved copies, and restoring one.** `getWorkspaceSnapshots` lists the copies of the
+  computer a Bot runs on, newest first, with the latest restore, `available` (false where this
+  OpenBot keeps none) and `canRestore`. `restoreComputer` starts a restore from one (202), with an
+  `Idempotency-Key`; one runs at a time per computer (409 `COMPUTER_RESTORE_RUNNING`). An admin may
+  name another person's computer with `computer`. A Bot's action on a computer being restored is
+  answered 503 `COMPUTER_RESTORING`, worth retrying. Both are recorded on the trail.
 - The model catalogue's `exposure` and its description say an empty allowlist means every model.
 
 ### Kubernetes
@@ -204,11 +238,30 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **`abuseWatch`** (off) watches each computer for CPU pinned at its limit and lookups its resolver
   refused, as gauges on the internal `/metrics`, and can suspend the one computer a crypto-mining
   finding traces to.
+- **`computers.sandbox.snapshots`** (off) keeps a daily copy of each computer's two volumes as CSI
+  VolumeSnapshots, the newest `keepDaily` (7), and lets people restore one (above). It needs the
+  snapshot controller and its CRDs in the cluster (on EKS, the `snapshot-controller` add-on) and a
+  VolumeSnapshotClass of the volumes' CSI driver named `className` (`openbot-workspace`). Without
+  them the server logs `computer-snapshots-unavailable` once and keeps no copies.
+- **`config.productAnalytics`** (on) is the product analytics switch (Before upgrading).
 - **`config.cloudAnalytics`** (off) is OpenBot Cloud's own counts for CopilotKit's staff console.
   Leave it off.
 
 ### Smaller changes
 
+- **A model that goes quiet while it works no longer has its answer cut off.** OpenBot's model
+  gateway closed an answer that sent nothing for 10 seconds, so a model that thought for longer
+  before its next words (a large prompt, a long think) ended the turn with a raw `ECONNRESET` error.
+  The gateway now keeps the answer open for as long as the model works.
+- **A turn whose connection is cut says the Bot stopped, and offers Carry on.** The fetch's own
+  words (`ECONNRESET: The socket connection was closed unexpectedly…`) are never shown. The turn
+  reads "The Bot stopped before it finished because OpenBot's backend stopped answering. What it
+  saved is shown here." with Carry on, and a built-in Bot whose model connection drops names the
+  provider: "The connection to Anthropic dropped. Ask the Bot to carry on." A turn that offers
+  Carry on keeps its message sent, so nothing is put back in the box to send again.
+- **A Bot on a Claude plan ends its Claude Code process when each run ends**, including a run that
+  was stopped, stopped twice, or whose request closed. Before, such a run could leave one running,
+  about 0.1 GiB each, until the machine running it ran out of memory and OpenBot stopped mid-task.
 - A Bot's step waits up to three minutes for its computer to start, up from 45 seconds, in a
   conversation, a task and a routine alike. A computer that took a minute and a half to come up used
   to answer the step "The computer is still starting", and a task's next step then read "Not done. A
