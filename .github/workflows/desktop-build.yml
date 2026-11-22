@@ -287,16 +287,6 @@ jobs:
       - name: Rust regression tests
         run: cargo test --locked --lib --bins
         working-directory: desktop/src-tauri
-      - name: TEMPORARY own_podman harness
-        if: matrix.platform == 'windows'
-        run: cargo build --locked --release --example own_podman_check
-        working-directory: desktop/src-tauri
-      - if: matrix.platform == 'windows'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: own-podman-check
-          path: desktop/src-tauri/target/release/examples/own_podman_check.exe
-          retention-days: 1
       # The binary run as the Recorder's browsers run it: the native messaging host Chrome starts, and
       # the install that writes its manifests. The host name and extension id come from
       # shared/recorder-extension.json, which the Rust reads at compile time.
