@@ -22,7 +22,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { copyText } from "@/components/settings/linked-accounts";
+import { CopyButton } from "@/components/copy-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -309,30 +309,6 @@ function Notice({ children }: { children: React.ReactNode }) {
     <p className="text-destructive text-sm" role="alert">
       {children}
     </p>
-  );
-}
-
-/** A Copy button that says whether the text landed on the clipboard. */
-function CopyButton({ label, text }: { label: string; text: string }) {
-  const [copied, setCopied] = useState<boolean | null>(null);
-  return (
-    <div className="flex shrink-0 flex-col items-end gap-1">
-      <Button
-        aria-label={label}
-        onClick={async () =>
-          setCopied(await copyText(text, navigator.clipboard))
-        }
-        size="sm"
-        variant="outline"
-      >
-        {copied ? "Copied" : "Copy"}
-      </Button>
-      {copied === false ? (
-        <span className="text-destructive text-xs" role="alert">
-          Couldn't copy. Select it and copy it yourself.
-        </span>
-      ) : null}
-    </div>
   );
 }
 

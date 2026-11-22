@@ -71,7 +71,8 @@ const engines = (process.env.OPENBOT_APP_ENGINES ?? "chromium")
 )[];
 
 const APP = join(import.meta.dir, "..");
-const ORIGIN = "http://openbot.test";
+/** On https, as OpenBot Cloud is: the page is a secure context, so the clipboard is offered. */
+const ORIGIN = "https://openbot.test";
 const ORGANIZATION = "/api/v2/organizations/default";
 const ME = `${ORGANIZATION}/people/me`;
 const PERSONAL = `${ME}/ai-connection`;
@@ -759,15 +760,7 @@ beforeAll(async () => {
     browsers.set(
       engine,
       // The CI job installs full Chromium without the headless shell.
-      // The page's origin counts as secure, as OpenBot Cloud's https is: the clipboard is offered.
-      await type.launch(
-        engine === "chromium"
-          ? {
-              channel: "chromium",
-              args: [`--unsafely-treat-insecure-origin-as-secure=${ORIGIN}`],
-            }
-          : {},
-      ),
+      await type.launch(engine === "chromium" ? { channel: "chromium" } : {}),
     );
   }
 }, 120_000);
@@ -2373,6 +2366,75 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         expect(await connected.textContent()).toContain(
           "Signed in with your ChatGPT plan.",
         );
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`the code to enter on the provider's page copies with one press, for ChatGPT and xAI, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      // Both wait to be approved, so the code stays on screen.
+      server.outcomes = ["never", "never"];
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      // Leave to read the clipboard back. WebKit writes on a press without asking, and knows only
+      // the read permission.
+      await page
+        .context()
+        .grantPermissions(
+          engine === "webkit"
+            ? ["clipboard-read"]
+            : ["clipboard-read", "clipboard-write"],
+          { origin: ORIGIN },
+        );
+      const clipboard = () =>
+        page.evaluate(() => navigator.clipboard.readText());
+      try {
+        await heading(page, "Connect your AI");
+        const chooser = page.locator("[data-ai-chooser]");
+        const copy = chooser.getByRole("button", { name: "Copy the code" });
+
+        // ChatGPT's code: copied as shown, and the button says so.
+        await chooser.getByRole("button", { name: /^OpenAI/ }).click();
+        await chooser
+          .getByRole("button", { name: "Sign in with ChatGPT", exact: true })
+          .click();
+        await chooser.getByText("VU3W-87566").waitFor();
+        expect(await copy.textContent()).toBe("Copy");
+        await copy.click();
+        await chooser
+          .getByRole("button", { name: "Copy the code" })
+          .filter({
+            hasText: "Copied",
+          })
+          .waitFor();
+        expect(await clipboard()).toBe("VU3W-87566");
+        expect(await chooser.getByRole("alert").count()).toBe(0);
+
+        // xAI's, the same way.
+        await chooser.getByRole("button", { name: "Cancel sign-in" }).click();
+        await copy.waitFor({ state: "detached" });
+        await chooser.getByRole("button", { name: "Back" }).click();
+        await chooser.getByRole("button", { name: /^xAI/ }).click();
+        await chooser
+          .getByRole("button", { name: "Sign in with xAI", exact: true })
+          .click();
+        await chooser.getByText("MQ7T-WD4X").waitFor();
+        expect(await copy.textContent()).toBe("Copy");
+        await copy.click();
+        await chooser
+          .getByRole("button", { name: "Copy the code" })
+          .filter({
+            hasText: "Copied",
+          })
+          .waitFor();
+        expect(await clipboard()).toBe("MQ7T-WD4X");
       } finally {
         await page.close();
       }
