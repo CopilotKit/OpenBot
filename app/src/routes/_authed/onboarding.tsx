@@ -20,6 +20,12 @@ import {
   OnboardingWizard,
 } from "@/components/onboarding/onboarding-wizard";
 import { Button } from "@/components/ui/button";
+import { useAiStep } from "@/components/onboarding/ai-step";
+import {
+  aiConnectionRequired,
+  needsAiConnection,
+  personalAiConnectionQueryOptions,
+} from "@/lib/ai-connection/queries";
 import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
@@ -45,8 +51,12 @@ const STEP_NUMBER = {
   welcome: 1,
   selfhost: 2,
   name: 3,
+  ai: 4,
 } as const;
 type StepId = keyof typeof STEP_NUMBER;
+
+/** The order the steps are shown in, whichever of them a person has. */
+const ORDER: StepId[] = ["welcome", "ai", "selfhost", "name"];
 
 const isStepId = (value: unknown): value is StepId =>
   typeof value === "string" && Object.hasOwn(STEP_NUMBER, value);
@@ -77,8 +87,15 @@ export const Route = createFileRoute("/_authed/onboarding")({
     const user = await context.queryClient.ensureQueryData(
       currentUserQueryOptions(),
     );
-    // Somebody who has finished, or whose deployment tracks no onboarding, has no business here.
-    if (!user || !needsOnboarding(user)) {
+    /*
+     * Somebody who has finished, or whose deployment tracks no onboarding, has no business here,
+     * unless they still have to connect their own AI: then Connect your AI is their one step, even
+     * for somebody who finished onboarding before it existed.
+     */
+    if (!user) throw redirect({ to: "/" });
+    // Asked every time, not only for somebody who finished: the step list reads it from the cache.
+    const aiRequired = await aiConnectionRequired(context.queryClient);
+    if (!needsOnboarding(user) && !aiRequired) {
       throw redirect({ to: "/" });
     }
   },
@@ -261,26 +278,57 @@ function RouteComponent() {
       Boolean(me.data?.name) &&
       me.data?.name !== me.data?.email,
   );
-  const ids: StepId[] = [
-    "welcome",
-    ...(capabilities?.localEvaluation ? (["selfhost"] as const) : []),
-    ...(nameKnown ? [] : (["name"] as const)),
-  ];
+  /*
+   * CONNECT YOUR AI, WHERE ONE IS REQUIRED AND THIS PERSON'S RUNS HAVE NONE (OpenBot Cloud, with no
+   * AI of their own or their organization's). Right after Welcome. Decided once, on arrival, like
+   * the name: connecting makes it unneeded, and deciding again would drop the step from under the
+   * person while they look at what they connected. `beforeLoad` has the answer in the cache.
+   *
+   * Somebody who finished onboarding before this step existed, or whose organization's AI went
+   * away, has it as their only step, and its button takes them into the app.
+   */
+  const personal = useQuery(personalAiConnectionQueryOptions());
+  const [aiNeeded] = React.useState(() => needsAiConnection(personal.data));
+  const [onboarded] = React.useState(
+    () =>
+      me.data !== undefined && me.data !== null && !needsOnboarding(me.data),
+  );
+  const aiConnected = personal.data ? personal.data.uses !== "none" : false;
+  const ids: StepId[] = onboarded
+    ? ["ai"]
+    : [
+        "welcome",
+        ...(aiNeeded ? (["ai"] as const) : []),
+        ...(capabilities?.localEvaluation ? (["selfhost"] as const) : []),
+        ...(nameKnown ? [] : (["name"] as const)),
+      ];
 
   /*
    * The step on screen: the address's, else the one the server saved, else the first. A step not in
-   * this person's list (OpenBot for Business for an organization's person, the name step once it is known)
-   * reads as the last one they have, once the answer that decides it is in. Arriving without a step
+   * this person's list (OpenBot for Business for an organization's person, the name step once it is
+   * known, Connect your AI once their runs have one) reads as the next one they have, or the last.
+   * No step after Connect your AI is reachable until it is connected. Arriving without a step
    * writes it into the address in place, so the entry the person lands on already names its step.
    */
   const reachable = (step: StepId | null | undefined): StepId | undefined => {
     if (!step) return undefined;
     if (step === "selfhost" && !capabilities) return step;
-    return ids.includes(step) ? step : ids[ids.length - 1];
+    const found = ids.includes(step)
+      ? step
+      : (ids.find((id) => ORDER.indexOf(id) > ORDER.indexOf(step)) ??
+        ids[ids.length - 1]);
+    if (
+      found &&
+      ids.includes("ai") &&
+      !aiConnected &&
+      ids.indexOf(found) > ids.indexOf("ai")
+    )
+      return "ai";
+    return found;
   };
   const saved = reachable(stepForNumber(me.data?.onboarding?.step));
   const asked = reachable(isStepId(search.step) ? search.step : undefined);
-  const current: StepId = asked ?? saved ?? "welcome";
+  const current: StepId = asked ?? saved ?? ids[0] ?? "welcome";
   React.useEffect(() => {
     if (asked !== undefined && asked === search.step) return;
     navigate({ to: "/onboarding", search: { step: current }, replace: true });
@@ -290,6 +338,8 @@ function RouteComponent() {
   const savedStep = me.data?.onboarding?.step;
   const { mutate: save } = advance;
   React.useEffect(() => {
+    // Somebody who finished onboarding has no place in it to keep.
+    if (onboarded) return;
     if (savedStep === undefined || savedStep === STEP_NUMBER[current]) return;
     // OpenBot for Business waits for the answer that says whether this person has one.
     if (current === "selfhost" && !capabilities) return;
@@ -302,7 +352,7 @@ function RouteComponent() {
       onError: (error) =>
         console.warn("Your place in onboarding was not saved.", error),
     });
-  }, [current, savedStep, save, capabilities]);
+  }, [current, savedStep, save, capabilities, onboarded]);
 
   /*
    * CONTINUE PUSHES, AND BACK RETURNS THROUGH HISTORY WHEN IT CAN. Continue adds an entry carrying
@@ -336,7 +386,8 @@ function RouteComponent() {
   const [finished, setFinished] = React.useState(false);
   const [leaving, setLeaving] = React.useState(false);
   const finish = async () => {
-    await complete.mutateAsync(undefined);
+    // Somebody who finished onboarding before only had their AI to connect.
+    if (!onboarded) await complete.mutateAsync(undefined);
     setFinished(true);
     await new Promise((resolve) =>
       setTimeout(resolve, reduced ? 150 : FINISH_MS),
@@ -352,6 +403,7 @@ function RouteComponent() {
 
   const name = useNameStep({ finish, finished });
   const selfhost = useBookDemoStep();
+  const ai = useAiStep();
   /*
    * The checklist says whether there is a Bot computer, and the intro shows one only where there
    * is. Until it answers, the usual case: a computer that is there.
@@ -395,6 +447,7 @@ function RouteComponent() {
       primaryDisabled: !capabilities,
       notice: capabilitiesFailed,
     },
+    ai,
     selfhost,
     name,
   };

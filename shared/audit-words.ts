@@ -53,6 +53,7 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "personal_ai_connection.replaced": "Connect a personal AI",
   "personal_ai_connection.removed": "Remove a personal AI",
   "personal_ai_connection.signed_in": "Sign in to an AI provider",
+  "service_terms.accepted": "Agree to the terms",
   "configuration.changed": "Change a setting",
   "credential.created": "Save a credential",
   "credential.rotated": "Replace a credential",

@@ -760,6 +760,231 @@ export const CompleteOnboardingResponse = zod.object({
 });
 
 /**
+ * Return the terms of service this OpenBot asks people to agree to before they use it, the version the person last agreed to and when, and whether they have to agree now. OpenBot Cloud has terms: a Terms of Service and an Acceptable Use Policy, published at the addresses given, under one version. When the version changes, acceptanceNeeded is true again until the person agrees to the new one, and the apps ask them before anything else. An agreement is the person's own, not an organization's: it holds in every organization they are in. A self-hosted OpenBot and OpenBot Desktop on its own have no terms: current is null and acceptanceNeeded is false. Only the person themselves may read it.
+ * @summary Read the terms a person has to agree to
+ */
+
+export const getServiceTermsPathPersonIdMax = 200;
+
+export const getServiceTermsPathPersonIdRegExp = new RegExp("\\S");
+
+export const GetServiceTermsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  personId: zod
+    .string()
+    .min(1)
+    .max(getServiceTermsPathPersonIdMax)
+    .regex(getServiceTermsPathPersonIdRegExp)
+    .describe(
+      "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
+    ),
+});
+
+export const getServiceTermsResponseCurrentOneVersionMax = 64;
+
+export const getServiceTermsResponseCurrentOneVersionRegExp = new RegExp(
+  "^[A-Za-z0-9._-]+$",
+);
+export const getServiceTermsResponseAcceptedOneVersionMax = 64;
+
+export const getServiceTermsResponseAcceptedOneVersionRegExp = new RegExp(
+  "^[A-Za-z0-9._-]+$",
+);
+
+export const GetServiceTermsResponse = zod
+  .object({
+    current: zod
+      .union([
+        zod
+          .object({
+            version: zod
+              .string()
+              .min(1)
+              .max(getServiceTermsResponseCurrentOneVersionMax)
+              .regex(getServiceTermsResponseCurrentOneVersionRegExp)
+              .describe(
+                "A version of the terms, such as 2026-11-21. Compared as written, never ordered.",
+              ),
+            termsOfServiceUrl: zod
+              .url()
+              .describe("Where the Terms of Service are published."),
+            acceptableUseUrl: zod
+              .url()
+              .describe("Where the Acceptable Use Policy is published."),
+          })
+          .describe(
+            "One version of the terms people agree to before they use OpenBot, and where each part is published.",
+          ),
+        zod.null(),
+      ])
+      .describe(
+        "The terms in force. Null where this OpenBot has no terms to agree to (a self-hosted OpenBot, OpenBot Desktop on its own).",
+      ),
+    accepted: zod
+      .union([
+        zod
+          .object({
+            version: zod
+              .string()
+              .min(1)
+              .max(getServiceTermsResponseAcceptedOneVersionMax)
+              .regex(getServiceTermsResponseAcceptedOneVersionRegExp)
+              .describe(
+                "A version of the terms, such as 2026-11-21. Compared as written, never ordered.",
+              ),
+            acceptedAt: zod.iso
+              .datetime({ offset: true })
+              .describe("When they agreed to it."),
+          })
+          .describe("A version of the terms the person agreed to, and when."),
+        zod.null(),
+      ])
+      .describe(
+        "The version the person last agreed to, which may be older than current. Null if they never agreed to any.",
+      ),
+    acceptanceNeeded: zod
+      .boolean()
+      .describe(
+        "Whether the person has to agree to the current terms before they use OpenBot. True while there are terms and accepted isn't the current version. The apps ask them first and let them in once they agree.",
+      ),
+  })
+  .describe(
+    "The terms this OpenBot asks people to agree to, and where the person stands. acceptanceNeeded is the server's verdict; a client renders it and never recomputes it.",
+  );
+
+/**
+ * Record that the person agreed to the terms of service, by the version they were shown, and when. The version sent must be the current one (getServiceTerms' current.version): an older one is refused with the code SERVICE_TERMS_CHANGED, so nobody is recorded as agreeing to terms they never saw. Agreeing again to the version already agreed to keeps the first time. Every agreement is kept, each version with its own time, and recorded on the audit trail. Where this OpenBot has no terms it answers 409 with the code SERVICE_TERMS_NONE. Only the person themselves may agree.
+ * @summary Agree to the current terms
+ */
+
+export const acceptServiceTermsPathPersonIdMax = 200;
+
+export const acceptServiceTermsPathPersonIdRegExp = new RegExp("\\S");
+
+export const AcceptServiceTermsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  personId: zod
+    .string()
+    .min(1)
+    .max(acceptServiceTermsPathPersonIdMax)
+    .regex(acceptServiceTermsPathPersonIdRegExp)
+    .describe(
+      "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
+    ),
+});
+
+export const acceptServiceTermsHeaderIdempotencyKeyMax = 128;
+
+export const AcceptServiceTermsHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(acceptServiceTermsHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const acceptServiceTermsBodyVersionMax = 64;
+
+export const acceptServiceTermsBodyVersionRegExp = new RegExp(
+  "^[A-Za-z0-9._-]+$",
+);
+
+export const AcceptServiceTermsBody = zod.object({
+  version: zod
+    .string()
+    .min(1)
+    .max(acceptServiceTermsBodyVersionMax)
+    .regex(acceptServiceTermsBodyVersionRegExp)
+    .describe(
+      "A version of the terms, such as 2026-11-21. Compared as written, never ordered.",
+    ),
+});
+
+export const acceptServiceTermsResponseCurrentOneVersionMax = 64;
+
+export const acceptServiceTermsResponseCurrentOneVersionRegExp = new RegExp(
+  "^[A-Za-z0-9._-]+$",
+);
+export const acceptServiceTermsResponseAcceptedOneVersionMax = 64;
+
+export const acceptServiceTermsResponseAcceptedOneVersionRegExp = new RegExp(
+  "^[A-Za-z0-9._-]+$",
+);
+
+export const AcceptServiceTermsResponse = zod
+  .object({
+    current: zod
+      .union([
+        zod
+          .object({
+            version: zod
+              .string()
+              .min(1)
+              .max(acceptServiceTermsResponseCurrentOneVersionMax)
+              .regex(acceptServiceTermsResponseCurrentOneVersionRegExp)
+              .describe(
+                "A version of the terms, such as 2026-11-21. Compared as written, never ordered.",
+              ),
+            termsOfServiceUrl: zod
+              .url()
+              .describe("Where the Terms of Service are published."),
+            acceptableUseUrl: zod
+              .url()
+              .describe("Where the Acceptable Use Policy is published."),
+          })
+          .describe(
+            "One version of the terms people agree to before they use OpenBot, and where each part is published.",
+          ),
+        zod.null(),
+      ])
+      .describe(
+        "The terms in force. Null where this OpenBot has no terms to agree to (a self-hosted OpenBot, OpenBot Desktop on its own).",
+      ),
+    accepted: zod
+      .union([
+        zod
+          .object({
+            version: zod
+              .string()
+              .min(1)
+              .max(acceptServiceTermsResponseAcceptedOneVersionMax)
+              .regex(acceptServiceTermsResponseAcceptedOneVersionRegExp)
+              .describe(
+                "A version of the terms, such as 2026-11-21. Compared as written, never ordered.",
+              ),
+            acceptedAt: zod.iso
+              .datetime({ offset: true })
+              .describe("When they agreed to it."),
+          })
+          .describe("A version of the terms the person agreed to, and when."),
+        zod.null(),
+      ])
+      .describe(
+        "The version the person last agreed to, which may be older than current. Null if they never agreed to any.",
+      ),
+    acceptanceNeeded: zod
+      .boolean()
+      .describe(
+        "Whether the person has to agree to the current terms before they use OpenBot. True while there are terms and accepted isn't the current version. The apps ask them first and let them in once they agree.",
+      ),
+  })
+  .describe(
+    "The terms this OpenBot asks people to agree to, and where the person stands. acceptanceNeeded is the server's verdict; a client renders it and never recomputes it.",
+  );
+
+/**
  * Return the instructions a person gave every Bot that works for them. Empty means they wrote none. They are the person's alone: nobody else, an administrator included, may read them.
  * @summary Read a person's standing instructions
  */

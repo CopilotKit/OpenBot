@@ -154,6 +154,8 @@ paths:
   /api/v2/organizations/{organizationId}/people/{personId}/restore-access: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1restore-access' }
   /api/v2/organizations/{organizationId}/people/{personId}/onboarding/advance: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1onboarding~1advance' }
   /api/v2/organizations/{organizationId}/people/{personId}/onboarding/complete: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1onboarding~1complete' }
+  /api/v2/organizations/{organizationId}/people/{personId}/terms: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1terms' }
+  /api/v2/organizations/{organizationId}/people/{personId}/terms/accept: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1terms~1accept' }
   /api/v2/organizations/{organizationId}/people/{personId}/instructions: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1instructions' }
   /api/v2/organizations/{organizationId}/people/{personId}/preferences: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1preferences' }
   /api/v2/organizations/{organizationId}/people/{personId}/api-keys: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1api-keys' }
@@ -596,8 +598,8 @@ components:
             computers:write: Use the mouse and keyboard on the signed-in person's Bots' computers and browsers, act on them as a Bot, and for an administrator stop, reset and update the organization's computers.
             reactions:read: Read the reactions Bots left on the signed-in person's messages.
             audit-events:read: Read the organization's audit trail, when the signed-in person is an administrator.
-            people:read: Read the signed-in person, their standing instructions and preferences, and for an administrator everybody in the organization.
-            people:write: Change the signed-in person's name, onboarding, standing instructions and preferences, and for an administrator anybody's role and access.
+            people:read: Read the signed-in person, their standing instructions and preferences, the terms they agreed to, and for an administrator everybody in the organization.
+            people:write: Change the signed-in person's name, onboarding, standing instructions and preferences, agree to the terms for them, and for an administrator anybody's role and access.
             linked-accounts:read: Read the signed-in person's linked accounts, and which services can be linked.
             linked-accounts:write: Link and unlink the signed-in person's accounts at other services.
             identity-providers:read: Read the organization's identity providers, when the signed-in person is an administrator.
