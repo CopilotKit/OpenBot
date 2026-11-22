@@ -2,7 +2,12 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ensureServer } from "./server";
+import {
+  ensureServer,
+  HOOK_START_MS,
+  HOOK_STOP_MS,
+  sharedChromium,
+} from "./server";
 
 /**
  * An app scene at a time looks the same each way you get there: opened at that time, seeked back
@@ -45,17 +50,22 @@ type Shot = { text: string; boxes: string[]; png: Uint8Array };
 let browser: Browser | undefined;
 let server: { url: string; stop(): Promise<void> } | undefined;
 
+// The hooks name their time: bun gives a hook 5 s, and a server start or stop can take longer.
+// bun test does not emit "exit", so stop() in afterAll is the only thing that gives the lease back.
+// The browser is shared by the files of the run and is not closed here (see sharedChromium).
 beforeAll(async () => {
   if (!asked) return;
   server = await ensureServer();
   const { chromium } = (await import(PLAYWRIGHT)) as { chromium: Chromium };
-  browser = await chromium.launch({ channel: "chromium" });
-});
+  // Never closed: see sharedChromium.
+  browser = await sharedChromium(() =>
+    chromium.launch({ channel: "chromium" }),
+  );
+}, HOOK_START_MS);
 
 afterAll(async () => {
-  await browser?.close();
   await server?.stop();
-});
+}, HOOK_STOP_MS);
 
 function appFrame(page: Page): Frame {
   const frame = page.frames().find((f) => f !== page.mainFrame());

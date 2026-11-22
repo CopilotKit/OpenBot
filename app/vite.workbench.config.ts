@@ -134,6 +134,14 @@ function desktopPages(): Plugin {
 export default defineConfig({
   root: appDir,
   base: "/__app/",
+  // A dependency cache for each app port: an app server on another port (another workbench run in
+  // this checkout) never optimizes the dependencies again in the folder this one serves them from.
+  cacheDir: path.join(
+    appDir,
+    "node_modules",
+    ".vite-workbench",
+    String(APP_PORT),
+  ),
   clearScreen: false,
   plugins: [
     busyPort(),
@@ -161,6 +169,9 @@ export default defineConfig({
     strictPort: true,
     hmr: { clientPort: WORKBENCH_PORT },
     fs: { allow: [repoRoot] },
+    // Each app server start runs generate:app-config, which writes this file again. Watched, every
+    // other app server of this checkout hot-updated its open frames in the middle of their runs.
+    watch: { ignored: ["**/src/lib/generated/application-config.ts"] },
   },
   optimizeDeps: {
     entries: [

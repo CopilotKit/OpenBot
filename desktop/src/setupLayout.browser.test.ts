@@ -1,5 +1,6 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
+import { sharedChromium } from "../workbench/server";
 
 /**
  * The AI step's form holds still while the install behind it comes and goes.
@@ -99,7 +100,9 @@ export function markFor(id) { return (id && byId.get(id)) ?? null; }`;
  */
 async function buildWindow(env: Record<string, string> = {}): Promise<Window> {
   const built = await Bun.build({
-    entrypoints: [new URL("./fakeNative/browserEntry.ts", import.meta.url).pathname],
+    entrypoints: [
+      new URL("./fakeNative/browserEntry.ts", import.meta.url).pathname,
+    ],
     target: "browser",
     format: "esm",
     define: {
@@ -183,15 +186,14 @@ beforeAll(async () => {
   ({ chromium } = playwright);
   // The CI job installs full Chromium without the headless shell. `OPENBOT_APP_ENGINE=webkit` is
   // for a look in the engine the Mac window draws with, on a machine that has it installed.
+  // Never closed: the browser test files of a run share it (see sharedChromium).
   browser =
     process.env.OPENBOT_APP_ENGINE === "webkit"
-      ? await playwright.webkit.launch()
-      : await chromium.launch({ channel: "chromium" });
-});
-
-afterAll(async () => {
-  await browser?.close();
-});
+      ? await sharedChromium(() => playwright.webkit.launch(), "webkit")
+      : await sharedChromium(() => chromium.launch({ channel: "chromium" }));
+  // bun gives a hook 5 s. Two builds and a browser launch can take longer on a busy machine, and
+  // a hook that runs out of time skips the file's tests while it still runs.
+}, 120_000);
 
 /** Where the form's first field is, and how tall the page is: what the window is sized to. */
 async function measure(page: Page) {
@@ -1540,14 +1542,19 @@ describe.skipIf(!asked)(
   "with scrollbars that take room, as Windows draws them",
   () => {
     test("at 1000x800, the background row holds still as the card's scrollbar comes and goes", async () => {
-      const drawn = await chromium.launch({
-        channel: "chromium",
-        ignoreDefaultArgs: ["--hide-scrollbars"],
+      // Its own browser for the scrollbars, launched once and never closed (see sharedChromium).
+      const drawn = await sharedChromium(
+        () =>
+          chromium.launch({
+            channel: "chromium",
+            ignoreDefaultArgs: ["--hide-scrollbars"],
+          }),
+        "chromium-scrollbars",
+      );
+      const page = await drawn.newPage({
+        viewport: { width: 1000, height: 800 },
       });
       try {
-        const page = await drawn.newPage({
-          viewport: { width: 1000, height: 800 },
-        });
         await toTheAiStep(page);
         const where = () =>
           page.evaluate(() => {
@@ -1581,7 +1588,7 @@ describe.skipIf(!asked)(
         expect(chosen.row).toEqual(listing.row);
         expect(chosen.tile).toEqual(listing.tile);
       } finally {
-        await drawn.close();
+        await page.close();
       }
     }, 30_000);
   },

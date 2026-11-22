@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { ensureServer } from "./server";
+import {
+  ensureServer,
+  HOOK_START_MS,
+  HOOK_STOP_MS,
+  sharedChromium,
+} from "./server";
 
 /**
  * An app scene in the workbench page: the app frame shows the app's screen when the page reports
@@ -53,17 +58,22 @@ declare global {
 let browser: Browser | undefined;
 let server: { url: string; stop(): Promise<void> } | undefined;
 
+// The hooks name their time: bun gives a hook 5 s, and a server start or stop can take longer.
+// bun test does not emit "exit", so stop() in afterAll is the only thing that gives the lease back.
+// The browser is shared by the files of the run and is not closed here (see sharedChromium).
 beforeAll(async () => {
   if (!asked) return;
   server = await ensureServer();
   const { chromium } = (await import(PLAYWRIGHT)) as { chromium: Chromium };
-  browser = await chromium.launch({ channel: "chromium" });
-});
+  // Never closed: see sharedChromium.
+  browser = await sharedChromium(() =>
+    chromium.launch({ channel: "chromium" }),
+  );
+}, HOOK_START_MS);
 
 afterAll(async () => {
-  await browser?.close();
   await server?.stop();
-});
+}, HOOK_STOP_MS);
 
 function appFrame(page: Page): Frame {
   const frame = page.frames().find((f) => f !== page.mainFrame());
@@ -354,6 +364,43 @@ describe.skipIf(!asked)("the app frame in the workbench page", () => {
           .pathname,
       }));
       expect(info).toEqual({ kind: "desktop", path: "/workbench/frame.html" });
+    } finally {
+      await page.close();
+    }
+  }, 120_000);
+
+  // A frame that unloads drops its animation frames. A seek that waited on one never ended, and a
+  // CLI shot failed with "evaluate: Resulting promise was garbage collected".
+  test("a seek ends when the app frame drops its frames and loads again", async () => {
+    if (!server) throw new Error("No server.");
+    const page = await openPage();
+    try {
+      await page.goto(`${server.url}/workbench/?scene=app-home-bots`);
+      await waitReady(page);
+      const first = await page.evaluate(async () => {
+        const iframe = document.querySelector("iframe");
+        const win = iframe?.contentWindow;
+        if (!win) throw new Error("No app frame.");
+        // From now on the frame draws no frame, as a frame that unloads.
+        win.requestAnimationFrame = () => 0;
+        const seek = window.__workbenchPage?.seek(1000);
+        const ended = await Promise.race([
+          seek?.then(() => "ended"),
+          new Promise((done) => setTimeout(() => done("hung"), 10_000)),
+        ]);
+        win.location.reload();
+        return ended;
+      });
+      expect(first).toBe("ended");
+      // The frame loaded again: a seek ends on the new load, ready, with the app drawn.
+      await page.evaluate(() => window.__workbenchPage?.seek(1000));
+      await waitReady(page);
+      const after = await page.evaluate(() => ({
+        at: window.__workbenchPage?.now(),
+        text: document.querySelector("iframe")?.contentDocument?.body.innerText,
+      }));
+      expect(after.at).toBe(1000);
+      expect(after.text).toContain("Start a conversation");
     } finally {
       await page.close();
     }

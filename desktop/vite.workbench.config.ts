@@ -349,7 +349,12 @@ export default defineConfig(({ mode }) => ({
   root: desktopDir,
   // A dependency cache for each port: a second workbench (another port, the same checkout) never
   // optimizes the dependencies again in the folder that this server serves them from.
-  cacheDir: join(desktopDir, "node_modules", ".vite-workbench", String(WORKBENCH_PORT)),
+  cacheDir: join(
+    desktopDir,
+    "node_modules",
+    ".vite-workbench",
+    String(WORKBENCH_PORT),
+  ),
   clearScreen: false,
   server: {
     port: WORKBENCH_PORT,

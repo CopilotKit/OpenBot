@@ -43,6 +43,15 @@ const APP_CLIENT_URL = `${WORKBENCH_URL}/__app/@vite/client`;
 const APP_TIMEOUT_MS = 90_000;
 const STOP_TIMEOUT_MS = 5_000;
 
+/**
+ * The time a test hook that calls ensureServer() needs: a server start, the app server, a browser.
+ * bun gives a hook 5 s by default. A hook that runs longer fails the file's tests, and bun goes on
+ * with the next file while the hook still runs.
+ */
+export const HOOK_START_MS = START_TIMEOUT_MS + APP_TIMEOUT_MS + 30_000;
+/** The time a test hook needs to close its browser and stop() the server (up to 15 s). */
+export const HOOK_STOP_MS = 30_000;
+
 // The desktop folder: this file is desktop/workbench/server.ts.
 const DESKTOP_DIR = `${import.meta.dir}/..`;
 
@@ -303,7 +312,7 @@ export async function ensureServer(): Promise<WorkbenchServer> {
   const lease = takeLease(dir);
   let released = false;
   // Sync, so it also runs in the "exit" event: a caller that never calls stop() (or exits early)
-  // still gives back its lease.
+  // still gives back its lease. `bun test` does not emit "exit": a test file must call stop().
   const release = (): number | null => {
     if (released) return null;
     released = true;
@@ -355,6 +364,34 @@ export async function ensureServer(): Promise<WorkbenchServer> {
   }
 }
 
+const browsers = new Map<string, Promise<unknown>>();
+
+/**
+ * One browser for each kind of launch in this process, never closed. For the browser test files.
+ *
+ * Bun 1.3 closes the pipes of a browser that closed again later, when it collects that child
+ * process. By then a browser launched after it can hold the same pipe numbers: its DevTools pipe
+ * closes, it exits with code 0, and Playwright does not see it, so each later call waits forever.
+ * `bun test a b c` runs the files in one process, so the second browser of a run could die in
+ * the middle of its file, and every file after it timed out.
+ *
+ * A browser that is never closed has no pipes to close again. Its pipe closes when the process
+ * exits, and the browser then exits too. `launch` starts the browser the first time for `key`.
+ */
+export function sharedChromium<B>(
+  launch: () => Promise<B>,
+  key = "chromium",
+): Promise<B> {
+  let browser = browsers.get(key) as Promise<B> | undefined;
+  if (!browser) {
+    browser = launch();
+    browsers.set(key, browser);
+    // A launch that failed does not stay: the next file tries again.
+    browser.catch(() => browsers.delete(key));
+  }
+  return browser;
+}
+
 /**
  * Starts a process that other processes share, with its output in `logPath`.
  *
@@ -370,7 +407,14 @@ export function spawnShared(
   const log = Bun.file(logPath);
   const proc = Bun.spawn(cmd, {
     cwd,
-    env: { ...process.env, WORKBENCH_APP_PORT: String(WORKBENCH_APP_PORT) },
+    env: {
+      ...process.env,
+      WORKBENCH_APP_PORT: String(WORKBENCH_APP_PORT),
+      // `bun test` sets NODE_ENV=test. Vite puts NODE_ENV in the hash of its dependency cache, so
+      // a server that a test started and one that a person started optimized the dependencies
+      // again on each start, under the feet of the other server's open windows.
+      NODE_ENV: "development",
+    },
     detached: true,
     stdin: "ignore",
     stdout: log,
