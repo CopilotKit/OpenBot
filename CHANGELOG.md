@@ -118,15 +118,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
     (the same parent domain, https and port). The token and revocation endpoints must still be on
     the address itself.
 - **Move OpenBot (Self-Contained) to OpenBot Cloud.** After the update, a computer that runs OpenBot
-  (Self-Contained) is asked once whether to move to OpenBot Cloud, with the space it would free, and
-  Settings offers Move to OpenBot Cloud until it has moved. The move lists what moves (Bots, skills,
-  conversations, memories, routines, goals, check-ins and files) and the app connections to connect
-  again, which never move. Your AI key comes along, sealed so only your OpenBot Cloud account can
-  read it, unless you untick it. Desktop signs in to OpenBot Cloud, packs everything up, sends it part
-  by part, has OpenBot Cloud add it and check it, and only once OpenBot Cloud's counts match removes
-  OpenBot from this computer, its volumes and images included, and says how much space that freed.
-  Any failure before that removes nothing. A moved person skips first-run setup in OpenBot Cloud;
-  the terms and their own AI still ask. On Windows, the Podman that OpenBot installed is removed
+  (Self-Contained) is asked once whether to move to OpenBot Cloud, with how much of OpenBot's files
+  the move removes, and Settings offers Move to OpenBot Cloud until it has moved. The move lists
+  what moves (Bots, skills, conversations, memories, routines, goals, check-ins and files) and the
+  app connections to connect again, which never move. Your AI key comes along, sealed so only your
+  OpenBot Cloud account can read it, unless you untick it. Desktop signs in to OpenBot Cloud, packs
+  everything up, sends it part by part, has OpenBot Cloud add it and check it, and only once
+  OpenBot Cloud's counts match removes OpenBot from this computer, its volumes and images included.
+  The result says how much it removed, counted as the move screen counted it. When the disk shows
+  much less of that free so far (a Mac can keep deleted files in a local snapshot for a while), it
+  says that too. Any failure before that removes nothing. A moved person skips first-run setup in
+  OpenBot Cloud; the terms and their own AI still ask. On Windows, the Podman that OpenBot installed is removed
   too when nothing else uses it; a Podman you installed or use stays. Keep OpenBot on this computer
   is remembered and never asked again at launch.
 - **Sign-out ends the browser's session at a hosted OpenBot.** A connected Desktop signs in through

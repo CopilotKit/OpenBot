@@ -362,7 +362,7 @@ fn a_move_that_arrives_and_matches_removes_openbot_and_says_what_it_freed() {
     let moved = run(&mut local, &mut cloud, &mut here, &asked(), &mut steps).unwrap();
 
     assert!(here.moved && here.removed);
-    assert_eq!(moved.freed_bytes, Some(7_000_000_000));
+    assert_eq!(moved.removed_bytes, Some(7_000_000_000));
     assert_eq!(moved.apps, [gmail()]);
     assert_eq!(moved.notes, ["Research runs on an ordinary computer here."]);
     // Part 1, which carries the manifest, first; every part arrived as it left.
@@ -531,30 +531,24 @@ fn a_failed_import_is_applied_once_more() {
     assert!(here.removed);
 }
 
-/// The freed figure is what the files measured, held to what the disk gained: box B's files measured
-/// 12.0 GB while its disk gained 10.8 GB, and the screen said 12.0. A disk that didn't move (another
-/// program wrote meanwhile) or couldn't be read leaves the files' figure.
+/// What was removed is what the files measured before less what is left, whatever the disk says;
+/// what the disk gained is its own figure, beside it. Box B's files measured 12.0 GB while its disk
+/// gained 10.8 GB. A disk that didn't grow (another program wrote meanwhile) or couldn't be read
+/// says nothing.
 #[test]
-fn the_space_freed_is_never_more_than_the_disk_gained() {
+fn what_was_removed_and_what_the_disk_gained_are_each_their_own() {
     const GB: u64 = 1_000_000_000;
+    assert_eq!(removed(Some(12 * GB), Some(0)), Some(12 * GB));
+    assert_eq!(removed(Some(12 * GB), None), Some(12 * GB));
+    assert_eq!(removed(Some(12 * GB), Some(GB)), Some(11 * GB));
+    assert_eq!(removed(None, Some(0)), None);
     assert_eq!(
-        freed(
-            (Some(12 * GB), Some(0)),
-            (Some(106_810_000_000), Some(117_610_000_000))
-        ),
+        disk_gained(Some(106_810_000_000), Some(117_610_000_000)),
         Some(10_800_000_000)
     );
-    assert_eq!(
-        freed((Some(12 * GB), Some(0)), (Some(100 * GB), Some(115 * GB))),
-        Some(12 * GB)
-    );
-    assert_eq!(
-        freed((Some(12 * GB), Some(0)), (Some(100 * GB), Some(99 * GB))),
-        Some(12 * GB)
-    );
-    assert_eq!(freed((Some(12 * GB), None), (None, None)), Some(12 * GB));
-    assert_eq!(freed((None, None), (Some(GB), Some(3 * GB))), Some(2 * GB));
-    assert_eq!(freed((None, None), (None, None)), None);
+    assert_eq!(disk_gained(Some(100 * GB), Some(99 * GB)), None);
+    assert_eq!(disk_gained(Some(100 * GB), Some(100 * GB)), None);
+    assert_eq!(disk_gained(None, Some(3 * GB)), None);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -645,6 +639,174 @@ fn a_macs_machine_disk_is_found_through_its_provider() {
     );
     assert!(footprint(&machine_disks(&inspected, "openbot", Some(&data))) >= 8192);
     let _ = std::fs::remove_dir_all(home);
+}
+
+// ------------------------------------------------------------------------------------------------
+// What the move screens promise, and what the result says.
+
+/// Podman 6.1's `podman machine inspect openbot` on a Mac, as it printed it on the cloud Mac, paths
+/// moved under `home`: no disk named, the provider only through `ConfigDir`.
+fn podman_61_inspect(home: &Path) -> String {
+    serde_json::json!([{
+        "ConfigDir": { "Path": home.join(".config/containers/podman/machine/libkrun").display().to_string() },
+        "ConnectionInfo": { "PodmanSocket": { "Path": "/tmp/podman/openbot-api.sock" }, "PodmanPipe": null },
+        "Created": "2026-11-22T15:58:37.375Z",
+        "LastUp": "2026-11-22T16:38:54.845Z",
+        "Name": "openbot",
+        "Resources": { "CPUs": 4, "DiskSize": 60, "Memory": 6144, "USBs": [] },
+        "SSHConfig": {
+            "IdentityPath": home.join(".local/share/containers/podman/machine/machine").display().to_string(),
+            "Port": 49812,
+            "RemoteUsername": "core"
+        },
+        "State": "running",
+        "UserModeNetworking": true,
+        "Rootful": true,
+        "Rosetta": false
+    }])
+    .to_string()
+}
+
+/**
+A Mac with OpenBot (Self-Contained) on its own Podman 6.1 machine, as 1.2.0-rc.1 left it: the
+installation folder, the downloads, and the machine's sparse disk in the provider's data folder.
+Removing OpenBot deletes all of them, but the disk shows only `shown` of what was deleted as free
+at once: a local snapshot taken a few minutes before keeps the rest.
+*/
+struct MacWithSnapshot {
+    home: PathBuf,
+    root: PathBuf,
+    disk: PathBuf,
+    /// What `podman machine inspect openbot` prints, until the machine is removed.
+    inspected: Option<String>,
+    free: u64,
+    shown: (u64, u64),
+    /// `podman machine rm` fails and leaves the disk, though Podman no longer names the machine.
+    machine_stays: bool,
+    measured: Footprint,
+}
+
+impl MacWithSnapshot {
+    fn new(shown: (u64, u64)) -> MacWithSnapshot {
+        let home = crate::test_support::temp_root("move-mac-snapshot");
+        let root = installation(&home);
+        let downloads = home.join("OpenBot/openbot-engine/images");
+        std::fs::create_dir_all(&downloads).unwrap();
+        std::fs::write(downloads.join("blob"), vec![5u8; 1_000_000]).unwrap();
+        let folder = home.join(".local/share/containers/podman/machine/libkrun");
+        std::fs::create_dir_all(&folder).unwrap();
+        // Sparse, as Podman makes it: long, and only what the machine wrote on disk.
+        let disk = folder.join("openbot-arm64.raw");
+        let mut file = std::fs::File::create(&disk).unwrap();
+        file.set_len(64 * 1024 * 1024).unwrap();
+        for at in [0u64, 8, 40] {
+            use std::io::{Seek, SeekFrom};
+            file.seek(SeekFrom::Start(at * 1024 * 1024)).unwrap();
+            file.write_all(&vec![9u8; 2 * 1024 * 1024]).unwrap();
+        }
+        drop(file);
+        MacWithSnapshot {
+            inspected: Some(podman_61_inspect(&home)),
+            home,
+            root,
+            disk,
+            free: 844_165_000_000,
+            shown,
+            machine_stays: false,
+            measured: Footprint::default(),
+        }
+    }
+
+    /// OpenBot's files, found as the move finds them on a Mac: the installation's own and its
+    /// downloads, and the machine's disk through what Podman's inspect prints.
+    fn parts(&self) -> Vec<PathBuf> {
+        let mut parts = crate::uninstall::installation_parts(&self.root, Some(&self.home));
+        if let Some(inspected) = &self.inspected {
+            parts.extend(machine_disks(
+                inspected,
+                "openbot",
+                Some(&self.home.join(".local/share")),
+            ));
+        }
+        parts
+    }
+}
+
+/// As `desktop_move`'s `ThisComputer` measures: the parts found once, then measured again.
+impl Here for MacWithSnapshot {
+    fn footprint(&mut self) -> Option<u64> {
+        let parts = self.parts();
+        self.measured.measure(|| parts)
+    }
+    fn moved(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+    /// `podman machine rm openbot` deletes the disk and Podman no longer knows the machine, then
+    /// the installation's files go.
+    fn remove(&mut self) -> Vec<String> {
+        let before = footprint(&self.parts());
+        if !self.machine_stays {
+            std::fs::remove_file(&self.disk).unwrap();
+        }
+        self.inspected = None;
+        crate::uninstall::remove_installation(&self.root, Some(&self.home), false).unwrap();
+        let left = if self.machine_stays {
+            footprint(std::slice::from_ref(&self.disk))
+        } else {
+            0
+        };
+        self.free += (before - left) * self.shown.0 / self.shown.1;
+        Vec::new()
+    }
+    fn free_space(&mut self) -> Option<u64> {
+        Some(self.free)
+    }
+}
+
+/// Seen on a Mac with Apple silicon, 1.2.0-rc.1 moved to OpenBot Cloud: the move screen said
+/// "Frees about 20.2 GB", then the result said "4.5 GB freed on this computer". The files were all
+/// gone; the disk showed 4.5 of the 20.2 GB free at once. The result says what the move removed,
+/// counted as the move screen counted it, and the disk's own figure beside it.
+#[test]
+fn the_result_counts_what_the_move_screen_counted() {
+    let mut mac = MacWithSnapshot::new((45, 202));
+    // What the move screen says: `move_offer` and `move_preview` measure these parts this way.
+    let promised = footprint(&mac.parts());
+    assert!(promised >= 7 * 1024 * 1024, "{promised}");
+    let moved = run(
+        &mut MemoryLocal::new(bundle(&[1000, 400, 7])),
+        &mut MemoryCloud::default(),
+        &mut mac,
+        &asked(),
+        &mut Steps::default(),
+    )
+    .unwrap();
+    assert!(!mac.disk.exists() && !mac.root.exists());
+    assert_eq!(moved.removed_bytes, Some(promised));
+    assert_eq!(moved.disk_gained_bytes, Some(promised * 45 / 202));
+    let _ = std::fs::remove_dir_all(&mac.home);
+}
+
+/// A machine whose removal failed is no longer named by Podman, but its disk is still there: the
+/// result measures the paths it measured before, so that disk is not counted as removed.
+#[test]
+fn a_disk_the_removal_left_is_not_counted_as_removed() {
+    let mut mac = MacWithSnapshot::new((1, 1));
+    mac.machine_stays = true;
+    let promised = footprint(&mac.parts());
+    let disk = footprint(std::slice::from_ref(&mac.disk));
+    let moved = run(
+        &mut MemoryLocal::new(bundle(&[1000, 400, 7])),
+        &mut MemoryCloud::default(),
+        &mut mac,
+        &asked(),
+        &mut Steps::default(),
+    )
+    .unwrap();
+    assert!(mac.disk.exists() && !mac.root.exists());
+    assert_eq!(moved.removed_bytes, Some(promised - disk));
+    assert_eq!(moved.disk_gained_bytes, Some(promised - disk));
+    let _ = std::fs::remove_dir_all(&mac.home);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1061,8 +1223,8 @@ fn a_real_move_removes_the_installation_and_reports_the_space_it_freed() {
     assert!(calls.contains(&"remove images".to_owned()));
     assert!(moved.left_behind.is_empty(), "{:?}", moved.left_behind);
     // At least the bytes written, as the disk holds them.
-    let freed = moved.freed_bytes.unwrap();
-    assert!(freed >= 2_902_734, "{freed}");
+    let removed = moved.removed_bytes.unwrap();
+    assert!(removed >= 2_902_734, "{removed}");
     assert_eq!(moved.apps[0].app_name, "Gmail");
     let _ = std::fs::remove_dir_all(home);
 }

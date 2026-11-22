@@ -35,7 +35,8 @@ import {
  * Whether this window offers the move to OpenBot Cloud, as the shell answers `move_offer`. `due`:
  * OpenBot is set up and runs on this computer, and the person has never answered. `fromSettings`:
  * Settings' "Move to OpenBot Cloud" sent the window here, answered once. `footprintBytes`: what
- * OpenBot takes on this computer now, or null when it couldn't be measured.
+ * OpenBot's own files take on this computer now, which the move removes, or null when it couldn't
+ * be measured. The finished move's `removedBytes` counts the same files the same way.
  */
 export type MoveOffer = {
   due: boolean;
@@ -63,7 +64,10 @@ export type MovePreview = {
 
 /** What a finished move answers (`move_to_cloud`). */
 export type Moved = {
-  freedBytes: number | null;
+  /** What the move removed of OpenBot's files, counted as `footprintBytes` counts them. */
+  removedBytes: number | null;
+  /** How much more free space the disk showed right after, which can be less for a while. */
+  diskGainedBytes: number | null;
   apps: ReconnectApp[];
   /** Plain sentences from OpenBot Cloud about things that moved differently. */
   notes: string[];
@@ -156,6 +160,28 @@ export function countLines(
       },
     ];
   });
+}
+
+/**
+ * What the move removes, as the choice says it. The result says the same figure, counted the same
+ * way: "OpenBot files", never "frees", because the disk can show less of it free for a while.
+ */
+export function removesSaid(bytes: number): string {
+  return `This removes about ${formatSpace(bytes)} of OpenBot files from this computer.`;
+}
+
+/**
+ * Whether the disk showed much less free space than the move removed. Seen on a Mac: 20.2 GB of
+ * files removed and 4.5 GB more free at once, the rest most likely kept by a local snapshot taken a
+ * few minutes before. A gap of a tenth or so (12.0 GB removed, 10.8 GB more free on a Windows box)
+ * is the disk's own bookkeeping and isn't said.
+ */
+export function heldBack(moved: Moved): boolean {
+  return (
+    moved.removedBytes != null &&
+    moved.diskGainedBytes != null &&
+    moved.diskGainedBytes < moved.removedBytes * 0.75
+  );
 }
 
 /** Disk space as a person reads it: "18.4 GB", or "640 MB" under a gigabyte. */
@@ -509,8 +535,7 @@ function Choice({
           </span>
           <span className="tile-summary">
             {WHAT_MOVES} move to your OpenBot Cloud account.
-            {footprintBytes != null &&
-              ` This frees about ${formatSpace(footprintBytes)} on this computer.`}
+            {footprintBytes != null && ` ${removesSaid(footprintBytes)}`}
           </span>
         </label>
         <label className={rowClass(picked === "keep")}>
@@ -664,7 +689,7 @@ function Confirm({
         ) : (
           <p className="footnote">
             {footprintBytes != null &&
-              `Frees about ${formatSpace(footprintBytes)}. `}
+              `Removes about ${formatSpace(footprintBytes)} of OpenBot files. `}
             {NOTHING_REMOVED_UNTIL_CHECKED}
           </p>
         )}
@@ -740,14 +765,25 @@ function Done({ moved }: { moved: Moved }) {
       <p className="lede">
         {WHAT_MOVES} are in your OpenBot Cloud account now.
       </p>
-      {moved.freedBytes != null && moved.freedBytes > 0 && (
-        <p className="move-freed">
+      {moved.removedBytes != null && moved.removedBytes > 0 && (
+        <div className="move-freed">
           <IconCircleCheck stroke={1.75} aria-hidden="true" />
-          <span>
-            <strong>{formatSpace(moved.freedBytes)} freed</strong> on this
-            computer
-          </span>
-        </p>
+          <div>
+            <p>
+              <strong>
+                {formatSpace(moved.removedBytes)} of OpenBot files removed
+              </strong>{" "}
+              from this computer
+            </p>
+            {heldBack(moved) && moved.diskGainedBytes != null && (
+              <p className="move-freed-held">
+                So far, {formatSpace(moved.diskGainedBytes)} of that is free
+                space on your disk. Your computer can keep deleted files in a
+                backup snapshot for a while before it frees their space.
+              </p>
+            )}
+          </div>
+        </div>
       )}
       {moved.apps.length > 0 && (
         <section
