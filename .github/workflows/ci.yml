@@ -419,7 +419,9 @@ jobs:
   # The desktop setup window's, for the same reason as the list above: the AI step's form holding
   # still while the install behind it comes and goes. It bundles the window from the desktop's own
   # dependencies. A few files, so it is its own job rather than one of the list's workers. In the
-  # image, as above.
+  # image, as above. The workbench's app scenes run here too: the real app (app/) in the workbench's
+  # app frame, on the fake Desktop bridge and the fake API. The app needs its generated config before
+  # its workbench server starts, and a full build of the app must hold nothing of the workbench.
   app-browser-desktop:
     name: app (real browser, desktop setup window)
     needs: changes
@@ -437,21 +439,25 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun install --frozen-lockfile
         working-directory: desktop
+      - run: bun run generate:app-config
       - run: |
           docker run --rm --ipc=host \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE/desktop" \
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 \
             "$PLAYWRIGHT_IMAGE" \
-            bun test src/setupLayout.browser.test.ts workbench/determinism.browser.test.ts workbench/layoutWatch.browser.test.ts workbench/shot.browser.test.ts
+            bun test src/setupLayout.browser.test.ts workbench/determinism.browser.test.ts workbench/layoutWatch.browser.test.ts workbench/shot.browser.test.ts workbench/appFrame.browser.test.ts workbench/appDeterminism.browser.test.ts workbench/appShot.browser.test.ts
       # The workbench's run check: every scene's run walked to its end, failing on a step that has
-      # nothing to click or type into, or a run that stalls.
+      # nothing to click or type into, or a run that stalls. It walks the app scenes too, and fails
+      # on an app request that has no answer or an error in the app.
       - run: |
           docker run --rm --ipc=host \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE/desktop" \
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             "$PLAYWRIGHT_IMAGE" \
             bun run workbench:check
+      # A full build of the app holds nothing of the workbench. On the runner, not in the image.
+      - run: OPENBOT_APP_BUILD_GUARD=1 bun test app/workbench/shippedBuild.test.ts
 
   # The suite in shards, one runner each, so the run takes as long as its slowest shard rather than
   # as long as every file one after another. `bun test --shard` does the split, cut by the per-file
