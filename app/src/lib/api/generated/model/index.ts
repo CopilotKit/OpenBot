@@ -677,6 +677,7 @@ export * from "./decideApprovalRequest";
 export * from "./declineInvitationHeaders";
 export * from "./declineSharedUseRequestHeaders";
 export * from "./declineSkillSharingHeaders";
+export * from "./deleteAiConnectionHeaders";
 export * from "./deleteApiKeyHeaders";
 export * from "./deleteAppAccessRequestHeaders";
 export * from "./deleteAppHeaders";
