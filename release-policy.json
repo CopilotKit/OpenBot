@@ -16,7 +16,7 @@
         "0082_routine_goal",
         "0077_channel_opening"
       ],
-      "to": "0151_sign_up_switch",
+      "to": "0161_ai_connection_shared_sign_in",
       "rollbackCompatible": false
     },
     "intelligenceCapabilities": []
