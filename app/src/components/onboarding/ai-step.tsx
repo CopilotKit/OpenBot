@@ -72,11 +72,11 @@ export function useAiStep(): OnboardingStep {
         <div className="flex flex-col gap-8">
           <AiChooserPane personal={personal.data} />
           {/*
-           * Room below it for the fade above the phone's pinned buttons (`before:h-8` in the frame's
-           * footer) and the frame's 16px gutter past it, so scrolled to the end, Sign out reads
-           * clear of it.
+           * No room of its own below: the frame keeps the fade's height above the phone's pinned
+           * buttons for every step, so scrolled to the end Sign out stops just above the fade, as
+           * Welcome's and the terms step's last lines do.
            */}
-          <div className="pb-12 lg:hidden">
+          <div className="lg:hidden">
             <WayOut />
           </div>
         </div>
