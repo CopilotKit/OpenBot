@@ -597,12 +597,17 @@ struct Answered {
     retry_after: Option<u64>,
 }
 
+/// The organization OpenBot (Self-Contained) answers for: it has one, and the API names it
+/// `default`. Its server doesn't list the caller's organizations, which needs the sign-in an
+/// organization-keeping OpenBot has (box A: `/api/v2/people/me/organizations` answered 404).
+pub const THIS_COMPUTERS_ORGANIZATION: &str = "default";
+
 impl Api {
-    /// The API at `base`, in the organization `pick` chooses from the caller's own list.
-    pub fn open(
+    /// The API at `base`, in the organization `organization` (an id or a slug).
+    pub fn at(
         base: &str,
         credentials: Box<dyn Credentials>,
-        pick: fn(&[Organization]) -> Option<String>,
+        organization: &str,
     ) -> Result<Api, String> {
         let client = reqwest::blocking::Client::builder()
             .connect_timeout(Duration::from_secs(20))
@@ -611,12 +616,21 @@ impl Api {
             .default_headers(crate::client_version::headers())
             .build()
             .map_err(|error| error.to_string())?;
-        let mut api = Api {
+        Ok(Api {
             base: base.trim_end_matches('/').to_owned(),
-            organization: String::new(),
+            organization: organization.to_owned(),
             credentials,
             client,
-        };
+        })
+    }
+
+    /// The API at `base`, in the organization `pick` chooses from the caller's own list.
+    pub fn open(
+        base: &str,
+        credentials: Box<dyn Credentials>,
+        pick: fn(&[Organization]) -> Option<String>,
+    ) -> Result<Api, String> {
+        let mut api = Api::at(base, credentials, "")?;
         let page: OrganizationPage = api.json(
             reqwest::Method::GET,
             "/api/v2/people/me/organizations",
@@ -765,15 +779,6 @@ pub struct Organization {
 #[derive(Deserialize)]
 struct OrganizationPage {
     organizations: Vec<Organization>,
-}
-
-/// Here: the organization the person works in on this computer (a personal OpenBot has one).
-pub fn this_computers_organization(list: &[Organization]) -> Option<String> {
-    list.iter()
-        .find(|organization| organization.active)
-        .or_else(|| list.iter().find(|organization| organization.personal))
-        .or_else(|| list.first())
-        .map(|organization| organization.id.clone())
 }
 
 /// On Cloud: the person's own organization, the one Cloud made for them.

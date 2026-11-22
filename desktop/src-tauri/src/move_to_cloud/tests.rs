@@ -689,20 +689,16 @@ fn local_openbot(parts: Vec<(Part, Vec<u8>)>, counts: Vec<Count>) -> String {
             "counts": counts.iter().map(|c| serde_json::json!({"kind": c.kind, "count": c.count})).collect::<Vec<_>>(),
             "reconnect": [{"appId": "gmail", "appName": "Gmail", "accountLabel": "sam@example.com"}],
         });
+        // OpenBot (Self-Contained) lists no organizations (box A: that address answered 404);
+        // its one organization is `default`.
         match (request.method.as_str(), request.path.as_str()) {
-            ("GET", "/api/v2/people/me/organizations") => json_response(
-                200,
-                serde_json::json!({"organizations": [
-                    {"id": "org_here", "slug": "me", "name": "Me", "role": "owner", "active": true, "personal": true}
-                ], "canCreate": false, "nextCursor": null}),
-            ),
-            ("POST", "/api/v2/organizations/org_here/exports") => {
+            ("POST", "/api/v2/organizations/default/exports") => {
                 assert!(request.headers.contains_key("idempotency-key"));
                 let mut preparing = ready.clone();
                 preparing["status"] = "preparing".into();
                 json_response(202, preparing)
             }
-            ("GET", "/api/v2/organizations/org_here/exports/exp_1") => {
+            ("GET", "/api/v2/organizations/default/exports/exp_1") => {
                 let mut polled = polled.lock().unwrap();
                 *polled += 1;
                 if *polled == 1 {
@@ -713,7 +709,7 @@ fn local_openbot(parts: Vec<(Part, Vec<u8>)>, counts: Vec<Count>) -> String {
                     json_response(200, ready.clone())
                 }
             }
-            ("GET", path) if path.contains("/org_here/exports/exp_1/parts/") => {
+            ("GET", path) if path.contains("/default/exports/exp_1/parts/") => {
                 let number: usize = path.rsplit('/').next().unwrap().parse().unwrap();
                 let bytes = &parts[number - 1].1;
                 match request.headers.get("range") {
@@ -941,10 +937,10 @@ fn real_move(verify: serde_json::Value) -> (Result<Moved, Failure>, PathBuf, Pat
     let local_address = local_openbot(parts.clone(), counts);
     let (cloud_address, received) =
         cloud_openbot(parts.iter().map(|(part, _)| part.clone()).collect(), verify);
-    let mut local = Api::open(
+    let mut local = Api::at(
         &local_address,
         Box::new(InstallToken(Some(TOKEN.into()))),
-        this_computers_organization,
+        THIS_COMPUTERS_ORGANIZATION,
     )
     .unwrap();
     let mut cloud = Api::open(&cloud_address, Box::new(Bearer), their_own_organization).unwrap();

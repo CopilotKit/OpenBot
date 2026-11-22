@@ -151,6 +151,7 @@ pub async fn move_preview<R: tauri::Runtime>(
     blocking(move || {
         let mut local = local_api(&app)?;
         let estimate = moving::Local::estimate(&mut local).map_err(|detail| {
+            log::warn!("[move] could not read what would move: {detail}");
             Problem::with(
                 "OpenBot couldn't read what's on this computer. Try again in a moment.",
                 detail,
@@ -361,12 +362,13 @@ fn local_api<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<moving::Api
         )
     })?;
     let token = crate::install_token_for(&shell, &root, &address);
-    moving::Api::open(
+    moving::Api::at(
         &format!("http://127.0.0.1:{}", ports.server),
         Box::new(moving::InstallToken(token)),
-        moving::this_computers_organization,
+        moving::THIS_COMPUTERS_ORGANIZATION,
     )
     .map_err(|detail| {
+        log::warn!("[move] could not open the OpenBot here: {detail}");
         Problem::with(
             "OpenBot couldn't reach its server on this computer. Try again in a moment.",
             detail,
