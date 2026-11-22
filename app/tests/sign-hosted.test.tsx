@@ -167,7 +167,7 @@ test("OpenBot Cloud's signed-out screen offers signing in and OpenBot for Busine
   expect(
     view.getAllByRole("button").map((button) => button.textContent),
   ).toEqual([
-    "OpenBot for Business™Your own cloud or on-prem. Book a call.",
+    "OpenBot for Business™Your own cloud or on-prem. Book a demo.",
     "Go to it",
   ]);
   expect(view.queryByText(/Sign-in isn't set up yet/)).toBeNull();

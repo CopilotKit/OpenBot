@@ -29,7 +29,7 @@ export const CLOUD_SIGN_IN_LINE =
   "We run OpenBot for you. New here? Signing in creates your account.";
 
 /** OpenBot for Business, in the words OpenBot Desktop's first screen gives it. */
-export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a call.";
+export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a demo.";
 
 /** The field for a company's own OpenBot, in words anybody can follow. */
 export const COMPANY_ADDRESS_LABEL = "Your company's OpenBot address";
