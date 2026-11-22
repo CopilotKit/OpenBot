@@ -3,12 +3,21 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page, Request } from "playwright-core";
 import { compile } from "tailwindcss";
+import { parse } from "yaml";
 import {
   CreateAppBody,
   CreateAppResponse,
 } from "@/lib/api/generated/apps/apps.zod";
 import { ListConnectionsResponse } from "@/lib/api/generated/connections/connections.zod";
-import type { Import, ReconnectApp } from "@/lib/api/generated/model";
+import type {
+  Import,
+  PersonalAiConnection,
+  ReconnectApp,
+} from "@/lib/api/generated/model";
+import {
+  GetPersonalAiConnectionResponse,
+  ReplacePersonalAiConnectionBody,
+} from "@/lib/api/generated/models/models.zod";
 import { ListImportsResponse } from "@/lib/api/generated/moving-to-openbot-cloud/moving-to-openbot-cloud.zod";
 import {
   GetPreferencesResponse,
@@ -185,6 +194,19 @@ const MOVE_UNAVAILABLE = {
 
 type Answer = { status: number; json: unknown };
 
+const spec = parse(
+  readFileSync(join(APP, "..", "api", "openapi.yaml"), "utf8"),
+) as { components: { examples: Record<string, { value: unknown }> } };
+/** The person's AI connection as the spec's example says it: OpenBot Cloud, with none yet. */
+function personalAiNone(): PersonalAiConnection {
+  return GetPersonalAiConnectionResponse.parse(
+    structuredClone(
+      spec.components.examples.PersonalAiConnectionNoneExample?.value,
+    ),
+  ) as PersonalAiConnection;
+}
+const GOOD_KEY = "sk-ant-api03-good";
+
 /** One OpenBot Cloud's server, as far as these screens ask it. */
 class FakeServer {
   /** The person's moves, or null on an OpenBot that takes none. */
@@ -200,6 +222,11 @@ class FakeServer {
   /** Every app added, by the entry it was asked for. */
   added: string[] = [];
   role: "member" | "admin";
+  /**
+   * The person's own AI on OpenBot Cloud, where one is required: null where the server answers
+   * none (404, as an OpenBot that requires none), else the connection as the server keeps it.
+   */
+  ai: PersonalAiConnection | null = null;
 
   constructor(imports: Import[] | null, role: "member" | "admin" = "member") {
     this.imports = imports;
@@ -210,6 +237,35 @@ class FakeServer {
     const url = new URL(request.url());
     const method = request.method();
     const path = url.pathname;
+    if (path === `${ME}/ai-connection` && this.ai) {
+      if (method === "PUT") {
+        const sent = request.postDataJSON() as Record<string, unknown>;
+        const input = ReplacePersonalAiConnectionBody.parse(sent);
+        this.ai = GetPersonalAiConnectionResponse.parse({
+          ...this.ai,
+          connection: {
+            provider: input.provider,
+            login: input.login,
+            model: null,
+            endpointHost: null,
+            keySet: true,
+            ready: true,
+            source: "stored",
+            editable: true,
+            saved: [
+              {
+                provider: input.provider,
+                login: input.login,
+                endpointHost: null,
+              },
+            ],
+            changedAt: "2026-11-22T10:00:00.000Z",
+          },
+          uses: "personal",
+        }) as PersonalAiConnection;
+      }
+      return { status: 200, json: this.ai };
+    }
     if (path === `${ORGANIZATION}/imports` && method === "GET") {
       if (this.imports === null) return { status: 404, json: MOVE_UNAVAILABLE };
       return {
@@ -549,6 +605,31 @@ const row = (page: Page, appId: string) =>
   page.locator(`[data-moved-app="${appId}"]`);
 const path = (page: Page) => new URL(page.url()).pathname;
 
+/** Connect your AI with a key, and its button. */
+async function connectAi(page: Page) {
+  const chooser = page.locator("[data-ai-chooser]");
+  await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+  await chooser.getByRole("tab", { name: "Use an API key" }).click();
+  await chooser.getByLabel("Anthropic API key").fill(GOOD_KEY);
+  await chooser.getByRole("button", { name: "Connect" }).click();
+  await chooser.getByRole("status").waitFor();
+  await page.locator("[data-onboarding-primary]").click();
+}
+
+/** Reconnect on the list: the app's page, its sign-in, and back to the list connected. */
+async function reconnectThrough(
+  page: Page,
+  server: FakeServer,
+  appId: string,
+  cloudId: string,
+) {
+  await row(page, appId).getByRole("button", { name: "Reconnect" }).click();
+  await page.waitForURL(`${ORIGIN}/connections/${cloudId}`);
+  server.connected.add(cloudId);
+  await page.goto(`${ORIGIN}/connections?connected=${cloudId}`);
+  await page.waitForURL(`${ORIGIN}/reconnect`);
+}
+
 describe.skipIf(!asked)("apps to reconnect after a move", () => {
   for (const engine of engines)
     test(`the person works through the list and is taken home when done, in ${engine}`, async () => {
@@ -636,6 +717,74 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         await page.getByRole("button", { name: "Done" }).click();
         await page.waitForURL(`${ORIGIN}/`);
         expect(server.saves).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    }, 120_000);
+
+  /*
+   * Reported on 1.2.0-rc.1: Reconnect after the move met Connect your AI, whose button then left
+   * the person on home, with no app connected and the list gone. Connect your AI comes first (OpenBot
+   * Desktop opens the list, and the gate asks for the AI on the way), then the list, each app's page,
+   * back to the list after each, and home after the last.
+   */
+  for (const engine of engines)
+    test(`after the move, Connect your AI first, then the list, each app and back, then home, in ${engine}`, async () => {
+      const server = new FakeServer([finishedMove([GMAIL, CALENDAR])]);
+      server.ai = personalAiNone();
+      // Where OpenBot Desktop's "Connect your AI" opens OpenBot Cloud.
+      const page = await open("/reconnect", server, engine);
+      try {
+        await heading(page, "Connect your AI");
+        expect(new URL(page.url()).searchParams.get("next")).toBe("/reconnect");
+        await connectAi(page);
+        await heading(page, "Reconnect your apps");
+        expect(path(page)).toBe("/reconnect");
+
+        await reconnectThrough(page, server, "gmail", "composio-gmail");
+        await row(page, "gmail").getByText("Reconnected").waitFor();
+        await row(page, "googlecalendar")
+          .getByRole("button", { name: "Reconnect" })
+          .waitFor();
+        await page.reload();
+        await row(page, "gmail").getByText("Reconnected").waitFor();
+        await row(page, "googlecalendar")
+          .getByRole("button", { name: "Reconnect" })
+          .waitFor();
+
+        await row(page, "googlecalendar")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        await page.waitForURL(`${ORIGIN}/connections/composio-googlecalendar`);
+        server.connected.add("composio-googlecalendar");
+        await page.goto(
+          `${ORIGIN}/connections?connected=composio-googlecalendar`,
+        );
+        await page.waitForURL(`${ORIGIN}/`);
+      } finally {
+        await page.close();
+      }
+    }, 120_000);
+
+  for (const engine of engines)
+    test(`an app's Reconnect that meets Connect your AI lands on that app's page once the AI is connected, in ${engine}`, async () => {
+      const server = new FakeServer([finishedMove([GMAIL, CALENDAR])]);
+      server.ai = personalAiNone();
+      // Where OpenBot Desktop's Reconnect on Gmail opens OpenBot Cloud.
+      const page = await open("/reconnect/gmail", server, engine);
+      try {
+        await heading(page, "Connect your AI");
+        await connectAi(page);
+        await page.waitForURL(`${ORIGIN}/connections/composio-gmail`);
+        await page.getByRole("heading", { level: 1, name: "Gmail" }).waitFor();
+        // And connecting it comes back to the list, with the other still to do.
+        server.connected.add("composio-gmail");
+        await page.goto(`${ORIGIN}/connections?connected=composio-gmail`);
+        await page.waitForURL(`${ORIGIN}/reconnect`);
+        await row(page, "gmail").getByText("Reconnected").waitFor();
+        await row(page, "googlecalendar")
+          .getByRole("button", { name: "Reconnect" })
+          .waitFor();
       } finally {
         await page.close();
       }
