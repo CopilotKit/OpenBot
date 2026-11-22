@@ -136,6 +136,42 @@ export function personalLogins(
   return [...(signIn ? [signIn] : []), ...loginsHere(provider, false)];
 }
 
+/**
+ * The providers whose sign-in an admin on OpenBot Cloud may share as the organization's AI: a
+ * ChatGPT or Claude plan, or a Google or xAI sign-in (replaceAiConnection with `plan` or `oauth`).
+ * Unbiased AI's sign-in ends in a key kept for the person alone, so it is never shared.
+ */
+const SHAREABLE: readonly AiConnectionProvider[] = [
+  "openai",
+  "anthropic",
+  "google",
+  "xai",
+];
+
+/**
+ * The ways in for the organization's AI on OpenBot Cloud in a plain browser: the admin's own
+ * sign-in first, exactly as Connect your AI offers it, where it can be shared; then the key or
+ * address.
+ */
+export function sharedLogins(
+  provider: AiProvider,
+  signIns: readonly AiConnectionProvider[],
+): AiConnectionLogin[] {
+  return SHAREABLE.includes(provider.id)
+    ? personalLogins(provider, signIns)
+    : loginsHere(provider, false);
+}
+
+/** What a person calls a provider's sign-in: "Claude plan", "ChatGPT plan", "Google sign-in". */
+export function signInWords(
+  provider: AiConnectionProvider,
+  login: AiConnectionLogin,
+): string {
+  if (login === "plan")
+    return provider === "anthropic" ? "Claude plan" : "ChatGPT plan";
+  return `${provider === "google" ? "Google" : (providerById(provider)?.name ?? provider)} sign-in`;
+}
+
 /** Whether a way in is a sign-in in the browser: a plan or a provider's own. */
 export function isSignIn(login: AiConnectionLogin | null): boolean {
   return login === "plan" || login === "oauth";

@@ -22,12 +22,14 @@ import {
 } from "@/components/ui/item";
 import { describeConnection } from "@/lib/ai-connection/describe";
 import { disconnectAiMutationOptions } from "@/lib/ai-connection/mutations";
-import { providerById } from "@/lib/ai-connection/providers";
+import { isSignIn, providerById } from "@/lib/ai-connection/providers";
 import {
   aiConnectionQueryOptions,
   desktopAiSupportQueryOptions,
+  personalAiConnectionQueryOptions,
 } from "@/lib/ai-connection/queries";
 import type { AiConnection } from "@/lib/api/generated/model";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { describeAiConnection } from "@/lib/desktop/ai-connection";
 import { changeAiConnectionMutationOptions } from "@/lib/desktop/mutations";
 import {
@@ -109,10 +111,13 @@ export function AiConnectionRow({
   const [open, setOpen] = useState(false);
   // A new dialog each time it opens, so nothing typed into the last one is kept.
   const [opened, setOpened] = useState(0);
+  const viewer = useViewerId(connection);
   const described = describeConnection(
     connection,
     organizationWide ? "organization" : "you",
+    viewer,
   );
+  const shared = described?.shared;
   return (
     <>
       <Item
@@ -130,12 +135,24 @@ export function AiConnectionRow({
         <ProviderTile provider={providerById(connection.provider)} />
         <ItemContent>
           <ItemTitle>{described?.provider ?? "Not chosen yet"}</ItemTitle>
-          <ItemDescription>
-            {described?.summary ??
-              (organizationWide
-                ? "Choose an AI for everyone in your organization."
-                : "Choose the AI your Bots use.")}
-          </ItemDescription>
+          {shared ? (
+            // An admin's own sign-in, shared: whose, what it does, and whether it still works.
+            <ItemDescription className="line-clamp-none">
+              {described.summary}{" "}
+              {shared.ready ? (
+                SHARED_FOR_EVERYONE
+              ) : (
+                <span className="text-destructive">{SHARED_STOPPED}</span>
+              )}
+            </ItemDescription>
+          ) : (
+            <ItemDescription>
+              {described?.summary ??
+                (organizationWide
+                  ? "Choose an AI for everyone in your organization."
+                  : "Choose the AI your Bots use.")}
+            </ItemDescription>
+          )}
         </ItemContent>
         <ItemActions>
           <IconChevronRight className="size-4 text-muted-foreground" />
@@ -152,6 +169,22 @@ export function AiConnectionRow({
       </Dialog>
     </>
   );
+}
+
+const SHARED_FOR_EVERYONE =
+  "Bots across the organization run on it for everyone who hasn't connected their own AI.";
+const SHARED_STOPPED =
+  "It stopped working. Change it to sign in again or use another provider.";
+
+/**
+ * The reader's person id, asked for only where the organization's AI is somebody's shared sign-in,
+ * so a sign-in they shared themselves reads as theirs.
+ */
+function useViewerId(connection: AiConnection): string | undefined {
+  return useQuery({
+    ...currentUserQueryOptions(),
+    enabled: Boolean(connection.sharedSignIn),
+  }).data?.id;
 }
 
 type Step =
@@ -171,11 +204,34 @@ function AiConnectionDialog({
   organizationWide: boolean;
 }) {
   const owner = organizationWide ? "organization" : "you";
-  const described = describeConnection(connection, owner);
+  const described = describeConnection(
+    connection,
+    owner,
+    useViewerId(connection),
+  );
   const [step, setStep] = useState<Step>(
     described ? { at: "current" } : { at: "choose" },
   );
   const disconnect = useMutation(disconnectAiMutationOptions(queryClient));
+  /*
+   * On OpenBot Cloud in a plain browser the admin may share their own sign-in as the
+   * organization's AI, run by the server as Connect your AI runs it. Inside OpenBot Desktop the
+   * chooser keeps Desktop's own plan sign-ins.
+   */
+  const personal = useQuery({
+    ...personalAiConnectionQueryOptions(),
+    enabled: organizationWide && !inDesktop,
+  }).data;
+  const share =
+    organizationWide && !inDesktop && personal?.available
+      ? {
+          signIns: personal.signIns,
+          mine:
+            personal.connection.ready && isSignIn(personal.connection.login)
+              ? personal.connection
+              : null,
+        }
+      : undefined;
   /*
    * Not inside OpenBot Desktop, where a plan's engine runs beside the connection and the switch
    * settles it: there the way off a connection is Change.
@@ -197,7 +253,7 @@ function AiConnectionDialog({
       <DialogContent>
         <ChooseConnection
           connection={connection}
-          mode={{ kind: "organization", inDesktop, organizationWide }}
+          mode={{ kind: "organization", inDesktop, organizationWide, share }}
           onBack={described ? () => setStep({ at: "current" }) : onClose}
           onConnected={(next) => setStep({ at: "done", ...next })}
         />
@@ -210,15 +266,22 @@ function AiConnectionDialog({
           {organizationWide ? "Organization's AI" : "AI connection"}
         </DialogTitle>
         <DialogDescription>
-          {described
-            ? organizationWide
-              ? `Bots use ${described.provider} for anyone in your organization who hasn't connected their own AI. OpenBot keeps the key and never shows it.`
-              : `Your Bots use ${described.provider}. OpenBot keeps the key or sign-in and never shows it.`
-            : "Your Bots don't have an AI provider yet."}
+          {described?.shared
+            ? `Bots use ${described.shared.words} for anyone in your organization who hasn't connected their own AI. OpenBot keeps the sign-in and never shows it.`
+            : described
+              ? organizationWide
+                ? `Bots use ${described.provider} for anyone in your organization who hasn't connected their own AI. OpenBot keeps the key and never shows it.`
+                : `Your Bots use ${described.provider}. OpenBot keeps the key or sign-in and never shows it.`
+              : "Your Bots don't have an AI provider yet."}
         </DialogDescription>
       </DialogHeader>
       <DialogBody className="mt-4 flex flex-col gap-3 text-sm">
         {described && <Details details={described.details} />}
+        {described?.shared && !described.shared.ready ? (
+          <p className="text-destructive" role="alert">
+            {SHARED_STOPPED}
+          </p>
+        ) : null}
         <p className="text-muted-foreground">
           {organizationWide
             ? "You can switch to another provider or key at any time. Runs that start after that use it."

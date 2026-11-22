@@ -5,7 +5,7 @@ import {
   IconExternalLink,
   IconSparkles,
 } from "@tabler/icons-react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   createContext,
   type ReactNode,
@@ -36,6 +36,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemFooter,
   ItemGroup,
   ItemMedia,
   ItemTitle,
@@ -73,6 +74,8 @@ import {
   loginsHere,
   personalLogins,
   providerById,
+  sharedLogins,
+  signInWords,
 } from "@/lib/ai-connection/providers";
 import type {
   AiConnection,
@@ -81,6 +84,7 @@ import type {
   AiConnectionProvider,
   AiSignInInputMethod,
 } from "@/lib/api/generated/model";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { markFor } from "@/lib/marks";
 import { queryClient } from "@/query-client";
 
@@ -110,6 +114,16 @@ export type ChooserMode =
        * it who hasn't connected their own, and the chooser says so.
        */
       organizationWide?: boolean;
+      /**
+       * On OpenBot Cloud in a plain browser: the admin may share their own sign-in as the
+       * organization's AI. `signIns`: the providers the server signs them in to itself, as Connect
+       * your AI offers them. `mine`: their own AI where it is a plan or a sign-in the server keeps
+       * for them and can use now, which they can share without signing in again.
+       */
+      share?: {
+        signIns: readonly AiConnectionProvider[];
+        mine: AiConnection | null;
+      };
     }
   | { kind: "personal"; signIns: readonly AiConnectionProvider[] };
 
@@ -233,18 +247,46 @@ function loginLabel(login: AiConnectionLogin): string {
 
 /** The ways in this chooser offers for a provider. */
 function loginsFor(provider: AiProvider, mode: ChooserMode) {
-  return mode.kind === "personal"
-    ? personalLogins(provider, mode.signIns)
-    : loginsHere(provider, mode.inDesktop);
+  if (mode.kind === "personal") return personalLogins(provider, mode.signIns);
+  if (mode.share && !mode.inDesktop)
+    return sharedLogins(provider, mode.share.signIns);
+  return loginsHere(provider, mode.inDesktop);
 }
 
 /** The provider row's second line: the setup window's, where its sign-in is offered here. */
 function providerSummary(provider: AiProvider, mode: ChooserMode) {
-  if (mode.kind === "organization")
-    return mode.inDesktop ? provider.summary : provider.keySummary;
-  return isSignIn(personalLogins(provider, mode.signIns)[0] ?? null)
+  if (mode.kind === "organization" && mode.inDesktop) return provider.summary;
+  return isSignIn(loginsFor(provider, mode)[0] ?? null)
     ? provider.summary
     : provider.keySummary;
+}
+
+/**
+ * The admin's own sign-in for this provider and way in, where they can share it as it is: their own
+ * AI is that provider's plan or sign-in, and it works now.
+ */
+function keptSignIn(
+  mode: ChooserMode,
+  provider: AiProvider | undefined,
+  login: AiConnectionLogin | null,
+): AiConnection | null {
+  if (mode.kind !== "organization" || mode.inDesktop || !mode.share)
+    return null;
+  const mine = mode.share.mine;
+  return mine &&
+    provider &&
+    mine.provider === provider.id &&
+    mine.login === login &&
+    isSignIn(login)
+    ? mine
+    : null;
+}
+
+/**
+ * The note an admin reads before sharing their own sign-in: what it does for everyone else.
+ */
+function shareNote(provider: AiConnectionProvider, login: AiConnectionLogin) {
+  return `Bots across your organization will run on your ${signInWords(provider, login)} for everyone who hasn't connected their own AI.`;
 }
 
 /**
@@ -281,10 +323,28 @@ export function ChooseConnection({
   const inDesktop = mode.kind === "organization" && mode.inDesktop;
   const organizationWide =
     mode.kind === "organization" && mode.organizationWide === true;
+  // The organization's AI on OpenBot Cloud in a plain browser: the admin's own sign-in, shared.
+  const share =
+    mode.kind === "organization" && !mode.inDesktop && mode.share
+      ? mode.share
+      : null;
+  // The server runs the sign-in (Connect your AI's), never OpenBot Desktop.
+  const serverRun = personal || share !== null;
   const [providerId, setProviderId] = useState<AiProvider["id"] | null>(null);
   const provider = providerById(providerId);
   const logins = provider ? loginsFor(provider, mode) : [];
   const [login, setLogin] = useState<AiConnectionLogin | null>(null);
+  const kept = keptSignIn(mode, provider, login);
+  // The admin's own sign-in, offered first in the list when it can be shared as it is.
+  const mineProvider = share?.mine
+    ? providerById(share.mine.provider)
+    : undefined;
+  const shareable =
+    mineProvider &&
+    share?.mine?.login &&
+    sharedLogins(mineProvider, share.signIns).includes(share.mine.login)
+      ? keptSignIn(mode, mineProvider, share.mine.login)
+      : null;
   const preset = provider ? ENDPOINT_PRESETS[provider.id] : undefined;
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -329,11 +389,12 @@ export function ChooseConnection({
     const nextLogins = next ? loginsFor(next, mode) : [];
     setLogin(nextLogins[0] ?? null);
     const nextPreset = next ? ENDPOINT_PRESETS[next.id] : undefined;
+    const nextKept = keptSignIn(mode, next ?? undefined, nextLogins[0] ?? null);
     setApiKey("");
     setBaseUrl(nextPreset?.baseUrl ?? "");
-    setModel(nextPreset?.model ?? "");
+    setModel(nextKept?.model ?? nextPreset?.model ?? "");
     setUseSaved(true);
-    setSignedIn(false);
+    setSignedIn(nextKept !== null);
     setSignInFailure(null);
     setSignInCode("");
     minted.current = null;
@@ -343,7 +404,7 @@ export function ChooseConnection({
     if (next === login) return;
     stopSignIn();
     connect.reset();
-    setSignedIn(false);
+    setSignedIn(keptSignIn(mode, provider, next) !== null);
     setSignInFailure(null);
     setLogin(next);
   }
@@ -468,7 +529,7 @@ export function ChooseConnection({
     setSignInFailure(null);
     setSignedIn(false);
     try {
-      if (personal) {
+      if (serverRun) {
         const reached = await serverSignIn(provider, current, method);
         if (!reached) return;
         // The provider's page gives the person a code to paste here; the field waits for it.
@@ -557,7 +618,28 @@ export function ChooseConnection({
 
   function submit() {
     const body = input();
-    if (!ready || !body || connect.isPending) return;
+    if (!ready || !body) return;
+    send(body);
+  }
+
+  /**
+   * Share the admin's own sign-in as it is, from the list: no sign-in again. A Google or xAI
+   * sign-in runs on the model their own AI names, or the provider's usual one.
+   */
+  function shareMine(mine: AiConnection) {
+    if (!mine.provider || (mine.login !== "plan" && mine.login !== "oauth"))
+      return;
+    const named = mine.model ?? ENDPOINT_PRESETS[mine.provider]?.model;
+    if (mine.login === "oauth" && !named) return;
+    send(
+      mine.login === "oauth" && named
+        ? { provider: mine.provider, login: mine.login, model: named }
+        : { provider: mine.provider, login: mine.login },
+    );
+  }
+
+  function send(body: AiConnectionInput) {
+    if (connect.isPending) return;
     connect.mutate(
       { input: body, desktop: inDesktop, onPhase: setPhase },
       {
@@ -615,6 +697,14 @@ export function ChooseConnection({
         }
       />
       <ChooserBody className="flex flex-col gap-4">
+        {!provider && shareable?.provider && shareable.login ? (
+          <ShareMine
+            busy={busy}
+            login={shareable.login}
+            onShare={() => shareMine(shareable)}
+            provider={providerById(shareable.provider)}
+          />
+        ) : null}
         <fieldset
           aria-label="AI provider"
           className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0"
@@ -674,13 +764,15 @@ export function ChooseConnection({
                 busy={busy || signingIn}
                 code={signInCode}
                 failure={signInFailure}
+                kept={kept !== null && signedIn}
+                login={login}
                 onCancel={stopSignIn}
                 onCode={setSignInCode}
                 onFinishCode={finishCode}
-                personal={personal}
+                serverRun={serverRun}
                 onSignIn={() => signIn()}
                 onSignInWithCode={
-                  personal && provider.id === "openai"
+                  serverRun && provider.id === "openai"
                     ? () => signIn("device")
                     : undefined
                 }
@@ -688,6 +780,12 @@ export function ChooseConnection({
                 signedIn={signedIn}
                 waiting={waiting}
               />
+            ) : null}
+
+            {share && isSignIn(login) ? (
+              <p className="text-muted-foreground text-sm">
+                {shareNote(provider.id, login)}
+              </p>
             ) : null}
 
             {login === "endpoint" && !preset ? (
@@ -793,7 +891,11 @@ export function ChooseConnection({
           ) : null}
           {provider ? (
             <Button disabled={!ready || busy} size="sm" type="submit">
-              {busy ? pendingLabel : "Connect"}
+              {busy
+                ? pendingLabel
+                : share && login && isSignIn(login)
+                  ? `Use my ${signInWords(provider.id, login)} for everyone`
+                  : "Connect"}
             </Button>
           ) : null}
         </ChooserFooter>
@@ -894,12 +996,14 @@ function SignInFields({
   busy,
   code,
   failure,
+  kept,
+  login,
   onCancel,
   onCode,
   onFinishCode,
   onSignIn,
   onSignInWithCode,
-  personal,
+  serverRun,
   provider,
   signedIn,
   waiting,
@@ -907,24 +1011,35 @@ function SignInFields({
   busy: boolean;
   code: string;
   failure: string | null;
+  /** Signed in already: the admin's own sign-in, kept for them, to share as it is. */
+  kept: boolean;
+  login: AiConnectionLogin;
   onCancel: () => void;
   onCode: (code: string) => void;
   onFinishCode: () => void;
   onSignIn: () => void;
   /** The quieter second way in, where the provider has one: ChatGPT's sign-in with a code. */
   onSignInWithCode?: () => void;
-  personal: boolean;
+  /** The server runs the sign-in (a person's own AI, or an admin's shared one), not Desktop. */
+  serverRun: boolean;
   provider: AiProvider;
   signedIn: boolean;
   waiting: Waiting | null;
 }) {
   const signInName = provider.id === "google" ? "Google" : provider.name;
+  if (kept)
+    return (
+      <p className="flex items-center gap-2 text-sm">
+        <IconCircleCheckFilled className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        You're signed in with your {signInWords(provider.id, login)}.
+      </p>
+    );
   return (
     <div className="flex flex-col gap-3">
       <p className="text-muted-foreground text-sm">
         {waiting?.method === "device"
           ? CODE_SIGN_IN_SAYS
-          : (personal && PERSONAL_SIGN_IN_SAYS[provider.id]) ||
+          : (serverRun && PERSONAL_SIGN_IN_SAYS[provider.id]) ||
             SIGN_IN_SAYS[provider.id]}
       </p>
       {signedIn ? (
@@ -1046,6 +1161,43 @@ function SignInFields({
   );
 }
 
+/**
+ * At the top of the organization's chooser, for an admin whose own AI is a plan or a sign-in the
+ * server keeps for them: share it as it is, in one press, with what that does said first.
+ */
+function ShareMine({
+  busy,
+  login,
+  onShare,
+  provider,
+}: {
+  busy: boolean;
+  login: AiConnectionLogin;
+  onShare: () => void;
+  provider: AiProvider | undefined;
+}) {
+  if (!provider) return null;
+  const words = signInWords(provider.id, login);
+  return (
+    <Item size="sm" variant="muted">
+      <ProviderTile provider={provider} />
+      <ItemContent>
+        <ItemTitle>Your {words}</ItemTitle>
+        <ItemDescription className="line-clamp-none">
+          {shareNote(provider.id, login)}
+        </ItemDescription>
+      </ItemContent>
+      <ItemFooter className="pl-11">
+        <Button disabled={busy} onClick={onShare} size="sm" type="button">
+          {busy
+            ? `Checking with ${provider.name}…`
+            : `Use my ${words} for everyone`}
+        </Button>
+      </ItemFooter>
+    </Item>
+  );
+}
+
 /** The connection now in use, as a row with a tick. */
 export function ConnectedRow({
   connection,
@@ -1054,7 +1206,12 @@ export function ConnectedRow({
   connection: AiConnection;
   owner?: AiConnectionOwner;
 }) {
-  const described = describeConnection(connection, owner);
+  // Who is reading, only to say "your" of a sign-in they shared themselves.
+  const viewer = useQuery({
+    ...currentUserQueryOptions(),
+    enabled: Boolean(connection.sharedSignIn),
+  }).data;
+  const described = describeConnection(connection, owner, viewer?.id);
   return (
     <Item role="status" size="sm" variant="muted">
       <ProviderTile provider={providerById(connection.provider)} />
