@@ -277,7 +277,6 @@ test("before the move, the apps that must be reconnected are listed by name, abo
     "3 Bots",
     "9 skills",
     "42 conversations",
-    "2,814 messages",
     "52 memories",
     "1 routine",
     "64 files",
@@ -446,6 +445,8 @@ test("counts keep the kinds there are words for, in order, and skip zeros; space
       { kind: "goals", count: 1 },
       { kind: "bots", count: 1 },
       { kind: "settings", count: 4 },
+      // A Bot's tool steps are message records too: never a count a person reads.
+      { kind: "messages", count: 39 },
       { kind: "something-new", count: 7 },
       { kind: "memories", count: 0 },
     ]).map((line) => line.said),

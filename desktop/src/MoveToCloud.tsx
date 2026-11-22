@@ -8,7 +8,6 @@ import {
   IconCloud,
   IconDeviceLaptop,
   IconFiles,
-  IconMessage,
   IconMessages,
   IconPlug,
   IconRobot,
@@ -127,7 +126,6 @@ const KINDS: readonly {
     many: "conversations",
     icon: IconMessages,
   },
-  { kind: "messages", one: "message", many: "messages", icon: IconMessage },
   { kind: "memories", one: "memory", many: "memories", icon: IconBrain },
   { kind: "routines", one: "routine", many: "routines", icon: IconClock },
   { kind: "goals", one: "goal", many: "goals", icon: IconTarget },
@@ -136,9 +134,11 @@ const KINDS: readonly {
 ];
 
 /**
- * The preview's counts as a person reads them: "3 Bots", "2,814 messages". Only the kinds there are
+ * The preview's counts as a person reads them: "3 Bots", "42 conversations". Only the kinds there are
  * words for, in their order, and none that is zero. A kind a later OpenBot adds is left out until
- * this list names it, and settings and AI keys are never a count.
+ * this list names it, and settings and AI keys are never a count. Nor are messages: the count holds
+ * every record of a conversation, a Bot's tool steps included, so on the test boxes a person who sent
+ * 6 messages and got 6 replies read "39 messages". Conversations say what moves.
  */
 export function countLines(
   counts: MovePreview["counts"],
