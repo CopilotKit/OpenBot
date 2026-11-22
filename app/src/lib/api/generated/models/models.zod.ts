@@ -768,7 +768,7 @@ export const GetPersonalAiConnectionResponse = zod
           ),
       )
       .describe(
-        "The providers the server can sign the person in to itself (startPersonalAiSignIn). Every other provider connects with a key or an address.",
+        "The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), Google and xAI sign-ins, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.",
       ),
   })
   .describe(
@@ -776,7 +776,7 @@ export const GetPersonalAiConnectionResponse = zod
   );
 
 /**
- * Connect the AI a person's runs use, with their own key or an address, or a key a sign-in through OpenBot kept for them (useSavedKey). OpenBot checks the connection with the provider first: a key, an address or a model it can't use is refused and nothing is saved. Once saved, the person's next run uses it, ahead of the organization's. The key is encrypted and kept for the person alone, never in the organization's vault, and never sent back. A plan or a sign-in held on one computer is refused (login plan or oauth): the server runs the person's Bots and can't use it. Recorded on the audit trail, never with a key. Only the person themselves may set it, and only where available is true.
+ * Connect the AI a person's runs use, with their own key or an address, or a key a sign-in through OpenBot kept for them (useSavedKey). OpenBot checks the connection with the provider first: a key, an address or a model it can't use is refused and nothing is saved. Once saved, the person's next run uses it, ahead of the organization's. The key is encrypted and kept for the person alone, never in the organization's vault, and never sent back. A plan (openai, anthropic) or a provider sign-in (google, xai) is accepted only once the person has signed in to that provider through OpenBot (startPersonalAiSignIn) and the sign-in was approved: the server keeps that sign-in for them alone and renews it itself. Without one it is refused, since the server runs the person's Bots and can't use a sign-in held on a computer. Recorded on the audit trail, never with a key. Only the person themselves may set it, and only where available is true.
  * @summary Set a person's own AI connection
  */
 
@@ -1044,7 +1044,7 @@ export const ReplacePersonalAiConnectionResponse = zod
           ),
       )
       .describe(
-        "The providers the server can sign the person in to itself (startPersonalAiSignIn). Every other provider connects with a key or an address.",
+        "The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), Google and xAI sign-ins, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.",
       ),
   })
   .describe(
@@ -1254,7 +1254,7 @@ export const DeletePersonalAiConnectionResponse = zod
           ),
       )
       .describe(
-        "The providers the server can sign the person in to itself (startPersonalAiSignIn). Every other provider connects with a key or an address.",
+        "The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), Google and xAI sign-ins, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.",
       ),
   })
   .describe(
@@ -1262,7 +1262,7 @@ export const DeletePersonalAiConnectionResponse = zod
   );
 
 /**
- * Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, and the code to check there. Then read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. Approved, the key the provider handed OpenBot is kept for the person as a saved key, never sent to the browser, and connecting with useSavedKey uses it. Only the person themselves may sign in, and only where available is true.
+ * Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the provider's page shows the person a code once they approve, and they send it back with finishPersonalAiSignIn. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: an Unbiased AI key as a saved key (connect with useSavedKey), a Claude or ChatGPT plan's sign-in (connect with login plan), or a Google or xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true.
  * @summary Start signing in to an AI provider
  */
 
@@ -1357,13 +1357,18 @@ export const StartPersonalAiSignInResponse = zod
       .min(1)
       .max(startPersonalAiSignInResponseIntervalMax)
       .describe("How many seconds to wait between reads."),
+    finish: zod
+      .string()
+      .describe(
+        "How the sign-in finishes. poll: read it (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. code: the provider's page shows the person a code once they approve it, which they send back with finishPersonalAiSignIn.",
+      ),
   })
   .describe(
     "A sign-in to an AI provider, waiting for the person to approve it in their browser.",
   );
 
 /**
- * Ask the provider once whether the person approved the sign-in, and say where it stands. pending: not yet, read it again after interval seconds. approved: the provider's key is kept for the person as a saved key, never in this answer. failed or expired: it is over, and detail says why in OpenBot's own words; start another. Reading it again after it is approved answers approved and asks the provider nothing. Only the person who started it may read it.
+ * Ask the provider once whether the person approved the sign-in, and say where it stands. pending: not yet, read it again after interval seconds. approved: what the provider handed OpenBot is kept for the person, never in this answer. failed or expired: it is over, and detail says why in OpenBot's own words; start another. Reading it again after it is approved answers approved and asks the provider nothing. Only the person who started it may read it.
  * @summary Read a sign-in to an AI provider
  */
 
@@ -1427,7 +1432,7 @@ export const GetPersonalAiSignInResponse = zod
     status: zod
       .string()
       .describe(
-        "pending: not approved yet. approved: the provider's key is kept for the person as a saved key. failed or expired: over; start another.",
+        "pending: not approved yet. approved: what the provider handed OpenBot (a key, or a sign-in the server renews) is kept for the person. failed or expired: over; start another.",
       ),
     detail: zod
       .string()
@@ -1439,6 +1444,116 @@ export const GetPersonalAiSignInResponse = zod
       .int()
       .min(1)
       .max(getPersonalAiSignInResponseIntervalMax)
+      .describe(
+        "How many seconds to wait before reading it again, while it is pending.",
+      ),
+  })
+  .describe("Where a sign-in to an AI provider stands. Never a key.");
+
+/**
+ * Finish a sign-in whose finish is code: send the code the provider's page showed the person once they approved it. OpenBot hands it to the provider at once and answers where the sign-in stands: approved, with what the provider handed back kept for the person and never in this answer, or failed with detail saying why in OpenBot's own words. A sign-in that is already approved answers approved and sends nothing. Only the person who started it may finish it.
+ * @summary Finish a sign-in with the provider's code
+ */
+
+export const finishPersonalAiSignInPathPersonIdMax = 200;
+
+export const finishPersonalAiSignInPathPersonIdRegExp = new RegExp("\\S");
+export const finishPersonalAiSignInPathSignInIdMax = 4096;
+
+export const finishPersonalAiSignInPathSignInIdRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
+
+export const FinishPersonalAiSignInParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  personId: zod
+    .string()
+    .min(1)
+    .max(finishPersonalAiSignInPathPersonIdMax)
+    .regex(finishPersonalAiSignInPathPersonIdRegExp)
+    .describe(
+      "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
+    ),
+  signInId: zod
+    .string()
+    .min(1)
+    .max(finishPersonalAiSignInPathSignInIdMax)
+    .regex(finishPersonalAiSignInPathSignInIdRegExp)
+    .describe("The sign-in's id, as startPersonalAiSignIn gave it."),
+});
+
+export const finishPersonalAiSignInHeaderIdempotencyKeyMax = 128;
+
+export const FinishPersonalAiSignInHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(finishPersonalAiSignInHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const finishPersonalAiSignInBodyCodeMax = 4096;
+
+export const finishPersonalAiSignInBodyCodeRegExp = new RegExp("\\S");
+
+export const FinishPersonalAiSignInBody = zod.object({
+  code: zod
+    .string()
+    .min(1)
+    .max(finishPersonalAiSignInBodyCodeMax)
+    .regex(finishPersonalAiSignInBodyCodeRegExp)
+    .describe(
+      "The code the provider's page showed the person once they approved the sign-in, as they copied it. Trimmed. Never sent back.",
+    ),
+});
+
+export const finishPersonalAiSignInResponseIdMax = 4096;
+
+export const finishPersonalAiSignInResponseIdRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
+export const finishPersonalAiSignInResponseIntervalMax = 600;
+
+export const FinishPersonalAiSignInResponse = zod
+  .object({
+    id: zod
+      .string()
+      .max(finishPersonalAiSignInResponseIdMax)
+      .regex(finishPersonalAiSignInResponseIdRegExp),
+    provider: zod
+      .enum([
+        "openai",
+        "anthropic",
+        "google",
+        "xai",
+        "unbiased",
+        "openai-compatible",
+      ])
+      .describe(
+        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+      ),
+    status: zod
+      .string()
+      .describe(
+        "pending: not approved yet. approved: what the provider handed OpenBot (a key, or a sign-in the server renews) is kept for the person. failed or expired: over; start another.",
+      ),
+    detail: zod
+      .string()
+      .nullable()
+      .describe(
+        "Why it failed or expired, in OpenBot's own words. Null otherwise.",
+      ),
+    interval: zod
+      .int()
+      .min(1)
+      .max(finishPersonalAiSignInResponseIntervalMax)
       .describe(
         "How many seconds to wait before reading it again, while it is pending.",
       ),
