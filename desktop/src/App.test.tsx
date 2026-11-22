@@ -1565,8 +1565,16 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     await userEvent.click(
       view.getByRole("button", { name: "Use OpenBot (Self-Contained)" }),
     );
+    // Not chosen until Install: looking at it is not an answer.
+    expect(
+      invokeCalls.filter((call) => call.command === "keep_self_contained"),
+    ).toEqual([]);
     await installLocal(view);
     await view.findByRole("heading", { name: "Connect your AI" });
+    // Chosen on the first screen in this version: the move to OpenBot Cloud is never offered.
+    expect(
+      invokeCalls.filter((call) => call.command === "keep_self_contained"),
+    ).toHaveLength(1);
     // Nothing of OpenBot Cloud was asked for.
     expect(
       invokeCalls.some((call) =>

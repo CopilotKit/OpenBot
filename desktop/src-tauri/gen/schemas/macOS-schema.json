@@ -3039,6 +3039,12 @@
           "markdownDescription": "Enables the intelligence command without any pre-configured scope."
         },
         {
+          "description": "Enables the move_to_cloud command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-move-to-cloud",
+          "markdownDescription": "Enables the move_to_cloud command without any pre-configured scope."
+        },
+        {
           "description": "Enables the notify command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-notify",
@@ -3241,6 +3247,12 @@
           "type": "string",
           "const": "openbot-desktop:deny-intelligence",
           "markdownDescription": "Denies the intelligence command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the move_to_cloud command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-move-to-cloud",
+          "markdownDescription": "Denies the move_to_cloud command without any pre-configured scope."
         },
         {
           "description": "Denies the notify command without any pre-configured scope.",

@@ -62,7 +62,8 @@ const LOCAL_STATUS: DesktopStatus = {
   appPort: 3010,
 };
 
-type Shell = "connected" | "local" | "older";
+/** `movable`: OpenBot on this computer, in a desktop build that offers OpenBot Cloud. */
+type Shell = "connected" | "local" | "movable" | "older";
 
 /** Every command the page asked the desktop app, in order. */
 let asked: string[] = [];
@@ -80,13 +81,20 @@ function installShell(kind: Shell) {
         if (kind === "older") throw "command connection not found";
         return kind === "connected"
           ? { mode: "connected", address: ADDRESS }
-          : { mode: "local", address: null };
+          : kind === "movable"
+            ? { mode: "local", address: null, moveToCloud: true }
+            : { mode: "local", address: null };
       }
       if (name === "status")
         return kind === "connected" ? CONNECTED_STATUS : LOCAL_STATUS;
       if (name === "update_offer")
         return { version: null, current: "1.1.0", installing: null };
-      if (name === "sign_out" || name === "change_connection") return null;
+      if (
+        name === "sign_out" ||
+        name === "change_connection" ||
+        name === "move_to_cloud"
+      )
+        return null;
       throw `command ${command} not found`;
     },
   };
@@ -198,6 +206,42 @@ test("Connect to an OpenBot asks first, saying OpenBot stops here and nothing is
     ) as HTMLButtonElement,
   );
   await waitFor(() => expect(asked).toContain("change_connection"));
+});
+
+test("Move to OpenBot Cloud says what happens first, then asks the desktop app to open the move", async () => {
+  const view = renderComputer("movable");
+  fireEvent.click(
+    await view.findByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  const dialog = await view.findByRole("dialog");
+  expect(dialog.textContent).toContain("Move to OpenBot Cloud?");
+  expect(dialog.textContent).toContain(
+    "Your Bots, conversations, memory, skills, routines and files move to your OpenBot Cloud account.",
+  );
+  expect(dialog.textContent).toContain(
+    "Your app connections are private, so they can't move.",
+  );
+  expect(dialog.textContent).toContain(
+    "Nothing is removed from this computer until everything has arrived and been checked.",
+  );
+  expect(asked).not.toContain("move_to_cloud");
+  fireEvent.click(
+    Array.from(dialog.querySelectorAll("button")).find(
+      (button) => button.textContent === "Continue",
+    ) as HTMLButtonElement,
+  );
+  await waitFor(() => expect(asked).toContain("move_to_cloud"));
+  // Moving is not stopping: OpenBot keeps running for the move to read from.
+  expect(asked).not.toContain("stop");
+  expect(asked).not.toContain("change_connection");
+});
+
+test("Move to OpenBot Cloud is offered only by a desktop build that offers OpenBot Cloud", async () => {
+  const view = renderComputer("local");
+  await view.findByRole("button", { name: "Connect to an OpenBot" });
+  expect(
+    view.queryByRole("button", { name: "Move to OpenBot Cloud" }),
+  ).toBeNull();
 });
 
 test("a desktop app from before it could connect is read as OpenBot on this computer", async () => {

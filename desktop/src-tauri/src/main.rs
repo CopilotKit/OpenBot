@@ -7,6 +7,7 @@ use std::sync::Mutex;
 mod desktop_connected;
 mod desktop_connection;
 mod desktop_host_access;
+mod desktop_move;
 mod desktop_page;
 mod desktop_stall;
 mod desktop_status;
@@ -137,6 +138,8 @@ struct Shell {
     /// The app connected to an OpenBot that runs somewhere else: its relay and sign-in while the
     /// window shows it. See `desktop_connected`.
     connected: desktop_connected::State,
+    /// The move from OpenBot (Self-Contained) to OpenBot Cloud. See `desktop_move`.
+    moving: desktop_move::State,
     /// The last security floor this app verified (`security_floor`).
     security_floor: security_floor::Known,
     /// This run already stopped OpenBot here for the security floor and showed its notice.
@@ -6426,7 +6429,7 @@ fn stop_for_uninstall(asked: uninstall::Asked) -> i32 {
         println!("{line}")
     });
     for failure in &failures {
-        println!("{failure}");
+        println!("{failure} {}", uninstall::UNINSTALLING_ANYWAY);
     }
     i32::from(!failures.is_empty())
 }
@@ -6585,6 +6588,41 @@ impl uninstall::Computer for ThisComputerAtUninstall {
                 wire_name(failure)
             )
         })
+    }
+
+    /// Exactly the volumes `stack::leftover_volumes` proves are this installation's, with the
+    /// stopped containers holding them, as Start fresh removes them. Nothing is forced: a running
+    /// container of this installation keeps everything, and says so.
+    fn remove_volumes(&mut self, engine: &engine::Address, root: &Path) -> Result<(), String> {
+        if !root.join("docker-compose.yml").is_file() {
+            return Ok(());
+        }
+        let secrets = openbot_desktop_lib::vault::already_given_no_ui(
+            root,
+            &root.join(".env"),
+            &openbot_env::MINTED[..],
+        )
+        .map_err(|problem| problem.said)?;
+        let leftovers =
+            stack::leftover_volumes(engine, root, &secrets).map_err(|problem| problem.said)?;
+        if leftovers.volumes.is_empty() {
+            return Ok(());
+        }
+        stack::reset_leftover_volumes(
+            engine,
+            root,
+            &secrets,
+            &leftovers.volumes,
+            &leftovers.container_names(),
+        )
+        .map_err(|problem| match problem.detail {
+            Some(detail) => format!("{} {detail}", problem.said),
+            None => problem.said,
+        })
+    }
+
+    fn remove_images(&mut self, engine: &engine::Address, root: &Path) -> Result<(), String> {
+        openbot_desktop_lib::superseded_images::remove_own(engine, root)
     }
 
     fn machine(&mut self, name: &str) -> Result<Option<bool>, String> {
@@ -14282,6 +14320,13 @@ fn main() {
             desktop_connected::sign_out_of_openbot,
             desktop_connected::use_this_computer,
             desktop_connected::take_connection_notice,
+            // The move from OpenBot (Self-Contained) to OpenBot Cloud. See `desktop_move`.
+            desktop_move::move_offer,
+            desktop_move::keep_self_contained,
+            desktop_move::move_preview,
+            desktop_move::move_to_cloud,
+            desktop_move::cancel_move,
+            desktop_move::open_moved_cloud,
         ])
         // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
         // with Back, Refresh, Save as and Print: Back walks the window out of OpenBot with nothing
