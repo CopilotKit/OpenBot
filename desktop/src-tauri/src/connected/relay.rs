@@ -802,7 +802,7 @@ fn on_the_relay(shared: &Shared, location: &HeaderValue) -> HeaderValue {
 #[cfg(test)]
 mod tests {
     use super::super::credentials::{in_memory, Store};
-    use super::super::fake_openbot::{raw_request, FakeOpenBot, Shape};
+    use super::super::fake_openbot::{no_browser, raw_request, FakeOpenBot, Shape};
     use super::*;
     use std::io::Read;
 
@@ -1516,7 +1516,7 @@ mod tests {
             organization_id: Some("org_kai".into()),
         };
         choice::write(&config, &left).unwrap();
-        first.sign_out().unwrap();
+        first.sign_out(no_browser).unwrap();
 
         let again = Arc::new(openbot.sign_in(store.clone()));
         let next = choice::signed_in_at(&choice::read(&config), &openbot.address());

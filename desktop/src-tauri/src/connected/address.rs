@@ -24,6 +24,10 @@ pub struct Metadata {
     pub authorization_endpoint: String,
     pub token_endpoint: String,
     pub revocation_endpoint: Option<String>,
+    /// Where the person's browser goes at sign-out to end its own session there (OpenID Connect
+    /// RP-Initiated Logout's `end_session_endpoint`). A hosted OpenBot publishes one; one that
+    /// runs on a team's own servers does not.
+    pub end_session_endpoint: Option<String>,
     /// Every scope it lists. The app's screens use the whole API, so all of them are asked for.
     pub scopes: Vec<String>,
 }
@@ -214,6 +218,17 @@ fn metadata_from(
         token_endpoint: endpoint("token_endpoint", false)?
             .ok_or("the metadata names no token_endpoint")?,
         revocation_endpoint: endpoint("revocation_endpoint", false)?,
+        // A page for the browser, so it may be where the authorization endpoint may be. Unlike
+        // the others it is not needed to sign in or to stay signed in, so one the app will not
+        // follow is left out, and the OpenBot is still one the app connects to: sign-out then
+        // revokes the app's tokens, as it does for an OpenBot that publishes none.
+        end_session_endpoint: endpoint("end_session_endpoint", true).unwrap_or_else(|why| {
+            log::warn!(
+                "[connect] {why}; sign-out will not end the browser's session at {}",
+                super::host_of(address)
+            );
+            None
+        }),
         scopes,
     })
 }
@@ -524,6 +539,54 @@ mod tests {
             ),
         )
         .is_err());
+    }
+
+    /// The end of the browser's session is a page for the browser, so it may be where the
+    /// authorization endpoint may be: the address, or a sibling name over https. Anywhere else it
+    /// is not taken, and the rest of the metadata still is: a sign-out that cannot end the browser's
+    /// session is no reason to refuse the OpenBot.
+    #[test]
+    fn the_end_session_endpoint_is_taken_where_a_browser_may_be_sent_and_left_out_elsewhere() {
+        let address = "https://api.openbot.example";
+        let with = |end_session: &str| {
+            let mut document = document(
+                "https://my.openbot.example/api/auth/oauth2/authorize",
+                "https://api.openbot.example/api/auth/oauth2/token",
+            );
+            document.insert("end_session_endpoint".into(), end_session.into());
+            metadata_from(address, &document).unwrap()
+        };
+        for kept in [
+            "https://my.openbot.example/api/auth/end-session",
+            "https://api.openbot.example/api/auth/end-session",
+        ] {
+            assert_eq!(with(kept).end_session_endpoint.as_deref(), Some(kept));
+        }
+        for left_out in [
+            "https://elsewhere.example/api/auth/end-session",
+            "https://openbot.example/api/auth/end-session",
+            "http://my.openbot.example/api/auth/end-session",
+            "https://my.openbot.example:8443/api/auth/end-session",
+            "https://someone:secret@my.openbot.example/api/auth/end-session",
+            "not an address",
+        ] {
+            let metadata = with(left_out);
+            assert_eq!(metadata.end_session_endpoint, None, "{left_out}");
+            assert_eq!(
+                metadata.token_endpoint,
+                "https://api.openbot.example/api/auth/oauth2/token"
+            );
+        }
+        // An OpenBot that publishes none, as one on a team's own servers.
+        let none = metadata_from(
+            address,
+            &document(
+                "https://my.openbot.example/api/auth/oauth2/authorize",
+                "https://api.openbot.example/api/auth/oauth2/token",
+            ),
+        )
+        .unwrap();
+        assert_eq!(none.end_session_endpoint, None);
     }
 
     /// A redirect to another host is not followed: the answer is read from the address typed.
