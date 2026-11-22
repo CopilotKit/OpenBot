@@ -9,7 +9,7 @@ import {
   WINDOWS_USER_AGENT,
 } from "./frameConfig";
 import { forceTheme, watchTheme } from "./frameTheme";
-import { startRun } from "./runner";
+import { type RunAction, startRun } from "./runner";
 import type { RunStep } from "./scenes/types";
 
 declare global {
@@ -18,6 +18,10 @@ declare global {
     | { end: number; nextAt(ms: number): number | null }
     | undefined;
   var __workbenchBooted: boolean | undefined;
+  /** The parent page listens here for each click and type step of the run. */
+  var __workbenchActions:
+    | { subscribe(listener: (action: RunAction) => void): () => void }
+    | undefined;
   interface Window {
     __workbenchRun?: RunStep[];
   }
@@ -54,7 +58,26 @@ watchTheme(document);
 // The parent page may give a run. Without one, the window runs as in real time.
 const steps =
   window.parent !== window ? window.parent.__workbenchRun : undefined;
-const run = startRun(steps ?? [], clock);
+const actionListeners = new Set<(action: RunAction) => void>();
+globalThis.__workbenchActions = {
+  subscribe(listener) {
+    actionListeners.add(listener);
+    return () => {
+      actionListeners.delete(listener);
+    };
+  },
+};
+const run = startRun(steps ?? [], clock, undefined, {
+  onAction(action) {
+    for (const listener of [...actionListeners]) {
+      try {
+        listener(action);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+  },
+});
 globalThis.__workbenchRunInfo = run;
 if (steps === undefined) clock.play(1);
 

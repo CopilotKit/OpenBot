@@ -1,7 +1,12 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { formatTime, RunControls, type RunControlsProps } from "./RunControls";
+import {
+  formatTime,
+  parseSpeed,
+  RunControls,
+  type RunControlsProps,
+} from "./RunControls";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -68,4 +73,51 @@ test("shows time text and marks", () => {
   );
   expect(view.getByText("1:14 / 1:40")).toBeTruthy();
   expect(view.getAllByTestId("mark").length).toBe(2);
+});
+
+test("the speeds are ¼×, ½×, 1×, 10× and Max", () => {
+  const view = render(<RunControls {...props()} />);
+  const select = view.getByLabelText("Speed") as HTMLSelectElement;
+  expect([...select.options].map((o) => o.textContent)).toEqual([
+    "¼×",
+    "½×",
+    "1×",
+    "10×",
+    "Max",
+  ]);
+  expect(select.value).toBe("1");
+});
+
+test("a slow speed calls onSpeed with a number", () => {
+  const p = props();
+  const view = render(<RunControls {...p} />);
+  fireEvent.change(view.getByLabelText("Speed"), { target: { value: "0.25" } });
+  expect(p.onSpeed).toHaveBeenCalledWith(0.25);
+  fireEvent.change(view.getByLabelText("Speed"), { target: { value: "0.5" } });
+  expect(p.onSpeed).toHaveBeenCalledWith(0.5);
+});
+
+test("parseSpeed reads every option and gives 1× for anything else", () => {
+  expect(parseSpeed("0.25")).toBe(0.25);
+  expect(parseSpeed("0.5")).toBe(0.5);
+  expect(parseSpeed("1")).toBe(1);
+  expect(parseSpeed("10")).toBe(10);
+  expect(parseSpeed("max")).toBe("max");
+  expect(parseSpeed("3")).toBe(1);
+});
+
+test("Pause at each action calls onPauseAtActions, and the next action shows", () => {
+  const onPauseAtActions = mock();
+  const view = render(
+    <RunControls
+      {...props({
+        pauseAtActions: false,
+        onPauseAtActions,
+        next: "Click · Install",
+      })}
+    />,
+  );
+  fireEvent.click(view.getByLabelText("Pause at each action"));
+  expect(onPauseAtActions).toHaveBeenCalledWith(true);
+  expect(view.getByText("Next: Click · Install")).toBeTruthy();
 });

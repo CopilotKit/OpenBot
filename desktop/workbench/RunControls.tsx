@@ -4,7 +4,7 @@ export function formatTime(ms: number): string {
   return `${Math.floor(total / 60)}:${String(seconds).padStart(2, "0")}`;
 }
 
-export type Speed = 1 | 10 | "max";
+export type Speed = 0.25 | 0.5 | 1 | 10 | "max";
 
 export type RunControlsProps = {
   now: number;
@@ -17,16 +17,35 @@ export type RunControlsProps = {
   onStep(): void;
   onSeek(ms: number): void;
   onSpeed(speed: Speed): void;
+  /** "Pause at each action": playback stops just before each click and type step. */
+  pauseAtActions?: boolean;
+  onPauseAtActions?(on: boolean): void;
+  /** The action the run stopped before, as "Click · Install", or null. */
+  next?: string | null;
 };
 
 const SPEEDS: { value: string; label: string }[] = [
+  { value: "0.25", label: "¼×" },
+  { value: "0.5", label: "½×" },
   { value: "1", label: "1×" },
   { value: "10", label: "10×" },
   { value: "max", label: "Max" },
 ];
 
-function parseSpeed(value: string): Speed {
-  return value === "max" ? "max" : value === "10" ? 10 : 1;
+/** A speed from its option value; anything it does not know is 1×. */
+export function parseSpeed(value: string): Speed {
+  switch (value) {
+    case "max":
+      return "max";
+    case "10":
+      return 10;
+    case "0.5":
+      return 0.5;
+    case "0.25":
+      return 0.25;
+    default:
+      return 1;
+  }
 }
 
 export function RunControls(props: RunControlsProps) {
@@ -79,6 +98,19 @@ export function RunControls(props: RunControlsProps) {
         ))}
       </select>
       <span>{`${formatTime(now)} / ${formatTime(end)}`}</span>
+      {props.onPauseAtActions && (
+        <label className="wb-pause-at-actions">
+          <input
+            type="checkbox"
+            checked={props.pauseAtActions ?? false}
+            onChange={(event) => props.onPauseAtActions?.(event.target.checked)}
+          />
+          Pause at each action
+        </label>
+      )}
+      {props.next && (
+        <p className="wb-next-action" role="status">{`Next: ${props.next}`}</p>
+      )}
     </div>
   );
 }

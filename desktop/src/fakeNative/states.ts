@@ -244,7 +244,7 @@ function createStates(where: Where): States {
     if (move === "midway") return new Promise(() => {});
     if (move === "failed")
       throw {
-        said: "OpenBot couldn't send your Bots to OpenBot Cloud. Check your internet connection, then try again.",
+        said: "OpenBot couldn't send everything to OpenBot Cloud. Check your internet connection and try again.",
         kind: "move-failed",
       } satisfies Problem;
     return {

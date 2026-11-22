@@ -133,7 +133,76 @@ function typeInto(field: HTMLElement, text: string): void {
   field.dispatchEvent(new Ev("change", { bubbles: true }));
 }
 
-function perform(step: RunStep, root: Document | undefined): void {
+/** A click or a type step, as a person sees the bot do it. */
+export type RunAction = {
+  kind: "click" | "type";
+  /** The name of what is clicked, or of the field typed into. */
+  name: string;
+  /** The text a type step types. */
+  text?: string;
+  /** Milliseconds from the scene start. */
+  at: number;
+  /** What the step found on the page, or null when nothing has that name. */
+  target: Element | null;
+};
+
+export type RunOptions = {
+  /** Called just before a click or a type step acts, with what it acts on. */
+  onAction?(action: RunAction): void;
+};
+
+/** The click and type steps of a run, in time order, without their targets. */
+export function runActions(
+  steps: readonly RunStep[],
+): Omit<RunAction, "target">[] {
+  const actions: Omit<RunAction, "target">[] = [];
+  for (const step of steps) {
+    const at = step.at * 1000;
+    if ("click" in step) actions.push({ kind: "click", name: step.click, at });
+    else if ("type" in step)
+      actions.push({ kind: "type", name: step.into, text: step.type, at });
+  }
+  return actions.sort((a, b) => a.at - b.at);
+}
+
+/** What a click or a type step with this name acts on, found as the run finds it. */
+export function findTarget(
+  root: Document,
+  action: Pick<RunAction, "kind" | "name">,
+): HTMLElement | null {
+  return action.kind === "click"
+    ? findClickable(root, action.name)
+    : findField(root, action.name);
+}
+
+/** The words for an action: "Click · Install", "Type · Code from your browser". */
+export function actionLabel(action: Pick<RunAction, "kind" | "name">): string {
+  return `${action.kind === "click" ? "Click" : "Type"} · ${action.name}`;
+}
+
+/**
+ * Where a play with "Pause at each action" goes next. It goes to `wanted`, but it stops 1 ms
+ * before the first action it would pass. At 1 ms before an action (where it stopped), it goes on
+ * through that action. `stopAt` is the time of the action it stops before, or null.
+ */
+export function playTo(
+  now: number,
+  wanted: number,
+  actionTimes: readonly number[],
+): { to: number; stopAt: number | null } {
+  let next: number | null = null;
+  for (const t of actionTimes)
+    if (t - 1 > now && (next === null || t < next)) next = t;
+  if (next !== null && next - 1 <= wanted)
+    return { to: next - 1, stopAt: next };
+  return { to: wanted, stopAt: null };
+}
+
+function perform(
+  step: RunStep,
+  root: Document | undefined,
+  options: RunOptions,
+): void {
   const control = nativeControl();
   if ("emit" in step) control.emit(step.emit, step.payload);
   else if ("answer" in step) control.setAnswer(step.answer, step.with);
@@ -143,6 +212,13 @@ function perform(step: RunStep, root: Document | undefined): void {
     control.setAnswer(step.fail, { mode: "fail", problem: step.problem });
   else if ("type" in step) {
     const field = findField(root ?? document, step.into);
+    options.onAction?.({
+      kind: "type",
+      name: step.into,
+      text: step.type,
+      at: step.at * 1000,
+      target: field,
+    });
     if (field) typeInto(field, step.type);
     else
       console.warn(
@@ -150,6 +226,12 @@ function perform(step: RunStep, root: Document | undefined): void {
       );
   } else {
     const target = findClickable(root ?? document, step.click);
+    options.onAction?.({
+      kind: "click",
+      name: step.click,
+      at: step.at * 1000,
+      target,
+    });
     if (target) target.click();
     else
       console.warn(
@@ -162,9 +244,10 @@ export function startRun(
   steps: readonly RunStep[],
   clock: PageClock,
   root?: Document,
+  options: RunOptions = {},
 ): { end: number; nextAt(ms: number): number | null } {
   for (const step of steps)
-    clock.schedule(step.at * 1000, () => perform(step, root));
+    clock.schedule(step.at * 1000, () => perform(step, root, options));
   const times = steps.map((step) => step.at * 1000);
   return {
     end: times.length === 0 ? 0 : Math.max(...times),

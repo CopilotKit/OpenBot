@@ -1,15 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Answer, Call, NativeControl } from "../src/fakeNative/control";
 import { COMMANDS } from "../src/fakeNative/registry";
+import {
+  type ActionMark,
+  ActionMarkers,
+  boxOverFrame,
+  MARKER_MS,
+} from "./ActionMarkers";
 import { CallLog } from "./CallLog";
 import { CommandsPanel } from "./CommandsPanel";
 import type { PageClock } from "./clock";
 import { EventsPanel } from "./EventsPanel";
 import { type FrameConfig, frameUrl } from "./frameConfig";
+import { ImportLogPanel } from "./ImportLogPanel";
 import { describeElements, type Warning } from "./layoutWatch";
 import { formatTime, RunControls, type Speed } from "./RunControls";
+import {
+  actionLabel,
+  findTarget,
+  playTo,
+  type RunAction,
+  runActions,
+} from "./runner";
 import { SceneList } from "./SceneList";
 import { SCENES } from "./scenes";
+import type { Scene } from "./scenes/types";
 import { decodeState, encodeState, type WorkbenchState } from "./urlState";
 import { useLayoutWatch } from "./useLayoutWatch";
 import { WarningsList } from "./WarningsList";
@@ -169,13 +184,54 @@ async function booted(win: FrameWindow): Promise<boolean> {
 // The grid color is page state and not in the URL. A color input takes only #rrggbb.
 const DEFAULT_GRID_COLOR = "#ff00ff";
 
-function initial(): { state: WorkbenchState; notices: string[] } {
-  return decodeState(window.location.search, SCENES, COMMANDS);
+/** Where the scenes imported in the page are kept, for this browser tab only. */
+const IMPORTED_KEY = "workbench.imported";
+
+function loadImported(): Scene[] {
+  try {
+    const raw = window.sessionStorage.getItem(IMPORTED_KEY);
+    const value: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(value)) return [];
+    return value.filter(
+      (scene): scene is Scene =>
+        typeof scene === "object" &&
+        scene !== null &&
+        typeof scene.id === "string" &&
+        typeof scene.title === "string" &&
+        typeof scene.start === "object" &&
+        scene.start !== null,
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveImported(scenes: readonly Scene[]): void {
+  try {
+    window.sessionStorage.setItem(IMPORTED_KEY, JSON.stringify(scenes));
+  } catch {
+    // The scenes still work until the page closes.
+  }
+}
+
+function initial(): {
+  state: WorkbenchState;
+  notices: string[];
+  imported: Scene[];
+} {
+  const imported = loadImported();
+  return {
+    ...decodeState(window.location.search, [...SCENES, ...imported], COMMANDS),
+    imported,
+  };
 }
 
 /** The frame reads this object when it boots, so it is set before the iframe mounts. */
-function frameConfig(state: WorkbenchState): FrameConfig {
-  const scene = SCENES.find((s) => s.id === state.scene) ?? SCENES[0];
+function frameConfig(
+  state: WorkbenchState,
+  scenes: readonly Scene[],
+): FrameConfig {
+  const scene = scenes.find((s) => s.id === state.scene) ?? scenes[0];
   return {
     hash: scene?.start.hash ?? "",
     search: scene?.start.search ?? "",
@@ -189,6 +245,11 @@ function frameConfig(state: WorkbenchState): FrameConfig {
 export function Workbench() {
   const [boot] = useState(initial);
   const [state, setState] = useState<WorkbenchState>(boot.state);
+  /** Scenes made from logs in this page: only in this browser tab, and not in links elsewhere. */
+  const [imported, setImported] = useState<Scene[]>(boot.imported);
+  const scenes: readonly Scene[] = [...SCENES, ...imported];
+  const scenesRef = useRef(scenes);
+  scenesRef.current = scenes;
   const [notices, setNotices] = useState<string[]>(boot.notices);
   const [gridColor, setGridColor] = useState(DEFAULT_GRID_COLOR);
   const [remountCount, setRemountCount] = useState(0);
@@ -197,6 +258,24 @@ export function Workbench() {
   const [end, setEnd] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState<Speed>(1);
+  /** "Pause at each action": a play stops just before each click and type step. */
+  const [pauseAtActions, setPauseAtActions] = useState(false);
+  const pauseAtActionsRef = useRef(pauseAtActions);
+  pauseAtActionsRef.current = pauseAtActions;
+  /** The markers of the actions the bot just did; each goes after MARKER_MS of real time. */
+  const [marks, setMarks] = useState<ActionMark[]>([]);
+  /** The action a play with "Pause at each action" stopped before. */
+  const [nextAction, setNextAction] = useState<ActionMark | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const markIdRef = useRef(0);
+  const markTimersRef = useRef(new Set<ReturnType<typeof setTimeout>>());
+  /** Set while the workbench plays the clock itself, to stop at each action. */
+  const loopRef = useRef<{
+    kind: "timer" | "walk";
+    handle: ReturnType<typeof setTimeout> | null;
+  } | null>(null);
+  /** Set while the Step button runs a step, so its action shows a marker. */
+  const steppingRef = useRef(false);
   const [handedOver, setHandedOver] = useState(false);
   /** The person closed the handover overlay. It shows again after the window hands over again. */
   const [overlayClosed, setOverlayClosed] = useState(false);
@@ -243,9 +322,11 @@ export function Workbench() {
     [],
   );
 
-  const config = frameConfig(state);
-  const scene = SCENES.find((s) => s.id === state.scene);
+  const config = frameConfig(state, scenes);
+  const scene = scenes.find((s) => s.id === state.scene);
   const run = scene?.run ?? [];
+  const actionsRef = useRef(runActions(run));
+  actionsRef.current = runActions(run);
   // Set during render, before the iframe element mounts and starts to load.
   window.__workbenchFrame = config;
   // A run, even an empty one, keeps the window from playing by itself.
@@ -272,7 +353,45 @@ export function Workbench() {
     if (!next) setOverlayClosed(false);
   }, []);
 
+  /** Stops the workbench's own play loop, if one runs. */
+  const stopLoop = useCallback(() => {
+    const loop = loopRef.current;
+    loopRef.current = null;
+    if (loop?.handle != null) clearTimeout(loop.handle);
+    return loop;
+  }, []);
+
+  /** The box of an element of the window, over the window, in the wrapper's coordinates. */
+  const boxOf = useCallback((target: Element | null) => {
+    const wrap = wrapRef.current;
+    const iframe = frameRef.current;
+    if (!target || !wrap || !iframe) return null;
+    return boxOverFrame(wrap, iframe, target, stateRef.current.window.width);
+  }, []);
+
+  /** Shows a marker over what an action acted on, for MARKER_MS of real time. */
+  const showAction = useCallback(
+    (action: RunAction) => {
+      const id = ++markIdRef.current;
+      const mark = {
+        id,
+        label: actionLabel(action),
+        box: boxOf(action.target),
+      };
+      setMarks((all) => [...all, mark]);
+      // The parent's own timer: the window's clock does not move it.
+      const timer = setTimeout(() => {
+        markTimersRef.current.delete(timer);
+        setMarks((all) => all.filter((m) => m.id !== id));
+      }, MARKER_MS);
+      markTimersRef.current.add(timer);
+    },
+    [boxOf],
+  );
+
   const detach = useCallback(() => {
+    stopLoop();
+    setNextAction(null);
     walkRef.current += 1;
     holdLayout(false);
     readyRef.current = false;
@@ -282,7 +401,7 @@ export function Workbench() {
     setPlaying(false);
     setHandedOver(false);
     setOverlayClosed(false);
-  }, [holdLayout]);
+  }, [holdLayout, stopLoop]);
 
   /** Takes the window's clock to `target` in short steps; false when a newer walk took over. */
   const walk = useCallback(
@@ -334,8 +453,10 @@ export function Workbench() {
       const target = targetRef.current ?? stateRef.current.at * 1000;
       targetRef.current = null;
       const hasRun =
-        (SCENES.find((s) => s.id === stateRef.current.scene)?.run ?? [])
-          .length > 0;
+        (
+          scenesRef.current.find((s) => s.id === stateRef.current.scene)?.run ??
+          []
+        ).length > 0;
       const off = clock.onTick((ms) => {
         setNow(ms);
         checkHandover();
@@ -351,6 +472,11 @@ export function Workbench() {
       const offChange = win.__workbench?.onChange((change) => {
         if (change.kind !== "emit") checkHandover();
       });
+      // A marker shows each action of a play or a step. A seek (and so a CLI shot) shows none.
+      const offActions = win.__workbenchActions?.subscribe((action) => {
+        if (clock.playing() || loopRef.current || steppingRef.current)
+          showAction(action);
+      });
       setFrameControl(win.__workbench ?? null);
       const live = {
         win,
@@ -359,6 +485,7 @@ export function Workbench() {
         off: () => {
           off();
           offChange?.();
+          offActions?.();
         },
       };
       liveRef.current = live;
@@ -372,7 +499,7 @@ export function Workbench() {
       } else setPlaying(false);
       markReady();
     },
-    [checkHandover, markReady, walk, writeAt],
+    [checkHandover, markReady, showAction, walk, writeAt],
   );
 
   const whenReady = useCallback(async () => {
@@ -390,6 +517,8 @@ export function Workbench() {
     async (ms: number) => {
       const live = liveRef.current;
       // A seek lands paused.
+      setNextAction(null);
+      if (stopLoop()) setPlaying(false);
       if (live?.clock.playing()) {
         live.clock.pause();
         setPlaying(false);
@@ -410,7 +539,7 @@ export function Workbench() {
       }
       await whenReady();
     },
-    [checkHandover, detach, markReady, walk, whenReady, writeAt],
+    [checkHandover, detach, markReady, stopLoop, walk, whenReady, writeAt],
   );
 
   useEffect(() => {
@@ -433,14 +562,16 @@ export function Workbench() {
     };
   }, [seek]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    const markTimers = markTimersRef.current;
+    return () => {
       liveRef.current?.off();
       liveRef.current = null;
+      for (const timer of markTimers) clearTimeout(timer);
+      markTimers.clear();
       delete window.__workbenchPage;
-    },
-    [],
-  );
+    };
+  }, []);
 
   // C turns Comment mode on and off, when the focus is not in a text field.
   useEffect(() => {
@@ -460,23 +591,95 @@ export function Workbench() {
     };
   }, [frameEl]);
 
+  /** Ends a play of the workbench's own loop. */
+  const endLoop = (live: Live) => {
+    stopLoop();
+    setPlaying(false);
+    setNow(live.clock.now());
+    writeAt(live.clock.now());
+  };
+
+  /** Stops 1 ms before the action at `at`, and outlines what it will act on. */
+  const stopBefore = (live: Live, at: number) => {
+    endLoop(live);
+    const action = actionsRef.current.find((a) => a.at === at);
+    if (!action) return;
+    // One frame, so the window has drawn what the steps before it changed.
+    void nextFrame(live.win).then(() => {
+      if (liveRef.current !== live || live.clock.now() !== at - 1) return;
+      const target = findTarget(live.win.document, action);
+      setNextAction({
+        id: 0,
+        label: actionLabel(action),
+        box: boxOf(target),
+      });
+    });
+  };
+
+  /** Plays the clock, and stops before each action of the run: see playTo. */
+  const playWithStops = (live: Live, next: Speed) => {
+    const times = actionsRef.current.map((a) => a.at);
+    const end = live.info.end;
+    if (next === "max") {
+      // As fast as the window can draw: a walk, as a seek does.
+      loopRef.current = { kind: "walk", handle: null };
+      const { to, stopAt } = playTo(live.clock.now(), end, times);
+      void walk(live, to).then((ok) => {
+        if (!ok || loopRef.current?.kind !== "walk") return;
+        checkHandover();
+        markReady();
+        if (stopAt !== null) stopBefore(live, stopAt);
+        else endLoop(live);
+      });
+      return;
+    }
+    let last = performance.now();
+    const tick = () => {
+      const loop = loopRef.current;
+      if (!loop || liveRef.current !== live) return;
+      loop.handle = null;
+      const real = performance.now();
+      const now = live.clock.now();
+      const wanted = Math.min(end, now + (real - last) * next);
+      last = real;
+      const { to, stopAt } = playTo(now, wanted, times);
+      live.clock.advanceTo(to);
+      if (stopAt !== null && live.clock.now() >= to) stopBefore(live, stopAt);
+      else if (live.clock.now() >= end) endLoop(live);
+      else loop.handle = setTimeout(tick, 16);
+    };
+    loopRef.current = { kind: "timer", handle: setTimeout(tick, 0) };
+  };
+
   const play = (next: Speed = speed) => {
-    const clock = liveRef.current?.clock;
-    if (!clock) return;
-    clock.play(next === "max" ? Number.POSITIVE_INFINITY : next);
+    const live = liveRef.current;
+    if (!live) return;
+    const { clock } = live;
+    setNextAction(null);
+    stopLoop();
+    clock.pause();
     setPlaying(true);
+    if (pauseAtActionsRef.current && actionsRef.current.length > 0)
+      playWithStops(live, next);
+    else clock.play(next === "max" ? Number.POSITIVE_INFINITY : next);
   };
 
   const pause = () => {
     const clock = liveRef.current?.clock;
     if (!clock) return;
+    if (stopLoop()?.kind === "walk") {
+      // Stops the walk, and lets the window take seeks again.
+      walkRef.current += 1;
+      holdLayout(false);
+      markReady();
+    }
     clock.pause();
     setPlaying(false);
     writeAt(clock.now());
   };
 
   const pickScene = (id: string) => {
-    const scene = SCENES.find((s) => s.id === id);
+    const scene = scenesRef.current.find((s) => s.id === id);
     update((prev) => ({
       ...prev,
       scene: id,
@@ -510,6 +713,20 @@ export function Workbench() {
   return (
     <div className="wb-page">
       <aside className="wb-side wb-side-left">
+        <ImportLogPanel
+          scenes={imported}
+          current={state.scene}
+          onImport={(scene) => {
+            const next = [...imported.filter((s) => s.id !== scene.id), scene];
+            setImported(next);
+            saveImported(next);
+            // A new scene of the same id loads again.
+            setRemountCount((count) => count + 1);
+            scenesRef.current = [...SCENES, ...next];
+            pickScene(scene.id);
+          }}
+          onPick={pickScene}
+        />
         <SceneList scenes={SCENES} current={state.scene} onPick={pickScene} />
       </aside>
       <main className="wb-center">
@@ -537,33 +754,36 @@ export function Workbench() {
           </div>
         )}
         <div className="wb-stage">
-          <WindowFrame
-            src={frameUrl(config)}
-            frameKey={frameKey}
-            width={state.window.width}
-            height={state.window.height}
-            os={state.window.os}
-            active={state.window.active}
-            theme={state.window.theme}
-            zoom={state.window.zoom}
-            grid={state.window.grid}
-            gridColor={gridColor}
-            comment={
-              commenting && scene
-                ? {
-                    scene: { id: scene.id, title: scene.title },
-                    atSeconds: toSeconds(now),
-                    window: state.window,
-                  }
-                : null
-            }
-            onFrame={(iframe) => {
-              frameRef.current = iframe;
-              setFrameEl(iframe);
-              if (iframe === null) detach();
-              else void attach(iframe);
-            }}
-          />
+          <div className="wb-window-wrap" ref={wrapRef}>
+            <WindowFrame
+              src={frameUrl(config)}
+              frameKey={frameKey}
+              width={state.window.width}
+              height={state.window.height}
+              os={state.window.os}
+              active={state.window.active}
+              theme={state.window.theme}
+              zoom={state.window.zoom}
+              grid={state.window.grid}
+              gridColor={gridColor}
+              comment={
+                commenting && scene
+                  ? {
+                      scene: { id: scene.id, title: scene.title },
+                      atSeconds: toSeconds(now),
+                      window: state.window,
+                    }
+                  : null
+              }
+              onFrame={(iframe) => {
+                frameRef.current = iframe;
+                setFrameEl(iframe);
+                if (iframe === null) detach();
+                else void attach(iframe);
+              }}
+            />
+            <ActionMarkers marks={marks} next={nextAction} />
+          </div>
           {handedOver && !overlayClosed && (
             // A sibling of the window, so a shot of the window does not show it.
             <section
@@ -619,7 +839,13 @@ export function Workbench() {
             onPlay={() => play()}
             onPause={pause}
             onStep={() => {
-              liveRef.current?.clock.stepToNext();
+              setNextAction(null);
+              steppingRef.current = true;
+              try {
+                liveRef.current?.clock.stepToNext();
+              } finally {
+                steppingRef.current = false;
+              }
             }}
             onSeek={(ms) => {
               void seek(ms);
@@ -628,6 +854,14 @@ export function Workbench() {
               setSpeed(next);
               if (playing) play(next);
             }}
+            pauseAtActions={pauseAtActions}
+            onPauseAtActions={(on) => {
+              setPauseAtActions(on);
+              pauseAtActionsRef.current = on;
+              if (!on) setNextAction(null);
+              if (playing) play();
+            }}
+            next={nextAction?.label ?? null}
           />
         ) : (
           <div>{`Time ${formatTime(now)}`}</div>
@@ -639,6 +873,11 @@ export function Workbench() {
           onGridColor={setGridColor}
           onCopyLink={() => {
             void navigator.clipboard.writeText(window.location.href);
+            if (imported.some((s) => s.id === state.scene))
+              setNotices((all) => [
+                ...all,
+                "This scene comes from a log you imported. It is only in this browser tab, so the link does not open it in another browser. To keep it, use Save for agents.",
+              ]);
           }}
         />
         <details className="wb-fold">

@@ -265,3 +265,141 @@ body {
   padding: 4px 8px;
   cursor: pointer;
 }
+
+/* Holds the window and the action markers over it; the markers are not in the window element. */
+.wb-window-wrap {
+  position: relative;
+  display: inline-block;
+  vertical-align: top;
+}
+
+.wb-actions {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.wb-action {
+  position: absolute;
+  --wb-action: #ff8a00;
+}
+
+.wb-action-next {
+  --wb-action: #3d7dff;
+}
+
+.wb-action-box {
+  position: absolute;
+  inset: -3px;
+  border: 2px solid var(--wb-action);
+  border-radius: 6px;
+}
+
+.wb-action-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+  border: 3px solid var(--wb-action);
+  border-radius: 50%;
+  animation: wb-action-pulse 0.6s ease-out 2;
+  opacity: 0;
+}
+
+@keyframes wb-action-pulse {
+  from {
+    transform: scale(0.4);
+    opacity: 1;
+  }
+  to {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-action-ring {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+.wb-action-label {
+  position: absolute;
+  left: -3px;
+  bottom: calc(100% + 6px);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--wb-action);
+  color: #fff;
+  font:
+    600 12px / 1.4 system-ui,
+    sans-serif;
+  white-space: nowrap;
+}
+
+.wb-side-right .wb-pause-at-actions {
+  justify-content: flex-start;
+  margin-top: 4px;
+}
+
+.wb-pause-at-actions input {
+  margin: 0;
+}
+
+.wb-next-action {
+  margin: 4px 0 12px;
+  font-weight: 600;
+}
+
+.wb-import {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--wb-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wb-import label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wb-import input[type="file"] {
+  max-width: 100%;
+  border: 0;
+  padding: 0;
+}
+
+.wb-import p {
+  margin: 0;
+}
+
+.wb-import code {
+  display: block;
+  overflow-wrap: anywhere;
+  font:
+    12px ui-monospace,
+    monospace;
+}
+
+.wb-import-save > summary {
+  cursor: pointer;
+}
+
+.wb-import-save p {
+  margin: 4px 0;
+  color: var(--wb-muted);
+}
+
+.wb-import nav button {
+  display: block;
+  width: 100%;
+  text-align: left;
+}

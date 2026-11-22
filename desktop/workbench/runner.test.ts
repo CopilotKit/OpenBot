@@ -19,7 +19,14 @@ import {
   type PageClock,
   SCENE_EPOCH,
 } from "./clock";
-import { startRun } from "./runner";
+import {
+  actionLabel,
+  findTarget,
+  playTo,
+  type RunAction,
+  runActions,
+  startRun,
+} from "./runner";
 
 beforeAll(() =>
   GlobalRegistrator.register({
@@ -200,4 +207,84 @@ test("a type step warns when no field has that name", () => {
   }
   expect(warn).toHaveBeenCalledTimes(1);
   expect(String(warn.mock.calls[0]?.[0])).toContain("Missing");
+});
+
+test("onAction sees each click and type step, with its target, before it acts", () => {
+  document.body.innerHTML = `<button>Install</button><label>Code <input /></label>`;
+  const button = document.querySelector("button");
+  const clicked: boolean[] = [];
+  button?.addEventListener("click", () => clicked.push(true));
+  const seen: RunAction[] = [];
+  startRun(
+    [
+      { at: 1, click: "Install" },
+      { at: 2, emit: "x", payload: null },
+      { at: 3, type: "abc", into: "Code" },
+    ],
+    clock,
+    undefined,
+    {
+      onAction: (action) => {
+        // Before the click: the button has not been pressed yet.
+        if (action.kind === "click") expect(clicked).toEqual([]);
+        seen.push(action);
+      },
+    },
+  );
+  clock.advanceTo(3000);
+  expect(clicked).toEqual([true]);
+  expect(seen.map(({ target, ...rest }) => rest)).toEqual([
+    { kind: "click", name: "Install", at: 1000 },
+    { kind: "type", name: "Code", text: "abc", at: 3000 },
+  ]);
+  expect(seen[0]?.target).toBe(button);
+  expect(seen[1]?.target).toBe(document.querySelector("input"));
+});
+
+test("runActions lists the click and type steps in time order", () => {
+  expect(
+    runActions([
+      { at: 5, type: "x", into: "Field" },
+      { at: 1, click: "Install" },
+      { at: 2, emit: "e", payload: null },
+    ]),
+  ).toEqual([
+    { kind: "click", name: "Install", at: 1000 },
+    { kind: "type", name: "Field", text: "x", at: 5000 },
+  ]);
+});
+
+test("findTarget finds what the run would act on, and actionLabel names it", () => {
+  document.body.innerHTML = `<button>Install</button><input aria-label="Code" />`;
+  expect(findTarget(document, { kind: "click", name: "Install" })).toBe(
+    document.querySelector("button"),
+  );
+  expect(findTarget(document, { kind: "type", name: "Code" })).toBe(
+    document.querySelector("input"),
+  );
+  expect(findTarget(document, { kind: "click", name: "Missing" })).toBeNull();
+  expect(actionLabel({ kind: "click", name: "Install" })).toBe(
+    "Click · Install",
+  );
+  expect(actionLabel({ kind: "type", name: "Code from your browser" })).toBe(
+    "Type · Code from your browser",
+  );
+});
+
+test("playTo stops 1 ms before the next action", () => {
+  expect(playTo(0, 600, [500, 2000])).toEqual({ to: 499, stopAt: 500 });
+  // An action later than the play goes: no stop.
+  expect(playTo(0, 400, [500])).toEqual({ to: 400, stopAt: null });
+  // Exactly at 1 ms before: the play reaches it and stops.
+  expect(playTo(0, 499, [500])).toEqual({ to: 499, stopAt: 500 });
+});
+
+test("playTo goes on through the action it stopped before", () => {
+  expect(playTo(499, 700, [500, 2000])).toEqual({ to: 700, stopAt: null });
+  expect(playTo(499, 5000, [500, 2000])).toEqual({ to: 1999, stopAt: 2000 });
+});
+
+test("playTo with no actions, or none ahead, goes where it is asked", () => {
+  expect(playTo(100, 300, [])).toEqual({ to: 300, stopAt: null });
+  expect(playTo(3000, 4000, [500, 2000])).toEqual({ to: 4000, stopAt: null });
 });

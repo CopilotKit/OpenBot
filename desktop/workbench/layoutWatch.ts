@@ -1,6 +1,7 @@
 import type { Box } from "./geometry";
 
-export type Snapshot = Map<string, { box: Box; label: string }>;
+/** `main` marks the main heading: the first h1 or h2 of the page. */
+export type Snapshot = Map<string, { box: Box; label: string; main?: boolean }>;
 export type Warning =
   | {
       kind: "moved";
@@ -148,12 +149,30 @@ export function visibleElements(root: Document) {
 export function snapshot(root: Document): Snapshot {
   const result: Snapshot = new Map();
   const seen = new Map<string, number>();
-  for (const { key, label, box } of visibleElements(root)) {
+  let mainFound = false;
+  for (const { element, key, label, box } of visibleElements(root)) {
     const count = (seen.get(key) ?? 0) + 1;
     seen.set(key, count);
-    result.set(count === 1 ? key : `${key}#${count}`, { box, label });
+    const main = !mainFound && /^h[12]$/i.test(element.tagName);
+    if (main) mainFound = true;
+    result.set(count === 1 ? key : `${key}#${count}`, {
+      box,
+      label,
+      ...(main ? { main: true } : {}),
+    });
   }
   return result;
+}
+
+/** The label of a warning for a group of elements that all moved by the same amount. */
+export const WHOLE_PAGE = "The whole page";
+
+/** Moves within this many pixels of each other are one move. */
+const SAME_MOVE_PX = 1;
+
+function mainHeading(snap: Snapshot): string | null {
+  for (const [key, entry] of snap) if (entry.main) return key;
+  return null;
 }
 
 export function compare(
@@ -162,16 +181,52 @@ export function compare(
   at: number,
   cause: string,
 ): Warning[] {
-  const warnings: Warning[] = [];
+  // A new main heading is a new screen: what was on the old one did not move, it went away.
+  if (mainHeading(before) !== mainHeading(after)) return [];
+  const moves: { label: string; dx: number; dy: number }[] = [];
+  let present = 0;
   for (const [key, was] of before) {
     const now = after.get(key);
     if (!now) continue;
+    present += 1;
     const dx = now.box.x - was.box.x;
     const dy = now.box.y - was.box.y;
-    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
-      warnings.push({ kind: "moved", at, label: now.label, dx, dy, cause });
-    }
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2)
+      moves.push({ label: now.label, dx, dy });
   }
+  // Moves of the same amount go in one group; a group is first seen at its first move.
+  const groups: { dx: number; dy: number; members: number[] }[] = [];
+  const groupOf = moves.map((move, index) => {
+    const group = groups.find(
+      (g) =>
+        Math.abs(g.dx - move.dx) <= SAME_MOVE_PX &&
+        Math.abs(g.dy - move.dy) <= SAME_MOVE_PX,
+    );
+    if (group) {
+      group.members.push(index);
+      return group;
+    }
+    const created = { dx: move.dx, dy: move.dy, members: [index] };
+    groups.push(created);
+    return created;
+  });
+  // Two or more that moved together, and at least half of what is on both: the page moved.
+  const whole = (group: (typeof groups)[number]) =>
+    group.members.length >= 2 && group.members.length * 2 >= present;
+  const warnings: Warning[] = [];
+  moves.forEach((move, index) => {
+    const group = groupOf[index];
+    if (!whole(group)) warnings.push({ kind: "moved", at, ...move, cause });
+    else if (group.members[0] === index)
+      warnings.push({
+        kind: "moved",
+        at,
+        label: WHOLE_PAGE,
+        dx: group.dx,
+        dy: group.dy,
+        cause,
+      });
+  });
   return warnings;
 }
 

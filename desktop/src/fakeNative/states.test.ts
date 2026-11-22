@@ -1,4 +1,6 @@
 import { beforeEach, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { nativeControl } from "./control";
 import { STATE_NAMES, stateAnswer } from "./states";
 
@@ -44,6 +46,28 @@ test("show_openbot at #local-app-too-old-security throws the security problem", 
     thrown = error;
   }
   expect((thrown as { kind?: string }).kind).toBe("app-too-old-security");
+});
+
+test("move_to_cloud at #move-failed says the native upload failure", () => {
+  // The fake stops in the upload stage, so it must say what `Failure::said` says for Upload.
+  const rust = readFileSync(
+    join(import.meta.dir, "../../src-tauri/src/move_to_cloud.rs"),
+    "utf8",
+  );
+  const native = /stage: Stage::Upload,[^}]*\}\s*=>\s*"([^"]+)"/.exec(
+    rust,
+  )?.[1];
+  expect(native).toBeDefined();
+  let thrown: unknown;
+  try {
+    stateAnswer({ hash: "#move-failed", search: "" })(
+      "move_to_cloud",
+      undefined,
+    );
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toEqual({ said: native, kind: "move-failed" });
 });
 
 test("local_eval_terms at #licence is not accepted yet", () => {
