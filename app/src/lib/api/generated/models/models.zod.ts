@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot's model, the provider or a gateway in front of it, read in the background, and are narrowed to the ones an administrator allowed. With view=all, every model listed before that narrowing, for an administrator choosing which to allow. When the listing can't be read, the catalogue holds the deployment's own model and nothing to pick.
+ * Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot's model, the provider or a gateway in front of it, read in the background. They are narrowed only once an administrator turns on the model allowlist and allows at least one; an empty allowlist means every model. With view=all, every model listed before that narrowing, for an administrator choosing which to allow. When the listing can't be read, the catalogue holds the deployment's own model and nothing to pick.
  * @summary Read the models Bots can run on
  */
 
@@ -51,7 +51,7 @@ export const GetModelCatalogueResponse = zod
     exposure: zod
       .enum(["all", "allowed"])
       .describe(
-        "Who decides what people may pick. all: one person on their own machine, offered every model listed. allowed: a team, offered the models an administrator allowed.",
+        "Who decides what people may pick. all: one person on their own machine, offered every model listed. allowed: a team, offered every model listed until an administrator narrows it with the model allowlist (on, with at least one model allowed).",
       ),
     default: zod
       .string()
