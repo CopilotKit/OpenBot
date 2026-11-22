@@ -85,15 +85,24 @@ import {
   sharedLogins,
   signInWords,
 } from "@/lib/ai-connection/providers";
+import {
+  awaitSignInRedirect,
+  beginSignInRedirect,
+  cancelSignInRedirect,
+  signInThroughDesktop,
+  takesRedirect,
+} from "@/lib/ai-connection/sign-in-redirect";
 import type {
   AiConnection,
   AiConnectionInput,
   AiConnectionLogin,
   AiConnectionProvider,
+  AiSignIn,
   AiSignInInputMethod,
 } from "@/lib/api/generated/model";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { ClientError } from "@/lib/client";
+import { desktopShell } from "@/lib/desktop/shell";
 import { markFor } from "@/lib/marks";
 import { queryClient } from "@/query-client";
 
@@ -109,7 +118,9 @@ import { queryClient } from "@/query-client";
  * and first the setup window's sign-in (a ChatGPT or Claude plan, a Google, xAI or Unbiased AI
  * sign-in) wherever the server runs it itself (`signIns`). The server keeps that sign-in for the
  * person and renews it, so never a Desktop-held one there, even inside Desktop: the server runs
- * the person's Bots.
+ * the person's Bots. Inside Desktop, Desktop only listens for a Claude or ChatGPT plan's redirect,
+ * so the person pastes nothing (lib/ai-connection/sign-in-redirect.ts); the sign-in stays the
+ * server's.
  *
  * TWO SURFACES. In a dialog (Settings) it draws the dialog's header, body and footer. On a page
  * (onboarding) it draws the same body and buttons inside a card, under the page's own heading.
@@ -303,6 +314,7 @@ function shareNote(provider: AiConnectionProvider, login: AiConnectionLogin) {
  * person then pastes what the provider gave them here (the code Claude's page shows, or the address
  * ChatGPT sends their browser to). `signInId`: the server's own sign-in, for a person's own AI.
  * `method`: the way in it was started with, where the provider has more than one (ChatGPT).
+ * `redirect`: OpenBot Desktop is listening for the provider's redirect, so nothing is pasted.
  */
 type Waiting = {
   url: string;
@@ -311,14 +323,16 @@ type Waiting = {
   signInId?: string;
   codeBack?: boolean;
   method?: AiSignInInputMethod;
+  redirect?: boolean;
 };
 
 /**
- * How a ChatGPT plan signs in where the server runs it. `code` first: a code to enter at ChatGPT,
- * which never lands on a page that won't load. `address`, the other way: the browser sign-in whose
- * last page won't load, and whose address the person pastes back.
+ * How a ChatGPT plan signs in where the server runs it. In a browser, `code` first: a code to enter
+ * at ChatGPT, which never lands on a page that won't load. `browser`, the other way: the browser
+ * sign-in whose last page won't load, and whose address the person pastes back. Inside OpenBot
+ * Desktop, `browser` first: Desktop takes that last page itself, so it loads and nothing is pasted.
  */
-type ChatGptWay = "code" | "address";
+type ChatGptWay = "code" | "browser";
 
 const wait = (seconds: number) =>
   new Promise((resolve) => setTimeout(resolve, seconds * 1000));
@@ -346,6 +360,11 @@ export function ChooseConnection({
       : null;
   // The server runs the sign-in (Connect your AI's), never OpenBot Desktop.
   const serverRun = personal || share !== null;
+  // Inside OpenBot Desktop, which can take a plan's redirect for the server's sign-in.
+  const inDesktopWindow = desktopShell() !== null;
+  // ChatGPT's first way: its browser sign-in where Desktop takes the redirect, a code elsewhere.
+  const firstChatGptWay: ChatGptWay =
+    serverRun && inDesktopWindow ? "browser" : "code";
   const [providerId, setProviderId] = useState<AiProvider["id"] | null>(null);
   const provider = providerById(providerId);
   const logins = provider ? loginsFor(provider, mode) : [];
@@ -373,10 +392,19 @@ export function ChooseConnection({
   const [signedIn, setSignedIn] = useState(false);
   const [signInFailure, setSignInFailure] = useState<string | null>(null);
   const [signingIn, setSigningIn] = useState(false);
-  const [chatGptWay, setChatGptWay] = useState<ChatGptWay>("code");
+  const [chatGptWay, setChatGptWay] = useState<ChatGptWay>(firstChatGptWay);
+  /*
+   * Desktop couldn't take this provider's redirect (an older Desktop, a busy port, a server from
+   * before it took the port): its sign-in is finished by paste, as in a browser.
+   */
+  const [pasteBack, setPasteBack] = useState(false);
   // The key an Unbiased AI sign-in in Desktop mints: held for the one request that sends it, never drawn.
   const minted = useRef<string | null>(null);
-  const attempt = useRef<{ plan?: Plan; attemptId?: string } | null>(null);
+  const attempt = useRef<{
+    plan?: Plan;
+    attemptId?: string;
+    redirectId?: string;
+  } | null>(null);
   const run = useRef(0);
   const connect = useMutation(
     personal
@@ -392,6 +420,7 @@ export function ChooseConnection({
     if (pending?.plan) void cancelPlanSignIn(pending.plan).catch(() => {});
     if (pending?.attemptId)
       void cancelProviderSignIn(pending.attemptId).catch(() => {});
+    if (pending?.redirectId) cancelSignInRedirect(pending.redirectId);
     setWaiting(null);
     setSigningIn(false);
   }
@@ -414,7 +443,8 @@ export function ChooseConnection({
     setSignedIn(nextKept !== null);
     setSignInFailure(null);
     setSignInCode("");
-    setChatGptWay("code");
+    setChatGptWay(firstChatGptWay);
+    setPasteBack(false);
     minted.current = null;
   }
 
@@ -514,14 +544,60 @@ export function ChooseConnection({
    * it stands every `interval` seconds until it is approved, failed or expired. With `finish` code,
    * stop and wait for the person to paste what the provider gave them (`finishCode`). What the
    * provider hands back stays on the server.
+   *
+   * Inside OpenBot Desktop, a Claude plan and ChatGPT's browser sign-in finish through Desktop's
+   * listener instead, with nothing pasted. Where that can't work, the paste, as in a browser.
    */
   async function serverSignIn(
     chosen: AiProvider,
     current: () => boolean,
     method: AiSignInInputMethod | undefined,
   ): Promise<"approved" | "code" | false> {
-    const begun = await startPersonalSignIn(chosen.id, method).catch(
-      (error: unknown) => {
+    let started: AiSignIn | null = null;
+    const redirectProvider = chosen.id;
+    if (
+      (redirectProvider === "anthropic" || redirectProvider === "openai") &&
+      takesRedirect({
+        inDesktop: inDesktopWindow,
+        serverRun,
+        provider: redirectProvider,
+        login,
+        method,
+        pasteBack,
+      })
+    ) {
+      const through = await signInThroughDesktop(redirectProvider, {
+        begin: beginSignInRedirect,
+        start: (loopbackPort) =>
+          redirectProvider === "anthropic"
+            ? startPersonalSignIn(redirectProvider, method, { loopbackPort })
+            : startPersonalSignIn(redirectProvider, "browser"),
+        wait: awaitSignInRedirect,
+        cancel: cancelSignInRedirect,
+        finish: finishPersonalSignIn,
+        hold: (redirectId) => {
+          attempt.current = redirectId ? { redirectId } : null;
+        },
+        opened: (signIn) => {
+          setWaiting({
+            url: signIn.url,
+            signInId: signIn.id,
+            method: signIn.provider === "openai" ? "browser" : method,
+            redirect: true,
+          });
+          window.open(signIn.url, "_blank", "noopener");
+        },
+        current,
+      });
+      if (through.outcome === "stopped") return false;
+      if (through.outcome === "approved") return "approved";
+      // Desktop can't take it here: this provider's sign-in is pasted back from now on.
+      setPasteBack(true);
+      started = through.begun;
+    }
+    const begun =
+      started ??
+      (await startPersonalSignIn(chosen.id, method).catch((error: unknown) => {
         // OpenAI gave no code (the server's 422): most often, device code sign-in is off. Said so.
         if (
           method === "device" &&
@@ -530,8 +606,7 @@ export function ChooseConnection({
         )
           throw new Error(CHATGPT_NO_CODE);
         throw error;
-      },
-    );
+      }));
     if (!current()) return false;
     const codeBack = begun.finish === "code";
     setWaiting({
@@ -829,10 +904,26 @@ export function ChooseConnection({
                 }}
                 onFinishCode={finishCode}
                 serverRun={serverRun}
+                desktopListens={serverRun && inDesktopWindow && !pasteBack}
+                noPaste={
+                  waiting
+                    ? waiting.redirect === true
+                    : takesRedirect({
+                        inDesktop: inDesktopWindow,
+                        serverRun,
+                        provider: provider.id,
+                        login,
+                        method:
+                          provider.id === "openai" && chatGptWay === "code"
+                            ? "device"
+                            : undefined,
+                        pasteBack,
+                      })
+                }
                 chatGptWay={chatGptWay}
                 onChatGptWay={chooseChatGptWay}
                 onSignIn={() =>
-                  // ChatGPT's plan where the server runs it: a code first, the address the other way.
+                  // ChatGPT's plan where the server runs it: the way chosen, a code or the browser.
                   serverRun &&
                   provider.id === "openai" &&
                   login === "plan" &&
@@ -1040,6 +1131,16 @@ const SIGN_IN_SAYS: Record<string, string> = {
     "Sign in or create an Unbiased AI account in your browser and approve the code shown here.",
 };
 
+/**
+ * A Claude or ChatGPT plan inside OpenBot Desktop, which takes the provider's redirect: nothing to
+ * paste, and the page it lands on loads.
+ */
+const NO_PASTE_SAYS: Record<string, string> = {
+  anthropic:
+    "Anthropic opens in your browser. It finishes on its own once you approve.",
+  openai: SIGN_IN_SAYS.openai ?? "",
+};
+
 /** ChatGPT's sign-in with a code (`device`): its page asks for the code shown here. */
 const CODE_SIGN_IN_SAYS =
   "OpenAI opens in your browser. Enter the code shown here, then approve. It finishes on its own.";
@@ -1054,9 +1155,11 @@ function SignInFields({
   busy,
   chatGptWay,
   code,
+  desktopListens,
   failure,
   kept,
   login,
+  noPaste,
   onCancel,
   onChatGptWay,
   onCode,
@@ -1068,8 +1171,12 @@ function SignInFields({
   waiting,
 }: {
   busy: boolean;
-  /** How a ChatGPT plan the server runs signs in: a code first, or the address the other way. */
+  /** How a ChatGPT plan the server runs signs in: a code, or the browser. */
   chatGptWay: ChatGptWay;
+  /** Inside OpenBot Desktop, which can take a plan's redirect for the server's sign-in. */
+  desktopListens: boolean;
+  /** This sign-in finishes through Desktop's listener: no paste box, and no page that won't load. */
+  noPaste: boolean;
   code: string;
   failure: string | null;
   /** Signed in already: the admin's own sign-in, kept for them, to share as it is. */
@@ -1094,12 +1201,14 @@ function SignInFields({
    * on in ChatGPT: the setting and its link come first. The other way, the browser sign-in
    * (`chatGptInBrowser`), lands on a page that can't load, whose address the person brings back:
    * its own steps first, and its own paste box. A sign-in under way keeps the way it started with.
+   * Inside OpenBot Desktop the browser sign-in comes first and is neither: Desktop takes its last
+   * page, so it loads and nothing is pasted (`noPaste`).
    */
   const chatGptServer =
     serverRun && provider.id === "openai" && login === "plan";
   const chatGptInBrowser =
     chatGptServer &&
-    (waiting ? waiting.method !== "device" : chatGptWay === "address");
+    (waiting ? waiting.method !== "device" : chatGptWay === "browser");
   const chatGptCode = chatGptServer && !chatGptInBrowser;
   const signInName = chatGptServer
     ? "ChatGPT"
@@ -1116,7 +1225,11 @@ function SignInFields({
   return (
     <div className="flex flex-col gap-3">
       {chatGptInBrowser ? (
-        signedIn ? null : waiting ? (
+        signedIn ? null : noPaste ? (
+          <p className="text-muted-foreground text-sm">
+            {NO_PASTE_SAYS.openai}
+          </p>
+        ) : waiting ? (
           <p className="text-muted-foreground text-sm">
             Approve the request in OpenAI's tab. When it says “
             {CHATGPT_DEAD_PAGE}”, copy its address and paste it below.
@@ -1134,7 +1247,9 @@ function SignInFields({
         <p className="text-muted-foreground text-sm">
           {waiting?.method === "device"
             ? CODE_SIGN_IN_SAYS
-            : SIGN_IN_SAYS[provider.id]}
+            : noPaste
+              ? NO_PASTE_SAYS[provider.id]
+              : SIGN_IN_SAYS[provider.id]}
         </p>
       )}
       {signedIn ? (
@@ -1274,23 +1389,29 @@ function SignInFields({
       {signedIn || waiting || !chatGptServer ? null : (
         <div className="flex flex-col items-start gap-1 border-border border-t pt-3">
           <p className="text-muted-foreground text-xs">
-            {chatGptWay === "code"
-              ? "Can't turn on device code sign-in? Your browser can sign in instead. Its last page won't load, and you paste that page's address here."
-              : "A code never shows a page that won't load. It needs device code sign-in turned on in ChatGPT."}
+            {desktopListens
+              ? chatGptWay === "code"
+                ? "Your browser can sign in instead. It finishes on its own once you approve."
+                : "You can also sign in with a code. It needs device code sign-in turned on in ChatGPT."
+              : chatGptWay === "code"
+                ? "Can't turn on device code sign-in? Your browser can sign in instead. Its last page won't load, and you paste that page's address here."
+                : "A code never shows a page that won't load. It needs device code sign-in turned on in ChatGPT."}
           </p>
           {/* Its words line up with the lines above; the ghost button's padding hangs outside. */}
           <Button
             className="-ml-2.5"
             disabled={busy}
             onClick={() =>
-              onChatGptWay(chatGptWay === "code" ? "address" : "code")
+              onChatGptWay(chatGptWay === "code" ? "browser" : "code")
             }
             size="sm"
             type="button"
             variant="ghost"
           >
             {chatGptWay === "code"
-              ? "Copy an address instead"
+              ? desktopListens
+                ? "Sign in with your browser instead"
+                : "Copy an address instead"
               : "Sign in with a code instead"}
           </Button>
         </div>

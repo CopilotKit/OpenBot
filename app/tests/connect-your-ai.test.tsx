@@ -42,6 +42,11 @@ import { personBody } from "./accounts-api";
  *   it, finishes with the address ChatGPT sends the browser to.
  *   Failed and expired sign-ins say why and sign in again, and leaving the row stops the reading.
  *   Inside OpenBot Desktop the sign-in is still the server's, never Desktop's.
+ * - Inside OpenBot Desktop, Desktop takes a Claude or ChatGPT plan's redirect, so nothing is pasted:
+ *   Claude's is sent to Desktop's port and finishes with code#state, ChatGPT's browser sign-in comes
+ *   first and finishes with the address it was sent to, and cancelling or leaving stops Desktop
+ *   listening. Where Desktop can't listen, the server refuses the port, or the page isn't sent to
+ *   Desktop, the paste, exactly as in a browser.
  * - Use an API key still connects every provider.
  * - Settings shows Your AI: theirs, which can be removed, back to the organization's.
  *
@@ -180,6 +185,26 @@ function signInStarted(
 
 /** What finishes Claude's sign-in: the spec's example of the code Claude's page shows. */
 const CLAUDE_CODE = "Zm9vYmFyLWNvZGU#c3RhdGUtZXhhbXBsZQ";
+
+/**
+ * Claude's sign-in inside OpenBot Desktop: the port Desktop listens on, and the page the server
+ * opens with it, sending Claude's redirect to Desktop with the state CLAUDE_CODE carries. Its code
+ * arrives at Desktop, and the app sends it on as code#state: CLAUDE_CODE, nothing pasted.
+ */
+const DESKTOP_PORT = 53682;
+const CLAUDE_REDIRECT_CODE = "Zm9vYmFyLWNvZGU";
+const CLAUDE_REDIRECT_STATE = "c3RhdGUtZXhhbXBsZQ";
+function claudeLoopbackPage(port: number): string {
+  const url = new URL(String(example("AiSignInClaudeExample").url));
+  // Claude's code page is asked for with code=true; a redirect to Desktop is not.
+  url.searchParams.delete("code");
+  url.searchParams.set("redirect_uri", `http://localhost:${port}/callback`);
+  url.searchParams.set("state", CLAUDE_REDIRECT_STATE);
+  return url.toString();
+}
+/** What finishes ChatGPT's browser sign-in inside Desktop: the address built from what arrived. */
+const CHATGPT_REDIRECT_ADDRESS =
+  "http://localhost:1455/auth/callback?code=ac_ZXhhbXBsZS1jb2Rl&state=example";
 /**
  * What finishes ChatGPT's sign-in in the browser: the address ChatGPT sends the browser to once the
  * person approves, on the redirect the spec's example asks for, with its state.
@@ -336,6 +361,12 @@ class FakeServer {
    * sentence, as it does when OpenAI's device code endpoint refuses.
    */
   deviceOff = false;
+  /**
+   * How this server takes Desktop's port for Claude (loopbackPort): `takes` sends Claude's redirect
+   * there; `refuses` is a server from before the field, whose strict schema answers 400 for a key it
+   * doesn't know; `ignores` starts the sign-in as if it weren't sent, with Claude's code page.
+   */
+  loopback: "takes" | "refuses" | "ignores" = "takes";
 
   constructor(start: Start, onboarded = false) {
     this.personal = personalFor(start);
@@ -437,6 +468,8 @@ class FakeServer {
       for (const key of Object.keys(sent))
         expect(Object.keys(body)).toContain(key);
       this.signIns.push(sent);
+      if ("loopbackPort" in sent && this.loopback === "refuses")
+        return invalid('Unrecognized key: "loopbackPort"');
       if (
         this.deviceOff &&
         body.provider === "openai" &&
@@ -449,6 +482,11 @@ class FakeServer {
       // The spec's example, read again every second rather than five so the test is quick.
       const begun = StartPersonalAiSignInResponse.parse({
         ...signInStarted(body.provider, body.method),
+        ...(body.provider === "anthropic" &&
+        body.loopbackPort !== undefined &&
+        this.loopback === "takes"
+          ? { url: claudeLoopbackPage(body.loopbackPort) }
+          : {}),
         interval: 1,
       });
       this.signIn = {
@@ -709,6 +747,77 @@ afterAll(async () => {
   for (const browser of browsers.values()) await browser.close();
 });
 
+/**
+ * OpenBot Desktop's window, as the page sees it. `true`: a Desktop from before it could take a
+ * sign-in's redirect, answering nothing it is asked. `{ listens }`: one with the redirect commands,
+ * answering them as desktop_page does, where `listens: false` can't have a port (one is busy).
+ */
+type DesktopWindow = boolean | { listens: boolean };
+
+/** What the page asked Desktop for its sign-in's redirect, as the stub recorded it. */
+type DesktopCall = { command: string; args: Record<string, unknown> };
+
+/**
+ * Desktop's three redirect commands, as desktop_page answers them: begin hands out an attempt and
+ * its port (Claude's a free one, ChatGPT's always 1455), await waits for the browser's redirect
+ * with that state, cancel ends the wait. The test plays the browser: `__desktopArrive` is the
+ * redirect reaching Desktop's listener, with the state the page waits for.
+ */
+function desktopStub(listens: boolean | null, port: number) {
+  type Pending = {
+    attemptId: string;
+    state: string;
+    resolve: (value: unknown) => void;
+    reject: (reason: unknown) => void;
+  };
+  const shell = window as unknown as Record<string, unknown>;
+  const calls: DesktopCall[] = [];
+  const pending: Pending[] = [];
+  let attempts = 0;
+  shell.__desktopCalls = calls;
+  shell.__desktopWaiting = () => pending.map((one) => one.state);
+  shell.__desktopArrive = (code: string | null, error: string | null) => {
+    const one = pending.shift();
+    if (!one) throw new Error("nothing waits for a redirect");
+    one.resolve({ code, state: one.state, error });
+  };
+  shell.__TAURI_INTERNALS__ = {
+    transformCallback: () => 1,
+    invoke: async (command: string, args?: Record<string, unknown>) => {
+      const name = command.split("|").pop() ?? command;
+      if (listens === null) return null;
+      if (!name.endsWith("_sign_in_redirect")) return null;
+      calls.push({ command: name, args: { ...args } });
+      if (name === "begin_sign_in_redirect") {
+        if (!listens)
+          throw "OpenBot Desktop couldn't listen for the sign-in. Another app is using its port.";
+        attempts += 1;
+        return {
+          attemptId: `attempt-${attempts}`,
+          port: args?.provider === "openai" ? 1455 : port,
+        };
+      }
+      if (name === "await_sign_in_redirect")
+        return new Promise((resolve, reject) =>
+          pending.push({
+            attemptId: String(args?.attemptId),
+            state: String(args?.state),
+            resolve,
+            reject,
+          }),
+        );
+      if (name === "cancel_sign_in_redirect") {
+        const at = pending.findIndex(
+          (one) => one.attemptId === args?.attemptId,
+        );
+        if (at >= 0)
+          pending.splice(at, 1)[0]?.reject("The sign-in was cancelled.");
+      }
+      return null;
+    },
+  };
+}
+
 /** The page at `path`, its server answering from `server`; `desktop` puts it in a Desktop window. */
 async function open(
   path: string,
@@ -716,7 +825,7 @@ async function open(
   engine: string,
   theme: Theme,
   window: Window,
-  desktop = false,
+  desktop: DesktopWindow = false,
 ): Promise<Page> {
   const browser = browsers.get(engine);
   if (!browser) throw new Error(`no ${engine}`);
@@ -727,13 +836,11 @@ async function open(
   });
   page.on("pageerror", (error) => console.error(error));
   if (desktop)
-    // OpenBot Desktop's window, as the page sees it: Tauri's IPC, answering nothing it is asked.
-    await page.addInitScript(() => {
-      (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
-        transformCallback: () => 1,
-        invoke: async () => null,
-      };
-    });
+    await page.addInitScript(
+      `(${desktopStub.toString()})(${
+        desktop === true ? "null" : String(desktop.listens)
+      }, ${DESKTOP_PORT})`,
+    );
   const inter = join(packageDir("@fontsource-variable/inter"), "files");
   // A provider's sign-in page, opened in a new tab: recorded, and never fetched from the provider.
   await page.context().route(
@@ -825,6 +932,52 @@ async function measured(page: Page) {
 
 const FINE = { sideways: false, cut: [] };
 const primary = (page: Page) => page.locator("[data-onboarding-primary]");
+
+/**
+ * Wait for the provider's page the app opened in a new tab: its request reaches the route a moment
+ * after the tab opens, and later in WebKit than in Chromium.
+ */
+async function openedIn(page: Page, server: FakeServer, url: string) {
+  for (let tries = 0; !server.opened.includes(url) && tries < 50; tries++)
+    await page.waitForTimeout(100);
+}
+
+/** Every redirect command the page sent the Desktop stub, in order. */
+const desktopCalls = (page: Page) =>
+  page.evaluate(
+    () =>
+      (window as unknown as Record<string, unknown>)
+        .__desktopCalls as DesktopCall[],
+  );
+
+/**
+ * The provider's redirect reaching Desktop's listener, once the page waits for it: Desktop hands
+ * the page its code, or the error the provider sent, with the state the page waits for.
+ */
+async function arrive(
+  page: Page,
+  code: string | null,
+  error: string | null = null,
+) {
+  await page.waitForFunction(
+    () =>
+      (
+        (
+          window as unknown as Record<string, () => string[]>
+        ).__desktopWaiting?.() ?? []
+      ).length > 0,
+  );
+  await page.evaluate(
+    ([given, failed]) =>
+      (
+        window as unknown as Record<
+          string,
+          (code: string | null, error: string | null) => void
+        >
+      ).__desktopArrive?.(given ?? null, failed ?? null),
+    [code, error] as const,
+  );
+}
 const heading = (page: Page, name: string) =>
   page.getByRole("heading", { level: 1, name }).waitFor();
 
@@ -1077,18 +1230,27 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
       try {
         await heading(page, "Connect your AI");
         const chooser = page.locator("[data-ai-chooser]");
-        // The plan's sign-in is the server's, never Desktop's: Desktop answers nothing it is
-        // asked here, and the sign-in still reaches the server and finishes. Being the server's,
-        // its browser sign-in would land on a page that won't load here too: a code first.
+        // The plan's sign-in is the server's, never Desktop's. This Desktop is from before it
+        // could take the sign-in's redirect and answers nothing it is asked: ChatGPT's browser
+        // sign-in, first inside Desktop, falls back to the paste, and still finishes.
         await chooser.getByRole("button", { name: /^OpenAI/ }).click();
         await chooser
           .getByRole("button", { name: "Sign in with ChatGPT", exact: true })
           .click();
-        await chooser.getByText("VU3W-87566").waitFor();
+        const address = chooser.getByLabel("Address from your browser");
+        await address.waitFor();
+        await chooser
+          .getByText(
+            "Approve the request in OpenAI's tab. When it says “This site can't be reached”, copy its address and paste it below.",
+          )
+          .waitFor();
+        await address.fill(CHATGPT_ADDRESS);
+        await chooser
+          .getByRole("button", { name: "Finish", exact: true })
+          .click();
         await chooser.getByText("Signed in to OpenAI.").waitFor();
-        expect(server.signIns).toEqual([
-          { provider: "openai", method: "device" },
-        ]);
+        expect(server.signIns).toEqual([{ provider: "openai" }]);
+        expect(server.finishes).toEqual([{ code: CHATGPT_ADDRESS }]);
         await chooser.getByRole("button", { name: "Back" }).click();
         server.signIns = [];
 
@@ -1127,6 +1289,447 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await page.close();
       }
     }, 60_000);
+
+  for (const engine of engines)
+    test(`inside OpenBot Desktop, a Claude plan finishes with nothing pasted: Desktop takes Claude's redirect, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "light",
+        WIDE,
+        { listens: true },
+      );
+      try {
+        await heading(page, "Connect your AI");
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+        await chooser
+          .getByText(
+            "Anthropic opens in your browser. It finishes on its own once you approve.",
+          )
+          .waitFor();
+        await shoot(page, "desktop-claude", engine, "light", WIDE);
+        await chooser
+          .getByRole("button", { name: "Sign in with Anthropic", exact: true })
+          .click();
+        await chooser
+          .getByText("Waiting for you to approve it in your browser…")
+          .waitFor();
+        // The server sends Claude's redirect to Desktop's port; that page is opened, and linked.
+        const claude = claudeLoopbackPage(DESKTOP_PORT);
+        expect(server.signIns).toEqual([
+          { provider: "anthropic", loopbackPort: DESKTOP_PORT },
+        ]);
+        expect(
+          await chooser
+            .getByRole("link", { name: "Open the sign-in page" })
+            .getAttribute("href"),
+        ).toBe(claude);
+        await openedIn(page, server, claude);
+        expect(server.opened).toContain(claude);
+        // Nothing to paste: no box, and no word of one.
+        expect(await chooser.getByRole("textbox").count()).toBe(0);
+        expect(await chooser.textContent()).not.toContain("paste");
+        expect(await desktopCalls(page)).toEqual([
+          {
+            command: "begin_sign_in_redirect",
+            args: { provider: "anthropic" },
+          },
+          {
+            command: "await_sign_in_redirect",
+            args: { attemptId: "attempt-1", state: CLAUDE_REDIRECT_STATE },
+          },
+        ]);
+        expect(await measured(page)).toEqual(FINE);
+        await shoot(page, "desktop-claude-waiting", engine, "light", WIDE);
+
+        // Claude's redirect reaches Desktop: its code and state go on to the server as code#state.
+        await arrive(page, CLAUDE_REDIRECT_CODE);
+        await chooser.getByText("Signed in to Anthropic.").waitFor();
+        expect(server.finishes).toEqual([{ code: CLAUDE_CODE }]);
+        expect(server.signInReads).toBe(0);
+        expect(await chooser.getByRole("textbox").count()).toBe(0);
+        await shoot(page, "desktop-claude-signed-in", engine, "light", WIDE);
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        await chooser.getByRole("status").waitFor();
+        expect(server.replaces).toEqual([
+          { provider: "anthropic", login: "plan" },
+        ]);
+        expect(await primary(page).isDisabled()).toBe(false);
+        await shoot(page, "desktop-claude-connected", engine, "light", WIDE);
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`inside OpenBot Desktop, Claude declining says so and signs in again, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "light",
+        WIDE,
+        { listens: true },
+      );
+      try {
+        await heading(page, "Connect your AI");
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+        const signIn = chooser.getByRole("button", {
+          name: "Sign in with Anthropic",
+          exact: true,
+        });
+        await signIn.click();
+        await arrive(page, null, "access_denied");
+        const alert = chooser.getByRole("alert");
+        await alert.waitFor();
+        expect(await alert.textContent()).toBe(
+          "The Claude sign-in wasn't approved. Sign in again.",
+        );
+        expect(server.finishes).toEqual([]);
+        await shoot(page, "desktop-claude-declined", engine, "light", WIDE);
+        await signIn.click();
+        await arrive(page, CLAUDE_REDIRECT_CODE);
+        await chooser.getByText("Signed in to Anthropic.").waitFor();
+        expect(server.finishes).toEqual([{ code: CLAUDE_CODE }]);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+  for (const engine of engines)
+    test(`inside OpenBot Desktop, ChatGPT's browser sign-in comes first and finishes with nothing pasted, and a code is the other way, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "light",
+        WIDE,
+        { listens: true },
+      );
+      try {
+        await heading(page, "Connect your AI");
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^OpenAI/ }).click();
+        // The browser first, with none of the paste's warnings: its last page loads here.
+        await chooser
+          .getByText(
+            "OpenAI opens in your browser. It finishes on its own once you approve.",
+          )
+          .waitFor();
+        expect(
+          await chooser.getByText("This site can't be reached").count(),
+        ).toBe(0);
+        expect(
+          await chooser
+            .getByRole("img", { name: /This site can't be reached/ })
+            .count(),
+        ).toBe(0);
+        await chooser
+          .getByText(
+            "You can also sign in with a code. It needs device code sign-in turned on in ChatGPT.",
+          )
+          .waitFor();
+        await chooser
+          .getByRole("button", { name: "Sign in with a code instead" })
+          .waitFor();
+        expect(await measured(page)).toEqual(FINE);
+        await shoot(page, "desktop-chatgpt", engine, "light", WIDE);
+
+        const signIn = chooser.getByRole("button", {
+          name: "Sign in with ChatGPT",
+          exact: true,
+        });
+        const waitingLine = chooser.getByText(
+          "Waiting for you to approve it in your browser…",
+        );
+        await signIn.click();
+        await waitingLine.waitFor();
+        expect(server.signIns).toEqual([
+          { provider: "openai", method: "browser" },
+        ]);
+        expect(await chooser.getByRole("textbox").count()).toBe(0);
+        expect(
+          await chooser.getByLabel("Address from your browser").count(),
+        ).toBe(0);
+        expect(await chooser.textContent()).not.toContain("paste");
+        expect(await measured(page)).toEqual(FINE);
+        await shoot(page, "desktop-chatgpt-waiting", engine, "light", WIDE);
+
+        // Cancel sign-in: Desktop stops listening for it.
+        await chooser.getByRole("button", { name: "Cancel sign-in" }).click();
+        await signIn.waitFor();
+        await signIn.click();
+        await waitingLine.waitFor();
+        await arrive(page, CHATGPT_CODE);
+        await chooser.getByText("Signed in to OpenAI.").waitFor();
+        // The whole address, built from what arrived, as a person would have pasted it.
+        expect(server.finishes).toEqual([{ code: CHATGPT_REDIRECT_ADDRESS }]);
+        expect(await desktopCalls(page)).toEqual([
+          { command: "begin_sign_in_redirect", args: { provider: "openai" } },
+          {
+            command: "await_sign_in_redirect",
+            args: { attemptId: "attempt-1", state: CHATGPT_STATE },
+          },
+          {
+            command: "cancel_sign_in_redirect",
+            args: { attemptId: "attempt-1" },
+          },
+          { command: "begin_sign_in_redirect", args: { provider: "openai" } },
+          {
+            command: "await_sign_in_redirect",
+            args: { attemptId: "attempt-2", state: CHATGPT_STATE },
+          },
+        ]);
+        await shoot(page, "desktop-chatgpt-signed-in", engine, "light", WIDE);
+
+        // The code, the other way: its steps, and the browser offered back below it.
+        await chooser.getByRole("button", { name: "Back" }).click();
+        await chooser.getByRole("button", { name: /^OpenAI/ }).click();
+        await chooser
+          .getByRole("button", { name: "Sign in with a code instead" })
+          .click();
+        await chooser
+          .getByRole("listitem")
+          .filter({ hasText: "Sign in with ChatGPT below to get a code." })
+          .waitFor();
+        await chooser
+          .getByText(
+            "Your browser can sign in instead. It finishes on its own once you approve.",
+          )
+          .waitFor();
+        await shoot(page, "desktop-chatgpt-code-way", engine, "light", WIDE);
+
+        // Leaving the row while the browser sign-in waits: Desktop stops listening.
+        await chooser
+          .getByRole("button", { name: "Sign in with your browser instead" })
+          .click();
+        await signIn.click();
+        await waitingLine.waitFor();
+        await chooser.getByRole("button", { name: "Back" }).click();
+        await page.waitForFunction(() =>
+          (
+            (window as unknown as Record<string, unknown>)
+              .__desktopCalls as DesktopCall[]
+          ).some(
+            (call) =>
+              call.command === "cancel_sign_in_redirect" &&
+              call.args.attemptId === "attempt-3",
+          ),
+        );
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`inside OpenBot Desktop, Claude falls back to today's paste when Desktop can't listen, the server refuses the port, or the page isn't Desktop's, in ${engine}`, async () => {
+      const cases: {
+        name: string;
+        listens: boolean;
+        loopback: FakeServer["loopback"];
+        signIns: Record<string, unknown>[];
+        calls: DesktopCall[];
+      }[] = [
+        {
+          name: "busy",
+          listens: false,
+          loopback: "takes",
+          signIns: [{ provider: "anthropic" }],
+          calls: [
+            {
+              command: "begin_sign_in_redirect",
+              args: { provider: "anthropic" },
+            },
+          ],
+        },
+        {
+          name: "older-server",
+          listens: true,
+          loopback: "refuses",
+          signIns: [
+            { provider: "anthropic", loopbackPort: DESKTOP_PORT },
+            { provider: "anthropic" },
+          ],
+          calls: [
+            {
+              command: "begin_sign_in_redirect",
+              args: { provider: "anthropic" },
+            },
+            {
+              command: "cancel_sign_in_redirect",
+              args: { attemptId: "attempt-1" },
+            },
+          ],
+        },
+        {
+          name: "not-desktops",
+          listens: true,
+          loopback: "ignores",
+          signIns: [{ provider: "anthropic", loopbackPort: DESKTOP_PORT }],
+          calls: [
+            {
+              command: "begin_sign_in_redirect",
+              args: { provider: "anthropic" },
+            },
+            {
+              command: "cancel_sign_in_redirect",
+              args: { attemptId: "attempt-1" },
+            },
+          ],
+        },
+      ];
+      for (const one of cases) {
+        const server = new FakeServer("none", true);
+        server.loopback = one.loopback;
+        const page = await open(
+          "/onboarding?step=ai",
+          server,
+          engine,
+          "light",
+          WIDE,
+          { listens: one.listens },
+        );
+        try {
+          await heading(page, "Connect your AI");
+          const chooser = page.locator("[data-ai-chooser]");
+          await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+          await chooser
+            .getByRole("button", {
+              name: "Sign in with Anthropic",
+              exact: true,
+            })
+            .click();
+          // Today's paste, exactly as in a browser: Claude's code page, and the box for its code.
+          const code = chooser.getByLabel("Code from your browser");
+          await code.waitFor();
+          await chooser
+            .getByText(
+              "Anthropic opens in your browser. Approve the request there, then paste the code it shows you.",
+            )
+            .waitFor();
+          expect(
+            await chooser
+              .getByRole("link", { name: "Open the sign-in page" })
+              .getAttribute("href"),
+          ).toBe(String(example("AiSignInClaudeExample").url));
+          expect(server.signIns).toEqual(one.signIns);
+          expect(await desktopCalls(page)).toEqual(one.calls);
+          if (one.name === "busy")
+            await shoot(page, "desktop-fallback-claude", engine, "light", WIDE);
+          await code.fill(CLAUDE_CODE);
+          await chooser
+            .getByRole("button", { name: "Finish", exact: true })
+            .click();
+          await chooser.getByText("Signed in to Anthropic.").waitFor();
+          expect(server.finishes).toEqual([{ code: CLAUDE_CODE }]);
+        } finally {
+          await page.close();
+        }
+      }
+
+      // ChatGPT, where Desktop can't listen: the browser sign-in's paste, with its warnings.
+      const server = new FakeServer("none", true);
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "light",
+        WIDE,
+        { listens: false },
+      );
+      try {
+        await heading(page, "Connect your AI");
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^OpenAI/ }).click();
+        await chooser
+          .getByRole("button", { name: "Sign in with ChatGPT", exact: true })
+          .click();
+        const address = chooser.getByLabel("Address from your browser");
+        await address.waitFor();
+        await chooser
+          .getByText(
+            "Approve the request in OpenAI's tab. When it says “This site can't be reached”, copy its address and paste it below.",
+          )
+          .waitFor();
+        expect(server.signIns).toEqual([{ provider: "openai" }]);
+        expect(await measured(page)).toEqual(FINE);
+        await shoot(page, "desktop-fallback-chatgpt", engine, "light", WIDE);
+        await address.fill(CHATGPT_ADDRESS);
+        await chooser
+          .getByRole("button", { name: "Finish", exact: true })
+          .click();
+        await chooser.getByText("Signed in to OpenAI.").waitFor();
+      } finally {
+        await page.close();
+      }
+    }, 120_000);
+
+  // The sign-in screens inside Desktop and in a plain browser, wide and at a phone's width, to set
+  // beside the same screens before Desktop took the redirect.
+  test.skipIf(!shots)(
+    "screenshots of Claude's and ChatGPT's sign-in, inside Desktop and in a browser",
+    async () => {
+      for (const engine of engines)
+        for (const window of [WIDE, PHONE])
+          for (const where of ["desktop", "browser"] as const) {
+            const server = new FakeServer("none", true);
+            server.outcomes = ["never", "never", "never", "never"];
+            const page = await open(
+              "/onboarding?step=ai",
+              server,
+              engine,
+              "light",
+              window,
+              where === "desktop" ? { listens: true } : false,
+            );
+            try {
+              await heading(page, "Connect your AI");
+              const chooser = page.locator("[data-ai-chooser]");
+              for (const [row, button, name] of [
+                [/^Anthropic/, "Sign in with Anthropic", "claude"],
+                [/^OpenAI/, "Sign in with ChatGPT", "chatgpt"],
+              ] as const) {
+                await chooser.getByRole("button", { name: row }).click();
+                const signIn = chooser.getByRole("button", {
+                  name: button,
+                  exact: true,
+                });
+                await signIn.waitFor();
+                expect(await measured(page)).toEqual(FINE);
+                await shoot(
+                  page,
+                  `cmp-${where}-${name}`,
+                  engine,
+                  "light",
+                  window,
+                );
+                await signIn.click();
+                await chooser
+                  .getByRole("button", { name: "Cancel sign-in" })
+                  .waitFor();
+                expect(await measured(page)).toEqual(FINE);
+                await shoot(
+                  page,
+                  `cmp-${where}-${name}-waiting`,
+                  engine,
+                  "light",
+                  window,
+                );
+                await chooser.getByRole("button", { name: "Back" }).click();
+              }
+            } finally {
+              await page.close();
+            }
+          }
+    },
+    300_000,
+  );
 
   for (const engine of engines)
     test(`Settings shows Your AI, and removing it goes back to the organization's, in ${engine}`, async () => {
@@ -1389,6 +1992,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
             .getByRole("link", { name: "Open the sign-in page" })
             .getAttribute("href"),
         ).toBe(chatgpt);
+        await openedIn(page, server, chatgpt);
         expect(server.opened).toContain(chatgpt);
         // No code to enter at ChatGPT, and no way to the code sign-in while this one waits.
         expect(await chooser.getByText("Verification code").count()).toBe(0);
@@ -1603,6 +2207,7 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         ]);
         expect(server.signIn?.reads).toBe(2);
         expect(server.finishes).toEqual([]);
+        await openedIn(page, server, device);
         expect(server.opened).toContain(device);
         await chooser.getByRole("button", { name: "Connect" }).click();
         const connected = chooser.getByRole("status");
