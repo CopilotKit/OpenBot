@@ -25,6 +25,7 @@ import { Route as AuthedAppBotRouteImport } from './routes/_authed/_app/bot'
 import { Route as AuthedAppBrowserRouteImport } from './routes/_authed/_app/browser'
 import { Route as AuthedAppMemoryRouteImport } from './routes/_authed/_app/memory'
 import { Route as AuthedAppReachabilityRouteImport } from './routes/_authed/_app/reachability'
+import { Route as AuthedAppReconnectRouteImport } from './routes/_authed/_app/reconnect'
 import { Route as AuthedAppResponsibilitiesRouteImport } from './routes/_authed/_app/responsibilities'
 import { Route as AuthedAppRoutinesRouteImport } from './routes/_authed/_app/routines'
 import { Route as AuthedAppSkillsRouteImport } from './routes/_authed/_app/skills'
@@ -79,6 +80,7 @@ import { Route as AuthedAppGroupChannelIdRouteImport } from './routes/_authed/_a
 import { Route as AuthedAppGroupNewRouteImport } from './routes/_authed/_app/group/new'
 import { Route as AuthedAppInvitationsIndexRouteImport } from './routes/_authed/_app/invitations.index'
 import { Route as AuthedAppInvitationsInvitationIdRouteImport } from './routes/_authed/_app/invitations.$invitationId'
+import { Route as AuthedAppReconnectAppIdRouteImport } from './routes/_authed/_app/reconnect_.$appId'
 import { Route as AuthedAppRoutinesNewRouteImport } from './routes/_authed/_app/routines_.new'
 import { Route as AuthedAppSScreenRouteImport } from './routes/_authed/_app/s/$screen'
 import { Route as AuthedAppSkillsSlugRouteImport } from './routes/_authed/_app/skills_.$slug'
@@ -212,6 +214,11 @@ const AuthedAppMemoryRoute = AuthedAppMemoryRouteImport.update({
 const AuthedAppReachabilityRoute = AuthedAppReachabilityRouteImport.update({
   id: '/reachability',
   path: '/reachability',
+  getParentRoute: () => AuthedAppRoute,
+} as any)
+const AuthedAppReconnectRoute = AuthedAppReconnectRouteImport.update({
+  id: '/reconnect',
+  path: '/reconnect',
   getParentRoute: () => AuthedAppRoute,
 } as any)
 const AuthedAppResponsibilitiesRoute =
@@ -496,6 +503,11 @@ const AuthedAppInvitationsInvitationIdRoute =
     path: '/invitations/$invitationId',
     getParentRoute: () => AuthedAppRoute,
   } as any)
+const AuthedAppReconnectAppIdRoute = AuthedAppReconnectAppIdRouteImport.update({
+  id: '/reconnect_/$appId',
+  path: '/reconnect/$appId',
+  getParentRoute: () => AuthedAppRoute,
+} as any)
 const AuthedAppRoutinesNewRoute = AuthedAppRoutinesNewRouteImport.update({
   id: '/routines_/new',
   path: '/routines/new',
@@ -835,6 +847,7 @@ export interface FileRoutesByFullPath {
   '/browser': typeof AuthedAppBrowserRoute
   '/memory': typeof AuthedAppMemoryRoute
   '/reachability': typeof AuthedAppReachabilityRoute
+  '/reconnect': typeof AuthedAppReconnectRoute
   '/responsibilities': typeof AuthedAppResponsibilitiesRoute
   '/routines': typeof AuthedAppRoutinesRoute
   '/skills': typeof AuthedAppSkillsRoute
@@ -883,6 +896,7 @@ export interface FileRoutesByFullPath {
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
   '/invitations/$invitationId': typeof AuthedAppInvitationsInvitationIdRoute
+  '/reconnect/$appId': typeof AuthedAppReconnectAppIdRoute
   '/routines/new': typeof AuthedAppRoutinesNewRoute
   '/s/$screen': typeof AuthedAppSScreenRoute
   '/skills/$slug': typeof AuthedAppSkillsSlugRoute
@@ -958,6 +972,7 @@ export interface FileRoutesByTo {
   '/browser': typeof AuthedAppBrowserRoute
   '/memory': typeof AuthedAppMemoryRoute
   '/reachability': typeof AuthedAppReachabilityRoute
+  '/reconnect': typeof AuthedAppReconnectRoute
   '/responsibilities': typeof AuthedAppResponsibilitiesRoute
   '/routines': typeof AuthedAppRoutinesRoute
   '/skills': typeof AuthedAppSkillsRoute
@@ -1006,6 +1021,7 @@ export interface FileRoutesByTo {
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
   '/invitations/$invitationId': typeof AuthedAppInvitationsInvitationIdRoute
+  '/reconnect/$appId': typeof AuthedAppReconnectAppIdRoute
   '/routines/new': typeof AuthedAppRoutinesNewRoute
   '/s/$screen': typeof AuthedAppSScreenRoute
   '/skills/$slug': typeof AuthedAppSkillsSlugRoute
@@ -1085,6 +1101,7 @@ export interface FileRoutesById {
   '/_authed/_app/browser': typeof AuthedAppBrowserRoute
   '/_authed/_app/memory': typeof AuthedAppMemoryRoute
   '/_authed/_app/reachability': typeof AuthedAppReachabilityRoute
+  '/_authed/_app/reconnect': typeof AuthedAppReconnectRoute
   '/_authed/_app/responsibilities': typeof AuthedAppResponsibilitiesRoute
   '/_authed/_app/routines': typeof AuthedAppRoutinesRoute
   '/_authed/_app/skills': typeof AuthedAppSkillsRoute
@@ -1135,6 +1152,7 @@ export interface FileRoutesById {
   '/_authed/_app/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/_authed/_app/group/new': typeof AuthedAppGroupNewRoute
   '/_authed/_app/invitations/$invitationId': typeof AuthedAppInvitationsInvitationIdRoute
+  '/_authed/_app/reconnect_/$appId': typeof AuthedAppReconnectAppIdRoute
   '/_authed/_app/routines_/new': typeof AuthedAppRoutinesNewRoute
   '/_authed/_app/s/$screen': typeof AuthedAppSScreenRoute
   '/_authed/_app/skills_/$slug': typeof AuthedAppSkillsSlugRoute
@@ -1214,6 +1232,7 @@ export interface FileRouteTypes {
     | '/browser'
     | '/memory'
     | '/reachability'
+    | '/reconnect'
     | '/responsibilities'
     | '/routines'
     | '/skills'
@@ -1262,6 +1281,7 @@ export interface FileRouteTypes {
     | '/group/$channelId'
     | '/group/new'
     | '/invitations/$invitationId'
+    | '/reconnect/$appId'
     | '/routines/new'
     | '/s/$screen'
     | '/skills/$slug'
@@ -1337,6 +1357,7 @@ export interface FileRouteTypes {
     | '/browser'
     | '/memory'
     | '/reachability'
+    | '/reconnect'
     | '/responsibilities'
     | '/routines'
     | '/skills'
@@ -1385,6 +1406,7 @@ export interface FileRouteTypes {
     | '/group/$channelId'
     | '/group/new'
     | '/invitations/$invitationId'
+    | '/reconnect/$appId'
     | '/routines/new'
     | '/s/$screen'
     | '/skills/$slug'
@@ -1463,6 +1485,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/browser'
     | '/_authed/_app/memory'
     | '/_authed/_app/reachability'
+    | '/_authed/_app/reconnect'
     | '/_authed/_app/responsibilities'
     | '/_authed/_app/routines'
     | '/_authed/_app/skills'
@@ -1513,6 +1536,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/group/$channelId'
     | '/_authed/_app/group/new'
     | '/_authed/_app/invitations/$invitationId'
+    | '/_authed/_app/reconnect_/$appId'
     | '/_authed/_app/routines_/new'
     | '/_authed/_app/s/$screen'
     | '/_authed/_app/skills_/$slug'
@@ -1696,6 +1720,13 @@ declare module '@tanstack/react-router' {
       path: '/reachability'
       fullPath: '/reachability'
       preLoaderRoute: typeof AuthedAppReachabilityRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/reconnect': {
+      id: '/_authed/_app/reconnect'
+      path: '/reconnect'
+      fullPath: '/reconnect'
+      preLoaderRoute: typeof AuthedAppReconnectRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/responsibilities': {
@@ -2074,6 +2105,13 @@ declare module '@tanstack/react-router' {
       path: '/invitations/$invitationId'
       fullPath: '/invitations/$invitationId'
       preLoaderRoute: typeof AuthedAppInvitationsInvitationIdRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/reconnect_/$appId': {
+      id: '/_authed/_app/reconnect_/$appId'
+      path: '/reconnect/$appId'
+      fullPath: '/reconnect/$appId'
+      preLoaderRoute: typeof AuthedAppReconnectAppIdRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/routines_/new': {
@@ -2637,6 +2675,7 @@ interface AuthedAppRouteChildren {
   AuthedAppBrowserRoute: typeof AuthedAppBrowserRoute
   AuthedAppMemoryRoute: typeof AuthedAppMemoryRoute
   AuthedAppReachabilityRoute: typeof AuthedAppReachabilityRoute
+  AuthedAppReconnectRoute: typeof AuthedAppReconnectRoute
   AuthedAppResponsibilitiesRoute: typeof AuthedAppResponsibilitiesRoute
   AuthedAppRoutinesRoute: typeof AuthedAppRoutinesRoute
   AuthedAppSkillsRoute: typeof AuthedAppSkillsRoute
@@ -2652,6 +2691,7 @@ interface AuthedAppRouteChildren {
   AuthedAppGroupChannelIdRoute: typeof AuthedAppGroupChannelIdRoute
   AuthedAppGroupNewRoute: typeof AuthedAppGroupNewRoute
   AuthedAppInvitationsInvitationIdRoute: typeof AuthedAppInvitationsInvitationIdRoute
+  AuthedAppReconnectAppIdRoute: typeof AuthedAppReconnectAppIdRoute
   AuthedAppRoutinesNewRoute: typeof AuthedAppRoutinesNewRoute
   AuthedAppSScreenRoute: typeof AuthedAppSScreenRoute
   AuthedAppSkillsSlugRoute: typeof AuthedAppSkillsSlugRoute
@@ -2693,6 +2733,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppBrowserRoute: AuthedAppBrowserRoute,
   AuthedAppMemoryRoute: AuthedAppMemoryRoute,
   AuthedAppReachabilityRoute: AuthedAppReachabilityRoute,
+  AuthedAppReconnectRoute: AuthedAppReconnectRoute,
   AuthedAppResponsibilitiesRoute: AuthedAppResponsibilitiesRoute,
   AuthedAppRoutinesRoute: AuthedAppRoutinesRoute,
   AuthedAppSkillsRoute: AuthedAppSkillsRoute,
@@ -2708,6 +2749,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppGroupChannelIdRoute: AuthedAppGroupChannelIdRoute,
   AuthedAppGroupNewRoute: AuthedAppGroupNewRoute,
   AuthedAppInvitationsInvitationIdRoute: AuthedAppInvitationsInvitationIdRoute,
+  AuthedAppReconnectAppIdRoute: AuthedAppReconnectAppIdRoute,
   AuthedAppRoutinesNewRoute: AuthedAppRoutinesNewRoute,
   AuthedAppSScreenRoute: AuthedAppSScreenRoute,
   AuthedAppSkillsSlugRoute: AuthedAppSkillsSlugRoute,

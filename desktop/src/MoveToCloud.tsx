@@ -73,6 +73,11 @@ export type Moved = {
   notes: string[];
   /** Plain sentences about what couldn't be removed from this computer after the move. */
   leftBehind: string[];
+  /**
+   * OpenBot Cloud still needs the person's AI before their Bots can run: true, false, or null (or
+   * absent, from an older shell) when it couldn't be asked. Only true changes the result.
+   */
+  connectAi?: boolean | null;
 };
 
 export type MoveStage =
@@ -302,8 +307,11 @@ type Screen =
  * 3. The move (`move_to_cloud`): sign in through the browser, pack up, send, add, check, and only
  *    then remove OpenBot from this computer, each a row (`move:progress`).
  * 4. A move that stopped removed nothing: the sentence, Try again, or keep OpenBot here.
- * 5. Done: the space freed, the apps to reconnect, each opening OpenBot Cloud's connections in this
- *    window (`open_moved_cloud`), and Open OpenBot.
+ * 5. Done: the space freed, the apps to reconnect, each opening its own connect page in OpenBot
+ *    Cloud in this window (`open_moved_cloud`), and Open OpenBot, which opens the list of apps to
+ *    reconnect when there are any. When OpenBot Cloud still needs the person's AI (`connectAi`),
+ *    Connect your AI comes first and is the only way on: the apps are named as the step after it,
+ *    with nothing on them to press.
  */
 export function MoveToCloud({
   offer,
@@ -783,6 +791,26 @@ function AppMark({ app }: { app: ReconnectApp }) {
   );
 }
 
+/**
+ * Where the result opens OpenBot Cloud: the list of apps the move left to reconnect, or one app's
+ * place in it, which opens that app's connect page and comes back to the list once it is
+ * connected. OpenBot Cloud runs Connect your AI before either when the person still needs one,
+ * then lands on the page asked for.
+ */
+export const RECONNECT_LIST = "/reconnect";
+
+/**
+ * One app's reconnect. The shell opens only a plain path of lowercase letters, digits, `-`, `_`
+ * and `/`, at most 100 characters (`relay::app_page`), and anything else opens home. An app id it
+ * can't carry opens the list instead, where the app is too.
+ */
+export function reconnectPage(app: ReconnectApp): string {
+  const path = `${RECONNECT_LIST}/${app.appId}`;
+  return /^[a-z0-9_-]+$/.test(app.appId) && path.length <= 100
+    ? path
+    : RECONNECT_LIST;
+}
+
 function Done({ moved }: { moved: Moved }) {
   const [opening, setOpening] = useState<string | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -797,6 +825,9 @@ function Done({ moved }: { moved: Moved }) {
     }
   };
   const notices = [...moved.notes, ...moved.leftBehind];
+  // OpenBot Cloud sends a person with no AI to Connect your AI before any page, and then on to
+  // the page they asked for: the list of apps that didn't move, each with Reconnect.
+  const aiFirst = moved.connectAi === true;
   return (
     <Sheet>
       <h1>You're on OpenBot Cloud</h1>
@@ -823,29 +854,53 @@ function Done({ moved }: { moved: Moved }) {
           </div>
         </div>
       )}
-      {moved.apps.length > 0 && (
+      {aiFirst && (
         <section
-          className="local-alert needs move-apps-notice"
-          aria-labelledby="moved-apps-heading"
+          className="local-alert needs move-ai-first"
+          aria-labelledby="moved-ai-heading"
         >
-          <h2 id="moved-apps-heading">Reconnect your apps in OpenBot Cloud</h2>
-          <p>Your app connections are private, so they didn't move.</p>
-          <AppList
-            apps={moved.apps}
-            action={(app) => (
-              <button
-                type="button"
-                className="quiet move-app-action"
-                aria-label={`Reconnect ${app.appName}`}
-                disabled={opening !== null}
-                onClick={() => void open("/connections")}
-              >
-                Reconnect
-              </button>
-            )}
-          />
+          <h2 id="moved-ai-heading">Connect your AI first</h2>
+          <p>
+            Your Bots can't work in OpenBot Cloud until you connect your AI.
+          </p>
         </section>
       )}
+      {moved.apps.length > 0 &&
+        (aiFirst ? (
+          <section className="move-then" aria-labelledby="moved-apps-heading">
+            <h2 id="moved-apps-heading">Then reconnect your apps</h2>
+            <p>
+              Your app connections are private, so they didn't move. Once your
+              AI is connected, you'll reconnect each one from a list in OpenBot
+              Cloud.
+            </p>
+            <AppList apps={moved.apps} />
+          </section>
+        ) : (
+          <section
+            className="local-alert needs move-apps-notice"
+            aria-labelledby="moved-apps-heading"
+          >
+            <h2 id="moved-apps-heading">
+              Reconnect your apps in OpenBot Cloud
+            </h2>
+            <p>Your app connections are private, so they didn't move.</p>
+            <AppList
+              apps={moved.apps}
+              action={(app) => (
+                <button
+                  type="button"
+                  className="quiet move-app-action"
+                  aria-label={`Reconnect ${app.appName}`}
+                  disabled={opening !== null}
+                  onClick={() => void open(reconnectPage(app))}
+                >
+                  Reconnect
+                </button>
+              )}
+            />
+          </section>
+        ))}
       {notices.length > 0 && (
         <div className="move-notice" role="status">
           {notices.map((said) => (
@@ -860,13 +915,25 @@ function Done({ moved }: { moved: Moved }) {
       )}
       <StepFooter>
         <div className="row">
-          <button
-            type="button"
-            disabled={opening !== null}
-            onClick={() => void open("/")}
-          >
-            Open OpenBot
-          </button>
+          {aiFirst ? (
+            <button
+              type="button"
+              disabled={opening !== null}
+              onClick={() => void open(RECONNECT_LIST)}
+            >
+              Connect your AI
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={opening !== null}
+              onClick={() =>
+                void open(moved.apps.length > 0 ? RECONNECT_LIST : "/")
+              }
+            >
+              Open OpenBot
+            </button>
+          )}
         </div>
         {opening !== null && <StatusLine>Opening OpenBot Cloud…</StatusLine>}
       </StepFooter>

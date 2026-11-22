@@ -891,12 +891,13 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         ]);
         expect(await measured(page)).toEqual(FINE);
 
-        // Connected: the step's button is the way in, and it finishes onboarding.
+        // Connected: the step's button is the way in, and it finishes onboarding. In, to where
+        // they were headed when the gate sent them back: Settings.
         expect(await primary(page).textContent()).toContain("Get started");
         await primary(page).click();
-        await page.locator("[data-app-home]").waitFor();
+        await page.waitForURL((url) => url.pathname === "/settings");
+        await page.getByRole("heading", { name: "Your AI" }).waitFor();
         expect(server.completes).toBe(1);
-        expect(new URL(page.url()).pathname).toBe("/");
       } finally {
         await page.close();
       }
@@ -944,10 +945,119 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await chooser.getByRole("button", { name: "Connect" }).click();
         await chooser.getByRole("status").waitFor();
         await primary(page).click();
-        await page.locator("[data-app-home]").waitFor();
+        // On to Settings, where they were going when the gate stopped them.
+        await page.waitForURL((url) => url.pathname === "/settings");
+        await page.getByRole("heading", { name: "Your AI" }).waitFor();
         // Already finished: not finished again, and no place in it saved.
         expect(server.completes).toBe(0);
         expect(server.onboarding.step).toBe(1);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+  /*
+   * Reported on 1.2.0-rc.1: after the move to OpenBot Cloud, an app's Reconnect opened OpenBot
+   * Cloud, the gate asked for Connect your AI first, and its button then left the person on home,
+   * nowhere near the app. Where they were headed is kept through the step, and a reload on it.
+   */
+  for (const engine of engines)
+    test(`an app's Reconnect that meets Connect your AI opens that app once the AI is connected, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      const page = await open(
+        "/connections/gmail",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        await heading(page, "Connect your AI");
+        const asked = new URL(page.url());
+        expect(asked.pathname).toBe("/onboarding");
+        expect(asked.searchParams.get("step")).toBe("ai");
+        expect(asked.searchParams.get("next")).toBe("/connections/gmail");
+        await page.reload();
+        await heading(page, "Connect your AI");
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+        await chooser.getByRole("tab", { name: "Use an API key" }).click();
+        await chooser.getByLabel("Anthropic API key").fill(GOOD_KEY);
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        await chooser.getByRole("status").waitFor();
+        await primary(page).click();
+        await page.locator('[data-app-connect="gmail"]').waitFor();
+        expect(new URL(page.url()).pathname).toBe("/connections/gmail");
+        expect(await page.locator("[data-app-home]").count()).toBe(0);
+        expect(server.completes).toBe(0);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+  for (const engine of engines)
+    test(`a new person sent to onboarding on their way to an app's page goes on to it at the end, in ${engine}`, async () => {
+      const server = new FakeServer("none");
+      const page = await open(
+        "/connections/gmail",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        await heading(page, "Welcome to OpenBot");
+        expect(new URL(page.url()).searchParams.get("next")).toBe(
+          "/connections/gmail",
+        );
+        await page.waitForFunction(
+          () =>
+            !document
+              .querySelector("[data-onboarding-primary]")
+              ?.hasAttribute("disabled"),
+        );
+        await primary(page).click();
+        await heading(page, "Connect your AI");
+        expect(new URL(page.url()).searchParams.get("next")).toBe(
+          "/connections/gmail",
+        );
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+        await chooser.getByRole("tab", { name: "Use an API key" }).click();
+        await chooser.getByLabel("Anthropic API key").fill(GOOD_KEY);
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        await chooser.getByRole("status").waitFor();
+        await primary(page).click();
+        await page.locator('[data-app-connect="gmail"]').waitFor();
+        expect(new URL(page.url()).pathname).toBe("/connections/gmail");
+        expect(server.completes).toBe(1);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+  for (const engine of engines)
+    test(`an address that isn't a page of OpenBot is never followed out of onboarding, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      const page = await open(
+        `/onboarding?step=ai&next=${encodeURIComponent("//evil.example/x")}`,
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      try {
+        await heading(page, "Connect your AI");
+        expect(new URL(page.url()).searchParams.get("next")).toBe(null);
+        const chooser = page.locator("[data-ai-chooser]");
+        await chooser.getByRole("button", { name: /^Anthropic/ }).click();
+        await chooser.getByRole("tab", { name: "Use an API key" }).click();
+        await chooser.getByLabel("Anthropic API key").fill(GOOD_KEY);
+        await chooser.getByRole("button", { name: "Connect" }).click();
+        await chooser.getByRole("status").waitFor();
+        await primary(page).click();
+        await page.locator("[data-app-home]").waitFor();
+        expect(new URL(page.url()).pathname).toBe("/");
       } finally {
         await page.close();
       }

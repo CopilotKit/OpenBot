@@ -74,6 +74,19 @@ function Home() {
   );
 }
 
+/**
+ * An app's page, as the move's Reconnect opens it (`/connections/<app>`): a stand-in that says which
+ * app it is. What matters here is that the gate gets the person to it.
+ */
+const appRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: "/connections/$key",
+  component: function AppPage() {
+    const { key } = appRoute.useParams();
+    return <h1 data-app-connect={key}>{key}</h1>;
+  },
+});
+
 const onboardingRoute = (
   OnboardingRoute as unknown as {
     update: (options: unknown) => typeof OnboardingRoute;
@@ -103,6 +116,7 @@ const router = createRouter({
   routeTree: rootRoute.addChildren([
     authedRoute.addChildren([
       onboardingRoute as never,
+      appRoute,
       settingsRoute.addChildren([
         createRoute({
           getParentRoute: () => settingsRoute,
