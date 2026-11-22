@@ -57,15 +57,14 @@ export const Route = createFileRoute("/_authed")({
      * Somebody who has not finished onboarding goes there and nowhere else. Here rather than in
      * `_app`, so admin and settings are behind the same gate; checked against the destination so
      * the onboarding route itself stays reachable.
-     */
-    /*
-     * Both gates below keep where the person was headed (`?next=`), and onboarding's last button
-     * takes them there: an app's Reconnect after the move to OpenBot Cloud runs Connect your AI and
-     * then opens that app, never home (lib/onboarding/destination.ts).
+     *
+     * This gate and the next keep where the person was headed (`?next=`), an invitation's link
+     * included, and onboarding's last button takes them there: an app's Reconnect after the move to
+     * OpenBot Cloud runs Connect your AI and then opens that app, never home
+     * (lib/onboarding/destination.ts).
      */
     const next = onboardingDestination(location.href);
     if (needsOnboarding(user) && location.pathname !== "/onboarding") {
-      rememberInvitationLink(location.pathname);
       throw redirect({ to: "/onboarding", search: next ? { next } : {} });
     }
     /*
@@ -78,7 +77,6 @@ export const Route = createFileRoute("/_authed")({
       location.pathname !== "/onboarding" &&
       (await aiConnectionRequired(context.queryClient))
     ) {
-      rememberInvitationLink(location.pathname);
       throw redirect({
         to: "/onboarding",
         search: next ? { step: "ai", next } : { step: "ai" },
