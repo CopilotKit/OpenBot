@@ -713,9 +713,7 @@ fn local_openbot(parts: Vec<(Part, Vec<u8>)>, counts: Vec<Count>) -> String {
                     json_response(200, ready.clone())
                 }
             }
-            ("GET", path)
-                if path.starts_with("/api/v2/organizations/org_here/exports/exp_1/parts/") =>
-            {
+            ("GET", path) if path.contains("/org_here/exports/exp_1/parts/") => {
                 let number: usize = path.rsplit('/').next().unwrap().parse().unwrap();
                 let bytes = &parts[number - 1].1;
                 match request.headers.get("range") {
@@ -777,9 +775,7 @@ fn cloud_openbot(expected: Vec<Part>, verify: serde_json::Value) -> (String, Rec
             ("POST", "/api/v2/organizations/org_mine/imports") => {
                 json_response(201, import("waiting-for-bundle"))
             }
-            ("PUT", path)
-                if path.starts_with("/api/v2/organizations/org_mine/imports/imp_1/parts/") =>
-            {
+            ("PUT", path) if path.contains("/org_mine/imports/imp_1/parts/") => {
                 let number: u32 = path.rsplit('/').next().unwrap().parse().unwrap();
                 let held = parts.lock().unwrap();
                 if number != 1 && !held.contains_key(&1) {
