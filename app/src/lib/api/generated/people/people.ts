@@ -18,6 +18,8 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AcceptServiceTermsHeaders,
+  AcceptServiceTermsRequest,
   AdminOnlyResponse,
   AdvanceOnboardingHeaders,
   AdvanceOnboardingRequest,
@@ -48,6 +50,8 @@ import type {
   RestorePersonAccessHeaders,
   RevokePersonAccessHeaders,
   ServerErrorResponse,
+  ServiceTerms,
+  ServiceTermsConflictResponse,
   SignInUnavailableResponse,
   StandingInstructions,
   UnauthenticatedResponse,
@@ -1284,6 +1288,401 @@ export const useCompleteOnboarding = <
 > => {
   return useMutation(
     getCompleteOnboardingMutationOptions(options),
+    queryClient,
+  );
+};
+export const getGetServiceTermsUrl = (
+  organizationId: string,
+  personId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/terms`;
+};
+
+/**
+ * Return the terms of service this OpenBot asks people to agree to before they use it, the version the person last agreed to and when, and whether they have to agree now. OpenBot Cloud has terms: a Terms of Service and an Acceptable Use Policy, published at the addresses given, under one version. When the version changes, acceptanceNeeded is true again until the person agrees to the new one, and the apps ask them before anything else. An agreement is the person's own, not an organization's: it holds in every organization they are in. A self-hosted OpenBot and OpenBot Desktop on its own have no terms: current is null and acceptanceNeeded is false. Only the person themselves may read it.
+ * @summary Read the terms a person has to agree to
+ */
+export const getServiceTerms = async (
+  organizationId: string,
+  personId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<ServiceTerms> => {
+  return apiRequest<ServiceTerms>(
+    getGetServiceTermsUrl(organizationId, personId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetServiceTermsQueryKey = (
+  organizationId: string,
+  personId: string,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/people/${personId}/terms`,
+  ] as const;
+};
+
+export const getGetServiceTermsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getServiceTerms>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getServiceTerms>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetServiceTermsQueryKey(organizationId, personId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getServiceTerms>>> = ({
+    signal,
+  }) =>
+    getServiceTerms(organizationId, personId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled:
+      organizationId !== null &&
+      organizationId !== undefined &&
+      personId !== null &&
+      personId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getServiceTerms>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetServiceTermsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getServiceTerms>>
+>;
+export type GetServiceTermsQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | OwnOnlyResponse
+  | PersonNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useGetServiceTerms<
+  TData = Awaited<ReturnType<typeof getServiceTerms>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getServiceTerms>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getServiceTerms>>,
+          TError,
+          Awaited<ReturnType<typeof getServiceTerms>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetServiceTerms<
+  TData = Awaited<ReturnType<typeof getServiceTerms>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getServiceTerms>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getServiceTerms>>,
+          TError,
+          Awaited<ReturnType<typeof getServiceTerms>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetServiceTerms<
+  TData = Awaited<ReturnType<typeof getServiceTerms>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getServiceTerms>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Read the terms a person has to agree to
+ */
+
+export function useGetServiceTerms<
+  TData = Awaited<ReturnType<typeof getServiceTerms>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getServiceTerms>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetServiceTermsQueryOptions(
+    organizationId,
+    personId,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getAcceptServiceTermsUrl = (
+  organizationId: string,
+  personId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/terms/accept`;
+};
+
+/**
+ * Record that the person agreed to the terms of service, by the version they were shown, and when. The version sent must be the current one (getServiceTerms' current.version): an older one is refused with the code SERVICE_TERMS_CHANGED, so nobody is recorded as agreeing to terms they never saw. Agreeing again to the version already agreed to keeps the first time. Every agreement is kept, each version with its own time, and recorded on the audit trail. Where this OpenBot has no terms it answers 409 with the code SERVICE_TERMS_NONE. Only the person themselves may agree.
+ * @summary Agree to the current terms
+ */
+export const acceptServiceTerms = async (
+  organizationId: string,
+  personId: string,
+  acceptServiceTermsRequest: AcceptServiceTermsRequest,
+  headers: AcceptServiceTermsHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<ServiceTerms> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<ServiceTerms>(
+    getAcceptServiceTermsUrl(organizationId, personId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(acceptServiceTermsRequest),
+    },
+  );
+};
+
+export const getAcceptServiceTermsMutationKey = () =>
+  ["acceptServiceTerms"] as const;
+
+export const getAcceptServiceTermsMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | ServiceTermsConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof acceptServiceTerms>>,
+    TError,
+    AcceptServiceTermsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof acceptServiceTerms>>,
+  TError,
+  AcceptServiceTermsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getAcceptServiceTermsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof acceptServiceTerms>>,
+    AcceptServiceTermsMutationVariables
+  > = (props) => {
+    const { organizationId, personId, data, headers } = props ?? {};
+
+    return acceptServiceTerms(
+      organizationId,
+      personId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AcceptServiceTermsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof acceptServiceTerms>>
+>;
+export type AcceptServiceTermsMutationBody = AcceptServiceTermsRequest;
+export type AcceptServiceTermsMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | OwnOnlyResponse
+  | PersonNotFoundResponse
+  | ServiceTermsConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type AcceptServiceTermsMutationVariables = {
+  organizationId: string;
+  personId: string;
+  data: AcceptServiceTermsRequest;
+  headers: AcceptServiceTermsHeaders;
+};
+
+/**
+ * @summary Agree to the current terms
+ */
+export const useAcceptServiceTerms = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | ServiceTermsConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof acceptServiceTerms>>,
+      TError,
+      AcceptServiceTermsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof acceptServiceTerms>>,
+  TError,
+  AcceptServiceTermsMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getAcceptServiceTermsMutationOptions(options),
     queryClient,
   );
 };
