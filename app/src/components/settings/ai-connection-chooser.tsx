@@ -15,6 +15,12 @@ import {
   useState,
 } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
+import {
+  CHATGPT_DEAD_PAGE,
+  ChatGptPaste,
+  ChatGptSteps,
+  wrongPage,
+} from "@/components/settings/chatgpt-browser-sign-in";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -85,6 +91,7 @@ import type {
   AiSignInInputMethod,
 } from "@/lib/api/generated/model";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { ClientError } from "@/lib/client";
 import { markFor } from "@/lib/marks";
 import { queryClient } from "@/query-client";
 
@@ -585,19 +592,31 @@ export function ChooseConnection({
     }
   }
 
-  /** Send the code the provider's page gave the person: to the server, or to Desktop's Claude plan. */
-  async function finishCode() {
+  /**
+   * Send the code the provider's page gave the person (`given`, when it came straight from a paste,
+   * or what is in the box): to the server, or to Desktop's Claude plan.
+   */
+  async function finishCode(given?: string) {
     const mine = run.current;
     const signInId = waiting?.signInId;
-    setSigningIn(true);
+    const pasted = (given ?? signInCode).trim();
+    if (!pasted) return;
     setSignInFailure(null);
+    // OpenAI's own sign-in page, pasted in place of the page it lands on: said here, nothing sent.
+    const wrong =
+      signInId && provider?.id === "openai" ? wrongPage(pasted) : null;
+    if (wrong) {
+      setSignInFailure(wrong);
+      return;
+    }
+    setSigningIn(true);
     try {
       if (signInId) {
-        const status = await finishPersonalSignIn(signInId, signInCode.trim());
+        const status = await finishPersonalSignIn(signInId, pasted);
         if (run.current !== mine) return;
         if (status.status !== "approved")
           throw new Error(status.detail ?? SIGN_IN_DIDNT_FINISH);
-      } else await finishPlanSignIn("claude", signInCode.trim());
+      } else await finishPlanSignIn("claude", pasted);
       if (run.current !== mine) return;
       attempt.current = null;
       setWaiting(null);
@@ -605,12 +624,18 @@ export function ChooseConnection({
       setSignedIn(true);
     } catch (error) {
       if (run.current !== mine) return;
-      // A refused code ends the attempt: the sign-in starts again.
+      const message =
+        error instanceof Error ? error.message : "Couldn't sign in. Try again.";
+      setSignInFailure(message);
+      /*
+       * The server refused what was pasted (400: from another sign-in, or with no code in it) and
+       * the sign-in waits on: the box stays open for the right one. Anything else, a sign-in that
+       * failed or expired, ends the attempt and it starts again.
+       */
+      if (signInId && error instanceof ClientError && error.status === 400)
+        return;
       attempt.current = null;
       setWaiting(null);
-      setSignInFailure(
-        error instanceof Error ? error.message : "Couldn't sign in. Try again.",
-      );
     } finally {
       if (run.current === mine) setSigningIn(false);
     }
@@ -767,7 +792,11 @@ export function ChooseConnection({
                 kept={kept !== null && signedIn}
                 login={login}
                 onCancel={stopSignIn}
-                onCode={setSignInCode}
+                onCode={(value) => {
+                  // A new paste or edit: what was wrong with the last one no longer applies.
+                  setSignInCode(value);
+                  setSignInFailure(null);
+                }}
                 onFinishCode={finishCode}
                 serverRun={serverRun}
                 onSignIn={() => signIn()}
@@ -976,16 +1005,6 @@ const SIGN_IN_SAYS: Record<string, string> = {
     "Sign in or create an Unbiased AI account in your browser and approve the code shown here.",
 };
 
-/**
- * Where the server runs the sign-in for a person's own AI, the words that differ. ChatGPT's sign-in
- * in the browser ends on an address that doesn't load (Codex's own sign-in waits there), which the
- * person pastes here.
- */
-const PERSONAL_SIGN_IN_SAYS: Record<string, string> = {
-  openai:
-    "OpenAI opens in your browser. After you approve, your browser lands on a page that doesn't load. Copy that page's address and paste it here.",
-};
-
 /** ChatGPT's sign-in with a code (`device`): its page asks for the code shown here. */
 const CODE_SIGN_IN_SAYS =
   "OpenAI opens in your browser. Enter the code shown here, then approve. It finishes on its own.";
@@ -1016,7 +1035,8 @@ function SignInFields({
   login: AiConnectionLogin;
   onCancel: () => void;
   onCode: (code: string) => void;
-  onFinishCode: () => void;
+  /** Send `text` when it came straight from a paste, or what is in the box. */
+  onFinishCode: (text?: string) => void;
   onSignIn: () => void;
   /** The quieter second way in, where the provider has one: ChatGPT's sign-in with a code. */
   onSignInWithCode?: () => void;
@@ -1026,7 +1046,20 @@ function SignInFields({
   signedIn: boolean;
   waiting: Waiting | null;
 }) {
-  const signInName = provider.id === "google" ? "Google" : provider.name;
+  /*
+   * ChatGPT's sign-in in the browser where the server runs it: it lands on a page that can't load,
+   * whose address the person brings back. Its own steps first, and its own paste box.
+   */
+  const chatGptInBrowser =
+    serverRun &&
+    provider.id === "openai" &&
+    login === "plan" &&
+    waiting?.method !== "device";
+  const signInName = chatGptInBrowser
+    ? "ChatGPT"
+    : provider.id === "google"
+      ? "Google"
+      : provider.name;
   if (kept)
     return (
       <p className="flex items-center gap-2 text-sm">
@@ -1036,12 +1069,22 @@ function SignInFields({
     );
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-muted-foreground text-sm">
-        {waiting?.method === "device"
-          ? CODE_SIGN_IN_SAYS
-          : (serverRun && PERSONAL_SIGN_IN_SAYS[provider.id]) ||
-            SIGN_IN_SAYS[provider.id]}
-      </p>
+      {chatGptInBrowser ? (
+        signedIn ? null : waiting ? (
+          <p className="text-muted-foreground text-sm">
+            Approve the request in OpenAI's tab. When it says “
+            {CHATGPT_DEAD_PAGE}”, copy its address and paste it below.
+          </p>
+        ) : (
+          <ChatGptSteps />
+        )
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          {waiting?.method === "device"
+            ? CODE_SIGN_IN_SAYS
+            : SIGN_IN_SAYS[provider.id]}
+        </p>
+      )}
       {signedIn ? (
         <p className="flex items-center gap-2 text-sm">
           <IconCircleCheckFilled className="size-4 text-emerald-600 dark:text-emerald-400" />
@@ -1067,13 +1110,18 @@ function SignInFields({
               <IconExternalLink className="ml-0.5 inline size-3.5" />
             </a>
           </p>
-          {waiting.codeBack ? (
+          {waiting.codeBack && chatGptInBrowser ? (
+            <ChatGptPaste
+              busy={busy}
+              code={code}
+              failure={failure}
+              onCode={onCode}
+              onFinish={onFinishCode}
+            />
+          ) : waiting.codeBack ? (
             <Field>
-              {/* ChatGPT's sign-in ends on an address to paste; Claude's on a code. */}
               <FieldLabel htmlFor="ai-connection-code">
-                {provider.id === "openai"
-                  ? "Address from your browser"
-                  : "Code from your browser"}
+                Code from your browser
               </FieldLabel>
               <div className="flex gap-2">
                 <Input
@@ -1085,7 +1133,7 @@ function SignInFields({
                 />
                 <Button
                   disabled={busy || code.trim().length === 0}
-                  onClick={onFinishCode}
+                  onClick={() => onFinishCode()}
                   size="sm"
                   type="button"
                   variant="outline"
@@ -1112,6 +1160,12 @@ function SignInFields({
             </Button>
           </div>
         </div>
+      ) : null}
+      {/* A sign-in that failed or expired: why, just above the button that starts it again. */}
+      {failure && !waiting && !signedIn ? (
+        <p className="text-destructive text-sm" role="alert">
+          {failure}
+        </p>
       ) : null}
       {signedIn || waiting ? null : (
         <div>
@@ -1152,7 +1206,8 @@ function SignInFields({
           </p>
         </div>
       )}
-      {failure ? (
+      {/* A code the server refused while the sign-in waits on; ChatGPT's paste box says it itself. */}
+      {failure && waiting && !chatGptInBrowser ? (
         <p className="text-destructive text-sm" role="alert">
           {failure}
         </p>
