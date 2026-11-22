@@ -1,0 +1,84 @@
+.wb-window {
+  display: inline-block;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.2),
+    0 16px 48px rgb(0 0 0 / 0.35);
+}
+
+.wb-window-mac {
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.wb-window-windows {
+  border-radius: 0;
+}
+
+.wb-window-content {
+  position: relative;
+  overflow: hidden;
+}
+
+.wb-window-content iframe {
+  display: block;
+}
+
+.wb-window-bar {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  user-select: none;
+  font:
+    12px / 1 system-ui,
+    sans-serif;
+}
+
+.wb-window-bar-mac {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  height: 28px;
+  gap: 8px;
+  padding-left: 12px;
+  background: transparent;
+  pointer-events: none;
+}
+
+.wb-window-light {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex: none;
+  pointer-events: auto;
+}
+
+.wb-window-bar-windows {
+  height: 32px;
+  justify-content: space-between;
+  background: #f3f3f3;
+  color: #1f1f1f;
+}
+
+.wb-window-bar-windows.wb-window-bar-inactive {
+  color: #8a8a8a;
+}
+
+.wb-window-title {
+  padding-left: 12px;
+}
+
+.wb-window-controls {
+  display: flex;
+  height: 100%;
+}
+
+.wb-window-control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 100%;
+  font-size: 14px;
+}

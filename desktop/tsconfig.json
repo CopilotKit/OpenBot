@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["vite/client", "bun-types"]
   },
-  "include": ["src", "scripts/*.ts"]
+  "include": ["src", "scripts/*.ts", "workbench", "vite.workbench.config.ts"]
 }

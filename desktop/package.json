@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "workbench": "vite --config vite.workbench.config.ts",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri"
