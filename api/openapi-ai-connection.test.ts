@@ -117,8 +117,7 @@ test("an administrator disconnects the organization's AI, with an Idempotency-Ke
     expect.stringContaining("IdempotencyKey"),
   );
   const answers = Object.values(
-    disconnect?.responses["200"]?.content?.["application/json"]?.examples ??
-      {},
+    disconnect?.responses["200"]?.content?.["application/json"]?.examples ?? {},
   ).map(exampleValue);
   expect(answers.length).toBe(1);
   for (const answer of answers) {
