@@ -16,6 +16,7 @@ import {
   StartPersonalAiSignInBody,
   StartPersonalAiSignInResponse,
 } from "@/lib/api/generated/models/models.zod";
+import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
 import { personBody } from "./accounts-api";
 
 /**
@@ -100,24 +101,65 @@ const BAD_KEY = "sk-ant-api03-refused";
 
 type Start = "none" | "organization";
 
+/** The person's AI connection as the spec's example for `start` says it. */
+function personalFor(start: Start): PersonalAiConnection {
+  return GetPersonalAiConnectionResponse.parse(
+    example(
+      start === "none"
+        ? "PersonalAiConnectionNoneExample"
+        : "PersonalAiConnectionOrganizationExample",
+    ),
+  ) as PersonalAiConnection;
+}
+
+/**
+ * The organization's own AI, as an admin reads it, agreeing with what the person's answer says of
+ * it: none on OpenBot Cloud until one is set.
+ */
+function organizationAi(personal: PersonalAiConnection) {
+  const organization: AiConnection = {
+    provider: personal.organization.provider,
+    login: personal.organization.provider ? "api-key" : null,
+    model: null,
+    endpointHost: null,
+    keySet: personal.organization.ready,
+    ready: personal.organization.ready,
+    source: personal.organization.ready ? "stored" : "none",
+    editable: true,
+    saved: [],
+    changedAt: null,
+  };
+  return GetAiConnectionResponse.parse(organization);
+}
+
+/** A second organization the person is in, beside `default`. */
+const ACME = "/api/v2/organizations/acme";
+
+/** One organization, as the person's list of their own answers it. */
+function organizationRow(id: string, name: string, active: boolean) {
+  return { personal: false, id, slug: id, name, role: "member", active };
+}
+
 /** One OpenBot Cloud's server, as far as these screens ask it. */
 class FakeServer {
   personal: PersonalAiConnection;
+  /**
+   * The person's answer in Acme, a second organization they are in, or null when they are in only
+   * `default` (the list of their organizations is then not served, as OpenBot with one answers).
+   */
+  acme: PersonalAiConnection | null = null;
+  /** The organization the session works in. */
+  active = "default";
   onboarding: { step: number; completedAt: string | null };
   replaces: unknown[] = [];
   removes = 0;
   completes = 0;
   signIns: unknown[] = [];
   signInReads = 0;
+  signOuts = 0;
 
   constructor(start: Start, onboarded = false) {
-    this.personal = GetPersonalAiConnectionResponse.parse(
-      example(
-        start === "none"
-          ? "PersonalAiConnectionNoneExample"
-          : "PersonalAiConnectionOrganizationExample",
-      ),
-    ) as PersonalAiConnection;
+    this.personal = personalFor(start);
     this.onboarding = onboarded
       ? { step: 1, completedAt: "2026-11-01T09:00:00.000Z" }
       : { step: 0, completedAt: null };
@@ -125,8 +167,38 @@ class FakeServer {
 
   answer(request: Request): { status: number; json: unknown } {
     const url = new URL(request.url());
-    const path = url.pathname;
     const method = request.method();
+    // Acme answers as `default` does, but for the person's AI there.
+    const inAcme = url.pathname.startsWith(`${ACME}/`) && this.acme !== null;
+    const path = inAcme
+      ? `${ORGANIZATION}${url.pathname.slice(ACME.length)}`
+      : url.pathname;
+    if (inAcme && this.acme && path === PERSONAL && method === "GET")
+      return { status: 200, json: this.acme };
+    if (inAcme && this.acme && path === `${ORGANIZATION}/ai-connection`)
+      return { status: 200, json: organizationAi(this.acme) };
+    if (url.pathname === "/api/v2/people/me/organizations" && this.acme)
+      return {
+        status: 200,
+        json: ListOrganizationsResponse.parse({
+          organizations: [
+            organizationRow("default", "Default", this.active === "default"),
+            organizationRow("acme", "Acme", this.active === "acme"),
+          ],
+          canCreate: false,
+          nextCursor: null,
+        }),
+      };
+    if (url.pathname === "/api/auth/organization/set-active") {
+      this.active = (
+        request.postDataJSON() as { organizationId: string }
+      ).organizationId;
+      return { status: 200, json: {} };
+    }
+    if (url.pathname === "/api/auth/sign-out") {
+      this.signOuts += 1;
+      return { status: 200, json: { success: true } };
+    }
     if (path === PERSONAL && method === "GET")
       return { status: 200, json: this.personal };
     if (path === PERSONAL && method === "PUT") {
@@ -229,22 +301,8 @@ class FakeServer {
       };
       return { status: 200, json: { onboarding: this.onboarding } };
     }
-    // The organization's own AI, as an admin reads it: none on OpenBot Cloud until one is set.
-    if (path === `${ORGANIZATION}/ai-connection` && method === "GET") {
-      const organization: AiConnection = {
-        provider: this.personal.organization.provider,
-        login: this.personal.organization.provider ? "api-key" : null,
-        model: null,
-        endpointHost: null,
-        keySet: this.personal.organization.ready,
-        ready: this.personal.organization.ready,
-        source: this.personal.organization.ready ? "stored" : "none",
-        editable: true,
-        saved: [],
-        changedAt: null,
-      };
-      return { status: 200, json: GetAiConnectionResponse.parse(organization) };
-    }
+    if (path === `${ORGANIZATION}/ai-connection` && method === "GET")
+      return { status: 200, json: organizationAi(this.personal) };
     if (path === `${ORGANIZATION}/deployment`)
       return {
         status: 200,
@@ -708,6 +766,125 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
       }
     }, 60_000);
 
+  for (const engine of engines)
+    test(`switching into an organization with no AI sends them to the step at once, in ${engine}`, async () => {
+      // Default has an AI for everyone; Acme has none, and the person has none of their own.
+      const server = new FakeServer("organization", true);
+      server.acme = personalFor("none");
+      const page = await open("/", server, engine, "light", WIDE);
+      try {
+        await page.locator("[data-app-home]").waitFor();
+        await page.getByRole("button", { name: "Work in Acme" }).click();
+        // No second click: the gate decides again in Acme as soon as the app works there.
+        await heading(page, "Connect your AI");
+        expect(server.active).toBe("acme");
+        expect(new URL(page.url()).searchParams.get("step")).toBe("ai");
+        expect(await page.locator("[data-app-home]").count()).toBe(0);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+  for (const engine of engines)
+    test(`the step lets them work in another organization of theirs, or sign out, in ${engine}`, async () => {
+      // Default has no AI and neither do they; Acme has one for everyone.
+      const server = new FakeServer("none", true);
+      server.acme = personalFor("organization");
+      const page = await open("/", server, engine, "light", WIDE);
+      try {
+        await heading(page, "Connect your AI");
+        // Styled: the way out is drawn beside the words on a desktop and under the chooser on a
+        // phone, and the stylesheet is what shows one of them.
+        await page.getByText("Signed in as dana@example.com").first().waitFor();
+        await style(page);
+        await page
+          .getByRole("heading", { name: "Or work in another organization" })
+          .waitFor();
+        // Only the others: Default is where they are.
+        const others = page.getByRole("group", {
+          name: "Or work in another organization",
+        });
+        expect(
+          await others.locator("[data-slot=item-title]").allTextContents(),
+        ).toEqual(["Acme"]);
+        await others.getByRole("button", { name: /Acme/ }).click();
+        await page.locator("[data-app-home]").waitFor();
+        expect(server.active).toBe("acme");
+      } finally {
+        await page.close();
+      }
+
+      // In one organization there is no list, and Sign out is always there.
+      const alone = new FakeServer("none", true);
+      const single = await open("/", alone, engine, "light", WIDE);
+      try {
+        await heading(single, "Connect your AI");
+        await single
+          .getByText("Signed in as dana@example.com")
+          .first()
+          .waitFor();
+        await style(single);
+        // One of the two is shown: beside the words here, at a desktop's width.
+        expect(
+          await single
+            .getByText("Signed in as dana@example.com")
+            .filter({ visible: true })
+            .count(),
+        ).toBe(1);
+        expect(
+          await single
+            .getByRole("heading", { name: "Or work in another organization" })
+            .count(),
+        ).toBe(0);
+        await single.getByRole("button", { name: "Sign out" }).click();
+        await single.locator("[data-sign-in]").waitFor();
+        expect(alone.signOuts).toBe(1);
+      } finally {
+        await single.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`on Cloud the organization's AI is said to be the organization's, in ${engine}`, async () => {
+      const server = new FakeServer("organization", true);
+      server.personal = GetPersonalAiConnectionResponse.parse(
+        example("PersonalAiConnectionExample"),
+      ) as PersonalAiConnection;
+      const page = await open("/settings", server, engine, "light", WIDE);
+      try {
+        // Its key is the organization's, not the admin's own.
+        await page
+          .getByRole("button", {
+            name: /OpenAI.*Uses your organization's OpenAI API key\./,
+          })
+          .waitFor();
+      } finally {
+        await page.close();
+      }
+
+      // With none set yet, the dialog sets one up rather than changing it.
+      const unset = new FakeServer("organization", true);
+      unset.personal = GetPersonalAiConnectionResponse.parse({
+        ...example("PersonalAiConnectionExample"),
+        organization: { ready: false, provider: null },
+      }) as PersonalAiConnection;
+      const second = await open("/settings", unset, engine, "light", WIDE);
+      try {
+        await second
+          .getByRole("button", {
+            name: /Not chosen yet.*Choose an AI for everyone in your organization\./,
+          })
+          .click();
+        const dialog = second.getByRole("dialog");
+        await dialog
+          .getByText("Set up your organization's AI", { exact: true })
+          .waitFor();
+        expect(await dialog.getByText("Change AI connection").count()).toBe(0);
+      } finally {
+        await second.close();
+      }
+    }, 60_000);
+
   // Every screen this adds, light and dark, wide and at a phone's width, beside the screens from
   // before they should match: onboarding's Welcome and Settings' AI connection dialog.
   test.skipIf(!shots)(
@@ -800,6 +977,47 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
               );
             } finally {
               await settings.close();
+            }
+
+            // The step for somebody in two organizations: the other one to work in instead.
+            const two = new FakeServer("none", true);
+            two.acme = personalFor("organization");
+            const both = await open("/", two, engine, theme, window);
+            try {
+              await heading(both, "Connect your AI");
+              await both
+                .getByRole("heading", {
+                  name: "Or work in another organization",
+                })
+                .first()
+                .waitFor();
+              expect(await measured(both)).toEqual(FINE);
+              await shoot(
+                both,
+                "step-other-organizations",
+                engine,
+                theme,
+                window,
+              );
+            } finally {
+              await both.close();
+            }
+
+            // The organization's AI with none set yet: the dialog sets one up.
+            const unset = new FakeServer("organization", true);
+            unset.personal = GetPersonalAiConnectionResponse.parse({
+              ...example("PersonalAiConnectionExample"),
+              organization: { ready: false, provider: null },
+            }) as PersonalAiConnection;
+            const setup = await open("/settings", unset, engine, theme, window);
+            try {
+              await setup
+                .getByRole("button", { name: /Not chosen yet/ })
+                .click();
+              await setup.getByRole("dialog").waitFor();
+              await shoot(setup, "org-setup-dialog", engine, theme, window);
+            } finally {
+              await setup.close();
             }
           }
     },

@@ -10,6 +10,8 @@ import {
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
+import { OrganizationBoundary } from "@/components/organizations/organization-boundary";
+import { useSwitchOrganization } from "@/components/organizations/use-switch-organization";
 import { SettingsSidebar } from "@/components/settings/settings-sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SidebarInset } from "@/components/ui/sidebar";
@@ -48,8 +50,29 @@ const authedRoute = createRoute({
       ) => Promise<void>
     )(options);
   },
-  component: () => <Outlet />,
+  // The app's own boundary: built again for each organization, and the gates decide again in it.
+  component: () => (
+    <OrganizationBoundary>
+      <Outlet />
+    </OrganizationBoundary>
+  ),
 });
+
+/**
+ * Home, with the account menu's switch to another organization: the same hook the menu runs, so a
+ * switch goes the way it does in the app (home first, then the app changes over).
+ */
+function Home() {
+  const switching = useSwitchOrganization();
+  return (
+    <main>
+      <h1 data-app-home="">Home</h1>
+      <button onClick={() => switching.run("acme")} type="button">
+        Work in Acme
+      </button>
+    </main>
+  );
+}
 
 const onboardingRoute = (
   OnboardingRoute as unknown as {
@@ -90,9 +113,14 @@ const router = createRouter({
       createRoute({
         getParentRoute: () => authedRoute,
         path: "/",
-        component: () => <h1 data-app-home="">Home</h1>,
+        component: Home,
       }),
     ]),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/sign",
+      component: () => <h1 data-sign-in="">Sign in</h1>,
+    }),
   ]),
 });
 

@@ -84,6 +84,7 @@ export function AiModelSection({
         <AiConnectionRow
           connection={connection.data}
           inDesktop={support.data === "in-place"}
+          organizationWide={organizationWide}
         />
       </PageRows>
     </PageSection>
@@ -93,14 +94,19 @@ export function AiModelSection({
 function AiConnectionRow({
   connection,
   inDesktop,
+  organizationWide,
 }: {
   connection: AiConnection;
   inDesktop: boolean;
+  organizationWide: boolean;
 }) {
   const [open, setOpen] = useState(false);
   // A new dialog each time it opens, so nothing typed into the last one is kept.
   const [opened, setOpened] = useState(0);
-  const described = describeConnection(connection);
+  const described = describeConnection(
+    connection,
+    organizationWide ? "organization" : "you",
+  );
   return (
     <>
       <Item
@@ -119,7 +125,10 @@ function AiConnectionRow({
         <ItemContent>
           <ItemTitle>{described?.provider ?? "Not chosen yet"}</ItemTitle>
           <ItemDescription>
-            {described?.summary ?? "Choose the AI your Bots use."}
+            {described?.summary ??
+              (organizationWide
+                ? "Choose an AI for everyone in your organization."
+                : "Choose the AI your Bots use.")}
           </ItemDescription>
         </ItemContent>
         <ItemActions>
@@ -132,6 +141,7 @@ function AiConnectionRow({
           inDesktop={inDesktop}
           key={opened}
           onClose={() => setOpen(false)}
+          organizationWide={organizationWide}
         />
       </Dialog>
     </>
@@ -147,12 +157,15 @@ function AiConnectionDialog({
   connection,
   inDesktop,
   onClose,
+  organizationWide,
 }: {
   connection: AiConnection;
   inDesktop: boolean;
   onClose: () => void;
+  organizationWide: boolean;
 }) {
-  const described = describeConnection(connection);
+  const owner = organizationWide ? "organization" : "you";
+  const described = describeConnection(connection, owner);
   const [step, setStep] = useState<Step>(
     described ? { at: "current" } : { at: "choose" },
   );
@@ -163,6 +176,7 @@ function AiConnectionDialog({
           connection={step.connection}
           desktopProblem={step.desktopProblem}
           onClose={onClose}
+          owner={owner}
         />
       </DialogContent>
     );
@@ -171,7 +185,7 @@ function AiConnectionDialog({
       <DialogContent>
         <ChooseConnection
           connection={connection}
-          mode={{ kind: "organization", inDesktop }}
+          mode={{ kind: "organization", inDesktop, organizationWide }}
           onBack={described ? () => setStep({ at: "current" }) : onClose}
           onConnected={(next) => setStep({ at: "done", ...next })}
         />
@@ -180,18 +194,23 @@ function AiConnectionDialog({
   return (
     <DialogContent>
       <DialogHeader>
-        <DialogTitle>AI connection</DialogTitle>
+        <DialogTitle>
+          {organizationWide ? "Organization's AI" : "AI connection"}
+        </DialogTitle>
         <DialogDescription>
           {described
-            ? `Your Bots use ${described.provider}. OpenBot keeps the key or sign-in and never shows it.`
+            ? organizationWide
+              ? `Bots use ${described.provider} for anyone in your organization who hasn't connected their own AI. OpenBot keeps the key and never shows it.`
+              : `Your Bots use ${described.provider}. OpenBot keeps the key or sign-in and never shows it.`
             : "Your Bots don't have an AI provider yet."}
         </DialogDescription>
       </DialogHeader>
       <DialogBody className="mt-4 flex flex-col gap-3 text-sm">
         {described && <Details details={described.details} />}
         <p className="text-muted-foreground">
-          You can switch to another provider or key while OpenBot keeps running.
-          Your next message uses the new connection.
+          {organizationWide
+            ? "You can switch to another provider or key at any time. Runs that start after that use it."
+            : "You can switch to another provider or key while OpenBot keeps running. Your next message uses the new connection."}
         </p>
       </DialogBody>
       <DialogFooter className="mt-4">

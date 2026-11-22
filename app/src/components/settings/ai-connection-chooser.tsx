@@ -41,7 +41,10 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { describeConnection } from "@/lib/ai-connection/describe";
+import {
+  type AiConnectionOwner,
+  describeConnection,
+} from "@/lib/ai-connection/describe";
 import {
   beginPlanSignIn,
   beginProviderSignIn,
@@ -94,7 +97,15 @@ import { queryClient } from "@/query-client";
  * (onboarding) it draws the same body and buttons inside a card, under the page's own heading.
  */
 export type ChooserMode =
-  | { kind: "organization"; inDesktop: boolean }
+  | {
+      kind: "organization";
+      inDesktop: boolean;
+      /**
+       * Beside each person's own AI (OpenBot Cloud): this is the organization's, for everyone in
+       * it who hasn't connected their own, and the chooser says so.
+       */
+      organizationWide?: boolean;
+    }
   | { kind: "personal"; signIns: readonly AiConnectionProvider[] };
 
 export type ChooserSurface = "dialog" | "card";
@@ -251,6 +262,8 @@ export function ChooseConnection({
 }) {
   const personal = mode.kind === "personal";
   const inDesktop = mode.kind === "organization" && mode.inDesktop;
+  const organizationWide =
+    mode.kind === "organization" && mode.organizationWide === true;
   const [providerId, setProviderId] = useState<AiProvider["id"] | null>(null);
   const provider = providerById(providerId);
   const logins = provider ? loginsFor(provider, mode) : [];
@@ -541,9 +554,19 @@ export function ChooseConnection({
             ? "OpenBot checks the connection before it switches. Nothing changes if the check fails."
             : personal
               ? "Choose the AI your Bots use when they work for you. It's yours alone."
-              : "Choose the AI your Bots use. OpenBot keeps running while it switches."
+              : organizationWide
+                ? "Choose an AI for everyone in your organization. Bots use it for anyone who hasn't connected their own."
+                : "Choose the AI your Bots use. OpenBot keeps running while it switches."
         }
-        title={personal ? "Connect your AI" : "Change AI connection"}
+        title={
+          personal
+            ? "Connect your AI"
+            : organizationWide
+              ? describeConnection(connection)
+                ? "Change your organization's AI"
+                : "Set up your organization's AI"
+              : "Change AI connection"
+        }
       />
       <ChooserBody className="flex flex-col gap-4">
         <fieldset
@@ -923,8 +946,14 @@ function SignInFields({
 }
 
 /** The connection now in use, as a row with a tick. */
-export function ConnectedRow({ connection }: { connection: AiConnection }) {
-  const described = describeConnection(connection);
+export function ConnectedRow({
+  connection,
+  owner = "you",
+}: {
+  connection: AiConnection;
+  owner?: AiConnectionOwner;
+}) {
+  const described = describeConnection(connection, owner);
   return (
     <Item role="status" size="sm" variant="muted">
       <ProviderTile provider={providerById(connection.provider)} />
@@ -947,10 +976,12 @@ export function Connected({
   connection,
   desktopProblem,
   onClose,
+  owner = "you",
 }: {
   connection: AiConnection;
   desktopProblem: string | null;
   onClose: () => void;
+  owner?: AiConnectionOwner;
 }) {
   const described = describeConnection(connection);
   return (
@@ -960,12 +991,13 @@ export function Connected({
           Connected to {described?.provider ?? "your AI"}
         </DialogTitle>
         <DialogDescription>
-          Your next message runs on it. Anything already running finishes on the
-          connection it started with.
+          {owner === "organization"
+            ? "Bots use it for anyone in your organization who hasn't connected their own AI."
+            : "Your next message runs on it. Anything already running finishes on the connection it started with."}
         </DialogDescription>
       </DialogHeader>
       <DialogBody className="mt-4 flex flex-col gap-3 text-sm">
-        <ConnectedRow connection={connection} />
+        <ConnectedRow connection={connection} owner={owner} />
         {desktopProblem ? (
           <p className="text-destructive" role="alert">
             {desktopProblem}
