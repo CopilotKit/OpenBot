@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { appsQueryOptions } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import {
   connectionsQueryOptions,
   personalConnections,
@@ -31,10 +32,20 @@ import { importListQueryOptions } from "./queries";
  *
  * Their connections are asked only where a move listed something, so an OpenBot nobody moved to
  * asks nothing more than the one read of the moves.
+ *
+ * THE MOVES ARE ASKED ONLY OF A HOSTED OPENBOT. Only OpenBot Cloud takes a move, and it is the
+ * OpenBot people sign in to with their account with OpenBot by CopilotKit (`hostedSignIn`). Every
+ * other OpenBot answers listImports with 404, which reads as none but is still a failed request on
+ * every page this frame draws, so a self-hosted OpenBot or the personal edition is never asked.
  */
 export function useMovedApps() {
-  const imports = useQuery(importListQueryOptions());
-  const listed = movedApps(imports.data ?? []);
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  const takesMoves = capabilities.data?.hostedSignIn === true;
+  const imports = useQuery({
+    ...importListQueryOptions(),
+    enabled: takesMoves,
+  });
+  const listed = movedApps(takesMoves ? (imports.data ?? []) : []);
   const any = listed.length > 0;
   const connections = useQuery({ ...connectionsQueryOptions(), enabled: any });
   // Which app each one is here: a move names an app as the computer knew it (`cloudAppFor`).
@@ -53,8 +64,11 @@ export function useMovedApps() {
   );
   const cloudIdOf = (appId: string) =>
     cloudAppFor(appId, cloudApps.data ?? [])?.id;
+  // Settled once the deployment has answered (an answer that failed reads as not hosted, as every
+  // capability does) and, where it takes moves, the moves have.
   const ready =
-    imports.isSuccess &&
+    !capabilities.isPending &&
+    (!takesMoves || imports.isSuccess) &&
     (!any ||
       (connections.isSuccess &&
         cloudApps.isSuccess &&

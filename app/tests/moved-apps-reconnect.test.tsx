@@ -227,13 +227,36 @@ class FakeServer {
    * none (404, as an OpenBot that requires none), else the connection as the server keeps it.
    */
   ai: PersonalAiConnection | null = null;
+  /**
+   * Whether people sign in with their OpenBot by CopilotKit account (`hostedSignIn`): OpenBot
+   * Cloud, the one OpenBot that takes a move. False is a self-hosted OpenBot or the personal edition.
+   */
+  hosted: boolean;
+  /** How many times the app asked for the person's moves. */
+  importAsks = 0;
+  /** Every API request answered 400 or more, as the browser's network panel would list it. */
+  failed: string[] = [];
 
-  constructor(imports: Import[] | null, role: "member" | "admin" = "member") {
+  constructor(
+    imports: Import[] | null,
+    role: "member" | "admin" = "member",
+    hosted = true,
+  ) {
     this.imports = imports;
     this.role = role;
+    this.hosted = hosted;
   }
 
   async answer(request: Request): Promise<Answer> {
+    const answer = await this.answerOf(request);
+    if (answer.status >= 400)
+      this.failed.push(
+        `${answer.status} ${request.method()} ${new URL(request.url()).pathname}`,
+      );
+    return answer;
+  }
+
+  async answerOf(request: Request): Promise<Answer> {
     const url = new URL(request.url());
     const method = request.method();
     const path = url.pathname;
@@ -267,6 +290,7 @@ class FakeServer {
       return { status: 200, json: this.ai };
     }
     if (path === `${ORGANIZATION}/imports` && method === "GET") {
+      this.importAsks += 1;
       if (this.imports === null) return { status: 404, json: MOVE_UNAVAILABLE };
       return {
         status: 200,
@@ -332,6 +356,7 @@ class FakeServer {
           authProviders: [],
           ssoConfigured: false,
           ssoRequired: false,
+          hostedSignIn: this.hosted,
         },
       };
     if (path === `${ORGANIZATION}/bots` && method === "GET")
@@ -899,6 +924,40 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
             .count(),
         ).toBe(0);
         expect(await page.getByRole("alert").count()).toBe(0);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+  /*
+   * Found by the server's personal-edition journey on the 1.2.0-rc.2 candidate: every page of a
+   * self-hosted OpenBot or the personal edition asked for the person's moves, which only OpenBot
+   * Cloud takes, and each answer was a 404 in the network panel. Nothing showed, but every page
+   * made a failing request. An OpenBot that isn't hosted is never asked.
+   */
+  for (const engine of engines)
+    test(`an OpenBot that isn't OpenBot Cloud is never asked for moves, on any page, in ${engine}`, async () => {
+      const server = new FakeServer(null, "member", false);
+      const page = await open("/", server, engine);
+      try {
+        // Home, drawn in the frame that carries the reconnect bar, with every read it made answered.
+        await page.waitForLoadState("networkidle");
+        expect(server.importAsks).toBe(0);
+        await page.goto(`${ORIGIN}/connections`);
+        await page.locator('[data-testid="account-composio-gmail"]').waitFor();
+        await page.goto(`${ORIGIN}/reconnect`);
+        await page.waitForURL(`${ORIGIN}/`);
+        await page.waitForTimeout(500);
+        expect(server.importAsks).toBe(0);
+        expect(
+          server.failed.filter((line) => line.endsWith("/imports")),
+        ).toEqual([]);
+        expect(
+          await page
+            .getByRole("complementary", { name: "Apps to reconnect" })
+            .count(),
+        ).toBe(0);
+        expect(await page.locator("[data-moved-apps-notice]").count()).toBe(0);
       } finally {
         await page.close();
       }
