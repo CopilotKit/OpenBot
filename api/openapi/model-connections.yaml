@@ -757,7 +757,12 @@ paths:
         seconds until it is approved, failed or expired. With finish code,
         the person approves, copies the code Claude's page shows them or
         the address ChatGPT sends their browser to, and sends it back with
-        finishPersonalAiSignIn. Approved, what the
+        finishPersonalAiSignIn. Inside OpenBot Desktop nobody copies
+        anything: Desktop listens on the person's own computer for the
+        provider's redirect and the app sends what arrives with
+        finishPersonalAiSignIn. For Claude, loopbackPort names the port
+        Desktop listens on; ChatGPT's browser sign-in always redirects to
+        localhost:1455. Approved, what the
         provider handed OpenBot is kept for the person alone, never sent to
         the browser: an Unbiased AI key as a saved key (connect with
         useSavedKey), a Claude or ChatGPT plan's sign-in (connect with login
@@ -790,6 +795,10 @@ paths:
               claude:
                 value:
                   provider: anthropic
+              claudeInDesktop:
+                value:
+                  provider: anthropic
+                  loopbackPort: 53682
       responses:
         '201':
           description: The sign-in, waiting for the person to approve it.
@@ -1472,6 +1481,18 @@ components:
             the person has turned on device code sign-in in ChatGPT's
             security settings. Every other provider has one way and ignores
             it.
+        loopbackPort:
+          type: integer
+          minimum: 1024
+          maximum: 65535
+          description: >-
+            anthropic only: the port OpenBot Desktop listens on, on the
+            person's own computer, for Claude's redirect. Claude then sends
+            the browser to http://localhost:{loopbackPort}/callback instead
+            of a page that shows a code, and the app sends the code and state
+            that arrive there (code#state) with finishPersonalAiSignIn, so
+            the person copies nothing. Absent, Claude's page shows the code
+            to copy. Every other provider ignores it.
     AiSignInCodeInput:
       type: object
       additionalProperties: false

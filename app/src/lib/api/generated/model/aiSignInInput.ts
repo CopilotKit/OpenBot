@@ -8,4 +8,10 @@ export interface AiSignInInput {
   provider: AiConnectionProvider;
   /** How to sign in, for a provider that offers more than one way. openai: browser (the default) approves in the browser and finishes with the address ChatGPT sends the browser to; device shows a code to enter at ChatGPT instead, which works only once the person has turned on device code sign-in in ChatGPT's security settings. Every other provider has one way and ignores it. */
   method?: AiSignInInputMethod;
+  /**
+   * anthropic only: the port OpenBot Desktop listens on, on the person's own computer, for Claude's redirect. Claude then sends the browser to http://localhost:{loopbackPort}/callback instead of a page that shows a code, and the app sends the code and state that arrive there (code#state) with finishPersonalAiSignIn, so the person copies nothing. Absent, Claude's page shows the code to copy. Every other provider ignores it.
+   * @minimum 1024
+   * @maximum 65535
+   */
+  loopbackPort?: number;
 }
