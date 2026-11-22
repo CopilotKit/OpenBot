@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { underConnections } from "@/lib/moves/moved-apps";
 import {
   isNavigationLink,
   type NavigationLink,
@@ -43,8 +44,9 @@ export function sectionForPath(
   ) {
     return CONVERSATIONS;
   }
+  const page = underConnections(pathname) ? "/connections" : pathname;
   const route = routes.find(
-    ({ to }) => pathname === to || pathname.startsWith(`${to}/`),
+    ({ to }) => page === to || page.startsWith(`${to}/`),
   );
   return route?.id ?? null;
 }

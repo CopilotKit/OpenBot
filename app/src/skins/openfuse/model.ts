@@ -2,6 +2,7 @@ import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import type { AgentProfile } from "@/lib/agents/queries";
 import type { BotAttention } from "@/lib/bot-lifecycle/queries";
 import type { ChannelSummary } from "@/lib/channels/queries";
+import { underConnections } from "@/lib/moves/moved-apps";
 
 /*
  * The rules OpenFuse's frame runs on, kept apart from the components so each one is a plain function
@@ -59,7 +60,11 @@ export function tabFor(pathname: string): FuseTab | null {
   if (pathname === "/s/activity") return "activity";
   if (pathname === "/s/ideas") return "ideas";
   if (pathname === "/s/goals") return "goals";
-  if (pathname === "/connections" || pathname.startsWith("/connections/")) {
+  if (
+    pathname === "/connections" ||
+    pathname.startsWith("/connections/") ||
+    underConnections(pathname)
+  ) {
     return "apps";
   }
   if (

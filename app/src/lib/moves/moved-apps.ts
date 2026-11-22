@@ -134,6 +134,14 @@ export function botList(names: readonly string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
+/**
+ * Whether a page is the list of apps to reconnect (`/reconnect`, `/reconnect/<app>`), which is part
+ * of Connections in every frame, as each app's page it opens is.
+ */
+export function underConnections(pathname: string): boolean {
+  return pathname === "/reconnect" || pathname.startsWith("/reconnect/");
+}
+
 /** How many moved apps still need connecting, as a person reads it. */
 export function stillToReconnect(count: number): string {
   return count === 1
