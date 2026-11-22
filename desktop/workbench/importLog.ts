@@ -105,5 +105,4 @@ Scene: ${id}
 Written: ${out}
 Open (the workbench must be running, "bun run workbench"): http://localhost:3021/workbench/?scene=${id}
 Screenshot: bun run workbench:shot ${id}
-(The page and the shot CLI show the scene once scenes/index.ts and shot.ts read the imported scenes.)
 The scene is approximate: the log has the rows' words and times, not the download bytes.`);

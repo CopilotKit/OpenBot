@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadImportedScenes, scenesForAll } from "./shot";
 
 /**
  * The agent CLI saves a screenshot and a JSON report.
@@ -69,4 +70,70 @@ describe.skipIf(!asked)("workbench:shot", () => {
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("install-mac");
   }, 30_000);
+});
+
+describe("loadImportedScenes", () => {
+  test("reads the scene files in a folder, in name order, and skips the rest", () => {
+    const dir = mkdtempSync(join(tmpdir(), "imported-"));
+    const scene = (id: string) => ({
+      id,
+      title: `Scene ${id}`,
+      group: "Install",
+      start: { hash: "", search: "" },
+      run: [{ at: 1, click: "Install" }],
+    });
+    writeFileSync(join(dir, "b.json"), JSON.stringify(scene("log-b")));
+    writeFileSync(join(dir, "a.json"), JSON.stringify(scene("log-a")));
+    writeFileSync(join(dir, "broken.json"), "{");
+    writeFileSync(join(dir, "other.json"), JSON.stringify({ id: "x" }));
+    writeFileSync(join(dir, "notes.txt"), "not a scene");
+    expect(loadImportedScenes(dir).map((s) => s.id)).toEqual([
+      "log-a",
+      "log-b",
+    ]);
+  });
+
+  test("gives no scenes when the folder is missing", () => {
+    expect(loadImportedScenes(join(tmpdir(), "no-such-folder-xyz"))).toEqual(
+      [],
+    );
+  });
+});
+
+describe("scenesForAll", () => {
+  const scene = (id: string) => ({
+    id,
+    title: id,
+    group: "Install" as const,
+    start: { hash: "", search: "" },
+  });
+  const scenes = [scene("install-mac"), scene("log-a"), scene("log-b")];
+  const imported = new Set(["log-a", "log-b"]);
+
+  test("--all --check skips the imported scenes and counts them", () => {
+    const picked = scenesForAll(scenes, imported, {
+      check: true,
+      includeImported: false,
+    });
+    expect(picked.scenes.map((s) => s.id)).toEqual(["install-mac"]);
+    expect(picked.skipped).toBe(2);
+  });
+
+  test("--include-imported keeps them with --check", () => {
+    const picked = scenesForAll(scenes, imported, {
+      check: true,
+      includeImported: true,
+    });
+    expect(picked.scenes).toHaveLength(3);
+    expect(picked.skipped).toBe(0);
+  });
+
+  test("--all without --check keeps them", () => {
+    const picked = scenesForAll(scenes, imported, {
+      check: false,
+      includeImported: false,
+    });
+    expect(picked.scenes).toHaveLength(3);
+    expect(picked.skipped).toBe(0);
+  });
 });
