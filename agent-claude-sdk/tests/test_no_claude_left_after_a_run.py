@@ -39,7 +39,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 TOKEN = "valid-test-token"
-CLI = str(Path(claude_agent_sdk.__file__).resolve().parent / "_bundled" / "claude")
+CLI = os.path.realpath(Path(claude_agent_sdk.__file__).parent / "_bundled" / "claude")
 # Asks the stand-in API to call the run's first tool.
 CALL_A_TOOL = "Show me the card."
 # Asks the stand-in API to hold its answer until the test ends: a model still working.
@@ -49,8 +49,23 @@ TAKE_YOUR_TIME = "Think about it for a long while."
 GONE_WITHIN = 25
 
 
-def claude_processes():
-    """The Claude Code processes this test process started that are still running."""
+def _children():
+    """This test process's child processes, as (pid, executable or command line)."""
+    if os.path.isdir("/proc"):
+        # Linux. Claude Code sets its process title there, which rewrites the command line `ps`
+        # shows, so each child is known by the executable it runs.
+        found = []
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                with open(f"/proc/{entry}/stat", encoding="utf-8") as stat:
+                    ppid = int(stat.read().rsplit(")", 1)[1].split()[1])
+                if ppid == os.getpid():
+                    found.append((int(entry), os.path.realpath(f"/proc/{entry}/exe")))
+            except (OSError, IndexError, ValueError):
+                continue  # Gone while it was being read.
+        return found
     listing = subprocess.run(
         ["ps", "-A", "-o", "pid=", "-o", "ppid=", "-o", "command="],
         capture_output=True,
@@ -60,9 +75,14 @@ def claude_processes():
     found = []
     for line in listing.splitlines():
         pid, ppid, command = line.strip().split(None, 2)
-        if int(ppid) == os.getpid() and command.startswith(CLI):
-            found.append(int(pid))
+        if int(ppid) == os.getpid():
+            found.append((int(pid), command))
     return found
+
+
+def claude_processes():
+    """The Claude Code processes this test process started that are still running."""
+    return [pid for pid, program in _children() if program.startswith(CLI)]
 
 
 async def left_after(seconds=GONE_WITHIN):
@@ -248,7 +268,7 @@ async def started(path, client, body):
     request = asyncio.create_task(events(client, path, body))
     deadline = time.monotonic() + 30
     while not claude_processes():
-        assert time.monotonic() < deadline, "Claude Code never started"
+        assert time.monotonic() < deadline, f"Claude Code never started; children: {_children()}"
         assert not request.done(), "the run ended before it could be closed"
         await asyncio.sleep(0.05)
     # Past Claude Code's start, into the model call the stand-in holds.
@@ -310,8 +330,12 @@ def test_no_claude_is_left_when_its_tool_does_not_stop(harness, stuck_tool, capl
             second = asyncio.create_task(stop())
             await asyncio.gather(first, second)
             await asyncio.gather(request, return_exceptions=True)
+            # The SDK's MCP server really does overrun its 5 seconds.
+            overran = "SDK MCP server 'ag_ui' did not stop within 5.0s"
+            deadline = time.monotonic() + GONE_WITHIN
+            while overran not in caplog.text and time.monotonic() < deadline:
+                await asyncio.sleep(0.25)
+            assert overran in caplog.text
             assert await left_after() == [], "Claude Code outlived its query"
-        # The SDK's MCP server really did overrun its 5 seconds.
-        assert "SDK MCP server 'ag_ui' did not stop within 5.0s" in caplog.text
 
     asyncio.run(scenario())
