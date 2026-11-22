@@ -12,6 +12,10 @@ const CLICKABLE = [
   "label",
   "[role=tab]",
   "a",
+  "[role=switch]",
+  "[role=menuitem]",
+  "[role=option]",
+  "[role=checkbox]",
 ];
 
 function collapsed(text: string | null | undefined): string {

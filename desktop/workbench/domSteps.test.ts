@@ -36,6 +36,12 @@ test("an exact name wins over a prefix", () => {
   expect(findClickable(document, "Install l")?.id).toBe("long");
 });
 
+test("a switch is found by its aria-label", () => {
+  document.body.innerHTML = `
+    <span id="usage" role="switch" aria-label="Share usage data" aria-checked="true"></span>`;
+  expect(findClickable(document, "Share usage data")?.id).toBe("usage");
+});
+
 test("typeInto fires input and change", () => {
   document.body.innerHTML = `<label for="code">Code</label><input id="code" />`;
   const field = findField(document, "Code") as HTMLInputElement;
