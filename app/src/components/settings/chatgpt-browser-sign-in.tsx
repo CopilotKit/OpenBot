@@ -1,4 +1,8 @@
-import { IconClipboard, IconMoodSad } from "@tabler/icons-react";
+import {
+  IconClipboard,
+  IconExternalLink,
+  IconMoodSad,
+} from "@tabler/icons-react";
 import { type ClipboardEvent, useEffect, useRef, useState } from "react";
 import { IllustrationFrame } from "@/components/onboarding/illustration-frame";
 import { Button } from "@/components/ui/button";
@@ -15,6 +19,9 @@ import { Input } from "@/components/ui/input";
  * address can't be changed and nothing in OpenBot's tab can read the other tab, so the person
  * copies it back. Done with no warning, that reads as broken; these screens say it first.
  *
+ * So it is the second way in. The first is ChatGPT's sign-in with a code (`ChatGptCodeSteps`),
+ * which never shows a page that won't load but needs device code sign-in turned on in ChatGPT first.
+ *
  * - Before it starts: three numbered steps and a drawing of the page they will land on, with its
  *   address marked as the thing to copy.
  * - While it waits: the paste box. Coming back to this tab puts the cursor in it. Pasting into it,
@@ -29,6 +36,64 @@ import { Input } from "@/components/ui/input";
 const LANDING = "localhost:1455/auth/callback?code=ac_…";
 
 export const CHATGPT_DEAD_PAGE = "This site can't be reached";
+
+/**
+ * ChatGPT's own settings, opened on Security and login: where a person turns on device code
+ * sign-in. The address OpenAI's help center links to (help.openai.com, article 7967234); OpenAI's
+ * Codex docs say device code sign-in is turned on there for a personal account, and in workspace
+ * permissions by the workspace's admin.
+ */
+export const CHATGPT_SECURITY_SETTINGS =
+  "https://chatgpt.com/#settings/Security";
+
+/** The link to ChatGPT's security settings, in the same style as the sign-in page's link. */
+export function ChatGptSettingsLink({
+  children = "Open ChatGPT's security settings",
+}: {
+  children?: React.ReactNode;
+}) {
+  return (
+    <a
+      className="text-foreground underline underline-offset-4"
+      href={CHATGPT_SECURITY_SETTINGS}
+      rel="noreferrer"
+      target="_blank"
+    >
+      {children}
+      <IconExternalLink className="ml-0.5 inline size-3.5" />
+    </a>
+  );
+}
+
+/**
+ * ChatGPT's sign-in with a code, the first way in where the server runs it: the setting OpenAI asks
+ * for first, with the link to it, then the code. It never lands on a page that won't load.
+ */
+export function ChatGptCodeSteps() {
+  return (
+    <ol className="flex flex-col gap-2.5 text-sm">
+      <Step number={1}>
+        <span className="flex flex-col gap-1">
+          <span>
+            Turn on device code sign-in in ChatGPT. Under Security and login,
+            switch on “Enable device code sign-in”.
+          </span>
+          <span>
+            <ChatGptSettingsLink />
+          </span>
+          <span className="text-muted-foreground">
+            On a Team or Enterprise workspace, your ChatGPT workspace admin
+            turns it on.
+          </span>
+        </span>
+      </Step>
+      <Step number={2}>Sign in with ChatGPT below to get a code.</Step>
+      <Step number={3}>
+        Enter the code on OpenAI's page and approve. It finishes on its own.
+      </Step>
+    </ol>
+  );
+}
 
 /** Before the sign-in starts: what is about to happen, in order. */
 export function ChatGptSteps() {
