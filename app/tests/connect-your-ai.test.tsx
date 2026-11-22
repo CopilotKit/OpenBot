@@ -132,6 +132,26 @@ function organizationAi(personal: PersonalAiConnection) {
   return GetAiConnectionResponse.parse(organization);
 }
 
+/** A refusal as the API sends one: problem details (api/openapi/common.yaml, `Problem`). */
+function problem(
+  status: number,
+  code: string,
+  category: string,
+  detail: string,
+) {
+  return {
+    type: `https://open.bot/errors/${code.toLowerCase().replaceAll("_", "-")}`,
+    title: detail,
+    status,
+    detail,
+    code,
+    category,
+    retryable: false,
+    requestId: "req_test",
+    traceId: "trace_test",
+  };
+}
+
 /** A second organization the person is in, beside `default`. */
 const ACME = "/api/v2/organizations/acme";
 
@@ -157,6 +177,8 @@ class FakeServer {
   signIns: unknown[] = [];
   signInReads = 0;
   signOuts = 0;
+  /** Whether the browser's session is signed in. Sign out ends it, as the server does. */
+  signedIn = true;
 
   constructor(start: Start, onboarded = false) {
     this.personal = personalFor(start);
@@ -173,6 +195,31 @@ class FakeServer {
     const path = inAcme
       ? `${ORGANIZATION}${url.pathname.slice(ACME.length)}`
       : url.pathname;
+    /*
+     * Signed out, as the real server answers: the deployment at `default` to anybody (the sign-in
+     * screen reads it), the deployment in any other organization not found, and everything else
+     * refused as unauthenticated.
+     */
+    if (!this.signedIn && url.pathname !== `${ORGANIZATION}/deployment`)
+      return /^\/api\/v2\/organizations\/[^/]+\/deployment$/.test(url.pathname)
+        ? {
+            status: 404,
+            json: problem(
+              404,
+              "ORGANIZATION_NOT_FOUND",
+              "not_found",
+              "Couldn't find that organization.",
+            ),
+          }
+        : {
+            status: 401,
+            json: problem(
+              401,
+              "AUTH_UNAUTHENTICATED",
+              "auth",
+              "Authentication required.",
+            ),
+          };
     if (inAcme && this.acme && path === PERSONAL && method === "GET")
       return { status: 200, json: this.acme };
     if (inAcme && this.acme && path === `${ORGANIZATION}/ai-connection`)
@@ -197,6 +244,7 @@ class FakeServer {
     }
     if (url.pathname === "/api/auth/sign-out") {
       this.signOuts += 1;
+      this.signedIn = false;
       return { status: 200, json: { success: true } };
     }
     if (path === PERSONAL && method === "GET")
