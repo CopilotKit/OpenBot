@@ -352,8 +352,7 @@ pub fn sign_in_for_move<R: tauri::Runtime>(
         sign_in::WAIT,
         |authorize| {
             opened.store(true, std::sync::atomic::Ordering::SeqCst);
-            tauri_plugin_opener::open_url(authorize, None::<&str>)
-                .map_err(|error| error.to_string())
+            open_in_browser(authorize)
         },
     );
     {
