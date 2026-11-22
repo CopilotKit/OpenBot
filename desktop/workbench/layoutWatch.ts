@@ -133,14 +133,101 @@ function boxOf(element: Element): Box {
   return { x, y, width, height };
 }
 
-/** The elements with a key and a box that is not empty, in document order. */
+/** Each side of `rect(top, right, bottom, left)` in px, or null when it is not a rect. */
+function clipRect(value: string): number[] | null {
+  const m = /^rect\((.*)\)$/.exec(value.trim());
+  if (!m) return null;
+  const sides = m[1]
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .map((side) => Number.parseFloat(side));
+  return sides.length === 4 && sides.every(Number.isFinite) ? sides : null;
+}
+
+/** True when a `clip` value lets at most 1 px of width or height show. */
+function clipHides(value: string): boolean {
+  const sides = clipRect(value);
+  if (!sides) return false;
+  const [top, right, bottom, left] = sides;
+  return right - left <= 1 || bottom - top <= 1;
+}
+
+/** True when a `clip-path` value shows nothing: `inset(50%)`, or a circle or ellipse of size 0. */
+function clipPathHides(value: string): boolean {
+  const text = value.trim();
+  const inset = /^inset\(([^)]*)\)/.exec(text);
+  if (inset) {
+    // The four sides as CSS writes them: 1 to 4 values, then an optional `round`.
+    const parts = inset[1]
+      .split(/\s+round\s+/)[0]
+      .split(/\s+/)
+      .filter(Boolean);
+    if (!parts.every((part) => part.endsWith("%"))) return false;
+    const [top, right = top, bottom = top, left = right] = parts.map((part) =>
+      Number.parseFloat(part),
+    );
+    return top + bottom >= 100 || left + right >= 100;
+  }
+  return /^(circle|ellipse)\(\s*0(px|%)?[\s)]/.test(text);
+}
+
+function overflowHidden(style: CSSStyleDeclaration): boolean {
+  return [style.overflow, style.overflowX, style.overflowY].some(
+    (value) => value === "hidden" || value === "clip",
+  );
+}
+
+/** True when an element hides itself and all inside it: `clip`, `clip-path`, or a box of 1 px or
+ * less that hides what goes past it. */
+function hidesContent(element: Element, known: Map<Element, boolean>): boolean {
+  const cached = known.get(element);
+  if (cached !== undefined) return cached;
+  const view = element.ownerDocument.defaultView;
+  let hides = false;
+  if (view) {
+    const style = view.getComputedStyle(element);
+    const { width, height } = boxOf(element);
+    hides =
+      clipHides(style.clip) ||
+      clipPathHides(style.clipPath) ||
+      ((width <= 1 || height <= 1) && overflowHidden(style));
+  }
+  known.set(element, hides);
+  return hides;
+}
+
+/**
+ * True when a person does not see an element, as with text for screen readers only (`sr-only`):
+ * its box is 1 px or less in width or height, or it or an ancestor hides it with `clip`,
+ * `clip-path`, or a box of 1 px or less with hidden overflow. `known` keeps the answer of each
+ * ancestor for one walk of the page.
+ */
+export function isVisuallyHidden(
+  element: Element,
+  known: Map<Element, boolean> = new Map(),
+): boolean {
+  const { width, height } = boxOf(element);
+  if (width <= 1 || height <= 1) return true;
+  for (let at: Element | null = element; at; at = at.parentElement) {
+    if (hidesContent(at, known)) return true;
+  }
+  return false;
+}
+
+/**
+ * The elements with a key and a box that is not empty, in document order. Text for screen readers
+ * only is not in the list: a person does not see it, so it cannot move, be cut off or go outside.
+ */
 export function visibleElements(root: Document) {
   const body = root.body;
   if (!body) return [];
+  const known = new Map<Element, boolean>();
   return Array.from(body.querySelectorAll("*")).flatMap((element) => {
     const identity = identify(element);
+    if (!identity) return [];
     const box = boxOf(element);
-    if (!identity || box.width === 0 || box.height === 0) return [];
+    if (box.width === 0 || box.height === 0) return [];
+    if (isVisuallyHidden(element, known)) return [];
     return [{ element, ...identity, box }];
   });
 }

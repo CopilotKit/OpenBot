@@ -2,8 +2,10 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { Box } from "./geometry";
 import {
+  clippedAndOutside,
   compare,
   elementKey,
+  isVisuallyHidden,
   type Snapshot,
   snapshot,
   WHOLE_PAGE,
@@ -198,4 +200,75 @@ test("an input is keyed by its label", () => {
 test("an aria-hidden ancestor hides the element", () => {
   const body = mount('<div aria-hidden="true"><button>Install</button></div>');
   expect(elementKey(body.querySelector("button") as Element)).toBeNull();
+});
+
+// happy-dom has no layout: each element gets the box in its data-box ("x y width height"), or
+// 10 x 10 at 0, 0.
+function withBoxes(run: () => void) {
+  const proto = Element.prototype;
+  const real = proto.getBoundingClientRect;
+  proto.getBoundingClientRect = function (this: Element) {
+    const [x = 0, y = 0, width = 10, height = 10] = (
+      this.getAttribute("data-box") ?? ""
+    )
+      .split(" ")
+      .filter(Boolean)
+      .map(Number);
+    return { x, y, width, height } as DOMRect;
+  };
+  try {
+    run();
+  } finally {
+    proto.getBoundingClientRect = real;
+  }
+}
+
+const SR_ONLY =
+  "position: absolute; overflow: hidden; white-space: nowrap; clip: rect(0px, 0px, 0px, 0px); clip-path: inset(50%);";
+
+test("text for screen readers only is visually hidden", () => {
+  withBoxes(() => {
+    const body = mount(`
+      <span id="sr" data-box="-1 -1 1 1" style="${SR_ONLY}">Conversations</span>
+      <span id="clip" data-box="0 0 80 20" style="position: absolute; clip: rect(0px, 0px, 0px, 0px)">Bots</span>
+      <span id="path" data-box="0 0 80 20" style="clip-path: inset(50%)">Sam Rivera, Acme</span>
+      <span id="line" data-box="0 0 80 1">Thin</span>
+      <span style="${SR_ONLY}" data-box="0 0 1 1"><b id="inner" data-box="0 0 80 20">Inside</b></span>
+      <div data-box="0 0 200 0"><b id="wrapped" data-box="0 0 80 20">Shown</b></div>
+      <span id="shown" style="clip-path: inset(10%)">Shown</span>
+    `);
+    const hidden = (id: string) =>
+      isVisuallyHidden(body.querySelector(`#${id}`) as Element);
+    expect(hidden("sr")).toBe(true);
+    expect(hidden("clip")).toBe(true);
+    expect(hidden("path")).toBe(true);
+    expect(hidden("line")).toBe(true);
+    expect(hidden("inner")).toBe(true);
+    // A box of 0 height without hidden overflow does not hide what is in it.
+    expect(hidden("wrapped")).toBe(false);
+    expect(hidden("shown")).toBe(false);
+  });
+});
+
+test("text for screen readers only has no key for moves and no cut-off or outside warning", () => {
+  withBoxes(() => {
+    mount(`
+      <nav>
+        <span data-box="-1 -1 1 1" style="${SR_ONLY}">Conversations</span>
+        <span data-box="-20 0 80 20" style="clip-path: inset(50%)">Sam Rivera, Acme</span>
+        <button data-box="-20 40 80 20">New conversation</button>
+      </nav>
+    `);
+    expect([...snapshot(document).keys()]).toEqual(["button:New conversation"]);
+    expect(clippedAndOutside(document, 3, { width: 800, height: 600 })).toEqual(
+      [
+        {
+          kind: "outside",
+          at: 3,
+          label: 'button "New conversation"',
+          overBy: 20,
+        },
+      ],
+    );
+  });
 });

@@ -7,7 +7,7 @@
  */
 
 import { DESKTOP_PAGE_SCRIPTS } from "virtual:workbench-desktop-pages";
-import { MotionGlobalConfig } from "motion/react";
+import { MotionGlobalConfig, time as motionTime } from "motion/react";
 import { nativeControl } from "../../desktop/src/fakeNative/control";
 import { installPageShell } from "../../desktop/src/fakeNative/pageShell";
 import type { ApiRoute, AppScene } from "../../desktop/workbench/appContract";
@@ -50,6 +50,36 @@ const ON_LOAD = new Set(["APP_THEME_PAGE", "OVERLAY_TITLE_BAR_PAGE"]);
 
 const STILL_CSS =
   "*, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; animation-duration: 0s !important; animation-delay: 0s !important; }";
+
+/** How far Motion's time moves in each new task while the page clock stands still, in ms. */
+const MOTION_TIME_STEP_MS = 1e-6;
+
+/**
+ * Motion draws an element only when its time has moved since the last draw it asked for
+ * (`VisualElement.scheduleRender` in motion-dom: `renderScheduledAt < time.now()`). Its time is
+ * `performance.now()`, which is the page clock, and the page clock stands still until the page
+ * plays it. So every value change after the first one at the same clock time was never drawn: an
+ * element kept its first style, for example `initial` (opacity 0) after a skipped entrance.
+ * Here Motion's time moves forward a tiny step in each new task while the clock stands still. In
+ * one task it stays the same, as Motion expects. The frame time (`frameData.timestamp`), which
+ * `useAnimationFrame` and the animations read, does not change.
+ */
+function keepMotionTimeMoving(): void {
+  const now = motionTime.now;
+  let last = Number.NEGATIVE_INFINITY;
+  let held: number | undefined;
+  motionTime.now = () => {
+    if (held !== undefined) return held;
+    let at = now();
+    if (at <= last) at = last + MOTION_TIME_STEP_MS;
+    last = at;
+    held = at;
+    queueMicrotask(() => {
+      held = undefined;
+    });
+    return at;
+  };
+}
 
 function message(value: unknown): string {
   if (value instanceof Error) return value.message;
@@ -120,7 +150,9 @@ function boot(): void {
     get: () => (windows ? WINDOWS_USER_AGENT : MAC_USER_AGENT),
   });
 
-  // 4. Still motion: Motion skips its animations, and CSS has no transitions.
+  // 4. Motion draws on the stopped page clock. Still motion: Motion skips its animations, and
+  // CSS has no transitions.
+  keepMotionTimeMoving();
   if (config.motion === "still") {
     MotionGlobalConfig.skipAnimations = true;
     const style = document.createElement("style");
