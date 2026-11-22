@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/item";
 import { describeConnection } from "@/lib/ai-connection/describe";
 import { removePersonalAiMutationOptions } from "@/lib/ai-connection/mutations";
-import { providerById } from "@/lib/ai-connection/providers";
+import { isSignIn, providerById } from "@/lib/ai-connection/providers";
 import {
   needsAiConnection,
   type PersonalAiConnection,
@@ -185,7 +185,11 @@ function YourAiDialog({
         <DialogTitle>Your AI</DialogTitle>
         <DialogDescription>
           {described
-            ? `Bots use ${described.provider} when they work for you. It's yours alone, and OpenBot never shows the key.`
+            ? `Bots use ${described.provider} when they work for you. ${
+                isSignIn(personal.connection.login)
+                  ? "It's yours alone, and OpenBot keeps you signed in."
+                  : "It's yours alone, and OpenBot never shows the key."
+              }`
             : "You haven't connected your own AI."}
         </DialogDescription>
       </DialogHeader>
