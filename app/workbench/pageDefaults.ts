@@ -204,6 +204,12 @@ export const SCRIPTED: Partial<
 /** The page commands with no default, and why. */
 export const NO_DEFAULT: Readonly<Partial<Record<PageCommand, string>>> = {
   "plugin:openbot-desktop|speech_start": "No scene drives speech yet.",
+  "plugin:openbot-desktop|begin_sign_in_redirect":
+    "No scene drives a sign-in redirect yet. Refused, the app falls back to a paste or a code.",
+  "plugin:openbot-desktop|await_sign_in_redirect":
+    "Asked only after begin_sign_in_redirect answers.",
+  "plugin:openbot-desktop|cancel_sign_in_redirect":
+    "Asked only after begin_sign_in_redirect answers.",
   "plugin:openbot-desktop|install_update":
     "An update moves through update_offer while it installs. A scene sets those answers.",
 };

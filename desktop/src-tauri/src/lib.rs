@@ -2,6 +2,7 @@
 pub mod acquire;
 pub mod ai_connection;
 pub mod app_update;
+pub mod claude_sign_in;
 pub mod cli_release;
 pub mod client_version;
 pub mod composio;
@@ -27,6 +28,7 @@ pub mod local_eval_state;
 pub mod local_images;
 pub mod local_update;
 pub mod logging;
+pub mod loopback_redirect;
 pub mod machine_size;
 pub mod move_to_cloud;
 #[cfg(target_os = "macos")]
@@ -51,6 +53,7 @@ pub mod release_images;
 pub mod saved_intent;
 pub mod security_floor;
 pub mod shell_updates;
+pub mod sign_in_redirect;
 pub mod speech;
 pub mod stack;
 pub mod stall;

@@ -333,26 +333,28 @@ test("a finished sign-in shows its tick for a second, and choosing another row t
 });
 
 /*
- * A first sign-in to a plan downloads that plan's image, which Install leaves to the plan. The
- * native side reports the download on the `images` row as Install does, and the model screen shows
- * it as Install shows a download, its size and all, until the sign-in's link is ready.
+ * A first sign-in to a ChatGPT plan downloads that plan's image, which runs the login and which
+ * Install leaves to the plan. The native side reports the download on the `images` row as Install
+ * does, and the model screen shows it as Install shows a download, its size and all, until the
+ * sign-in's link is ready.
  */
 test("a plan sign-in that downloads its image shows the download as Install does", async () => {
   const begun = deferred<string>();
   invokeHandler = async (command) => {
     if (command === "providers") return providers;
-    if (command === "begin_claude_sign_in") return begun.promise;
+    if (command === "begin_chatgpt_sign_in") return begun.promise;
+    if (command === "finish_chatgpt_sign_in") return deferred<string>().promise;
     if (command === "cancel_chatgpt_sign_in") return null;
     throw new Error(`unexpected command ${command}`);
   };
   const view = await renderPicker(() => {});
-  await pick(view, /Anthropic/);
+  await pick(view, /OpenAI/);
   await userEvent.click(
-    view.getByRole("button", { name: "Sign in with Anthropic" }),
+    view.getByRole("button", { name: "Sign in with OpenAI" }),
   );
   await waitFor(() =>
     expect(
-      invokeCalls.some((call) => call.command === "begin_claude_sign_in"),
+      invokeCalls.some((call) => call.command === "begin_chatgpt_sign_in"),
     ).toBe(true),
   );
   await act(async () => {
@@ -392,7 +394,7 @@ test("a plan sign-in that downloads its image shows the download as Install does
   expect(view.queryByRole("list", { name: "Sign-in download" })).toBeNull();
   expect(view.getByRole("status").textContent).toBe("OpenBot is downloaded.");
   await act(async () => {
-    begun.resolve("https://claude.test");
+    begun.resolve("https://auth.openai.test");
   });
 });
 
@@ -508,22 +510,24 @@ test("a ChatGPT sign-in that finished is not cancelled when the screen moves on"
   ).toBe(false);
 });
 
+/*
+ * Claude's plan sign-in used to hand back a code to paste here. It now comes back to Desktop on
+ * its own, as ChatGPT's does: no code box, and the link stays shown while it waits.
+ */
 test.each([
   {
     name: "Anthropic",
     signIn: "claude",
-    says: "Anthropic opens in your browser. Approve the request there, then paste the code it shows you back here. You won't need an API key.",
-    asksForCode: true,
+    says: "Anthropic opens in your browser. You won't type anything here or need an API key.",
   },
   {
     name: "OpenAI",
     signIn: "chatgpt",
     says: "OpenAI opens in your browser. You won't type anything here or need an API key.",
-    asksForCode: false,
   },
 ])(
-  "$name's plan sign-in says beforehand whether it will ask for a code",
-  async ({ name, signIn, says, asksForCode }) => {
+  "$name's plan sign-in finishes on its own, with no code to paste",
+  async ({ name, signIn, says }) => {
     const finished = deferred<string>();
     invokeHandler = async (command) => {
       if (command === "providers") return providers;
@@ -543,11 +547,43 @@ test.each([
       view.getByRole("button", { name: `Sign in with ${name}` }),
     );
     await view.findByText("Open the sign-in page");
-    expect(Boolean(view.queryByLabelText("Code from your browser"))).toBe(
-      asksForCode,
+    expect(view.queryByLabelText("Code from your browser")).toBeNull();
+    expect(view.getByRole("status").textContent).toBe(
+      "Waiting for you to approve it…",
     );
+    // The browser comes back: signed in, with nothing typed.
+    await act(async () => finished.resolve(`synthetic-${signIn}-plan-token`));
+    await view.findByText(new RegExp(`Signed in to ${name}`));
+    expect(
+      invokeCalls.find((call) => call.command === `finish_${signIn}_sign_in`)
+        ?.args,
+    ).toBeUndefined();
   },
 );
+
+test("leaving a Claude plan sign-in that waits for the browser stops it", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    if (command === "begin_claude_sign_in") return "https://sign-in.example";
+    if (command === "finish_claude_sign_in") return deferred<string>().promise;
+    if (command === "cancel_claude_sign_in") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker();
+  await pick(view, /Anthropic/);
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in with Anthropic" }),
+  );
+  await view.findByText("Open the sign-in page");
+  await userEvent.click(
+    view.getByRole("button", { name: "Choose a different provider" }),
+  );
+  await waitFor(() =>
+    expect(
+      invokeCalls.some((call) => call.command === "cancel_claude_sign_in"),
+    ).toBe(true),
+  );
+});
 
 test("a saved provider-scoped plan session enables continue without exposing a token", async () => {
   const choices: unknown[] = [];
@@ -618,15 +654,6 @@ for (const provider of providers) {
         await userEvent.click(
           view.getByRole("button", { name: `Sign in with ${provider.name}` }),
         );
-        if (provider.id === "anthropic") {
-          await userEvent.type(
-            await view.findByLabelText("Code from your browser"),
-            "synthetic-code",
-          );
-          await userEvent.click(
-            view.getByRole("button", { name: "Finish signing in" }),
-          );
-        }
       }
       await view.findByText(
         new RegExp(

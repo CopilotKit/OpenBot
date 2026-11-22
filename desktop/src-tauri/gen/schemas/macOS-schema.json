@@ -2961,6 +2961,12 @@
           "markdownDescription": "Enables the appearance command without any pre-configured scope."
         },
         {
+          "description": "Enables the await_sign_in_redirect command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-await-sign-in-redirect",
+          "markdownDescription": "Enables the await_sign_in_redirect command without any pre-configured scope."
+        },
+        {
           "description": "Enables the begin_plan_sign_in command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-begin-plan-sign-in",
@@ -2973,6 +2979,12 @@
           "markdownDescription": "Enables the begin_provider_sign_in command without any pre-configured scope."
         },
         {
+          "description": "Enables the begin_sign_in_redirect command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-begin-sign-in-redirect",
+          "markdownDescription": "Enables the begin_sign_in_redirect command without any pre-configured scope."
+        },
+        {
           "description": "Enables the cancel_plan_sign_in command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-cancel-plan-sign-in",
@@ -2983,6 +2995,12 @@
           "type": "string",
           "const": "openbot-desktop:allow-cancel-provider-sign-in",
           "markdownDescription": "Enables the cancel_provider_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel_sign_in_redirect command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-cancel-sign-in-redirect",
+          "markdownDescription": "Enables the cancel_sign_in_redirect command without any pre-configured scope."
         },
         {
           "description": "Enables the change_ai_connection command without any pre-configured scope.",
@@ -3171,6 +3189,12 @@
           "markdownDescription": "Denies the appearance command without any pre-configured scope."
         },
         {
+          "description": "Denies the await_sign_in_redirect command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-await-sign-in-redirect",
+          "markdownDescription": "Denies the await_sign_in_redirect command without any pre-configured scope."
+        },
+        {
           "description": "Denies the begin_plan_sign_in command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-begin-plan-sign-in",
@@ -3183,6 +3207,12 @@
           "markdownDescription": "Denies the begin_provider_sign_in command without any pre-configured scope."
         },
         {
+          "description": "Denies the begin_sign_in_redirect command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-begin-sign-in-redirect",
+          "markdownDescription": "Denies the begin_sign_in_redirect command without any pre-configured scope."
+        },
+        {
           "description": "Denies the cancel_plan_sign_in command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-cancel-plan-sign-in",
@@ -3193,6 +3223,12 @@
           "type": "string",
           "const": "openbot-desktop:deny-cancel-provider-sign-in",
           "markdownDescription": "Denies the cancel_provider_sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel_sign_in_redirect command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-cancel-sign-in-redirect",
+          "markdownDescription": "Denies the cancel_sign_in_redirect command without any pre-configured scope."
         },
         {
           "description": "Denies the change_ai_connection command without any pre-configured scope.",

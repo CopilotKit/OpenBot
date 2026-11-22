@@ -1,12 +1,7 @@
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  HANDBACK_COMMANDS,
-  NOT_YET_IN_DESKTOP,
-  PAGE_COMMANDS,
-  PAGE_PLUGIN,
-} from "./pageRegistry";
+import { HANDBACK_COMMANDS, PAGE_COMMANDS, PAGE_PLUGIN } from "./pageRegistry";
 
 const DESKTOP = join(import.meta.dir, "..", "..");
 const APP_SRC = join(DESKTOP, "..", "app", "src");
@@ -86,16 +81,7 @@ test("every command desktop_page.rs registers is in PAGE_COMMANDS, and no more",
 test("every page command the app calls is in PAGE_COMMANDS", () => {
   const found = appCommands();
   expect(found.length).toBeGreaterThanOrEqual(20);
-  const allowed: readonly string[] = [...known, ...NOT_YET_IN_DESKTOP];
-  for (const name of found) expect(allowed).toContain(name);
-});
-
-test("every command not yet in Desktop is still called by the app, and is no page command", () => {
-  const found = new Set(appCommands());
-  for (const name of NOT_YET_IN_DESKTOP) {
-    expect(found.has(name)).toBe(true);
-    expect(known).not.toContain(name);
-  }
+  for (const name of found) expect(known).toContain(name);
 });
 
 test("no duplicates", () => {

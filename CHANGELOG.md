@@ -166,6 +166,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   the system browser, which stayed signed in after sign-out, so the next sign-in on that computer
   came back as the previous person. Desktop now opens the OpenBot's `end_session_endpoint`, where it
   publishes one, after every sign-out.
+- **A Claude plan's sign-in finishes on its own.** Approve in the browser and you're done, in the
+  setup window and in Settings alike: the browser comes back to Desktop, with no code to copy and
+  paste. The sign-in runs in Desktop itself, so it no longer downloads the Claude Agent SDK image
+  or starts a container first. That image still downloads when a Claude plan's Bot first starts.
+  An app page from before this keeps its paste box and still finishes from the code.
 
 ### Admin
 
