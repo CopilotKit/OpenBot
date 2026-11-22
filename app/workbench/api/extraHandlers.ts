@@ -4,13 +4,17 @@
  * `start.api`. Pattern: the `/info` answer in app/tests/connection-lost-conversation.test.tsx.
  */
 import { HttpResponse, http, type RequestHandler } from "msw";
+import { SAM } from "../session";
 
-/** A made-up person and session, with fixed times, so each run gives the same answer. */
+/**
+ * A made-up session for Sam, the person that people/me answers (../session.ts), with fixed times,
+ * so each run gives the same answer.
+ */
 const SIGNED_IN = {
   session: {
     id: "workbench-session",
     token: "workbench-session-token",
-    userId: "workbench-person",
+    userId: "sam",
     expiresAt: "2030-01-01T00:00:00.000Z",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -18,9 +22,9 @@ const SIGNED_IN = {
     userAgent: null,
   },
   user: {
-    id: "workbench-person",
-    name: "Sam Rivera",
-    email: "sam@example.com",
+    id: "sam",
+    name: SAM.name,
+    email: SAM.email,
     emailVerified: true,
     image: null,
     createdAt: "2026-01-01T00:00:00.000Z",

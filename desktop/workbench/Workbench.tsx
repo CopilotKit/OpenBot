@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Answer, Call, NativeControl } from "../src/fakeNative/control";
+import { PAGE_COMMANDS } from "../src/fakeNative/pageRegistry";
 import { COMMANDS } from "../src/fakeNative/registry";
 import {
   type ActionMark,
@@ -7,6 +8,8 @@ import {
   boxOverFrame,
   MARKER_MS,
 } from "./ActionMarkers";
+import type { ApiRecord } from "./appContract";
+import { appFrameConfig } from "./appFrameConfig";
 import { CallLog } from "./CallLog";
 import { CommandsPanel } from "./CommandsPanel";
 import type { PageClock } from "./clock";
@@ -23,7 +26,15 @@ import {
   runActions,
 } from "./runner";
 import { SceneList } from "./SceneList";
-import { SCENES } from "./scenes";
+import {
+  ALL_SCENE_GROUPS,
+  type DesktopSceneEntry,
+  isApp,
+  loadScenes,
+  type SceneEntry,
+  sceneEnd,
+  sceneSteps,
+} from "./sceneCatalog";
 import type { Scene } from "./scenes/types";
 import { decodeState, encodeState, type WorkbenchState } from "./urlState";
 import { useLayoutWatch } from "./useLayoutWatch";
@@ -45,6 +56,8 @@ export type WorkbenchPage = {
   /** False while the window remounts; true after it loads and the clock is at its time. */
   readonly ready: boolean;
   readonly scene: string;
+  /** "app" when the window shows OpenBot's web app, "desktop" for the setup window. */
+  readonly kind: "desktop" | "app";
   /** Milliseconds from the scene start, on the window's clock. */
   now(): number;
   /** Resolves when the window is ready at `ms` and has drawn one frame. */
@@ -56,12 +69,22 @@ export type WorkbenchPage = {
   warnings(): Warning[];
   /** The elements the layout warnings know in the loaded window, in document order. */
   elements(): ReturnType<typeof describeElements>;
+  /** The `/api` requests of the loaded app window, oldest first. Empty for a desktop window. */
+  requests(): readonly ApiRecord[];
+  /** The errors the loaded app window caught. Empty for a desktop window. */
+  errors(): readonly string[];
 };
 
 type RunInfo = { end: number; nextAt(ms: number): number | null };
 type FrameWindow = Window & typeof globalThis;
-/** The loaded window: its clock, its run, and how to stop listening to it. */
-type Live = { win: FrameWindow; clock: PageClock; info: RunInfo; off(): void };
+/** The loaded window: its clock, its run, whether it shows the app, and how to stop listening to it. */
+type Live = {
+  win: FrameWindow;
+  clock: PageClock;
+  info: RunInfo;
+  app: boolean;
+  off(): void;
+};
 
 const BOOT_TIMEOUT_MS = 10_000;
 /** The longest step of a walk. Steps fall on multiples of it, so every walk to a time takes the same steps. */
@@ -214,22 +237,36 @@ function saveImported(scenes: readonly Scene[]): void {
   }
 }
 
-function initial(): {
+function initial(catalog: readonly SceneEntry[]): {
   state: WorkbenchState;
   notices: string[];
   imported: Scene[];
 } {
   const imported = loadImported();
   return {
-    ...decodeState(window.location.search, [...SCENES, ...imported], COMMANDS),
+    ...decodeState(
+      window.location.search,
+      [...catalog, ...imported],
+      [...COMMANDS, ...PAGE_COMMANDS],
+    ),
     imported,
   };
 }
 
-/** The frame reads this object when it boots, so it is set before the iframe mounts. */
+/** Waits for the fonts of an app window, so its text has its final boxes. */
+async function fontsReady(live: Live): Promise<void> {
+  if (!live.app) return;
+  try {
+    await live.win.document.fonts?.ready;
+  } catch {
+    // A font that does not load leaves the fallback font: the window is still ready.
+  }
+}
+
+/** The desktop frame reads this object when it boots, so it is set before the iframe mounts. */
 function frameConfig(
   state: WorkbenchState,
-  scenes: readonly Scene[],
+  scenes: readonly DesktopSceneEntry[],
 ): FrameConfig {
   const scene = scenes.find((s) => s.id === state.scene) ?? scenes[0];
   return {
@@ -242,15 +279,58 @@ function frameConfig(
   };
 }
 
+type Catalog = { scenes: SceneEntry[]; notices: string[] };
+
+/** Loads the scene catalog once, then shows the workbench. */
 export function Workbench() {
-  const [boot] = useState(initial);
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const loadRef = useRef<Promise<Catalog> | null>(null);
+  useEffect(() => {
+    let current = true;
+    loadRef.current ??= loadScenes();
+    void loadRef.current.then((loaded) => {
+      if (current) setCatalog(loaded);
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
+  if (!catalog)
+    return (
+      <div className="wb-page">
+        <p role="status">Loading scenes…</p>
+      </div>
+    );
+  return (
+    <WorkbenchLoaded
+      catalog={catalog.scenes}
+      catalogNotices={catalog.notices}
+    />
+  );
+}
+
+export type WorkbenchLoadedProps = {
+  /** The desktop scenes, then the app scenes. */
+  catalog: readonly SceneEntry[];
+  /** What went wrong while the app scenes loaded. */
+  catalogNotices: readonly string[];
+};
+
+export function WorkbenchLoaded({
+  catalog,
+  catalogNotices,
+}: WorkbenchLoadedProps) {
+  const [boot] = useState(() => initial(catalog));
   const [state, setState] = useState<WorkbenchState>(boot.state);
   /** Scenes made from logs in this page: only in this browser tab, and not in links elsewhere. */
   const [imported, setImported] = useState<Scene[]>(boot.imported);
-  const scenes: readonly Scene[] = [...SCENES, ...imported];
+  const scenes: readonly SceneEntry[] = [...catalog, ...imported];
   const scenesRef = useRef(scenes);
   scenesRef.current = scenes;
-  const [notices, setNotices] = useState<string[]>(boot.notices);
+  const [notices, setNotices] = useState<string[]>(() => [
+    ...catalogNotices,
+    ...boot.notices,
+  ]);
   const [gridColor, setGridColor] = useState(DEFAULT_GRID_COLOR);
   const [remountCount, setRemountCount] = useState(0);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -322,16 +402,32 @@ export function Workbench() {
     [],
   );
 
-  const config = frameConfig(state, scenes);
   const scene = scenes.find((s) => s.id === state.scene);
-  const run = scene?.run ?? [];
-  const actionsRef = useRef(runActions(run));
-  actionsRef.current = runActions(run);
+  const appScene = scene && isApp(scene) ? scene : null;
+  const steps = scene ? sceneSteps(scene) : [];
+  const runEnd = scene ? sceneEnd(scene) : 0;
+  const actionsRef = useRef(runActions(steps));
+  actionsRef.current = runActions(steps);
   // Set during render, before the iframe element mounts and starts to load.
-  window.__workbenchFrame = config;
-  // A run, even an empty one, keeps the window from playing by itself.
-  window.__workbenchRun = run;
-  const frameKey = `${state.scene}|${state.window.os}|${JSON.stringify(config.env)}|${remountCount}`;
+  let config: FrameConfig | null = null;
+  const appConfig = appScene ? appFrameConfig(state, appScene) : null;
+  if (appScene && appConfig) {
+    // The app frame finds its run in the app scenes by id.
+    window.__workbenchAppFrame = appConfig;
+    delete window.__workbenchRun;
+  } else {
+    config = frameConfig(
+      state,
+      scenes.filter((s): s is DesktopSceneEntry => !isApp(s)),
+    );
+    delete window.__workbenchAppFrame;
+    window.__workbenchFrame = config;
+    // A run, even an empty one, keeps the window from playing by itself.
+    window.__workbenchRun = scene && !isApp(scene) ? (scene.run ?? []) : [];
+  }
+  const kind = appConfig ? "app" : "desktop";
+  const host = appConfig?.host ?? "desktop";
+  const frameKey = `${state.scene}|${state.window.os}|${JSON.stringify(config?.env ?? {})}|${remountCount}|${kind}|${host}|${appConfig?.role ?? ""}|${appConfig?.motion ?? ""}`;
 
   const writeAt = useCallback(
     (ms: number) => update((prev) => ({ ...prev, at: toSeconds(ms) })),
@@ -452,11 +548,11 @@ export function Workbench() {
       liveRef.current?.off();
       const target = targetRef.current ?? stateRef.current.at * 1000;
       targetRef.current = null;
-      const hasRun =
-        (
-          scenesRef.current.find((s) => s.id === stateRef.current.scene)?.run ??
-          []
-        ).length > 0;
+      const current = scenesRef.current.find(
+        (s) => s.id === stateRef.current.scene,
+      );
+      const hasRun = current ? sceneSteps(current).length > 0 : false;
+      const app = current ? isApp(current) : false;
       const off = clock.onTick((ms) => {
         setNow(ms);
         checkHandover();
@@ -478,10 +574,11 @@ export function Workbench() {
           showAction(action);
       });
       setFrameControl(win.__workbench ?? null);
-      const live = {
+      const live: Live = {
         win,
         clock,
         info,
+        app,
         off: () => {
           off();
           offChange?.();
@@ -491,6 +588,8 @@ export function Workbench() {
       liveRef.current = live;
       setEnd(info.end);
       if (!(await walk(live, target))) return;
+      await fontsReady(live);
+      if (liveRef.current !== live) return;
       setNow(clock.now());
       checkHandover();
       if (target === 0 && !hasRun) {
@@ -510,6 +609,7 @@ export function Workbench() {
         waitersRef.current.push({ resolve, reject }),
       );
     const live = liveRef.current;
+    if (live) await fontsReady(live);
     await nextFrame(live?.win ?? window);
   }, []);
 
@@ -550,6 +650,11 @@ export function Workbench() {
       get scene() {
         return stateRef.current.scene;
       },
+      get kind() {
+        const id = stateRef.current.scene;
+        const current = scenesRef.current.find((s) => s.id === id);
+        return current && isApp(current) ? "app" : "desktop";
+      },
       now: () => liveRef.current?.clock.now() ?? 0,
       seek,
       calls: () => liveRef.current?.win.__workbench?.calls() ?? [],
@@ -559,6 +664,8 @@ export function Workbench() {
         const doc = frameRef.current?.contentDocument;
         return doc ? describeElements(doc) : [];
       },
+      requests: () => liveRef.current?.win.__workbenchApi?.requests() ?? [],
+      errors: () => [...(liveRef.current?.win.__workbenchErrors ?? [])],
     };
   }, [seek]);
 
@@ -685,6 +792,9 @@ export function Workbench() {
       scene: id,
       at: 0,
       answers: {},
+      api: {},
+      // The host and the motion stay; the role is the scene's again.
+      app: prev.app ? { ...prev.app, role: null } : prev.app,
       window: { ...prev.window, os: scene?.start.os ?? prev.window.os },
     }));
   };
@@ -697,6 +807,8 @@ export function Workbench() {
     }));
     const frame = window.__workbenchFrame;
     if (frame) frame.answers = { ...frame.answers, [command]: answer };
+    const appFrame = window.__workbenchAppFrame;
+    if (appFrame) appFrame.answers = { ...appFrame.answers, [command]: answer };
   };
 
   const changeWindow = (patch: Partial<WindowSettingsValue>) => {
@@ -722,12 +834,17 @@ export function Workbench() {
             saveImported(next);
             // A new scene of the same id loads again.
             setRemountCount((count) => count + 1);
-            scenesRef.current = [...SCENES, ...next];
+            scenesRef.current = [...catalog, ...next];
             pickScene(scene.id);
           }}
           onPick={pickScene}
         />
-        <SceneList scenes={SCENES} current={state.scene} onPick={pickScene} />
+        <SceneList
+          scenes={catalog}
+          current={state.scene}
+          onPick={pickScene}
+          groups={ALL_SCENE_GROUPS}
+        />
       </aside>
       <main className="wb-center">
         {notices.length > 0 && (
@@ -756,8 +873,10 @@ export function Workbench() {
         <div className="wb-stage">
           <div className="wb-window-wrap" ref={wrapRef}>
             <WindowFrame
-              src={frameUrl(config)}
+              src={config ? frameUrl(config) : (appScene?.start.route ?? "/")}
               frameKey={frameKey}
+              host={host}
+              address={appScene?.start.route}
               width={state.window.width}
               height={state.window.height}
               os={state.window.os}
@@ -829,11 +948,11 @@ export function Workbench() {
               : "Press C to comment on a part of the window."}
           </p>
         </section>
-        {run.length > 0 ? (
+        {steps.length > 0 ? (
           <RunControls
             now={now}
-            end={end}
-            marks={run.map((step) => step.at * 1000)}
+            end={end || runEnd * 1000}
+            marks={steps.map((step) => step.at * 1000)}
             playing={playing}
             speed={speed}
             onPlay={() => play()}
