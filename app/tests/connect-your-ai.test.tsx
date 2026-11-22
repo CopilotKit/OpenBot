@@ -986,7 +986,8 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await chooser.getByRole("button", { name: "Connect" }).click();
         await chooser.getByRole("status").waitFor();
         await primary(page).click();
-        await page.waitForURL((url) => url.pathname === "/connections/gmail");
+        await page.locator('[data-app-connect="gmail"]').waitFor();
+        expect(new URL(page.url()).pathname).toBe("/connections/gmail");
         expect(await page.locator("[data-app-home]").count()).toBe(0);
         expect(server.completes).toBe(0);
       } finally {
@@ -1027,7 +1028,8 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         await chooser.getByRole("button", { name: "Connect" }).click();
         await chooser.getByRole("status").waitFor();
         await primary(page).click();
-        await page.waitForURL((url) => url.pathname === "/connections/gmail");
+        await page.locator('[data-app-connect="gmail"]').waitFor();
+        expect(new URL(page.url()).pathname).toBe("/connections/gmail");
         expect(server.completes).toBe(1);
       } finally {
         await page.close();
