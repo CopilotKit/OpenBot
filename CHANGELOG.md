@@ -8,6 +8,98 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+**Before upgrading.**
+
+- **Migrations run at start: eight, and none removes anything.** The database moves from
+  `0151_sign_up_switch`, where 1.1.3 left it, to `0161_ai_connection_shared_sign_in`. Every one is
+  an expand: a 1.1.3 server works against the new schema, so 1.1.3 upgrades with its servers
+  rolling one by one, with no downtime. There is no `0154` or `0155`.
+  - `0152_bot_run_client_and_outcome` keeps, for each Bot run, which app asked for it (web,
+    Desktop, the API or another) and how it ended.
+  - `0153_personal_ai_connections` keeps a person's own AI connection (below), sealed with the
+    vault's key and never in an organization's vault.
+  - `0156_service_terms_acceptances` keeps which version of OpenBot Cloud's terms each person agreed
+    to, and when.
+  - `0157_moving_to_cloud` keeps the exports and imports of a move to OpenBot Cloud (below).
+  - `0158_computer_holds` keeps an operator's stop on an organization's, a person's or one
+    computer's computers.
+  - `0159_personal_ai_sign_in_logins` lets a person's own AI connection be a provider sign-in. Its
+    check is added without reading the table.
+  - `0160_ai_connection_disconnected` lets an organization keep no AI connection, once an admin
+    disconnects it (below). A 1.1.3 server reading such a row reads the deployment's environment, as
+    it does with no row.
+  - `0161_ai_connection_shared_sign_in` keeps whose sign-in an organization's AI is, where an admin
+    shares their own (below).
+- **An empty model allowlist no longer narrows anything.** People pick from, and Bots run on, every
+  model the AI connection lists until an admin narrows it: Only allowed models on and at least one
+  model allowed. Before, an organization with Only allowed models off offered only its default model
+  and showed no model picker, and one with it on and nothing allowed refused every run. An
+  organization that has allowed models is unchanged.
+- Nothing in a Helm values file has to change. Every new chart value (under Kubernetes) is off or
+  empty by default.
+
+### Your own AI on OpenBot Cloud
+
+- **Connect your AI.** OpenBot Cloud brings no AI of its own, so each person connects theirs, and it
+  is theirs alone: it follows them into every organization they are in, is never shared with an
+  organization, and comes ahead of the organization's AI on their runs. A new person meets a Connect
+  your AI step right after Welcome, only where the organization has no AI. Its button waits until
+  they connect, and the step offers their other organizations and Sign out as the ways out. The gate
+  sends anybody in that state there from anywhere, including after switching to an organization
+  with no AI. A run refused for want of an AI says "Connect your AI to use Bots. An admin can also
+  set one up for everyone in your organization." with a Connect your AI button. Self-hosted
+  OpenBot and OpenBot (Self-Contained) are unchanged.
+- **Sign in to ChatGPT, Claude, Google or xAI, or use a key.** Each provider's sign-in comes first,
+  as OpenBot Desktop's setup window offers it, with Use an API key (or an address) as the
+  alternative. ChatGPT signs in in the browser, and the address the browser lands on is pasted back;
+  Sign in with a code instead uses ChatGPT's device code, which needs device code sign-in turned on
+  in ChatGPT's security settings. A Claude plan finishes with the code Claude's page shows. Google,
+  xAI and Unbiased AI finish by themselves. The server runs each sign-in, keeps what the provider
+  hands back sealed for that person, renews it itself, and never sends it to the browser. Every
+  model call of the person's runs goes through the model gateway with their credential.
+- **Your own AI offers every model it lists.** A person on their own Claude or ChatGPT plan, Google
+  or xAI sign-in, or key picks from everything it lists, as OpenBot Desktop does. The organization's
+  allowlist narrows what people on the organization's AI pick from, and applies to a person's own
+  AI only once an admin narrows it.
+- **Settings, Your AI.** Shows the person's own connection, or that their Bots use the
+  organization's, to add, change or remove theirs. The admin's section beside it reads
+  Organization's AI.
+- **An admin can share their own sign-in as the organization's AI.** In Admin, Providers, the
+  organization's AI chooser offers each provider's sign-in first, as Connect your AI does. Signing in
+  connects the organization on that admin's sign-in, and an admin whose own AI is already such a
+  sign-in shares it in one press. Bots then run on it for everybody with no AI of their own. The
+  Providers row says whose sign-in it is and, once it stops working, that it needs a new sign-in or
+  another provider; runs are then refused with a sentence that says the shared sign-in ended.
+
+### OpenBot Cloud
+
+- **OpenBot Cloud's sign-in screen: sign in, or OpenBot for Business.** Signed out, OpenBot Cloud
+  offers Sign in or create an account, through its own sign-in, which makes an account for somebody
+  new, and OpenBot for Business, your own cloud or on-prem, with the same words and Book a demo as
+  OpenBot Desktop's first screen. Under them, "Already have OpenBot at work?" takes your company's
+  OpenBot address and sends the browser there to sign in. Nothing offers OpenBot (Self-Contained) or
+  installing OpenBot on a computer. Every other OpenBot keeps its sign-in screen.
+- **Agree to the terms before using OpenBot Cloud.** The signed-in gate sends a person who has to
+  agree to the Terms of Service and Acceptable Use Policy to a terms screen, before onboarding, and
+  again whenever their version changes, then returns them to where they were headed. Continue waits
+  for the box naming both documents. Terms that changed meanwhile show the new version unticked. A
+  failed read holds the person on the screen with Try again, never past it. Self-hosted OpenBot and
+  the personal edition have no terms and never see the screen.
+- **Sign out signs the browser out of OpenBot by CopilotKit too.** Before, the browser stayed
+  signed in there, so the next person to choose Continue with OpenBot by CopilotKit in that browser,
+  or OpenBot Desktop's next sign-in through it, came back as the person who had just signed out.
+  Sign out on a hosted OpenBot now ends that session too and returns to the sign-in screen, instead
+  of "Couldn't find that organization."
+- **An invitation's email brings the person back to OpenBot.** Its button opens `/accept-invite`,
+  which signs the person in, or up, with the invitation and lands them working in the organization
+  they were invited to, even from a browser that was working in another one. An invitation the
+  sign-in already accepted signs them straight in.
+- **Computers on OpenBot Cloud have limits.** Each computer is held to 2 CPUs, 4 GiB of memory and a
+  disk limit above what its root filesystem can hold, and one session runs at most 4 hours before it
+  is restarted at a moment no run is using it (below). An operator can stop the computers of an
+  organization, a person or one computer; a routine of a stopped scope fails saying so, and is never
+  switched off.
+
 ### OpenBot Desktop
 
 - **OpenBot Cloud, first on the first screen.** "Set up OpenBot" opens on OpenBot Cloud: this app on
@@ -18,8 +110,103 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   on-prem with a demo to book, and so does connecting to your company's OpenBot by its address.
   The address field asks for your company's OpenBot address and says who has it. OpenBot
   (Self-Contained), everything on this computer, is a line at the foot of the screen, which opens
-  what the computer needs and Install. A build made with `VITE_OPENBOT_CLOUD_ENABLED=false` keeps
-  the first screen without OpenBot Cloud.
+  what the computer needs and Install. Release and candidate installers are built with OpenBot
+  Cloud on; a build made with `VITE_OPENBOT_CLOUD_ENABLED=false` keeps the first screen without it.
+  - The app checks, signs in and calls OpenBot Cloud at api.open.bot, which bot protection never
+    challenges, while what you read and open in a browser stays my.open.bot.
+  - Connecting to an OpenBot now follows an authorization endpoint on a sibling name of its address
+    (the same parent domain, https and port). The token and revocation endpoints must still be on
+    the address itself.
+- **Move OpenBot (Self-Contained) to OpenBot Cloud.** After the update, a computer that runs OpenBot
+  (Self-Contained) is asked once whether to move to OpenBot Cloud, with the space it would free, and
+  Settings offers Move to OpenBot Cloud until it has moved. The move lists what moves (Bots, skills,
+  conversations, memories, routines, goals, check-ins and files) and the app connections to connect
+  again, which never move. Your AI key comes along, sealed so only your OpenBot Cloud account can
+  read it, unless you untick it. Desktop signs in to OpenBot Cloud, packs everything up, sends it part
+  by part, has OpenBot Cloud add it and check it, and only once OpenBot Cloud's counts match removes
+  OpenBot from this computer, its volumes and images included, and says how much space that freed.
+  Any failure before that removes nothing. A moved person skips first-run setup in OpenBot Cloud;
+  the terms and their own AI still ask. On Windows, the Podman that OpenBot installed is removed
+  too when nothing else uses it; a Podman you installed or use stays. Keep OpenBot on this computer
+  is remembered and never asked again at launch.
+- **Sign-out ends the browser's session at a hosted OpenBot.** A connected Desktop signs in through
+  the system browser, which stayed signed in after sign-out, so the next sign-in on that computer
+  came back as the previous person. Desktop now opens the OpenBot's `end_session_endpoint`, where it
+  publishes one, after every sign-out.
+
+### Admin
+
+- **Providers changes, disconnects and connects the organization's AI.** It showed Connected with
+  no way to change it, and on OpenBot Cloud it could show an admin's own plan as the organization's.
+  It now reads the organization's connection and opens the same chooser as Settings: Change, and a
+  new Disconnect, which stops the organization's Bots using it and revokes its key while keeping the
+  keys of other connections for a later switch. Where whoever runs OpenBot sets the provider, the
+  row says so and opens nothing. Activity names the disconnect.
+- **The model allowlist says what it does.** In conversations says "Every listed model" until the
+  allowlist narrows anything, and Only allowed models says what each state does. On OpenBot Cloud
+  with no organization AI, it says each person picks from their own AI's models.
+
+### API
+
+- **A person's own AI connection.** `getPersonalAiConnection`, `replacePersonalAiConnection` and
+  `deletePersonalAiConnection` under `people/{personId}/ai-connection`, own only, on the new scopes
+  `personal-ai-connection:read` and `personal-ai-connection:write`. The answer says which AI the
+  person's runs use (`personal`, `organization` or none), whether one is required, whether they can
+  set their own, and which provider sign-ins the server runs (`signIns`).
+  `startPersonalAiSignIn`, `getPersonalAiSignIn` and `finishPersonalAiSignIn` run those sign-ins:
+  `finish` says whether one finishes by polling or with a code, and `method` (`browser`, the
+  default, or `device`) chooses ChatGPT's. `replacePersonalAiConnection` takes `login: plan`
+  (openai, anthropic) and `login: oauth` (google, xai) once that sign-in is approved.
+- **Disconnect the organization's AI.** `deleteAiConnection`
+  (`DELETE /api/v2/organizations/{organizationId}/ai-connection`), admin only, refused with
+  `AI_CONNECTION_FIXED` where whoever runs OpenBot sets the provider, and recorded on the trail.
+- **Share an admin's sign-in as the organization's AI.** On OpenBot Cloud `replaceAiConnection`
+  takes `login: plan` or `oauth` from an admin who signed in to that provider through OpenBot, and
+  `AiConnection` carries `sharedSignIn`: whose sign-in it is and whether it still works.
+- **The terms a person agrees to.** `getServiceTerms` and `acceptServiceTerms` under
+  `people/{personId}/terms`, own only. Agreeing to a version that isn't current is refused with
+  `SERVICE_TERMS_CHANGED`, and agreeing where there are no terms with `SERVICE_TERMS_NONE`. A
+  self-hosted OpenBot has none: `current` is null and `acceptanceNeeded` false.
+- **Moving to OpenBot Cloud.** On the person's own computer, `getExportEstimate`, `createExport`,
+  `getExport`, `deleteExport` and `downloadExportPart` (resumable with `Range`), on `exports:read`
+  and `exports:write`. On OpenBot Cloud only, `createImport`, `listImports`, `getImport`,
+  `uploadImportPart`, `applyImport` and `getImportVerification`, on `imports:read` and
+  `imports:write`: a per-import key a model key is sealed to, parts in any order, applied in the
+  background, and a verification that counts what arrived by kind, files by bytes. A busy move
+  answers 429 `RATE_LIMITED`.
+- **A hosted OpenBot's sign-out and invitations.** `GET /api/auth/hosted/sign-out` ends the browser's
+  OpenBot session and its OpenBot by CopilotKit session, and the hosted authorization server
+  metadata names it as `end_session_endpoint`. `GET /api/auth/hosted/sign-in` takes
+  `invitationTicket` and `organizationId`.
+- The model catalogue's `exposure` and its description say an empty allowlist means every model.
+
+### Kubernetes
+
+- **Computers are replaced when they can no longer work.** In sandbox mode both of a computer's
+  probes ask `/health/working`, which starts a shell in the workspace and checks every Bot's folder,
+  the home folder and the browser are there; a new liveness probe restarts a broken computer from
+  its image within about a minute, keeping its volumes. When a call to a computer fails, the server
+  asks the same question and replaces a broken one at once, then sends the call once more. Before, a
+  computer wiped from inside stayed Ready and failed every command until its next suspend.
+- **`computers.sandbox.maxSessionAfter`** (empty, no limit, by default) sets the longest one session
+  of a computer runs, used or not. Past it the computer is restarted when no routine, check-in, goal
+  or recent action is using it, or at the latest 30 minutes later; its volumes stay, the trail
+  records it, and the Bot's next action on it is told so.
+- **`computers.dnsPolicy` and `computers.dnsConfig`** pass a computer's name resolution through as
+  written, checked at install.
+- **`config.googleModelSignIn`** (with `secrets.googleModelOAuthClientSecret`) lets people sign in to
+  Google for their own AI through a Google web client. Off with an empty `clientId`.
+- **`abuseWatch`** (off) watches each computer for CPU pinned at its limit and lookups its resolver
+  refused, as gauges on the internal `/metrics`, and can suspend the one computer a crypto-mining
+  finding traces to.
+- **`config.cloudAnalytics`** (off) is OpenBot Cloud's own counts for CopilotKit's staff console.
+  Leave it off.
+
+### Smaller changes
+
+- The memory sweep asks Intelligence whether memory is available only when it has something to
+  mirror, and waits longer after each failed answer (up to 30 minutes), so an organization whose
+  entitlement never becomes ready is no longer asked every minute on every replica.
 
 ## 1.1.3
 
