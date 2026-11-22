@@ -1,5 +1,6 @@
 import {
   IconBrain,
+  IconBuilding,
   IconChartBar,
   IconChevronRight,
   IconCloud,
@@ -7,8 +8,10 @@ import {
   IconKey,
   IconSearch,
   IconShieldLock,
+  IconSparkles,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
 import {
@@ -16,6 +19,8 @@ import {
   PageRows,
   PageSection,
 } from "@/components/layout/page-shell";
+import { AiConnectionRow } from "@/components/settings/ai-connection";
+import { ProviderTile } from "@/components/settings/ai-connection-chooser";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -37,6 +42,15 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { describeConnection } from "@/lib/ai-connection/describe";
+import { providerById } from "@/lib/ai-connection/providers";
+import {
+  type AiConnection,
+  aiConnectionQueryOptions,
+  desktopAiSupportQueryOptions,
+  type PersonalAiConnection,
+  personalAiConnectionQueryOptions,
+} from "@/lib/ai-connection/queries";
 import {
   enterpriseOverviewQueryOptions,
   modelUsageQueryOptions,
@@ -77,29 +91,160 @@ const SOURCE_VENDORS: Partial<Record<ModelSource, string>> = {
 };
 
 /**
- * Admin, Providers: what serves the models built-in Bots run on. One today, read from the
- * deployment's configuration; a row each once a deployment can hold more than one.
+ * Admin, Providers: the organization's AI (getAiConnection), with Change and Disconnect in the same
+ * dialog and chooser Settings and Connect your AI use. And on OpenBot Cloud, where each person can
+ * bring their own AI, the viewer's own beside it, with the way to change it in Settings.
+ *
+ * The row reads the organization's connection, never the model catalogue: on OpenBot Cloud the
+ * catalogue is read with the viewer's own AI ahead of the organization's (it is what *they* pick
+ * from), so an admin who connected a Claude plan of their own was shown that plan as the
+ * organization's provider.
  */
 export function ProviderSection() {
-  const available = useQuery(availableModelsQueryOptions());
-  /*
-   * A section of its own, not one of the admin's controls: it reads the model listing and nothing
-   * an edition fixes, so it shows in the personal edition's Admin as in the team's.
-   */
+  const connection = useQuery(aiConnectionQueryOptions());
+  const support = useQuery(desktopAiSupportQueryOptions());
+  const personal = useQuery(personalAiConnectionQueryOptions());
+  if (connection.isPending || support.isPending || personal.isPending)
+    return null;
+  // Each person brings their own AI here (OpenBot Cloud): the server's verdict, never guessed.
+  const cloud = personal.data?.available === true;
+  return (
+    <>
+      <PageSection
+        description={
+          cloud
+            ? "Bots use it for everyone in your organization who hasn't connected their own AI."
+            : "Built-in Bots and the framework picked at setup run on this provider."
+        }
+        title={cloud ? "Organization's AI" : "AI provider"}
+      >
+        {connection.error ? (
+          <p className="mt-4 text-destructive text-sm" role="alert">
+            Couldn't load the AI connection. Try again in a moment.
+          </p>
+        ) : connection.data === null ? (
+          // An OpenBot older than the AI connection: what the model listing says serves it.
+          <CatalogueProviderRow />
+        ) : (
+          <PageRows>
+            {connection.data.editable && support.data !== "older" ? (
+              <AiConnectionRow
+                connection={connection.data}
+                inDesktop={support.data === "in-place"}
+                organizationWide={cloud}
+              />
+            ) : (
+              <FixedConnectionRow
+                connection={connection.data}
+                organizationWide={cloud}
+              />
+            )}
+          </PageRows>
+        )}
+      </PageSection>
+      {cloud && personal.data ? (
+        <ViewerAiSection personal={personal.data} />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The organization's AI where it can't be changed here: whoever runs OpenBot sets it (`editable`
+ * false), or an OpenBot Desktop older than changing it in place, where Settings has its own Change.
+ */
+function FixedConnectionRow({
+  connection,
+  organizationWide,
+}: {
+  connection: AiConnection;
+  organizationWide: boolean;
+}) {
+  // Set where OpenBot runs, it is nobody's here: the organization's.
+  const described = describeConnection(
+    connection,
+    organizationWide || !connection.editable ? "organization" : "you",
+  );
+  return (
+    <Item size="sm">
+      <ProviderTile provider={providerById(connection.provider)} />
+      <ItemContent>
+        <ItemTitle>{described?.provider ?? "Not chosen yet"}</ItemTitle>
+        <ItemDescription>
+          {connection.editable
+            ? `${described?.summary ?? "No AI provider yet."} Change it in Settings.`
+            : `${described?.summary ?? "No AI provider yet."} Set by whoever runs OpenBot.`}
+        </ItemDescription>
+      </ItemContent>
+    </Item>
+  );
+}
+
+/**
+ * The viewer's own AI on OpenBot Cloud, which only they can change, in Settings → Your AI. Their
+ * runs use it ahead of the organization's; with none of their own, the organization's.
+ */
+function ViewerAiSection({ personal }: { personal: PersonalAiConnection }) {
+  const described =
+    personal.uses === "personal"
+      ? describeConnection(personal.connection)
+      : null;
   return (
     <PageSection
-      description="Built-in Bots and the framework picked at setup run on models from this provider."
-      title="Connected"
+      description="Each person can connect their own AI. Bots use it when they work for them, ahead of the organization's."
+      title="Your AI"
     >
-      {available.isPending ? null : available.error ? (
-        <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load the provider. Try again in a moment.
-        </p>
-      ) : (
-        <ProviderRow listing={available.data} />
-      )}
+      <PageRows>
+        <Item render={<Link hash="your-ai" to="/settings" />} size="sm">
+          {described ? (
+            <ProviderTile
+              provider={providerById(personal.connection.provider)}
+            />
+          ) : (
+            <ItemMedia variant="icon">
+              {personal.uses === "organization" ? (
+                <IconBuilding />
+              ) : (
+                <IconSparkles />
+              )}
+            </ItemMedia>
+          )}
+          <ItemContent>
+            <ItemTitle>
+              {described
+                ? described.provider
+                : personal.uses === "organization"
+                  ? "Your organization's AI"
+                  : "Not connected"}
+            </ItemTitle>
+            <ItemDescription>
+              {described
+                ? `${described.summary} Only you use it. Change it in Settings.`
+                : personal.uses === "organization"
+                  ? "Bots use the organization's for you. Connect your own in Settings."
+                  : "Bots can't work for you yet. Connect your AI in Settings."}
+            </ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <IconChevronRight className="size-4 text-muted-foreground" />
+          </ItemActions>
+        </Item>
+      </PageRows>
     </PageSection>
   );
+}
+
+/** From an OpenBot older than the AI connection: what serves the models, by the model listing. */
+function CatalogueProviderRow() {
+  const available = useQuery(availableModelsQueryOptions());
+  if (available.isPending) return null;
+  if (available.error)
+    return (
+      <p className="mt-4 text-destructive text-sm" role="alert">
+        Couldn't load the provider. Try again in a moment.
+      </p>
+    );
+  return <ProviderRow listing={available.data} />;
 }
 
 function ProviderRow({ listing }: { listing: AvailableModels }) {
@@ -198,7 +343,7 @@ export function ModelChoiceSection() {
               </ItemTitle>
               <ItemDescription>
                 {open
-                  ? `${data.models.length} models, kept current from your provider.`
+                  ? `${data.models.length} ${data.models.length === 1 ? "model" : "models"}, kept current from your provider.`
                   : allowed === 0
                     ? `Your provider doesn't list any model you allowed, so people only get ${data.default}.`
                     : "People see them in the composer's model picker, with the default."}

@@ -59,6 +59,8 @@ export function YourAiSection() {
   return (
     <PageSection
       description="Bots use your own AI when they work for you. It's personal to you and never shared with your organization."
+      // Admin → Providers links here.
+      id="your-ai"
       title="Your AI"
     >
       <PageRows>
