@@ -206,6 +206,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- A Bot's step waits up to three minutes for its computer to start, up from 45 seconds, in a
+  conversation, a task and a routine alike. A computer that took a minute and a half to come up used
+  to answer the step "The computer is still starting", and a task's next step then read "Not done. A
+  step before it didn't work." The Computer panel keeps saying the computer is starting for as long
+  as the step waits.
 - The memory sweep asks Intelligence whether memory is available only when it has something to
   mirror, and waits longer after each failed answer (up to 30 minutes), so an organization whose
   entitlement never becomes ready is no longer asked every minute on every replica.
