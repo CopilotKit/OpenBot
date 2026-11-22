@@ -386,7 +386,9 @@ jobs:
   # next language the recognizer has, or says which language to add and where. The page's
   # language and its names for languages are the engine's own. And the sidebar's edge, dragged in a
   # window zoomed in, narrowing the sidebar, which never takes more than two-fifths of the window.
-  # In the image, as above: WebKit's
+  # And the terms on OpenBot Cloud: the gate holding a person at them from anywhere until they tick
+  # the box and agree, asking again when they change, and never shown where there are none, in the
+  # engine the Mac window draws with too. In the image, as above: WebKit's
   # system packages are about 94 MB, which took nine minutes from the mirror on a slow day.
   app-browser-webkit:
     name: app (real browser, WebKit)
@@ -410,7 +412,7 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
             "$PLAYWRIGHT_IMAGE" \
-            bun test app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx
+            bun test app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx
 
   # The desktop setup window's, for the same reason as the list above: the AI step's form holding
   # still while the install behind it comes and goes. It bundles the window from the desktop's own
