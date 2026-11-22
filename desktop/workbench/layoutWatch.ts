@@ -1,7 +1,6 @@
 import type { Box } from "./geometry";
 
-/** `main` marks the main heading: the first h1 or h2 of the page. */
-export type Snapshot = Map<string, { box: Box; label: string; main?: boolean }>;
+export type Snapshot = Map<string, { box: Box; label: string }>;
 export type Warning =
   | {
       kind: "moved";
@@ -149,17 +148,10 @@ export function visibleElements(root: Document) {
 export function snapshot(root: Document): Snapshot {
   const result: Snapshot = new Map();
   const seen = new Map<string, number>();
-  let mainFound = false;
-  for (const { element, key, label, box } of visibleElements(root)) {
+  for (const { key, label, box } of visibleElements(root)) {
     const count = (seen.get(key) ?? 0) + 1;
     seen.set(key, count);
-    const main = !mainFound && /^h[12]$/i.test(element.tagName);
-    if (main) mainFound = true;
-    result.set(count === 1 ? key : `${key}#${count}`, {
-      box,
-      label,
-      ...(main ? { main: true } : {}),
-    });
+    result.set(count === 1 ? key : `${key}#${count}`, { box, label });
   }
   return result;
 }
@@ -170,19 +162,15 @@ export const WHOLE_PAGE = "The whole page";
 /** Moves within this many pixels of each other are one move. */
 const SAME_MOVE_PX = 1;
 
-function mainHeading(snap: Snapshot): string | null {
-  for (const [key, entry] of snap) if (entry.main) return key;
-  return null;
-}
-
 export function compare(
   before: Snapshot,
   after: Snapshot,
   at: number,
   cause: string,
 ): Warning[] {
-  // A new main heading is a new screen: what was on the old one did not move, it went away.
-  if (mainHeading(before) !== mainHeading(after)) return [];
+  // A new screen (a new main heading) is not a reason to skip: an element that stays on the
+  // screen across the change, such as the background row or the step list, must not jump. What
+  // was only on the old screen has no key in the new one, so it is not compared.
   const moves: { label: string; dx: number; dy: number }[] = [];
   let present = 0;
   for (const [key, was] of before) {

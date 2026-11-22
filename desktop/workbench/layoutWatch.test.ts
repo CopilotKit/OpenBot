@@ -82,26 +82,67 @@ test("a group that is less than half of the page keeps one warning each", () => 
   ]);
 });
 
-test("a new main heading is a new screen: no moves", () => {
-  const before: Snapshot = new Map([
-    ["heading:Install", { box: box(0, 0), label: "h", main: true }],
-    ["a", { box: box(0, 50), label: "a" }],
+test("a new main heading still reports what stayed on the screen and moved", () => {
+  // The step changes from the license to the AI step. The old step's text goes away (no key in
+  // the new snapshot); the step list and the background row stay, and the row jumps 157px.
+  const proto = Element.prototype;
+  const real = proto.getBoundingClientRect;
+  // happy-dom has no layout: each element takes its y from data-y.
+  proto.getBoundingClientRect = function (this: Element) {
+    const y = Number(this.closest("[data-y]")?.getAttribute("data-y") ?? 0);
+    return { x: 0, y, width: 10, height: 10 } as DOMRect;
+  };
+  const screen = (heading: string, body: string, rowY: number) =>
+    mount(
+      `<main><h1 data-y="0">${heading}</h1>${body}` +
+        '<ol><li data-y="300">Account</li></ol>' +
+        `<span data-y="${rowY}">Installing OpenBot in the background</span></main>`,
+    );
+  try {
+    screen("Accept the license agreement", '<p data-y="40">Read it</p>', 400);
+    const before = snapshot(document);
+    screen("Connect your AI", '<p data-y="40">Pick a provider</p>', 557);
+    expect(compare(before, snapshot(document), 37, "clock")).toEqual([
+      {
+        kind: "moved",
+        at: 37,
+        label: 'span "Installing OpenBot in the background"',
+        dx: 0,
+        dy: 157,
+        cause: "clock",
+      },
+    ]);
+  } finally {
+    proto.getBoundingClientRect = real;
+  }
+});
+
+test("a new main heading with most of the page moved is one warning for the whole page", () => {
+  const before = snap({
+    "heading:Install": box(0, 0),
+    a: box(0, 50),
+    b: box(0, 70),
+    c: box(0, 90),
+  });
+  const after = snap({
+    "heading:Connect your AI": box(0, 0),
+    a: box(0, 200),
+    b: box(0, 220),
+    c: box(0, 240),
+  });
+  expect(compare(before, after, 1, "x")).toEqual([
+    { kind: "moved", at: 1, label: WHOLE_PAGE, dx: 0, dy: 150, cause: "x" },
   ]);
-  const after: Snapshot = new Map([
-    ["heading:Connect your AI", { box: box(0, 0), label: "h", main: true }],
-    ["a", { box: box(0, 200), label: "a" }],
-  ]);
-  expect(compare(before, after, 1, "x")).toEqual([]);
 });
 
 test("one element that moved 13px alone stays a warning", () => {
   const before: Snapshot = new Map([
-    ["heading:Install", { box: box(0, 0), label: "h", main: true }],
+    ["heading:Install", { box: box(0, 0), label: "h" }],
     ["step", { box: box(0, 50), label: "Step 2 of 4" }],
     ["c", { box: box(0, 90), label: "c" }],
   ]);
   const after: Snapshot = new Map([
-    ["heading:Install", { box: box(0, 0), label: "h", main: true }],
+    ["heading:Install", { box: box(0, 0), label: "h" }],
     ["step", { box: box(0, 63), label: "Step 2 of 4" }],
     ["c", { box: box(0, 90), label: "c" }],
   ]);
@@ -117,16 +158,19 @@ test("one element that moved 13px alone stays a warning", () => {
   ]);
 });
 
-test("snapshot marks the first h1 or h2 as the main heading", () => {
-  mount("<h3>Small</h3><h2>Main</h2><h1>Later</h1>");
+test("snapshot numbers a key that is on the page more than once", () => {
+  mount("<h2>Main</h2><button>Next</button><button>Next</button>");
   // happy-dom has no layout: give every element a box.
   const proto = Element.prototype;
   const real = proto.getBoundingClientRect;
   proto.getBoundingClientRect = () =>
     ({ x: 0, y: 0, width: 10, height: 10 }) as DOMRect;
   try {
-    const marked = [...snapshot(document)].filter(([, e]) => e.main);
-    expect(marked.map(([key]) => key)).toEqual(["heading:Main"]);
+    expect([...snapshot(document).keys()]).toEqual([
+      "heading:Main",
+      "button:Next",
+      "button:Next#2",
+    ]);
   } finally {
     proto.getBoundingClientRect = real;
   }
