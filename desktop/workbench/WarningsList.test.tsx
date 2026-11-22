@@ -244,8 +244,23 @@ test("mergeRunWarnings keeps the rows a seek back has not found again", () => {
   const late = clipped(9000, "Footer");
   const found = clipped(1000, "Title");
   // A seek back to 0:02 found only the early warning again: the late row stays.
-  expect(mergeRunWarnings([early, late], [found])).toEqual([found, late]);
-  expect(mergeRunWarnings([], [found])).toEqual([found]);
+  expect(mergeRunWarnings([early, late], [found], 2000)).toEqual([found, late]);
+  expect(mergeRunWarnings([], [found], 2000)).toEqual([found]);
+});
+
+test("mergeRunWarnings drops a kept row the clock went past without finding it again", () => {
+  const early = clipped(1000, "Title");
+  const late = clipped(9000, "Footer");
+  // After a fix and a reload, the run found nothing. Ahead of 0:09 the late row stays, muted.
+  expect(mergeRunWarnings([early, late], [], 0)).toEqual([early, late]);
+  expect(mergeRunWarnings([early, late], [], 5000)).toEqual([late]);
+  // At its own time it stays: the watch finds a warning at the clock's time, not before.
+  expect(mergeRunWarnings([late], [], 9000)).toEqual([late]);
+  // Past it, unfound: the warning is gone from the run, so the row goes.
+  expect(mergeRunWarnings([early, late], [], 9001)).toEqual([]);
+  // Found again past its time: one row, the found one.
+  const again = clipped(9000, "Footer");
+  expect(mergeRunWarnings([early, late], [again], 12000)).toEqual([again]);
 });
 
 test("after a seek back the list keeps its rows: the ones not reached show muted, in the same place", () => {
@@ -261,7 +276,7 @@ test("after a seek back the list keeps its rows: the ones not reached show muted
 
   const view = render(
     <WarningsList
-      warnings={mergeRunWarnings([early, late], [early])}
+      warnings={mergeRunWarnings([early, late], [early], 2000)}
       found={[early]}
       onSeek={() => {}}
     />,

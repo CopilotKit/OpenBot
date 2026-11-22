@@ -20,10 +20,12 @@ import {
   type StopDeps,
   sortLeases,
   stopAppServer,
+  stopEarlierAppServer,
   stopPlan,
   stopShared,
   takeLease,
   takeStartLock,
+  takeStartLockSync,
   withStartLock,
   workbenchPort,
   writePidFile,
@@ -382,6 +384,49 @@ describe("takeStartLock", () => {
   });
 });
 
+describe("takeStartLockSync", () => {
+  // The exit hook: a stopper that saw this process's lease holds the lock for its scan only. The
+  // hook waits for it, so it does not leave a server running with no lease.
+  test("takes the lock once its holder lets it go", async () => {
+    const dir = tempDir();
+    // A live process holds the lock for 300 ms, as a stopper does for its lease scan.
+    const holder = Bun.spawn(
+      [
+        process.execPath,
+        "-e",
+        `import { takeStartLock } from ${JSON.stringify(join(import.meta.dir, "server.ts"))};
+import { rmSync } from "node:fs";
+if (!takeStartLock(${JSON.stringify(dir)})) process.exit(2);
+console.log("held");
+await Bun.sleep(300);
+rmSync(${JSON.stringify(join(dir, "start.lock"))});
+await Bun.sleep(5_000);`,
+      ],
+      { stdout: "pipe" },
+    );
+    try {
+      const reader = holder.stdout.getReader();
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain(
+        "held",
+      );
+      expect(takeStartLock(dir)).toBe(false);
+      const from = Date.now();
+      expect(takeStartLockSync(dir, 3_000)).toBe(true);
+      expect(Date.now() - from).toBeLessThan(3_000);
+    } finally {
+      holder.kill("SIGKILL");
+    }
+  });
+
+  test("gives up after its wait while a live process holds the lock", () => {
+    const dir = tempDir();
+    expect(takeStartLock(dir, aliveSet(10, 20), 10)).toBe(true);
+    const from = Date.now();
+    expect(takeStartLockSync(dir, 100, aliveSet(10, 20), 20)).toBe(false);
+    expect(Date.now() - from).toBeGreaterThanOrEqual(100);
+  });
+});
+
 describe("spawnShared", () => {
   // A worker's command stops with a signal to its whole process group (Ctrl+C, or a timeout).
   // The shared server that this command started must keep running for the other lease holders.
@@ -415,6 +460,82 @@ await Bun.sleep(30_000);
       try {
         process.kill(sharedPid, "SIGKILL");
       } catch {}
+    }
+  });
+});
+
+describe("stopEarlierAppServer", () => {
+  const startOf = (pid: number) => (pid === 77 ? "Mon 10:00" : null);
+  const setup = (start = "Mon 10:00") => {
+    const path = join(tempDir(), "app-server.pid");
+    writeFileSync(path, `77\n${start}\n`);
+    return path;
+  };
+
+  // A crash a few seconds after a start: the earlier app server lives but does not answer yet.
+  // It is stopped and waited for, not forgotten while it still runs.
+  test("stops a live app server that does not answer yet, and waits until it exits", async () => {
+    const path = setup();
+    let running = true;
+    const signals: string[] = [];
+    await stopEarlierAppServer(path, {
+      alive: (pid) => pid === 77 && running,
+      startOf,
+      signal: (pid, signal) => {
+        signals.push(`${pid} ${signal}`);
+        setTimeout(() => {
+          running = false;
+        }, 120);
+      },
+      timeoutMs: 2_000,
+    });
+    expect(signals).toEqual(["77 SIGTERM"]);
+    expect(running).toBe(false);
+    expect(existsSync(path)).toBe(false);
+  });
+
+  test("kills one that does not end on SIGTERM", async () => {
+    const path = setup();
+    let running = true;
+    const signals: string[] = [];
+    await stopEarlierAppServer(path, {
+      alive: (pid) => pid === 77 && running,
+      startOf,
+      signal: (_pid, signal) => {
+        signals.push(signal);
+        if (signal === "SIGKILL") running = false;
+      },
+      timeoutMs: 100,
+    });
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(existsSync(path)).toBe(false);
+  });
+
+  test("keeps the record of one that outlives SIGKILL, so the next run tries again", async () => {
+    const path = setup();
+    await stopEarlierAppServer(path, {
+      alive: (pid) => pid === 77,
+      startOf,
+      signal: () => {},
+      timeoutMs: 50,
+    });
+    expect(existsSync(path)).toBe(true);
+  });
+
+  test("never signals a dead pid or a pid now used by another process; only removes the file", async () => {
+    for (const [path, alive] of [
+      [setup(), () => false],
+      [setup("Sun 09:00"), (pid: number) => pid === 77],
+    ] as const) {
+      const signals: string[] = [];
+      await stopEarlierAppServer(path, {
+        alive,
+        startOf,
+        signal: (_pid, signal) => signals.push(signal),
+        timeoutMs: 50,
+      });
+      expect(signals).toEqual([]);
+      expect(existsSync(path)).toBe(false);
     }
   });
 });

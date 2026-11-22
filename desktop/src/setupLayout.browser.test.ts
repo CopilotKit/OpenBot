@@ -195,6 +195,32 @@ beforeAll(async () => {
   // a hook that runs out of time skips the file's tests while it still runs.
 }, 120_000);
 
+/**
+ * The window come to rest: its fonts loaded, every entrance animation ended (the infinite ones,
+ * spinners and the download bar, left running), and two frames drawn after.
+ *
+ * A fixed wait is not enough. The card's `settle` entrance runs 420 ms on an ease that is still a
+ * ten-thousandth of a pixel from home at 400 ms, and a box measured on that offset came back
+ * 22.000015 px tall: a one-line name read as two lines about one run in three.
+ */
+async function settled(page: Page) {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) =>
+          Number.isFinite(
+            Number(animation.effect?.getComputedTiming().endTime),
+          ),
+        )
+        .map((animation) => animation.finished.catch(() => undefined)),
+    );
+    for (let frame = 0; frame < 2; frame++)
+      await new Promise((drawn) => requestAnimationFrame(drawn));
+  });
+}
+
 /** Where the form's first field is, and how tall the page is: what the window is sized to. */
 async function measure(page: Page) {
   const field = await page
@@ -742,12 +768,9 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         await page
           .getByRole("button", { name: "Sign in to OpenBot Cloud" })
           .waitFor();
-        // Measured in the window's own face: a line set in the fallback, before Inter has loaded,
-        // can wrap where Inter's doesn't.
-        await page.evaluate(async () => {
-          await document.fonts.ready;
-        });
-        await page.waitForTimeout(400);
+        // Measured in the window's own face, at rest: a line set in the fallback, before Inter has
+        // loaded, can wrap where Inter's doesn't, and the card's entrance moves every box.
+        await settled(page);
         const shape = await page.evaluate(() => {
           const card = document.querySelector("main > .sheet") as HTMLElement;
           const rows = [

@@ -42,6 +42,9 @@ type Page = {
   getByLabel(text: string, options?: { exact?: boolean }): Locator;
   locator(selector: string): Locator & { first(): Locator };
   mouse: { move(x: number, y: number): Promise<void> };
+  screenshot(options: {
+    clip: { x: number; y: number; width: number; height: number };
+  }): Promise<Uint8Array>;
   close(): Promise<void>;
 };
 type Browser = {
@@ -105,6 +108,42 @@ function markerInWindow(page: Page) {
   });
 }
 
+/** The share of pixels that differ between two PNG shots of the same size, decoded in the page. */
+function changedShare(page: Page, a: Uint8Array, b: Uint8Array) {
+  return page.evaluate(
+    async ([one, two]) => {
+      const pixels = async (base64: string) => {
+        const blob = await (
+          await fetch(`data:image/png;base64,${base64}`)
+        ).blob();
+        const bitmap = await createImageBitmap(blob);
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("No 2d context.");
+        context.drawImage(bitmap, 0, 0);
+        return context.getImageData(0, 0, bitmap.width, bitmap.height);
+      };
+      const [x, y] = await Promise.all([pixels(one), pixels(two)]);
+      if (x.width !== y.width || x.height !== y.height) return 1;
+      let changed = 0;
+      for (let i = 0; i < x.data.length; i += 4) {
+        // A pixel counts as changed past a small difference (anti-aliasing, the caret).
+        if (
+          Math.abs((x.data[i] ?? 0) - (y.data[i] ?? 0)) > 24 ||
+          Math.abs((x.data[i + 1] ?? 0) - (y.data[i + 1] ?? 0)) > 24 ||
+          Math.abs((x.data[i + 2] ?? 0) - (y.data[i + 2] ?? 0)) > 24
+        )
+          changed++;
+      }
+      return changed / (x.width * x.height);
+    },
+    [Buffer.from(a).toString("base64"), Buffer.from(b).toString("base64")] as [
+      string,
+      string,
+    ],
+  );
+}
+
 describe.skipIf(!asked)("the workbench's motion", () => {
   test("the paused Next: marker stays on its element after Fit and a splitter drag", async () => {
     if (!browser) throw new Error("No browser.");
@@ -152,6 +191,130 @@ describe.skipIf(!asked)("the workbench's motion", () => {
   }, 60_000);
 
   for (const reducedMotion of ["no-preference", "reduce"] as const) {
+    test(`the Install marker, or its ghost when the screen changed at once, shows for at least 400 ms (${reducedMotion})`, async () => {
+      if (!browser) throw new Error("No browser.");
+      const page = await browser.newPage({
+        viewport: { width: 1600, height: 1000 },
+        reducedMotion,
+      });
+      try {
+        await openScene(page, "install-mac");
+        await page.getByLabel("Pause at each action").check();
+        await page.getByRole("button", { name: "Play" }).click();
+        await page.waitForFunction(() =>
+          /Install/.test(
+            document.querySelector(".wb-action-next .wb-action-label")
+              ?.textContent ?? "",
+          ),
+        );
+        // Each animation frame from the click on: is the Install marker (or its ghost) drawn.
+        await page.evaluate(() => {
+          const seen: { t: number; shown: boolean; ghost: boolean }[] = [];
+          (window as unknown as { __seen: typeof seen }).__seen = seen;
+          const tick = () => {
+            const mark = [
+              ...document.querySelectorAll(".wb-action:not(.wb-action-next)"),
+            ].find((m) => /Install/.test(m.textContent ?? ""));
+            seen.push({
+              t: performance.now(),
+              shown:
+                !!mark && Number.parseFloat(getComputedStyle(mark).opacity) > 0,
+              ghost: !!mark?.classList.contains("wb-action-ghost"),
+            });
+            if (seen.length < 600) requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        });
+        await page.getByRole("button", { name: "Play" }).click();
+        await page.waitForTimeout(1600);
+        const seen = await page.evaluate(
+          () =>
+            (
+              window as unknown as {
+                __seen: { t: number; shown: boolean; ghost: boolean }[];
+              }
+            ).__seen,
+        );
+        const shown = seen.filter((s) => s.shown);
+        expect(shown.length).toBeGreaterThan(0);
+        const from = shown[0]?.t ?? 0;
+        const to = shown[shown.length - 1]?.t ?? 0;
+        expect(to - from).toBeGreaterThanOrEqual(400);
+        // Shown without a gap, and gone by MARKER_MS.
+        const first = seen.findIndex((s) => s.shown);
+        const last =
+          seen.length - 1 - [...seen].reverse().findIndex((s) => s.shown);
+        expect(seen.slice(first, last + 1).every((s) => s.shown)).toBe(true);
+        expect(to - from).toBeLessThanOrEqual(1300);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+    test(`a warning hover that seeks back shows the window as it was last painted until the target state (${reducedMotion})`, async () => {
+      if (!browser) throw new Error("No browser.");
+      const page = await browser.newPage({
+        viewport: { width: 1600, height: 1000 },
+        reducedMotion,
+      });
+      try {
+        await openScene(page, "install-mac");
+        // At the run's end: a dark window under the "OpenBot opens here" card, with its title bar.
+        await page.evaluate(() => window.__workbenchPage?.seek(240_000));
+        await page.waitForSelector(".wb-warning-list button");
+        await page.waitForTimeout(300);
+        // The part of the window on screen: the stage clips it, and the warnings panel under the
+        // stage (where the hovered row changes) is not the window.
+        const clip = await page.evaluate(() => {
+          const element = document.querySelector("[data-workbench-window]");
+          if (!element) return null;
+          let r = element.getBoundingClientRect();
+          for (let up = element.parentElement; up; up = up.parentElement) {
+            if (getComputedStyle(up).overflow === "visible") continue;
+            const s = up.getBoundingClientRect();
+            const x = Math.max(r.left, s.left);
+            const y = Math.max(r.top, s.top);
+            r = new DOMRect(
+              x,
+              y,
+              Math.min(r.right, s.right) - x,
+              Math.min(r.bottom, s.bottom) - y,
+            );
+          }
+          return {
+            x: Math.ceil(r.x),
+            y: Math.ceil(r.y),
+            width: Math.floor(r.width),
+            height: Math.floor(r.height),
+          };
+        });
+        if (!clip) throw new Error("No window.");
+        const before = await page.screenshot({ clip });
+        const state = () =>
+          page.evaluate(() => ({
+            ready: window.__workbenchPage?.ready === true,
+            highlight:
+              document.querySelector("[data-workbench-highlight]") !== null,
+          }));
+        await page.locator(".wb-warning-list button").first().hover();
+        const shares: number[] = [];
+        const deadline = Date.now() + 15_000;
+        while (Date.now() < deadline) {
+          const start = await state();
+          if (start.highlight) break;
+          const shot = await page.screenshot({ clip });
+          const end = await state();
+          // Only a shot taken wholly while the window was not ready: the target frame is not there yet.
+          if (!start.ready && !end.ready)
+            shares.push(await changedShare(page, before, shot));
+        }
+        expect(shares.length).toBeGreaterThan(0);
+        for (const share of shares) expect(share).toBeLessThan(0.02);
+      } finally {
+        await page.close();
+      }
+    }, 120_000);
+
     test(`a warning hover that seeks back keeps the window covered until the target state (${reducedMotion})`, async () => {
       if (!browser) throw new Error("No browser.");
       const page = await browser.newPage({
@@ -237,12 +400,14 @@ describe.skipIf(!asked)("the workbench's motion", () => {
           if (s.seeking) expect(s.still || s.ready).toBe(true);
         }
         expect(samples[first]?.still).toBe(false);
-        // The list did not shrink under the pointer.
+        // The list did not shrink under the pointer. It can grow: the replay can find a warning the
+        // first walk did not, since the layout watch checks on animation frames, and a loaded
+        // machine draws other frames.
         expect(
           await page.evaluate(
             () => document.querySelectorAll(".wb-warning-list li").length,
           ),
-        ).toBe(rowCount);
+        ).toBeGreaterThanOrEqual(rowCount);
       } finally {
         await page.close();
       }

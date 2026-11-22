@@ -114,7 +114,7 @@ A **run** is a scene that plays over time. A scene with a run shows these contro
 
 A run stops at its end, at every speed. A scene without a run says "No run. The scene plays on its own." and shows the time.
 
-When a run clicks or types during a play or a step, a marker shows the element over the window for a short time (at most 1.2 s). The marker follows its element, and goes at once when the element leaves the screen, is hidden or has no size, at every speed. The paused "Next:" marker is measured again when the zoom, the window or the stage changes. A seek shows no markers, so a CLI shot never shows them.
+When a run clicks or types during a play or a step, a marker shows the element over the window for a short time (at most 1.2 s). The marker follows its element at every speed. When the element leaves the screen, is hidden or has no size, the marker stays at the element's last place for 0.5 s as a ghost: the same label, the outline dashed, and fading out. So every click and type step shows for at least about 0.5 s, also when the click changes the screen at once. With reduced motion, the ghost does not fade. A marker never shows as a ghost while its element is on the screen: it follows the element. The paused "Next:" marker is measured again when the zoom, the window or the stage changes. A seek shows no markers, so a CLI shot never shows them.
 
 ### Handover and handback
 
@@ -345,7 +345,7 @@ Under the window, the workbench lists layout warnings as the clock moves. The li
 
 The workbench checks after each native call and event. In an app scene, it also checks after each request, stream event and socket message. Elements that are hidden from view, such as labels for screen readers only, do not get warnings.
 
-Hold the pointer on a warning for 250 ms to jump to its time. The row says "Jumping…" while the window gets there, and the heading says where it goes, for example "Seeking to 0:44…". The list keeps its rows during the jump, so the row under the pointer stays. When the jump goes back in time, the window starts again under a still of what it showed, so the replay does not show; the new state shows in one step. After a seek back, the rows that the replay has not reached yet stay in the list, muted. Then the workbench marks the warning over the window:
+Hold the pointer on a warning for 250 ms to jump to its time. The row says "Jumping…" while the window gets there, and the heading says where it goes, for example "Seeking to 0:44…". The list keeps its rows during the jump, so the row under the pointer stays. When the jump goes back in time, the window starts again under a still of what it showed, so the replay does not show; the new state shows in one step. The still looks like the window: the same theme, under the title bar, and with the cards over the window ("OpenBot opens here") as they were. After a seek back, the rows that the replay has not reached yet stay in the list, muted. A muted row goes when the run passes its time without finding it again, for example after you fixed it and the frame loaded again. Then the workbench marks the warning over the window:
 
 - For **moved**: a dashed box where the element was, a solid box where it is, and an arrow between them. A label says how far it moved, for example "moved 157 px down".
 - For **cut off**: a box around the element, with a shaded strip for the hidden part. A label says "cut off by N px".
@@ -510,7 +510,7 @@ OPENBOT_APP_BROWSER=1 bun test workbench/motion.browser.test.ts
 - `appDeterminism.browser.test.ts` checks that an app frame is the same after a seek back and after a reload.
 - `appShot.browser.test.ts` runs the CLI on an app scene and on an unknown scene.
 - `critique.browser.test.ts` runs `workbench:critique` and checks the folder it writes: `frame.png`, `frame.json` and `prompt.md`.
-- `motion.browser.test.ts` checks that the paused "Next:" marker stays on its element after Fit and a splitter drag, and that a warning hover that seeks back keeps a still of the window over the replay.
+- `motion.browser.test.ts` checks that the paused "Next:" marker stays on its element after Fit and a splitter drag, that the Install marker (or its ghost) shows for at least 400 ms after the click, and that a warning hover that seeks back keeps a still of the window over the replay that looks like the window did (less than 2% of its pixels differ).
 
 You can also run all nine files in one `bun test` command, as CI does. Each file gets the workbench server in its `beforeAll` hook and gives it back with `stop()` in its `afterAll` hook. The hooks have their own time limits, because bun gives a hook only 5 seconds. `bun test` does not send the process `exit` event, so a file that does not call `stop()` leaves the server running.
 
@@ -528,3 +528,5 @@ The CI job "app (real browser, desktop setup window)" runs the workbench checks.
 2. It runs the full build check of the app with `OPENBOT_APP_BUILD_GUARD=1`, on the runner. It runs before the steps in the image: those run as root, and after them the build cannot write its config into `app/node_modules/.vite-temp`.
 3. It runs the nine browser tests in the Playwright image.
 4. It runs `bun run workbench:check` in the Playwright image.
+
+Both image steps run with `docker run --init`. Then tini is PID 1 and reaps the app servers whose workbench server exited. Without it, such an app server stays a zombie that looks alive, and each stop waits out its time limits.

@@ -19,11 +19,10 @@ import {
   APP_PID_FILE,
   appPort,
   busyPortMessage,
-  isAlive,
   leaseDir,
-  livePid,
   portArg,
   readPidFile,
+  stopEarlierAppServer,
   WORKBENCH_PORT,
   writePidFile,
 } from "./workbench/server";
@@ -174,22 +173,6 @@ function killGroup(pid: number): void {
   try {
     process.kill(-pid, "SIGTERM");
   } catch {}
-}
-
-// An app server that an earlier workbench run started and did not stop (it was killed with
-// SIGKILL, for example) is stopped, so a run never reuses a server with old settings. A pid file
-// whose process is gone, or whose pid now belongs to another process, is only removed.
-async function stopEarlierAppServer(pidPath: string): Promise<void> {
-  const record = readPidFile(pidPath);
-  if (record === null) return;
-  const pid = livePid(record, isAlive);
-  if (pid !== null && (await appAnswers())) {
-    killGroup(pid);
-    const deadline = Date.now() + 5_000;
-    while (Date.now() < deadline && (await appAnswers()))
-      await sleep(APP_POLL_MS);
-  }
-  rmSync(pidPath, { force: true });
 }
 
 // Starts the app server (`bun run workbench` in app/) when it does not answer, so

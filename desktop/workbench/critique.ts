@@ -262,7 +262,10 @@ async function main(): Promise<void> {
     }
   } finally {
     await browser?.close();
-    if (server.started) await server.stop();
+    // Also a reused server: stop() gives back this process's lease under the start lock, and
+    // stops the server only when no other live lease remains (never one started by hand). The
+    // exit hook alone can leave a reused server running with no lease.
+    await server.stop();
   }
 }
 

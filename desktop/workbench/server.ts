@@ -333,6 +333,24 @@ export function takeStartLock(
   return false;
 }
 
+/** How long the exit hook waits for the start lock, in milliseconds. */
+const EXIT_LOCK_WAIT_MS = 1_000;
+
+/** takeStartLock, tried again for up to `waitMs`: for the exit hook, which cannot await. */
+export function takeStartLockSync(
+  dir: string,
+  waitMs: number = EXIT_LOCK_WAIT_MS,
+  alive: IsAlive = isAlive,
+  pid: number = process.pid,
+): boolean {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    if (takeStartLock(dir, alive, pid)) return true;
+    if (Date.now() >= deadline) return false;
+    Bun.sleepSync(25);
+  }
+}
+
 function dropStartLock(dir: string): void {
   rmSync(join(dir, "start.lock"), { force: true });
 }
@@ -492,6 +510,62 @@ export async function stopAppServer(
   if (readPidFile(path)?.pid === app.pid) rmSync(path, { force: true });
 }
 
+/** Signals a process group. */
+export type SignalGroup = (pid: number, signal: "SIGTERM" | "SIGKILL") => void;
+
+const signalGroup: SignalGroup = (pid, signal) => {
+  try {
+    process.kill(-pid, signal);
+  } catch {}
+};
+
+/**
+ * Before a workbench server starts its app server: stops the app server that an earlier run
+ * recorded in `pidPath` and did not stop (it was killed with SIGKILL, for example), so a run never
+ * reuses one with old settings and two never fight for the port. A live, verified pid is stopped
+ * also when it does not answer yet: it may still be starting, or hung. The file goes only after
+ * that process is gone, or when its pid is dead or now another process's.
+ */
+export async function stopEarlierAppServer(
+  pidPath: string,
+  {
+    alive = isAlive,
+    startOf = processStart,
+    signal = signalGroup,
+    timeoutMs = STOP_TIMEOUT_MS,
+  }: {
+    alive?: IsAlive;
+    startOf?: StartOf;
+    signal?: SignalGroup;
+    timeoutMs?: number;
+  } = {},
+): Promise<void> {
+  const record = readPidFile(pidPath);
+  if (record === null) return;
+  const ours = () => livePid(record, alive, startOf) !== null;
+  const gone = async () => {
+    const deadline = Date.now() + timeoutMs;
+    while (ours() && Date.now() < deadline) await sleep(50);
+    return !ours();
+  };
+  if (ours()) {
+    // Its own process group: the app server's children stop too.
+    signal(record.pid, "SIGTERM");
+    if (!(await gone())) {
+      signal(record.pid, "SIGKILL");
+      // Still there after SIGKILL: keep the record, so the next run tries again.
+      if (!(await gone())) return;
+    }
+  }
+  if (readPidFile(pidPath)?.pid === record.pid)
+    rmSync(pidPath, { force: true });
+}
+
+/**
+ * Waits for a stopped server to exit: SIGKILL after STOP_TIMEOUT_MS, and then at most that long
+ * again. A process nobody reaps (a zombie, under a PID 1 that is not an init) still answers
+ * `kill(pid, 0)`, so a wait with no limit could hang the stop.
+ */
 async function waitForExit(pid: number): Promise<void> {
   const deadline = Date.now() + STOP_TIMEOUT_MS;
   while (isAlive(pid) && Date.now() < deadline) await sleep(50);
@@ -499,7 +573,8 @@ async function waitForExit(pid: number): Promise<void> {
     try {
       process.kill(pid, "SIGKILL");
     } catch {}
-    while (isAlive(pid)) await sleep(50);
+    const killDeadline = Date.now() + STOP_TIMEOUT_MS;
+    while (isAlive(pid) && Date.now() < killDeadline) await sleep(50);
   }
 }
 
@@ -535,14 +610,15 @@ export async function ensureServer(): Promise<WorkbenchServer> {
     released = true;
     process.off("exit", onExit);
   };
-  // Sync, so it runs in the "exit" event: a caller that never calls stop() (or exits early) still
-  // gives back its lease. `bun test` does not emit "exit": a test file must call stop(). Without
-  // the start lock (another process starts or stops right now) it only removes its lease: that
-  // process holds a lease of its own, or is stopping the server already.
+  // Sync, so it runs in the "exit" event: a caller that never calls stop() (or exits early, by
+  // `process.exit`) still gives back its lease. `bun test` does not emit "exit": a test file must
+  // call stop(). It waits a short time for the start lock: a stopper that saw this lease holds it
+  // only for its scan. Still without the lock, it only removes its lease: the holder is starting
+  // (with a lease of its own) or stopping the server already.
   const onExit = () => {
     if (released) return;
     giveBack();
-    if (!takeStartLock(dir)) {
+    if (!takeStartLockSync(dir)) {
       rmSync(join(dir, lease), { force: true });
       return;
     }

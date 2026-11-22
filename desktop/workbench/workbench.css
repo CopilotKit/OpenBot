@@ -955,12 +955,13 @@ kbd {
   vertical-align: top;
 }
 
-/* The still of the window while a warning hover seeks back: the run replays under it. */
+/*
+ * The still of the window while a warning hover seeks back: the run replays under it. Inside the
+ * window's content, after the iframe and before the title bar, so it is drawn under the bar.
+ */
 .wb-still {
   position: absolute;
-  z-index: 3;
   border: 0;
-  transform-origin: 0 0;
   pointer-events: none;
   background: transparent;
 }
@@ -1016,6 +1017,34 @@ kbd {
   .wb-action-ring {
     animation: none;
     opacity: 1;
+  }
+}
+
+/*
+ * A marker whose element left: the same outline, dashed, and the same label, at the element's
+ * last place, fading out over GHOST_MS (ActionMarkers.tsx). With reduced motion it shows still for
+ * that time, then goes.
+ */
+.wb-action-ghost {
+  animation: wb-action-ghost 500ms ease-out forwards;
+}
+
+.wb-action-ghost .wb-action-box {
+  border-style: dashed;
+}
+
+@keyframes wb-action-ghost {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-action-ghost {
+    animation: none;
   }
 }
 

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { Box } from "./geometry";
 import type { Warning } from "./layoutWatch";
 
@@ -264,13 +265,11 @@ export function frameOrigin(
 /** A still of the window: what it showed last, kept over it while a warning hover seeks back. */
 export type WindowStillShot = {
   html: string;
-  /** Where the window's frame was, in the wrapper's coordinates. */
-  x: number;
-  y: number;
-  /** The window's size in its own pixels, and the wrapper pixels one of them takes. */
+  /** The window's size in its own pixels. */
   width: number;
   height: number;
-  scale: number;
+  /** The frame's `color-scheme`, as the window's own iframe has it. */
+  theme: "light" | "dark";
   scrollX: number;
   scrollY: number;
 };
@@ -278,8 +277,15 @@ export type WindowStillShot = {
 /**
  * The window's document as HTML that shows the same picture with no script: its styles and its
  * content now, with the values typed into fields, and a base address so its files still load.
+ *
+ * With `theme`, the window's dark media rules are written for that theme. The workbench forces
+ * the window's theme by rewriting the rules' media at run time (frameTheme.ts), and a copied
+ * `<style>` has the source's `prefers-color-scheme` media again: a dark window's still was drawn
+ * light. The rules are not written out from the CSSOM: Chrome writes a shorthand that uses var()
+ * and a longhand after it as empty values (`border-top-style: ;`), so the spinner's ring and the
+ * step marks were lost.
  */
-export function stillHtml(doc: Document): string {
+export function stillHtml(doc: Document, theme?: "light" | "dark"): string {
   const clone = doc.documentElement.cloneNode(true) as HTMLElement;
   // Typed values live in the fields' properties, which HTML does not keep: copy them over.
   const from = doc.documentElement.querySelectorAll("input, textarea, select");
@@ -302,6 +308,20 @@ export function stillHtml(doc: Document): string {
       });
     }
   });
+  // The forced theme, as frameTheme.ts forces it on the live sheets: a dark media rule's media
+  // becomes `all` in a dark window and `not all` in a light one.
+  if (theme) {
+    const media = theme === "dark" ? "all" : "not all";
+    for (const style of clone.querySelectorAll("style")) {
+      style.textContent = (style.textContent ?? "").replace(
+        /@media([^{;]*)\{/g,
+        (rule, prelude: string) =>
+          prelude.replace(/\s+/g, " ").includes("prefers-color-scheme: dark")
+            ? `@media ${media} {`
+            : rule,
+      );
+    }
+  }
   for (const script of clone.querySelectorAll("script")) script.remove();
   const head = clone.querySelector("head");
   // Style sheets made in script are not in the HTML: write their rules out.
@@ -316,6 +336,13 @@ export function stillHtml(doc: Document): string {
     }
   } catch {}
   if (head) {
+    // A new document plays its animations from the start, and the window's entrance (the card
+    // fading in) showed again. Every animation is put past its end: an entrance shows as it
+    // ended, as the window was painted, and a spinner keeps turning.
+    const ended = doc.createElement("style");
+    ended.textContent =
+      "*, *::before, *::after { animation-delay: -3600s !important; }";
+    head.append(ended);
     const base = doc.createElement("base");
     base.href = doc.baseURI;
     head.prepend(base);
@@ -324,8 +351,10 @@ export function stillHtml(doc: Document): string {
 }
 
 /**
- * The still over the window. It runs no script (sandbox), takes no pointer, and is the size and
- * the zoom of the window it covers. `onReady` runs when it shows.
+ * The still over the window, inside the window frame: under its title bar, in its zoom and its
+ * rounded corners, so it looks as the window did. It runs no script (sandbox) and takes no
+ * pointer. It stays hidden until its document and fonts loaded, so it never shows half drawn;
+ * `onReady` runs two frames after it shows.
  */
 export function WindowStill({
   still,
@@ -334,6 +363,16 @@ export function WindowStill({
   still: WindowStillShot;
   onReady(): void;
 }) {
+  const [shown, setShown] = useState(false);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+  useEffect(() => {
+    if (!shown) return;
+    let handle = requestAnimationFrame(() => {
+      handle = requestAnimationFrame(() => onReadyRef.current());
+    });
+    return () => cancelAnimationFrame(handle);
+  }, [shown]);
   return (
     <iframe
       className="wb-still"
@@ -344,18 +383,21 @@ export function WindowStill({
       sandbox="allow-same-origin"
       srcDoc={still.html}
       style={{
-        left: still.x,
-        top: still.y,
+        left: 0,
+        top: 0,
         width: still.width,
         height: still.height,
-        transform: `scale(${still.scale})`,
+        colorScheme: still.theme,
+        visibility: shown ? "visible" : "hidden",
       }}
       onLoad={(event) => {
-        event.currentTarget.contentWindow?.scrollTo(
-          still.scrollX,
-          still.scrollY,
+        const win = event.currentTarget.contentWindow;
+        win?.scrollTo(still.scrollX, still.scrollY);
+        const fonts = win?.document.fonts?.ready ?? Promise.resolve();
+        void fonts.then(
+          () => setShown(true),
+          () => setShown(true),
         );
-        onReady();
       }}
     />
   );

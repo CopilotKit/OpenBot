@@ -666,8 +666,19 @@ export function WorkbenchLoaded({
    * not show. It belongs to the jump that made it, or to a newer jump that took it over.
    */
   const [still, setStill] = useState<
-    (WindowStillShot & { scene: string }) | null
+    | (WindowStillShot & {
+        scene: string;
+        /** The handover and handback cards as they were: they stay while the still shows. */
+        handover: boolean;
+        handback: string | null;
+      })
+    | null
   >(null);
+  /** The cards over the window now, for a still to keep. */
+  const cardsRef = useRef({
+    handover: false,
+    handback: null as string | null,
+  });
   const stillOwnerRef = useRef(0);
   const stillShownRef = useRef<(() => void) | null>(null);
   const {
@@ -1000,15 +1011,11 @@ export function WorkbenchLoaded({
    * wait, when it does not load). The caller removes it.
    */
   const coverWithStill = useCallback((live: Live): Promise<void> => {
-    const wrap = wrapRef.current;
-    const iframe = frameRef.current;
-    if (!wrap || !iframe) return Promise.resolve();
-    const outer = wrap.getBoundingClientRect();
-    const rect = iframe.getBoundingClientRect();
-    const { width, height } = stateRef.current.window;
+    if (!frameRef.current) return Promise.resolve();
+    const { width, height, theme } = stateRef.current.window;
     let html: string;
     try {
-      html = stillHtml(live.doc);
+      html = stillHtml(live.doc, theme);
     } catch {
       return Promise.resolve();
     }
@@ -1022,12 +1029,11 @@ export function WorkbenchLoaded({
       stillShownRef.current = done;
       setStill({
         scene: stateRef.current.scene,
+        ...cardsRef.current,
         html,
-        x: rect.left - outer.left,
-        y: rect.top - outer.top,
         width,
         height,
-        scale: width > 0 && rect.width > 0 ? rect.width / width : 1,
+        theme,
         scrollX: live.win.scrollX,
         scrollY: live.win.scrollY,
       });
@@ -1126,15 +1132,20 @@ export function WorkbenchLoaded({
     showWarning(warning, true);
   };
 
-  // While markers show, each follows its element on every animation frame, or goes at once when
-  // the element left the screen: a marker never points at a place where its element is not.
+  // While markers show, each follows its element on every animation frame. When the element left
+  // the screen, the marker turns into a ghost at its last place for GHOST_MS and goes: a marker
+  // never points at a place where its element is now, and every action shows long enough to see.
   const hasMarks = marks.length > 0;
   useEffect(() => {
     if (!hasMarks) return;
     let handle = 0;
     const tick = () => {
       setMarks((all) => {
-        const next = followMarks(all, (target) => boxOf(target));
+        const next = followMarks(
+          all,
+          (target) => boxOf(target),
+          performance.now(),
+        );
         return next === all ? all : [...next];
       });
       handle = requestAnimationFrame(tick);
@@ -1488,9 +1499,21 @@ export function WorkbenchLoaded({
     });
   };
 
+  /*
+   * The cards over the window. While a still covers the window, the cards it had stay as they
+   * were: the replay under it starts again before them, and the eye must see no change.
+   */
+  const cover = still && still.scene === state.scene ? still : null;
+  const showHandover = cover ? cover.handover : handedOver && !overlayClosed;
+  const shownHandback = cover
+    ? cover.handback
+    : appScene && handedBack !== null && !handbackClosed
+      ? handedBack
+      : null;
+  cardsRef.current = { handover: showHandover, handback: shownHandback };
   /** The desktop scene the handback card opens, when the workbench has it. */
   const handbackTarget =
-    handedBack === null ? null : desktopSceneFor(handedBack);
+    shownHandback === null ? null : desktopSceneFor(shownHandback);
   const handbackScene =
     handbackTarget !== null && scenes.some((s) => s.id === handbackTarget)
       ? handbackTarget
@@ -1565,7 +1588,8 @@ export function WorkbenchLoaded({
    * The list keeps every row of the run: after a seek back, the rows that the replay has not
    * reached show muted, not removed, so the list does not shrink under the pointer. While a hover jumps to a
    * warning, it keeps the rows it had, so the row under the pointer stays. A new scene, window,
-   * answers or settings is a new run, and starts the rows again.
+   * answers or settings is a new run, and starts the rows again. A kept row the clock passed
+   * without the run finding it again (fixed, and the frame reloaded) goes.
    */
   const runKey = JSON.stringify([
     state.scene,
@@ -1584,6 +1608,7 @@ export function WorkbenchLoaded({
     shownWarningsRef.current.warnings = mergeRunWarnings(
       shownWarningsRef.current.warnings,
       warnings,
+      now,
     );
   /** The rows the run found up to now; frozen with the rows while a hover jumps. */
   const foundWarningsRef = useRef(warnings);
@@ -1698,6 +1723,14 @@ export function WorkbenchLoaded({
                     }
                   : null
               }
+              cover={
+                cover && (
+                  <WindowStill
+                    still={cover}
+                    onReady={() => stillShownRef.current?.()}
+                  />
+                )
+              }
               onFrame={(iframe) => {
                 frameRef.current = iframe;
                 setFrameEl(iframe);
@@ -1705,12 +1738,6 @@ export function WorkbenchLoaded({
                 else void attach(iframe);
               }}
             />
-            {still && still.scene === state.scene && (
-              <WindowStill
-                still={still}
-                onReady={() => stillShownRef.current?.()}
-              />
-            )}
             <ActionMarkers marks={marks} next={nextAction} />
             {highlight && !highlight.jumping && origin && (
               <WarningHighlight
@@ -1723,7 +1750,7 @@ export function WorkbenchLoaded({
               />
             )}
           </div>
-          {handedOver && !overlayClosed && (
+          {showHandover && (
             // A sibling of the window, so a shot of the window does not show it.
             <section
               className="wb-handover"
@@ -1751,7 +1778,7 @@ export function WorkbenchLoaded({
               </div>
             </section>
           )}
-          {appScene && handedBack !== null && !handbackClosed && (
+          {shownHandback !== null && (
             // A sibling of the window, as the handover card, so a shot of the window does not show it.
             <section
               className="wb-handover"
@@ -1763,8 +1790,8 @@ export function WorkbenchLoaded({
                 </h2>
                 <p>
                   The app asked OpenBot Desktop to{" "}
-                  {HANDBACK_WORDS[handedBack] ?? handedBack}. The real window
-                  now shows the setup window.
+                  {HANDBACK_WORDS[shownHandback] ?? shownHandback}. The real
+                  window now shows the setup window.
                 </p>
                 <div className="wb-handover-actions" style={HANDOVER_ACTIONS}>
                   {handbackScene !== null && (

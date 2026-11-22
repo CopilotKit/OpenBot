@@ -3,6 +3,13 @@ import type { Box } from "./geometry";
 /** How long a marker for an action stays at most, in real milliseconds. */
 export const MARKER_MS = 1200;
 
+/**
+ * How long a marker stays as a ghost after its element left, in real milliseconds. A click often
+ * changes the screen at once, so without it the marker showed for 8 to 43 ms and its cause was
+ * almost never seen.
+ */
+export const GHOST_MS = 500;
+
 export type ActionMark = {
   id: number;
   label: string;
@@ -10,6 +17,11 @@ export type ActionMark = {
   box: Box | null;
   /** The element the action acted on, measured again while the marker shows. */
   target?: Element | null;
+  /**
+   * When its element left (real ms, performance.now()): the marker is then a ghost, dashed and
+   * fading, at the element's last box. Null or missing while it follows its element.
+   */
+  ghostSince?: number | null;
 };
 
 /** The part of an element that followTarget reads. */
@@ -48,26 +60,43 @@ export function sameBox(a: Box | null, b: Box | null): boolean {
 }
 
 /**
- * One animation frame for all markers: each follows its element or goes. Gives the same array
- * when nothing changed.
+ * What one marker is on an animation frame at real time `now`. While its element is on screen it
+ * follows it, also when it was a ghost (an element that came back is never under a ghost). When
+ * the element left, the marker stays as a ghost at the last box for GHOST_MS, then goes (null).
+ * A marker that never had a box goes at once.
+ */
+export function markAt(
+  mark: ActionMark,
+  measure: (target: Element) => Box | null,
+  now: number,
+): ActionMark | null {
+  const target = mark.target;
+  const step = followTarget(target, () => (target ? measure(target) : null));
+  if (!step.drop) {
+    if (!target) return mark;
+    if (mark.ghostSince == null && sameBox(step.box, mark.box)) return mark;
+    return { ...mark, box: step.box, ghostSince: null };
+  }
+  if (mark.box === null) return null;
+  if (mark.ghostSince == null) return { ...mark, ghostSince: now };
+  return now - mark.ghostSince >= GHOST_MS ? null : mark;
+}
+
+/**
+ * One animation frame for all markers, at real time `now`: each follows its element, is a ghost,
+ * or goes. Gives the same array when nothing changed.
  */
 export function followMarks(
   marks: readonly ActionMark[],
   measure: (target: Element) => Box | null,
+  now: number = performance.now(),
 ): readonly ActionMark[] {
   let changed = false;
   const next: ActionMark[] = [];
   for (const mark of marks) {
-    const target = mark.target;
-    const step = followTarget(target, () => (target ? measure(target) : null));
-    if (step.drop) {
-      changed = true;
-      continue;
-    }
-    if (target && !sameBox(step.box, mark.box)) {
-      changed = true;
-      next.push({ ...mark, box: step.box });
-    } else next.push(mark);
+    const step = markAt(mark, measure, now);
+    if (step !== mark) changed = true;
+    if (step) next.push(step);
   }
   return changed ? next : marks;
 }
@@ -97,7 +126,8 @@ export function boxOverFrame(
 }
 
 function Mark({ mark, next }: { mark: ActionMark; next: boolean }) {
-  const className = `wb-action${next ? " wb-action-next" : ""}`;
+  const ghost = !next && mark.ghostSince != null;
+  const className = `wb-action${next ? " wb-action-next" : ""}${ghost ? " wb-action-ghost" : ""}`;
   if (!mark.box)
     return (
       <div className={className} style={{ left: 8, top: 8 }}>
@@ -108,7 +138,7 @@ function Mark({ mark, next }: { mark: ActionMark; next: boolean }) {
   return (
     <div className={className} style={{ left: x, top: y, width, height }}>
       <span className="wb-action-box" />
-      {!next && <span className="wb-action-ring" />}
+      {!next && !ghost && <span className="wb-action-ring" />}
       <span className="wb-action-label">
         {next ? `Next: ${mark.label}` : mark.label}
       </span>
@@ -118,7 +148,8 @@ function Mark({ mark, next }: { mark: ActionMark; next: boolean }) {
 
 /**
  * Shows what the bot did: an outline, a ring and a label over each element a click or a type step
- * acted on, and the element of the next action when the run stopped before it. It is drawn next to
+ * acted on (a dashed ghost at its last place when the element left), and the element of the next
+ * action when the run stopped before it. It is drawn next to
  * the window element and not in it, so a shot of the window does not show it.
  */
 export function ActionMarkers({

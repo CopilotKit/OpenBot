@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { cleanup, render } from "@testing-library/react";
+import { forceTheme } from "./frameTheme";
 import type { Warning } from "./layoutWatch";
 import {
   highlightLabel,
@@ -145,6 +146,32 @@ test("the still of the window keeps its styles, content and typed values, and ru
   expect(html).toContain("<base href=");
   // The live document is not changed.
   expect(document.querySelector("script")).not.toBeNull();
+  document.head.innerHTML = "";
+  document.body.innerHTML = "";
+});
+
+test("the still of a window in a forced theme keeps that theme, not the system's", () => {
+  // The workbench forces a dark window by rewriting its dark media rules at run time; the source
+  // text still says prefers-color-scheme, so a copied <style> drew a dark window's still light.
+  document.head.innerHTML =
+    "<style>.card { color: black; } @media (prefers-color-scheme: dark) { .card { color: white; } }</style>";
+  document.body.innerHTML = '<div class="card">Set up</div>';
+  forceTheme(document, "dark");
+
+  const html = stillHtml(document, "dark");
+  expect(html).not.toContain("prefers-color-scheme");
+  expect(html).toContain("@media all { .card { color: white; } }");
+  expect(html).toContain(".card { color: black; }");
+  // In a light window the dark rules never apply.
+  expect(stillHtml(document, "light")).toContain(
+    "@media not all { .card { color: white; } }",
+  );
+  // A shorthand with var() and a longhand after it stay as written (the CSSOM loses them).
+  document.head.innerHTML =
+    "<style>.spin { border: 2px solid var(--border); border-top-color: var(--ring); }</style>";
+  expect(stillHtml(document, "dark")).toContain(
+    ".spin { border: 2px solid var(--border); border-top-color: var(--ring); }",
+  );
   document.head.innerHTML = "";
   document.body.innerHTML = "";
 });

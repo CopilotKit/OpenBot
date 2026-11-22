@@ -445,8 +445,11 @@ jobs:
       # app/node_modules/.vite-temp, so after them that folder is root's and this build, as the
       # runner's user, fails with EACCES.
       - run: OPENBOT_APP_BUILD_GUARD=1 bun test app/workbench/shippedBuild.test.ts
+      # `--init` on both image steps: tini is PID 1 and reaps the orphans. Without it, bun is PID 1,
+      # and an app server whose workbench server exited stays a zombie that still answers
+      # `kill(pid, 0)`, so each stop waits out its time limits.
       - run: |
-          docker run --rm --ipc=host \
+          docker run --rm --init --ipc=host \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE/desktop" \
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 \
@@ -456,7 +459,7 @@ jobs:
       # nothing to click or type into, or a run that stalls. It walks the app scenes too, and fails
       # on an app request that has no answer or an error in the app.
       - run: |
-          docker run --rm --ipc=host \
+          docker run --rm --init --ipc=host \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE/desktop" \
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             "$PLAYWRIGHT_IMAGE" \
