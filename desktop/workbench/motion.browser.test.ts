@@ -40,7 +40,10 @@ type Page = {
   ): Promise<T>;
   getByRole(role: string, options: { name: string | RegExp }): Locator;
   getByLabel(text: string, options?: { exact?: boolean }): Locator;
-  locator(selector: string): Locator & { first(): Locator };
+  locator(selector: string): Locator & {
+    first(): Locator;
+    nth(index: number): Locator;
+  };
   mouse: { move(x: number, y: number): Promise<void> };
   screenshot(options: {
     clip: { x: number; y: number; width: number; height: number };
@@ -209,17 +212,25 @@ describe.skipIf(!asked)("the workbench's motion", () => {
         );
         // Each animation frame from the click on: is the Install marker (or its ghost) drawn.
         await page.evaluate(() => {
-          const seen: { t: number; shown: boolean; ghost: boolean }[] = [];
+          const seen: {
+            t: number;
+            shown: boolean;
+            ghost: boolean;
+            opacity: number;
+          }[] = [];
           (window as unknown as { __seen: typeof seen }).__seen = seen;
           const tick = () => {
             const mark = [
               ...document.querySelectorAll(".wb-action:not(.wb-action-next)"),
             ].find((m) => /Install/.test(m.textContent ?? ""));
+            const opacity = mark
+              ? Number.parseFloat(getComputedStyle(mark).opacity)
+              : 0;
             seen.push({
               t: performance.now(),
-              shown:
-                !!mark && Number.parseFloat(getComputedStyle(mark).opacity) > 0,
+              shown: opacity > 0,
               ghost: !!mark?.classList.contains("wb-action-ghost"),
+              opacity,
             });
             if (seen.length < 600) requestAnimationFrame(tick);
           };
@@ -231,7 +242,12 @@ describe.skipIf(!asked)("the workbench's motion", () => {
           () =>
             (
               window as unknown as {
-                __seen: { t: number; shown: boolean; ghost: boolean }[];
+                __seen: {
+                  t: number;
+                  shown: boolean;
+                  ghost: boolean;
+                  opacity: number;
+                }[];
               }
             ).__seen,
         );
@@ -246,6 +262,18 @@ describe.skipIf(!asked)("the workbench's motion", () => {
           seen.length - 1 - [...seen].reverse().findIndex((s) => s.shown);
         expect(seen.slice(first, last + 1).every((s) => s.shown)).toBe(true);
         expect(to - from).toBeLessThanOrEqual(1300);
+        // The ghost's label can be read: it holds full opacity for most of GHOST_MS and fades only
+        // at the end. The Install click changes the screen at once, so the marker is a ghost.
+        const ghostFrom = seen.find((s) => s.ghost)?.t;
+        expect(ghostFrom).toBeDefined();
+        const late = seen.filter(
+          (s) =>
+            s.ghost &&
+            s.t - (ghostFrom ?? 0) >= 250 &&
+            s.t - (ghostFrom ?? 0) <= 320,
+        );
+        expect(late.length).toBeGreaterThan(0);
+        for (const s of late) expect(s.opacity).toBeGreaterThanOrEqual(0.9);
       } finally {
         await page.close();
       }
@@ -408,6 +436,97 @@ describe.skipIf(!asked)("the workbench's motion", () => {
             () => document.querySelectorAll(".wb-warning-list li").length,
           ),
         ).toBeGreaterThanOrEqual(rowCount);
+      } finally {
+        await page.close();
+      }
+    }, 120_000);
+
+    test(`while the pointer is in the list, a warning hover that seeks back keeps the hovered row in its place and every row (${reducedMotion})`, async () => {
+      if (!browser) throw new Error("No browser.");
+      const page = await browser.newPage({
+        viewport: { width: 1600, height: 1000 },
+        reducedMotion,
+      });
+      try {
+        // As the review found it: a row early in the run that the replay does not find again (there
+        // a 0:00 page move from the load), above the hovered 0:37 row. Here the test makes one: at
+        // 0:10 it moves the window's content by hand, which the replay does not do.
+        await openScene(page, "install-mac");
+        await page.evaluate(() => window.__workbenchPage?.seek(10_000));
+        await page.waitForTimeout(300);
+        await page.evaluate(() => {
+          const doc = document.querySelector<HTMLIFrameElement>(
+            "[data-workbench-window] iframe",
+          )?.contentDocument;
+          const push = doc?.createElement("div");
+          if (!doc || !push) throw new Error("No window.");
+          push.style.height = "40px";
+          doc.body.prepend(push);
+        });
+        // The watch checks after the clock moves.
+        await page.evaluate(() => window.__workbenchPage?.seek(11_000));
+        await page.waitForFunction(() =>
+          (window.__workbenchPage?.warnings() ?? []).some(
+            (w) => w.at < 37_000 && w.at >= 10_000,
+          ),
+        );
+        await page.evaluate(() => window.__workbenchPage?.seek(240_000));
+        await page.waitForSelector(".wb-warning-list button");
+        await page.waitForTimeout(300);
+        const rowCount = await page.evaluate(
+          () => document.querySelectorAll(".wb-warning-list li").length,
+        );
+        expect(rowCount).toBeGreaterThan(1);
+        const rows = await page.evaluate(() =>
+          [...document.querySelectorAll(".wb-warning-list button")].map(
+            (b) => b.textContent ?? "",
+          ),
+        );
+        const index = rows.findIndex((t) => / at 0:37 /.test(t));
+        expect(index).toBeGreaterThan(0);
+        const text = rows[index] ?? "";
+        // Each animation frame: how many rows, and where the hovered row is.
+        await page.evaluate((hovered) => {
+          const samples: {
+            rows: number;
+            y: number | null;
+            seeking: boolean;
+          }[] = [];
+          (window as unknown as { __rows: typeof samples }).__rows = samples;
+          const tick = () => {
+            const row = [
+              ...document.querySelectorAll(".wb-warning-list button"),
+            ].find((b) => (b.textContent ?? "").startsWith(hovered));
+            samples.push({
+              rows: document.querySelectorAll(".wb-warning-list li").length,
+              y: row ? row.getBoundingClientRect().top : null,
+              seeking: /Seeking to/.test(
+                document.querySelector(".wb-warnings h3")?.textContent ?? "",
+              ),
+            });
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        }, text);
+        await page.locator(".wb-warning-list button").nth(index).hover();
+        await page.waitForSelector("[data-workbench-highlight]");
+        // The replay goes on after the warning shows; the pointer stays in the list.
+        await page.waitForTimeout(1500);
+        const samples = await page.evaluate(
+          () =>
+            (
+              window as unknown as {
+                __rows: { rows: number; y: number | null; seeking: boolean }[];
+              }
+            ).__rows,
+        );
+        expect(samples.some((s) => s.seeking)).toBe(true);
+        const y = samples[0]?.y;
+        expect(y).not.toBeNull();
+        for (const s of samples) {
+          expect(s.rows).toBeGreaterThanOrEqual(rowCount);
+          expect(s.y).toBe(y ?? null);
+        }
       } finally {
         await page.close();
       }

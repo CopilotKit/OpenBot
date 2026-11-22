@@ -1,4 +1,4 @@
-import { type MouseEvent, useEffect, useRef } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 import type { Warning } from "./layoutWatch";
 import { formatTime } from "./RunControls";
 
@@ -71,6 +71,11 @@ export type WarningsListProps = {
    * every row shows as found.
    */
   found?: readonly Warning[];
+  /**
+   * The run the rows are from. While the pointer is in the list, the list keeps the rows it
+   * shows; a new run (a new scene, for example) shows its own rows at once.
+   */
+  run?: string;
 };
 
 /** A fixed order, so a seek that finds the warnings again does not move a row under the pointer: by time, then by label. */
@@ -93,8 +98,24 @@ export function WarningsList({
   hoverDelay = HOVER_DELAY_MS,
   seekingTo = null,
   found,
+  run,
 }: WarningsListProps) {
-  const foundKeys = found ? new Set(found.map(warningKey)) : null;
+  /**
+   * While the pointer is in the list, the rows stay the same: a seek back that drops a row or
+   * finds a new one would move the row under the pointer. A row the run does not have now shows
+   * muted. The rows of now show when the pointer leaves the list.
+   */
+  const [inside, setInside] = useState(false);
+  const shownRef = useRef<{ run?: string; warnings: readonly Warning[] }>({
+    run,
+    warnings,
+  });
+  if (!inside || shownRef.current.run !== run)
+    shownRef.current = { run, warnings };
+  const frozen = shownRef.current.warnings !== warnings;
+  const shown = shownRef.current.warnings;
+  const foundKeys =
+    found || frozen ? new Set((found ?? warnings).map(warningKey)) : null;
   const timerRef = useRef<{
     key: string;
     handle: ReturnType<typeof setTimeout>;
@@ -139,7 +160,7 @@ export function WarningsList({
     timerRef.current = { key, handle };
   };
 
-  const sorted = sortWarnings(warnings);
+  const sorted = sortWarnings(shown);
   /** The same warning can show twice; the second one gets "#2" on its key. */
   const seen = new Map<string, number>();
   const rows = sorted.map((warning) => {
@@ -154,14 +175,16 @@ export function WarningsList({
     <section
       className="wb-warnings"
       aria-busy={seekingTo !== null ? true : undefined}
+      onMouseEnter={() => setInside(true)}
       onMouseLeave={(event) => {
         if (!moved(event, false)) return;
+        setInside(false);
         cancel();
         onLeave?.();
       }}
     >
       <h3>
-        {`Layout warnings (${warnings.length})`}
+        {`Layout warnings (${shown.length})`}
         {seekingTo !== null && (
           <span className="wb-warning-status" role="status">
             {`Seeking to ${formatTime(seekingTo)}…`}

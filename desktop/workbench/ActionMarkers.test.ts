@@ -5,6 +5,7 @@ import {
   followMarks,
   followTarget,
   GHOST_MS,
+  labelFitsInside,
   markAt,
   sameBox,
 } from "./ActionMarkers";
@@ -127,4 +128,18 @@ test("sameBox rounds to the pixel", () => {
   expect(sameBox(box(10), box(11))).toBe(false);
   expect(sameBox(null, null)).toBe(true);
   expect(sameBox(null, box(1))).toBe(false);
+});
+
+test("labelFitsInside: a ghost's label goes inside its box only when the box is wide and tall enough", () => {
+  expect(labelFitsInside("Install", { width: 120, height: 36 })).toBe(true);
+  expect(labelFitsInside("Install", { width: 50, height: 36 })).toBe(false);
+  expect(labelFitsInside("Install", { width: 70, height: 36 })).toBe(true);
+  expect(labelFitsInside("Install", { width: 120, height: 16 })).toBe(false);
+  // The Install button's box after the click: the label goes on two lines inside it.
+  expect(labelFitsInside("Click · Install", { width: 72, height: 44 })).toBe(
+    true,
+  );
+  expect(labelFitsInside("Click · Install", { width: 72, height: 30 })).toBe(
+    false,
+  );
 });

@@ -1839,6 +1839,7 @@ export function WorkbenchLoaded({
           <WarningsList
             warnings={shownWarningsRef.current.warnings}
             found={foundWarningsRef.current}
+            run={runKey}
             seekingTo={highlight?.jumping ? highlight.warning.at : null}
             onSeek={(ms) => {
               void seek(ms);

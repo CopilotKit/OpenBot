@@ -287,3 +287,60 @@ test("after a seek back the list keeps its rows: the ones not reached show muted
   expect(rows[1]?.className).toContain("wb-warning-later");
   expect(view.getByText(/Layout warnings \(2\)/)).toBeTruthy();
 });
+
+test("while the pointer is in the list, a seek back that drops a row keeps every row in its place, muted; the new rows show when the pointer leaves", () => {
+  // The review's case: a 0:00 row above the hovered one is not found again after the seek.
+  const clock = clipped(0, "The whole page");
+  const hovered = clipped(5000, "Install");
+  const late = clipped(9000, "Footer");
+  const view = render(
+    <WarningsList
+      warnings={[clock, hovered, late]}
+      onSeek={() => {}}
+      run="a"
+    />,
+  );
+  const section = view.container.querySelector("section") as Element;
+  const texts = () =>
+    [...view.container.querySelectorAll("li button")].map(
+      (row) => row.textContent,
+    );
+  const before = texts();
+  fireEvent.mouseEnter(section, { clientX: 5, clientY: 40 });
+  fireEvent.mouseMove(view.getAllByRole("button")[1] as Element, {
+    clientX: 5,
+    clientY: 40,
+  });
+
+  // The seek back: the run has only the hovered row now, and a new one.
+  const found = clipped(6000, "New");
+  view.rerender(
+    <WarningsList
+      warnings={[hovered, found]}
+      found={[hovered, found]}
+      onSeek={() => {}}
+      run="a"
+    />,
+  );
+  expect(texts()).toEqual(before);
+  const rows = [...view.container.querySelectorAll("li button")];
+  expect(rows[0]?.className).toContain("wb-warning-later");
+  expect(rows[1]?.className ?? "").not.toContain("wb-warning-later");
+  expect(rows[2]?.className).toContain("wb-warning-later");
+
+  // The pointer leaves: the rows of now show.
+  fireEvent.mouseLeave(section, { clientX: 500, clientY: 40 });
+  expect(texts()).toEqual([warningText(hovered), warningText(found)]);
+});
+
+test("a new run shows its own rows at once, also with the pointer in the list", () => {
+  const view = render(
+    <WarningsList warnings={[clipped(0, "A")]} onSeek={() => {}} run="a" />,
+  );
+  fireEvent.mouseEnter(view.container.querySelector("section") as Element);
+  view.rerender(
+    <WarningsList warnings={[clipped(0, "B")]} onSeek={() => {}} run="b" />,
+  );
+  expect(view.container.textContent).toContain("B is cut off");
+  expect(view.container.textContent).not.toContain("A is cut off");
+});

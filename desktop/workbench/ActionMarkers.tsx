@@ -125,6 +125,30 @@ export function boxOverFrame(
   };
 }
 
+/**
+ * True when a ghost's label fits inside its box, on one line or wrapped at its spaces. 12 px
+ * semibold text is at most about 7.5 px a character and 17 px a line; the padding and the outline
+ * take 12 px of the width and 4 px of the height.
+ */
+export function labelFitsInside(
+  label: string,
+  box: { width: number; height: number },
+): boolean {
+  const room = Math.floor((box.width - 12) / 7.5);
+  let lines = 1;
+  let line = 0;
+  for (const word of label.split(/\s+/)) {
+    if (word.length > room) return false;
+    if (line === 0) line = word.length;
+    else if (line + 1 + word.length <= room) line += 1 + word.length;
+    else {
+      lines++;
+      line = word.length;
+    }
+  }
+  return lines * 17 + 4 <= box.height;
+}
+
 function Mark({ mark, next }: { mark: ActionMark; next: boolean }) {
   const ghost = !next && mark.ghostSince != null;
   const className = `wb-action${next ? " wb-action-next" : ""}${ghost ? " wb-action-ghost" : ""}`;
@@ -139,7 +163,13 @@ function Mark({ mark, next }: { mark: ActionMark; next: boolean }) {
     <div className={className} style={{ left: x, top: y, width, height }}>
       <span className="wb-action-box" />
       {!next && !ghost && <span className="wb-action-ring" />}
-      <span className="wb-action-label">
+      <span
+        className={
+          ghost && labelFitsInside(mark.label, mark.box)
+            ? "wb-action-label wb-action-label-inside"
+            : "wb-action-label"
+        }
+      >
         {next ? `Next: ${mark.label}` : mark.label}
       </span>
     </div>
