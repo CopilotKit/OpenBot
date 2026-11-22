@@ -4973,9 +4973,9 @@ paths:
                 waiting:
                   $ref: '#/components/examples/AiSignInExample'
                 chatgpt:
-                  $ref: '#/components/examples/AiSignInChatGptExample'
+                  $ref: '#/components/examples/AiSignInChatGptBrowserExample'
                 chatgptWithACode:
-                  $ref: '#/components/examples/AiSignInChatGptDeviceExample'
+                  $ref: '#/components/examples/AiSignInChatGptExample'
                 claude:
                   $ref: '#/components/examples/AiSignInClaudeExample'
         '400':
@@ -46168,7 +46168,7 @@ components:
         expiresAt: '2026-11-21T09:10:00.000Z'
         interval: 5
         finish: poll
-    AiSignInChatGptExample:
+    AiSignInChatGptBrowserExample:
       summary: A ChatGPT plan sign-in in the browser, finished with the address ChatGPT sends it to.
       value:
         id: Y2hhdGdwdC1icm93c2Vy
@@ -46178,8 +46178,8 @@ components:
         expiresAt: '2026-11-21T09:15:00.000Z'
         interval: 5
         finish: code
-    AiSignInChatGptDeviceExample:
-      summary: A ChatGPT plan sign-in with a code, waiting for the person to enter it at ChatGPT.
+    AiSignInChatGptExample:
+      summary: A ChatGPT plan sign-in with a code (method device), waiting for the person to enter it at ChatGPT.
       value:
         id: Y2hhdGdwdC1zaWduLWlu
         provider: openai
