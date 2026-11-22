@@ -2756,10 +2756,11 @@ p.move-key-none {
   margin-top: 16px;
 }
 
-/* The space the move freed: one line in the success colour's mark. */
+/* What the move removed: one line in the success colour's mark, and under it, when the disk shows
+   much less of it free so far, a smaller line that says so. */
 .move-freed {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   margin: 0;
   font-size: var(--text-base);
@@ -2767,11 +2768,22 @@ p.move-key-none {
   color: var(--text-secondary);
 }
 
+.move-freed p {
+  margin: 0;
+}
+
 .move-freed svg {
   width: 20px;
   height: 20px;
+  margin-top: 1px;
   flex: none;
   color: var(--good);
+}
+
+.move-freed .move-freed-held {
+  margin-top: 4px;
+  font-size: var(--text-sm);
+  line-height: 20px;
 }
 
 .move-freed strong {

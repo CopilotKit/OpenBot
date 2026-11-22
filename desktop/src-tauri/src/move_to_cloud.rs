@@ -214,7 +214,8 @@ pub trait Cloud {
 
 /// This computer, once the move has arrived and been checked.
 pub trait Here {
-    /// What OpenBot takes on this computer now, in bytes, when it can be measured.
+    /// What OpenBot takes on this computer now, in bytes, when it can be measured: by the rule the
+    /// move screens' estimate uses, over the same paths before and after (`Footprint`).
     fn footprint(&mut self) -> Option<u64>;
     /// The move is kept: the answer recorded and the app pointed at Cloud, before anything goes,
     /// so a removal cut short never offers the move again.
@@ -228,27 +229,52 @@ pub trait Here {
 }
 
 /**
-What removing OpenBot freed: what it measured of its own files before and after, but never more
-than the disk itself gained when the disk says. On two Windows boxes the files measured 12.2 and
-12.0 GB while the disk gained 11.4 and 10.8 GB (Podman's own helper stays, and a deleted disk
-image does not hand back every byte its length claims), and the person reads the claim against
-the disk.
+What the move removed of OpenBot's files: what they took before the removal, less what is still
+there after, measured by the rule the move screens' estimate uses (`footprint`, over the same
+paths: `Footprint`). So the result counts what the estimate counted.
 */
-pub fn freed(
-    footprint: (Option<u64>, Option<u64>),
-    free_space: (Option<u64>, Option<u64>),
-) -> Option<u64> {
-    let measured = footprint
-        .0
-        .map(|before| before.saturating_sub(footprint.1.unwrap_or(0)));
-    let gained = match free_space {
+pub fn removed(before: Option<u64>, after: Option<u64>) -> Option<u64> {
+    before.map(|before| before.saturating_sub(after.unwrap_or(0)))
+}
+
+/**
+How much more space the disk says is free after the removal than before, when it says, and when
+that grew at all (another program writing meanwhile can shrink it).
+
+This is not the same figure as `removed`, and is never put in its place. On a Mac with Apple
+silicon (1.2.0-rc.1, Podman 6.1.4, OpenBot's machine on a 60 GB sparse disk) the move screen said
+"Frees about 20.2 GB" and the result, then the smaller of the two, said "4.5 GB freed": the files
+were all gone, and the disk gained 4.5 GB at once. That is about what OpenBot wrote in the minutes
+before the move (the log's free-space lines), which is what deleting frees when a local snapshot
+of the disk was taken just before: the snapshot keeps the older blocks until the system lets it
+go. On two Windows boxes the files measured 12.2 and 12.0 GB while the disk gained 11.4 and
+10.8 GB.
+*/
+pub fn disk_gained(before: Option<u64>, after: Option<u64>) -> Option<u64> {
+    match (before, after) {
         (Some(before), Some(after)) if after > before => Some(after - before),
         _ => None,
-    };
-    match (measured, gained) {
-        (Some(measured), Some(gained)) => Some(measured.min(gained)),
-        (measured, None) => measured,
-        (None, gained) => gained,
+    }
+}
+
+/**
+OpenBot's footprint on this computer, measured over the same paths each time: the paths are found
+once, at the first measure, and the measure after the removal reads those same paths. Found again,
+a machine whose removal failed would no longer be found (its engine no longer names it), and its
+disk would count as removed while it is still there.
+*/
+#[derive(Default)]
+pub struct Footprint {
+    parts: Option<Vec<PathBuf>>,
+}
+
+impl Footprint {
+    /// What the parts take now, finding them with `find` the first time. None when nothing is there
+    /// to measure the first time.
+    pub fn measure(&mut self, find: impl FnOnce() -> Vec<PathBuf>) -> Option<u64> {
+        let parts = self.parts.get_or_insert_with(find);
+        let total = footprint(parts);
+        (total > 0 || !parts.is_empty()).then_some(total)
     }
 }
 
@@ -315,8 +341,12 @@ impl Failure {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Moved {
-    /// What removing OpenBot freed on this computer, when it could be measured.
-    pub freed_bytes: Option<u64>,
+    /// What the move removed of OpenBot's files, counted as the move screens' estimate counts them
+    /// (`removed`), when it could be measured.
+    pub removed_bytes: Option<u64>,
+    /// How much more free space the disk showed right after (`disk_gained`). Less than
+    /// `removed_bytes` when the system holds on to deleted files for a while.
+    pub disk_gained_bytes: Option<u64>,
     /// The apps to connect again on Cloud.
     pub apps: Vec<ReconnectApp>,
     /// What Cloud brought in differently, in its own sentences.
@@ -433,7 +463,8 @@ pub fn run(
         verification.reconnect
     };
     Ok(Moved {
-        freed_bytes: freed((before, after), (free_before, free_after)),
+        removed_bytes: removed(before, after),
+        disk_gained_bytes: disk_gained(free_before, free_after),
         apps,
         notes: verification
             .notes

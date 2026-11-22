@@ -136,12 +136,12 @@ const MOVE_PREVIEW = {
     { kind: "settings", count: 1 },
   ],
   apps: move === "confirm-many" ? MORE_APPS : MOVE_APPS,
-  footprintBytes: 18_400_000_000,
+  footprintBytes: 20_200_000_000,
   modelKeysAvailable: true,
 };
 function moveAnswer(command) {
   if (command === "move_offer")
-    return { due: true, fromSettings: move !== "choice", footprintBytes: 18_400_000_000 };
+    return { due: true, fromSettings: move !== "choice", footprintBytes: 20_200_000_000 };
   if (command === "move_preview")
     return move === "confirm-loading" ? new Promise(() => {}) : MOVE_PREVIEW;
   if (command !== "move_to_cloud") return undefined;
@@ -156,10 +156,12 @@ function moveAnswer(command) {
   if (move === "midway") return new Promise(() => {});
   if (move === "failed")
     throw { said: "OpenBot couldn't send your Bots to OpenBot Cloud. Check your internet connection, then try again.", kind: "move-failed" };
+  // \`#move-done-held\`: as on a Mac, the disk shows 4.5 of the 20.2 GB removed free so far.
   return {
-    freedBytes: 18_400_000_000,
+    removedBytes: 20_200_000_000,
+    diskGainedBytes: move === "done-held" ? 4_500_000_000 : 20_100_000_000,
     apps: MOVE_APPS,
-    notes: move === "done" ? ["Research runs on an ordinary computer here, because OpenBot Cloud has no isolated computers."] : [],
+    notes: move === "done" || move === "done-held" ? ["Research runs on an ordinary computer here, because OpenBot Cloud has no isolated computers."] : [],
     leftBehind: move === "done-left" ? ["Some of OpenBot's software is still on this computer. Restart your computer to finish removing it."] : [],
   };
 }
@@ -3035,6 +3037,11 @@ describe.skipIf(!asked)(
       { hash: "#move-failed", heading: "The move didn't finish", move: true },
       { hash: "#move-done", heading: "You're on OpenBot Cloud", move: true },
       {
+        hash: "#move-done-held",
+        heading: "You're on OpenBot Cloud",
+        move: true,
+      },
+      {
         hash: "#move-done-left",
         heading: "You're on OpenBot Cloud",
         move: true,
@@ -3088,6 +3095,21 @@ describe.skipIf(!asked)(
               pageScrolls: false,
               moveInView: true,
             });
+            // The result says the figure the move screens said, counted the same way.
+            const said = await page.evaluate(
+              () => document.querySelector("main")?.textContent ?? "",
+            );
+            if (screen.hash === "#move-choice")
+              expect(said).toContain(
+                "This removes about 20.2 GB of OpenBot files from this computer.",
+              );
+            if (screen.hash === "#move-confirm")
+              expect(said).toContain("Removes about 20.2 GB of OpenBot files.");
+            if (screen.hash.startsWith("#move-done"))
+              expect(said).toContain("20.2 GB of OpenBot files removed");
+            expect(said.includes("of that is free space on your disk")).toBe(
+              screen.hash === "#move-done-held",
+            );
           } finally {
             await page.close();
           }
