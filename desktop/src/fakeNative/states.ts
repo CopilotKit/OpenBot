@@ -21,8 +21,8 @@ export const STATE_NAMES: readonly {
   { hash: "", search: "?offer", title: "First run, update offered" },
   { hash: "", search: "?internal", title: "First run, internal build" },
   { hash: "#start", search: "", title: "Relaunch with an update" },
-  { hash: "#update-short", search: "", title: "Update: no room" },
-  { hash: "#backend-short", search: "", title: "Back end update: no room" },
+  { hash: "#update-short", search: "", title: "OpenBot update: no room" },
+  { hash: "#backend-short", search: "", title: "Services update: no room" },
   { hash: "#signin", search: "", title: "Sign in" },
   { hash: "#licence", search: "", title: "Licence" },
   {

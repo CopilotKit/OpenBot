@@ -111,8 +111,18 @@ function markerInWindow(page: Page) {
   });
 }
 
-/** The share of pixels that differ between two PNG shots of the same size, decoded in the page. */
-function changedShare(page: Page, a: Uint8Array, b: Uint8Array) {
+/**
+ * The share of pixels that differ between two PNG shots of the same size, decoded in the page, and
+ * the box the changed pixels lie in (null when none did).
+ */
+async function changed(
+  page: Page,
+  a: Uint8Array,
+  b: Uint8Array,
+): Promise<{
+  share: number;
+  box: { x: number; y: number; width: number; height: number } | null;
+}> {
   return page.evaluate(
     async ([one, two]) => {
       const pixels = async (base64: string) => {
@@ -127,24 +137,53 @@ function changedShare(page: Page, a: Uint8Array, b: Uint8Array) {
         return context.getImageData(0, 0, bitmap.width, bitmap.height);
       };
       const [x, y] = await Promise.all([pixels(one), pixels(two)]);
-      if (x.width !== y.width || x.height !== y.height) return 1;
+      if (x.width !== y.width || x.height !== y.height)
+        return { share: 1, box: null };
       let changed = 0;
+      let left = Infinity;
+      let top = Infinity;
+      let right = -1;
+      let bottom = -1;
       for (let i = 0; i < x.data.length; i += 4) {
         // A pixel counts as changed past a small difference (anti-aliasing, the caret).
         if (
           Math.abs((x.data[i] ?? 0) - (y.data[i] ?? 0)) > 24 ||
           Math.abs((x.data[i + 1] ?? 0) - (y.data[i + 1] ?? 0)) > 24 ||
           Math.abs((x.data[i + 2] ?? 0) - (y.data[i + 2] ?? 0)) > 24
-        )
+        ) {
           changed++;
+          const at = i / 4;
+          const px = at % x.width;
+          const py = Math.floor(at / x.width);
+          left = Math.min(left, px);
+          top = Math.min(top, py);
+          right = Math.max(right, px);
+          bottom = Math.max(bottom, py);
+        }
       }
-      return changed / (x.width * x.height);
+      return {
+        share: changed / (x.width * x.height),
+        box:
+          right < 0
+            ? null
+            : {
+                x: left,
+                y: top,
+                width: right - left + 1,
+                height: bottom - top + 1,
+              },
+      };
     },
     [Buffer.from(a).toString("base64"), Buffer.from(b).toString("base64")] as [
       string,
       string,
     ],
   );
+}
+
+/** The share alone. */
+async function changedShare(page: Page, a: Uint8Array, b: Uint8Array) {
+  return (await changed(page, a, b)).share;
 }
 
 describe.skipIf(!asked)("the workbench's motion", () => {
@@ -325,7 +364,6 @@ describe.skipIf(!asked)("the workbench's motion", () => {
         // At the run's end: a dark window under the "OpenBot opens here" card, with its title bar.
         await page.evaluate(() => window.__workbenchPage?.seek(240_000));
         await page.waitForSelector(".wb-warning-list button");
-        await page.waitForTimeout(300);
         // The part of the window on screen: the stage clips it, and the warnings panel under the
         // stage (where the hovered row changes) is not the window.
         const clip = await page.evaluate(() => {
@@ -352,7 +390,21 @@ describe.skipIf(!asked)("the workbench's motion", () => {
           };
         });
         if (!clip) throw new Error("No window.");
-        const before = await page.screenshot({ clip });
+        // The window as it was last painted is the window once it settled. A fixed 300 ms wait can
+        // take it mid-transition on a slower runner, while the still shows every animation at its
+        // end: only the no-preference run failed on CI, with a frame 2.2% off (0.01% here).
+        // Settled: two shots 100 ms apart differ only by what never stops (the spinners turn),
+        // under half of the share the check below allows.
+        let before = await page.screenshot({ clip });
+        for (let tries = 0; ; tries++) {
+          await page.waitForTimeout(100);
+          const next = await page.screenshot({ clip });
+          const drift = await changedShare(page, before, next);
+          before = next;
+          if (drift < 0.01) break;
+          if (tries >= 50)
+            throw new Error(`The window never settled: ${drift}`);
+        }
         const state = () =>
           page.evaluate(() => ({
             ready: window.__workbenchPage?.ready === true,
@@ -368,10 +420,33 @@ describe.skipIf(!asked)("the workbench's motion", () => {
           const shot = await page.screenshot({ clip });
           const end = await state();
           // Only a shot taken wholly while the window was not ready: the target frame is not there yet.
-          if (!start.ready && !end.ready)
-            shares.push(await changedShare(page, before, shot));
+          if (!start.ready && !end.ready) {
+            const change = await changed(page, before, shot);
+            shares.push(change.share);
+            // Where a frame changed, and what covered the window then, so a failure says why.
+            if (change.share >= 0.02)
+              console.log(
+                "A frame changed:",
+                JSON.stringify({
+                  ...change,
+                  ...(await page.evaluate(() => {
+                    const still = document.querySelector<HTMLIFrameElement>(
+                      "[data-workbench-still]",
+                    );
+                    return {
+                      still: still ? still.style.visibility || "shown" : "none",
+                    };
+                  })),
+                }),
+              );
+          }
         }
+        console.log(
+          `Most of the window a frame changed: ${Math.max(...shares)}`,
+        );
         expect(shares.length).toBeGreaterThan(0);
+        // An uncovered replay changes most of the window: 89% when this was found, and about 5% for
+        // a dark window whose card has not drawn yet, so the bound stays under that.
         for (const share of shares) expect(share).toBeLessThan(0.02);
       } finally {
         await page.close();
