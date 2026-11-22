@@ -79,6 +79,7 @@ import type {
   AiConnectionInput,
   AiConnectionLogin,
   AiConnectionProvider,
+  AiSignInInputMethod,
 } from "@/lib/api/generated/model";
 import { markFor } from "@/lib/marks";
 import { queryClient } from "@/query-client";
@@ -248,8 +249,9 @@ function providerSummary(provider: AiProvider, mode: ChooserMode) {
 
 /**
  * A sign-in in the browser, while it waits for the person to approve it there. `codeBack`: the
- * provider's page then shows a code to paste here (a Claude plan). `signInId`: the server's own
- * sign-in, for a person's own AI.
+ * person then pastes what the provider gave them here (the code Claude's page shows, or the address
+ * ChatGPT sends their browser to). `signInId`: the server's own sign-in, for a person's own AI.
+ * `method`: the way in it was started with, where the provider has more than one (ChatGPT).
  */
 type Waiting = {
   url: string;
@@ -257,6 +259,7 @@ type Waiting = {
   attemptId?: string;
   signInId?: string;
   codeBack?: boolean;
+  method?: AiSignInInputMethod;
 };
 
 const wait = (seconds: number) =>
@@ -422,14 +425,15 @@ export function ChooseConnection({
   /**
    * The server's own sign-in: start it and open the provider's page. With `finish` poll, read where
    * it stands every `interval` seconds until it is approved, failed or expired. With `finish` code,
-   * stop and wait for the person to paste what the provider's page gave them (`finishCode`). What
-   * the provider hands back stays on the server.
+   * stop and wait for the person to paste what the provider gave them (`finishCode`). What the
+   * provider hands back stays on the server.
    */
   async function serverSignIn(
     chosen: AiProvider,
     current: () => boolean,
+    method: AiSignInInputMethod | undefined,
   ): Promise<"approved" | "code" | false> {
-    const begun = await startPersonalSignIn(chosen.id);
+    const begun = await startPersonalSignIn(chosen.id, method);
     if (!current()) return false;
     const codeBack = begun.finish === "code";
     setWaiting({
@@ -437,6 +441,7 @@ export function ChooseConnection({
       code: begun.userCode,
       signInId: begun.id,
       codeBack,
+      method,
     });
     window.open(begun.url, "_blank", "noopener");
     if (codeBack) return "code";
@@ -453,7 +458,8 @@ export function ChooseConnection({
     }
   }
 
-  async function signIn() {
+  /** `method`: ChatGPT's code sign-in (`device`) in place of its browser sign-in, the default. */
+  async function signIn(method?: AiSignInInputMethod) {
     if (!provider || !login) return;
     stopSignIn();
     const mine = run.current;
@@ -463,7 +469,7 @@ export function ChooseConnection({
     setSignedIn(false);
     try {
       if (personal) {
-        const reached = await serverSignIn(provider, current);
+        const reached = await serverSignIn(provider, current, method);
         if (!reached) return;
         // The provider's page gives the person a code to paste here; the field waits for it.
         if (reached === "code") {
@@ -672,7 +678,12 @@ export function ChooseConnection({
                 onCode={setSignInCode}
                 onFinishCode={finishCode}
                 personal={personal}
-                onSignIn={signIn}
+                onSignIn={() => signIn()}
+                onSignInWithCode={
+                  personal && provider.id === "openai"
+                    ? () => signIn("device")
+                    : undefined
+                }
                 provider={provider}
                 signedIn={signedIn}
                 waiting={waiting}
@@ -864,13 +875,18 @@ const SIGN_IN_SAYS: Record<string, string> = {
 };
 
 /**
- * Where the server runs the sign-in for a person's own AI, the words that differ: ChatGPT's page
- * asks for the code shown here.
+ * Where the server runs the sign-in for a person's own AI, the words that differ. ChatGPT's sign-in
+ * in the browser ends on an address that doesn't load (Codex's own sign-in waits there), which the
+ * person pastes here.
  */
 const PERSONAL_SIGN_IN_SAYS: Record<string, string> = {
   openai:
-    "OpenAI opens in your browser. Enter the code shown here, then approve. It finishes on its own.",
+    "OpenAI opens in your browser. After you approve, your browser lands on a page that doesn't load. Copy that page's address and paste it here.",
 };
+
+/** ChatGPT's sign-in with a code (`device`): its page asks for the code shown here. */
+const CODE_SIGN_IN_SAYS =
+  "OpenAI opens in your browser. Enter the code shown here, then approve. It finishes on its own.";
 
 const SIGN_IN_DIDNT_FINISH = "The sign-in didn't finish. Try again.";
 
@@ -882,6 +898,7 @@ function SignInFields({
   onCode,
   onFinishCode,
   onSignIn,
+  onSignInWithCode,
   personal,
   provider,
   signedIn,
@@ -894,6 +911,8 @@ function SignInFields({
   onCode: (code: string) => void;
   onFinishCode: () => void;
   onSignIn: () => void;
+  /** The quieter second way in, where the provider has one: ChatGPT's sign-in with a code. */
+  onSignInWithCode?: () => void;
   personal: boolean;
   provider: AiProvider;
   signedIn: boolean;
@@ -903,8 +922,10 @@ function SignInFields({
   return (
     <div className="flex flex-col gap-3">
       <p className="text-muted-foreground text-sm">
-        {(personal && PERSONAL_SIGN_IN_SAYS[provider.id]) ||
-          SIGN_IN_SAYS[provider.id]}
+        {waiting?.method === "device"
+          ? CODE_SIGN_IN_SAYS
+          : (personal && PERSONAL_SIGN_IN_SAYS[provider.id]) ||
+            SIGN_IN_SAYS[provider.id]}
       </p>
       {signedIn ? (
         <p className="flex items-center gap-2 text-sm">
@@ -933,8 +954,11 @@ function SignInFields({
           </p>
           {waiting.codeBack ? (
             <Field>
+              {/* ChatGPT's sign-in ends on an address to paste; Claude's on a code. */}
               <FieldLabel htmlFor="ai-connection-code">
-                Code from your browser
+                {provider.id === "openai"
+                  ? "Address from your browser"
+                  : "Code from your browser"}
               </FieldLabel>
               <div className="flex gap-2">
                 <Input
@@ -992,6 +1016,25 @@ function SignInFields({
             ) : null}
             {busy ? "Starting…" : `Sign in with ${signInName}`}
           </Button>
+        </div>
+      )}
+      {signedIn || waiting || !onSignInWithCode ? null : (
+        <div className="flex flex-col items-start">
+          {/* Its words line up with the lines above; the ghost button's padding hangs outside. */}
+          <Button
+            className="-ml-2.5 text-muted-foreground"
+            disabled={busy}
+            onClick={onSignInWithCode}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Sign in with a code instead
+          </Button>
+          <p className="text-muted-foreground text-xs">
+            This needs device code sign-in turned on in ChatGPT's security
+            settings.
+          </p>
         </div>
       )}
       {failure ? (
