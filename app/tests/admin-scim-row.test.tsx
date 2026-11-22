@@ -107,7 +107,9 @@ test("with several organizations, deprovisioning takes the person out of this or
   await view.findByText("SCIM provisioning");
   const said = scimRow(view);
   expect(said).toContain("removes the person from this organization");
-  expect(said).toContain("own organization");
+  // A self-hosted person has no organization of their own to keep, so none is promised.
+  expect(said).toContain("They keep any other organization they're in.");
+  expect(said).not.toContain("own organization");
   expect(said).not.toContain("ends sessions");
   expect(said).not.toContain("blocks the address");
 });
