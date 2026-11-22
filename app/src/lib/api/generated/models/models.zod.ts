@@ -1262,7 +1262,7 @@ export const DeletePersonalAiConnectionResponse = zod
   );
 
 /**
- * Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the provider's page shows the person a code once they approve, and they send it back with finishPersonalAiSignIn. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: an Unbiased AI key as a saved key (connect with useSavedKey), a Claude or ChatGPT plan's sign-in (connect with login plan), or a Google or xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true.
+ * Start a sign-in to an AI provider that the server runs itself, for a provider PersonalAiConnection lists in signIns. The answer holds the address the person approves it at, in their browser, the code to check there where the provider shows one, and how it finishes. With finish poll, read the sign-in (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. With finish code, the person approves, copies the code Claude's page shows them or the address Google sends their browser to, and sends it back with finishPersonalAiSignIn. Approved, what the provider handed OpenBot is kept for the person alone, never sent to the browser: an Unbiased AI key as a saved key (connect with useSavedKey), a Claude or ChatGPT plan's sign-in (connect with login plan), or a Google or xAI sign-in (connect with login oauth). The server renews a sign-in that expires itself. Only the person themselves may sign in, and only where available is true.
  * @summary Start signing in to an AI provider
  */
 
@@ -1360,7 +1360,7 @@ export const StartPersonalAiSignInResponse = zod
     finish: zod
       .string()
       .describe(
-        "How the sign-in finishes. poll: read it (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. code: the provider's page shows the person a code once they approve it, which they send back with finishPersonalAiSignIn.",
+        "How the sign-in finishes. poll: read it (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. code: once the person approves it, the provider shows them a code (Claude) or sends their browser to an address that doesn't load (Google), and they send that code or address back with finishPersonalAiSignIn.",
       ),
   })
   .describe(
@@ -1451,7 +1451,7 @@ export const GetPersonalAiSignInResponse = zod
   .describe("Where a sign-in to an AI provider stands. Never a key.");
 
 /**
- * Finish a sign-in whose finish is code: send the code the provider's page showed the person once they approved it. OpenBot hands it to the provider at once and answers where the sign-in stands: approved, with what the provider handed back kept for the person and never in this answer, or failed with detail saying why in OpenBot's own words. A sign-in that is already approved answers approved and sends nothing. Only the person who started it may finish it.
+ * Finish a sign-in whose finish is code: send what the person copied once they approved it, the code the provider's page showed or the address their browser landed on. OpenBot hands it to the provider at once and answers where the sign-in stands: approved, with what the provider handed back kept for the person and never in this answer, or failed with detail saying why in OpenBot's own words. A sign-in that is already approved answers approved and sends nothing. Only the person who started it may finish it.
  * @summary Finish a sign-in with the provider's code
  */
 
@@ -1510,7 +1510,7 @@ export const FinishPersonalAiSignInBody = zod.object({
     .max(finishPersonalAiSignInBodyCodeMax)
     .regex(finishPersonalAiSignInBodyCodeRegExp)
     .describe(
-      "The code the provider's page showed the person once they approved the sign-in, as they copied it. Trimmed. Never sent back.",
+      "What the person copied once they approved the sign-in: the code the provider's page showed, or the whole address their browser landed on. Trimmed. Never sent back.",
     ),
 });
 
