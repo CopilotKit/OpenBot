@@ -15,9 +15,31 @@ export const HOSTED_SIGN_OUT_PATH = "/api/auth/hosted/sign-out";
  * an address on this OpenBot. Opened as a page, not fetched: the browser leaves for the hosted
  * sign-in. The server sends a person back only to its own origin, whatever this says.
  */
-export function hostedSignInAddress(returnTo: string): string {
-  return `${HOSTED_SIGN_IN_PATH}?returnTo=${encodeURIComponent(returnTo)}`;
+export function hostedSignInAddress(
+  returnTo: string,
+  invitation?: HostedInvitation,
+): string {
+  const query = [`returnTo=${encodeURIComponent(returnTo)}`];
+  if (invitation) {
+    query.push(`invitationTicket=${encodeURIComponent(invitation.ticket)}`);
+    if (invitation.organizationId)
+      query.push(
+        `organizationId=${encodeURIComponent(invitation.organizationId)}`,
+      );
+  }
+  return `${HOSTED_SIGN_IN_PATH}?${query.join("&")}`;
 }
+
+/**
+ * An invitation to an organization on a hosted OpenBot, as its email's button carries it: the
+ * one-time ticket from the hosted sign-in, and the OpenBot organization it invites to. The hosted
+ * sign-in takes the ticket instead of asking the person to sign up again, and the server lands them
+ * working in that organization.
+ */
+export type HostedInvitation = {
+  ticket: string;
+  organizationId?: string;
+};
 
 /**
  * The address that signs this browser out of OpenBot by CopilotKit and brings it back to `returnTo`, an address

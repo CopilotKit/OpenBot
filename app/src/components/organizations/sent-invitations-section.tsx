@@ -119,7 +119,7 @@ export function SentInvitationsSection({
   const [inviting, setInviting] = useState(false);
   /*
    * A hosted OpenBot: an invitation is an email from OpenBot by CopilotKit, accepted from that email.
-   * No OpenBot link accepts it, so there is no link to copy.
+   * Its link carries a one-time ticket that only the email has, so there is no link to copy.
    */
   const hosted =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
