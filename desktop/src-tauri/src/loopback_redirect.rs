@@ -25,6 +25,9 @@ const REQUEST_PATIENCE: Duration = Duration::from_secs(2);
 /// How often a wait looks for a connection, a cancel or its deadline.
 const POLL: Duration = Duration::from_millis(50);
 
+/// How many system-picked ports to try before giving up on one free on both loopbacks.
+const PORT_ATTEMPTS: usize = 16;
+
 /// The listener a sign-in's redirect comes back to.
 pub struct Listener {
     listeners: Vec<TcpListener>,
@@ -60,17 +63,47 @@ pub enum BindError {
 }
 
 impl Listener {
-    /// On `127.0.0.1`, on a port the system picks, for a provider that accepts any loopback port.
+    /**
+    On a port the system picks, for a provider that accepts any loopback port (Claude).
+
+    ON BOTH LOOPBACKS, THE SAME PORT. The redirect names `localhost`, and a browser may try `::1`
+    first. Measured on Windows: Edge resolves `localhost` as `::1` first and only reached a listener
+    on `127.0.0.1` by falling back, and a browser that tried `::1` alone would wait forever. Worse,
+    whoever held `[::1]` on that port would be sent the code. So the port is one this computer gives
+    us on both: when `[::1]` is taken there, the pair is dropped and another port is picked. A
+    computer with no IPv6 at all listens on `127.0.0.1` alone, which is all its browser can reach.
+    */
     pub fn on_any_port(path: &'static str) -> std::io::Result<Self> {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
-        listener.set_nonblocking(true)?;
-        let port = listener.local_addr()?.port();
-        Ok(Self {
-            listeners: vec![listener],
-            port,
-            path,
-            honours_cancel: false,
-        })
+        let mut last = None;
+        for _ in 0..PORT_ATTEMPTS {
+            let ipv4 = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
+            let port = ipv4.local_addr()?.port();
+            let listeners = match TcpListener::bind((Ipv6Addr::LOCALHOST, port)) {
+                Ok(ipv6) => vec![ipv4, ipv6],
+                // Another program has this port on `::1`: a browser trying `::1` would reach it.
+                Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+                    last = Some(error);
+                    continue;
+                }
+                // No IPv6 loopback on this computer: nothing can be reached there either.
+                Err(_) => vec![ipv4],
+            };
+            for listener in &listeners {
+                listener.set_nonblocking(true)?;
+            }
+            return Ok(Self {
+                listeners,
+                port,
+                path,
+                honours_cancel: false,
+            });
+        }
+        Err(last.unwrap_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::AddrInUse,
+                "no port was free on both loopbacks",
+            )
+        }))
     }
 
     /**
@@ -344,6 +377,87 @@ pub(crate) mod tests {
         assert!(elsewhere.starts_with("HTTP/1.1 404"), "{elsewhere}");
         assert!(ours.starts_with("HTTP/1.1 200"), "{ours}");
         assert!(!ours.contains("ac.ours"), "a page must never echo a code");
+    }
+
+    /// Whether this computer has an IPv6 loopback to test against.
+    fn has_ipv6_loopback() -> bool {
+        TcpListener::bind((Ipv6Addr::LOCALHOST, 0)).is_ok()
+    }
+
+    /*
+    THE BUG, AS THE WINDOWS INSTALL CHECK FOUND IT. Claude's listener was on `127.0.0.1` alone. A
+    browser that resolves `localhost` to `::1` and tries only that reached nothing, and the sign-in
+    waited until it was cancelled. Now the redirect is answered on `::1` too, on the same port.
+    */
+    #[test]
+    fn a_browser_that_tries_ipv6_first_reaches_the_listener() {
+        if !has_ipv6_loopback() {
+            eprintln!("skipped: this computer has no IPv6 loopback");
+            return;
+        }
+        let _ports = crate::test_support::hold_ports();
+        let listener = Listener::on_any_port("/callback").unwrap();
+        let port = listener.port();
+        let browser = std::thread::spawn(move || {
+            let mut stream = TcpStream::connect_timeout(
+                &SocketAddr::from((Ipv6Addr::LOCALHOST, port)),
+                Duration::from_secs(2),
+            )
+            .expect("the listener answers on ::1");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            write!(
+                stream,
+                "GET /callback?code=ac.v6&state=current HTTP/1.1\r\nHost: localhost:{port}\r\n\r\n"
+            )
+            .unwrap();
+            let mut reply = String::new();
+            let _ = stream.read_to_string(&mut reply);
+            reply
+        });
+        let (outcome, reply) = listener
+            .wait("current", Duration::from_secs(20), &|| false)
+            .unwrap();
+        assert_eq!(
+            outcome,
+            Outcome::Code {
+                code: "ac.v6".into(),
+                state: "current".into()
+            }
+        );
+        reply.page("200 OK", "Done", &["Close this tab."]);
+        assert!(browser.join().unwrap().starts_with("HTTP/1.1 200"));
+    }
+
+    /// A port another program holds on `::1` is never the one handed out: a browser trying `::1`
+    /// would give that program the code.
+    #[test]
+    fn a_port_someone_else_holds_on_ipv6_is_never_used() {
+        if !has_ipv6_loopback() {
+            eprintln!("skipped: this computer has no IPv6 loopback");
+            return;
+        }
+        let _ports = crate::test_support::hold_ports();
+        // Hold `::1` on a run of the system's next ports, the ones it is most likely to pick.
+        let squatters: Vec<TcpListener> = (0..64)
+            .filter_map(|_| TcpListener::bind((Ipv6Addr::LOCALHOST, 0)).ok())
+            .collect();
+        let held: Vec<u16> = squatters
+            .iter()
+            .map(|squatter| squatter.local_addr().unwrap().port())
+            .collect();
+        for _ in 0..32 {
+            let listener = Listener::on_any_port("/callback").unwrap();
+            assert!(
+                !held.contains(&listener.port()),
+                "handed out a port another program has on ::1"
+            );
+            assert!(
+                TcpListener::bind((Ipv6Addr::LOCALHOST, listener.port())).is_err(),
+                "the listener does not hold ::1 on its own port"
+            );
+        }
     }
 
     #[test]
