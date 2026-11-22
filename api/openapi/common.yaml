@@ -401,6 +401,8 @@ paths:
   /api/v2/organizations/{organizationId}/computers/update: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1update' }
   /api/v2/organizations/{organizationId}/computers/{botId}: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}' }
   /api/v2/organizations/{organizationId}/computers/{botId}/wake: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1wake' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/workspace-snapshots: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1workspace-snapshots' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/restore: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1restore' }
   /api/v2/organizations/{organizationId}/computers/{botId}/screenshot: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1screenshot' }
   /api/v2/organizations/{organizationId}/computers/{botId}/page-frames/{toolCallId}: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1page-frames~1{toolCallId}' }
   /api/v2/organizations/{organizationId}/computers/{botId}/page: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1page' }

@@ -24,6 +24,8 @@ import type {
   ComputerPageFrameAnswer,
   ComputerPageText,
   ComputerReset,
+  ComputerRestore,
+  ComputerRestoreRequest,
   ComputerScreenshot,
   ComputerScroll,
   ComputerSecretAsk,
@@ -36,7 +38,9 @@ import type {
   ComputerType,
   ComputerUpdated,
   GetComputerControlParams,
+  GetWorkspaceSnapshotsParams,
   ListComputersParams,
+  WorkspaceSnapshots,
 } from "../model";
 
 import { apiRequest } from "../../request";
@@ -246,6 +250,97 @@ export const wakeComputer = async (
     ...options,
     method: "POST",
   });
+};
+
+export const getGetWorkspaceSnapshotsUrl = (
+  organizationId: string,
+  botId: string,
+  params?: GetWorkspaceSnapshotsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/computers/${encodeURIComponent(String(botId))}/workspace-snapshots?${stringifiedParams}`
+    : `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/computers/${encodeURIComponent(String(botId))}/workspace-snapshots`;
+};
+
+/**
+ * Return the saved copies of the computer this Bot runs on for the caller, newest first, and the latest restore of it. OpenBot saves each computer's files and browser sign-ins once a day and keeps the last 7, and saves it again just before every restore. computer names another person's computer the Bot runs on (person:<id> or bot:<id>), which only an administrator of the organization may read. available is false where this OpenBot keeps no copies. canRestore says whether the caller may restore it: an administrator of the organization, or the person whose computer it is when they own the Bot (an isolated Bot's computer is its owner's). Reading it never starts the computer.
+ * @summary Read a computer's saved copies
+ */
+export const getWorkspaceSnapshots = async (
+  organizationId: string,
+  botId: string,
+  params?: GetWorkspaceSnapshotsParams,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<WorkspaceSnapshots> => {
+  return apiRequest<WorkspaceSnapshots>(
+    getGetWorkspaceSnapshotsUrl(organizationId, botId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getRestoreComputerUrl = (
+  organizationId: string,
+  botId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/computers/${encodeURIComponent(String(botId))}/restore`;
+};
+
+/**
+ * Put the computer this Bot runs on back the way it was in one of its saved copies, and record it on the audit trail. Nothing is restored unless someone asks: OpenBot first saves the computer as it is now (kept as a copy of kind before-restore), then replaces every file and browser sign-in on it with the copy's and starts it again. Every Bot on that computer goes back, and routines that use it wait until it is back. The answer comes at once, with the restore running; read getWorkspaceSnapshots for how it ends. computer names another person's computer, as in getWorkspaceSnapshots. Only an administrator of the organization, or the person whose computer it is when they own the Bot, may do this. One restore of a computer runs at a time.
+ * @summary Restore a computer from a saved copy
+ */
+export const restoreComputer = async (
+  organizationId: string,
+  botId: string,
+  computerRestoreRequest: ComputerRestoreRequest,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<ComputerRestore> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<ComputerRestore>(
+    getRestoreComputerUrl(organizationId, botId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(computerRestoreRequest),
+    },
+  );
 };
 
 export const getGetComputerScreenshotUrl = (
