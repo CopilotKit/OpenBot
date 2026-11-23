@@ -51,6 +51,7 @@ import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
+import { useBackAfterConnect } from "@/lib/plugins/connect-return";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
@@ -168,6 +169,11 @@ function RouteComponent() {
    * too): back to the list once this app is connected, and a way back to it until then.
    */
   const returningTo = useReturnToReconnectList();
+  /*
+   * Opened in a new tab for this app's sign-in, by a Bot's card or a Bot's page: closed, or sent
+   * back to where Connect was pressed, once the account is connected.
+   */
+  useBackAfterConnect(key);
   if (key === "github" || key === "slack") {
     return <IdentityConnectionPage linked={linked} provider={key} />;
   }

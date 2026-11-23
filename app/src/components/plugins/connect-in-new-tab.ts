@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createElement, useCallback, useEffect, useRef, useState } from "react";
 import { ConsentHandoffDialog } from "@/components/plugins/consent-handoff";
 import { desktopShell } from "@/lib/desktop/shell";
+import { markConnectReturn } from "@/lib/plugins/connect-return";
 import {
   brokeredConsentFor,
   type ConsentHandoff,
@@ -128,6 +129,14 @@ export function useConnectInNewTab() {
     return tab;
   };
 
+  /*
+   * WHERE THE PRESS WAS MADE goes with the tab, so the page the sign-in comes back to can close it,
+   * or send it back here, once the account is connected (lib/plugins/connect-return.ts). Written
+   * before the tab leaves OpenBot, while it is still this site's blank page.
+   */
+  const here = () =>
+    `${window.location.pathname}${window.location.search}${window.location.hash}`;
+
   /**
    * `first` runs between claiming the tab and asking for the consent, for a press that has to turn
    * the app on before it can be connected (the personal edition's chat card). The tab is claimed
@@ -141,6 +150,7 @@ export function useConnectInNewTab() {
     }
     const tab = claimTab();
     handle.current = tab;
+    markConnectReturn(tab, serverId, here());
     void ask(serverId, tab);
   };
 
@@ -151,8 +161,12 @@ export function useConnectInNewTab() {
   const openAfter = (first: () => Promise<string>) => {
     const tab = claimTab();
     handle.current = tab;
+    const from = here();
     first().then(
-      (serverId) => void ask(serverId, tab),
+      (serverId) => {
+        markConnectReturn(tab, serverId, from);
+        void ask(serverId, tab);
+      },
       () => {
         tab?.close();
         handle.current = null;
