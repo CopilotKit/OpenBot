@@ -3,8 +3,12 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
-import { CopilotKitMark, ProviderLogo } from "@/components/auth/provider-logo";
-import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  CLOUD_SIGN_IN_TITLE,
+  CloudSignIn,
+} from "@/components/auth/cloud-sign-in";
+import { ProviderLogo } from "@/components/auth/provider-logo";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -12,7 +16,6 @@ import {
   signInWith,
   signInWithEmailDomain,
 } from "@/lib/auth/client";
-import { hostedSignInAddress } from "@/lib/auth/hosted";
 import { resumeUrlFor, verifierPathFor } from "@/lib/auth/resume";
 import { appConfig } from "@/lib/generated/application-config";
 import { inNoOrganization } from "@/lib/organizations/in-no-organization";
@@ -82,12 +85,11 @@ function SignScreen() {
   const { flow_id: flowId } = Route.useSearch();
   // Which provider is being opened, rather than whether one is: with three buttons, a single
   // boolean would put "Opening…" on all of them.
-  const [opening, setOpening] = useState<
-    AuthProviderId | "copilotkit" | "sso" | null
-  >(null);
+  const [opening, setOpening] = useState<AuthProviderId | "sso" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { data: options } = useQuery(authProvidersQueryOptions());
   const providers = options?.providers ?? [];
+  // OpenBot Cloud: its own screen (`CloudSignIn`), and none of the ways in below.
   const hosted = options?.hosted === true;
   const [email, setEmail] = useState("");
 
@@ -140,37 +142,6 @@ function SignScreen() {
 
   const providerButtons = (
     <div className="flex flex-col gap-2">
-      {/*
-       * A hosted OpenBot's own way in, first: the person's account with OpenBot by CopilotKit
-       * (`hostedSignIn`). The same button as the others, as a link that looks like them, because the server takes the
-       * browser on to that sign-in page and back to where sign-in would have brought them. A refusal
-       * lands on the server's own page, which links back here.
-       */}
-      {hosted ? (
-        <a
-          aria-disabled={opening !== null || undefined}
-          className={cn(
-            buttonVariants({ size: "lg", variant: "outline" }),
-            "h-10 w-full justify-start gap-3 px-3 tracking-tight",
-            opening !== null && "pointer-events-none opacity-50",
-          )}
-          href={hostedSignInAddress(
-            resumeUrlFor(window.location.origin, flowId),
-          )}
-          onClick={() => {
-            setError(null);
-            setOpening("copilotkit");
-          }}
-        >
-          <CopilotKitMark />
-          <span className="flex-1 text-center">
-            {opening === "copilotkit"
-              ? "Opening OpenBot by CopilotKit…"
-              : "Continue with OpenBot by CopilotKit"}
-          </span>
-          <span aria-hidden="true" className="size-[18px]" />
-        </a>
-      ) : null}
       {providers.map((provider) => (
         /*
          * Every provider gets the same button, and it is the light-themed outline one
@@ -235,76 +206,89 @@ function SignScreen() {
           transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
           variants={{ hidden, shown }}
         >
-          Sign in to {appConfig.brand.productName}
+          {hosted
+            ? CLOUD_SIGN_IN_TITLE
+            : `Sign in to ${appConfig.brand.productName}`}
         </motion.h1>
         <motion.div
-          className="mt-8 w-full"
+          className={cn("w-full", hosted ? "mt-3" : "mt-8")}
           transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
           variants={{ hidden, shown }}
         >
-          {options?.ssoRequired ? (
-            <p className="mb-3 text-center text-sm text-muted-foreground">
-              Your organization requires you to sign in with your company
-              account.
-            </p>
-          ) : null}
-          {(providers.length > 0 || hosted) && !options?.ssoRequired ? (
-            providerButtons
-          ) : options?.sso || options?.ssoRequired ? null : (
-            <p className="text-center text-sm text-muted-foreground">
-              Sign-in isn't set up yet. An admin has to set it up first.
-            </p>
-          )}
           {/*
-           * The way in for a company that runs its own identity provider.
-           *
-           * Below the buttons, because a deployment with both has more people arriving through the
-           * buttons: the registered providers are for the companies whose IdP was added by hand.
+           * OpenBot Cloud (`hostedSignIn`, true only where organizations come from OpenBot Cloud's
+           * own sign-in) has a screen of its own: sign in, or OpenBot for Business. Every other
+           * OpenBot keeps the ways in it was set up with, below.
            */}
-          {options?.sso ? (
-            <form className="mt-3" onSubmit={handleDomainSignIn}>
-              {providers.length > 0 ? (
-                <div className="mb-3 flex items-center gap-3">
-                  <Separator className="flex-1" />
-                  <span className="text-muted-foreground text-xs">or</span>
-                  <Separator className="flex-1" />
-                </div>
+          {hosted ? (
+            <CloudSignIn flowId={flowId} />
+          ) : (
+            <>
+              {options?.ssoRequired ? (
+                <p className="mb-3 text-center text-sm text-muted-foreground">
+                  Your organization requires you to sign in with your company
+                  account.
+                </p>
               ) : null}
-              <Input
-                autoComplete="email"
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="you@company.com"
-                required
-                type="email"
-                value={email}
-              />
-              <Button
-                className="mt-2 h-10 w-full tracking-tight"
-                disabled={opening !== null || email.trim().length === 0}
-                size="lg"
-                type="submit"
-                variant="outline"
-              >
-                {opening === "sso"
-                  ? "Opening…"
-                  : "Continue with your company account"}
-              </Button>
-            </form>
-          ) : null}
-          {/* The administrators' audited break-glass while SSO is required; everybody else is refused. */}
-          {options?.ssoRequired && providers.length > 0 ? (
-            <details className="mt-4 text-sm">
-              <summary className="cursor-pointer text-center text-muted-foreground">
-                Admin sign-in
-              </summary>
-              <div className="mt-3">{providerButtons}</div>
-            </details>
-          ) : null}
-          {error ? (
-            <p className="mt-3 text-sm text-destructive" role="alert">
-              {error}
-            </p>
-          ) : null}
+              {providers.length > 0 && !options?.ssoRequired ? (
+                providerButtons
+              ) : options?.sso || options?.ssoRequired ? null : (
+                <p className="text-center text-sm text-muted-foreground">
+                  Sign-in isn't set up yet. An admin has to set it up first.
+                </p>
+              )}
+              {/*
+               * The way in for a company that runs its own identity provider.
+               *
+               * Below the buttons, because a deployment with both has more people arriving through the
+               * buttons: the registered providers are for the companies whose IdP was added by hand.
+               */}
+              {options?.sso ? (
+                <form className="mt-3" onSubmit={handleDomainSignIn}>
+                  {providers.length > 0 ? (
+                    <div className="mb-3 flex items-center gap-3">
+                      <Separator className="flex-1" />
+                      <span className="text-muted-foreground text-xs">or</span>
+                      <Separator className="flex-1" />
+                    </div>
+                  ) : null}
+                  <Input
+                    autoComplete="email"
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="you@company.com"
+                    required
+                    type="email"
+                    value={email}
+                  />
+                  <Button
+                    className="mt-2 h-10 w-full tracking-tight"
+                    disabled={opening !== null || email.trim().length === 0}
+                    size="lg"
+                    type="submit"
+                    variant="outline"
+                  >
+                    {opening === "sso"
+                      ? "Opening…"
+                      : "Continue with your company account"}
+                  </Button>
+                </form>
+              ) : null}
+              {/* The administrators' audited break-glass while SSO is required; everybody else is refused. */}
+              {options?.ssoRequired && providers.length > 0 ? (
+                <details className="mt-4 text-sm">
+                  <summary className="cursor-pointer text-center text-muted-foreground">
+                    Admin sign-in
+                  </summary>
+                  <div className="mt-3">{providerButtons}</div>
+                </details>
+              ) : null}
+              {error ? (
+                <p className="mt-3 text-sm text-destructive" role="alert">
+                  {error}
+                </p>
+              ) : null}
+            </>
+          )}
         </motion.div>
       </motion.div>
     </div>

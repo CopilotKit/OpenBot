@@ -14,7 +14,7 @@ export interface ModelCatalogue {
   provider: ModelCatalogueProvider;
   /** Who serves the models: a provider's own API, an OpenAI-compatible gateway in front of one, or a ChatGPT or Claude plan. */
   source: ModelCatalogueSource;
-  /** Who decides what people may pick. all: one person on their own machine, offered every model listed. allowed: a team, offered the models an administrator allowed. */
+  /** Who decides what people may pick. all: one person on their own machine, offered every model listed. allowed: a team, offered every model listed until an administrator narrows it with the model allowlist (on, with at least one model allowed). */
   exposure: ModelCatalogueExposure;
   /** What a run uses when nobody picked. Always one of models. */
   default: string;

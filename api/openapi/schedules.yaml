@@ -705,6 +705,58 @@ paths:
           $ref: ./common.yaml#/components/responses/ServerError
         default:
           $ref: ./common.yaml#/components/responses/UnexpectedError
+  /api/v2/organizations/{organizationId}/check-in-items/{checkInItemId}/work-on:
+    parameters:
+      - $ref: ./common.yaml#/components/parameters/OrganizationId
+      - $ref: "#/components/parameters/CheckInItemId"
+    post:
+      tags:
+        - Check-ins
+      operationId: workOnCheckInItem
+      summary: Work on an item
+      description: "Start an item the way this server takes work on. Where the server
+        runs tasks in conversations of their own, it becomes a task, as
+        startCheckInItem makes one, and `task` names it. Where it does not, no
+        task and no conversation is made: the item is started, and
+        `conversation` names the caller's own conversation with the item's Bot
+        (made if they have none yet) and the message to send there as the
+        caller's own, so the Bot works on it in that conversation like any other
+        request. One that is no longer open, or is somebody else's, is refused."
+      security:
+        - webSession: []
+        - appOAuth:
+            - check-ins:write
+        - apiKey: []
+      parameters:
+        - $ref: ./common.yaml#/components/parameters/IdempotencyKey
+      responses:
+        "200":
+          description: The item, started, with the task it became or the conversation to
+            work on it in.
+          headers: *a1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckInItemWork"
+              examples:
+                inConversation:
+                  $ref: "#/components/examples/CheckInItemWorkInConversationExample"
+                asTask:
+                  $ref: "#/components/examples/CheckInItemWorkAsTaskExample"
+        "400":
+          $ref: ./common.yaml#/components/responses/InvalidRequest
+        "401":
+          $ref: ./common.yaml#/components/responses/Unauthenticated
+        "403":
+          $ref: ./common.yaml#/components/responses/Forbidden
+        "404":
+          $ref: "#/components/responses/CheckInItemNotFound"
+        "409":
+          $ref: ./common.yaml#/components/responses/IdempotencyConflict
+        "500":
+          $ref: ./common.yaml#/components/responses/ServerError
+        default:
+          $ref: ./common.yaml#/components/responses/UnexpectedError
   /api/v2/organizations/{organizationId}/check-in-items/{checkInItemId}/dismiss:
     parameters:
       - $ref: ./common.yaml#/components/parameters/OrganizationId
@@ -2499,6 +2551,51 @@ components:
             conversationId:
               type: string
               description: The task's own conversation.
+    CheckInItemWork:
+      type: object
+      description: An item, started, and where the work on it goes on. Exactly one of
+        `task` and `conversation` is set.
+      required:
+        - checkInItem
+        - task
+        - conversation
+      properties:
+        checkInItem:
+          $ref: "#/components/schemas/CheckInItem"
+        task:
+          type:
+            - object
+            - "null"
+          description: The task the item became, where this server runs tasks in
+            conversations of their own. Null otherwise.
+          required:
+            - id
+            - conversationId
+          properties:
+            id:
+              type: string
+              description: The task's id.
+            conversationId:
+              type: string
+              description: The task's own conversation.
+        conversation:
+          type:
+            - object
+            - "null"
+          description: Where this server runs no tasks, the caller's own conversation with
+            the item's Bot and what to send there. Null when the item became a
+            task.
+          required:
+            - id
+            - message
+          properties:
+            id:
+              type: string
+              description: The caller's conversation with the item's Bot, that Bot alone.
+            message:
+              type: string
+              description: "The message to send in that conversation as the caller's own: the
+                item's title, its detail and where it was read."
     CheckInUsage:
       type: object
       description: How check-ins are going, per Bot. Counts only.
@@ -3627,6 +3724,53 @@ components:
         task:
           id: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
           conversationId: 8d7c6b5a-4f3e-4d2c-9b1a-0f9e8d7c6b5a
+    CheckInItemWorkInConversationExample:
+      summary: An item, started in the caller's own conversation with its Bot.
+      value:
+        checkInItem:
+          id: 9e8d7c6b-5a4f-4e3d-2c1b-0a9f8e7d6c5b
+          botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          checkInId: c1f0a4de-52b7-4c0b-9a57-3a1e8d2f6b90
+          title: Reply to the vendor about the renewal
+          detail: The vendor answered yesterday and asked for a decision by Friday.
+          sourceApp: Gmail
+          sourceRef: null
+          sourceLink: https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5
+          status: started
+          pingId: null
+          deliveredAt: null
+          resolvedAt: 2026-11-14T10:12:00.000Z
+          createdAt: 2026-11-14T09:00:36.000Z
+        task: null
+        conversation:
+          id: 5f0c2a52-3f1e-4a55-9d0a-7f6d2b1c8e90
+          message: |-
+            Reply to the vendor about the renewal
+
+            The vendor answered yesterday and asked for a decision by Friday.
+
+            Source: https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5
+    CheckInItemWorkAsTaskExample:
+      summary: An item, started as a task.
+      value:
+        checkInItem:
+          id: 9e8d7c6b-5a4f-4e3d-2c1b-0a9f8e7d6c5b
+          botId: agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21
+          checkInId: c1f0a4de-52b7-4c0b-9a57-3a1e8d2f6b90
+          title: Reply to the vendor about the renewal
+          detail: The vendor answered yesterday and asked for a decision by Friday.
+          sourceApp: Gmail
+          sourceRef: null
+          sourceLink: https://mail.google.com/mail/u/0/#inbox/18c2f0a1b2c3d4e5
+          status: started
+          pingId: null
+          deliveredAt: null
+          resolvedAt: 2026-11-14T10:12:00.000Z
+          createdAt: 2026-11-14T09:00:36.000Z
+        task:
+          id: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+          conversationId: 8d7c6b5a-4f3e-4d2c-9b1a-0f9e8d7c6b5a
+        conversation: null
     CheckInUsageExample:
       summary: A week of check-ins.
       value:

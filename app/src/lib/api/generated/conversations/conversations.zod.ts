@@ -86,7 +86,7 @@ export const CreateConversationJoinTokenResponse = zod
   );
 
 /**
- * Return one page of the caller's conversations: pinned ones first, then the most recently used. Each says what was last said in it, whether the caller has read it, and what a Bot is still working on there. With q the page holds only the conversations whose name or words match, for a search of the whole list; a search page holds at most 50. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the caller's conversations: pinned ones first, then the most recently used. Each says what was last said in it, whether the caller has read it, and what a Bot is still working on there. With q the page holds only the conversations whose name or words match, for a search of the whole list; a search page holds at most 50. With botId it holds only the conversations that Bot takes part in, in the same order. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List conversations
  */
 
@@ -101,6 +101,8 @@ export const ListConversationsParams = zod.object({
 
 export const listConversationsQueryQMin = 2;
 export const listConversationsQueryQMax = 200;
+
+export const listConversationsQueryBotIdMax = 200;
 
 export const listConversationsQueryLimitDefault = 50;
 export const listConversationsQueryLimitMax = 200;
@@ -119,6 +121,14 @@ export const ListConversationsQueryParams = zod.object({
     .optional()
     .describe(
       "What the person typed to search their conversations: 2 to 200 characters, with no control characters.",
+    ),
+  botId: zod
+    .string()
+    .min(1)
+    .max(listConversationsQueryBotIdMax)
+    .optional()
+    .describe(
+      "Only the conversations this Bot takes part in, one-Bot and group alike. A Bot the caller has no conversations with answers an empty page. Cannot be combined with q.",
     ),
   limit: zod
     .int()

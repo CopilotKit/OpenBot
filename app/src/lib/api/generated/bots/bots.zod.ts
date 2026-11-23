@@ -145,6 +145,12 @@ export const ListBotsResponse = zod.object({
           .describe(
             "Whether an administrator assigned this Bot to the caller.",
           ),
+        lastConversationAt: zod.iso
+          .datetime({ offset: true })
+          .nullish()
+          .describe(
+            "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+          ),
         builtIn: zod
           .boolean()
           .describe(
@@ -154,6 +160,20 @@ export const ListBotsResponse = zod.object({
           .boolean()
           .describe(
             "Whether it runs on OpenBot's model, so a person can pick the model per conversation.",
+          ),
+        defaultModel: zod
+          .object({
+            model: zod.string(),
+            effort: zod.string().nullable(),
+            source: zod
+              .string()
+              .describe(
+                "The model connection source when the default was saved.",
+              ),
+          })
+          .nullish()
+          .describe(
+            "The Bot's saved default model and thinking level. Null follows the deployment default.",
           ),
         keyFromOpenBot: zod
           .boolean()
@@ -396,6 +416,12 @@ export const CreateBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -405,6 +431,20 @@ export const CreateBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it runs on OpenBot's model, so a person can pick the model per conversation.",
+        ),
+      defaultModel: zod
+        .object({
+          model: zod.string(),
+          effort: zod.string().nullable(),
+          source: zod
+            .string()
+            .describe(
+              "The model connection source when the default was saved.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The Bot's saved default model and thinking level. Null follows the deployment default.",
         ),
       keyFromOpenBot: zod
         .boolean()
@@ -531,6 +571,12 @@ export const GetBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -540,6 +586,20 @@ export const GetBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it runs on OpenBot's model, so a person can pick the model per conversation.",
+        ),
+      defaultModel: zod
+        .object({
+          model: zod.string(),
+          effort: zod.string().nullable(),
+          source: zod
+            .string()
+            .describe(
+              "The model connection source when the default was saved.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The Bot's saved default model and thinking level. Null follows the deployment default.",
         ),
       keyFromOpenBot: zod
         .boolean()
@@ -566,7 +626,7 @@ export const GetBotResponse = zod.object({
 });
 
 /**
- * Replace a Bot's name, title, role description and visibility, which are all required, and change any optional field that is present. An absent endpoint, key or isolated leaves that setting as it is, so an edit to a name never drops a key or moves a Bot between computers. Only whoever may manage the Bot may change it, and a Bot that comes with OpenBot cannot be changed. Making a Bot public reports what that means for the shared app accounts it uses.
+ * Replace a Bot's name, title, role description and visibility, which are all required, and change any optional field that is present. An absent endpoint, key, isolated or default model leaves that setting as it is, so an edit to a name never drops a key or moves a Bot between computers. Only whoever may manage the Bot may change it, and a Bot that comes with OpenBot cannot be changed. Making a Bot public reports what that means for the shared app accounts it uses.
  * @summary Change a Bot
  */
 
@@ -611,6 +671,13 @@ export const updateBotBodyOneEndpointTwoRegExp = new RegExp(
 );
 export const updateBotBodyOneAuthHeaderRegExp = new RegExp("^[A-Za-z0-9-]*$");
 export const updateBotBodyOneInstructionsMax = 1000;
+
+export const updateBotBodyOneDefaultModelModelMax = 500;
+
+export const updateBotBodyOneDefaultModelModelRegExp = new RegExp("\\S");
+export const updateBotBodyOneDefaultModelEffortMax = 40;
+
+export const updateBotBodyOneDefaultModelEffortRegExp = new RegExp("\\S");
 
 export const UpdateBotBody = zod
   .object({
@@ -672,6 +739,24 @@ export const UpdateBotBody = zod
       .optional()
       .describe(
         "New instructions for the starter Bot, 1 to 1000 characters once trimmed. Absent leaves them as they are; every other Bot ignores them.",
+      ),
+    defaultModel: zod
+      .object({
+        model: zod
+          .string()
+          .min(1)
+          .max(updateBotBodyOneDefaultModelModelMax)
+          .regex(updateBotBodyOneDefaultModelModelRegExp),
+        effort: zod
+          .string()
+          .min(1)
+          .max(updateBotBodyOneDefaultModelEffortMax)
+          .regex(updateBotBodyOneDefaultModelEffortRegExp)
+          .nullable(),
+      })
+      .nullish()
+      .describe(
+        "A model from the connected provider and its thinking level. Null resets to the deployment default. Omit to keep the current setting.",
       ),
   })
   .describe("A Bot's fields after the change.");
@@ -756,6 +841,12 @@ export const UpdateBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -765,6 +856,20 @@ export const UpdateBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it runs on OpenBot's model, so a person can pick the model per conversation.",
+        ),
+      defaultModel: zod
+        .object({
+          model: zod.string(),
+          effort: zod.string().nullable(),
+          source: zod
+            .string()
+            .describe(
+              "The model connection source when the default was saved.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The Bot's saved default model and thinking level. Null follows the deployment default.",
         ),
       keyFromOpenBot: zod
         .boolean()
@@ -1033,6 +1138,12 @@ export const DuplicateBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1042,6 +1153,20 @@ export const DuplicateBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it runs on OpenBot's model, so a person can pick the model per conversation.",
+        ),
+      defaultModel: zod
+        .object({
+          model: zod.string(),
+          effort: zod.string().nullable(),
+          source: zod
+            .string()
+            .describe(
+              "The model connection source when the default was saved.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The Bot's saved default model and thinking level. Null follows the deployment default.",
         ),
       keyFromOpenBot: zod
         .boolean()
@@ -1180,6 +1305,12 @@ export const HideBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1189,6 +1320,20 @@ export const HideBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it runs on OpenBot's model, so a person can pick the model per conversation.",
+        ),
+      defaultModel: zod
+        .object({
+          model: zod.string(),
+          effort: zod.string().nullable(),
+          source: zod
+            .string()
+            .describe(
+              "The model connection source when the default was saved.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The Bot's saved default model and thinking level. Null follows the deployment default.",
         ),
       keyFromOpenBot: zod
         .boolean()
@@ -1327,6 +1472,12 @@ export const UnhideBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1336,6 +1487,20 @@ export const UnhideBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it runs on OpenBot's model, so a person can pick the model per conversation.",
+        ),
+      defaultModel: zod
+        .object({
+          model: zod.string(),
+          effort: zod.string().nullable(),
+          source: zod
+            .string()
+            .describe(
+              "The model connection source when the default was saved.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The Bot's saved default model and thinking level. Null follows the deployment default.",
         ),
       keyFromOpenBot: zod
         .boolean()
@@ -1474,6 +1639,12 @@ export const PinBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1483,6 +1654,20 @@ export const PinBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it runs on OpenBot's model, so a person can pick the model per conversation.",
+        ),
+      defaultModel: zod
+        .object({
+          model: zod.string(),
+          effort: zod.string().nullable(),
+          source: zod
+            .string()
+            .describe(
+              "The model connection source when the default was saved.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The Bot's saved default model and thinking level. Null follows the deployment default.",
         ),
       keyFromOpenBot: zod
         .boolean()
@@ -1621,6 +1806,12 @@ export const UnpinBotResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1630,6 +1821,20 @@ export const UnpinBotResponse = zod.object({
         .boolean()
         .describe(
           "Whether it runs on OpenBot's model, so a person can pick the model per conversation.",
+        ),
+      defaultModel: zod
+        .object({
+          model: zod.string(),
+          effort: zod.string().nullable(),
+          source: zod
+            .string()
+            .describe(
+              "The model connection source when the default was saved.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The Bot's saved default model and thinking level. Null follows the deployment default.",
         ),
       keyFromOpenBot: zod
         .boolean()
@@ -1810,6 +2015,12 @@ export const RevokeBotCallbackTokenResponse = zod.object({
       assignedToMe: zod
         .boolean()
         .describe("Whether an administrator assigned this Bot to the caller."),
+      lastConversationAt: zod.iso
+        .datetime({ offset: true })
+        .nullish()
+        .describe(
+          "When a conversation of the caller's with this Bot last had a message, the Bot's or anybody's, or was started if it has none yet; null when the caller has none. Counts the conversations listConversations lists. Set on listBots.",
+        ),
       builtIn: zod
         .boolean()
         .describe(
@@ -1819,6 +2030,20 @@ export const RevokeBotCallbackTokenResponse = zod.object({
         .boolean()
         .describe(
           "Whether it runs on OpenBot's model, so a person can pick the model per conversation.",
+        ),
+      defaultModel: zod
+        .object({
+          model: zod.string(),
+          effort: zod.string().nullable(),
+          source: zod
+            .string()
+            .describe(
+              "The model connection source when the default was saved.",
+            ),
+        })
+        .nullish()
+        .describe(
+          "The Bot's saved default model and thinking level. Null follows the deployment default.",
         ),
       keyFromOpenBot: zod
         .boolean()

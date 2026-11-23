@@ -1,14 +1,14 @@
-import { TelemetryAssistantMessage } from "@/components/channels/telemetry-assistant-message";
 import { CopilotChat } from "@copilotkit/react-core/v2";
 import { IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { ConversationApprovals } from "@/components/approvals/inline-approval";
+import { TelemetryAssistantMessage } from "@/components/channels/telemetry-assistant-message";
 import { ComputerChatControls } from "@/components/computer/computer-controls";
 import { ComputerViewPanel } from "@/components/computer/computer-panel";
-import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
+import { AddCardButton } from "@/components/plan/add-card-button";
 import { StarPrompt } from "@/components/star-prompt/star-prompt";
 import { Button } from "@/components/ui/button";
 import { defaultAgentId } from "@/lib/agents/default-agent";
@@ -20,6 +20,7 @@ import {
 import { getBot } from "@/lib/api/generated/bots/bots";
 import { organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
+import { useOpenComputerOnRequest } from "@/lib/computers/panel-view";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotActivity } from "@/lib/copilot/bot-activity";
 import { useBotThread } from "@/lib/copilot/bot-thread";
@@ -235,13 +236,17 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
          * transcript has been scrolled to, and that it survives the next release of the chat.
          */}
         {stopped ? (
-          <p
-            className="border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
-            data-testid="bot-chat-stopped"
-            role="alert"
-          >
-            {stopped}
-          </p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-destructive/10 px-6 py-2">
+            <p
+              className="text-destructive text-sm"
+              data-testid="bot-chat-stopped"
+              role="alert"
+            >
+              {stopped}
+            </p>
+            {/* A run refused because the organization needs a card is answered here. */}
+            <AddCardButton />
+          </div>
         ) : null}
         {/*
          * The ask to star OpenBot on GitHub, when the server says it is due: this is the screen where

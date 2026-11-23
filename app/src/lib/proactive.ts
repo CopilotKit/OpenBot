@@ -10,13 +10,15 @@ import {
   listCheckInItems,
   listCheckIns,
   runCheckIn,
-  startCheckInItem,
   updateCheckIn,
+  workOnCheckInItem,
 } from "@/lib/api/generated/check-ins/check-ins";
 import type {
   LastCheckIn as ApiLastCheckIn,
   CheckIn,
   CheckInItem,
+  CheckInItemWork,
+  CheckInItemWorkConversation,
   CheckInRunAnswer,
   CreateCheckInRequest,
   UpdateCheckInRequest,
@@ -176,22 +178,33 @@ export const removeProactiveSetting = (id: string) =>
   });
 
 /**
- * Start an item as a task in a conversation of its own, or Hide it. The server answers a second
- * Start with the task the first one opened, so a double tap starts one task. The task arrives on the
- * lists through the tasks query, so nothing here reads the answer.
+ * Where Work on it took an item: the API's `CheckInItemWork`. The server decides by whether it runs
+ * task threads. With them on, the item became a task in a conversation of its own (`task`), which
+ * arrives on the lists through the tasks query. With them off, no task was made: `conversation` is
+ * the person's own conversation with the item's Bot and the message to send there, so the Bot works
+ * on it in that conversation like any other request.
+ */
+export type ItemWork = CheckInItemWork;
+
+/** The person's conversation with an item's Bot, and the message that asks the Bot to work on it. */
+export type ItemConversation = NonNullable<CheckInItemWorkConversation>;
+
+/**
+ * Work on an item, or Hide it. A second Work on it of the same item is refused, so a double tap
+ * starts it once. Hide answers nothing a caller needs.
  */
 export const resolveSuggestion = async (
   id: string,
   action: "start" | "dismiss",
-): Promise<void> => {
+): Promise<ItemWork | null> => {
   if (action === "start")
-    await startCheckInItem(organizationId(), id, once(), {
+    return workOnCheckInItem(organizationId(), id, once(), {
       fallback: "Couldn't start this. Try again.",
     });
-  else
-    await dismissCheckInItem(organizationId(), id, once(), {
-      fallback: "Couldn't hide this. Try again.",
-    });
+  await dismissCheckInItem(organizationId(), id, once(), {
+    fallback: "Couldn't hide this. Try again.",
+  });
+  return null;
 };
 
 /** A setting's check-ins produce items, so a change to either refreshes both. */
@@ -202,22 +215,33 @@ const settleProactive = (queryClient: QueryClient) => () =>
   ]);
 
 /**
- * Start an item as a task, or Hide it. Either takes it off every list at once: the Bots page, the
- * Bot's page and the skins all read the one suggestions query. Start also opens a task, and both move
- * the counts on the sidebar's badge, so the tasks and the attention counts are read again too.
+ * Work on an item, or Hide it. Either takes it off every list at once: the Bots page, the Bot's page
+ * and the skins all read the one suggestions query. Work on it may open a task, and both move the
+ * counts on the sidebar's badge, so the tasks and the attention counts are read again too.
+ *
+ * Where the server answers with the person's conversation instead of a task, `openConversation` is
+ * handed it, to take them there and send its message. Here rather than on the button's own
+ * `mutate`, because the row is gone from the list by the time that would run.
  */
-export const resolveSuggestionMutationOptions = (queryClient: QueryClient) =>
+export const resolveSuggestionMutationOptions = (
+  queryClient: QueryClient,
+  {
+    openConversation,
+  }: { openConversation?: (conversation: ItemConversation) => void } = {},
+) =>
   mutationOptions({
     mutationFn: ({ id, action }: { id: string; action: "start" | "dismiss" }) =>
       resolveSuggestion(id, action),
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: (work) => {
+      if (work?.conversation) openConversation?.(work.conversation);
+      return Promise.all([
         settleProactive(queryClient)(),
         queryClient.invalidateQueries({ queryKey: taskKeys.all }),
         queryClient.invalidateQueries({
           queryKey: botLifecycleKeys.attention,
         }),
-      ]),
+      ]);
+    },
   });
 
 export const createProactiveSettingMutationOptions = (

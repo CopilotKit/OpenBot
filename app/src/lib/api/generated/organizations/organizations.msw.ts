@@ -18,6 +18,7 @@ import type {
   OrganizationMemberPage,
   OrganizationMemberResponse,
   OrganizationPage,
+  OrganizationPlan,
   OrganizationResponse,
   UpdateOrganizationMemberRequest,
   UpdateOrganizationRequest,
@@ -28,7 +29,7 @@ export const getListOrganizationsResponseMock = (): OrganizationPage => ({
     {
       id: "Wm4pZ7tKc1Xb9RnQ2sYd6hLe",
       slug: "dana",
-      name: "Dana's organization",
+      name: "Dana’s organization",
       role: "owner",
       active: true,
       personal: true,
@@ -147,6 +148,15 @@ export const getCreateOrganizationInvitationResponseMock =
     },
     delivery: "link",
   });
+
+export const getGetOrganizationPlanResponseMock = (): OrganizationPlan => ({
+  required: true,
+  status: "trialing",
+  trialEndsAt: "2026-12-20T09:30:00Z",
+  renewsAt: null,
+  addCardUrl:
+    "/api/auth/hosted/checkout?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe",
+});
 
 export const getListInvitationsResponseMock = (): InvitationPage => ({
   invitations: [
@@ -493,6 +503,32 @@ export const getCancelOrganizationInvitationMockHandler = (
   );
 };
 
+export const getGetOrganizationPlanMockHandler = (
+  overrideResponse?:
+    | OrganizationPlan
+    | ((
+        info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+      ) => Promise<OrganizationPlan> | OrganizationPlan),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string }>(
+    "*/api/v2/organizations/:organizationId/plan",
+    async (
+      info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetOrganizationPlanResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
 export const getListInvitationsMockHandler = (
   overrideResponse?:
     | InvitationPage
@@ -602,6 +638,7 @@ export const getOrganizationsMock = () => [
   getListOrganizationInvitationsMockHandler(),
   getCreateOrganizationInvitationMockHandler(),
   getCancelOrganizationInvitationMockHandler(),
+  getGetOrganizationPlanMockHandler(),
   getListInvitationsMockHandler(),
   getGetInvitationMockHandler(),
   getAcceptInvitationMockHandler(),

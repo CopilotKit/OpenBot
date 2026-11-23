@@ -217,7 +217,6 @@ test("Cmd/Ctrl+K opens it, and empty it lists pages, Bots and five recent conver
   expect(options("Pages")).toEqual([
     "New conversation",
     "Bots",
-    "Agents",
     "Routines",
     "Memory",
     "Skills",

@@ -2,6 +2,8 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
+  describe,
   expect,
   mock,
   setSystemTime,
@@ -674,7 +676,7 @@ test("the first screen offers OpenBot (Self-Contained), then OpenBot for Busines
   // Cloud and Self-Hosted are OpenBot for Business's, in one group that says it books a call.
   const business = view.getByRole("group", { name: "OpenBot for Business" });
   expect(business.textContent).toContain(
-    "For your whole team. Book a call to see it.",
+    "For your whole team. Book a demo to see it.",
   );
   expect(
     [...business.querySelectorAll('input[type="radio"]')].map(
@@ -758,7 +760,7 @@ test("picking OpenBot for Business shows what it adds and the booking calendar, 
     view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
   ).toHaveProperty("checked", false);
   // No address and no Connect: that is the link under the rows.
-  expect(view.queryByLabelText("OpenBot address")).toBeNull();
+  expect(view.queryByLabelText("Your company's OpenBot address")).toBeNull();
   expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
   expect(view.queryByRole("button", { name: "Install" })).toBeNull();
   expect(
@@ -809,7 +811,7 @@ test("picking OpenBot for Business shows what it adds and the booking calendar, 
   await userEvent.click(ownCloud);
   expect([business.checked, ownCloud.checked]).toEqual([false, true]);
   expect(view.getByTitle("Booking calendar")).toBe(calendar);
-  expect(view.queryByLabelText("OpenBot address")).toBeNull();
+  expect(view.queryByLabelText("Your company's OpenBot address")).toBeNull();
   // Self-Contained again: its needs and Install, as before.
   await userEvent.click(
     view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
@@ -1031,21 +1033,20 @@ test("Connect to it asks for an address in place of Install, and going back brin
     ),
   ).toEqual([false, false, false]);
   expect(self.checked).toBe(false);
-  const field = view.getByLabelText("OpenBot address") as HTMLInputElement;
+  const field = view.getByLabelText(
+    "Your company's OpenBot address",
+  ) as HTMLInputElement;
   // The link brought the person to the field.
   expect(document.activeElement).toBe(field);
   expect(field.placeholder).toBe("https://openbot.example.com");
   expect(field.value).toBe("");
   expect(
     view.getByText(
-      "You'll sign in to it in your browser. Nothing is installed on this computer.",
+      "You'll sign in to it in your browser, then come straight back here.",
     ),
   ).toBeTruthy();
   // What Self-Contained asks of this computer, and its Install, are not this choice's.
-  expect(buttons(view)).toEqual([
-    "Connect",
-    "Use OpenBot on this computer instead",
-  ]);
+  expect(buttons(view)).toEqual(["Back", "Connect"]);
   expect(
     view.queryByRole("heading", { name: "What this computer needs" }),
   ).toBeNull();
@@ -1060,22 +1061,22 @@ test("Connect to it asks for an address in place of Install, and going back brin
   expectPlain(view);
   // Back, by the control that says so, and by the rows themselves.
   await userEvent.type(field, "openbot.example.com");
-  await userEvent.click(
-    view.getByRole("button", { name: "Use OpenBot on this computer instead" }),
-  );
+  await userEvent.click(view.getByRole("button", { name: "Back" }));
   expect(buttons(view)).toEqual(["Connect to it", "Install"]);
   await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
   // What was typed is still there.
   expect(
-    (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
+    (view.getByLabelText("Your company's OpenBot address") as HTMLInputElement)
+      .value,
   ).toBe("openbot.example.com");
   // OpenBot for Business from here is its booker, and Connect to it goes back to the address.
   await userEvent.click(business);
   expect(view.getByTitle("Booking calendar")).toBeTruthy();
-  expect(view.queryByLabelText("OpenBot address")).toBeNull();
+  expect(view.queryByLabelText("Your company's OpenBot address")).toBeNull();
   await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
   expect(
-    (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
+    (view.getByLabelText("Your company's OpenBot address") as HTMLInputElement)
+      .value,
   ).toBe("openbot.example.com");
   await userEvent.click(
     view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
@@ -1097,7 +1098,9 @@ test("a good address signs in through the browser, and nothing on this computer 
     connect_to_openbot: () => signIn.promise,
   });
   const from = invokeCalls.length;
-  const field = view.getByLabelText("OpenBot address") as HTMLInputElement;
+  const field = view.getByLabelText(
+    "Your company's OpenBot address",
+  ) as HTMLInputElement;
   // No scheme: the shell takes it as https, and the window does not refuse it first.
   await userEvent.type(field, "openbot.example.com{Enter}");
   expect(
@@ -1153,7 +1156,9 @@ for (const { kind, said, at, offer } of CONNECT_PROBLEMS) {
       },
       install_app_update: () => new Promise(() => {}),
     });
-    const field = view.getByLabelText("OpenBot address") as HTMLInputElement;
+    const field = view.getByLabelText(
+      "Your company's OpenBot address",
+    ) as HTMLInputElement;
     await userEvent.type(field, `${ELSEWHERE}{Enter}`);
     const alert = await view.findByRole("alert");
     expect(alert.textContent).toContain(said);
@@ -1163,10 +1168,7 @@ for (const { kind, said, at, offer } of CONNECT_PROBLEMS) {
       expect(alert.textContent).toBe(said);
       expect(document.activeElement).toBe(field);
       expect(field.getAttribute("aria-invalid")).toBe("true");
-      expect(buttons(view)).toEqual([
-        "Connect",
-        "Use OpenBot on this computer instead",
-      ]);
+      expect(buttons(view)).toEqual(["Back", "Connect"]);
       // A sentence about the address goes once the address changes.
       await userEvent.type(field, "x");
       expect(view.queryByRole("alert")).toBeNull();
@@ -1233,7 +1235,9 @@ test("an OpenBot this build is too old for says in its notice that this build do
       updatesItself: false,
     },
   });
-  const field = view.getByLabelText("OpenBot address") as HTMLInputElement;
+  const field = view.getByLabelText(
+    "Your company's OpenBot address",
+  ) as HTMLInputElement;
   await userEvent.type(field, `${ELSEWHERE}{Enter}`);
   const line = await view.findByText(DOESNT_UPDATE_ITSELF);
   const notice = view.getByRole("alert");
@@ -1250,7 +1254,9 @@ test("Cancel while the browser is waited on stops the sign-in and gives the form
     connect_to_openbot: () => signIn.promise,
     cancel_connect: null,
   });
-  const field = view.getByLabelText("OpenBot address") as HTMLInputElement;
+  const field = view.getByLabelText(
+    "Your company's OpenBot address",
+  ) as HTMLInputElement;
   await userEvent.type(field, `${ELSEWHERE}{Enter}`);
   await view.findByText("Finish signing in in your browser.");
   await userEvent.click(view.getByRole("button", { name: "Cancel" }));
@@ -1316,7 +1322,8 @@ test("a launch after the sign-in ended says so once, with the address filled in 
     view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
   ).toHaveProperty("checked", false);
   expect(
-    (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
+    (view.getByLabelText("Your company's OpenBot address") as HTMLInputElement)
+      .value,
   ).toBe(ELSEWHERE);
   expect(view.getByRole("alert").textContent).toBe(said);
   expect(notices).toBe(1);
@@ -1337,6 +1344,555 @@ test("a launch after the sign-in ended says so once, with the address filled in 
   expect(strays).toEqual([]);
 });
 
+/*
+ * OpenBot Cloud is on only in a build that sets VITE_OPENBOT_CLOUD_ENABLED=true. Off, which is every
+ * build until Cloud is open to everybody, the first screen is the one above: OpenBot
+ * (Self-Contained), OpenBot for Business with Cloud and Self-Hosted that book a call, and connecting
+ * to an address. A connection saved to Cloud's own address is then any connection: the address
+ * form, filled in. Before the switch, every build offered Sign in to OpenBot Cloud.
+ */
+const CLOUD = "https://api.open.bot";
+/** Where people use OpenBot Cloud in a browser: what the window names and opens. */
+const CLOUD_WEB = "https://my.open.bot";
+
+test("with OpenBot Cloud off, a launch whose sign-in to Cloud's address ended opens on the address form, not on Cloud", async () => {
+  expect(process.env.VITE_OPENBOT_CLOUD_ENABLED).toBeUndefined();
+  const said =
+    "Your sign-in to api.open.bot has ended. Sign in again to keep going.";
+  let notices = 0;
+  const strays = connectedShell({
+    connection: { mode: "connected", address: CLOUD, signedIn: false },
+    take_connection_notice: () => {
+      notices += 1;
+      return notices === 1 ? { kind: "session-ended", message: said } : null;
+    },
+  });
+  const view = await renderApp(true);
+  expect(view.queryByRole("radio", { name: /^OpenBot Cloud/ })).toBeNull();
+  expect(
+    view.queryByRole("button", { name: "Sign in to OpenBot Cloud" }),
+  ).toBeNull();
+  expect(
+    (view.getByLabelText("Your company's OpenBot address") as HTMLInputElement)
+      .value,
+  ).toBe(CLOUD);
+  expect(view.getByRole("alert").textContent).toBe(said);
+  expect(view.getByRole("button", { name: "Sign in again" })).toBeTruthy();
+  expect(strays).toEqual([]);
+});
+
+describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)", () => {
+  let before: string | undefined;
+  beforeEach(() => {
+    before = process.env.VITE_OPENBOT_CLOUD_ENABLED;
+    process.env.VITE_OPENBOT_CLOUD_ENABLED = "true";
+  });
+  afterEach(() => {
+    if (before === undefined) delete process.env.VITE_OPENBOT_CLOUD_ENABLED;
+    else process.env.VITE_OPENBOT_CLOUD_ENABLED = before;
+  });
+
+  /*
+   * The ways to run OpenBot, as they are sold with Cloud on, in the order a person reads them and a
+   * keyboard or a screen reader meets them. The screen steers to OpenBot Cloud, first and picked,
+   * which this app signs in to, and OpenBot for Business, a company's own cloud or on-prem, which
+   * books a demo, with the link to connect to a company's own OpenBot. OpenBot (Self-Contained) is a
+   * line at the very foot of the card, below everything else: never picked, never shaded, never the
+   * way back. Before, Self-Contained came first and was picked, then a smaller row between the
+   * choices.
+   */
+  test("the first screen opens on OpenBot Cloud, then OpenBot for Business and its link, with OpenBot (Self-Contained) a line at its foot", async () => {
+    setupRootConfiguration("/tmp/local-eval-welcome-cloud", async () =>
+      emptyConfiguration(),
+    );
+    withLocalCli({
+      connection: THIS_COMPUTER,
+      record_setup_event: null,
+      "plugin:opener|open_url": null,
+    });
+    const view = await renderApp();
+    const radios = view.getAllByRole("radio") as HTMLInputElement[];
+    expect(radios.map((radio) => radio.closest("label")?.textContent)).toEqual([
+      "OpenBot CloudUse OpenBot here. Your Bots run in our cloud.",
+      "OpenBot for BusinessYour own cloud or on-prem. Book a demo.",
+    ]);
+    expect(radios.map((radio) => [radio.value, radio.checked])).toEqual([
+      ["cloud", true],
+      ["business", false],
+    ]);
+    // The order a keyboard and a screen reader meet them: Cloud, Business, the link, Cloud's
+    // sign-in, and last of all the way to Self-Contained.
+    const order = () =>
+      [...view.container.querySelectorAll("input[type=radio], button")].map(
+        (control) =>
+          control instanceof HTMLInputElement
+            ? control.value
+            : control.textContent,
+      );
+    expect(order()).toEqual([
+      "cloud",
+      "business",
+      "Connect to it",
+      "Sign in to OpenBot Cloud",
+      "Use OpenBot (Self-Contained)",
+    ]);
+    // Self-Contained is a line with a link, the card's last element, not a row and not picked.
+    const foot = view.getByRole("region", { name: "Run on this computer" });
+    expect(foot.textContent).toBe(
+      "Want everything to run on this computer? Use OpenBot (Self-Contained).",
+    );
+    expect(foot.parentElement?.lastElementChild).toBe(foot);
+    expect(foot.querySelector(".tile, .chosen")).toBeNull();
+    // Cloud's sign-in is what the screen opens on: nothing to type.
+    expect(
+      view.getByText(
+        "This app connects to OpenBot Cloud, where your Bots run. Your account, Bots and conversations are the same here and at my.open.bot.",
+      ),
+    ).toBeTruthy();
+    expect(view.queryByLabelText("Your company's OpenBot address")).toBeNull();
+    expect(
+      view.queryByRole("heading", { name: "What this computer needs" }),
+    ).toBeNull();
+    // OpenBot for Business is one row, not a group of two, and names its clouds by their marks.
+    expect(
+      view.queryByRole("group", { name: "OpenBot for Business" }),
+    ).toBeNull();
+    expect(
+      [
+        ...(radios[1]?.closest("label")?.querySelectorAll("img[data-mark]") ??
+          []),
+      ].map((mark) => mark.getAttribute("data-mark")),
+    ).toEqual(["aws", "azure", "google-cloud", "kubernetes"]);
+    // OpenBot for Business books a demo, and Self-Contained's line is still last, below the booker.
+    await userEvent.click(radios[1] as HTMLInputElement);
+    expect(radios[1]?.checked).toBe(true);
+    expect(view.getByTitle("Booking calendar")).toBeTruthy();
+    expect(view.queryByLabelText("Your company's OpenBot address")).toBeNull();
+    expect(
+      view.queryByRole("button", { name: "Sign in to OpenBot Cloud" }),
+    ).toBeNull();
+    expect(order().at(-1)).toBe("Use OpenBot (Self-Contained)");
+    // The calendar is below the lists: Book a demo, in view from the start, takes the person there.
+    await userEvent.click(view.getByRole("button", { name: "Book a demo" }));
+    expect(document.activeElement).toBe(
+      view.getByRole("heading", { name: "Book a demo" }),
+    );
+    // Connect to it, under OpenBot for Business: the address, who has it, and Connect, no row
+    // picked.
+    await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
+    const field = view.getByLabelText("Your company's OpenBot address");
+    expect(document.activeElement).toBe(field);
+    expect(field.getAttribute("aria-describedby")?.split(" ").length).toBe(2);
+    expect(radios.map((radio) => radio.checked)).toEqual([false, false]);
+    expect(view.queryByTitle("Booking calendar")).toBeNull();
+    expect(
+      view.getByText(
+        "Ask your IT team or whoever set up OpenBot at your company for this address.",
+      ),
+    ).toBeTruthy();
+    expect(
+      view.getByText(
+        "You'll sign in to it in your browser, then come straight back here.",
+      ),
+    ).toBeTruthy();
+    // Back: the choices again, as the screen opened, on OpenBot Cloud, never on Self-Contained.
+    // Every choice is this app on this computer, so it is Back, not "use OpenBot on this computer".
+    expect(view.queryByText(/on this computer instead/)).toBeNull();
+    await userEvent.click(view.getByRole("button", { name: "Back" }));
+    expect(radios.map((radio) => radio.checked)).toEqual([true, false]);
+    expect(view.queryByLabelText("Your company's OpenBot address")).toBeNull();
+    expect(buttons(view)).toEqual([
+      "Connect to it",
+      "Sign in to OpenBot Cloud",
+      "Use OpenBot (Self-Contained)",
+    ]);
+    expectPlain(view);
+    expect(localCliCalls()).toEqual([]);
+  });
+
+  /*
+   * OpenBot (Self-Contained), opened from its line at the foot: what this computer needs and why,
+   * the setup time and Install, there at the foot, with neither row picked. Install sets it up.
+   */
+  test("OpenBot (Self-Contained), opened at the foot, shows what this computer needs and Install, which sets it up", async () => {
+    setupRootConfiguration("/tmp/cloud-self-contained", async () =>
+      emptyConfiguration(),
+    );
+    withLocalCli({
+      connection: THIS_COMPUTER,
+      record_setup_event: null,
+      "plugin:opener|open_url": null,
+      ...readyLocal(),
+    });
+    const view = await renderApp();
+    await userEvent.click(
+      view.getByRole("button", { name: "Use OpenBot (Self-Contained)" }),
+    );
+    expect(
+      (view.getAllByRole("radio") as HTMLInputElement[]).map(
+        (radio) => radio.checked,
+      ),
+    ).toEqual([false, false]);
+    const foot = view.getByRole("region", { name: "Run on this computer" });
+    expect(
+      within(foot).getByRole("heading", { name: "What this computer needs" }),
+    ).toBeTruthy();
+    expect(foot.querySelector(".this-computer-aside")?.textContent).toBe(
+      "OpenBot (Self-Contained) Everything runs on this computer, for trying it or personal use.",
+    );
+    expect(
+      [...foot.querySelectorAll(".needs-list li")].map(
+        (item) => item.textContent,
+      ),
+    ).toEqual([
+      "A Mac or a 64-bit Windows PC",
+      "16 GB of memory or more",
+      "4 CPU cores or more",
+      "40 GB of free disk space",
+    ]);
+    expect(
+      within(foot).getByText(
+        "Setup takes 1 to 10 minutes, depending on your internet speed.",
+      ),
+    ).toBeTruthy();
+    expect(buttons(view)).toEqual(["Connect to it", "Install"]);
+    expect(localCliCalls()).toEqual([]);
+    // Cloud again closes it.
+    await userEvent.click(view.getByRole("radio", { name: /^OpenBot Cloud/ }));
+    expect(
+      view.queryByRole("heading", { name: "What this computer needs" }),
+    ).toBeNull();
+    await userEvent.click(
+      view.getByRole("button", { name: "Use OpenBot (Self-Contained)" }),
+    );
+    // Not chosen until Install: looking at it is not an answer.
+    expect(
+      invokeCalls.filter((call) => call.command === "keep_self_contained"),
+    ).toEqual([]);
+    await installLocal(view);
+    await view.findByRole("heading", { name: "Connect your AI" });
+    // Chosen on the first screen in this version: the move to OpenBot Cloud is never offered.
+    expect(
+      invokeCalls.filter((call) => call.command === "keep_self_contained"),
+    ).toHaveLength(1);
+    // Nothing of OpenBot Cloud was asked for.
+    expect(
+      invokeCalls.some((call) =>
+        ["check_openbot_address", "connect_to_openbot"].includes(call.command),
+      ),
+    ).toBe(false);
+  });
+
+  /*
+   * Self-Contained is never picked to begin with: a relaunch that finds OpenBot installed here still
+   * opens on OpenBot Cloud, and Self-Contained is its line at the foot.
+   */
+  test("a relaunch that finds OpenBot on this computer still opens on OpenBot Cloud", async () => {
+    setupRootConfiguration("/tmp/cloud-installed-here", async () =>
+      previouslyHostedConfiguration(DEFAULT_HARNESS),
+    );
+    withLocalCli({ ...readyLocal(), record_setup_event: null });
+    const view = await renderApp();
+    await view.findByRole("heading", { name: "Set up OpenBot" });
+    expect(
+      (view.getAllByRole("radio") as HTMLInputElement[]).map((radio) => [
+        radio.value,
+        radio.checked,
+      ]),
+    ).toEqual([
+      ["cloud", true],
+      ["business", false],
+    ]);
+    expect(buttons(view)).toEqual([
+      "Connect to it",
+      "Sign in to OpenBot Cloud",
+      "Use OpenBot (Self-Contained)",
+    ]);
+  });
+
+  /*
+   * OpenBot Cloud: the OpenBot we run, at an address built into the app. Picked, it offers Sign in
+   * to OpenBot Cloud and nothing to type. The sign-in is the shell's, as for any OpenBot that runs
+   * elsewhere: the address checked, then the browser, then OpenBot Cloud in this window.
+   */
+  test("OpenBot Cloud signs in at its built-in address with nothing to type, and Cancel stops the sign-in", async () => {
+    setupRootConfiguration("/tmp/cloud-sign-in", async () =>
+      emptyConfiguration(),
+    );
+    withLocalCli({
+      connection: THIS_COMPUTER,
+      record_setup_event: null,
+      "plugin:opener|open_url": null,
+      check_openbot_address: (args: { address: string }) => ({
+        address: args.address,
+      }),
+      connect_to_openbot: () => new Promise(() => {}),
+      cancel_connect: null,
+    });
+    const view = await renderApp();
+    const cloud = view.getByRole("radio", {
+      name: /^OpenBot Cloud/,
+    }) as HTMLInputElement;
+    // Picked to begin with. Away and back, as a person who looked at another choice does.
+    expect(cloud.checked).toBe(true);
+    await userEvent.click(
+      view.getByRole("radio", { name: /^OpenBot for Business/ }),
+    );
+    await userEvent.click(cloud);
+    expect(cloud.checked).toBe(true);
+    // Nothing to type, nothing to install, no calendar: its sign-in.
+    expect(view.queryByLabelText("Your company's OpenBot address")).toBeNull();
+    expect(view.queryByTitle("Booking calendar")).toBeNull();
+    expect(
+      view.queryByRole("heading", { name: "What this computer needs" }),
+    ).toBeNull();
+    expect(
+      view.getByText(
+        "This app connects to OpenBot Cloud, where your Bots run. Your account, Bots and conversations are the same here and at my.open.bot.",
+      ),
+    ).toBeTruthy();
+    expect(
+      view.getByText(
+        "You'll sign in or create an account in your browser, then come straight back here.",
+      ),
+    ).toBeTruthy();
+    const signIn = view.getByRole("button", {
+      name: "Sign in to OpenBot Cloud",
+    });
+    // Picked just now: Enter signs in.
+    expect(document.activeElement).toBe(signIn);
+    expect(buttons(view)).toEqual([
+      "Connect to it",
+      "Sign in to OpenBot Cloud",
+      "Use OpenBot (Self-Contained)",
+    ]);
+    expectPlain(view);
+
+    const from = invokeCalls.length;
+    await userEvent.click(signIn);
+    await view.findByText("Finish signing in in your browser.");
+    expect(asked(from)).toEqual([
+      { command: "check_openbot_address", args: { address: CLOUD } },
+      { command: "connect_to_openbot", args: { address: CLOUD } },
+    ]);
+    // While the browser is waited on, Cancel is the way out: the rows and the links hold still.
+    expect(
+      (view.getAllByRole("radio") as HTMLInputElement[]).map(
+        (radio) => radio.disabled,
+      ),
+    ).toEqual([true, true]);
+    expect(buttons(view)).toEqual([
+      "Cancel",
+      "Connect to it",
+      "Use OpenBot (Self-Contained)",
+    ]);
+    expect(
+      view.getByRole("button", { name: "Use OpenBot (Self-Contained)" }),
+    ).toHaveProperty("disabled", true);
+    await userEvent.click(view.getByRole("button", { name: "Cancel" }));
+    expect(asked(from).map((call) => call.command)).toEqual([
+      "check_openbot_address",
+      "connect_to_openbot",
+      "cancel_connect",
+    ]);
+    expect(
+      view.getByRole("button", { name: "Sign in to OpenBot Cloud" }),
+    ).toBeTruthy();
+    // Nothing about this computer was set up or downloaded.
+    expect(localCliCalls()).toEqual([]);
+  });
+
+  test("OpenBot Cloud that can't be reached says so, and Try again signs in again", async () => {
+    setupRootConfiguration("/tmp/cloud-unreachable", async () =>
+      emptyConfiguration(),
+    );
+    const said =
+      "OpenBot couldn't reach api.open.bot. Check the address and your network, then try again.";
+    let checks = 0;
+    withLocalCli({
+      connection: THIS_COMPUTER,
+      record_setup_event: null,
+      check_openbot_address: (args: { address: string }) => {
+        checks += 1;
+        if (checks === 1) throw { said, kind: "unreachable" };
+        return { address: args.address };
+      },
+      connect_to_openbot: null,
+    });
+    const view = await renderApp();
+    await userEvent.click(view.getByRole("radio", { name: /^OpenBot Cloud/ }));
+    await userEvent.click(
+      view.getByRole("button", { name: "Sign in to OpenBot Cloud" }),
+    );
+    expect((await view.findByRole("alert")).textContent).toBe(said);
+    const again = view.getByRole("button", { name: "Try again" });
+    expect(document.activeElement).toBe(again);
+    await userEvent.click(again);
+    // Signed in: the shell is showing OpenBot Cloud in this window.
+    await view.findByText("Opening OpenBot…");
+    expect(view.queryByRole("alert")).toBeNull();
+    expect(checks).toBe(2);
+  });
+
+  test("a build pointed at another OpenBot Cloud signs in there", async () => {
+    const url = process.env.VITE_OPENBOT_CLOUD_URL;
+    process.env.VITE_OPENBOT_CLOUD_URL = " https://cloud-test.example.com/ ";
+    try {
+      setupRootConfiguration("/tmp/cloud-elsewhere", async () =>
+        emptyConfiguration(),
+      );
+      withLocalCli({
+        connection: THIS_COMPUTER,
+        record_setup_event: null,
+        check_openbot_address: (args: { address: string }) => ({
+          address: args.address,
+        }),
+        connect_to_openbot: () => new Promise(() => {}),
+      });
+      const view = await renderApp();
+      await userEvent.click(
+        view.getByRole("radio", { name: /^OpenBot Cloud/ }),
+      );
+      expect(
+        view.getByText(/the same here and at cloud-test\.example\.com\./),
+      ).toBeTruthy();
+      const from = invokeCalls.length;
+      await userEvent.click(
+        view.getByRole("button", { name: "Sign in to OpenBot Cloud" }),
+      );
+      await view.findByText("Finish signing in in your browser.");
+      expect(asked(from)[0]).toEqual({
+        command: "check_openbot_address",
+        args: { address: "https://cloud-test.example.com" },
+      });
+    } finally {
+      if (url === undefined) delete process.env.VITE_OPENBOT_CLOUD_URL;
+      else process.env.VITE_OPENBOT_CLOUD_URL = url;
+    }
+  });
+
+  test("OpenBot Cloud on a release this app can't connect to offers it in the browser, where people use it", async () => {
+    setupRootConfiguration("/tmp/cloud-too-old", async () =>
+      emptyConfiguration(),
+    );
+    const said =
+      "The OpenBot at api.open.bot is on a release this app can't connect to yet. Ask whoever runs it to update OpenBot, or open it in your browser.";
+    withLocalCli({
+      connection: THIS_COMPUTER,
+      record_setup_event: null,
+      "plugin:opener|open_url": null,
+      check_openbot_address: () => {
+        throw { said, kind: "too-old" };
+      },
+    });
+    const view = await renderApp();
+    await userEvent.click(view.getByRole("radio", { name: /^OpenBot Cloud/ }));
+    const from = invokeCalls.length;
+    await userEvent.click(
+      view.getByRole("button", { name: "Sign in to OpenBot Cloud" }),
+    );
+    expect((await view.findByRole("alert")).textContent).toBe(said);
+    // This app asked the address for programs; the person is sent to the one for people.
+    expect(asked(from)[0]).toEqual({
+      command: "check_openbot_address",
+      args: { address: CLOUD },
+    });
+    const link = view.getByRole("link", { name: "Open in browser" });
+    expect(link.getAttribute("href")).toBe(CLOUD_WEB);
+    await userEvent.click(link);
+    expect(invokeCalls).toContainEqual({
+      command: "plugin:opener|open_url",
+      args: { url: CLOUD_WEB },
+    });
+  });
+
+  test("a build that names both of its OpenBot Cloud's addresses connects to one and shows the other", async () => {
+    const before = {
+      api: process.env.VITE_OPENBOT_CLOUD_URL,
+      web: process.env.VITE_OPENBOT_CLOUD_WEB_URL,
+    };
+    process.env.VITE_OPENBOT_CLOUD_URL = "https://api.cloud-test.example.com";
+    process.env.VITE_OPENBOT_CLOUD_WEB_URL =
+      "https://my.cloud-test.example.com/";
+    try {
+      setupRootConfiguration("/tmp/cloud-two-addresses", async () =>
+        emptyConfiguration(),
+      );
+      withLocalCli({
+        connection: THIS_COMPUTER,
+        record_setup_event: null,
+        check_openbot_address: (args: { address: string }) => ({
+          address: args.address,
+        }),
+        connect_to_openbot: () => new Promise(() => {}),
+      });
+      const view = await renderApp();
+      await userEvent.click(
+        view.getByRole("radio", { name: /^OpenBot Cloud/ }),
+      );
+      expect(
+        view.getByText(/the same here and at my\.cloud-test\.example\.com\./),
+      ).toBeTruthy();
+      const from = invokeCalls.length;
+      await userEvent.click(
+        view.getByRole("button", { name: "Sign in to OpenBot Cloud" }),
+      );
+      await view.findByText("Finish signing in in your browser.");
+      expect(asked(from)).toEqual([
+        {
+          command: "check_openbot_address",
+          args: { address: "https://api.cloud-test.example.com" },
+        },
+        {
+          command: "connect_to_openbot",
+          args: { address: "https://api.cloud-test.example.com" },
+        },
+      ]);
+    } finally {
+      for (const [name, value] of [
+        ["VITE_OPENBOT_CLOUD_URL", before.api],
+        ["VITE_OPENBOT_CLOUD_WEB_URL", before.web],
+      ] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
+  test("a launch whose OpenBot Cloud sign-in ended opens on OpenBot Cloud, with Sign in again", async () => {
+    const said =
+      "Your sign-in to api.open.bot has ended. Sign in again to keep going.";
+    let notices = 0;
+    const strays = connectedShell({
+      connection: { mode: "connected", address: CLOUD, signedIn: false },
+      take_connection_notice: () => {
+        notices += 1;
+        return notices === 1 ? { kind: "session-ended", message: said } : null;
+      },
+      check_openbot_address: { address: CLOUD },
+      connect_to_openbot: () => new Promise(() => {}),
+    });
+    const view = await renderApp(true);
+    expect(view.getByRole("radio", { name: /^OpenBot Cloud/ })).toHaveProperty(
+      "checked",
+      true,
+    );
+    // Nothing to type: the address is Cloud's.
+    expect(view.queryByLabelText("Your company's OpenBot address")).toBeNull();
+    expect(view.getByRole("alert").textContent).toBe(said);
+    await userEvent.click(view.getByRole("button", { name: "Sign in again" }));
+    await view.findByText("Finish signing in in your browser.");
+    expect(view.queryByRole("alert")).toBeNull();
+    expect(asked().map((call) => call.command)).toEqual([
+      "connection",
+      "take_connection_notice",
+      "check_openbot_address",
+      "connect_to_openbot",
+    ]);
+    expect(strays).toEqual([]);
+  });
+});
+
 test("asked from Settings to choose where OpenBot runs, the first screen opens on the connect choice with the address and no failure", async () => {
   setupRootConfiguration("/tmp/choose-again", async () => emptyConfiguration());
   withLocalCli({
@@ -1352,13 +1908,11 @@ test("asked from Settings to choose where OpenBot runs, the first screen opens o
     false,
   );
   expect(
-    (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
+    (view.getByLabelText("Your company's OpenBot address") as HTMLInputElement)
+      .value,
   ).toBe(ELSEWHERE);
   expect(view.queryByRole("alert")).toBeNull();
-  expect(buttons(view)).toEqual([
-    "Connect",
-    "Use OpenBot on this computer instead",
-  ]);
+  expect(buttons(view)).toEqual(["Back", "Connect"]);
   // Nothing of an install on this computer has been asked for yet.
   expect(asked().map((call) => call.command)).toEqual([
     "connection",
@@ -1423,7 +1977,8 @@ test("asked from Settings on an install on this computer, the first screen shows
   // The other choice, with the address connected to before, and back.
   await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
   expect(
-    (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
+    (view.getByLabelText("Your company's OpenBot address") as HTMLInputElement)
+      .value,
   ).toBe(ELSEWHERE);
   await userEvent.click(
     view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
@@ -1454,7 +2009,8 @@ test("a saved sign-in that can't open OpenBot says why on the connect screen, an
   const view = await renderApp();
   expect((await view.findByRole("alert")).textContent).toContain(said);
   expect(
-    (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
+    (view.getByLabelText("Your company's OpenBot address") as HTMLInputElement)
+      .value,
   ).toBe(ELSEWHERE);
   await userEvent.click(view.getByRole("button", { name: "Try again" }));
   await view.findByText("Opening OpenBot…");
@@ -1466,7 +2022,7 @@ test("a saved sign-in that can't open OpenBot says why on the connect screen, an
   expect(strays).toEqual([]);
 });
 
-test("Use OpenBot on this computer instead switches a saved connection back, and setup carries on as a first run", async () => {
+test("Back from a saved connection switches it back to this computer, and setup carries on as a first run", async () => {
   setupRootConfiguration("/tmp/back-to-this-computer", async () =>
     emptyConfiguration(),
   );
@@ -1482,9 +2038,7 @@ test("Use OpenBot on this computer instead switches a saved connection back, and
     "connection",
     "take_connection_notice",
   ]);
-  await userEvent.click(
-    view.getByRole("button", { name: "Use OpenBot on this computer instead" }),
-  );
+  await userEvent.click(view.getByRole("button", { name: "Back" }));
   await view.findByRole("button", { name: "Install" });
   const commands = asked().map((call) => call.command);
   expect(commands.indexOf("use_this_computer")).toBe(2);
@@ -1498,7 +2052,8 @@ test("Use OpenBot on this computer instead switches a saved connection back, and
   // The address is still there for somebody who changes their mind.
   await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
   expect(
-    (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
+    (view.getByLabelText("Your company's OpenBot address") as HTMLInputElement)
+      .value,
   ).toBe(ELSEWHERE);
 });
 
@@ -1507,7 +2062,8 @@ test("a person who went back to this computer finds the address they connected t
     connection: { mode: "local", address: ELSEWHERE, signedIn: false },
   });
   expect(
-    (view.getByLabelText("OpenBot address") as HTMLInputElement).value,
+    (view.getByLabelText("Your company's OpenBot address") as HTMLInputElement)
+      .value,
   ).toBe(ELSEWHERE);
 });
 
@@ -3130,6 +3686,11 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
   setupRootConfiguration("/tmp/local-eval-plan", async () =>
     emptyConfiguration(),
   );
+  // The browser comes back to Desktop when the person approves: held until the test says so.
+  let approve: (token: string) => void = () => {};
+  const approved = new Promise<string>((resolve) => {
+    approve = resolve;
+  });
   withLocalCli({
     providers: [
       {
@@ -3142,7 +3703,7 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
       },
     ],
     begin_claude_sign_in: "https://claude.example/authorize",
-    finish_claude_sign_in: "synthetic-plan-token",
+    finish_claude_sign_in: () => approved,
     set_up_local_eval: localStatus("starting", "valid"),
     connect_local_eval: localConnection,
     run_local_eval: localStatus("ready", "valid"),
@@ -3153,18 +3714,15 @@ test("a Claude plan signed in on the provider screen reaches Start with its toke
   await userEvent.click(
     await view.findByRole("button", { name: "Sign in with Anthropic" }),
   );
-  await userEvent.type(
-    await view.findByLabelText("Code from your browser"),
-    "synthetic-code",
-  );
+  await view.findByText("Open the sign-in page");
+  // Nothing to paste: Claude's sign-in finishes on its own.
+  expect(view.queryByLabelText("Code from your browser")).toBeNull();
   // Intelligence is ready and waiting before the sign-in finishes, as on a real machine. The
   // finished sign-in then moves on by itself, from an effect rather than a click, and Start must
   // still get the model it chose (it once got null: Start ran before the choice had rendered).
   await waitFor(() => expect(localSequence()).toContain("run_local_eval"));
   await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
-  await userEvent.click(
-    view.getByRole("button", { name: "Finish signing in" }),
-  );
+  await act(async () => approve("synthetic-plan-token"));
   // A tick for a second, then on by itself. (The install's row under it has a tick of its own.)
   await waitFor(() =>
     expect(
@@ -4272,6 +4830,209 @@ test("relaunch upgrades an older installation to this app's release as part of S
   });
 });
 
+/** The commands that start or update OpenBot or its backend on this computer. */
+const STARTS_OR_UPDATES = [
+  "wake_engine",
+  "run_local_eval",
+  "set_up_local_eval",
+  "connect_local_eval",
+  "upgrade_and_start",
+  "start_stack",
+];
+
+function startsOrUpdates() {
+  return invokeCalls
+    .map((call) => call.command)
+    .filter((command) => STARTS_OR_UPDATES.includes(command));
+}
+
+/** The move to OpenBot Cloud due at this launch, as the shell answers it after the update. */
+function withMoveDue() {
+  const preview = deferred<unknown>();
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "move_offer")
+      return { due: true, fromSettings: false, footprintBytes: 20_200_000_000 };
+    if (command === "move_preview") return preview.promise;
+    if (command === "keep_self_contained") return null;
+    if (command === "move_to_cloud")
+      return {
+        removedBytes: 20_200_000_000,
+        diskGainedBytes: 20_100_000_000,
+        apps: [],
+        notes: [],
+        leftBehind: [],
+      };
+    return previous(command, args);
+  };
+  return preview;
+}
+
+/*
+ * A dogfooding report on 1.2.0-rc.1: installed over OpenBot (Self-Contained), the window spent about
+ * three minutes on "Updating OpenBot (Self-Contained)" before it asked "Move to OpenBot Cloud?".
+ * OpenBot Cloud is the default, so the question comes first now, before anything starts or updates.
+ */
+describe("the move to OpenBot Cloud, due at a launch that would update OpenBot", () => {
+  test("asks before any update or start", async () => {
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-first",
+      localStatus("ready", "valid"),
+    );
+    withOlderDeployment(() => new Promise(() => {}));
+    withMoveDue();
+    const view = await renderApp();
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(startsOrUpdates()).toEqual([]);
+    expect(
+      view.queryByRole("heading", {
+        name: "Updating OpenBot (Self-Contained)",
+      }),
+    ).toBeNull();
+  });
+
+  test("OpenBot Cloud: OpenBot updates and starts under the move's screen, which fills in and moves", async () => {
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-cloud",
+      localStatus("ready", "valid"),
+    );
+    const updating = deferred<unknown>();
+    withOlderDeployment(() => updating.promise);
+    const preview = withMoveDue();
+    const view = await renderApp();
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    // The confirm screen, saying it is getting ready while OpenBot updates and starts behind it.
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud" });
+    expect(
+      view.getByText(
+        "Getting your Bots ready to move. This can take a few minutes.",
+      ),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(startsOrUpdates()).toContain("upgrade_and_start"),
+    );
+    await emitProgress({
+      step: "release",
+      ok: true,
+      running: true,
+      detail:
+        "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
+    });
+    expect(
+      view.queryByRole("heading", {
+        name: "Updating OpenBot (Self-Contained)",
+      }),
+    ).toBeNull();
+    expect(
+      view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+    ).toHaveProperty("disabled", true);
+    // What moves is read only once OpenBot is up.
+    expect(invokeCalls.some((call) => call.command === "move_preview")).toBe(
+      false,
+    );
+    await act(async () =>
+      updating.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
+    );
+    await waitFor(() =>
+      expect(invokeCalls.some((call) => call.command === "move_preview")).toBe(
+        true,
+      ),
+    );
+    await act(async () =>
+      preview.resolve({
+        counts: [{ kind: "bots", count: 3 }],
+        apps: [],
+        footprintBytes: 20_200_000_000,
+        modelKeysAvailable: false,
+      }),
+    );
+    await view.findByText("3 Bots");
+    // The window stays on the move: OpenBot is not shown over it.
+    expect(invokeCalls.some((call) => call.command === "show_openbot")).toBe(
+      false,
+    );
+    await userEvent.click(
+      view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+    );
+    await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
+    expect(
+      invokeCalls.some((call) => call.command === "keep_self_contained"),
+    ).toBe(false);
+  });
+
+  test("Keep: OpenBot updates and opens as it always has", async () => {
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-keep",
+      localStatus("ready", "valid"),
+    );
+    const updating = deferred<unknown>();
+    withOlderDeployment(() => updating.promise);
+    withMoveDue();
+    const view = await renderApp();
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    expect(startsOrUpdates()).toEqual([]);
+    await userEvent.click(view.getByRole("radio", { name: /Self-Contained/ }));
+    await userEvent.click(
+      view.getByRole("button", { name: "Keep OpenBot on this computer" }),
+    );
+    await waitFor(() =>
+      expect(startsOrUpdates()).toContain("upgrade_and_start"),
+    );
+    expect(
+      invokeCalls.some((call) => call.command === "keep_self_contained"),
+    ).toBe(true);
+    await emitProgress({
+      step: "release",
+      ok: true,
+      running: true,
+      detail:
+        "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
+    });
+    expect(
+      view.getByRole("heading", { name: "Updating OpenBot (Self-Contained)" }),
+    ).toBeTruthy();
+    await act(async () =>
+      updating.resolve({ from: "v0.3.0", to: "v0.3.1", moved: true }),
+    );
+    await expectHandover();
+    expect(invokeCalls.some((call) => call.command === "move_preview")).toBe(
+      false,
+    );
+  });
+
+  test("a start for the move that fails is said there, and Keep carries on here", async () => {
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-fails",
+      localStatus("ready", "valid"),
+    );
+    let attempts = 0;
+    withOlderDeployment(() => {
+      attempts += 1;
+      if (attempts === 1)
+        throw { said: "OpenBot couldn't update. Try again in a moment." };
+      return new Promise(() => {});
+    });
+    withMoveDue();
+    const view = await renderApp();
+    await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    await view.findByText("OpenBot couldn't update. Try again in a moment.");
+    expect(
+      view.getByRole("heading", { name: "Move to OpenBot Cloud" }),
+    ).toBeTruthy();
+    await userEvent.click(
+      view.getByRole("button", { name: "Keep OpenBot on this computer" }),
+    );
+    // Back to this computer's own screens, with the failure and Start's way on, as today.
+    await view.findByText("OpenBot couldn't update. Try again in a moment.");
+    expect(
+      view.queryByRole("heading", { name: "Move to OpenBot Cloud" }),
+    ).toBeNull();
+  });
+});
+
 /*
  * A dogfooding report: an app that shows a screen while it updates is unusual, and the screen said
  * nothing of why. It is headed as the self-contained OpenBot's update now, and under the progress
@@ -5172,6 +5933,42 @@ test("an installation an earlier app connected to hosted Intelligence starts at 
     root,
     ...LOCAL_ADDRESSES,
     harness: { id: DEFAULT_HARNESS },
+    model: { provider: "openai", login: "api-key", saved: true },
+  });
+});
+
+/**
+ * A Mac updated from 1.0.3 to 1.1.2 with its local backend gone came back to the first screen. Its
+ * install asked for the new default Bot, which the folder's release, still 1.0.3 until Start moves
+ * it, did not have, and failed every time. The native side now installs the Bot the folder has
+ * (`harness::the_release_includes`) and says which, and Start asks for that one.
+ */
+test("Start asks for the Bot the install put in when the folder's release lacked the default", async () => {
+  const root = "/tmp/older-release-folder";
+  setupRootConfiguration(root, async () =>
+    previouslyHostedConfiguration("langgraph"),
+  );
+  withLocalCli({
+    ...readyLocal(),
+    prepare_installation: async () => ({ id: "langgraph" }),
+  });
+  const view = await renderApp();
+  await view.findByRole("heading", { name: "Set up OpenBot" });
+  await installLocal(view);
+  await view.findByRole("heading", { name: "Connect your AI" });
+  expect(installationCalls()).toEqual([
+    {
+      command: "prepare_installation",
+      args: { root, harness: { id: DEFAULT_HARNESS } },
+    },
+  ]);
+  await userEvent.click(view.getByRole("radio", { name: /OpenAI/ }));
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await expectHandover();
+  expect(getStartStackPayload()).toEqual({
+    root,
+    ...LOCAL_ADDRESSES,
+    harness: { id: "langgraph" },
     model: { provider: "openai", login: "api-key", saved: true },
   });
 });
@@ -6372,7 +7169,7 @@ test("on that machine, connecting to an OpenBot that runs elsewhere never asks W
   const view = await renderApp();
   await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
   await userEvent.type(
-    view.getByLabelText("OpenBot address"),
+    view.getByLabelText("Your company's OpenBot address"),
     `${ELSEWHERE}{Enter}`,
   );
   await view.findByText("Finish signing in in your browser.");
@@ -6476,7 +7273,7 @@ test("a clean computer's first screen downloads nothing, and connecting to an Op
   expect(earlyDownloadCalls()).toEqual([]);
   await userEvent.click(view.getByRole("button", { name: "Connect to it" }));
   await userEvent.type(
-    view.getByLabelText("OpenBot address"),
+    view.getByLabelText("Your company's OpenBot address"),
     `${ELSEWHERE}{Enter}`,
   );
   await view.findByText("Finish signing in in your browser.");
@@ -7263,15 +8060,6 @@ for (const provider of [
         await userEvent.click(
           view.getByRole("button", { name: `Sign in with ${provider.name}` }),
         );
-        if (provider.id === "anthropic") {
-          await userEvent.type(
-            await view.findByLabelText("Code from your browser"),
-            "synthetic-code",
-          );
-          await userEvent.click(
-            view.getByRole("button", { name: "Finish signing in" }),
-          );
-        }
       }
       // A fresh sign-in moves on by itself; a saved one is only offered, so it waits for Continue.
       if (session === "saved") {

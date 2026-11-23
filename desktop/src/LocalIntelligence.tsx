@@ -82,6 +82,13 @@ export type StartOutcome = "started" | "failed" | "deferred" | "opening";
  */
 const POLL_DELAYS: number[] = [2_000, 4_000, 8_000, ...Array(12).fill(15_000)];
 
+/** While a status call has run out of time and the wait asks again. */
+export const BACKEND_SLOW_SAID =
+  "OpenBot's services are slow to answer. OpenBot keeps checking.";
+/** When no status call answered before the wait's checks ran out. */
+export const BACKEND_SILENT_SAID =
+  "OpenBot's services didn't answer in time. Retry to check again.";
+
 /** How often a running setup or update asks how far its download has got. */
 const DOWNLOAD_EVERY_MS = 1_000;
 
@@ -154,8 +161,13 @@ function isReady(report: LocalReport): boolean {
  * do not come back by themselves, and their rows say what to do. Not one the CLI did not say the
  * services of, as an older one does not: nothing says it is on its way.
  */
-function servicesComingUp(report: LocalReport): boolean {
-  if (
+/**
+ * Degraded with nothing that waiting will not change: no reason, no shortfall, no update on record,
+ * and a licence that is valid or not said. What a backend still coming up, or coming back from a
+ * slow spell, reports while its checks catch up.
+ */
+function degradedWhileStarting(report: LocalReport): boolean {
+  return !(
     report.outcome !== "completed" ||
     report.reason !== null ||
     report.readiness !== "degraded" ||
@@ -163,9 +175,11 @@ function servicesComingUp(report: LocalReport): boolean {
     report.shortfall ||
     (report.licence !== "valid" && report.licence !== "unknown") ||
     report.stack?.unfinishedUpdate
-  ) {
-    return false;
-  }
+  );
+}
+
+function servicesComingUp(report: LocalReport): boolean {
+  if (!degradedWhileStarting(report)) return false;
   return (report.stack?.observed?.services ?? []).some(
     (service) =>
       !service.ready &&
@@ -727,9 +741,52 @@ export function useLocalSequence({
     let woken = false;
     // The release an update that just failed was moving to, until the next answer says where.
     let failedTo: string | null = null;
+    /*
+     * A status call that runs out of time is a backend slow to answer, not a setup that failed.
+     * Found in a dogfooding report: the container engine stalled for a few minutes, the CLI's
+     * service listing took 115 seconds, and the one status call ran out at its 120-second limit.
+     * The window took that single call as the whole setup timing out, stopped at the first check
+     * and said "took too long to set up". Retry four minutes later answered in a tenth of a second.
+     * So it is asked again on the wait's own schedule, like a backend still starting.
+     */
+    const status = () => {
+      const started = runLocalEval("status", id);
+      const answer = started.report.catch((error: unknown) => {
+        if (error instanceof LocalEvalError && error.category === "timeout")
+          return "timeout" as const;
+        throw error;
+      });
+      return call({ attempt: started.attempt, answer }, token);
+    };
+    let slow = false;
+    // Whether any status call in this wait ran out of time. A backend coming back from a slow spell
+    // says degraded while its checks catch up: found on the Windows pass of this fix, after the
+    // backend's CPU was held back for four and a half minutes, the first answer was degraded and
+    // the wait ended at once with "OpenBot is running but not working properly".
+    let wasSlow = false;
     for (let tries = 0; ; tries += 1) {
-      const found = await report("status");
+      const found = await status();
       if (!found) return null;
+      if (found === "timeout") {
+        if (tries >= pollDelays.length) {
+          // The log says how long it waited and that the last call ran out of time.
+          backEndWaitEnded(BACKEND_SILENT_SAID);
+          update({
+            detail: null,
+            blocked: { said: BACKEND_SILENT_SAID, reason: null },
+          });
+          return null;
+        }
+        slow = true;
+        wasSlow = true;
+        update({ detail: BACKEND_SLOW_SAID });
+        if (!(await pause(pollDelays[tries], token))) return null;
+        continue;
+      }
+      if (slow) {
+        slow = false;
+        update({ detail: null });
+      }
       // How many of its services are up: how far along the back end's start is.
       const services = found.stack?.observed?.services;
       if (services?.length)
@@ -848,7 +905,8 @@ export function useLocalSequence({
       }
       const waking =
         woken && found.readiness === "degraded" && unfinished !== null;
-      const comingUp = servicesComingUp(found);
+      const comingUp =
+        servicesComingUp(found) || (wasSlow && degradedWhileStarting(found));
       if (
         !waking &&
         !comingUp &&
@@ -1073,16 +1131,25 @@ export function useLocalSequence({
    * itself when its cluster is gone (`lost_stack` in local_eval.rs) and sets up a new one, and
    * connect, wait and start follow as on a first setup: one journey forward. The sign-in and the AI
    * connection are kept: neither was in what went.
+   *
+   * The same for a backend whose cluster alone is gone (`backend-gone`), as after
+   * `docker container prune` removed its stopped node: setup makes the cluster again for the same
+   * stack, with its saved licence and keys, so OpenBot's own data and its link to the backend stay.
+   * OpenBot's own installation is left as it is there, never installed again: a Mac whose folder
+   * was still on 1.0.3 under Desktop 1.1.2 failed a first install that asked for a Bot 1.0.3 did
+   * not have, while Start takes the update path, moving the folder to this app's release first.
    */
   async function startFresh() {
     if (now.current.running) return;
+    // Only the backend went: OpenBot's own installation is as it was, and is not installed again.
+    const backendOnly = now.current.blocked?.reason === "backend-gone";
     halt();
     const token = generation.current;
     go.current = true;
     latest.current.onForgotten();
     // Nothing of the lost backend's rows is left to show: the install's rows come first.
     update(idle);
-    if (!(await latest.current.installAgain())) return;
+    if (!backendOnly && !(await latest.current.installAgain())) return;
     // Stopped or left while it installed.
     if (generation.current !== token) return;
     void run("setup");
@@ -1439,10 +1506,11 @@ export function LocalNeeds({
   const reason = sequence.blocked?.reason;
   if (reason === "authentication-required")
     return <SignInToCopilotKit onSignedIn={sequence.retry} />;
-  if (reason === "stack-lost")
+  if (reason === "stack-lost" || reason === "backend-gone")
     return (
       <StartFresh
         said={explain ? (sequence.blocked?.said ?? null) : null}
+        label={reason === "backend-gone" ? "Set up again" : "Start fresh"}
         onStartFresh={sequence.startFresh}
       />
     );
@@ -1462,21 +1530,27 @@ function needsPerson(sequence: LocalSequence): boolean {
   return (
     reason === "authentication-required" ||
     reason === "eula-acceptance-required" ||
-    reason === "stack-lost"
+    reason === "stack-lost" ||
+    reason === "backend-gone"
   );
 }
 
-/** The backend is gone: Retry would only ask again about it, so Start fresh is the one way on. */
+/** The backend is gone: Retry would only ask again about it, so setting up again is the one way on. */
 function backendLost(sequence: LocalSequence): boolean {
-  return sequence.stopped && sequence.blocked?.reason === "stack-lost";
+  const reason = sequence.blocked?.reason;
+  return (
+    sequence.stopped && (reason === "stack-lost" || reason === "backend-gone")
+  );
 }
 
 /** The one way on once the backend is gone: set OpenBot up again. What is gone is said with it. */
 function StartFresh({
   said,
+  label,
   onStartFresh,
 }: {
   said: string | null;
+  label: string;
   onStartFresh: () => void;
 }) {
   return (
@@ -1484,7 +1558,7 @@ function StartFresh({
       {said && <p>{said}</p>}
       <div className="row">
         <button type="button" onClick={onStartFresh}>
-          Start fresh
+          {label}
         </button>
       </div>
     </div>

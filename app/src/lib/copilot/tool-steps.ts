@@ -1,11 +1,12 @@
 import { NOT_RUN_AFTER_FAILURE } from "@openbot/shared/approval-outcomes";
 import { calledTooEarly } from "@openbot/shared/tool-steps";
 import { useMemo, useSyncExternalStore } from "react";
-import { readOutcome } from "@/lib/computers/activity";
 import {
   componentKeys,
   type PublishedPlayground,
 } from "@/lib/components/queries";
+import { readOutcome } from "@/lib/computers/activity";
+import { subscribeToQueryCache } from "@/lib/query-cache-store";
 import { queryClient } from "@/query-client";
 import { GALLERY_COMPONENTS } from "./gallery-registry";
 
@@ -39,18 +40,18 @@ export function componentTest(
     GALLERY_COMPONENTS.some((component) => component.name === name);
 }
 
+const followPublished = (changed: () => void) =>
+  subscribeToQueryCache(queryClient, changed);
+
 /**
  * The same test for a component that draws: it follows the published components as the page loads
  * them, and never fetches them itself (`SandboxedTools` does). Read from the page's own query cache,
  * as the handlers read it, so a transcript drawn outside a query provider still has its answer.
+ * Told after a render that changed the cache, not during it: see `subscribeToQueryCache`.
  */
 export function useComponentTest(): (name: string) => boolean {
-  const published = useSyncExternalStore(
-    (changed) => queryClient.getQueryCache().subscribe(changed),
-    () =>
-      queryClient.getQueryData<PublishedPlayground[]>(
-        componentKeys.published(),
-      ),
+  const published = useSyncExternalStore(followPublished, () =>
+    queryClient.getQueryData<PublishedPlayground[]>(componentKeys.published()),
   );
   return useMemo(() => componentTest(published), [published]);
 }

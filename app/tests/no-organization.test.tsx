@@ -213,22 +213,42 @@ test("an app page answers with the page for somebody in no organization: the sen
   expect(view.queryByText(/Something went wrong/)).toBeNull();
 });
 
-test("the sign-in screen shows as for anybody, with the hosted sign-in", async () => {
+/** OpenBot Cloud's sign-in screen's way in (components/auth/cloud-sign-in.tsx). */
+const CLOUD_SIGN_IN = "Sign in or create an account";
+
+test("the sign-in screen shows as for anybody, with OpenBot Cloud's sign-in", async () => {
   const { view } = openApp("/sign");
-  await view.findByRole("link", { name: HOSTED });
-  expect(
-    view.getByRole("button", { name: /Continue with Google/ }),
-  ).toBeTruthy();
+  const signIn = await view.findByRole("link", { name: CLOUD_SIGN_IN });
+  expect(signIn.getAttribute("href")).toBe(
+    `/api/auth/hosted/sign-in?returnTo=${encodeURIComponent(location.origin)}`,
+  );
   expect(view.queryByText(/Something went wrong/)).toBeNull();
   // What it offers anybody was read as nobody, once the session's own read was not found.
   expect(requests).toContain("GET /api/v2/organizations/default/deployment");
 });
 
-test("Sign out signs out and shows the sign-in screen", async () => {
-  const { view, person } = openApp("/");
-  await person.click(await view.findByRole("button", { name: "Sign out" }));
-  await waitFor(() => expect(requests).toContain("POST /api/auth/sign-out"));
-  await view.findByRole("button", { name: /Continue with Google/ });
+test("Sign out signs out of OpenBot and OpenBot by CopilotKit, and comes back to the sign-in screen", async () => {
+  const left: string[] = [];
+  const assign = window.location.assign;
+  // The browser leaving for another page is where this test stops following it, as the person's browser would.
+  window.location.assign = ((address: string) => {
+    left.push(address);
+  }) as typeof window.location.assign;
+  try {
+    const { view, router, person } = openApp("/");
+    await person.click(await view.findByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(requests).toContain("POST /api/auth/sign-out"));
+    // A hosted OpenBot: the browser goes on to sign out of OpenBot by CopilotKit too, and is sent back here.
+    await waitFor(() =>
+      expect(left).toEqual([
+        `/api/auth/hosted/sign-out?returnTo=${encodeURIComponent(`${location.origin}/sign`)}`,
+      ]),
+    );
+    await router.navigate({ to: "/sign" });
+    await view.findByRole("link", { name: CLOUD_SIGN_IN });
+  } finally {
+    window.location.assign = assign;
+  }
 });
 
 test("added to an organization again, Try again opens the app", async () => {

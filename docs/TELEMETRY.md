@@ -1,5 +1,18 @@
 # OpenBot product telemetry
 
+> **On Kubernetes, a team install connects to CopilotKit by default.** Separately from the usage
+> events on this page, the `openbot` and `openbot-bundle` charts install a management agent that
+> connects the install to CopilotKit's management service with its team licence, with no step from
+> you. Every minute it sends a heartbeat: OpenBot's version, chart and image digests, the last
+> database migration, pod readiness counts, and upgrade state. It sends no conversations,
+> messages, files, prompts, names, secrets or logs, and by default it upgrades nothing. It never
+> runs on OpenBot Desktop, on the personal edition, on OpenBot Cloud, or without a team licence.
+>
+> To turn it off, set `management.enabled=false` on the `openbot` chart
+> (`openbot.management.enabled=false` on `openbot-bundle`), or press Disconnect on Admin → Managed
+> updates. [CopilotKit management on Kubernetes](managed-upgrades.md) lists every field that
+> leaves your cluster.
+
 OpenBot forwards bounded usage events through the public `@copilotkit/shared` telemetry sender and the existing CopilotKit telemetry sink to PostHog. It adds no analytics database, migration, identity store, queue, replay service or administrator health endpoint. Local audit remains authoritative and independent of product analytics.
 
 ## Configuration and scope

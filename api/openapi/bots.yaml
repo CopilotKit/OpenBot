@@ -193,7 +193,7 @@ paths:
       description: >-
         Replace a Bot's name, title, role description and visibility, which are
         all required, and change any optional field that is present. An absent
-        endpoint, key or isolated leaves that setting as it is, so an edit to
+        endpoint, key, isolated or default model leaves that setting as it is, so an edit to
         a name never drops a key or moves a Bot between computers. Only whoever
         may manage the Bot may change it, and a Bot that comes with OpenBot
         cannot be changed. Making a Bot public reports what that means for the
@@ -1582,6 +1582,14 @@ components:
         assignedToMe:
           type: boolean
           description: Whether an administrator assigned this Bot to the caller.
+        lastConversationAt:
+          type: [string, 'null']
+          format: date-time
+          description: >-
+            When a conversation of the caller's with this Bot last had a
+            message, the Bot's or anybody's, or was started if it has none yet;
+            null when the caller has none. Counts the conversations
+            listConversations lists. Set on listBots.
         builtIn:
           type: boolean
           description: >-
@@ -1592,6 +1600,18 @@ components:
           description: >-
             Whether it runs on OpenBot's model, so a person can pick the model
             per conversation.
+        defaultModel:
+          type: [object, 'null']
+          description: The Bot's saved default model and thinking level. Null follows the deployment default.
+          required: [model, effort, source]
+          properties:
+            model:
+              type: string
+            effort:
+              type: [string, 'null']
+            source:
+              type: string
+              description: The model connection source when the default was saved.
         keyFromOpenBot:
           type: boolean
           description: >-
@@ -1742,6 +1762,24 @@ components:
           $ref: '#/components/schemas/BotIsolated'
         instructions:
           $ref: '#/components/schemas/BotInstructions'
+        defaultModel:
+          type: [object, 'null']
+          additionalProperties: false
+          description: >-
+            A model from the connected provider and its thinking level. Null resets
+            to the deployment default. Omit to keep the current setting.
+          required: [model, effort]
+          properties:
+            model:
+              type: string
+              minLength: 1
+              maxLength: 500
+              pattern: \S
+            effort:
+              type: [string, 'null']
+              minLength: 1
+              maxLength: 40
+              pattern: \S
     CreateBotRequest:
       description: >-
         A new Bot: a Bot's fields, and the framework it is built on. One closed

@@ -24,6 +24,10 @@ pub struct Metadata {
     pub authorization_endpoint: String,
     pub token_endpoint: String,
     pub revocation_endpoint: Option<String>,
+    /// Where the person's browser goes at sign-out to end its own session there (OpenID Connect
+    /// RP-Initiated Logout's `end_session_endpoint`). A hosted OpenBot publishes one; one that
+    /// runs on a team's own servers does not.
+    pub end_session_endpoint: Option<String>,
     /// Every scope it lists. The app's screens use the whole API, so all of them are asked for.
     pub scopes: Vec<String>,
 }
@@ -154,25 +158,36 @@ fn json_object(
     }
 }
 
-/// The endpoints and scopes of a metadata document. Each endpoint has to be on the address itself:
-/// the browser is sent to one and a code is posted to another, and neither goes anywhere but the
-/// OpenBot the person typed.
+/// The endpoints and scopes of a metadata document. The endpoints this app calls itself (the token
+/// and revocation endpoints) have to be on the address itself: a code and a refresh token are
+/// posted there, and go nowhere but the OpenBot the person typed.
+///
+/// The authorization endpoint is where the person's browser is sent to sign in and say yes, and it
+/// may also be on a sibling of the address: another name under the same parent domain, over https.
+/// An OpenBot can answer programs and people's browsers on two names, one never challenged and one
+/// behind an edge that challenges bots (OpenBot Cloud's `api.open.bot` and `my.open.bot`). Its
+/// metadata, asked on the first, sends the browser to the second, where the person may already be
+/// signed in, and keeps the app's own calls on the first.
 fn metadata_from(
     address: &str,
     document: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<Metadata, String> {
     let home = reqwest::Url::parse(address).map_err(|error| error.to_string())?;
-    let endpoint = |name: &str| -> Result<Option<String>, String> {
+    let endpoint = |name: &str, browser: bool| -> Result<Option<String>, String> {
         let Some(value) = document.get(name).and_then(serde_json::Value::as_str) else {
             return Ok(None);
         };
         let url = reqwest::Url::parse(value).map_err(|_| format!("{name} is not an address"))?;
+        let plain = url.username().is_empty() && url.password().is_none();
         let same = url.scheme() == home.scheme()
             && url.host_str() == home.host_str()
+            && url.port_or_known_default() == home.port_or_known_default();
+        let sibling = browser
+            && url.scheme() == "https"
+            && home.scheme() == "https"
             && url.port_or_known_default() == home.port_or_known_default()
-            && url.username().is_empty()
-            && url.password().is_none();
-        if !same {
+            && siblings(&url, &home);
+        if !plain || !(same || sibling) {
             return Err(format!("{name} is on another host than the address"));
         }
         Ok(Some(url.into()))
@@ -198,13 +213,36 @@ fn metadata_from(
         return Err("the metadata lists no S256 code challenge".into());
     }
     Ok(Metadata {
-        authorization_endpoint: endpoint("authorization_endpoint")?
+        authorization_endpoint: endpoint("authorization_endpoint", true)?
             .ok_or("the metadata names no authorization_endpoint")?,
-        token_endpoint: endpoint("token_endpoint")?
+        token_endpoint: endpoint("token_endpoint", false)?
             .ok_or("the metadata names no token_endpoint")?,
-        revocation_endpoint: endpoint("revocation_endpoint")?,
+        revocation_endpoint: endpoint("revocation_endpoint", false)?,
+        // A page for the browser, so it may be where the authorization endpoint may be. Unlike
+        // the others it is not needed to sign in or to stay signed in, so one the app will not
+        // follow is left out, and the OpenBot is still one the app connects to: sign-out then
+        // revokes the app's tokens, as it does for an OpenBot that publishes none.
+        end_session_endpoint: endpoint("end_session_endpoint", true).unwrap_or_else(|why| {
+            log::warn!(
+                "[connect] {why}; sign-out will not end the browser's session at {}",
+                super::host_of(address)
+            );
+            None
+        }),
         scopes,
     })
+}
+
+/// Two names under the same parent domain, which itself has a dot in it: `api.open.bot` and
+/// `my.open.bot`, never `open.bot` and `bot`. Names only: an IP address has no parent domain.
+fn siblings(one: &reqwest::Url, other: &reqwest::Url) -> bool {
+    let parent = |url: &reqwest::Url| {
+        url.domain()
+            .and_then(|domain| domain.split_once('.'))
+            .map(|(_, parent)| parent.to_ascii_lowercase())
+            .filter(|parent| parent.contains('.'))
+    };
+    matches!((parent(one), parent(other)), (Some(a), Some(b)) if a == b)
 }
 
 #[cfg(test)]
@@ -416,6 +454,139 @@ mod tests {
     fn metadata_that_names_another_host_is_not_followed() {
         let server = FakeOpenBot::start(Shape::MetadataElsewhere);
         assert_eq!(kind(&server.address()), Some(Kind::TooOld));
+    }
+
+    fn document(authorization: &str, token: &str) -> serde_json::Map<String, serde_json::Value> {
+        let serde_json::Value::Object(document) = serde_json::json!({
+            "authorization_endpoint": authorization,
+            "token_endpoint": token,
+            "revocation_endpoint": token.replace("/token", "/revoke"),
+            "scopes_supported": ["openbot", "offline_access"],
+            "code_challenge_methods_supported": ["S256"],
+        }) else {
+            unreachable!()
+        };
+        document
+    }
+
+    /// OpenBot Cloud as the app is told it: asked on the address for programs, its metadata sends
+    /// the person's browser to the address people use, and keeps the code and the refresh token on
+    /// the address the app was given.
+    #[test]
+    fn the_browser_may_be_sent_to_a_sibling_name_and_the_app_calls_stay_on_the_address() {
+        let address = "https://api.openbot.example";
+        let metadata = metadata_from(
+            address,
+            &document(
+                "https://my.openbot.example/api/auth/oauth2/authorize",
+                "https://api.openbot.example/api/auth/oauth2/token",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            metadata.authorization_endpoint,
+            "https://my.openbot.example/api/auth/oauth2/authorize"
+        );
+        assert_eq!(
+            metadata.token_endpoint,
+            "https://api.openbot.example/api/auth/oauth2/token"
+        );
+        assert_eq!(
+            metadata.revocation_endpoint.as_deref(),
+            Some("https://api.openbot.example/api/auth/oauth2/revoke")
+        );
+    }
+
+    #[test]
+    fn a_sibling_is_never_where_the_code_goes_and_anything_further_is_refused() {
+        let address = "https://api.openbot.example";
+        for (authorization, token) in [
+            // The token endpoint on the sibling: a code goes nowhere but the address.
+            (
+                "https://api.openbot.example/api/auth/oauth2/authorize",
+                "https://my.openbot.example/api/auth/oauth2/token",
+            ),
+            // Another site altogether, or the parent domain itself.
+            (
+                "https://elsewhere.example/api/auth/oauth2/authorize",
+                "https://api.openbot.example/api/auth/oauth2/token",
+            ),
+            (
+                "https://openbot.example/api/auth/oauth2/authorize",
+                "https://api.openbot.example/api/auth/oauth2/token",
+            ),
+            // A sibling over http, or on another port.
+            (
+                "http://my.openbot.example/api/auth/oauth2/authorize",
+                "https://api.openbot.example/api/auth/oauth2/token",
+            ),
+            (
+                "https://my.openbot.example:8443/api/auth/oauth2/authorize",
+                "https://api.openbot.example/api/auth/oauth2/token",
+            ),
+        ] {
+            assert!(
+                metadata_from(address, &document(authorization, token)).is_err(),
+                "{authorization} {token}"
+            );
+        }
+        // An address with no parent domain of its own has no siblings.
+        assert!(metadata_from(
+            "https://openbot.example",
+            &document(
+                "https://other.example/api/auth/oauth2/authorize",
+                "https://openbot.example/api/auth/oauth2/token",
+            ),
+        )
+        .is_err());
+    }
+
+    /// The end of the browser's session is a page for the browser, so it may be where the
+    /// authorization endpoint may be: the address, or a sibling name over https. Anywhere else it
+    /// is not taken, and the rest of the metadata still is: a sign-out that cannot end the browser's
+    /// session is no reason to refuse the OpenBot.
+    #[test]
+    fn the_end_session_endpoint_is_taken_where_a_browser_may_be_sent_and_left_out_elsewhere() {
+        let address = "https://api.openbot.example";
+        let with = |end_session: &str| {
+            let mut document = document(
+                "https://my.openbot.example/api/auth/oauth2/authorize",
+                "https://api.openbot.example/api/auth/oauth2/token",
+            );
+            document.insert("end_session_endpoint".into(), end_session.into());
+            metadata_from(address, &document).unwrap()
+        };
+        for kept in [
+            "https://my.openbot.example/api/auth/end-session",
+            "https://api.openbot.example/api/auth/end-session",
+        ] {
+            assert_eq!(with(kept).end_session_endpoint.as_deref(), Some(kept));
+        }
+        for left_out in [
+            "https://elsewhere.example/api/auth/end-session",
+            "https://openbot.example/api/auth/end-session",
+            "http://my.openbot.example/api/auth/end-session",
+            "https://my.openbot.example:8443/api/auth/end-session",
+            "https://someone:secret@my.openbot.example/api/auth/end-session",
+            "not an address",
+        ] {
+            let metadata = with(left_out);
+            assert_eq!(metadata.end_session_endpoint, None, "{left_out}");
+            assert_eq!(
+                metadata.token_endpoint,
+                "https://api.openbot.example/api/auth/oauth2/token"
+            );
+        }
+        // An OpenBot that publishes none, as one on a team's own servers.
+        let none = metadata_from(
+            address,
+            &document(
+                "https://my.openbot.example/api/auth/oauth2/authorize",
+                "https://api.openbot.example/api/auth/oauth2/token",
+            ),
+        )
+        .unwrap();
+        assert_eq!(none.end_session_endpoint, None);
     }
 
     /// A redirect to another host is not followed: the answer is read from the address typed.

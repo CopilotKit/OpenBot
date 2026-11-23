@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthedRouteImport } from './routes/_authed'
+import { Route as AcceptInviteRouteImport } from './routes/accept-invite'
 import { Route as ConnectingRouteImport } from './routes/connecting'
 import { Route as DesktopReturnRouteImport } from './routes/desktop-return'
 import { Route as SignRouteImport } from './routes/sign'
@@ -17,12 +18,14 @@ import { Route as AuthedAppRouteImport } from './routes/_authed/_app'
 import { Route as AuthedAdminRouteRouteImport } from './routes/_authed/admin/route'
 import { Route as AuthedOnboardingRouteImport } from './routes/_authed/onboarding'
 import { Route as AuthedSettingsRouteRouteImport } from './routes/_authed/settings/route'
+import { Route as AuthedTermsRouteImport } from './routes/_authed/terms'
 import { Route as AuthedAppIndexRouteImport } from './routes/_authed/_app/index'
 import { Route as AuthedAppApprovalsRouteImport } from './routes/_authed/_app/approvals'
 import { Route as AuthedAppBotRouteImport } from './routes/_authed/_app/bot'
 import { Route as AuthedAppBrowserRouteImport } from './routes/_authed/_app/browser'
 import { Route as AuthedAppMemoryRouteImport } from './routes/_authed/_app/memory'
 import { Route as AuthedAppReachabilityRouteImport } from './routes/_authed/_app/reachability'
+import { Route as AuthedAppReconnectRouteImport } from './routes/_authed/_app/reconnect'
 import { Route as AuthedAppResponsibilitiesRouteImport } from './routes/_authed/_app/responsibilities'
 import { Route as AuthedAppRoutinesRouteImport } from './routes/_authed/_app/routines'
 import { Route as AuthedAppSkillsRouteImport } from './routes/_authed/_app/skills'
@@ -37,6 +40,7 @@ import { Route as AuthedAdminCredentialsRouteImport } from './routes/_authed/adm
 import { Route as AuthedAdminEnterpriseRouteImport } from './routes/_authed/admin/enterprise'
 import { Route as AuthedAdminIdentityProvidersRouteImport } from './routes/_authed/admin/identity-providers'
 import { Route as AuthedAdminLearningRouteImport } from './routes/_authed/admin/learning'
+import { Route as AuthedAdminManagementRouteImport } from './routes/_authed/admin/management'
 import { Route as AuthedAdminPeopleRouteImport } from './routes/_authed/admin/people'
 import { Route as AuthedAdminPermissionsRouteImport } from './routes/_authed/admin/permissions'
 import { Route as AuthedAdminPlaygroundRouteImport } from './routes/_authed/admin/playground'
@@ -76,6 +80,7 @@ import { Route as AuthedAppGroupChannelIdRouteImport } from './routes/_authed/_a
 import { Route as AuthedAppGroupNewRouteImport } from './routes/_authed/_app/group/new'
 import { Route as AuthedAppInvitationsIndexRouteImport } from './routes/_authed/_app/invitations.index'
 import { Route as AuthedAppInvitationsInvitationIdRouteImport } from './routes/_authed/_app/invitations.$invitationId'
+import { Route as AuthedAppReconnectAppIdRouteImport } from './routes/_authed/_app/reconnect_.$appId'
 import { Route as AuthedAppRoutinesNewRouteImport } from './routes/_authed/_app/routines_.new'
 import { Route as AuthedAppSScreenRouteImport } from './routes/_authed/_app/s/$screen'
 import { Route as AuthedAppSkillsSlugRouteImport } from './routes/_authed/_app/skills_.$slug'
@@ -137,6 +142,11 @@ const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AcceptInviteRoute = AcceptInviteRouteImport.update({
+  id: '/accept-invite',
+  path: '/accept-invite',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConnectingRoute = ConnectingRouteImport.update({
   id: '/connecting',
   path: '/connecting',
@@ -171,6 +181,11 @@ const AuthedSettingsRouteRoute = AuthedSettingsRouteRouteImport.update({
   path: '/settings',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedTermsRoute = AuthedTermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const AuthedAppIndexRoute = AuthedAppIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -199,6 +214,11 @@ const AuthedAppMemoryRoute = AuthedAppMemoryRouteImport.update({
 const AuthedAppReachabilityRoute = AuthedAppReachabilityRouteImport.update({
   id: '/reachability',
   path: '/reachability',
+  getParentRoute: () => AuthedAppRoute,
+} as any)
+const AuthedAppReconnectRoute = AuthedAppReconnectRouteImport.update({
+  id: '/reconnect',
+  path: '/reconnect',
   getParentRoute: () => AuthedAppRoute,
 } as any)
 const AuthedAppResponsibilitiesRoute =
@@ -271,6 +291,11 @@ const AuthedAdminIdentityProvidersRoute =
 const AuthedAdminLearningRoute = AuthedAdminLearningRouteImport.update({
   id: '/learning',
   path: '/learning',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
+const AuthedAdminManagementRoute = AuthedAdminManagementRouteImport.update({
+  id: '/management',
+  path: '/management',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
 const AuthedAdminPeopleRoute = AuthedAdminPeopleRouteImport.update({
@@ -478,6 +503,11 @@ const AuthedAppInvitationsInvitationIdRoute =
     path: '/invitations/$invitationId',
     getParentRoute: () => AuthedAppRoute,
   } as any)
+const AuthedAppReconnectAppIdRoute = AuthedAppReconnectAppIdRouteImport.update({
+  id: '/reconnect_/$appId',
+  path: '/reconnect/$appId',
+  getParentRoute: () => AuthedAppRoute,
+} as any)
 const AuthedAppRoutinesNewRoute = AuthedAppRoutinesNewRouteImport.update({
   id: '/routines_/new',
   path: '/routines/new',
@@ -804,17 +834,20 @@ const AuthedAdminPluginsKeyToolsToolRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthedAppIndexRoute
+  '/accept-invite': typeof AcceptInviteRoute
   '/connecting': typeof ConnectingRoute
   '/desktop-return': typeof DesktopReturnRoute
   '/sign': typeof SignRoute
   '/admin': typeof AuthedAdminRouteRouteWithChildren
   '/settings': typeof AuthedSettingsRouteRouteWithChildren
   '/onboarding': typeof AuthedOnboardingRoute
+  '/terms': typeof AuthedTermsRoute
   '/approvals': typeof AuthedAppApprovalsRoute
   '/bot': typeof AuthedAppBotRoute
   '/browser': typeof AuthedAppBrowserRoute
   '/memory': typeof AuthedAppMemoryRoute
   '/reachability': typeof AuthedAppReachabilityRoute
+  '/reconnect': typeof AuthedAppReconnectRoute
   '/responsibilities': typeof AuthedAppResponsibilitiesRoute
   '/routines': typeof AuthedAppRoutinesRoute
   '/skills': typeof AuthedAppSkillsRoute
@@ -828,6 +861,7 @@ export interface FileRoutesByFullPath {
   '/admin/enterprise': typeof AuthedAdminEnterpriseRoute
   '/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
   '/admin/learning': typeof AuthedAdminLearningRoute
+  '/admin/management': typeof AuthedAdminManagementRoute
   '/admin/people': typeof AuthedAdminPeopleRoute
   '/admin/permissions': typeof AuthedAdminPermissionsRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
@@ -862,6 +896,7 @@ export interface FileRoutesByFullPath {
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
   '/invitations/$invitationId': typeof AuthedAppInvitationsInvitationIdRoute
+  '/reconnect/$appId': typeof AuthedAppReconnectAppIdRoute
   '/routines/new': typeof AuthedAppRoutinesNewRoute
   '/s/$screen': typeof AuthedAppSScreenRoute
   '/skills/$slug': typeof AuthedAppSkillsSlugRoute
@@ -926,15 +961,18 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof AuthedAppIndexRoute
+  '/accept-invite': typeof AcceptInviteRoute
   '/connecting': typeof ConnectingRoute
   '/desktop-return': typeof DesktopReturnRoute
   '/sign': typeof SignRoute
   '/onboarding': typeof AuthedOnboardingRoute
+  '/terms': typeof AuthedTermsRoute
   '/approvals': typeof AuthedAppApprovalsRoute
   '/bot': typeof AuthedAppBotRoute
   '/browser': typeof AuthedAppBrowserRoute
   '/memory': typeof AuthedAppMemoryRoute
   '/reachability': typeof AuthedAppReachabilityRoute
+  '/reconnect': typeof AuthedAppReconnectRoute
   '/responsibilities': typeof AuthedAppResponsibilitiesRoute
   '/routines': typeof AuthedAppRoutinesRoute
   '/skills': typeof AuthedAppSkillsRoute
@@ -948,6 +986,7 @@ export interface FileRoutesByTo {
   '/admin/enterprise': typeof AuthedAdminEnterpriseRoute
   '/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
   '/admin/learning': typeof AuthedAdminLearningRoute
+  '/admin/management': typeof AuthedAdminManagementRoute
   '/admin/people': typeof AuthedAdminPeopleRoute
   '/admin/permissions': typeof AuthedAdminPermissionsRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
@@ -982,6 +1021,7 @@ export interface FileRoutesByTo {
   '/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/group/new': typeof AuthedAppGroupNewRoute
   '/invitations/$invitationId': typeof AuthedAppInvitationsInvitationIdRoute
+  '/reconnect/$appId': typeof AuthedAppReconnectAppIdRoute
   '/routines/new': typeof AuthedAppRoutinesNewRoute
   '/s/$screen': typeof AuthedAppSScreenRoute
   '/skills/$slug': typeof AuthedAppSkillsSlugRoute
@@ -1047,6 +1087,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authed': typeof AuthedRouteWithChildren
+  '/accept-invite': typeof AcceptInviteRoute
   '/connecting': typeof ConnectingRoute
   '/desktop-return': typeof DesktopReturnRoute
   '/sign': typeof SignRoute
@@ -1054,11 +1095,13 @@ export interface FileRoutesById {
   '/_authed/settings': typeof AuthedSettingsRouteRouteWithChildren
   '/_authed/_app': typeof AuthedAppRouteWithChildren
   '/_authed/onboarding': typeof AuthedOnboardingRoute
+  '/_authed/terms': typeof AuthedTermsRoute
   '/_authed/_app/approvals': typeof AuthedAppApprovalsRoute
   '/_authed/_app/bot': typeof AuthedAppBotRoute
   '/_authed/_app/browser': typeof AuthedAppBrowserRoute
   '/_authed/_app/memory': typeof AuthedAppMemoryRoute
   '/_authed/_app/reachability': typeof AuthedAppReachabilityRoute
+  '/_authed/_app/reconnect': typeof AuthedAppReconnectRoute
   '/_authed/_app/responsibilities': typeof AuthedAppResponsibilitiesRoute
   '/_authed/_app/routines': typeof AuthedAppRoutinesRoute
   '/_authed/_app/skills': typeof AuthedAppSkillsRoute
@@ -1072,6 +1115,7 @@ export interface FileRoutesById {
   '/_authed/admin/enterprise': typeof AuthedAdminEnterpriseRoute
   '/_authed/admin/identity-providers': typeof AuthedAdminIdentityProvidersRoute
   '/_authed/admin/learning': typeof AuthedAdminLearningRoute
+  '/_authed/admin/management': typeof AuthedAdminManagementRoute
   '/_authed/admin/people': typeof AuthedAdminPeopleRoute
   '/_authed/admin/permissions': typeof AuthedAdminPermissionsRoute
   '/_authed/admin/playground': typeof AuthedAdminPlaygroundRoute
@@ -1108,6 +1152,7 @@ export interface FileRoutesById {
   '/_authed/_app/group/$channelId': typeof AuthedAppGroupChannelIdRoute
   '/_authed/_app/group/new': typeof AuthedAppGroupNewRoute
   '/_authed/_app/invitations/$invitationId': typeof AuthedAppInvitationsInvitationIdRoute
+  '/_authed/_app/reconnect_/$appId': typeof AuthedAppReconnectAppIdRoute
   '/_authed/_app/routines_/new': typeof AuthedAppRoutinesNewRoute
   '/_authed/_app/s/$screen': typeof AuthedAppSScreenRoute
   '/_authed/_app/skills_/$slug': typeof AuthedAppSkillsSlugRoute
@@ -1174,17 +1219,20 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/accept-invite'
     | '/connecting'
     | '/desktop-return'
     | '/sign'
     | '/admin'
     | '/settings'
     | '/onboarding'
+    | '/terms'
     | '/approvals'
     | '/bot'
     | '/browser'
     | '/memory'
     | '/reachability'
+    | '/reconnect'
     | '/responsibilities'
     | '/routines'
     | '/skills'
@@ -1198,6 +1246,7 @@ export interface FileRouteTypes {
     | '/admin/enterprise'
     | '/admin/identity-providers'
     | '/admin/learning'
+    | '/admin/management'
     | '/admin/people'
     | '/admin/permissions'
     | '/admin/playground'
@@ -1232,6 +1281,7 @@ export interface FileRouteTypes {
     | '/group/$channelId'
     | '/group/new'
     | '/invitations/$invitationId'
+    | '/reconnect/$appId'
     | '/routines/new'
     | '/s/$screen'
     | '/skills/$slug'
@@ -1296,15 +1346,18 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/accept-invite'
     | '/connecting'
     | '/desktop-return'
     | '/sign'
     | '/onboarding'
+    | '/terms'
     | '/approvals'
     | '/bot'
     | '/browser'
     | '/memory'
     | '/reachability'
+    | '/reconnect'
     | '/responsibilities'
     | '/routines'
     | '/skills'
@@ -1318,6 +1371,7 @@ export interface FileRouteTypes {
     | '/admin/enterprise'
     | '/admin/identity-providers'
     | '/admin/learning'
+    | '/admin/management'
     | '/admin/people'
     | '/admin/permissions'
     | '/admin/playground'
@@ -1352,6 +1406,7 @@ export interface FileRouteTypes {
     | '/group/$channelId'
     | '/group/new'
     | '/invitations/$invitationId'
+    | '/reconnect/$appId'
     | '/routines/new'
     | '/s/$screen'
     | '/skills/$slug'
@@ -1416,6 +1471,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_authed'
+    | '/accept-invite'
     | '/connecting'
     | '/desktop-return'
     | '/sign'
@@ -1423,11 +1479,13 @@ export interface FileRouteTypes {
     | '/_authed/settings'
     | '/_authed/_app'
     | '/_authed/onboarding'
+    | '/_authed/terms'
     | '/_authed/_app/approvals'
     | '/_authed/_app/bot'
     | '/_authed/_app/browser'
     | '/_authed/_app/memory'
     | '/_authed/_app/reachability'
+    | '/_authed/_app/reconnect'
     | '/_authed/_app/responsibilities'
     | '/_authed/_app/routines'
     | '/_authed/_app/skills'
@@ -1441,6 +1499,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/enterprise'
     | '/_authed/admin/identity-providers'
     | '/_authed/admin/learning'
+    | '/_authed/admin/management'
     | '/_authed/admin/people'
     | '/_authed/admin/permissions'
     | '/_authed/admin/playground'
@@ -1477,6 +1536,7 @@ export interface FileRouteTypes {
     | '/_authed/_app/group/$channelId'
     | '/_authed/_app/group/new'
     | '/_authed/_app/invitations/$invitationId'
+    | '/_authed/_app/reconnect_/$appId'
     | '/_authed/_app/routines_/new'
     | '/_authed/_app/s/$screen'
     | '/_authed/_app/skills_/$slug'
@@ -1542,6 +1602,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   AuthedRoute: typeof AuthedRouteWithChildren
+  AcceptInviteRoute: typeof AcceptInviteRoute
   ConnectingRoute: typeof ConnectingRoute
   DesktopReturnRoute: typeof DesktopReturnRoute
   SignRoute: typeof SignRoute
@@ -1554,6 +1615,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AuthedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/accept-invite': {
+      id: '/accept-invite'
+      path: '/accept-invite'
+      fullPath: '/accept-invite'
+      preLoaderRoute: typeof AcceptInviteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/connecting': {
@@ -1605,6 +1673,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsRouteRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/terms': {
+      id: '/_authed/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof AuthedTermsRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/_app/': {
       id: '/_authed/_app/'
       path: '/'
@@ -1645,6 +1720,13 @@ declare module '@tanstack/react-router' {
       path: '/reachability'
       fullPath: '/reachability'
       preLoaderRoute: typeof AuthedAppReachabilityRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/reconnect': {
+      id: '/_authed/_app/reconnect'
+      path: '/reconnect'
+      fullPath: '/reconnect'
+      preLoaderRoute: typeof AuthedAppReconnectRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/responsibilities': {
@@ -1743,6 +1825,13 @@ declare module '@tanstack/react-router' {
       path: '/learning'
       fullPath: '/admin/learning'
       preLoaderRoute: typeof AuthedAdminLearningRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/admin/management': {
+      id: '/_authed/admin/management'
+      path: '/management'
+      fullPath: '/admin/management'
+      preLoaderRoute: typeof AuthedAdminManagementRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
     '/_authed/admin/people': {
@@ -2016,6 +2105,13 @@ declare module '@tanstack/react-router' {
       path: '/invitations/$invitationId'
       fullPath: '/invitations/$invitationId'
       preLoaderRoute: typeof AuthedAppInvitationsInvitationIdRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/reconnect_/$appId': {
+      id: '/_authed/_app/reconnect_/$appId'
+      path: '/reconnect/$appId'
+      fullPath: '/reconnect/$appId'
+      preLoaderRoute: typeof AuthedAppReconnectAppIdRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/routines_/new': {
@@ -2422,6 +2518,7 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminEnterpriseRoute: typeof AuthedAdminEnterpriseRoute
   AuthedAdminIdentityProvidersRoute: typeof AuthedAdminIdentityProvidersRoute
   AuthedAdminLearningRoute: typeof AuthedAdminLearningRoute
+  AuthedAdminManagementRoute: typeof AuthedAdminManagementRoute
   AuthedAdminPeopleRoute: typeof AuthedAdminPeopleRoute
   AuthedAdminPermissionsRoute: typeof AuthedAdminPermissionsRoute
   AuthedAdminPlaygroundRoute: typeof AuthedAdminPlaygroundRoute
@@ -2460,6 +2557,7 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminEnterpriseRoute: AuthedAdminEnterpriseRoute,
   AuthedAdminIdentityProvidersRoute: AuthedAdminIdentityProvidersRoute,
   AuthedAdminLearningRoute: AuthedAdminLearningRoute,
+  AuthedAdminManagementRoute: AuthedAdminManagementRoute,
   AuthedAdminPeopleRoute: AuthedAdminPeopleRoute,
   AuthedAdminPermissionsRoute: AuthedAdminPermissionsRoute,
   AuthedAdminPlaygroundRoute: AuthedAdminPlaygroundRoute,
@@ -2577,6 +2675,7 @@ interface AuthedAppRouteChildren {
   AuthedAppBrowserRoute: typeof AuthedAppBrowserRoute
   AuthedAppMemoryRoute: typeof AuthedAppMemoryRoute
   AuthedAppReachabilityRoute: typeof AuthedAppReachabilityRoute
+  AuthedAppReconnectRoute: typeof AuthedAppReconnectRoute
   AuthedAppResponsibilitiesRoute: typeof AuthedAppResponsibilitiesRoute
   AuthedAppRoutinesRoute: typeof AuthedAppRoutinesRoute
   AuthedAppSkillsRoute: typeof AuthedAppSkillsRoute
@@ -2592,6 +2691,7 @@ interface AuthedAppRouteChildren {
   AuthedAppGroupChannelIdRoute: typeof AuthedAppGroupChannelIdRoute
   AuthedAppGroupNewRoute: typeof AuthedAppGroupNewRoute
   AuthedAppInvitationsInvitationIdRoute: typeof AuthedAppInvitationsInvitationIdRoute
+  AuthedAppReconnectAppIdRoute: typeof AuthedAppReconnectAppIdRoute
   AuthedAppRoutinesNewRoute: typeof AuthedAppRoutinesNewRoute
   AuthedAppSScreenRoute: typeof AuthedAppSScreenRoute
   AuthedAppSkillsSlugRoute: typeof AuthedAppSkillsSlugRoute
@@ -2633,6 +2733,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppBrowserRoute: AuthedAppBrowserRoute,
   AuthedAppMemoryRoute: AuthedAppMemoryRoute,
   AuthedAppReachabilityRoute: AuthedAppReachabilityRoute,
+  AuthedAppReconnectRoute: AuthedAppReconnectRoute,
   AuthedAppResponsibilitiesRoute: AuthedAppResponsibilitiesRoute,
   AuthedAppRoutinesRoute: AuthedAppRoutinesRoute,
   AuthedAppSkillsRoute: AuthedAppSkillsRoute,
@@ -2648,6 +2749,7 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppGroupChannelIdRoute: AuthedAppGroupChannelIdRoute,
   AuthedAppGroupNewRoute: AuthedAppGroupNewRoute,
   AuthedAppInvitationsInvitationIdRoute: AuthedAppInvitationsInvitationIdRoute,
+  AuthedAppReconnectAppIdRoute: AuthedAppReconnectAppIdRoute,
   AuthedAppRoutinesNewRoute: AuthedAppRoutinesNewRoute,
   AuthedAppSScreenRoute: AuthedAppSScreenRoute,
   AuthedAppSkillsSlugRoute: AuthedAppSkillsSlugRoute,
@@ -2697,6 +2799,7 @@ interface AuthedRouteChildren {
   AuthedSettingsRouteRoute: typeof AuthedSettingsRouteRouteWithChildren
   AuthedAppRoute: typeof AuthedAppRouteWithChildren
   AuthedOnboardingRoute: typeof AuthedOnboardingRoute
+  AuthedTermsRoute: typeof AuthedTermsRoute
   AuthedSignInRequestIdRoute: typeof AuthedSignInRequestIdRoute
 }
 
@@ -2705,6 +2808,7 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedSettingsRouteRoute: AuthedSettingsRouteRouteWithChildren,
   AuthedAppRoute: AuthedAppRouteWithChildren,
   AuthedOnboardingRoute: AuthedOnboardingRoute,
+  AuthedTermsRoute: AuthedTermsRoute,
   AuthedSignInRequestIdRoute: AuthedSignInRequestIdRoute,
 }
 
@@ -2713,6 +2817,7 @@ const AuthedRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   AuthedRoute: AuthedRouteWithChildren,
+  AcceptInviteRoute: AcceptInviteRoute,
   ConnectingRoute: ConnectingRoute,
   DesktopReturnRoute: DesktopReturnRoute,
   SignRoute: SignRoute,

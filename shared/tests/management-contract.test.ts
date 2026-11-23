@@ -9,6 +9,7 @@ import {
   CertificateRequest,
   CommandResult,
   canonicalCommand,
+  ENROLLMENT_REFUSAL_CODES,
   EnrollmentGranted,
   EnrollmentPending,
   EnrollmentProblem,
@@ -246,6 +247,45 @@ function opensslPems() {
 }
 
 describe("enrollment contract", () => {
+  test("a heartbeat and an install status may say whether upgrades are on, and only with the known values", () => {
+    const status = {
+      enrolled: true,
+      agentConnected: true,
+      lastHeartbeatAt: "2026-11-20T10:00:00.000Z",
+      agentVersion: "1.2.0",
+    };
+    expect(InstallStatus.parse(status)).toEqual(status);
+    for (const upgrades of ["on", "not-set-up"] as const)
+      expect(InstallStatus.parse({ ...status, upgrades })).toEqual({
+        ...status,
+        upgrades,
+      });
+    expect(
+      InstallStatus.safeParse({ ...status, upgrades: "maybe" }).success,
+    ).toBe(false);
+    expect(Heartbeat.shape.upgrades.safeParse("not-set-up").success).toBe(true);
+    expect(Heartbeat.shape.upgrades.safeParse(undefined).success).toBe(true);
+    expect(Heartbeat.shape.upgrades.safeParse("off").success).toBe(false);
+  });
+
+  test("a refusal names one of the codes a server reports, and a repeat start names the install", () => {
+    expect(ENROLLMENT_REFUSAL_CODES).toEqual([
+      "invalid-licence",
+      "not-team",
+      "blocked",
+      "not-entitled",
+      "already-enrolled",
+    ]);
+    const repeat = {
+      type: "about:blank",
+      title: "This server is already connected.",
+      status: 409,
+      code: "already-enrolled",
+      installId: "6f1c1a52-2f0e-4c3b-9b1e-6a3f0f6b2d11",
+    };
+    expect(EnrollmentProblem.parse(repeat)).toEqual(repeat);
+  });
+
   const installId = "6f1c1a52-2f0e-4c3b-9b1e-6a3f0f6b2d11";
   const token = "e1_Q2hhbmdlIG1lIGlzIG5vdCBhIHRva2VuIGJ1dCBpdCBpcyBsb25n";
   const pems = opensslPems();
@@ -263,6 +303,23 @@ describe("enrollment contract", () => {
     expect(
       EnrollmentStart.safeParse({ ...start, serverUrl: "file:///etc/passwd" })
         .success,
+    ).toBe(false);
+    // The licence approves a start in licence mode; approval is the default.
+    for (const mode of ["approval", "licence"] as const)
+      expect(EnrollmentStart.parse({ ...start, mode })).toEqual({
+        ...start,
+        mode,
+      });
+    expect(EnrollmentStart.safeParse({ ...start, mode: "auto" }).success).toBe(
+      false,
+    );
+    // The install's own id, so two installs at the same address under one licence stay apart.
+    const instanceId = "5d3c2b1a-0f9e-4d8c-8b7a-6e5f4d3c2b1a";
+    expect(
+      EnrollmentStart.parse({ ...start, mode: "licence", instanceId }),
+    ).toEqual({ ...start, mode: "licence", instanceId });
+    expect(
+      EnrollmentStart.safeParse({ ...start, instanceId: "production" }).success,
     ).toBe(false);
     const started = {
       requestId: "0b7f4f2e-3a49-4f61-9d2c-6c1d5a7e8f90",
@@ -379,4 +436,26 @@ describe("enrollment contract", () => {
       }).success,
     ).toBe(true);
   });
+});
+
+test("an install's status reads with its window, and without one from a service before it was added", () => {
+  const status = {
+    enrolled: true,
+    agentConnected: true,
+    lastHeartbeatAt: "2026-11-20T10:31:12Z",
+    agentVersion: "0.4.0",
+  };
+  expect(InstallStatus.safeParse(status).success).toBe(true);
+  expect(
+    InstallStatus.safeParse({
+      ...status,
+      window: { weekday: 2, startUtc: "14:00", hours: 4 },
+    }).success,
+  ).toBe(true);
+  expect(
+    InstallStatus.safeParse({
+      ...status,
+      window: { weekday: 2, startUtc: "14:00", hours: 2 },
+    }).success,
+  ).toBe(false);
 });

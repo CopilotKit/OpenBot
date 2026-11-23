@@ -183,6 +183,26 @@ const COPILOTKIT = /(?<!OpenBot\s+by\s+)(?<![\w/.-])CopilotKit(?![\w/-])/;
  */
 const COPILOTKIT_ALLOWED: { file: string; text: string; why: string }[] = [
   {
+    file: "app/src/routes/_authed/admin/management.tsx",
+    text: "CopilotKit sees this install's version and health",
+    why: "managed updates: the company that receives the install's version and health and upgrades it, said before Connect in the same words as the approval page (the glossary's named exception)",
+  },
+  {
+    file: "app/src/routes/_authed/admin/management.tsx",
+    text: "The window is agreed with CopilotKit",
+    why: "managed updates: who the maintenance window is agreed with, the same words as the approval page",
+  },
+  {
+    file: "app/src/routes/_authed/admin/management.tsx",
+    text: "sign in to CopilotKit as an admin",
+    why: "managed updates: the approval page signs in to CopilotKit's own account, under the name its sign-in card shows",
+  },
+  {
+    file: "app/src/routes/_authed/admin/management.tsx",
+    text: "CopilotKit account your licence is under",
+    why: "managed updates: the account's own name, the glossary's named exception like GitHub's and Slack's own words",
+  },
+  {
     file: "desktop/src/Sections.tsx",
     text: "by CopilotKit",
     why: "the Account step's header, beside OpenBot's name: it reads OpenBot by CopilotKit",

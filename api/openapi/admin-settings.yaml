@@ -109,6 +109,10 @@ paths:
         organization's rule holds for everybody who signs in, and sending
         ssoRequired in any other organization answers 409. Only an
         administrator of the organization may change them.
+        Where people sign in with their OpenBot by CopilotKit account
+        (hostedSignIn in getDeployment), single sign-on can't be required:
+        sending ssoRequired true answers 409 with the code
+        HOSTED_SIGN_IN_ONLY.
       security:
         - webSession: []
         - appOAuth: [settings:write]
@@ -1074,7 +1078,8 @@ components:
           type: boolean
           description: >-
             Whether a company's own identity provider is registered, so an
-            email address can be sent to it. Never which.
+            email address can be sent to it. Never which. Always false where
+            hostedSignIn is true.
         ssoRequired:
           type: boolean
           description: >-
@@ -1082,7 +1087,8 @@ components:
             sign-on, because its one organization requires it; social sign-in
             then stays only as the configured administrators' way in. Where
             this OpenBot may keep more than one organization, each one requires
-            it of its own members in its settings, and this says false.
+            it of its own members in its settings, and this says false. Always
+            false where hostedSignIn is true.
         builtInBots:
           type: boolean
           description: >-
@@ -2108,7 +2114,9 @@ components:
       description: >-
         Single sign-on can't be required before an identity provider is
         registered, ssoRequired was sent in an organization other than the
-        one this OpenBot keeps, or the Idempotency-Key was used for a
+        one this OpenBot keeps, people sign in here with their OpenBot by
+        CopilotKit account so no organization requires it
+        (HOSTED_SIGN_IN_ONLY), or the Idempotency-Key was used for a
         different request.
       content:
         application/problem+json:
@@ -2133,6 +2141,17 @@ components:
                 status: 409
                 detail: Register an identity provider before requiring SSO, or nobody but the break-glass administrators can sign in.
                 code: CONFLICT
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            hostedSignIn:
+              value:
+                type: https://open.bot/errors/hosted-sign-in-only
+                title: Sign-in here is through OpenBot by CopilotKit.
+                status: 409
+                detail: People sign in here with their OpenBot by CopilotKit account, so an organization can't set up its own company sign-in.
+                code: HOSTED_SIGN_IN_ONLY
                 category: conflict
                 retryable: false
                 requestId: req_example

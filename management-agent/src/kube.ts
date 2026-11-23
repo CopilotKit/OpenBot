@@ -80,7 +80,11 @@ export class Kube {
     } catch (error) {
       if (
         error instanceof CommandFailed &&
-        /NotFound|not found/.test(error.stderr)
+        // The object is not there: `Error from server (NotFound)`. Not any "not found": while the agent's
+        // Role is being created beside its pod, the API server answers `Forbidden ... RBAC: role
+        // "openbot-agent" not found`, and reading that as "no Secret" made an agent with a
+        // certificate ask for an enrollment token again.
+        /\(NotFound\)/.test(error.stderr)
       )
         return null;
       throw error;

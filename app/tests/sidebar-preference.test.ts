@@ -1,11 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import {
   applySidebarOpen,
+  clampSidebarWidth,
   LEGACY_APP_SIDEBAR_WIDTH_KEY,
   parseStoredSidebarOpen,
   SIDEBAR_STORAGE_KEY,
   SIDEBAR_WIDTH,
   SIDEBAR_WIDTH_STORAGE_KEY,
+  sidebarCeiling,
+  sidebarFloor,
+  sidebarToggleShown,
+  sidebarWidthStyle,
   storedSidebarWidth,
 } from "../src/lib/sidebar";
 
@@ -97,5 +102,98 @@ describe("sidebar width", () => {
     expect(
       storedSidebarWidth(storage({ [SIDEBAR_WIDTH_STORAGE_KEY]: "9000" })),
     ).toBe("340px");
+  });
+});
+
+/*
+ * Beside a strip, the sidebar's width is the strip and the panel together, so the floor a drag
+ * stops at is the panel's own floor plus the strip: the panel never gets narrower than it was
+ * allowed to be on its own.
+ */
+describe("the floor a drag stops at", () => {
+  test("is the panel's floor with no strip", () => {
+    expect(sidebarFloor(0)).toBe(180);
+  });
+
+  test("adds the strip's width to the panel's floor", () => {
+    expect(sidebarFloor(48)).toBe(228);
+  });
+
+  test("holds a drag narrower than the panel's floor at it", () => {
+    expect(clampSidebarWidth(100, sidebarFloor(48))).toBe(228);
+  });
+});
+
+/*
+ * The page's "Show sidebar" button is the way back to a hidden panel. On a section with no panel
+ * there is nothing to show, and the strip beside the page is the way to Conversations.
+ */
+describe("the page's Show sidebar button", () => {
+  test("shows when the panel is hidden and its section has one", () => {
+    expect(
+      sidebarToggleShown({
+        isMobile: false,
+        open: false,
+        panelAvailable: true,
+      }),
+    ).toBe(true);
+  });
+
+  test("does not show while the panel is showing", () => {
+    expect(
+      sidebarToggleShown({ isMobile: false, open: true, panelAvailable: true }),
+    ).toBe(false);
+  });
+
+  test("does not show on a section with no panel", () => {
+    expect(
+      sidebarToggleShown({
+        isMobile: false,
+        open: false,
+        panelAvailable: false,
+      }),
+    ).toBe(false);
+  });
+
+  test("always shows in a narrow window, where the sheet starts closed", () => {
+    expect(
+      sidebarToggleShown({ isMobile: true, open: true, panelAvailable: false }),
+    ).toBe(true);
+  });
+});
+
+/*
+ * Admin and Settings share the width and may be dragged to 180px, which beside the strip would
+ * leave the panel narrower than it may ever be dragged. And however wide it was left, the sidebar
+ * takes no more than two-fifths of the window: zoomed in, the window is fewer of the page's pixels
+ * wide and the sidebar would otherwise keep its count of them.
+ */
+test("the shared width is drawn between the floor and two-fifths of the window", () => {
+  expect(sidebarWidthStyle("180px", { besideStrip: true })).toBe(
+    "clamp(calc(180px + var(--sidebar-width-icon)), 180px, 40vw)",
+  );
+  expect(sidebarWidthStyle("480px", { besideStrip: false })).toBe(
+    "clamp(180px, 480px, 40vw)",
+  );
+});
+
+/*
+ * "Cannot drag sidebar to make it smaller ... zooming in zooms the entire screen": a window zoomed
+ * to 175% is about 820 of the page's pixels wide, so the edge may not be dragged out past two-fifths
+ * of that, and a window too narrow for even the floor keeps the floor.
+ */
+describe("the widest a drag goes", () => {
+  test("is the fixed maximum in a wide window", () => {
+    expect(sidebarCeiling(1440, 228)).toBe(480);
+  });
+
+  test("is two-fifths of a zoomed-in window", () => {
+    expect(sidebarCeiling(820, 228)).toBe(328);
+    expect(clampSidebarWidth(600, 228, sidebarCeiling(820, 228))).toBe(328);
+  });
+
+  test("is never under the floor", () => {
+    expect(sidebarCeiling(400, 228)).toBe(228);
+    expect(clampSidebarWidth(100, 228, sidebarCeiling(400, 228))).toBe(228);
   });
 });

@@ -19,6 +19,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { recheckSetupMutationOptions } from "@/lib/setup/mutations";
 import {
@@ -71,6 +72,8 @@ export function SetupChecklist({
 }) {
   const checklist = useQuery(setupChecklistQueryOptions());
   const recheck = useMutation(recheckSetupMutationOptions(queryClient));
+  const hosted =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.hostedSignIn === true;
 
   /*
    * Check again asks the server to ask Intelligence, the model provider and the computers again,
@@ -114,7 +117,7 @@ export function SetupChecklist({
           <p className="text-sm text-muted-foreground" role="status">
             {checklist.data.audience === "member"
               ? memberSummaryOf(checklist.data.rows)
-              : summaryOf(checklist.data.rows)}
+              : summaryOf(checklist.data.rows, hosted)}
           </p>
           <PageRows className="mt-0">
             <ul aria-label="Setup">
@@ -142,8 +145,13 @@ export function SetupChecklist({
   );
 }
 
-/** One line over the list, so the state of the whole list is said before its rows are read. */
-export function summaryOf(rows: SetupRow[]): string {
+/**
+ * One line over the list, so the state of the whole list is said before its rows are read.
+ *
+ * `hosted` is a hosted OpenBot (`hostedSignIn`), whose server sends an organization admin no fix
+ * for what OpenBot by CopilotKit sets up, so not every optional row says how to add it.
+ */
+export function summaryOf(rows: SetupRow[], hosted = false): string {
   const gaps = rows.filter((row) => row.status === "needs_setup");
   const unchecked = rows.filter((row) => row.status === "not_checked").length;
   const notChecked =
@@ -167,7 +175,9 @@ export function summaryOf(rows: SetupRow[]): string {
   const needs =
     required > 0
       ? `${things} setup, and ${required === 1 ? "1 is" : `${required} are`} required. Set up the required ${required === 1 ? "one" : "ones"} first.`
-      : `${PRODUCT} is ready to use. ${optional}. Each says how to add it.`;
+      : hosted
+        ? `${PRODUCT} is ready to use. ${optional}.`
+        : `${PRODUCT} is ready to use. ${optional}. Each says how to add it.`;
   return notChecked ? `${needs} ${notChecked}` : needs;
 }
 

@@ -91,6 +91,8 @@ export function sourceSettings(config: AgentConfig) {
     },
     insecure: source.insecure ? true : null,
     secretRef: source.pullSecret ? { name: source.pullSecret } : null,
+    // The cloud's registry, signed in to with source-controller's workload identity.
+    provider: source.provider ?? null,
     // Flux checks the chart's signature before Helm reads it.
     verify: source.verify
       ? {

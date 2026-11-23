@@ -2,7 +2,7 @@ import {
   IconBuilding,
   IconChevronDown,
   IconChevronRight,
-  IconUser,
+  IconCreditCard,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -12,7 +12,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogBody,
@@ -56,7 +56,6 @@ import {
 } from "@/lib/organizations/queries";
 import {
   givableRoles,
-  initialsOf,
   memberControl,
   memberLine,
   personName,
@@ -65,7 +64,11 @@ import {
   roleInSentence,
   roleName,
 } from "@/lib/organizations/words";
+import { needsCard, usePlan } from "@/lib/plan/queries";
+import { cardAction, planSummary } from "@/lib/plan/words";
+import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import { PersonAvatar } from "./person-avatar";
 import { SentInvitationsSection } from "./sent-invitations-section";
 
 /** The API's cap on an organization's name, so the field stops where the server does. */
@@ -100,6 +103,7 @@ export function OrganizationSettingsPage() {
       <PageSection title="Profile">
         <PageRows>
           <NameRow canManage={canManage} organization={organization} />
+          <PlanRow />
         </PageRows>
       </PageSection>
       <MembersSection organization={organization} />
@@ -165,6 +169,41 @@ function NameRow({
         open={open}
         organization={organization}
       />
+    </>
+  );
+}
+
+/**
+ * Where the organization stands on its plan, where this OpenBot needs one: on its free trial, on the
+ * plan, a failed payment, or none yet. Read-only, with the way to add or update the card for an
+ * owner or an admin while Bots can't run (`addCardUrl`, the server's verdict). Nothing, and no
+ * divider, where no plan is needed or while it is read.
+ */
+function PlanRow() {
+  const plan = usePlan();
+  if (!plan?.required) return null;
+  return (
+    <>
+      <Separator />
+      <Item size="sm">
+        <ItemMedia variant="icon">
+          <IconCreditCard />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>Plan</ItemTitle>
+          <ItemDescription>{planSummary(plan)}</ItemDescription>
+        </ItemContent>
+        {needsCard(plan) && plan.addCardUrl ? (
+          <ItemActions>
+            <a
+              className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
+              href={plan.addCardUrl}
+            >
+              {cardAction(plan)}
+            </a>
+          </ItemActions>
+        ) : null}
+      </Item>
     </>
   );
 }
@@ -258,25 +297,6 @@ function RenameOrganizationDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-/**
- * A person's picture, or their initials on the tint the account row uses, or a person's mark for
- * somebody OpenBot knows neither a name nor an address for.
- */
-function PersonAvatar({ person }: { person: OrganizationMemberSummary }) {
-  const initials = initialsOf(person);
-  return (
-    <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted-foreground/10 text-foreground/70 text-xs">
-      {person.image ? (
-        <img alt="" className="size-full object-cover" src={person.image} />
-      ) : initials ? (
-        initials
-      ) : (
-        <IconUser aria-hidden="true" className="size-4" />
-      )}
-    </div>
   );
 }
 

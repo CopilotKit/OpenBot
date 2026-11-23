@@ -20,6 +20,7 @@ import {
 import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
+import { MovedAppsBanner } from "@/components/moves/moved-apps-notice";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { botAttentionQueryOptions } from "@/lib/bot-lifecycle/queries";
@@ -134,6 +135,7 @@ export function OpenFuseFrame({ children }: { children: ReactNode }) {
         data-openfuse-tab={tab ?? "none"}
       >
         <ConnectionBanner />
+        <MovedAppsBanner />
         <UpdateBanner />
         <SelfHostBanner />
         {/* Beside the header, the column's own margin moves the window too (`data-desktop-drag`). */}

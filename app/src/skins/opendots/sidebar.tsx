@@ -628,8 +628,8 @@ function UserRow() {
           disabled={signOut.isPending}
           label="Sign out"
           onClick={async () => {
-            await signOut.mutateAsync();
-            await navigate({ to: "/sign" });
+            const { leaving } = await signOut.mutateAsync();
+            if (!leaving) await navigate({ to: "/sign" });
           }}
         >
           <IconLogout />

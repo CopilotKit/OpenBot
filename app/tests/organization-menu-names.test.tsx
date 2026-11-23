@@ -14,14 +14,14 @@ import { compile } from "tailwindcss";
  * highlighted from the keyboard, as the account row's own tooltip does.
  *
  * Rendered in a real Chromium, because where text is cut is the browser's layout to decide. The menu
- * is the real account row and organization rows with the app's stylesheet, at the sidebar's width
- * before anybody drags it (340px), at the narrowest it can be dragged to (220px), and as wide as
- * the sheet a 700px window opens it in (18rem).
+ * is the real account row and organization rows with the app's stylesheet, opened from the
+ * account's avatar at the foot of the sidebar's strip, as the strip opens it: to the avatar's
+ * right, in a wide window, a narrow one, and a phone's.
  *
  *   OPENBOT_APP_BROWSER=1 bun test app/tests/organization-menu-names.test.tsx
  *
  * With OPENBOT_APP_SHOTS=<dir> it also saves the open menu with a short and a long name, and the
- * tooltip, in Chromium and WebKit, light and dark, in a 1440px and a 700px window, as
+ * tooltip, in Chromium and WebKit, light and dark, in each of those windows, as
  * organization-menu-<engine>-<theme>-<window>.png and organization-menu-...-tooltip.png.
  */
 const asked = process.env.OPENBOT_APP_BROWSER === "1";
@@ -30,13 +30,11 @@ const shots = process.env.OPENBOT_APP_SHOTS;
 const APP = join(import.meta.dir, "..");
 const ORIGIN = "http://openbot.test";
 
-/** `SIDEBAR_WIDTH` and `SIDEBAR_MIN_WIDTH` in app/src/lib/sidebar.ts. */
-const WIDTHS = [340, 220] as const;
-/** `SIDEBAR_WIDTH_MOBILE` in app/src/components/ui/sidebar.tsx, the sheet a narrow window opens. */
-const SHEET = 288;
+/** A wide window, a window narrow enough for the sidebar's sheet, and a phone's. */
+const WINDOWS = [1440, 700, 390] as const;
 /** The name OpenBot gives a person's own organization, as it was seen cut. */
 const ORGANIZATION = "Ana Lindqvist's organization";
-/** Too long for the menu at any width the sidebar can be. */
+/** Too long for the menu in any window: the menu stops at 24rem. */
 const LONG_ORGANIZATION =
   "Alexandria Montgomery-Fitzwilliam's organization for northern research";
 
@@ -110,6 +108,7 @@ beforeAll(async () => {
     "components/ui/sidebar.tsx",
     "components/app-sidebar/account-label.tsx",
     "components/layout/openbot-version.tsx",
+    "components/layout/strip.tsx",
     "components/organizations/organization-menu.tsx",
     "../tests/organization-menu-names.fixture.tsx",
   ].flatMap((file) =>
@@ -126,7 +125,7 @@ afterAll(async () => {
 });
 
 type Look = {
-  /** The window's width; the sidebar sits at its left edge. */
+  /** The window's width; the strip sits at its left edge. */
   window?: number;
   also?: string[];
   theme?: "light" | "dark";
@@ -134,9 +133,8 @@ type Look = {
   on?: Browser;
 };
 
-/** The account row in a sidebar `width` wide, styled, for a person whose own organization is `organization`. */
+/** The strip's account avatar, styled, for a person whose own organization is `organization`. */
 async function open(
-  width: number,
   organization: string,
   { window = 1440, also = [], theme = "light", on = browser }: Look = {},
 ): Promise<Page> {
@@ -160,13 +158,18 @@ async function open(
       return route.fulfill({ path: font });
     return route.fulfill({ status: 404 });
   });
-  const query = new URLSearchParams({ width: String(width), organization });
+  const query = new URLSearchParams({ organization });
   for (const name of also) query.append("also", name);
   await page.goto(`${ORIGIN}/?${query}`);
   await page.addStyleTag({ content: css });
-  await page.locator("[data-sidebar=menu-button]").waitFor();
+  await avatar(page).waitFor();
   await page.evaluate(() => document.fonts.ready);
   return page;
+}
+
+/** The account's avatar at the strip's foot, named for the person and where they work. */
+function avatar(page: Page) {
+  return page.getByRole("button", { name: "Sam Rivera, Acme" });
 }
 
 /** The menu's row for `name`. */
@@ -191,7 +194,8 @@ async function measured(page: Page, name: string) {
 
 /** What the tooltip says, once one shows; null when none shows. */
 async function tooltip(page: Page): Promise<string | null> {
-  const popup = page.locator('[data-slot="tooltip-content"]');
+  // The open one: the avatar's own tooltip, from its keyboard focus, can still be fading out.
+  const popup = page.locator('[data-slot="tooltip-content"][data-open]');
   try {
     await popup.waitFor({ state: "visible", timeout: 3_000 });
   } catch {
@@ -201,15 +205,11 @@ async function tooltip(page: Page): Promise<string | null> {
 }
 
 describe.skipIf(!asked)("an organization's name in the account menu", () => {
-  for (const [label, width, window] of [
-    ["the sidebar's own width", WIDTHS[0], 1440],
-    ["the sidebar's narrowest", WIDTHS[1], 1440],
-    ["a 700px window's sheet", SHEET, 700],
-  ] as const) {
-    test(`at ${label}, ${ORGANIZATION} reads whole`, async () => {
-      const page = await open(width, ORGANIZATION, { window });
+  for (const window of WINDOWS) {
+    test(`in a ${window}px window, ${ORGANIZATION} reads whole`, async () => {
+      const page = await open(ORGANIZATION, { window });
       try {
-        await page.locator("[data-sidebar=menu-button]").click();
+        await avatar(page).click();
         await row(page, ORGANIZATION).waitFor();
         expect(await measured(page, ORGANIZATION)).toEqual({
           cut: false,
@@ -221,11 +221,11 @@ describe.skipIf(!asked)("an organization's name in the account menu", () => {
     }, 60_000);
   }
 
-  for (const width of WIDTHS) {
-    test(`at ${width}px, a name still cut reads whole on hover`, async () => {
-      const page = await open(width, LONG_ORGANIZATION);
+  for (const window of [WINDOWS[0], WINDOWS[2]]) {
+    test(`in a ${window}px window, a name still cut reads whole on hover`, async () => {
+      const page = await open(LONG_ORGANIZATION, { window });
       try {
-        await page.locator("[data-sidebar=menu-button]").click();
+        await avatar(page).click();
         await row(page, LONG_ORGANIZATION).waitFor();
         expect(await measured(page, LONG_ORGANIZATION)).toEqual({
           cut: true,
@@ -238,10 +238,10 @@ describe.skipIf(!asked)("an organization's name in the account menu", () => {
       }
     }, 60_000);
 
-    test(`at ${width}px, a name still cut reads whole when the keyboard highlights its row`, async () => {
-      const page = await open(width, LONG_ORGANIZATION);
+    test(`in a ${window}px window, a name still cut reads whole when the keyboard highlights its row`, async () => {
+      const page = await open(LONG_ORGANIZATION, { window });
       try {
-        // Into the account row, open its menu, and down from Acme to the person's own organization.
+        // Onto the avatar, open its menu, and down from Acme to the person's own organization.
         await page.keyboard.press("Tab");
         await page.keyboard.press("Enter");
         await row(page, "Acme").waitFor();
@@ -257,6 +257,7 @@ describe.skipIf(!asked)("an organization's name in the account menu", () => {
         await page.keyboard.press("ArrowDown");
         await page
           .locator('[data-slot="tooltip-content"]')
+          .filter({ hasText: LONG_ORGANIZATION })
           .waitFor({ state: "hidden" });
       } finally {
         await page.close();
@@ -265,9 +266,9 @@ describe.skipIf(!asked)("an organization's name in the account menu", () => {
   }
 
   test("a name that reads whole offers no tooltip", async () => {
-    const page = await open(WIDTHS[1], ORGANIZATION);
+    const page = await open(ORGANIZATION, { window: WINDOWS[2] });
     try {
-      await page.locator("[data-sidebar=menu-button]").click();
+      await avatar(page).click();
       await row(page, ORGANIZATION).hover();
       expect(await tooltip(page)).toBeNull();
     } finally {
@@ -288,27 +289,23 @@ describe.skipIf(!asked)("an organization's name in the account menu", () => {
       try {
         for (const [engine, on] of engines)
           for (const theme of ["light", "dark"] as const)
-            for (const [window, width] of [
-              [1440, WIDTHS[0]],
-              [1440, WIDTHS[1]],
-              [700, SHEET],
-            ] as const) {
-              const page = await open(width, ORGANIZATION, {
+            for (const window of WINDOWS) {
+              const page = await open(ORGANIZATION, {
                 window,
                 also: [LONG_ORGANIZATION],
                 theme,
                 on,
               });
               try {
-                const name = `organization-menu-${engine}-${theme}-${window}-${width}`;
-                await page.locator("[data-sidebar=menu-button]").click();
+                const name = `organization-menu-${engine}-${theme}-${window}`;
+                await avatar(page).click();
                 await row(page, LONG_ORGANIZATION).waitFor();
                 await page.mouse.move(window - 10, 10);
                 const clip = {
                   x: 0,
-                  y: 120,
+                  y: 0,
                   width: Math.min(window, 820),
-                  height: 400,
+                  height: 520,
                 };
                 await page.screenshot({
                   path: join(shots, `${name}.png`),
@@ -326,8 +323,8 @@ describe.skipIf(!asked)("an organization's name in the account menu", () => {
               } finally {
                 await page.close();
               }
-              // And from the keyboard: into the account row, open its menu, down to the long name.
-              const keyboard = await open(width, ORGANIZATION, {
+              // And from the keyboard: onto the avatar, open its menu, down to the long name.
+              const keyboard = await open(ORGANIZATION, {
                 window,
                 also: [LONG_ORGANIZATION],
                 theme,
@@ -346,13 +343,13 @@ describe.skipIf(!asked)("an organization's name in the account menu", () => {
                   await keyboard.screenshot({
                     path: join(
                       shots,
-                      `organization-menu-${engine}-${theme}-${window}-${width}-keyboard.png`,
+                      `organization-menu-${engine}-${theme}-${window}-keyboard.png`,
                     ),
                     clip: {
                       x: 0,
-                      y: 120,
+                      y: 0,
                       width: Math.min(window, 820),
-                      height: 400,
+                      height: 520,
                     },
                     animations: "disabled",
                   });

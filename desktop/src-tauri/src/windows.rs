@@ -1318,6 +1318,18 @@ fn machine_drive_in(registry: &str, distribution: &str) -> Option<MachineDrive> 
     })
 }
 
+/// The folder WSL keeps the distribution `name` in, for the person signed in, when it is
+/// registered. None off Windows.
+pub fn distribution_base(name: &str) -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    return distribution_folder(LXSS, name).map(std::path::PathBuf::from);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = name;
+        None
+    }
+}
+
 /// The `BasePath` WSL recorded for `distribution`, under `registry` in the person's own hive.
 #[cfg(target_os = "windows")]
 fn distribution_folder(registry: &str, distribution: &str) -> Option<String> {

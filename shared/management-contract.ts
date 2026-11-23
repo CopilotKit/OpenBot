@@ -61,6 +61,10 @@ export type CommandKind = (typeof COMMAND_KINDS)[number];
 /** What the agent says when a rollback is asked of a release whose policy needs a restore. */
 export const ROLLBACK_REFUSED_REASON = "policy: restore-backup needs a person";
 
+/** Whether an install's agent can upgrade it: what the heartbeat and the install status report. */
+export const UPGRADES = ["on", "not-set-up"] as const;
+export type Upgrades = (typeof UPGRADES)[number];
+
 export const Heartbeat = z.strictObject({
   /** The install's id; the service holds it equal to the client certificate's CN. */
   installId: z.uuid(),
@@ -103,6 +107,11 @@ export const Heartbeat = z.strictObject({
     /** One line on the current or last operation, never a log line. */
     journal: z.string().max(2048).nullable(),
   }),
+  /**
+   * Whether the agent can upgrade the install: `on`, or `not-set-up` when it is connected but its
+   * upgrade machinery isn't (for example no backup target yet). Optional: older agents leave it out.
+   */
+  upgrades: z.enum(UPGRADES).optional(),
   sentAt: isoTime,
 });
 export type Heartbeat = z.infer<typeof Heartbeat>;
@@ -399,6 +408,30 @@ const certificates = z
     /^\s*(?:-----BEGIN CERTIFICATE-----\r?\n[A-Za-z0-9+/=\r\n]+-----END CERTIFICATE-----\s*)+$/,
   );
 
+/**
+ * How an enrollment is approved. `approval`: an admin approves the code on the enrollment page (the
+ * admin screen's Connect). `licence`: the licence approves it at once, when it is a valid team licence
+ * and its organization isn't blocked, so a team install connects by default with no step.
+ */
+export const ENROLLMENT_MODES = ["approval", "licence"] as const;
+export type EnrollmentMode = (typeof ENROLLMENT_MODES)[number];
+
+/**
+ * The `code` an enrollment refusal (EnrollmentProblem) carries, for the server to report:
+ * invalid-licence (401), not-team (403: not a team licence, or a demo licence), blocked (403: CopilotKit
+ * turned managed updates off for the organization), not-entitled (403: the same, on the approval page),
+ * already-enrolled (409, with `installId`: a live install already exists for this licence's organization
+ * and server address).
+ */
+export const ENROLLMENT_REFUSAL_CODES = [
+  "invalid-licence",
+  "not-team",
+  "blocked",
+  "not-entitled",
+  "already-enrolled",
+] as const;
+export type EnrollmentRefusalCode = (typeof ENROLLMENT_REFUSAL_CODES)[number];
+
 /** 1. OpenBot starts an enrollment with its CopilotKit licence. */
 export const EnrollmentStart = z.strictObject({
   /** The install's CopilotKit licence token, verified offline by the service. */
@@ -410,6 +443,16 @@ export const EnrollmentStart = z.strictObject({
   installName: z.string().trim().min(1).max(128),
   /** OpenBot's own address, shown on the approval page so the admin knows what they approve. */
   serverUrl: httpUrl,
+  /** Who approves it; `approval` when left out. */
+  mode: z.enum(ENROLLMENT_MODES).optional(),
+  /**
+   * This install's own id: a UUID the server makes once, keeps in its database and sends on every
+   * start, the same value across restarts and upgrades. The service allows one live install per
+   * organization and instanceId, so two installs under one licence never collide even when they
+   * share an address (the chart's default in-cluster one). Left out by older servers: then the
+   * service keys on the organization and serverUrl.
+   */
+  instanceId: z.uuid().optional(),
 });
 export type EnrollmentStart = z.infer<typeof EnrollmentStart>;
 
@@ -486,6 +529,13 @@ export const InstallStatus = z.strictObject({
   agentConnected: z.boolean(),
   lastHeartbeatAt: isoTime.nullable(),
   agentVersion: text.nullable(),
+  /**
+   * The install's current maintenance window (the service's default unless an operator set one).
+   * The service always sends it; optional so a server reads a service from before it was added.
+   */
+  window: MaintenanceWindow.optional(),
+  /** The last heartbeat's `upgrades`, when the agent sends it. */
+  upgrades: z.enum(UPGRADES).optional(),
 });
 export type InstallStatus = z.infer<typeof InstallStatus>;
 

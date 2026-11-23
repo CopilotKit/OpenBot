@@ -20,6 +20,12 @@ import { ClientError } from "@/lib/client";
 /** How long nothing may arrive from a run before the server is asked about it. */
 export const QUIET_RUN_MS = 45_000;
 
+/**
+ * The quiet period the conversation screen watches with. Always {@link QUIET_RUN_MS}; a test of the
+ * whole screen shortens it, since nothing else can wait out three quarters of a minute.
+ */
+export const quietRunPeriod = { ms: QUIET_RUN_MS };
+
 /** How long the server is given to answer. Past this it has not answered. */
 export const LIVENESS_ANSWER_MS = 15_000;
 
@@ -31,14 +37,14 @@ export type RunLiveness = "live" | "over" | "unreachable";
 
 /** Said under a turn whose run ended without telling this browser. */
 export const RUN_ENDED_UNHEARD =
-  "The Bot stopped before it finished. What it saved is shown here. Send a message to carry on.";
+  "The Bot stopped before it finished. What it saved is shown here.";
 
 /**
  * Said under a turn whose run could not be asked about. It does not say the message was sent: a
  * run that never started goes quiet the same way, and nothing here can tell the two apart.
  */
 export const RUN_UNREACHABLE =
-  "OpenBot lost touch with the Bot before it finished. Try again in a moment, or reload to see what was saved.";
+  "OpenBot lost touch with the Bot before it finished. Carry on once OpenBot is back.";
 
 /** What a join token says about the conversation it is for: the run in progress, or none. */
 type Joined = { runId: string | null };
@@ -96,6 +102,13 @@ export async function askRunLiveness(
  * the server's run ends with the turn still going here. After `quietMs`
  * with nothing, `ask` is asked, and again each `quietMs` while it answers "live". The first other
  * answer settles `over`, once, and the watch stops. `stop` ends it with nothing settled.
+ *
+ * RESTING IS STILL WATCHED, FOR THE SERVER ITSELF. Between two runs of a turn the browser takes a
+ * step of its own (it saves a file, runs a command), and that step is a request to the server. Found
+ * on a person's 1.1.2 Desktop: the server stopped in the middle of such a step and Docker started it
+ * again, and the step's request never came back, so the turn sat on "Thinking" for good with the
+ * person's next message queued behind it. No run is expected while resting, so "over" and "live"
+ * both mean the server is there and the step is still its own. Only "unreachable" ends a rest.
  */
 export function watchQuietRun(options: {
   ask: () => Promise<RunLiveness>;
@@ -104,7 +117,8 @@ export function watchQuietRun(options: {
   heard: () => void;
   /**
    * The run on the server has ended and the turn is this browser's for now (a step it takes
-   * itself, a card the person answers): nothing is expected, so nothing is asked, until `heard`.
+   * itself, a card the person answers): no run is expected until `heard`, so only a server that
+   * stops answering ends the watch.
    */
   rest: () => void;
   stop: () => void;
@@ -114,7 +128,9 @@ export function watchQuietRun(options: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let asking = false;
-  // Whether anything arrived while the server was being asked: its answer is then out of date.
+  let resting = false;
+  // Whether anything arrived (or the run came to rest) while the server was being asked: its
+  // answer is then about a moment that has passed.
   let heardSince = false;
   let settle: (outcome: Exclude<RunLiveness, "live">) => void = () => {};
   const over = new Promise<Exclude<RunLiveness, "live">>((resolve) => {
@@ -126,15 +142,17 @@ export function watchQuietRun(options: {
     timer = setTimeout(() => {
       asking = true;
       heardSince = false;
+      const askedResting = resting;
       void options
         .ask()
         .catch(() => "unreachable" as const)
         .then((answer) => {
           asking = false;
           if (stopped) return;
-          // Resting: the answer is about a run that has since ended in the ordinary way.
-          if (heardSince && timer === undefined) return;
-          if (answer === "live" || heardSince) return wait();
+          if (heardSince) return wait();
+          // While resting no run is expected: a server that answers at all is still taking the step.
+          if (answer === "live" || (askedResting && answer === "over"))
+            return wait();
           stopped = true;
           settle(answer);
         });
@@ -145,13 +163,14 @@ export function watchQuietRun(options: {
     // Something arrived: the quiet starts again, and an answer on its way is about a run that
     // has since spoken, so it is not taken.
     heard: () => {
+      resting = false;
       if (asking) heardSince = true;
       else wait();
     },
     rest: () => {
-      heardSince = true;
-      clearTimeout(timer);
-      timer = undefined;
+      resting = true;
+      if (asking) heardSince = true;
+      else wait();
     },
     stop: () => {
       stopped = true;

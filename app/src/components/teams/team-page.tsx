@@ -1,9 +1,9 @@
 import {
   IconBuildingBank,
+  IconCheck,
   IconChevronRight,
   IconPencil,
   IconPlus,
-  IconSearch,
   IconShieldCheck,
   IconSitemap,
   IconUser,
@@ -19,6 +19,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { PersonAvatar } from "@/components/organizations/person-avatar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -54,6 +55,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { personName } from "@/lib/organizations/words";
 import { NO_PARENT, teamDetailsFrom } from "@/lib/teams/form";
 import {
   deleteTeamMutationOptions,
@@ -62,7 +64,7 @@ import {
   updateTeamMutationOptions,
 } from "@/lib/teams/mutations";
 import {
-  organizationPeopleQueryOptions,
+  type OrganizationPerson,
   possibleParents,
   type TeamPerson,
   type TeamSummary,
@@ -72,12 +74,14 @@ import {
 } from "@/lib/teams/queries";
 import { queryClient } from "@/query-client";
 import { parentLabels } from "./new-team-page";
+import { PeopleTypeahead } from "./people-typeahead";
+import {
+  backToTeams,
+  type TeamPaths,
+  type TeamsShell,
+  teamPaths,
+} from "./team-paths";
 import { ROLE_WORDS, TEAMS_DESCRIPTION } from "./team-words";
-
-const BACK = {
-  label: "Teams",
-  linkProps: { to: "/teams" as const },
-};
 
 /**
  * One team: what it is called and for, the team it is under, and its people.
@@ -88,27 +92,31 @@ const BACK = {
  * serves a member, a maintainer and an admin. A team from the company's directory keeps the
  * directory's name and people, and nobody leaves it here.
  */
-function Team({ teamId }: { teamId: string }) {
+function Team({ teamId, paths }: { teamId: string; paths: TeamPaths }) {
   const team = useQuery(teamQueryOptions(teamId));
   const list = useQuery(teamListQueryOptions());
 
   if (team.isPending) return null;
   if (team.error) {
     return (
-      <PageShell backButton={BACK} title="Team">
+      <PageShell backButton={backToTeams(paths)} title="Team">
         <p className="text-destructive text-sm" role="alert">
           {team.error.message}
         </p>
       </PageShell>
     );
   }
-  return <TeamDetail team={team.data} teams={list.data?.teams ?? []} />;
+  return (
+    <TeamDetail paths={paths} team={team.data} teams={list.data?.teams ?? []} />
+  );
 }
 
 function TeamDetail({
+  paths,
   team,
   teams,
 }: {
+  paths: TeamPaths;
   team: TeamSummary;
   /** The organization's teams, to name this one's parent and to choose another from. */
   teams: readonly TeamSummary[];
@@ -124,7 +132,7 @@ function TeamDetail({
 
   return (
     <PageShell
-      backButton={BACK}
+      backButton={backToTeams(paths)}
       description={team.description ?? undefined}
       title={team.name}
     >
@@ -222,7 +230,9 @@ function TeamDetail({
       {open === "parent" ? (
         <ParentDialog onClose={close} team={team} teams={teams} />
       ) : null}
-      {open === "delete" ? <DeleteDialog onClose={close} team={team} /> : null}
+      {open === "delete" ? (
+        <DeleteDialog onClose={close} paths={paths} team={team} />
+      ) : null}
     </PageShell>
   );
 }
@@ -580,8 +590,10 @@ function ParentDialog({
 }
 
 /**
- * The organization's members who are not in the team yet, each with an Add. Adding is one write a
- * person, done as it is pressed, so the list shortens as people go in and nothing waits on a Save.
+ * Adding people to a team: a type-ahead box over the organization's own members, searched on the
+ * server as the admin types (PeopleTypeahead). Adding is one write a person, done as they are
+ * chosen, so several go in one after another and nothing waits on a Save. Whoever was added here is
+ * listed under the box until the dialog closes.
  */
 function AddPersonDialog({
   team,
@@ -592,90 +604,92 @@ function AddPersonDialog({
   inTeam: readonly TeamPerson[];
   onClose: () => void;
 }) {
-  const people = useQuery(organizationPeopleQueryOptions());
   const add = useMutation(putTeamMemberMutationOptions(queryClient));
-  const [search, setSearch] = useState("");
-  const taken = new Set(inTeam.map((person) => person.id));
-  const outside = (people.data ?? []).filter((person) => !taken.has(person.id));
-  const wanted = search.trim().toLowerCase();
-  const shown = wanted
-    ? outside.filter((person) =>
-        `${person.name ?? ""} ${person.email}`.toLowerCase().includes(wanted),
-      )
-    : outside;
+  const [added, setAdded] = useState<OrganizationPerson[]>([]);
+  // Chosen and not yet answered: offered as in the team, and given back if the server refuses.
+  const [adding, setAdding] = useState<ReadonlySet<string>>(new Set());
+  const taken = new Set([
+    ...inTeam.map((person) => person.id),
+    ...added.map((person) => person.id),
+    ...adding,
+  ]);
+  const settle = (id: string) =>
+    setAdding((now) => new Set([...now].filter((one) => one !== id)));
+  const last = added[0];
   return (
     <Dialog onOpenChange={(next) => !next && onClose()} open>
-      <DialogContent>
+      {/*
+       * Held near the top, not centred: the list under the box grows and shrinks with every
+       * keystroke, and a centred dialog would jump up and down with it.
+       */}
+      <DialogContent className="top-[8svh] translate-y-0 sm:top-[12svh]">
         <DialogHeader>
           <DialogTitle>Add people to {team.name}</DialogTitle>
           <DialogDescription>
-            They can use everything the team is given, from their next message.
+            Type a name or email to find someone in this organization. They can
+            use everything the team is given, from their next message.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4">
-          <Input
-            aria-label="Search people"
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by name or address"
-            value={search}
+          <PeopleTypeahead
+            announcement={
+              last ? `${personName(last)} added to ${team.name}` : undefined
+            }
+            inTeam={taken}
+            onChoose={(person) => {
+              setAdding((now) => new Set([...now, person.id]));
+              add.mutate(
+                { teamId: team.id, memberId: person.id, role: "member" },
+                {
+                  onSuccess: () =>
+                    setAdded((now) => [
+                      person,
+                      ...now.filter((one) => one.id !== person.id),
+                    ]),
+                  onSettled: () => settle(person.id),
+                },
+              );
+            }}
+            teamName={team.name}
           />
           {add.error ? (
             <p className="text-destructive text-sm" role="alert">
               {add.error.message}
             </p>
           ) : null}
-          {people.isPending ? null : people.error ? (
-            <p className="text-destructive text-sm" role="alert">
-              {people.error.message}
-            </p>
-          ) : shown.length === 0 ? (
-            <PageEmpty
-              icon={wanted ? IconSearch : IconUsers}
-              title={wanted ? "No matches" : "Everyone is already in"}
-            >
-              {wanted
-                ? `Nobody matches "${search.trim()}".`
-                : "Everyone in the organization is in this team."}
-            </PageEmpty>
-          ) : (
-            <ul aria-label="People to add" className="flex flex-col gap-2">
-              {shown.map((person) => (
-                <li key={person.id}>
-                  {/* Filled, not card-coloured: a card is the dialog's own colour and would not show. */}
-                  <Item size="sm" variant="muted">
-                    <ItemMedia variant="icon">
-                      <IconUser />
-                    </ItemMedia>
-                    <ItemContent className="min-w-0">
-                      <ItemTitle>{person.name ?? person.email}</ItemTitle>
-                      {person.name ? (
-                        <ItemDescription className="line-clamp-1 break-all">
-                          {person.email}
-                        </ItemDescription>
-                      ) : null}
-                    </ItemContent>
-                    <ItemActions>
-                      <Button
-                        aria-label={`Add ${person.name ?? person.email}`}
-                        disabled={add.isPending}
-                        onClick={() =>
-                          add.mutate({
-                            teamId: team.id,
-                            memberId: person.id,
-                            role: "member",
-                          })
-                        }
-                        size="sm"
-                        variant="outline"
-                      >
-                        Add
-                      </Button>
-                    </ItemActions>
-                  </Item>
-                </li>
-              ))}
-            </ul>
-          )}
+          {added.length > 0 ? (
+            <section aria-label={`Added to ${team.name}`}>
+              <h3 className="mb-2 font-medium text-muted-foreground text-xs">
+                Added
+              </h3>
+              <ul className="flex flex-col gap-2">
+                {added.map((person) => (
+                  <li key={person.id}>
+                    {/* Filled, not card-coloured: a card is the dialog's own colour and would not show. */}
+                    <Item size="sm" variant="muted">
+                      <ItemMedia>
+                        <PersonAvatar person={person} />
+                      </ItemMedia>
+                      <ItemContent className="min-w-0">
+                        <ItemTitle>{personName(person)}</ItemTitle>
+                        {person.name ? (
+                          <ItemDescription className="line-clamp-1 break-all">
+                            {person.email}
+                          </ItemDescription>
+                        ) : null}
+                      </ItemContent>
+                      <ItemActions>
+                        <IconCheck
+                          aria-label="Added"
+                          className="size-4 text-muted-foreground"
+                        />
+                      </ItemActions>
+                    </Item>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </DialogBody>
         <DialogFooter className="mt-4">
           <Button onClick={onClose} size="sm" type="button">
@@ -739,9 +753,12 @@ function LeaveDialog({
 function DeleteDialog({
   team,
   onClose,
+  paths,
 }: {
   team: TeamSummary;
   onClose: () => void;
+  /** Where the list is, in the frame the page is in: where a deleted team's page sends you. */
+  paths: TeamPaths;
 }) {
   const navigate = useNavigate();
   const remove = useMutation(deleteTeamMutationOptions(queryClient));
@@ -768,7 +785,7 @@ function DeleteDialog({
             disabled={remove.isPending}
             onClick={() =>
               remove.mutate(team.id, {
-                onSuccess: () => void navigate({ to: "/teams" }),
+                onSuccess: () => void navigate(paths.list()),
               })
             }
             size="sm"
@@ -782,11 +799,25 @@ function DeleteDialog({
   );
 }
 
-/** The personal edition shows that this page applies to a team. */
-export function TeamDetailPage({ teamId }: { teamId: string }) {
+/**
+ * The personal edition shows that this page applies to a team. `shell` is the frame it is drawn in,
+ * so the back button, and the list a deleted team leaves for, stay in it.
+ */
+export function TeamDetailPage({
+  teamId,
+  shell = "app",
+}: {
+  teamId: string;
+  shell?: TeamsShell;
+}) {
+  const paths = teamPaths(shell);
   return (
-    <TeamPage backButton={BACK} description={TEAMS_DESCRIPTION} title="Team">
-      <Team teamId={teamId} />
+    <TeamPage
+      backButton={backToTeams(paths)}
+      description={TEAMS_DESCRIPTION}
+      title="Team"
+    >
+      <Team paths={paths} teamId={teamId} />
     </TeamPage>
   );
 }
