@@ -119,6 +119,8 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "computer.desktop_recording_stopped":
     "Stop recording on the Windows computer",
   "computer.desktop_recording_gap": "Record on the Windows computer",
+  "computer.desktop_connected": "Connect a Windows computer",
+  "computer.desktop_connect_refused": "Connect a Windows computer",
   "computer.secret_requested": "Ask a person to fill in a field",
   "computer.secret_supplied": "Fill in a field for a Bot",
   "computer.sign_in_requested": "Ask a person to sign in",

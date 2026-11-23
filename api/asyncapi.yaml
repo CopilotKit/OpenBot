@@ -239,6 +239,10 @@ channels:
         $ref: "#/components/messages/LinkClose"
       linkBye:
         $ref: "#/components/messages/LinkBye"
+      linkPing:
+        $ref: "#/components/messages/LinkPing"
+      linkPong:
+        $ref: "#/components/messages/LinkPong"
   botTerminal:
     address: /api/v2/organizations/{organizationId}/computers/{botId}/terminal
     title: A Bot's terminal
@@ -615,6 +619,7 @@ operations:
       - $ref: "#/channels/windowsComputerLink/messages/linkData"
       - $ref: "#/channels/windowsComputerLink/messages/linkClose"
       - $ref: "#/channels/windowsComputerLink/messages/linkBye"
+      - $ref: "#/channels/windowsComputerLink/messages/linkPong"
   receiveWindowsComputerLink:
     action: receive
     title: Hear from a Windows computer
@@ -628,6 +633,7 @@ operations:
       - $ref: "#/channels/windowsComputerLink/messages/linkResponse"
       - $ref: "#/channels/windowsComputerLink/messages/linkData"
       - $ref: "#/channels/windowsComputerLink/messages/linkClose"
+      - $ref: "#/channels/windowsComputerLink/messages/linkPing"
   sendBotTerminal:
     action: send
     title: Show a Bot's terminal
@@ -1128,6 +1134,20 @@ components:
       summary: Either side ends a stream.
       payload:
         $ref: "#/components/schemas/LinkClose"
+    LinkPing:
+      name: linkPing
+      title: Ping
+      summary: >-
+        The computer checks the link is alive. A link the computer hears
+        nothing on for a while is presumed dead, and dialled again.
+      payload:
+        $ref: "#/components/schemas/LinkPing"
+    LinkPong:
+      name: linkPong
+      title: Pong
+      summary: OpenBot's answer to a ping.
+      payload:
+        $ref: "#/components/schemas/LinkPong"
     LinkBye:
       name: linkBye
       title: Bye
@@ -2026,3 +2046,19 @@ components:
           type: string
         botId:
           type: string
+    LinkPing:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: ping
+    LinkPong:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: pong

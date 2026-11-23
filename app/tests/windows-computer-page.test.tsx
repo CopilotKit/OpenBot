@@ -55,6 +55,14 @@ class FakeSocket {
 
 const requests: string[] = [];
 const server = setupServer(
+  // Connected, whatever the generated mock draws: the connect panel has tests of its own below.
+  http.get("*/api/v2/organizations/:organizationId/windows-computer", () =>
+    HttpResponse.json({
+      ...getGetWindowsComputerResponseMock(),
+      connected: true,
+      enrolled: true,
+    }),
+  ),
   ...getWindowsComputerMock(),
   http.all("*", () => new HttpResponse(null, { status: 404 })),
 );
@@ -101,6 +109,8 @@ function heldBy(holder: "bot" | "human") {
       HttpResponse.json({
         ...getGetWindowsComputerResponseMock(),
         available: true,
+        connected: true,
+        enrolled: true,
         unavailableReason: undefined,
         control: {
           holder,
@@ -211,6 +221,8 @@ test("taking it over and handing it back are writes at the API's address, each w
       HttpResponse.json({
         ...getGetWindowsComputerResponseMock(),
         available: true,
+        connected: true,
+        enrolled: true,
         control: {
           holder: "human",
           since: "2026-11-20T09:13:41.000Z",
@@ -283,4 +295,94 @@ test("the words for who is using it and why it can't be used", () => {
     "excel.exe",
     "mspaint.exe",
   ]);
+});
+
+/** A Windows computer that is not connected now, set up before or never. */
+function notConnected(enrolled: boolean) {
+  return http.get(
+    "*/api/v2/organizations/:organizationId/windows-computer",
+    () =>
+      HttpResponse.json({
+        ...getGetWindowsComputerResponseMock(),
+        available: false,
+        connected: false,
+        enrolled,
+        unavailableReason: enrolled ? "not_connected" : "not_enrolled",
+        control: null,
+      }),
+  );
+}
+
+test("with no Windows computer connected yet, the page makes a code, shows it once, and opens no screen", async () => {
+  const keys: string[] = [];
+  server.use(
+    notConnected(false),
+    http.post(
+      "*/api/v2/organizations/:organizationId/windows-computer/enrollment-codes",
+      ({ request }) => {
+        keys.push(request.headers.get("idempotency-key") ?? "");
+        return HttpResponse.json(
+          {
+            code: `obwe_code-${keys.length}`,
+            expiresAt: "2026-11-23T10:15:00.000Z",
+          },
+          { status: 201 },
+        );
+      },
+    ),
+  );
+  const view = draw();
+  expect(await view.findByText("Connect your Windows computer")).toBeTruthy();
+  expect(view.queryByText(NOT_MASKED)).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: "Make a code" }));
+  const field = (await view.findByLabelText("Code")) as HTMLInputElement;
+  expect(field.value).toBe("obwe_code-1");
+  expect(field.readOnly).toBe(true);
+  fireEvent.click(view.getByRole("button", { name: "Make a new code" }));
+  await waitFor(() =>
+    expect((view.getByLabelText("Code") as HTMLInputElement).value).toBe(
+      "obwe_code-2",
+    ),
+  );
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).not.toBe(keys[1]);
+  expect(sockets).toEqual([]);
+});
+
+test("a Windows computer set up before and not connected now says it connects by itself", async () => {
+  server.use(notConnected(true));
+  const view = draw();
+  expect(
+    await view.findByText("Your Windows computer isn't connected"),
+  ).toBeTruthy();
+  expect(view.getByRole("button", { name: "Make a code" })).toBeTruthy();
+  expect(unavailableWords("not_connected")).toContain("connects by itself");
+});
+
+test("a code that can't be made says so", async () => {
+  server.use(
+    notConnected(false),
+    http.post(
+      "*/api/v2/organizations/:organizationId/windows-computer/enrollment-codes",
+      () =>
+        HttpResponse.json(
+          {
+            type: "https://open.bot/errors/rate-limited",
+            title: "Too many requests.",
+            status: 429,
+            detail:
+              "Too many codes were asked for at once. Wait a few minutes and try again.",
+          },
+          {
+            status: 429,
+            headers: { "content-type": "application/problem+json" },
+          },
+        ),
+    ),
+  );
+  const view = draw();
+  fireEvent.click(await view.findByRole("button", { name: "Make a code" }));
+  expect((await view.findByRole("alert")).textContent).toContain(
+    "Too many codes",
+  );
 });

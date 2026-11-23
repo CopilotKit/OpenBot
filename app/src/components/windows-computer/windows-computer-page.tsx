@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { ConnectWindowsComputer } from "@/components/windows-computer/connect-windows-computer";
 import type { WindowsComputerRecording } from "@/lib/api/generated/model";
 import {
   releaseWindowsComputerMutationOptions,
@@ -65,6 +66,10 @@ export function unavailableWords(reason: string | undefined): string {
       return "Your Windows computer is locked. Unlock it to keep going.";
     case "secure_desktop":
       return "Windows is asking for permission. Answer it on your Windows computer.";
+    case "not_enrolled":
+      return "No Windows computer is connected to OpenBot yet. Connect one on the Windows computer page.";
+    case "not_connected":
+      return "Your Windows computer isn't connected. It connects by itself when it's on and you're signed in to it.";
     default:
       return "Your Windows computer isn't answering right now. It shows here again once it does.";
   }
@@ -147,7 +152,11 @@ export function WindowsComputerPage() {
     );
   return (
     <PageShell description={DESCRIPTION} title={TITLE}>
-      <WindowsComputerView computer={computer.data} />
+      {computer.data.connected === false ? (
+        <ConnectWindowsComputer computer={computer.data} />
+      ) : (
+        <WindowsComputerView computer={computer.data} />
+      )}
     </PageShell>
   );
 }
