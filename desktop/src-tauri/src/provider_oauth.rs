@@ -1815,17 +1815,23 @@ mod tests {
     fn cloudflare_uses_the_next_registered_port_when_one_is_taken() {
         let held = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let taken = held.local_addr().unwrap().port();
-        let free = {
-            let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-            probe.local_addr().unwrap().port()
-        };
-        let (pending, _) = begin_cloudflare(
-            CLOUDFLARE_DASHBOARD,
-            CLOUDFLARE_API,
-            "client",
-            &[taken, free],
-        )
-        .unwrap();
+        // A port found free is free only until another test takes it, so a lost race picks again.
+        let (free, pending) = (0..20)
+            .find_map(|_| {
+                let free = {
+                    let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+                    probe.local_addr().unwrap().port()
+                };
+                begin_cloudflare(
+                    CLOUDFLARE_DASHBOARD,
+                    CLOUDFLARE_API,
+                    "client",
+                    &[taken, free],
+                )
+                .ok()
+                .map(|(pending, _)| (free, pending))
+            })
+            .expect("no free port in twenty tries");
         let Pending::Cloudflare { redirect, .. } = pending else {
             panic!("not a Cloudflare sign-in");
         };
