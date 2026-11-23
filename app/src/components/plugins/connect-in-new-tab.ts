@@ -157,21 +157,28 @@ export function useConnectInNewTab() {
   /**
    * The same, for a press whose `first` is what names the app: adding an app from Browse apps
    * answers the id of the row it made, and that row is what the sign-in is for.
+   *
+   * `first` may answer null: the press turned out to need no sign-in (the chat card's Connect on an
+   * app that did not say how it connects until it was on, and then took a key). The claimed tab is
+   * closed unused. Settles once the tab is closed or the sign-in asked for, so the caller can go on
+   * to whatever replaced the sign-in.
    */
-  const openAfter = (first: () => Promise<string>) => {
+  const openAfter = (first: () => Promise<string | null>): Promise<void> => {
     const tab = claimTab();
     handle.current = tab;
     const from = here();
-    first().then(
-      (serverId) => {
-        markConnectReturn(tab, serverId, from);
-        void ask(serverId, tab);
-      },
-      () => {
-        tab?.close();
-        handle.current = null;
-      },
-    );
+    const unused = () => {
+      tab?.close();
+      handle.current = null;
+    };
+    return first().then((serverId) => {
+      if (serverId === null) {
+        unused();
+        return;
+      }
+      markConnectReturn(tab, serverId, from);
+      void ask(serverId, tab);
+    }, unused);
   };
 
   /*
