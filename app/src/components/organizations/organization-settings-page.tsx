@@ -3,11 +3,13 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconCreditCard,
+  IconSearch,
 } from "@tabler/icons-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Fragment, useEffect, useId, useState } from "react";
 import {
+  PageEmpty,
   PageRows,
   PageSection,
   PageShell,
@@ -51,7 +53,7 @@ import {
 import {
   type OrganizationMemberSummary,
   type OrganizationSummary,
-  organizationMembersQueryOptions,
+  organizationMemberPagesQueryOptions,
   useOrganizationChoices,
 } from "@/lib/organizations/queries";
 import {
@@ -64,6 +66,7 @@ import {
   roleInSentence,
   roleName,
 } from "@/lib/organizations/words";
+import { SEARCH_MAX } from "@/lib/people/queries";
 import { needsCard, usePlan } from "@/lib/plan/queries";
 import { cardAction, planSummary } from "@/lib/plan/words";
 import { cn } from "@/lib/utils";
@@ -309,14 +312,25 @@ type RoleChange = {
 /**
  * Who is in the organization, with each person's role, and what their row offers: a Role menu
  * listing the roles the server says the person looking may give them (`assignableRoles`), and
- * Remove or Leave where the membership can end (`removable`).
+ * Remove or Leave where the membership can end (`removable`). A page at a time, with a search above
+ * them that asks the server, as Admin's People does: an organization can have any number of people.
  */
 function MembersSection({
   organization,
 }: {
   organization: OrganizationSummary;
 }) {
-  const members = useQuery(organizationMembersQueryOptions(organization.id));
+  const [search, setSearch] = useState("");
+  // Debounced, so typing a name is one request rather than one per keystroke.
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const members = useInfiniteQuery(
+    organizationMemberPagesQueryOptions(organization.id, query),
+  );
+  const rows = members.data?.pages.flatMap((page) => page.members) ?? [];
   const me = useQuery(currentUserQueryOptions()).data;
   const changeRole = useMutation(changeMemberRoleMutationOptions(queryClient));
   // Kept while its dialog closes, so the question does not lose its name on the way out.
@@ -346,13 +360,30 @@ function MembersSection({
 
   return (
     <PageSection title="Members">
+      {/*
+        Server-side search, as on Admin's People: filtering what already arrived would only search
+        the first page, which is the opposite of what somebody looking for a colleague needs.
+      */}
+      <Input
+        aria-label="Search members"
+        className="mt-4"
+        maxLength={SEARCH_MAX}
+        onChange={(event) => setSearch(event.target.value)}
+        placeholder="Search by name or address"
+        value={search}
+      />
       {members.isPending ? null : members.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
           {members.error.message}
         </p>
+      ) : rows.length === 0 ? (
+        // A list with nobody in it at all can't be read by anybody, so this is a search's answer.
+        <PageEmpty icon={IconSearch} title="No matches">
+          {`Nobody matches "${query}".`}
+        </PageEmpty>
       ) : (
         <PageRows>
-          {members.data.map((member, index) => {
+          {rows.map((member, index) => {
             const control = memberControl(member, viewer);
             const name = personName(member);
             const roles = givableRoles(member);
@@ -442,12 +473,24 @@ function MembersSection({
                     </ItemActions>
                   ) : null}
                 </Item>
-                {index !== members.data.length - 1 && <Separator />}
+                {index !== rows.length - 1 && <Separator />}
               </Fragment>
             );
           })}
         </PageRows>
       )}
+      {/* Only when the server says there is another page, as on Admin's People. */}
+      {members.hasNextPage ? (
+        <Button
+          className="mt-4"
+          disabled={members.isFetchingNextPage}
+          onClick={() => members.fetchNextPage()}
+          size="sm"
+          variant="outline"
+        >
+          {members.isFetchingNextPage ? "Loading…" : "Show more"}
+        </Button>
+      ) : null}
       {changeRole.error ? (
         <p className="mt-3 text-destructive text-sm" role="alert">
           {changeRole.error.message}

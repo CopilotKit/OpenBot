@@ -241,6 +241,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   also removes an app from its own page under Connections, with Admin's "Enable for this
   organization" switch, so adding and removing never need Admin. A member isn't shown it.
 
+### Organizations and teams
+
+- **Every list of people pages and searches, as People does.** Organization settings' Members and
+  Invitations, the Teams list and a team's people show a page at a time with Show more, and a search
+  box above them that asks the server: "sar" finds Sarah, Sara and Sarita, anywhere in a name or
+  address, whatever the case. They used to read every page before drawing anything.
+- **People are picked from the organization only.** Adding somebody to a group conversation, and
+  choosing who a Bot is published to, find members of the organization as you type, as Add person on
+  a team does. The email box and the comma-separated addresses are gone, and nobody outside the
+  organization is ever found or shown. Inviting somebody new is still a plain email box.
+
 ### API
 
 - **Anybody signed in searches the app directory, and asks for an app with no Bot named.**
