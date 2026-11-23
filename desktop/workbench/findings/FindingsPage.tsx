@@ -6,14 +6,25 @@
 // own, so what this page shows is what "Open in workbench" shows, and the two cannot drift apart.
 // Another occurrence in the same scene goes through the frame's `__workbenchPage.mark()`, so the
 // workbench does not load again.
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
-  type ChangeEvent,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { copyText } from "../clipboard";
 import {
   CLASS_LABELS,
@@ -42,6 +53,7 @@ import {
   warningMark,
 } from "../findings";
 import type { CheckStatus } from "../findingsServer";
+import { isTextField, usesArrows } from "../keyTargets";
 import { formatTime } from "../RunControls";
 import type { WorkbenchPage } from "../Workbench";
 
@@ -51,6 +63,19 @@ type Load =
   | { state: "missing"; message: string }
   | { state: "failed"; message: string }
   | { state: "loaded"; value: Loaded };
+
+const WINDOW_OPTIONS: { value: FindingFilter["window"]; label: string }[] = [
+  { value: "all", label: "All windows" },
+  { value: "desktop", label: "Setup window" },
+  { value: "app", label: "App" },
+];
+const SORT_OPTIONS: { value: FindingSort; label: string }[] = [
+  { value: "size", label: "Size" },
+  { value: "scenes", label: "Number of scenes" },
+  { value: "time", label: "Time" },
+];
+/** The File filter's "All files": the filter itself keeps an empty string. */
+const ALL_FILES = "*";
 
 const POLL_MS = 1000;
 const AGE_TICK_MS = 30_000;
@@ -76,15 +101,15 @@ function fileLine(f: Finding): string | null {
   return `${c.file}${c.line !== undefined ? `:${c.line}` : ""}`;
 }
 
-/** True while the focus is in a field that takes typed keys. */
+/**
+ * True while the focus is in a field that takes typed keys, or in a control that uses the arrow
+ * keys itself (a Select and its list), or on the checkbox.
+ */
 function typing(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName;
   return (
-    tag === "INPUT" ||
-    tag === "TEXTAREA" ||
-    tag === "SELECT" ||
-    target.isContentEditable
+    isTextField(target) ||
+    usesArrows(target) ||
+    (target as HTMLElement | null)?.getAttribute?.("role") === "checkbox"
   );
 }
 
@@ -97,9 +122,30 @@ function readLink(): { finding: string | null; occurrence: number } {
   };
 }
 
+/*
+ * The kind of a finding as a small label in the app's colors: solid for the run problems and a
+ * shift under hand, tinted for the other problems, quiet for an expected move.
+ */
+const CHIP = "whitespace-nowrap rounded px-1.5 text-[11px]/4 font-semibold";
+const CHIP_SOLID = "bg-destructive text-background";
+const CHIP_TINTED = "bg-destructive/10 text-destructive";
+const CHIP_QUIET = "bg-muted text-muted-foreground";
+const RUN_PROBLEMS: readonly FindingKind[] = [
+  "no-answer",
+  "app-error",
+  "stalled",
+  "step",
+];
+
 function KindChip({ kind }: { kind: FindingKind }) {
   return (
-    <span className="fd-chip" data-kind={kind}>
+    <span
+      className={cn(
+        CHIP,
+        RUN_PROBLEMS.includes(kind) ? CHIP_SOLID : CHIP_TINTED,
+      )}
+      data-kind={kind}
+    >
       {KIND_LABELS[kind]}
     </span>
   );
@@ -110,13 +156,35 @@ function Chips({ finding }: { finding: Finding }) {
   const movement = finding.movement;
   if (!movement) return <KindChip kind={finding.kind} />;
   return (
-    <span className="fd-chip" data-class={movement.class}>
+    <span
+      className={cn(
+        CHIP,
+        movement.class === "shift-under-hand"
+          ? CHIP_SOLID
+          : movement.class === "jitter"
+            ? CHIP_TINTED
+            : CHIP_QUIET,
+      )}
+      data-class={movement.class}
+    >
       {movement.class === "expected"
         ? `${KIND_LABELS[finding.kind]} · ${CLASS_LABELS.expected}`
         : CLASS_LABELS[movement.class]}
     </span>
   );
 }
+
+/** A key, as the keys help draws it (KeysHelp.tsx). */
+function Key({ children }: { children: string }) {
+  return (
+    <kbd className="min-w-5 rounded border bg-muted px-1 text-center font-mono text-[11px]">
+      {children}
+    </kbd>
+  );
+}
+
+const TIME = "font-mono text-xs font-medium tabular-nums";
+const MUTED = "text-xs text-muted-foreground";
 
 function sizeText(f: Finding): string {
   return f.size === null ? "Run problem" : `${f.size} px`;
@@ -139,7 +207,7 @@ export function FindingsPage() {
   const [copied, setCopied] = useState<string | null>(null);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [frameSrc, setFrameSrc] = useState<string | null>(null);
-  const rowsRef = useRef<HTMLUListElement | null>(null);
+  const rowsRef = useRef<HTMLTableSectionElement | null>(null);
 
   const fetchFindings = useCallback(async () => {
     try {
@@ -329,12 +397,9 @@ export function FindingsPage() {
   };
 
   const setField =
-    <K extends keyof FindingFilter>(
-      key: K,
-      read: (v: string) => FindingFilter[K],
-    ) =>
-    (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-      setFilter((f) => ({ ...f, [key]: read(event.target.value) }));
+    <K extends keyof FindingFilter>(key: K) =>
+    (value: FindingFilter[K]) =>
+      setFilter((f) => ({ ...f, [key]: value }));
 
   const filtered =
     filter.showExpected ||
@@ -344,20 +409,43 @@ export function FindingsPage() {
     filter.minSize > 0 ||
     filter.text.trim() !== "";
 
+  const fileLabel = (file: string) =>
+    file.replace(/^(desktop|app)\/src\//, "$1 · ");
+  const kindLabel =
+    filter.kind === "all" ? "All kinds" : KIND_LABELS[filter.kind];
+  const windowLabel = WINDOW_OPTIONS.find(
+    (o) => o.value === filter.window,
+  )?.label;
+  const sortLabel = SORT_OPTIONS.find((o) => o.value === sort)?.label;
+
   return (
-    <div className="fd-page">
-      <aside className="wb-side fd-side">
-        <nav className="wb-pages" aria-label="Workbench pages">
-          <a href="/workbench/">Scenes</a>
-          <span aria-current="page">Findings</span>
+    <div className="grid h-dvh grid-cols-[minmax(320px,420px)_minmax(0,1fr)] text-sm">
+      <aside className="flex min-h-0 flex-col gap-3 overflow-hidden border-r p-3">
+        <nav className="flex flex-none gap-1" aria-label="Workbench pages">
+          <a
+            className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+            href="/workbench/"
+          >
+            Scenes
+          </a>
+          <span
+            className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
+            aria-current="page"
+          >
+            Findings
+          </span>
         </nav>
-        <section className="fd-run" aria-label="The check">
-          <div className="fd-run-line">
-            <p className="fd-age">
+        <section className="grid flex-none gap-2" aria-label="The check">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-muted-foreground">
               {loaded ? (
                 <>
                   {`${loaded.data.sceneCount} scenes, checked `}
-                  <time dateTime={loaded.mtime} title={loaded.mtime}>
+                  <time
+                    className="text-foreground"
+                    dateTime={loaded.mtime}
+                    title={loaded.mtime}
+                  >
                     {age(loaded.mtime, now)}
                   </time>
                 </>
@@ -367,13 +455,19 @@ export function FindingsPage() {
                 "No check yet"
               )}
             </p>
-            <button type="button" onClick={runCheck} disabled={running}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={runCheck}
+              disabled={running}
+            >
               {running ? "Checking…" : "Run the check again"}
-            </button>
+            </Button>
           </div>
           {running && status && (
-            <div className="fd-progress" role="status">
+            <div className={cn("grid gap-1", MUTED)} role="status">
               <progress
+                className="h-1 w-full appearance-none overflow-hidden rounded-full [&::-moz-progress-bar]:bg-primary [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-primary"
                 max={status.total || 1}
                 value={status.total ? status.done : undefined}
               />
@@ -382,7 +476,7 @@ export function FindingsPage() {
                   ? `${status.done} of ${status.total} scenes`
                   : "Starting the check…"}
                 {status.scene && (
-                  <span className="wb-mono"> · {status.scene}</span>
+                  <span className="font-mono"> · {status.scene}</span>
                 )}
               </span>
             </div>
@@ -392,210 +486,292 @@ export function FindingsPage() {
             status?.exitCode !== undefined &&
             status.exitCode !== 0 &&
             status.exitCode !== 1 && (
-              <details className="fd-run-error" open>
-                <summary>{`The check failed (code ${status.exitCode}).`}</summary>
-                <pre>{status.stderr.join("\n")}</pre>
-              </details>
+              <Collapsible
+                defaultOpen
+                className="rounded-lg bg-destructive/10 p-2"
+              >
+                <CollapsibleTrigger className="text-left font-medium">
+                  {`The check failed (code ${status.exitCode}).`}
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-xs">
+                    {status.stderr.join("\n")}
+                  </pre>
+                </CollapsibleContent>
+              </Collapsible>
             )}
           {runError && (
-            <p className="fd-run-error" role="alert">
+            <p
+              className="rounded-lg bg-destructive/10 p-2 text-destructive"
+              role="alert"
+            >
               {runError}
             </p>
           )}
         </section>
 
-        <section className="fd-filters" aria-label="Filters">
-          <input
+        <section
+          className="grid flex-none grid-cols-2 gap-2"
+          aria-label="Filters"
+        >
+          <Input
             type="search"
+            className="col-span-2"
             aria-label="Filter findings"
             placeholder="Filter findings"
             value={filter.text}
-            onChange={setField("text", (v) => v)}
+            onChange={(e) => setField("text")(e.target.value)}
           />
-          <label>
-            <span>Kind</span>
-            <select
+          <div className="grid min-w-0 gap-1">
+            <span className={MUTED}>Kind</span>
+            <Select
               value={filter.kind}
-              onChange={setField("kind", (v) => v as FindingFilter["kind"])}
+              onValueChange={(v) =>
+                setField("kind")(String(v) as FindingFilter["kind"])
+              }
             >
-              <option value="all">All kinds</option>
-              {FINDING_KINDS.map((kind) => (
-                <option key={kind} value={kind}>
-                  {KIND_LABELS[kind]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Window</span>
-            <select
+              <SelectTrigger size="sm" aria-label="Kind" className="w-full">
+                <SelectValue>{kindLabel}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All kinds</SelectItem>
+                {FINDING_KINDS.map((kind) => (
+                  <SelectItem key={kind} value={kind}>
+                    {KIND_LABELS[kind]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid min-w-0 gap-1">
+            <span className={MUTED}>Window</span>
+            <Select
               value={filter.window}
-              onChange={setField("window", (v) => v as FindingFilter["window"])}
+              onValueChange={(v) =>
+                setField("window")(String(v) as FindingFilter["window"])
+              }
             >
-              <option value="all">All windows</option>
-              <option value="desktop">Setup window</option>
-              <option value="app">App</option>
-            </select>
-          </label>
-          <label>
-            <span>File</span>
-            <select value={filter.file} onChange={setField("file", (v) => v)}>
-              <option value="">All files</option>
-              {files.map((file) => (
-                <option key={file} value={file}>
-                  {file.replace(/^(desktop|app)\/src\//, "$1 · ")}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>At least</span>
-            <span className="fd-px">
-              <input
+              <SelectTrigger size="sm" aria-label="Window" className="w-full">
+                <SelectValue>{windowLabel}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {WINDOW_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid min-w-0 gap-1">
+            <span className={MUTED}>File</span>
+            <Select
+              value={filter.file || ALL_FILES}
+              onValueChange={(v) =>
+                setField("file")(v === ALL_FILES ? "" : String(v))
+              }
+            >
+              <SelectTrigger size="sm" aria-label="File" className="w-full">
+                <SelectValue>
+                  {filter.file ? fileLabel(filter.file) : "All files"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_FILES}>All files</SelectItem>
+                {files.map((file) => (
+                  <SelectItem key={file} value={file}>
+                    {fileLabel(file)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Label className="grid min-w-0 gap-1 font-normal">
+            <span className={MUTED}>At least</span>
+            <span className="flex items-center gap-1 text-muted-foreground">
+              <Input
                 type="number"
+                className="h-7"
                 min={0}
                 step={1}
                 value={filter.minSize}
-                onChange={setField("minSize", (v) =>
-                  Math.max(0, Number(v) || 0),
-                )}
+                onChange={(e) =>
+                  setField("minSize")(Math.max(0, Number(e.target.value) || 0))
+                }
               />
               px
             </span>
-          </label>
-          <label>
-            <span>Sort by</span>
-            <select
+          </Label>
+          <div className="grid min-w-0 gap-1">
+            <span className={MUTED}>Sort by</span>
+            <Select
               value={sort}
-              onChange={(e) => setSort(e.target.value as FindingSort)}
+              onValueChange={(v) => setSort(String(v) as FindingSort)}
             >
-              <option value="size">Size</option>
-              <option value="scenes">Number of scenes</option>
-              <option value="time">Time</option>
-            </select>
-          </label>
+              <SelectTrigger size="sm" aria-label="Sort by" className="w-full">
+                <SelectValue>{sortLabel}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {SORT_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </section>
 
-        <label className="fd-expected">
-          <input
-            type="checkbox"
-            checked={filter.showExpected}
-            onChange={(e) =>
-              setFilter((f) => ({ ...f, showExpected: e.target.checked }))
-            }
-          />
-          {`Show expected moves (${expectedCount})`}
-        </label>
-        <p className="fd-hint">
-          Expected moves come after an input, on a new screen or while a screen
-          loads. Shown by default: shift under hand, jitter, cut off, outside,
-          spacing and run problems.
-        </p>
-        <p className="fd-hint" data-spacing-rule>
-          <strong>Spacing</strong>
-          {`: ${SPACING_RULE} Why: ${SPACING_WHY}`}
-        </p>
+        <div className="flex-none">
+          <Label className="text-sm">
+            <Checkbox
+              checked={filter.showExpected}
+              onCheckedChange={(checked) => setField("showExpected")(checked)}
+            />
+            {`Show expected moves (${expectedCount})`}
+          </Label>
+          <p className={cn("mt-1 pl-6", MUTED)}>
+            Expected moves come after an input, on a new screen or while a
+            screen loads. Shown by default: shift under hand, jitter, cut off,
+            outside, spacing and run problems.
+          </p>
+          <p className={cn("mt-1 pl-6", MUTED)} data-spacing-rule>
+            <strong className="font-semibold text-foreground">Spacing</strong>
+            {`: ${SPACING_RULE} Why: ${SPACING_WHY}`}
+          </p>
+        </div>
 
-        <div className="fd-count">
-          <span>
-            {loaded
-              ? shown.length === all.length
+        <div className="flex min-h-5 flex-none items-center justify-between text-xs font-semibold">
+          {loaded ? (
+            <span data-finding-count="">
+              {shown.length === all.length
                 ? `${all.length} findings`
-                : `${shown.length} of ${all.length} findings`
-              : ""}
-          </span>
+                : `${shown.length} of ${all.length} findings`}
+            </span>
+          ) : (
+            <span />
+          )}
           {filtered && (
-            <button
-              type="button"
-              className="wb-link-button"
+            <Button
+              variant="link"
+              size="xs"
+              className="h-auto px-0"
               onClick={() => setFilter(NO_FILTER)}
             >
               Clear the filters
-            </button>
+            </Button>
           )}
         </div>
 
         {load.state === "missing" || load.state === "failed" ? (
-          <p className="fd-empty">{load.message}</p>
+          <p className="text-muted-foreground">{load.message}</p>
         ) : loaded && all.length === 0 ? (
-          <p className="fd-empty">The check found nothing.</p>
+          <p className="text-muted-foreground">The check found nothing.</p>
         ) : loaded && shown.length === 0 ? (
-          <p className="fd-empty">No finding matches the filters.</p>
+          <p className="text-muted-foreground">
+            No finding matches the filters.
+          </p>
         ) : (
-          <ul className="fd-rows" ref={rowsRef} aria-label="Findings">
-            {shown.map((f) => {
-              const file = f.component?.file;
-              return (
-                <li key={f.id}>
-                  <button
-                    type="button"
-                    className="fd-row"
-                    data-finding-id={f.id}
-                    aria-current={f.id === selected?.id ? "true" : undefined}
-                    onClick={() => pick(f.id)}
+          <Table
+            aria-label="Findings"
+            className="table-fixed"
+            containerClassName="min-h-0 flex-1"
+          >
+            <TableBody ref={rowsRef}>
+              {shown.map((f) => {
+                const file = f.component?.file;
+                const current = f.id === selected?.id;
+                return (
+                  <TableRow
+                    key={f.id}
+                    data-class={f.movement?.class}
+                    className={cn(current && "bg-muted hover:bg-muted")}
                   >
-                    <span className="fd-row-title">{f.title}</span>
-                    <span className="fd-row-meta">
-                      <Chips finding={f} />
-                      <span className="fd-size">{sizeText(f)}</span>
-                      <span>{scenesText(f)}</span>
-                      {file && (
-                        <span
-                          className="fd-file wb-mono"
-                          title={fileLine(f) ?? file}
+                    <TableCell className="px-2">
+                      <div className="grid gap-1">
+                        <Button
+                          variant="link"
+                          className="line-clamp-2 block h-auto whitespace-normal px-0 text-left font-medium text-foreground [overflow-wrap:anywhere]"
+                          data-finding-id={f.id}
+                          aria-current={current ? "true" : undefined}
+                          onClick={() => pick(f.id)}
                         >
-                          {baseName(file)}
+                          {f.title}
+                        </Button>
+                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                          <Chips finding={f} />
+                          <span className="font-semibold text-foreground tabular-nums">
+                            {sizeText(f)}
+                          </span>
+                          <span>{scenesText(f)}</span>
+                          {file && (
+                            <span
+                              className="min-w-0 truncate font-mono"
+                              title={fileLine(f) ?? file}
+                            >
+                              {baseName(file)}
+                            </span>
+                          )}
                         </span>
-                      )}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         )}
-        <p className="fd-keys">
-          <kbd>j</kbd> <kbd>k</kbd> findings · <kbd>←</kbd> <kbd>→</kbd>{" "}
+        <p className={cn("flex-none", MUTED)}>
+          <Key>j</Key> <Key>k</Key> findings · <Key>←</Key> <Key>→</Key>{" "}
           occurrences
         </p>
       </aside>
 
-      <main className="fd-detail">
+      <main className="flex min-h-0 min-w-0 flex-col gap-3 p-3">
         {selected && occurrence && loaded ? (
           <>
-            <header className="fd-head">
-              <h1>{selected.title}</h1>
-              <p className="fd-head-meta">
+            <header className="grid flex-none gap-1">
+              <h1 className="text-base font-semibold [overflow-wrap:anywhere]">
+                {selected.title}
+              </h1>
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                 <Chips finding={selected} />
-                <span className="fd-size">{sizeText(selected)}</span>
+                <span className="font-semibold text-foreground tabular-nums">
+                  {sizeText(selected)}
+                </span>
                 <span>
                   {`${scenesText(selected)}, ${selected.occurrences.length} ${selected.occurrences.length === 1 ? "time" : "times"}`}
                 </span>
                 {fileLine(selected) ? (
-                  <span className="wb-mono" title={selected.component?.name}>
+                  <span className="font-mono" title={selected.component?.name}>
                     {fileLine(selected)}
                   </span>
                 ) : isLayoutKind(selected.kind) ? (
-                  <span className="fd-muted">No component file found</span>
+                  <span>No component file found</span>
                 ) : null}
               </p>
               {selected.kind === "spacing" && (
-                <p className="fd-why" data-rule="spacing">
-                  <strong>{KIND_LABELS.spacing}</strong>
+                <p className="text-muted-foreground" data-rule="spacing">
+                  <strong className="font-semibold text-foreground">
+                    {KIND_LABELS.spacing}
+                  </strong>
                   {`: ${SPACING_RULE} ${SPACING_WHY}`}
                 </p>
               )}
               {movement && (
-                <p className="fd-why" data-rule={movement.rule}>
-                  <strong>{RULE_LABELS[movement.rule]}</strong>
+                <p className="text-muted-foreground" data-rule={movement.rule}>
+                  <strong className="font-semibold text-foreground">
+                    {RULE_LABELS[movement.rule]}
+                  </strong>
                   {`: ${movement.why}`}
                 </p>
               )}
             </header>
-            <div className="fd-bar">
-              <div className="fd-step">
-                <button
-                  type="button"
+            <div className="flex flex-none flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
                   aria-keyshortcuts="ArrowLeft"
                   onClick={() =>
                     setIndex(
@@ -606,15 +782,16 @@ export function FindingsPage() {
                   disabled={occurrences.length < 2}
                 >
                   Previous
-                </button>
+                </Button>
                 <span
-                  className="fd-step-text"
+                  className="min-w-14 text-center text-muted-foreground tabular-nums"
                   data-occurrence={occurrenceIndex}
                 >
                   {`${occurrenceIndex + 1} of ${occurrences.length}`}
                 </span>
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="outline"
                   aria-keyshortcuts="ArrowRight"
                   onClick={() =>
                     setIndex((occurrenceIndex + 1) % occurrences.length)
@@ -622,23 +799,25 @@ export function FindingsPage() {
                   disabled={occurrences.length < 2}
                 >
                   Next
-                </button>
+                </Button>
               </div>
-              <span className="fd-where">
+              <span className="font-medium">
                 {occurrence.scene.title}
-                <span className="wb-time"> {formatTime(occurrence.at)}</span>
+                <span className={TIME}> {formatTime(occurrence.at)}</span>
               </span>
-              <span className="fd-actions">
+              <span className="ml-auto flex items-center gap-2">
                 {copied && (
-                  <span className="fd-muted" role="status">
+                  <span className={MUTED} role="status">
                     {copied}
                   </span>
                 )}
-                <button type="button" onClick={copyPrompt}>
+                <Button size="sm" variant="outline" onClick={copyPrompt}>
                   Copy as prompt
-                </button>
+                </Button>
                 <a
-                  className="fd-open"
+                  className={cn(
+                    buttonVariants({ variant: "outline", size: "sm" }),
+                  )}
                   href={`/workbench/?${occurrenceQuery(occurrence, loaded.data.window)}`}
                   target="_blank"
                   rel="noreferrer"
@@ -648,34 +827,51 @@ export function FindingsPage() {
               </span>
             </div>
             {occurrences.length > 1 && (
-              <ol className="fd-occurrences" aria-label="Occurrences">
-                {occurrences.map((o, i) => (
-                  // The scene, the time and the warning with its boxes name one occurrence.
-                  <li
-                    key={`${o.scene.id}|${o.at}|${JSON.stringify(o.warning ?? o.label)}`}
-                  >
-                    <button
-                      type="button"
-                      aria-current={i === occurrenceIndex ? "true" : undefined}
-                      onClick={() => setIndex(i)}
+              <ol
+                className="flex max-h-22 flex-none flex-wrap gap-1 overflow-y-auto"
+                aria-label="Occurrences"
+              >
+                {occurrences.map((o, i) => {
+                  const current = i === occurrenceIndex;
+                  return (
+                    // The scene, the time and the warning with its boxes name one occurrence.
+                    <li
+                      key={`${o.scene.id}|${o.at}|${JSON.stringify(o.warning ?? o.label)}`}
                     >
-                      <span>{o.scene.title}</span>
-                      <span className="wb-time">{formatTime(o.at)}</span>
-                      {o.warning?.kind === "moved" && o.warning.cause && (
-                        <span className="fd-muted">{o.warning.cause}</span>
-                      )}
-                    </button>
-                  </li>
-                ))}
+                      <Button
+                        size="xs"
+                        variant={current ? "default" : "outline"}
+                        className="font-normal"
+                        aria-current={current ? "true" : undefined}
+                        onClick={() => setIndex(i)}
+                      >
+                        <span>{o.scene.title}</span>
+                        <span className={TIME}>{formatTime(o.at)}</span>
+                        {o.warning?.kind === "moved" && o.warning.cause && (
+                          <span
+                            className={cn(
+                              "text-xs",
+                              !current && "text-muted-foreground",
+                            )}
+                          >
+                            {o.warning.cause}
+                          </span>
+                        )}
+                      </Button>
+                    </li>
+                  );
+                })}
               </ol>
             )}
             {!occurrence.warning && (
-              <p className="fd-message wb-mono">{occurrence.label}</p>
+              <p className="flex-none whitespace-pre-wrap rounded-lg border p-2 font-mono text-xs [overflow-wrap:anywhere]">
+                {occurrence.label}
+              </p>
             )}
             {frameSrc && (
               <iframe
                 ref={frameRef}
-                className="fd-frame"
+                className="min-h-80 w-full flex-1 rounded-lg border"
                 title="The scene in the workbench"
                 src={frameSrc}
                 data-findings-frame=""
@@ -683,7 +879,7 @@ export function FindingsPage() {
             )}
           </>
         ) : (
-          <p className="fd-empty fd-detail-empty">
+          <p className="m-auto text-muted-foreground">
             {load.state === "loading"
               ? "Loading findings…"
               : "Pick a finding to see it in its scene."}

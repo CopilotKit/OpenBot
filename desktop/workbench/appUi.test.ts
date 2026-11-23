@@ -16,8 +16,6 @@ const PENDING: readonly string[] = [
   "CommandsPanel.tsx",
   "CommentLayer.tsx",
   "EventsPanel.tsx",
-  "findings/FindingsPage.tsx",
-  "findings/findings.css",
   "ImportLogPanel.tsx",
   "Inspector.tsx",
   "RequestLog.tsx",
