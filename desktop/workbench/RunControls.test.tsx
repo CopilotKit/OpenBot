@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import {
   formatTime,
   parseSpeed,
@@ -50,21 +51,30 @@ test("Pause shows while playing and calls onPause", () => {
   expect(p.onPause).toHaveBeenCalledTimes(1);
 });
 
-test("speed change calls onSpeed", () => {
+/** Opens the Speed list and picks the option with that name. */
+async function pickSpeed(view: ReturnType<typeof render>, name: string) {
+  const person = userEvent.setup({ document });
+  await person.click(view.getByRole("combobox", { name: "Speed" }));
+  await person.click(
+    await within(document.body).findByRole("option", { name }),
+  );
+}
+
+test("speed change calls onSpeed", async () => {
   const p = props();
   const view = render(<RunControls {...p} />);
-  fireEvent.change(view.getByLabelText("Speed"), { target: { value: "max" } });
+  await pickSpeed(view, "Max");
   expect(p.onSpeed).toHaveBeenCalledWith("max");
 });
 
-test("range change calls onSeek with a number", () => {
-  const p = props();
+test("the Time slider seeks with a number", async () => {
+  const p = props({ now: 5000 });
   const view = render(<RunControls {...p} />);
-  const t = view.getByLabelText("Time");
-  fireEvent.focusIn(t);
-  fireEvent.change(t, { target: { value: "5000" } });
-  fireEvent.keyUp(t);
-  expect(p.onSeek).toHaveBeenCalledWith(5000);
+  const time = view.getByRole("slider", { name: "Time" });
+  expect(time.getAttribute("aria-valuenow")).toBe("5000");
+  time.focus();
+  await userEvent.setup({ document }).keyboard("{ArrowRight}");
+  expect(p.onSeek).toHaveBeenCalledWith(5100);
 });
 
 test("shows time text and marks", () => {
@@ -75,26 +85,26 @@ test("shows time text and marks", () => {
   expect(view.getAllByTestId("mark").length).toBe(2);
 });
 
-test("the speeds are ¼×, ½×, 1×, 10× and Max", () => {
+test("the speeds are ¼×, ½×, 1×, 10× and Max", async () => {
   const view = render(<RunControls {...props()} />);
-  const select = view.getByLabelText("Speed") as HTMLSelectElement;
-  expect([...select.options].map((o) => o.textContent)).toEqual([
+  const trigger = view.getByRole("combobox", { name: "Speed" });
+  expect(trigger.textContent).toContain("1×");
+  await userEvent.setup({ document }).click(trigger);
+  const options = await within(document.body).findAllByRole("option");
+  expect(options.map((o) => o.textContent)).toEqual([
     "¼×",
     "½×",
     "1×",
     "10×",
     "Max",
   ]);
-  expect(select.value).toBe("1");
 });
 
-test("a slow speed calls onSpeed with a number", () => {
+test("a slow speed calls onSpeed with a number", async () => {
   const p = props();
   const view = render(<RunControls {...p} />);
-  fireEvent.change(view.getByLabelText("Speed"), { target: { value: "0.25" } });
+  await pickSpeed(view, "¼×");
   expect(p.onSpeed).toHaveBeenCalledWith(0.25);
-  fireEvent.change(view.getByLabelText("Speed"), { target: { value: "0.5" } });
-  expect(p.onSpeed).toHaveBeenCalledWith(0.5);
 });
 
 test("parseSpeed reads every option and gives 1× for anything else", () => {
@@ -117,7 +127,7 @@ test("Pause at each action calls onPauseAtActions, and the next action shows", (
       })}
     />,
   );
-  fireEvent.click(view.getByLabelText("Pause at each action"));
+  fireEvent.click(view.getByRole("checkbox", { name: "Pause at each action" }));
   expect(onPauseAtActions).toHaveBeenCalledWith(true);
   expect(view.getByText("Next: Click · Install")).toBeTruthy();
 });

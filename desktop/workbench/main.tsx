@@ -1,8 +1,9 @@
+// First, so Tailwind declares its layers before any other stylesheet uses one.
+import "../../app/workbench/page.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { Workbench } from "./Workbench";
 import { followPageTheme } from "./pageTheme";
-import "../../app/workbench/page.css";
+import { Workbench } from "./Workbench";
 import "./workbench.css";
 
 followPageTheme();

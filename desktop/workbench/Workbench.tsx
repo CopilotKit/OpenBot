@@ -51,6 +51,7 @@ import {
   parseMark,
   userActions,
 } from "./findings";
+import { isTextField, pressable, usesArrows } from "./keyTargets";
 import { KeysHelp } from "./KeysHelp";
 import { describeElements, type ScreenMark, type Warning } from "./layoutWatch";
 import { pickArea } from "./pickElement";
@@ -385,53 +386,6 @@ function handedOverIn(win: FrameWindow | undefined): boolean {
     .some(
       (call) => call.command === "show_openbot" && call.settled === "resolved",
     );
-}
-
-/** True for a field that takes typed text, where the C key must type a letter. */
-function isTextField(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  if (el?.nodeType !== 1) return false;
-  if (el.isContentEditable) return true;
-  const tag = el.tagName.toLowerCase();
-  if (tag === "textarea" || tag === "select") return true;
-  if (tag !== "input") return false;
-  const type = (el.getAttribute("type") ?? "text").toLowerCase();
-  return ![
-    "button",
-    "checkbox",
-    "radio",
-    "range",
-    "color",
-    "submit",
-    "reset",
-    "image",
-    "file",
-  ].includes(type);
-}
-
-/** True for a control that uses the arrow keys itself: a slider or a splitter. */
-function usesArrows(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  if (el?.nodeType !== 1) return false;
-  if (el.getAttribute("role") === "separator") return true;
-  return (
-    el.tagName.toLowerCase() === "input" &&
-    (el.getAttribute("type") ?? "").toLowerCase() === "range"
-  );
-}
-
-/** True for a control that Space and Enter press: a button, a link, a checkbox, a summary. */
-function pressable(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  if (el?.nodeType !== 1) return false;
-  const tag = el.tagName.toLowerCase();
-  return (
-    tag === "button" ||
-    tag === "summary" ||
-    tag === "a" ||
-    tag === "input" ||
-    el.getAttribute("role") === "separator"
-  );
 }
 
 /** The panel sizes: defaults, limits and where each is kept for this viewer. */

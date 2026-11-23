@@ -1,102 +1,109 @@
-/* The panels of an app scene: Requests, API answers, and Stream and sockets. */
+/*
+ * In Tailwind's base layer (app/workbench/page.css declares the layers), so the app's components,
+ * whose classes are utilities, always win over these rules. These rules go away as the panels move
+ * to the app's components (desktop/workbench/README.md, "The rule").
+ */
+@layer base {
+  /* The panels of an app scene: Requests, API answers, and Stream and sockets. */
 
-.wb-app-fold ul {
-  list-style: none;
-  padding-left: 0;
-}
+  .wb-app-fold ul {
+    list-style: none;
+    padding-left: 0;
+  }
 
-.wb-app-fold li {
-  padding: 4px;
-  border-bottom: 1px solid var(--ck-border-container);
-}
+  .wb-app-fold li {
+    padding: 4px;
+    border-bottom: 1px solid var(--ck-border-container);
+  }
 
-.wb-app-fold li:last-child {
-  border-bottom: 0;
-}
+  .wb-app-fold li:last-child {
+    border-bottom: 0;
+  }
 
-.wb-app-fold code {
-  font: 500 12px / 16px var(--ck-mono);
-  overflow-wrap: anywhere;
-}
+  .wb-app-fold code {
+    font: 500 12px / 16px var(--ck-mono);
+    overflow-wrap: anywhere;
+  }
 
-.wb-app-fold em {
-  font-style: normal;
-  color: var(--ck-text-secondary);
-}
+  .wb-app-fold em {
+    font-style: normal;
+    color: var(--ck-text-secondary);
+  }
 
-.wb-app-fold li button {
-  margin: 0;
-  padding: 0 8px;
-  font-size: 12px;
-}
+  .wb-app-fold li button {
+    margin: 0;
+    padding: 0 8px;
+    font-size: 12px;
+  }
 
-.wb-app-fold p {
-  margin: 0;
-  padding: 0 4px;
-  color: var(--ck-text-secondary);
-}
+  .wb-app-fold p {
+    margin: 0;
+    padding: 0 4px;
+    color: var(--ck-text-secondary);
+  }
 
-.wb-app-fold input[type="search"] {
-  width: 100%;
-  margin-bottom: 4px;
-}
+  .wb-app-fold input[type="search"] {
+    width: 100%;
+    margin-bottom: 4px;
+  }
 
-/* A request: time, method, route and status on one line; where the answer came from under it. */
-.wb-req-line {
-  display: grid;
-  grid-template-columns: 32px 36px minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: 8px;
-}
+  /* A request: time, method, route and status on one line; where the answer came from under it. */
+  .wb-req-line {
+    display: grid;
+    grid-template-columns: 32px 36px minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 8px;
+  }
 
-.wb-req-method {
-  font: 600 12px / 16px var(--ck-mono);
-}
+  .wb-req-method {
+    font: 600 12px / 16px var(--ck-mono);
+  }
 
-.wb-app-fold code.wb-req-route {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  overflow-wrap: normal;
-}
+  .wb-app-fold code.wb-req-route {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    overflow-wrap: normal;
+  }
 
-.wb-req-status {
-  font: 500 12px / 16px var(--ck-mono);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
+  .wb-req-status {
+    font: 500 12px / 16px var(--ck-mono);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
 
-.wb-req-meta {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding-left: 40px;
-  font-size: 12px;
-  line-height: 16px;
-}
+  .wb-req-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding-left: 40px;
+    font-size: 12px;
+    line-height: 16px;
+  }
 
-/* An API answer: the route on one line, with all of it in the tooltip. */
-.wb-app-fold [data-testid="api-answer"] code {
-  display: inline-block;
-  max-width: 100%;
-  vertical-align: bottom;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+  /* An API answer: the route on one line, with all of it in the tooltip. */
+  .wb-app-fold [data-testid="api-answer"] code {
+    display: inline-block;
+    max-width: 100%;
+    vertical-align: bottom;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
-/* A request that no scene answer, stream or handler answered: a real server would not fail it. */
-.wb-side .wb-request-missing {
-  color: #b42318;
-  font-weight: 600;
-}
-
-.wb-side .wb-request-missing em {
-  color: inherit;
-}
-
-@media (prefers-color-scheme: dark) {
+  /* A request that no scene answer, stream or handler answered: a real server would not fail it. */
   .wb-side .wb-request-missing {
-    color: #ff8a80;
+    color: #b42318;
+    font-weight: 600;
+  }
+
+  .wb-side .wb-request-missing em {
+    color: inherit;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .wb-side .wb-request-missing {
+      color: #ff8a80;
+    }
   }
 }

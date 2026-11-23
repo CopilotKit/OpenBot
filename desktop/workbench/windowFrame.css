@@ -1,115 +1,122 @@
-.wb-window {
-  display: inline-block;
-  background: #fff;
-  box-shadow:
-    0 0 0 1px rgb(0 0 0 / 0.2),
-    0 16px 48px rgb(0 0 0 / 0.35);
-}
+/*
+ * In Tailwind's base layer (app/workbench/page.css declares the layers), so the app's components,
+ * whose classes are utilities, always win over these rules. These rules go away as the panels move
+ * to the app's components (desktop/workbench/README.md, "The rule").
+ */
+@layer base {
+  .wb-window {
+    display: inline-block;
+    background: #fff;
+    box-shadow:
+      0 0 0 1px rgb(0 0 0 / 0.2),
+      0 16px 48px rgb(0 0 0 / 0.35);
+  }
 
-.wb-window-mac {
-  border-radius: 10px;
-  overflow: hidden;
-}
+  .wb-window-mac {
+    border-radius: 10px;
+    overflow: hidden;
+  }
 
-.wb-window-windows {
-  border-radius: 0;
-}
+  .wb-window-windows {
+    border-radius: 0;
+  }
 
-.wb-window-content {
-  position: relative;
-  overflow: hidden;
-}
+  .wb-window-content {
+    position: relative;
+    overflow: hidden;
+  }
 
-.wb-window-content iframe {
-  display: block;
-}
+  .wb-window-content iframe {
+    display: block;
+  }
 
-.wb-window-bar {
-  display: flex;
-  align-items: center;
-  box-sizing: border-box;
-  user-select: none;
-  font:
-    12px / 1 system-ui,
-    sans-serif;
-}
+  .wb-window-bar {
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    user-select: none;
+    font:
+      12px / 1 system-ui,
+      sans-serif;
+  }
 
-/* Over the page, as macOS draws them; each light's place comes from titleBar.ts. */
-.wb-window-bar-mac {
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 0;
-  z-index: 1;
-  background: transparent;
-  pointer-events: none;
-}
+  /* Over the page, as macOS draws them; each light's place comes from titleBar.ts. */
+  .wb-window-bar-mac {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 0;
+    z-index: 1;
+    background: transparent;
+    pointer-events: none;
+  }
 
-.wb-window-light {
-  position: absolute;
-  box-sizing: border-box;
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.18);
-  pointer-events: auto;
-}
+  .wb-window-light {
+    position: absolute;
+    box-sizing: border-box;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.18);
+    pointer-events: auto;
+  }
 
-.wb-window-bar-windows {
-  height: 32px;
-  justify-content: space-between;
-  background: #f3f3f3;
-  color: #1f1f1f;
-}
+  .wb-window-bar-windows {
+    height: 32px;
+    justify-content: space-between;
+    background: #f3f3f3;
+    color: #1f1f1f;
+  }
 
-.wb-window-bar-windows.wb-window-bar-inactive {
-  color: #8a8a8a;
-}
+  .wb-window-bar-windows.wb-window-bar-inactive {
+    color: #8a8a8a;
+  }
 
-.wb-window-title {
-  padding-left: 12px;
-}
+  .wb-window-title {
+    padding-left: 12px;
+  }
 
-.wb-window-controls {
-  display: flex;
-  height: 100%;
-}
+  .wb-window-controls {
+    display: flex;
+    height: 100%;
+  }
 
-.wb-window-control {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 46px;
-  height: 100%;
-  font-size: 14px;
-}
+  .wb-window-control {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 100%;
+    font-size: 14px;
+  }
 
-.wb-window-bar-browser {
-  height: 36px;
-  gap: 12px;
-  padding: 0 12px;
-  background: #ececec;
-  color: #3c3c3c;
-  border-bottom: 1px solid #d4d4d4;
-}
+  .wb-window-bar-browser {
+    height: 36px;
+    gap: 12px;
+    padding: 0 12px;
+    background: #ececec;
+    color: #3c3c3c;
+    border-bottom: 1px solid #d4d4d4;
+  }
 
-.wb-browser-dots {
-  display: flex;
-  gap: 8px;
-  flex: none;
-}
+  .wb-browser-dots {
+    display: flex;
+    gap: 8px;
+    flex: none;
+  }
 
-.wb-browser-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #b8b8b8;
-}
+  .wb-browser-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #b8b8b8;
+  }
 
-.wb-browser-address {
-  flex: 1;
-  min-width: 0;
-  padding: 5px 10px;
-  border-radius: 6px;
-  background: #fff;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  .wb-browser-address {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 10px;
+    border-radius: 6px;
+    background: #fff;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
 }

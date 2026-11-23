@@ -1,3 +1,15 @@
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
+
 export function formatTime(ms: number): string {
   const total = Math.floor(ms / 1000);
   const seconds = total % 60;
@@ -50,79 +62,90 @@ export function parseSpeed(value: string): Speed {
 
 export function RunControls(props: RunControlsProps) {
   const { now, end, marks, playing, speed } = props;
+  const label = SPEEDS.find((option) => option.value === String(speed))?.label;
   return (
-    <div className="wb-run">
-      <div className="wb-run-buttons">
-        <button
-          type="button"
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
           aria-keyshortcuts="Space"
           title={playing ? "Pause (Space)" : "Play (Space)"}
           onClick={playing ? props.onPause : props.onPlay}
         >
           {playing ? "Pause" : "Play"}
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
           aria-keyshortcuts="."
           title="Step to the next run step (.)"
           onClick={props.onStep}
         >
           Step
-        </button>
-        <span className="wb-time">{`${formatTime(now)} / ${formatTime(end)}`}</span>
+        </Button>
+        <span className="ml-auto font-mono text-xs text-muted-foreground tabular-nums">{`${formatTime(now)} / ${formatTime(end)}`}</span>
       </div>
-      <div className="wb-run-track">
-        <input
-          type="range"
-          aria-label="Time"
+      <div className="relative pb-2">
+        <Slider
+          thumbLabel="Time"
           aria-keyshortcuts="ArrowLeft ArrowRight"
           min={0}
-          max={end}
+          max={Math.max(end, 1)}
           step={100}
           value={now}
-          onChange={(event) => props.onSeek(Number(event.target.value))}
+          onValueChange={(value) =>
+            props.onSeek(Array.isArray(value) ? value[0] : value)
+          }
         />
         {/* Inset by the thumb's radius, so 0% and 100% sit under the thumb's centre. */}
-        <div className="wb-run-marks" aria-hidden="true">
+        <div
+          className="pointer-events-none absolute inset-x-2 bottom-0 h-1.5"
+          aria-hidden="true"
+        >
           {end > 0 &&
             marks.map((mark, index) => (
               <span
                 // biome-ignore lint/suspicious/noArrayIndexKey: marks can repeat, and the list has no other identity
                 key={`${index}-${mark}`}
                 data-testid="mark"
-                className="wb-run-mark"
+                className="absolute top-0 h-full w-px bg-muted-foreground"
                 style={{ left: `${Math.min(100, (mark / end) * 100)}%` }}
               />
             ))}
         </div>
       </div>
-      <div className="wb-run-meta">
-        <label className="wb-prop">
-          <span>Speed</span>
-          <select
-            value={String(speed)}
-            onChange={(event) => props.onSpeed(parseSpeed(event.target.value))}
-          >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground">Speed</span>
+        <Select
+          value={String(speed)}
+          onValueChange={(value) => props.onSpeed(parseSpeed(String(value)))}
+        >
+          <SelectTrigger size="sm" aria-label="Speed" className="min-w-20">
+            <SelectValue>{label}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
             {SPEEDS.map((option) => (
-              <option key={option.value} value={option.value}>
+              <SelectItem key={option.value} value={option.value}>
                 {option.label}
-              </option>
+              </SelectItem>
             ))}
-          </select>
-        </label>
+          </SelectContent>
+        </Select>
       </div>
       {props.onPauseAtActions && (
-        <label className="wb-check">
-          <input
-            type="checkbox"
+        <Label className="text-xs font-normal">
+          <Checkbox
             checked={props.pauseAtActions ?? false}
-            onChange={(event) => props.onPauseAtActions?.(event.target.checked)}
+            onCheckedChange={(checked) => props.onPauseAtActions?.(checked)}
           />
           Pause at each action
-        </label>
+        </Label>
       )}
       {props.next && (
-        <p className="wb-next-action" role="status">{`Next: ${props.next}`}</p>
+        <p
+          className="text-xs text-muted-foreground"
+          role="status"
+        >{`Next: ${props.next}`}</p>
       )}
     </div>
   );

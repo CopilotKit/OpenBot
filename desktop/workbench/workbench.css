@@ -1,4 +1,10 @@
 /*
+ * In Tailwind's base layer (app/workbench/page.css declares the layers), so the app's components,
+ * whose classes are utilities, always win over these rules. These rules go away as the panels move
+ * to the app's components (desktop/workbench/README.md, "The rule").
+ */
+@layer base {
+  /*
  * The workbench chrome: CopilotKit tokens (copilotkit-ui-theme skill) on a plain, quiet ground.
  * Glass panels with white borders, a 4px grid. Text is the system sans-serif; times, routes,
  * JSON and code are the system monospace. No web fonts.
@@ -6,1258 +12,1259 @@
  * titles). Weight: 400 text, 500 controls, 600 titles.
  * The window frame (windowFrame.css) stays neutral and is not themed here.
  */
-:root {
-  color-scheme: light dark;
-  /* CopilotKit tokens */
-  --ck-surface-main: #f3f3f5;
-  --ck-surface-container: #ffffff;
-  --ck-surface-hovered: #f7f7f9;
-  --ck-border-default: #ffffff;
-  --ck-border-container: #dbdbe5;
-  /* A control edge you can see on white glass. */
-  --ck-border-control: #c9c9d3;
-  --ck-text-primary: #010507;
-  --ck-text-secondary: #57575b;
-  --ck-text-disabled: #838389;
-  --ck-text-invert: #ffffff;
-  --ck-white-50: rgba(255, 255, 255, 0.5);
-  --ck-white-65: rgba(255, 255, 255, 0.65);
-  --ck-white-70: rgba(255, 255, 255, 0.7);
-  --ck-grey-200: #f0f0f4;
-  /* The fill of the selected row in a list. */
-  --ck-selected: rgba(1, 5, 7, 0.07);
-  --ck-elevation-sm: 0px 1px 2px 0px rgba(1, 5, 7, 0.06);
-  --ck-elevation-md: 0px 6px 6px -2px rgba(1, 5, 7, 0.08);
-  --ck-elevation-lg: 0px 16px 24px -8px rgba(1, 5, 7, 0.12);
-  --ck-radius-xs: 4px;
-  --ck-radius-sm: 8px;
-  --ck-radius-full: 9999px;
-  --ck-notice: #fff3b0;
-  /* The system's own fonts, so nothing loads from the web. Monospace only for times, routes, JSON
+  :root {
+    color-scheme: light dark;
+    /* CopilotKit tokens */
+    --ck-surface-main: #f3f3f5;
+    --ck-surface-container: #ffffff;
+    --ck-surface-hovered: #f7f7f9;
+    --ck-border-default: #ffffff;
+    --ck-border-container: #dbdbe5;
+    /* A control edge you can see on white glass. */
+    --ck-border-control: #c9c9d3;
+    --ck-text-primary: #010507;
+    --ck-text-secondary: #57575b;
+    --ck-text-disabled: #838389;
+    --ck-text-invert: #ffffff;
+    --ck-white-50: rgba(255, 255, 255, 0.5);
+    --ck-white-65: rgba(255, 255, 255, 0.65);
+    --ck-white-70: rgba(255, 255, 255, 0.7);
+    --ck-grey-200: #f0f0f4;
+    /* The fill of the selected row in a list. */
+    --ck-selected: rgba(1, 5, 7, 0.07);
+    --ck-elevation-sm: 0px 1px 2px 0px rgba(1, 5, 7, 0.06);
+    --ck-elevation-md: 0px 6px 6px -2px rgba(1, 5, 7, 0.08);
+    --ck-elevation-lg: 0px 16px 24px -8px rgba(1, 5, 7, 0.12);
+    --ck-radius-xs: 4px;
+    --ck-radius-sm: 8px;
+    --ck-radius-full: 9999px;
+    --ck-notice: #fff3b0;
+    /* The system's own fonts, so nothing loads from the web. Monospace only for times, routes, JSON
      and code. */
-  --ck-sans:
-    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-  --ck-mono: ui-monospace, "SF Mono", Menlo, monospace;
-  /* The glass of a card over the window: it must read on a light and on a dark window. */
-  --wb-glass-card: rgba(255, 255, 255, 0.82);
+    --ck-sans:
+      system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+    --ck-mono: ui-monospace, "SF Mono", Menlo, monospace;
+    /* The glass of a card over the window: it must read on a light and on a dark window. */
+    --wb-glass-card: rgba(255, 255, 255, 0.82);
 
-  /* The names the rest of the workbench uses (CommentLayer.tsx reads these). */
-  --wb-bg: var(--ck-surface-main);
-  --wb-panel: var(--ck-surface-container);
-  --wb-text: var(--ck-text-primary);
-  --wb-muted: var(--ck-text-secondary);
-  --wb-border: var(--ck-border-control);
-  --wb-current: var(--ck-selected);
-  --wb-notice: var(--ck-notice);
-  /* The highlight of a layout warning over the window: strong enough for light and dark windows. */
-  --wb-highlight-moved: #ff5a00;
-  --wb-highlight-bad: #e5132a;
-  --wb-highlight-halo: #ffffff;
-}
+    /* The names the rest of the workbench uses (CommentLayer.tsx reads these). */
+    --wb-bg: var(--ck-surface-main);
+    --wb-panel: var(--ck-surface-container);
+    --wb-text: var(--ck-text-primary);
+    --wb-muted: var(--ck-text-secondary);
+    --wb-border: var(--ck-border-control);
+    --wb-current: var(--ck-selected);
+    --wb-notice: var(--ck-notice);
+    /* The highlight of a layout warning over the window: strong enough for light and dark windows. */
+    --wb-highlight-moved: #ff5a00;
+    --wb-highlight-bad: #e5132a;
+    --wb-highlight-halo: #ffffff;
+  }
 
-/*
+  /*
  * Dark: derived from the same tokens. The ground is a plain near-black; the glass is a dim white;
  * text uses the light end of the grey scale.
  */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ck-surface-main: #111114;
-    --ck-surface-container: #26262f;
-    --ck-surface-hovered: #2e2e38;
-    --ck-border-default: rgba(255, 255, 255, 0.1);
-    --ck-border-container: rgba(255, 255, 255, 0.12);
-    --ck-border-control: rgba(255, 255, 255, 0.16);
-    --ck-text-primary: #f0f0f4;
-    --ck-text-secondary: #afafb7;
-    --ck-text-disabled: #838389;
-    --ck-text-invert: #010507;
-    --ck-white-50: rgba(255, 255, 255, 0.05);
-    --ck-white-65: rgba(255, 255, 255, 0.08);
-    --ck-white-70: rgba(255, 255, 255, 0.1);
-    --ck-grey-200: #33333d;
-    --ck-selected: rgba(255, 255, 255, 0.1);
-    --ck-elevation-sm: 0px 1px 2px 0px rgba(0, 0, 0, 0.3);
-    --ck-elevation-md: 0px 6px 6px -2px rgba(0, 0, 0, 0.3);
-    --ck-elevation-lg: 0px 16px 24px -8px rgba(0, 0, 0, 0.45);
-    --wb-glass-card: rgba(38, 38, 47, 0.82);
-    --ck-notice: #4a3f12;
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ck-surface-main: #111114;
+      --ck-surface-container: #26262f;
+      --ck-surface-hovered: #2e2e38;
+      --ck-border-default: rgba(255, 255, 255, 0.1);
+      --ck-border-container: rgba(255, 255, 255, 0.12);
+      --ck-border-control: rgba(255, 255, 255, 0.16);
+      --ck-text-primary: #f0f0f4;
+      --ck-text-secondary: #afafb7;
+      --ck-text-disabled: #838389;
+      --ck-text-invert: #010507;
+      --ck-white-50: rgba(255, 255, 255, 0.05);
+      --ck-white-65: rgba(255, 255, 255, 0.08);
+      --ck-white-70: rgba(255, 255, 255, 0.1);
+      --ck-grey-200: #33333d;
+      --ck-selected: rgba(255, 255, 255, 0.1);
+      --ck-elevation-sm: 0px 1px 2px 0px rgba(0, 0, 0, 0.3);
+      --ck-elevation-md: 0px 6px 6px -2px rgba(0, 0, 0, 0.3);
+      --ck-elevation-lg: 0px 16px 24px -8px rgba(0, 0, 0, 0.45);
+      --wb-glass-card: rgba(38, 38, 47, 0.82);
+      --ck-notice: #4a3f12;
+    }
   }
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html,
-body,
-#root {
-  height: 100%;
-  margin: 0;
-}
-
-/* The page ground, text and font are the app's (app/workbench/page.css). */
-
-code,
-kbd,
-pre,
-textarea {
-  font-family: var(--ck-mono);
-}
-
-.wb-mono,
-.wb-time {
-  font-family: var(--ck-mono);
-  font-size: 12px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Three columns with a drag handle between each: the widths are per viewer (Workbench.tsx). */
-.wb-page {
-  display: grid;
-  grid-template-columns:
-    var(--wb-left, 248px) 8px minmax(0, 1fr) 8px
-    var(--wb-right, 280px);
-  height: 100%;
-  padding: 8px;
-}
-
-/* Glass panels: the scene list column, the right panel and the warnings area. */
-.wb-side,
-.wb-under {
-  background: var(--ck-white-50);
-  border: 2px solid var(--ck-border-default);
-  border-radius: var(--ck-radius-sm);
-}
-
-.wb-side {
-  min-width: 0;
-  overflow-y: auto;
-  padding: 16px 12px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--ck-border-control) transparent;
-}
-
-/* Panel titles: "Scenes", "Run", "Window", "Review". */
-.wb-side h2 {
-  margin: 0 0 8px;
-  padding: 0 4px;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 600;
-}
-
-/* Section title with an extending line: "App", "Layout warnings", "Keys". Sentence case. */
-.wb-side h3,
-.wb-under h3 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 16px 0 8px;
-  padding: 0 4px;
-  font-size: 13px;
-  line-height: 20px;
-  font-weight: 600;
-  color: var(--ck-text-primary);
-  white-space: nowrap;
-}
-
-.wb-side h3::after,
-.wb-under h3::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--ck-border-container);
-}
-
-/* Buttons: a visible edge on the glass, in light and in dark. Pressed is dark fill, light text. */
-.wb-side button,
-.wb-notice button,
-.wb-handover-card button,
-.wb-import input[type="file"]::file-selector-button {
-  font: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 20px;
-  color: var(--ck-text-primary);
-  background: var(--ck-surface-container);
-  border: 1px solid var(--ck-border-control);
-  border-radius: var(--ck-radius-sm);
-  box-shadow: var(--ck-elevation-sm);
-  padding: 3px 12px;
-  margin: 0;
-  cursor: pointer;
-}
-
-.wb-side button:hover,
-.wb-notice button:hover,
-.wb-handover-card button:hover,
-.wb-import input[type="file"]::file-selector-button:hover {
-  background: var(--ck-surface-hovered);
-}
-
-.wb-side button:active,
-.wb-notice button:active,
-.wb-handover-card button:active {
-  background: var(--ck-grey-200);
-}
-
-.wb-side button:disabled {
-  color: var(--ck-text-disabled);
-  cursor: default;
-  box-shadow: none;
-}
-
-.wb-side button[aria-pressed="true"] {
-  background: var(--ck-text-primary);
-  border-color: var(--ck-text-primary);
-  color: var(--ck-text-invert);
-}
-
-/* A quiet text action: "Collapse all", "Answer this". */
-.wb-side button.wb-link-button {
-  padding: 0 4px;
-  font-size: 12px;
-  line-height: 16px;
-  font-weight: 500;
-  color: var(--ck-text-secondary);
-  background: none;
-  border: 0;
-  box-shadow: none;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.wb-side button.wb-link-button:hover {
-  color: var(--ck-text-primary);
-  background: none;
-}
-
-/* Inputs and dropdowns. */
-.wb-side input,
-.wb-side select,
-.wb-side textarea {
-  font: inherit;
-  font-size: 13px;
-  color: var(--ck-text-primary);
-  background: var(--ck-surface-container);
-  border: 1px solid var(--ck-border-control);
-  border-radius: var(--ck-radius-xs);
-  padding: 3px 8px;
-  min-width: 0;
-}
-
-.wb-side input::placeholder {
-  color: var(--ck-text-secondary);
-}
-
-.wb-side input[type="number"] {
-  font-family: var(--ck-mono);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-/* One focus ring for every control, from the palette. */
-:is(
-  button,
-  summary,
-  select,
-  input,
-  textarea,
-  [role="separator"]
-):focus-visible {
-  outline: 2px solid var(--ck-text-primary);
-  outline-offset: 2px;
-}
-
-.wb-side input[type="checkbox"],
-.wb-side input[type="range"],
-.wb-side input[type="color"] {
-  accent-color: var(--ck-text-primary);
-}
-
-.wb-side input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-}
-
-.wb-side input[type="range"] {
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-
-.wb-side input[type="color"] {
-  width: 32px;
-  height: 24px;
-  padding: 2px;
-  cursor: pointer;
-}
-
-.wb-side p {
-  margin: 0;
-  padding: 0 4px;
-  color: var(--ck-text-secondary);
-}
-
-/* A property row: the name on the left, the control on the right. */
-.wb-prop {
-  display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  min-height: 28px;
-  padding: 0 4px;
-}
-
-.wb-prop > span,
-.wb-prop > label {
-  color: var(--ck-text-secondary);
-}
-
-.wb-prop > :is(input, select):not([type="checkbox"]) {
-  width: 100%;
-}
-
-.wb-prop > input[type="checkbox"] {
-  justify-self: start;
-}
-
-.wb-size,
-.wb-inline {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.wb-size {
-  gap: 4px;
-  color: var(--ck-text-secondary);
-}
-
-.wb-size input,
-.wb-inline select {
-  flex: 1;
-  width: 0;
-}
-
-.wb-inline input[type="number"] {
-  flex: none;
-  width: 64px;
-}
-
-.wb-side .wb-prop .wb-inline button {
-  flex: none;
-  padding: 3px 8px;
-}
-
-.wb-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 0 4px;
-}
-
-/* The right column: Run, Window, Review, then the panels that fold open. */
-.wb-side-right > section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.wb-side-right > section + section {
-  margin-top: 24px;
-}
-
-.wb-side-right .wb-inline {
-  padding: 0 4px;
-}
-
-.wb-panel-head,
-.wb-scenes-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.wb-panel-head h2,
-.wb-scenes-head h2 {
-  margin: 0;
-}
-
-/* The run's transport: buttons and time, the track with the step marks, the speed. */
-.wb-run {
-  display: grid;
-  gap: 8px;
-}
-
-.wb-run-buttons {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 4px;
-}
-
-.wb-run-buttons .wb-time {
-  margin-left: auto;
-}
-
-.wb-run-track {
-  position: relative;
-  height: 24px;
-  margin: 0 4px;
-}
-
-.wb-side .wb-run-track input[type="range"] {
-  display: block;
-  width: 100%;
-  height: 16px;
-  margin: 0;
-}
-
-/* Inset by the thumb's radius, so a mark sits under the thumb at that time. */
-.wb-run-marks {
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 0;
-  height: 6px;
-  pointer-events: none;
-}
-
-.wb-run-mark {
-  position: absolute;
-  bottom: 0;
-  width: 1px;
-  height: 6px;
-  margin-left: -0.5px;
-  background: var(--ck-text-secondary);
-}
-
-.wb-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 28px;
-  padding: 0 4px;
-}
-
-.wb-next-action {
-  font-weight: 600;
-}
-
-.wb-side p.wb-next-action {
-  color: var(--ck-text-primary);
-}
-
-.wb-side p.wb-run-still {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.wb-run-still .wb-time {
-  color: var(--ck-text-primary);
-}
-
-/* The "?" keys help. */
-.wb-keys {
-  position: relative;
-}
-
-.wb-keys > summary {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  list-style: none;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ck-text-secondary);
-  background: var(--ck-surface-container);
-  border: 1px solid var(--ck-border-control);
-  border-radius: var(--ck-radius-full);
-  cursor: pointer;
-}
-
-.wb-keys > summary::-webkit-details-marker {
-  display: none;
-}
-
-.wb-keys > summary:hover,
-.wb-keys[open] > summary {
-  color: var(--ck-text-primary);
-  background: var(--ck-surface-hovered);
-}
-
-.wb-keys-card {
-  position: absolute;
-  right: 0;
-  top: 32px;
-  z-index: 20;
-  width: 288px;
-  padding: 4px 12px 12px;
-  background: var(--ck-surface-container);
-  border: 1px solid var(--ck-border-container);
-  border-radius: var(--ck-radius-sm);
-  box-shadow: var(--ck-elevation-lg);
-}
-
-.wb-keys-card h3 {
-  margin-top: 8px;
-}
-
-.wb-keys-card dl {
-  display: grid;
-  gap: 4px;
-  margin: 0 0 8px;
-  padding: 0 4px;
-}
-
-.wb-keys-card dl > div {
-  display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
-  align-items: baseline;
-  gap: 8px;
-}
-
-.wb-keys-card dt {
-  display: flex;
-  gap: 4px;
-}
-
-.wb-keys-card dd {
-  margin: 0;
-}
-
-kbd {
-  display: inline-block;
-  min-width: 20px;
-  padding: 0 4px;
-  font-size: 12px;
-  line-height: 18px;
-  text-align: center;
-  background: var(--ck-grey-200);
-  border: 1px solid var(--ck-border-control);
-  border-radius: var(--ck-radius-xs);
-}
-
-/* Scenes: the filter, the groups that fold, and one row per scene. */
-.wb-scenes-head {
-  margin-bottom: 8px;
-}
-
-.wb-side input.wb-scene-filter {
-  display: block;
-  width: 100%;
-  height: 28px;
-  margin: 0 0 4px;
-}
-
-.wb-side .wb-scenes h3 {
-  margin: 12px 0 2px;
-  padding: 0;
-}
-
-.wb-side .wb-scenes h3::after {
-  display: none;
-}
-
-.wb-side button.wb-group-toggle {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  width: 100%;
-  padding: 2px 4px;
-  font-size: 12px;
-  line-height: 16px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  text-align: left;
-  color: var(--ck-text-secondary);
-  background: transparent;
-  border: 0;
-  border-radius: var(--ck-radius-xs);
-  box-shadow: none;
-}
-
-.wb-side button.wb-group-toggle:hover {
-  color: var(--ck-text-primary);
-  background: var(--ck-white-50);
-}
-
-.wb-side button.wb-group-toggle[aria-disabled="true"] {
-  cursor: default;
-}
-
-.wb-group-toggle::after {
-  content: attr(data-count);
-  margin-left: auto;
-  font-family: var(--ck-mono);
-  font-weight: 500;
-  letter-spacing: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.wb-chevron {
-  flex: none;
-  transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-[aria-expanded="true"] > .wb-chevron {
-  transform: rotate(90deg);
-}
-
-/* Scene rows: 28px, one line each; a long title ends in an ellipsis. */
-.wb-side button.wb-scene {
-  display: block;
-  width: 100%;
-  margin: 0 0 1px;
-  padding: 4px 8px;
-  text-align: left;
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 20px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  background: transparent;
-  border: 0;
-  border-radius: var(--ck-radius-xs);
-  box-shadow: none;
-}
-
-.wb-side button.wb-scene:hover {
-  background: color-mix(in srgb, var(--ck-selected) 50%, transparent);
-}
-
-.wb-side button.wb-scene-current,
-.wb-side button.wb-scene-current:hover {
-  font-weight: 600;
-  background: var(--ck-selected);
-}
-
-/* The keyboard cursor of ↑ and ↓, when it is not on the current scene. */
-.wb-side button.wb-scene-cursor {
-  box-shadow: inset 0 0 0 1px var(--ck-border-control);
-}
-
-.wb-empty {
-  padding: 8px 4px;
-}
-
-/* The drag handles between the panels. */
-.wb-split {
-  position: relative;
-  touch-action: none;
-  outline-offset: -2px;
-}
-
-.wb-split-x {
-  cursor: col-resize;
-}
-
-.wb-split-y {
-  flex: none;
-  height: 8px;
-  cursor: row-resize;
-}
-
-.wb-split::after {
-  content: "";
-  position: absolute;
-  border-radius: var(--ck-radius-full);
-  background: transparent;
-  transition: background 120ms ease-out;
-}
-
-.wb-split-x::after {
-  top: 16px;
-  bottom: 16px;
-  left: 3px;
-  width: 2px;
-}
-
-.wb-split-y::after {
-  left: 16px;
-  right: 16px;
-  top: 3px;
-  height: 2px;
-}
-
-.wb-split:hover::after,
-.wb-split:focus-visible::after,
-.wb-split:active::after {
-  background: var(--ck-text-secondary);
-}
-
-/* The center column: the stage takes the height the warnings leave. */
-.wb-center {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-
-/* The window's space. It scrolls when the window is bigger than it (a zoom you set). */
-.wb-stage {
-  position: relative;
-  flex: 1 1 0;
-  min-height: 0;
-  overflow: auto;
-  padding: 16px;
-  border-radius: var(--ck-radius-sm);
-  background: color-mix(in srgb, var(--ck-text-primary) 3%, transparent);
-}
-
-/*
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+
+  /* The page ground, text and font are the app's (app/workbench/page.css). */
+
+  code,
+  kbd,
+  pre,
+  textarea {
+    font-family: var(--ck-mono);
+  }
+
+  .wb-mono,
+  .wb-time {
+    font-family: var(--ck-mono);
+    font-size: 12px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Three columns with a drag handle between each: the widths are per viewer (Workbench.tsx). */
+  .wb-page {
+    display: grid;
+    grid-template-columns:
+      var(--wb-left, 248px) 8px minmax(0, 1fr) 8px
+      var(--wb-right, 280px);
+    height: 100%;
+    padding: 8px;
+  }
+
+  /* Glass panels: the scene list column, the right panel and the warnings area. */
+  .wb-side,
+  .wb-under {
+    background: var(--ck-white-50);
+    border: 2px solid var(--ck-border-default);
+    border-radius: var(--ck-radius-sm);
+  }
+
+  .wb-side {
+    min-width: 0;
+    overflow-y: auto;
+    padding: 16px 12px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--ck-border-control) transparent;
+  }
+
+  /* Panel titles: "Scenes", "Run", "Window", "Review". */
+  .wb-side h2 {
+    margin: 0 0 8px;
+    padding: 0 4px;
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 600;
+  }
+
+  /* Section title with an extending line: "App", "Layout warnings", "Keys". Sentence case. */
+  .wb-side h3,
+  .wb-under h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 16px 0 8px;
+    padding: 0 4px;
+    font-size: 13px;
+    line-height: 20px;
+    font-weight: 600;
+    color: var(--ck-text-primary);
+    white-space: nowrap;
+  }
+
+  .wb-side h3::after,
+  .wb-under h3::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--ck-border-container);
+  }
+
+  /* Buttons: a visible edge on the glass, in light and in dark. Pressed is dark fill, light text. */
+  .wb-side button,
+  .wb-notice button,
+  .wb-handover-card button,
+  .wb-import input[type="file"]::file-selector-button {
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+    color: var(--ck-text-primary);
+    background: var(--ck-surface-container);
+    border: 1px solid var(--ck-border-control);
+    border-radius: var(--ck-radius-sm);
+    box-shadow: var(--ck-elevation-sm);
+    padding: 3px 12px;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .wb-side button:hover,
+  .wb-notice button:hover,
+  .wb-handover-card button:hover,
+  .wb-import input[type="file"]::file-selector-button:hover {
+    background: var(--ck-surface-hovered);
+  }
+
+  .wb-side button:active,
+  .wb-notice button:active,
+  .wb-handover-card button:active {
+    background: var(--ck-grey-200);
+  }
+
+  .wb-side button:disabled {
+    color: var(--ck-text-disabled);
+    cursor: default;
+    box-shadow: none;
+  }
+
+  .wb-side button[aria-pressed="true"] {
+    background: var(--ck-text-primary);
+    border-color: var(--ck-text-primary);
+    color: var(--ck-text-invert);
+  }
+
+  /* A quiet text action: "Collapse all", "Answer this". */
+  .wb-side button.wb-link-button {
+    padding: 0 4px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 500;
+    color: var(--ck-text-secondary);
+    background: none;
+    border: 0;
+    box-shadow: none;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .wb-side button.wb-link-button:hover {
+    color: var(--ck-text-primary);
+    background: none;
+  }
+
+  /* Inputs and dropdowns. */
+  .wb-side input,
+  .wb-side select,
+  .wb-side textarea {
+    font: inherit;
+    font-size: 13px;
+    color: var(--ck-text-primary);
+    background: var(--ck-surface-container);
+    border: 1px solid var(--ck-border-control);
+    border-radius: var(--ck-radius-xs);
+    padding: 3px 8px;
+    min-width: 0;
+  }
+
+  .wb-side input::placeholder {
+    color: var(--ck-text-secondary);
+  }
+
+  .wb-side input[type="number"] {
+    font-family: var(--ck-mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One focus ring for every control, from the palette. */
+  :is(
+    button,
+    summary,
+    select,
+    input,
+    textarea,
+    [role="separator"]
+  ):focus-visible {
+    outline: 2px solid var(--ck-text-primary);
+    outline-offset: 2px;
+  }
+
+  .wb-side input[type="checkbox"],
+  .wb-side input[type="range"],
+  .wb-side input[type="color"] {
+    accent-color: var(--ck-text-primary);
+  }
+
+  .wb-side input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+  }
+
+  .wb-side input[type="range"] {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .wb-side input[type="color"] {
+    width: 32px;
+    height: 24px;
+    padding: 2px;
+    cursor: pointer;
+  }
+
+  .wb-side p {
+    margin: 0;
+    padding: 0 4px;
+    color: var(--ck-text-secondary);
+  }
+
+  /* A property row: the name on the left, the control on the right. */
+  .wb-prop {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+    padding: 0 4px;
+  }
+
+  .wb-prop > span,
+  .wb-prop > label {
+    color: var(--ck-text-secondary);
+  }
+
+  .wb-prop > :is(input, select):not([type="checkbox"]) {
+    width: 100%;
+  }
+
+  .wb-prop > input[type="checkbox"] {
+    justify-self: start;
+  }
+
+  .wb-size,
+  .wb-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .wb-size {
+    gap: 4px;
+    color: var(--ck-text-secondary);
+  }
+
+  .wb-size input,
+  .wb-inline select {
+    flex: 1;
+    width: 0;
+  }
+
+  .wb-inline input[type="number"] {
+    flex: none;
+    width: 64px;
+  }
+
+  .wb-side .wb-prop .wb-inline button {
+    flex: none;
+    padding: 3px 8px;
+  }
+
+  .wb-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 4px;
+  }
+
+  /* The right column: Run, Window, Review, then the panels that fold open. */
+  .wb-side-right > section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .wb-side-right > section + section {
+    margin-top: 24px;
+  }
+
+  .wb-side-right .wb-inline {
+    padding: 0 4px;
+  }
+
+  .wb-panel-head,
+  .wb-scenes-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .wb-panel-head h2,
+  .wb-scenes-head h2 {
+    margin: 0;
+  }
+
+  /* The run's transport: buttons and time, the track with the step marks, the speed. */
+  .wb-run {
+    display: grid;
+    gap: 8px;
+  }
+
+  .wb-run-buttons {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 4px;
+  }
+
+  .wb-run-buttons .wb-time {
+    margin-left: auto;
+  }
+
+  .wb-run-track {
+    position: relative;
+    height: 24px;
+    margin: 0 4px;
+  }
+
+  .wb-side .wb-run-track input[type="range"] {
+    display: block;
+    width: 100%;
+    height: 16px;
+    margin: 0;
+  }
+
+  /* Inset by the thumb's radius, so a mark sits under the thumb at that time. */
+  .wb-run-marks {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: 0;
+    height: 6px;
+    pointer-events: none;
+  }
+
+  .wb-run-mark {
+    position: absolute;
+    bottom: 0;
+    width: 1px;
+    height: 6px;
+    margin-left: -0.5px;
+    background: var(--ck-text-secondary);
+  }
+
+  .wb-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+    padding: 0 4px;
+  }
+
+  .wb-next-action {
+    font-weight: 600;
+  }
+
+  .wb-side p.wb-next-action {
+    color: var(--ck-text-primary);
+  }
+
+  .wb-side p.wb-run-still {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .wb-run-still .wb-time {
+    color: var(--ck-text-primary);
+  }
+
+  /* The "?" keys help. */
+  .wb-keys {
+    position: relative;
+  }
+
+  .wb-keys > summary {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    list-style: none;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ck-text-secondary);
+    background: var(--ck-surface-container);
+    border: 1px solid var(--ck-border-control);
+    border-radius: var(--ck-radius-full);
+    cursor: pointer;
+  }
+
+  .wb-keys > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .wb-keys > summary:hover,
+  .wb-keys[open] > summary {
+    color: var(--ck-text-primary);
+    background: var(--ck-surface-hovered);
+  }
+
+  .wb-keys-card {
+    position: absolute;
+    right: 0;
+    top: 32px;
+    z-index: 20;
+    width: 288px;
+    padding: 4px 12px 12px;
+    background: var(--ck-surface-container);
+    border: 1px solid var(--ck-border-container);
+    border-radius: var(--ck-radius-sm);
+    box-shadow: var(--ck-elevation-lg);
+  }
+
+  .wb-keys-card h3 {
+    margin-top: 8px;
+  }
+
+  .wb-keys-card dl {
+    display: grid;
+    gap: 4px;
+    margin: 0 0 8px;
+    padding: 0 4px;
+  }
+
+  .wb-keys-card dl > div {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .wb-keys-card dt {
+    display: flex;
+    gap: 4px;
+  }
+
+  .wb-keys-card dd {
+    margin: 0;
+  }
+
+  kbd {
+    display: inline-block;
+    min-width: 20px;
+    padding: 0 4px;
+    font-size: 12px;
+    line-height: 18px;
+    text-align: center;
+    background: var(--ck-grey-200);
+    border: 1px solid var(--ck-border-control);
+    border-radius: var(--ck-radius-xs);
+  }
+
+  /* Scenes: the filter, the groups that fold, and one row per scene. */
+  .wb-scenes-head {
+    margin-bottom: 8px;
+  }
+
+  .wb-side input.wb-scene-filter {
+    display: block;
+    width: 100%;
+    height: 28px;
+    margin: 0 0 4px;
+  }
+
+  .wb-side .wb-scenes h3 {
+    margin: 12px 0 2px;
+    padding: 0;
+  }
+
+  .wb-side .wb-scenes h3::after {
+    display: none;
+  }
+
+  .wb-side button.wb-group-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    padding: 2px 4px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    text-align: left;
+    color: var(--ck-text-secondary);
+    background: transparent;
+    border: 0;
+    border-radius: var(--ck-radius-xs);
+    box-shadow: none;
+  }
+
+  .wb-side button.wb-group-toggle:hover {
+    color: var(--ck-text-primary);
+    background: var(--ck-white-50);
+  }
+
+  .wb-side button.wb-group-toggle[aria-disabled="true"] {
+    cursor: default;
+  }
+
+  .wb-group-toggle::after {
+    content: attr(data-count);
+    margin-left: auto;
+    font-family: var(--ck-mono);
+    font-weight: 500;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .wb-chevron {
+    flex: none;
+    transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  [aria-expanded="true"] > .wb-chevron {
+    transform: rotate(90deg);
+  }
+
+  /* Scene rows: 28px, one line each; a long title ends in an ellipsis. */
+  .wb-side button.wb-scene {
+    display: block;
+    width: 100%;
+    margin: 0 0 1px;
+    padding: 4px 8px;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: transparent;
+    border: 0;
+    border-radius: var(--ck-radius-xs);
+    box-shadow: none;
+  }
+
+  .wb-side button.wb-scene:hover {
+    background: color-mix(in srgb, var(--ck-selected) 50%, transparent);
+  }
+
+  .wb-side button.wb-scene-current,
+  .wb-side button.wb-scene-current:hover {
+    font-weight: 600;
+    background: var(--ck-selected);
+  }
+
+  /* The keyboard cursor of ↑ and ↓, when it is not on the current scene. */
+  .wb-side button.wb-scene-cursor {
+    box-shadow: inset 0 0 0 1px var(--ck-border-control);
+  }
+
+  .wb-empty {
+    padding: 8px 4px;
+  }
+
+  /* The drag handles between the panels. */
+  .wb-split {
+    position: relative;
+    touch-action: none;
+    outline-offset: -2px;
+  }
+
+  .wb-split-x {
+    cursor: col-resize;
+  }
+
+  .wb-split-y {
+    flex: none;
+    height: 8px;
+    cursor: row-resize;
+  }
+
+  .wb-split::after {
+    content: "";
+    position: absolute;
+    border-radius: var(--ck-radius-full);
+    background: transparent;
+    transition: background 120ms ease-out;
+  }
+
+  .wb-split-x::after {
+    top: 16px;
+    bottom: 16px;
+    left: 3px;
+    width: 2px;
+  }
+
+  .wb-split-y::after {
+    left: 16px;
+    right: 16px;
+    top: 3px;
+    height: 2px;
+  }
+
+  .wb-split:hover::after,
+  .wb-split:focus-visible::after,
+  .wb-split:active::after {
+    background: var(--ck-text-secondary);
+  }
+
+  /* The center column: the stage takes the height the warnings leave. */
+  .wb-center {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  /* The window's space. It scrolls when the window is bigger than it (a zoom you set). */
+  .wb-stage {
+    position: relative;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: auto;
+    padding: 16px;
+    border-radius: var(--ck-radius-sm);
+    background: color-mix(in srgb, var(--ck-text-primary) 3%, transparent);
+  }
+
+  /*
  * Below the window. The warnings scroll on their own; a drag on the handle sets the height. The
  * height does not follow the number of warnings: a stage that changed height would change Fit's
  * zoom during a walk, and a zoom change moves the window's elements by a pixel or two.
  */
-.wb-under {
-  flex: none;
-  height: 25vh;
-  max-height: 30vh;
-  overflow-y: auto;
-  padding: 0 12px 12px;
-}
-
-.wb-under p {
-  margin: 0;
-  padding: 0 4px;
-  color: var(--ck-text-secondary);
-}
-
-.wb-warning-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.wb-under li {
-  margin: 0 0 2px;
-}
-
-/* A warning row: the list item pattern, as wide as the list. */
-.wb-under button {
-  display: block;
-  width: 100%;
-  font: inherit;
-  font-size: 13px;
-  line-height: 20px;
-  color: inherit;
-  background: transparent;
-  border: 0;
-  border-radius: var(--ck-radius-xs);
-  padding: 4px 8px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.wb-under button:hover {
-  background: color-mix(in srgb, var(--ck-selected) 60%, transparent);
-}
-
-/* The warning shown over the window: a tint and a leading dot in the highlight's colour. */
-.wb-under button.wb-warning-current {
-  background: color-mix(in srgb, var(--wb-highlight-moved) 12%, transparent);
-}
-
-/* A row from before a seek back that the replay has not reached yet: kept, muted. */
-.wb-under button.wb-warning-later {
-  color: var(--wb-muted);
-  opacity: 0.7;
-}
-
-.wb-under button.wb-warning-current::before {
-  content: "";
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 8px;
-  vertical-align: 1px;
-  border-radius: 50%;
-  background: var(--wb-highlight-moved);
-}
-
-.wb-under button[aria-pressed="true"] {
-  font-weight: 600;
-}
-
-/* The class a move row names, after its words. */
-.wb-warning-class {
-  margin-left: 8px;
-  color: var(--ck-text-secondary);
-}
-
-/* "Show expected moves (N)": the expected moves stay hidden until you turn it on. */
-.wb-warning-expected {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 6px;
-  color: var(--ck-text-secondary);
-}
-
-.wb-warning-status {
-  margin-left: 8px;
-  color: var(--ck-text-secondary);
-  font-weight: 500;
-}
-
-/* The panels that fold open. */
-.wb-fold {
-  margin-top: 16px;
-  border-top: 1px solid var(--ck-border-container);
-  padding-top: 8px;
-}
-
-.wb-side-right > .wb-fold + .wb-fold {
-  margin-top: 0;
-}
-
-.wb-fold > summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px;
-  list-style: none;
-  border-radius: var(--ck-radius-xs);
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 20px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.wb-fold > summary::-webkit-details-marker {
-  display: none;
-}
-
-/* A drawn chevron: right when closed, down when open. */
-.wb-fold > summary::before {
-  content: "";
-  flex: none;
-  width: 6px;
-  height: 6px;
-  margin: 0 3px;
-  border-right: 1.5px solid var(--ck-text-secondary);
-  border-bottom: 1.5px solid var(--ck-text-secondary);
-  transform: rotate(-45deg);
-  transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.wb-fold[open] > summary::before {
-  transform: rotate(45deg);
-}
-
-.wb-fold > summary:hover {
-  background: var(--ck-white-50);
-}
-
-.wb-fold > :not(summary) {
-  margin-top: 8px;
-}
-
-.wb-fold ul {
-  margin: 0;
-  padding-left: 16px;
-}
-
-.wb-fold li {
-  overflow-wrap: anywhere;
-}
-
-.wb-side-right textarea {
-  font-family: var(--ck-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  width: 100%;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .wb-chevron,
-  .wb-fold > summary::before,
-  .wb-split::after {
-    transition: none;
+  .wb-under {
+    flex: none;
+    height: 25vh;
+    max-height: 30vh;
+    overflow-y: auto;
+    padding: 0 12px 12px;
   }
-}
 
-.wb-notices {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  right: 8px;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
+  .wb-under p {
+    margin: 0;
+    padding: 0 4px;
+    color: var(--ck-text-secondary);
+  }
 
-.wb-notice {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
-  background: var(--wb-notice);
-  border: 2px solid var(--ck-border-default);
-  border-radius: var(--ck-radius-sm);
-  box-shadow: var(--ck-elevation-md);
-}
+  .wb-warning-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
 
-/* Covers the stage, not the window element, so a shot of the window does not show it. */
-.wb-handover {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: color-mix(in srgb, var(--ck-surface-main) 40%, transparent);
-}
+  .wb-under li {
+    margin: 0 0 2px;
+  }
 
-/* Glass over the window: the window shows through, blurred, on a light or a dark window. */
-.wb-handover-card {
-  max-width: 400px;
-  padding: 16px 20px;
-  background: var(--wb-glass-card);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
-  border: 2px solid var(--ck-border-default);
-  border-radius: var(--ck-radius-sm);
-  box-shadow: var(--ck-elevation-lg);
-}
+  /* A warning row: the list item pattern, as wide as the list. */
+  .wb-under button {
+    display: block;
+    width: 100%;
+    font: inherit;
+    font-size: 13px;
+    line-height: 20px;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    border-radius: var(--ck-radius-xs);
+    padding: 4px 8px;
+    text-align: left;
+    cursor: pointer;
+  }
 
-.wb-handover-card h2 {
-  margin: 0 0 8px;
-  font-size: 16px;
-  line-height: 20px;
-  font-weight: 600;
-}
+  .wb-under button:hover {
+    background: color-mix(in srgb, var(--ck-selected) 60%, transparent);
+  }
 
-.wb-handover-card p {
-  margin: 0 0 12px;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--ck-text-secondary);
-}
+  /* The warning shown over the window: a tint and a leading dot in the highlight's colour. */
+  .wb-under button.wb-warning-current {
+    background: color-mix(in srgb, var(--wb-highlight-moved) 12%, transparent);
+  }
 
-/* Holds the window and the action markers over it; the markers are not in the window element. */
-.wb-window-wrap {
-  position: relative;
-  display: inline-block;
-  vertical-align: top;
-}
+  /* A row from before a seek back that the replay has not reached yet: kept, muted. */
+  .wb-under button.wb-warning-later {
+    color: var(--wb-muted);
+    opacity: 0.7;
+  }
 
-/*
+  .wb-under button.wb-warning-current::before {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 8px;
+    vertical-align: 1px;
+    border-radius: 50%;
+    background: var(--wb-highlight-moved);
+  }
+
+  .wb-under button[aria-pressed="true"] {
+    font-weight: 600;
+  }
+
+  /* The class a move row names, after its words. */
+  .wb-warning-class {
+    margin-left: 8px;
+    color: var(--ck-text-secondary);
+  }
+
+  /* "Show expected moves (N)": the expected moves stay hidden until you turn it on. */
+  .wb-warning-expected {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 6px;
+    color: var(--ck-text-secondary);
+  }
+
+  .wb-warning-status {
+    margin-left: 8px;
+    color: var(--ck-text-secondary);
+    font-weight: 500;
+  }
+
+  /* The panels that fold open. */
+  .wb-fold {
+    margin-top: 16px;
+    border-top: 1px solid var(--ck-border-container);
+    padding-top: 8px;
+  }
+
+  .wb-side-right > .wb-fold + .wb-fold {
+    margin-top: 0;
+  }
+
+  .wb-fold > summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px;
+    list-style: none;
+    border-radius: var(--ck-radius-xs);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 20px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .wb-fold > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  /* A drawn chevron: right when closed, down when open. */
+  .wb-fold > summary::before {
+    content: "";
+    flex: none;
+    width: 6px;
+    height: 6px;
+    margin: 0 3px;
+    border-right: 1.5px solid var(--ck-text-secondary);
+    border-bottom: 1.5px solid var(--ck-text-secondary);
+    transform: rotate(-45deg);
+    transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .wb-fold[open] > summary::before {
+    transform: rotate(45deg);
+  }
+
+  .wb-fold > summary:hover {
+    background: var(--ck-white-50);
+  }
+
+  .wb-fold > :not(summary) {
+    margin-top: 8px;
+  }
+
+  .wb-fold ul {
+    margin: 0;
+    padding-left: 16px;
+  }
+
+  .wb-fold li {
+    overflow-wrap: anywhere;
+  }
+
+  .wb-side-right textarea {
+    font-family: var(--ck-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    width: 100%;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wb-chevron,
+    .wb-fold > summary::before,
+    .wb-split::after {
+      transition: none;
+    }
+  }
+
+  .wb-notices {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .wb-notice {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--wb-notice);
+    border: 2px solid var(--ck-border-default);
+    border-radius: var(--ck-radius-sm);
+    box-shadow: var(--ck-elevation-md);
+  }
+
+  /* Covers the stage, not the window element, so a shot of the window does not show it. */
+  .wb-handover {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: color-mix(in srgb, var(--ck-surface-main) 40%, transparent);
+  }
+
+  /* Glass over the window: the window shows through, blurred, on a light or a dark window. */
+  .wb-handover-card {
+    max-width: 400px;
+    padding: 16px 20px;
+    background: var(--wb-glass-card);
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+    border: 2px solid var(--ck-border-default);
+    border-radius: var(--ck-radius-sm);
+    box-shadow: var(--ck-elevation-lg);
+  }
+
+  .wb-handover-card h2 {
+    margin: 0 0 8px;
+    font-size: 16px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+
+  .wb-handover-card p {
+    margin: 0 0 12px;
+    font-size: 13px;
+    line-height: 20px;
+    color: var(--ck-text-secondary);
+  }
+
+  /* Holds the window and the action markers over it; the markers are not in the window element. */
+  .wb-window-wrap {
+    position: relative;
+    display: inline-block;
+    vertical-align: top;
+  }
+
+  /*
  * The still of the window while a warning hover seeks back: the run replays under it. Inside the
  * window's content, after the iframe and before the title bar, so it is drawn under the bar.
  */
-.wb-still {
-  position: absolute;
-  border: 0;
-  pointer-events: none;
-  background: transparent;
-}
-
-.wb-actions {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  pointer-events: none;
-}
-
-.wb-action {
-  position: absolute;
-  --wb-action: #ff8a00;
-}
-
-.wb-action-next {
-  --wb-action: #3d7dff;
-}
-
-.wb-action-box {
-  position: absolute;
-  inset: -3px;
-  border: 2px solid var(--wb-action);
-  border-radius: 6px;
-}
-
-.wb-action-ring {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 24px;
-  height: 24px;
-  margin: -12px 0 0 -12px;
-  border: 3px solid var(--wb-action);
-  border-radius: 50%;
-  animation: wb-action-pulse 0.6s ease-out 2;
-  opacity: 0;
-}
-
-@keyframes wb-action-pulse {
-  from {
-    transform: scale(0.4);
-    opacity: 1;
+  .wb-still {
+    position: absolute;
+    border: 0;
+    pointer-events: none;
+    background: transparent;
   }
-  to {
-    transform: scale(2.4);
+
+  .wb-actions {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+  }
+
+  .wb-action {
+    position: absolute;
+    --wb-action: #ff8a00;
+  }
+
+  .wb-action-next {
+    --wb-action: #3d7dff;
+  }
+
+  .wb-action-box {
+    position: absolute;
+    inset: -3px;
+    border: 2px solid var(--wb-action);
+    border-radius: 6px;
+  }
+
+  .wb-action-ring {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 24px;
+    height: 24px;
+    margin: -12px 0 0 -12px;
+    border: 3px solid var(--wb-action);
+    border-radius: 50%;
+    animation: wb-action-pulse 0.6s ease-out 2;
     opacity: 0;
   }
-}
 
-@media (prefers-reduced-motion: reduce) {
-  .wb-action-ring {
-    animation: none;
-    opacity: 1;
+  @keyframes wb-action-pulse {
+    from {
+      transform: scale(0.4);
+      opacity: 1;
+    }
+    to {
+      transform: scale(2.4);
+      opacity: 0;
+    }
   }
-}
 
-/*
+  @media (prefers-reduced-motion: reduce) {
+    .wb-action-ring {
+      animation: none;
+      opacity: 1;
+    }
+  }
+
+  /*
  * A marker whose element left: the same outline, dashed, and the same label, at the element's
  * last place for GHOST_MS (500 ms, ActionMarkers.tsx). It holds full opacity for 70 % of that
  * time, so the label can be read, and fades in the last 150 ms. With reduced motion it shows
  * still for that time, then goes.
  */
-.wb-action-ghost {
-  animation: wb-action-ghost 500ms linear forwards;
-}
-
-.wb-action-ghost .wb-action-box {
-  border-style: dashed;
-}
-
-@keyframes wb-action-ghost {
-  0%,
-  70% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
   .wb-action-ghost {
-    animation: none;
+    animation: wb-action-ghost 500ms linear forwards;
   }
-}
 
-.wb-action-label {
-  position: absolute;
-  left: -3px;
-  bottom: calc(100% + 6px);
-  padding: 2px 6px;
-  border-radius: var(--ck-radius-xs);
-  background: var(--wb-action);
-  color: #fff;
-  font: 600 12px / 1.4 var(--ck-sans);
-  white-space: nowrap;
-}
+  .wb-action-ghost .wb-action-box {
+    border-style: dashed;
+  }
 
-/*
+  @keyframes wb-action-ghost {
+    0%,
+    70% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wb-action-ghost {
+      animation: none;
+    }
+  }
+
+  .wb-action-label {
+    position: absolute;
+    left: -3px;
+    bottom: calc(100% + 6px);
+    padding: 2px 6px;
+    border-radius: var(--ck-radius-xs);
+    background: var(--wb-action);
+    color: #fff;
+    font: 600 12px / 1.4 var(--ck-sans);
+    white-space: nowrap;
+  }
+
+  /*
  * The ghost's label is quieter, so the new screen's text under it still shows: a dark translucent
  * fill, an orange 1px outline and light orange text (about 4:1 on a white window, more on a dark
  * one). When it fits, it sits inside the ghost's empty box, not over the screen above it.
  */
-.wb-action-ghost .wb-action-label {
-  padding: 1px 5px;
-  border: 1px solid var(--wb-action);
-  background: rgb(17 17 17 / 0.7);
-  color: #ffb054;
-}
+  .wb-action-ghost .wb-action-label {
+    padding: 1px 5px;
+    border: 1px solid var(--wb-action);
+    background: rgb(17 17 17 / 0.7);
+    color: #ffb054;
+  }
 
-.wb-action-ghost .wb-action-label-inside {
-  left: 50%;
-  top: 50%;
-  bottom: auto;
-  box-sizing: border-box;
-  width: max-content;
-  max-width: 100%;
-  transform: translate(-50%, -50%);
-  text-align: center;
-  white-space: normal;
-}
+  .wb-action-ghost .wb-action-label-inside {
+    left: 50%;
+    top: 50%;
+    bottom: auto;
+    box-sizing: border-box;
+    width: max-content;
+    max-width: 100%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    white-space: normal;
+  }
 
-/* Import a log: folded under the scenes. */
-.wb-import {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+  /* Import a log: folded under the scenes. */
+  .wb-import {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
 
-.wb-import input[type="file"] {
-  max-width: 100%;
-  border: 0;
-  padding: 0 4px;
-  background: transparent;
-}
+  .wb-import input[type="file"] {
+    max-width: 100%;
+    border: 0;
+    padding: 0 4px;
+    background: transparent;
+  }
 
-.wb-import input[type="file"]::file-selector-button {
-  margin-right: 8px;
-}
+  .wb-import input[type="file"]::file-selector-button {
+    margin-right: 8px;
+  }
 
-.wb-import code {
-  display: block;
-  overflow-wrap: anywhere;
-  padding: 8px;
-  font: 12px / 1.5 var(--ck-mono);
-  background: var(--ck-white-65);
-  border-radius: var(--ck-radius-xs);
-}
+  .wb-import code {
+    display: block;
+    overflow-wrap: anywhere;
+    padding: 8px;
+    font: 12px / 1.5 var(--ck-mono);
+    background: var(--ck-white-65);
+    border-radius: var(--ck-radius-xs);
+  }
 
-.wb-import-save > summary {
-  padding: 0 4px;
-  cursor: pointer;
-}
+  .wb-import-save > summary {
+    padding: 0 4px;
+    cursor: pointer;
+  }
 
-.wb-side .wb-import-save p {
-  margin: 4px 0;
-}
+  .wb-side .wb-import-save p {
+    margin: 4px 0;
+  }
 
-/* The review prompts: Comment, and Critique this screen. */
-.wb-comment-toggle p[role="status"] {
-  color: var(--ck-text-primary);
-}
+  /* The review prompts: Comment, and Critique this screen. */
+  .wb-comment-toggle p[role="status"] {
+    color: var(--ck-text-primary);
+  }
 
-/*
+  /*
  * The highlight of a layout warning, over the window and not in the window element, so a shot of
  * the window does not show it. Each line has a white 1px halo, so it reads on light and dark windows.
  */
-.wb-highlight {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  pointer-events: none;
-  --wb-hl: var(--wb-highlight-bad);
-}
+  .wb-highlight {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    --wb-hl: var(--wb-highlight-bad);
+  }
 
-.wb-highlight-moved {
-  --wb-hl: var(--wb-highlight-moved);
-}
+  .wb-highlight-moved {
+    --wb-hl: var(--wb-highlight-moved);
+  }
 
-.wb-highlight-box,
-.wb-highlight-ghost,
-.wb-highlight-shade {
-  position: absolute;
-  border-radius: 2px;
-}
+  .wb-highlight-box,
+  .wb-highlight-ghost,
+  .wb-highlight-shade {
+    position: absolute;
+    border-radius: 2px;
+  }
 
-.wb-highlight-box {
-  border: 2px solid var(--wb-hl);
-  box-shadow:
-    0 0 0 1px var(--wb-highlight-halo),
-    inset 0 0 0 1px var(--wb-highlight-halo);
-}
+  .wb-highlight-box {
+    border: 2px solid var(--wb-hl);
+    box-shadow:
+      0 0 0 1px var(--wb-highlight-halo),
+      inset 0 0 0 1px var(--wb-highlight-halo);
+  }
 
-.wb-highlight-ghost {
-  border: 2px dashed var(--wb-hl);
-  background: color-mix(in srgb, var(--wb-hl) 8%, transparent);
-  box-shadow: 0 0 0 1px var(--wb-highlight-halo);
-}
+  .wb-highlight-ghost {
+    border: 2px dashed var(--wb-hl);
+    background: color-mix(in srgb, var(--wb-hl) 8%, transparent);
+    box-shadow: 0 0 0 1px var(--wb-highlight-halo);
+  }
 
-/* What is cut off, or what is past the edge of the window. */
-.wb-highlight-shade {
-  background: repeating-linear-gradient(
-    45deg,
-    color-mix(in srgb, var(--wb-hl) 55%, transparent) 0 4px,
-    color-mix(in srgb, var(--wb-hl) 20%, transparent) 4px 8px
-  );
-  outline: 1px solid var(--wb-highlight-halo);
-}
+  /* What is cut off, or what is past the edge of the window. */
+  .wb-highlight-shade {
+    background: repeating-linear-gradient(
+      45deg,
+      color-mix(in srgb, var(--wb-hl) 55%, transparent) 0 4px,
+      color-mix(in srgb, var(--wb-hl) 20%, transparent) 4px 8px
+    );
+    outline: 1px solid var(--wb-highlight-halo);
+  }
 
-.wb-highlight-arrow {
-  position: absolute;
-  left: 0;
-  top: 0;
-  overflow: visible;
-}
+  .wb-highlight-arrow {
+    position: absolute;
+    left: 0;
+    top: 0;
+    overflow: visible;
+  }
 
-.wb-highlight-arrow line {
-  stroke: var(--wb-hl);
-  stroke-width: 2;
-  stroke-linecap: round;
-}
+  .wb-highlight-arrow line {
+    stroke: var(--wb-hl);
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
 
-.wb-highlight-arrow polygon {
-  fill: var(--wb-hl);
-}
+  .wb-highlight-arrow polygon {
+    fill: var(--wb-hl);
+  }
 
-.wb-highlight-arrow .wb-highlight-halo {
-  stroke: var(--wb-highlight-halo);
-  stroke-width: 4;
-  stroke-linejoin: round;
-  fill: var(--wb-highlight-halo);
-}
+  .wb-highlight-arrow .wb-highlight-halo {
+    stroke: var(--wb-highlight-halo);
+    stroke-width: 4;
+    stroke-linejoin: round;
+    fill: var(--wb-highlight-halo);
+  }
 
-.wb-highlight-label {
-  position: absolute;
-  transform: translateY(calc(-100% - 6px));
-  padding: 2px 6px;
-  border-radius: var(--ck-radius-xs);
-  background: var(--wb-hl);
-  color: #ffffff;
-  box-shadow: 0 0 0 1px var(--wb-highlight-halo);
-  font: 600 12px / 16px var(--ck-sans);
-  white-space: nowrap;
-}
+  .wb-highlight-label {
+    position: absolute;
+    transform: translateY(calc(-100% - 6px));
+    padding: 2px 6px;
+    border-radius: var(--ck-radius-xs);
+    background: var(--wb-hl);
+    color: #ffffff;
+    box-shadow: 0 0 0 1px var(--wb-highlight-halo);
+    font: 600 12px / 16px var(--ck-sans);
+    white-space: nowrap;
+  }
 
-.wb-highlight-label-below {
-  transform: translateY(6px);
-}
+  .wb-highlight-label-below {
+    transform: translateY(6px);
+  }
 
-/* The workbench pages: Scenes (this page) and Findings (findings/). */
-.wb-pages {
-  display: flex;
-  gap: 4px;
-  margin: 0 0 12px;
-  padding: 2px;
-  border-radius: var(--ck-radius-sm);
-  background: var(--ck-grey-200);
-}
+  /* The workbench pages: Scenes (this page) and Findings (findings/). */
+  .wb-pages {
+    display: flex;
+    gap: 4px;
+    margin: 0 0 12px;
+    padding: 2px;
+    border-radius: var(--ck-radius-sm);
+    background: var(--ck-grey-200);
+  }
 
-.wb-pages > * {
-  flex: 1;
-  padding: 2px 8px;
-  border-radius: var(--ck-radius-xs);
-  text-align: center;
-  font-weight: 500;
-  color: var(--ck-text-secondary);
-  text-decoration: none;
-}
+  .wb-pages > * {
+    flex: 1;
+    padding: 2px 8px;
+    border-radius: var(--ck-radius-xs);
+    text-align: center;
+    font-weight: 500;
+    color: var(--ck-text-secondary);
+    text-decoration: none;
+  }
 
-.wb-pages > a:hover {
-  color: var(--ck-text-primary);
-  background: var(--ck-white-70);
-}
+  .wb-pages > a:hover {
+    color: var(--ck-text-primary);
+    background: var(--ck-white-70);
+  }
 
-.wb-pages > [aria-current="page"] {
-  color: var(--ck-text-primary);
-  background: var(--ck-surface-container);
-  box-shadow: var(--ck-elevation-sm);
-}
+  .wb-pages > [aria-current="page"] {
+    color: var(--ck-text-primary);
+    background: var(--ck-surface-container);
+    box-shadow: var(--ck-elevation-sm);
+  }
 
-/* `embed=1`: only the window and its layout warnings, for the Findings page's frame. */
-.wb-page[data-embed] {
-  grid-template-columns: minmax(0, 1fr);
-}
+  /* `embed=1`: only the window and its layout warnings, for the Findings page's frame. */
+  .wb-page[data-embed] {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
-.wb-page[data-embed] > .wb-side,
-.wb-page[data-embed] > .wb-split-x {
-  display: none;
-}
+  .wb-page[data-embed] > .wb-side,
+  .wb-page[data-embed] > .wb-split-x {
+    display: none;
+  }
 
-/* The frame is small: the warnings get less room, so the window gets more. */
-.wb-page[data-embed] .wb-under {
-  height: 18vh;
+  /* The frame is small: the warnings get less room, so the window gets more. */
+  .wb-page[data-embed] .wb-under {
+    height: 18vh;
+  }
 }

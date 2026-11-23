@@ -10,7 +10,11 @@
     "skipLibCheck": true,
     "types": ["vite/client", "bun-types"],
     "baseUrl": ".",
-    "paths": { "@/*": ["../app/src/*"] }
+    "paths": {
+      "@/*": ["../app/src/*"],
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"]
+    }
   },
   "include": ["src", "scripts/*.ts", "workbench", "vite.workbench.config.ts"]
 }
