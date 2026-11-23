@@ -40,8 +40,9 @@ import { BUSINESS_SUMMARY, CloudMarks, HostingMark } from "./Welcome";
  * OpenBot is set up and runs on this computer, and the person has never answered, or kept OpenBot
  * here after a move that failed and the app has updated since (once). `fromSettings`:
  * Settings' "Move to OpenBot Cloud" sent the window here, answered once. `footprintBytes`: what
- * OpenBot's own files take on this computer now, which the move removes, or null when it couldn't
- * be measured. The finished move's `removedBytes` counts the same files the same way.
+ * OpenBot's own files take on this computer now, which the move removes, or null when it isn't
+ * measured yet (the window then asks `move_footprint`) or couldn't be. The finished move's
+ * `removedBytes` counts the same files the same way.
  */
 export type MoveOffer = {
   due: boolean;
@@ -346,6 +347,27 @@ export function MoveToCloud({
       alive.current = false;
     };
   }, []);
+  /*
+   * What OpenBot's files take here. The shell answers the question at once and measures this on its
+   * own (`move_footprint`): on a Mac with two older installs on its disk, measuring it first held
+   * the question back 15 seconds. Until it arrives, or if it never does, the screens say the move
+   * without it.
+   */
+  const [footprintBytes, setFootprintBytes] = useState(offer.footprintBytes);
+  useEffect(() => {
+    if (offer.footprintBytes != null) return;
+    let current = true;
+    invoke<number | null>("move_footprint")
+      .then((bytes) => {
+        if (current && typeof bytes === "number") setFootprintBytes(bytes);
+      })
+      .catch(() => {
+        // An older shell sends the size with the answer, or not at all.
+      });
+    return () => {
+      current = false;
+    };
+  }, [offer.footprintBytes]);
   const keep = async () => {
     setKeeping(true);
     try {
@@ -427,7 +449,7 @@ export function MoveToCloud({
   if (screen.at === "choice")
     return (
       <Choice
-        footprintBytes={offer.footprintBytes}
+        footprintBytes={footprintBytes}
         keeping={keeping}
         onCloud={toConfirm}
         onKeep={() => void keep()}
@@ -439,7 +461,7 @@ export function MoveToCloud({
         preview={preview}
         problem={here?.at === "failed" ? here.problem : previewProblem}
         gettingReady={here?.at === "starting" || here?.at === "stopped"}
-        footprintBytes={preview?.footprintBytes ?? offer.footprintBytes}
+        footprintBytes={preview?.footprintBytes ?? footprintBytes}
         includeKeys={includeKeys}
         onIncludeKeys={setIncludeKeys}
         keeping={keeping}
