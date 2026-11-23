@@ -381,6 +381,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   providers, so its row asks only for an API key: OpenBot fills in
   `https://api.trustedrouter.com/v1` and the model `anthropic/claude-sonnet-5.5`, which can be
   changed to any name the gateway lists.
+- **A Bot asked for an app it doesn't hold puts up that app's card first.** Asked to find a
+  Fireflies recording, a Bot that held only Gmail and Slack searched them for Fireflies' emails and
+  said it couldn't reach Fireflies, and showed the Fireflies card only when asked why. Any app the
+  Bot doesn't hold, including one the person names, now gets its card first, and the Bot no longer
+  says it can't reach it.
 - **A Bot answers in words.** In a conversation a Bot is no longer offered reactions, so it never
   answers a greeting, a thank-you or an "ok" with only an emoji. Reactions already in a
   conversation still show.
