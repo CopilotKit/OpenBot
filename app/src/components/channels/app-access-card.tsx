@@ -8,6 +8,8 @@ import { PluginLogo } from "@/components/plugins/plugin-logo";
 import { Button } from "@/components/ui/button";
 import { agentQueryOptions } from "@/lib/agents/queries";
 import { type AppAccess, botAppQueryOptions } from "@/lib/app-access/queries";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { useDeclaredBotId } from "@/lib/copilot/active-bot";
 import { type CardPlace, useCarryOn } from "@/lib/copilot/carry-on";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -82,6 +84,10 @@ function LiveAppAccessCard({
   const bot = useQuery(agentQueryOptions(agentId)).data?.name;
   const edition =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition ?? "team";
+  // An admin is offered the step itself, so the sentence never tells them to ask one.
+  const admin = isOrganizationAdmin(
+    useQuery(currentUserQueryOptions()).data?.role,
+  );
   const { carried, offer } = useCarryOn({
     place,
     ready: access ? access.state === "ready" : null,
@@ -117,12 +123,12 @@ function LiveAppAccessCard({
           {live.isPending ? null : access ? (
             <p className="text-muted-foreground text-sm">
               {access.state !== "ready"
-                ? refusedSentence(access, prompt, bot, edition)
+                ? refusedSentence(access, prompt, bot, edition, admin)
                 : carried || offer
                   ? `${name} is ready now.`
                   : prompt.reason !== "access"
                     ? `${name} is ready now. Ask again and the Bot can use it.`
-                    : refusedSentence(access, prompt, bot, edition)}
+                    : refusedSentence(access, prompt, bot, edition, admin)}
             </p>
           ) : (
             <p className="text-muted-foreground text-sm" role="alert">
@@ -189,12 +195,15 @@ function refusedSentence(
   prompt: ConnectPrompt,
   bot: string | undefined,
   edition: "team" | "personal",
+  admin: boolean,
 ): string {
   if (
     access.state === "shared_not_connected" &&
     prompt.reason === "shared" &&
     !access.requestKind
   )
-    return `Your organisation's ${access.displayName} account needs reconnecting. Only an admin can reconnect it.`;
-  return appAccessSentence(access, bot, edition);
+    return admin
+      ? `Your organization's ${access.displayName} account needs reconnecting.`
+      : `Your organisation's ${access.displayName} account needs reconnecting. Only an admin can reconnect it.`;
+  return appAccessSentence(access, bot, edition, admin);
 }

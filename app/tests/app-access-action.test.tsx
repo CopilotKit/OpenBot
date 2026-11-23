@@ -34,6 +34,7 @@ import {
   appAccessRequestResponse,
   appSetupResponse,
   botAppPath,
+  botAppResponse,
 } from "./bot-grants-api";
 import { botPath } from "./bots-api";
 import {
@@ -81,6 +82,8 @@ function mounted(
     connectGate?: Promise<void>;
     /** The service this OpenBot's directory comes from, as app-setup says. Composio's unless named. */
     directory?: "composio" | "arcade";
+    /** What the server says the app is now, when the press reads it again after turning it on. */
+    readAgain?: () => AppAccess;
   } = {},
 ) {
   const sent: Sent[] = [];
@@ -113,6 +116,12 @@ function mounted(
       return Response.json({ bot: { id: "expenses", name: "Expenses" } });
     if (url === APP_SETUP_PATH)
       return appSetupResponse(options.directory ?? "composio");
+    if (
+      options.readAgain &&
+      method === "GET" &&
+      url === botAppPath("expenses", access.key)
+    )
+      return botAppResponse(options.readAgain());
     if (answer && method !== "GET")
       return Response.json(answer.body, { status: answer.status });
     if (connectionsCall(url, { method })?.operation === "connect") {
@@ -650,6 +659,125 @@ test("an admin's press that cannot be carried out says what is missing", async (
   expect((await view.findByRole("alert")).textContent).toBe(
     "Gmail has no tools to give yet.",
   );
+});
+
+/*
+ * OpenBot Cloud, an admin in their own organization: a Bot asked for Notion, and the card said
+ * "This Bot hasn't been given Notion. Only an admin can give it." to the admin. Pressing Give it
+ * answered "Notion has no tools to give yet": Notion lists its tools only for somebody who has
+ * signed in, and the press never signed them in.
+ */
+const NOTION: Partial<AppAccess> = {
+  key: "notion",
+  displayName: "Notion",
+  source: "catalogue",
+  connect: "oauth",
+  account: "personal",
+  connectedAt: null,
+};
+
+test.each([
+  [
+    "not_granted",
+    { state: "not_granted" },
+    "This Bot hasn't been given Gmail yet.",
+  ],
+  [
+    "disabled, never switched on",
+    { state: "disabled", unavailable: "absent" },
+    "Gmail isn't turned on yet.",
+  ],
+  [
+    "disabled, with no directory set up",
+    { state: "disabled", unavailable: "directory_unavailable" },
+    "Gmail isn't set up yet.",
+  ],
+  [
+    "disabled, token_missing",
+    { state: "disabled", unavailable: "token_missing" },
+    "Gmail isn't fully set up yet.",
+  ],
+  [
+    "shared_not_connected",
+    { state: "shared_not_connected", account: "shared" },
+    "Your organization's Gmail account isn't connected yet.",
+  ],
+] as const)(
+  "an admin is told what is missing, never to ask an admin: %s",
+  (_, overrides, sentence) => {
+    expect(
+      appAccessSentence(appAccess(overrides), undefined, "team", true),
+    ).toBe(sentence);
+  },
+);
+
+test("an admin's one press on Notion signs them in, then gives it to the Bot once they're connected", async () => {
+  const before = appAccess({
+    ...NOTION,
+    state: "not_granted",
+    granted: false,
+    requestKind: "grant",
+  });
+  const { view, sent, opened, swap } = mounted(before, undefined, {
+    admin: true,
+    // Turned on with nothing given: its tools come with the admin's sign-in.
+    readAgain: () => before,
+  });
+  fireEvent.click(
+    await view.findByRole("button", { name: "Give Notion to Expenses" }),
+  );
+  await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+  await view.findByText("Finish in the tab that opened.");
+  const approve = `POST ${botAppPath("expenses", "notion")}/approve`;
+  const posts = () =>
+    sent
+      .filter((call) => call.method === "POST")
+      .map((call) => `${call.method} ${call.url}`);
+  expect(posts()).toEqual([
+    approve,
+    `POST ${myConnectionPath("notion", "connect")}`,
+  ]);
+
+  // The admin finished signing in to Notion in the other tab.
+  await swap({ ...before, connectedAt: "2026-11-23T23:10:00.000Z" });
+  await waitFor(() =>
+    expect(posts()).toEqual([
+      approve,
+      `POST ${myConnectionPath("notion", "connect")}`,
+      approve,
+    ]),
+  );
+  expect(view.queryByRole("alert")).toBeNull();
+});
+
+test("an admin already signed in to Notion gives it in one press, with no sign-in", async () => {
+  const { view, sent, opened } = mounted(
+    appAccess({
+      ...NOTION,
+      state: "not_granted",
+      granted: false,
+      requestKind: "grant",
+      connectedAt: "2026-11-20T09:00:00.000Z",
+    }),
+    undefined,
+    {
+      admin: true,
+      readAgain: () =>
+        appAccess({ ...NOTION, connectedAt: "2026-11-20T09:00:00.000Z" }),
+    },
+  );
+  fireEvent.click(
+    await view.findByRole("button", { name: "Give Notion to Expenses" }),
+  );
+  await waitFor(() =>
+    expect(
+      sent.filter((call) => call.method === "POST").map((call) => call.url),
+    ).toEqual([`${botAppPath("expenses", "notion")}/approve`]),
+  );
+  // Settled: nothing more was asked, and no sign-in was opened.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(sent.filter((call) => call.method === "POST")).toHaveLength(1);
+  expect(opened).toEqual([]);
 });
 
 test.each([

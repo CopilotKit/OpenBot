@@ -518,6 +518,93 @@ test("an admin's Turn on and give it goes on to the key form for an app that tak
   ]);
 });
 
+/**
+ * NOTION, FOR THE ADMIN OF THEIR OWN ORGANIZATION ON OPENBOT CLOUD. A Bot asked for Notion. The card
+ * told the admin "Only an admin can give it", and its press answered "Notion has no tools to give
+ * yet": Notion lists its tools only for somebody who has signed in, and nothing signed them in. One
+ * press now turns Notion on, opens the admin's sign-in, and gives it to the Bot once they're in.
+ */
+test("an admin's one press on Notion turns it on, signs them in, and gives it to the Bot", async () => {
+  const browser = aBrowser();
+  const notion = (overrides: Partial<AppAccess>): AppAccess =>
+    appAccess({
+      key: "notion",
+      displayName: "Notion",
+      source: "catalogue",
+      connect: "oauth",
+      granted: false,
+      requestKind: "grant",
+      ...overrides,
+    });
+  const SIGNED_IN = "2026-11-23T23:10:00.000Z";
+  let live = notion({
+    state: "disabled",
+    unavailable: "absent",
+    requestKind: "enable",
+  });
+  const writes: string[] = [];
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    if (method !== "GET") writes.push(`${method} ${url}`);
+    if (url === DEPLOYMENT_PATH) return Response.json({ edition: "team" });
+    if (url === ME_PATH)
+      return meResponse({ user: { id: "usr_me", role: "admin", name: "Me" } });
+    if (url === botPath("assistant"))
+      return Response.json({
+        bot: { id: "assistant", name: "General Assistant" },
+      });
+    if (url === botAppPath("assistant", "notion")) return botAppResponse(live);
+    if (url === `${botAppPath("assistant", "notion")}/approve`) {
+      // As the server answers: on with nothing given until the admin has signed in, then given.
+      const given = live.connectedAt !== null;
+      live = given
+        ? notion({ state: "ready", granted: true, connectedAt: SIGNED_IN })
+        : notion({ state: "not_granted" });
+      return appAccessApprovalResponse({
+        request: appAccessRequest({
+          kind: given ? "grant" : "enable",
+          status: "approved",
+          agentId: "assistant",
+        }),
+        enabled: !given,
+        granted: given ? ["notion/notion-search"] : [],
+      });
+    }
+    if (url === myConnectionPath("notion", "connect"))
+      return startResponse({ authorizationUrl: CONSENT });
+    if (url.startsWith(MY_CONNECTIONS_PATH)) return connectionPage([]);
+    return Response.json({});
+  }) as unknown as typeof fetch;
+  const view = drawFirefliesCard("notion", "Notion");
+
+  // Said to the admin as what is missing: the button beside it is theirs to press.
+  await view.findByText("Notion isn't turned on yet.");
+  expect(view.queryByText(/Only an admin/)).toBeNull();
+  browser.click(
+    await view.findByRole("button", {
+      name: "Turn on Notion and give it to General Assistant",
+    }),
+  );
+  await waitFor(() => expect(browser.tabs[0]?.to).toEqual([CONSENT]), {
+    timeout: 3_000,
+  });
+  expect(browser.tabs[0].duringClick).toBe(true);
+  await view.findByText("Finish in the tab that opened.");
+  expect(view.queryByRole("alert")).toBeNull();
+
+  // The admin finished Notion's sign-in in the other tab.
+  live = notion({ state: "not_granted", connectedAt: SIGNED_IN });
+  // Drawn outside a conversation, so there is nothing to carry on: the card says it's ready.
+  await view.findByText("Ready to use.", {}, { timeout: 6_000 });
+  expect(writes).toEqual([
+    `POST ${botAppPath("assistant", "notion")}/approve`,
+    `POST ${myConnectionPath("notion", "connect")}`,
+    `POST ${botAppPath("assistant", "notion")}/approve`,
+  ]);
+  expect(view.queryByRole("alert")).toBeNull();
+}, 15_000);
+
 test("an admin's Turn on and give it goes on to the sign-in for an app that signs in", async () => {
   const browser = aBrowser();
   servingApp(

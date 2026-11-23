@@ -222,6 +222,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   own release still shows the uninstall command.
 - People, Remove says the person keeps their account and any other organization they're in. It no
   longer promises an organization of their own (Before upgrading).
+- **An admin gives a Bot Notion from its card in one press.** Asked for Notion, a Bot drew a card
+  that told its admin "Only an admin can give it", and Give it answered "Notion has no tools to give
+  yet". Notion lists its tools only once you've signed in, and the press never signed you in. It now
+  turns Notion on, opens your Notion sign-in, and gives Notion to the Bot once you're in. On OpenBot
+  Cloud that is the admin of their own organization. A card or a Bot's Apps row shown to an admin
+  says what is missing, never to ask an admin.
 
 ### API
 
