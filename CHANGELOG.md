@@ -307,6 +307,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- After connecting an app from a Bot's card or a Bot's page, you're back where you pressed Connect.
+  The sign-in's tab closes once the app is connected, or, where the browser won't close it, goes back
+  to the conversation or the Bot's page. It used to stay on the app's page under Connections.
 - **A Bot's command is no longer refused as "not saved", and the Bot gets what it printed.** Every
   command a Bot runs is checked against the saved conversation first, and the saved copy can trail
   the conversation on screen by several seconds on a busy day. A command checked too soon was
