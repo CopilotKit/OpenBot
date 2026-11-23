@@ -256,6 +256,10 @@ impl Local for MemoryLocal {
     }
 }
 
+/// OpenBot Cloud's sentence for an import that stopped part way and goes on when applied again.
+const PASSING: &str =
+    "Something went wrong while importing. Apply again to go on from where it stopped.";
+
 #[derive(Default)]
 struct MemoryCloud {
     received: BTreeMap<u32, Vec<u8>>,
@@ -274,7 +278,8 @@ impl MemoryCloud {
             status: status.into(),
             recipient_key: Some(serde_json::json!({"kty": "RSA", "kid": "imp_1"})),
             received_parts: self.received.keys().copied().collect(),
-            error: (status == "failed").then(|| "it stopped".into()),
+            // What OpenBot Cloud says of a run that stopped part way (`failureOf`).
+            error: (status == "failed").then(|| PASSING.into()),
         }
     }
 }
@@ -975,8 +980,13 @@ fn local_openbot(parts: Vec<(Part, Vec<u8>)>, counts: Vec<Count>) -> String {
 type Received = Arc<Mutex<BTreeMap<u32, Vec<u8>>>>;
 
 /// OpenBot Cloud, as the API says it answers: the person's own organization, an import that
-/// checks each part against the manifest, imports on apply, and is checked by `verify`.
-fn cloud_openbot(expected: Vec<Part>, verify: serde_json::Value) -> (String, Received) {
+/// checks each part against the manifest, imports on apply, and is checked by `verify`. With
+/// `stops`, every run of the import fails, and the import says that sentence as its `error`.
+fn cloud_openbot(
+    expected: Vec<Part>,
+    verify: serde_json::Value,
+    stops: Option<&'static str>,
+) -> (String, Received) {
     let received: Received = Arc::default();
     let parts = received.clone();
     let address = serve(move |request| {
@@ -1027,9 +1037,14 @@ fn cloud_openbot(expected: Vec<Part>, verify: serde_json::Value) -> (String, Rec
                 }
                 json_response(202, import("importing"))
             }
-            ("GET", "/api/v2/organizations/org_mine/imports/imp_1") => {
-                json_response(200, import("imported"))
-            }
+            ("GET", "/api/v2/organizations/org_mine/imports/imp_1") => match stops {
+                Some(sentence) => {
+                    let mut failed = import("failed");
+                    failed["error"] = sentence.into();
+                    json_response(200, failed)
+                }
+                None => json_response(200, import("imported")),
+            },
             ("GET", "/api/v2/organizations/org_mine/imports/imp_1/verification") => {
                 json_response(200, verify.clone())
             }
@@ -1159,6 +1174,13 @@ fn installation(home: &Path) -> PathBuf {
 }
 
 fn real_move(verify: serde_json::Value) -> (Result<Moved, Failure>, PathBuf, PathBuf, Vec<String>) {
+    real_move_stopping(verify, None)
+}
+
+fn real_move_stopping(
+    verify: serde_json::Value,
+    stops: Option<&'static str>,
+) -> (Result<Moved, Failure>, PathBuf, PathBuf, Vec<String>) {
     let home = crate::test_support::temp_root("move-real");
     let root = installation(&home);
     let parts = bundle(&[70_000, 30_000, 5]);
@@ -1168,8 +1190,11 @@ fn real_move(verify: serde_json::Value) -> (Result<Moved, Failure>, PathBuf, Pat
         count("memories", 4),
     ];
     let local_address = local_openbot(parts.clone(), counts);
-    let (cloud_address, received) =
-        cloud_openbot(parts.iter().map(|(part, _)| part.clone()).collect(), verify);
+    let (cloud_address, received) = cloud_openbot(
+        parts.iter().map(|(part, _)| part.clone()).collect(),
+        verify,
+        stops,
+    );
     let mut local = Api::at(
         &local_address,
         Box::new(InstallToken(Some(TOKEN.into()))),
@@ -1253,6 +1278,48 @@ fn a_real_move_whose_check_doesnt_match_deletes_nothing() {
     ] {
         assert!(root.join(entry).exists(), "{entry} was removed");
     }
+    let _ = std::fs::remove_dir_all(home);
+}
+
+/// OpenBot Cloud's sentence for a conversation that has new messages here and was carried on there
+/// since an earlier move: it won't overwrite it, so trying again stops the same way.
+const CARRIED_ON: &str = "\"Field Researcher\" has new messages on your computer, and was also carried on in OpenBot Cloud. OpenBot won't overwrite what was said in OpenBot Cloud, so the new messages can't move.";
+/// Its sentence for a conversation a Bot is answering there right now.
+const BEING_ANSWERED: &str = "\"Field Researcher\" is being answered in OpenBot Cloud right now. Start the move again once it's done.";
+
+/// The move over HTTP, where OpenBot Cloud stops the import and says why in its own sentence: the
+/// person reads that sentence, not a line telling them to try again in a moment, which can't get
+/// past a conversation OpenBot Cloud won't overwrite. Nothing on this computer is touched.
+/// Seen on 2026-11-22: Desktop said "Try again in a moment" and only logged Cloud's reason.
+#[test]
+fn a_move_cloud_stops_for_a_reason_says_that_reason() {
+    for sentence in [CARRIED_ON, BEING_ANSWERED] {
+        let (outcome, home, root, calls) =
+            real_move_stopping(serde_json::json!({"matches": true}), Some(sentence));
+        let failure = outcome.unwrap_err();
+        assert_eq!(failure.said(), sentence);
+        assert_eq!(failure.kind(), "move-stopped");
+        assert!(calls.is_empty(), "{calls:?}");
+        assert_eq!(answered(&home.join("config")), None);
+        assert!(root.join("engine/machine/disk.vhdx").exists());
+        let _ = std::fs::remove_dir_all(home);
+    }
+}
+
+/// An import that stopped part way, which OpenBot Cloud says to apply again: Desktop applied it
+/// again already, so the person reads Desktop's own line, and trying again in a moment is right.
+#[test]
+fn a_move_whose_import_only_stopped_part_way_says_try_again() {
+    let (outcome, home, _root, calls) =
+        real_move_stopping(serde_json::json!({"matches": true}), Some(PASSING));
+    let failure = outcome.unwrap_err();
+    assert_eq!(
+        failure.said(),
+        "OpenBot Cloud couldn't add everything to your account. Try again in a moment."
+    );
+    assert_eq!(failure.kind(), "move-failed");
+    assert!(failure.detail().contains(PASSING), "{}", failure.detail());
+    assert!(calls.is_empty(), "{calls:?}");
     let _ = std::fs::remove_dir_all(home);
 }
 

@@ -15,6 +15,7 @@ import {
   useState,
 } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
+import { CopyButton } from "@/components/copy-button";
 import {
   CHATGPT_DEAD_PAGE,
   ChatGptCodeSteps,
@@ -59,6 +60,7 @@ import {
   beginProviderSignIn,
   cancelPlanSignIn,
   cancelProviderSignIn,
+  finishesInDesktop,
   finishPlanSignIn,
   finishProviderSignIn,
   type Plan,
@@ -661,13 +663,15 @@ export function ChooseConnection({
         attempt.current = { plan };
         const { url } = await beginPlanSignIn(plan);
         if (!current()) return;
-        setWaiting({ url, codeBack: plan === "claude" });
+        // A Desktop older than Claude's loopback sign-in sends Claude's code page: paste it here.
+        const codeBack = plan === "claude" && !finishesInDesktop(url);
+        setWaiting({ url, codeBack });
         window.open(url, "_blank", "noopener");
-        // Claude's sign-in hands back a code to paste here; ChatGPT's finishes in the browser.
-        if (plan === "claude") {
+        if (codeBack) {
           setSigningIn(false);
           return;
         }
+        // Otherwise the browser comes back to Desktop, and it finishes on its own.
         await finishPlanSignIn(plan);
       } else {
         const begun = await beginProviderSignIn(
@@ -1140,7 +1144,8 @@ const SIGN_IN_SAYS: Record<string, string> = {
 
 /**
  * A Claude or ChatGPT plan inside OpenBot Desktop, which takes the provider's redirect: nothing to
- * paste, and the page it lands on loads.
+ * paste, and the page it lands on loads. The same words where Desktop runs Claude's sign-in itself;
+ * a Desktop older than that hands back a code to paste instead, and `SIGN_IN_SAYS` says so.
  */
 const NO_PASTE_SAYS: Record<string, string> = {
   anthropic:
@@ -1256,7 +1261,9 @@ function SignInFields({
             ? CODE_SIGN_IN_SAYS
             : noPaste
               ? NO_PASTE_SAYS[provider.id]
-              : SIGN_IN_SAYS[provider.id]}
+              : provider.id === "anthropic" && !serverRun && !waiting?.codeBack
+                ? NO_PASTE_SAYS.anthropic
+                : SIGN_IN_SAYS[provider.id]}
         </p>
       )}
       {signedIn ? (
@@ -1266,11 +1273,19 @@ function SignInFields({
         </p>
       ) : waiting ? (
         <div className="flex flex-col gap-3">
+          {/* The code to enter on the provider's page, with a button that copies it to paste there. */}
           {waiting.code ? (
-            <p className="text-sm">
-              Verification code:{" "}
-              <strong className="font-mono">{waiting.code}</strong>
-            </p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <p className="text-sm">
+                Verification code:{" "}
+                <strong className="font-mono">{waiting.code}</strong>
+              </p>
+              <CopyButton
+                key={waiting.code}
+                label="Copy the code"
+                text={waiting.code}
+              />
+            </div>
           ) : null}
           <p className="text-muted-foreground text-sm">
             Didn't open?{" "}

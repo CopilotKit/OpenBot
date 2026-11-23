@@ -301,14 +301,33 @@ pub trait Progress {
 pub enum Failure {
     /// Packing up, sending, or importing stopped. `detail` is for the log.
     Failed { stage: Stage, detail: String },
+    /**
+    Cloud stopped the import and said why, in a sentence the person reads (`Import.error`): a
+    conversation carried on in OpenBot Cloud that it won't overwrite, or one a Bot is answering
+    there now. The window shows that sentence as it is. Trying again in a moment doesn't get past
+    it, so the window doesn't say to.
+    */
+    Stopped { said: String },
     /// Cloud has the import, but not everything in it: what was short, for the log.
     Mismatch { detail: String },
 }
 
+/**
+The reason in a failed import's own sentence, when it gives one. None when there is no sentence,
+or when it only asks to apply again: the import stopped part way, the move applied it again
+already, and Desktop's own line (try again in a moment) is the right one.
+*/
+pub fn reason_of(error: Option<&str>) -> Option<&str> {
+    error
+        .map(str::trim)
+        .filter(|said| !said.is_empty() && !said.contains("Apply again"))
+}
+
 impl Failure {
     /// The sentence the setup window shows. Nothing was removed, which the window says too.
-    pub fn said(&self) -> &'static str {
+    pub fn said(&self) -> &str {
         match self {
+            Failure::Stopped { said } => said,
             Failure::Failed {
                 stage: Stage::Export,
                 ..
@@ -326,13 +345,16 @@ impl Failure {
     pub fn kind(&self) -> &'static str {
         match self {
             Failure::Failed { .. } => "move-failed",
+            Failure::Stopped { .. } => "move-stopped",
             Failure::Mismatch { .. } => "move-mismatch",
         }
     }
 
+    /// For the log. Cloud's own sentence is the whole of what it said.
     pub fn detail(&self) -> &str {
         match self {
             Failure::Failed { detail, .. } | Failure::Mismatch { detail } => detail,
+            Failure::Stopped { said } => said,
         }
     }
 }
@@ -615,9 +637,14 @@ fn wait_for_import(cloud: &mut dyn Cloud, id: &str, limits: Limits) -> Result<()
         match import.status.as_str() {
             "imported" => return Ok(()),
             "failed" if applies >= 1 => {
+                if let Some(said) = reason_of(import.error.as_deref()) {
+                    return Err(Failure::Stopped {
+                        said: said.to_owned(),
+                    });
+                }
                 return Err(failed(
                     import.error.unwrap_or_else(|| "the import failed".into()),
-                ))
+                ));
             }
             "failed" => {
                 applies += 1;

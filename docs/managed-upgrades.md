@@ -89,8 +89,10 @@ helm upgrade openbot <chart> --reuse-values --set openbot.management.enabled=fal
 
 An install opted out this way makes no connection to `fleet.bot.copilotkit.ai`. The namespace
 `openbot-system` and the Secret `openbot-agent-credentials` stay; delete them if you want nothing
-left. To have CopilotKit retire the install and revoke its certificate too, press Disconnect in
-Admin → Managed updates once the agent has stopped reporting (about five minutes).
+left. The agent was part of the `openbot` release, so that upgrade removed it and there is no
+`openbot-agent` release to uninstall. To have CopilotKit retire the install and revoke its
+certificate too, press Disconnect in Admin → Managed updates. If you had set upgrades up, the
+`openbot-agent` release is still there: uninstall it first (see the end of this page).
 
 Admin → Managed updates still shows, so an admin can connect by hand later. To hide it as well, also
 set `server.managementEnrollment.enabled=false` (`openbot.server.managementEnrollment.enabled=false`
@@ -118,7 +120,7 @@ these states:
 With `management.enabled=false`, Connect takes two steps instead: **Step 1 of 2: approve the code**,
 at CopilotKit's page, signed in as an admin of the organization your licence belongs to, then **Step
 2 of 2: install the management agent**, with one `helm install` command that holds nothing secret.
-After that, Disconnect asks you to uninstall the agent with Helm first.
+After that, Disconnect asks you to uninstall that agent's `openbot-agent` release with Helm first.
 
 ## Letting CopilotKit run your upgrades
 

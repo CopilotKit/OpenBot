@@ -23,6 +23,9 @@ export const aiConnectionKeys = {
   all: ["ai-connection"] as const,
   current: ["ai-connection", "current"] as const,
   personal: ["ai-connection", "personal"] as const,
+  /** The person's answer in another of their organizations, named by its id. */
+  personalIn: (organizationId: string) =>
+    ["ai-connection", "personal", "in", organizationId] as const,
   // Not under `all`: what Desktop can do does not change when the connection does.
   desktop: ["ai-connection-desktop"] as const,
 };
@@ -59,6 +62,29 @@ export function personalAiConnectionQueryOptions() {
     queryFn: async ({ signal }): Promise<PersonalAiConnection | null> => {
       try {
         return await getPersonalAiConnection(organizationId(), "me", {
+          signal,
+          fallback: "Couldn't load your AI connection.",
+        });
+      } catch (error) {
+        if (error instanceof ClientError && error.status === 404) return null;
+        throw error;
+      }
+    },
+  });
+}
+
+/**
+ * The person's AI connection in another organization of theirs, asked at that organization's own
+ * address, so the session stays where it is. Connect your AI offers to work in an organization only
+ * when this says it has an AI for everyone (`organization.ready`). Null from an OpenBot older than
+ * this operation (404), as above.
+ */
+export function personalAiConnectionInQueryOptions(organizationId: string) {
+  return queryOptions({
+    queryKey: aiConnectionKeys.personalIn(organizationId),
+    queryFn: async ({ signal }): Promise<PersonalAiConnection | null> => {
+      try {
+        return await getPersonalAiConnection(organizationId, "me", {
           signal,
           fallback: "Couldn't load your AI connection.",
         });
