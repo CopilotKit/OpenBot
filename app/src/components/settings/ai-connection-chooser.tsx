@@ -15,6 +15,7 @@ import {
   useState,
 } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
+import { CopyButton } from "@/components/copy-button";
 import {
   CHATGPT_DEAD_PAGE,
   ChatGptCodeSteps,
@@ -1272,11 +1273,19 @@ function SignInFields({
         </p>
       ) : waiting ? (
         <div className="flex flex-col gap-3">
+          {/* The code to enter on the provider's page, with a button that copies it to paste there. */}
           {waiting.code ? (
-            <p className="text-sm">
-              Verification code:{" "}
-              <strong className="font-mono">{waiting.code}</strong>
-            </p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <p className="text-sm">
+                Verification code:{" "}
+                <strong className="font-mono">{waiting.code}</strong>
+              </p>
+              <CopyButton
+                key={waiting.code}
+                label="Copy the code"
+                text={waiting.code}
+              />
+            </div>
           ) : null}
           <p className="text-muted-foreground text-sm">
             Didn't open?{" "}

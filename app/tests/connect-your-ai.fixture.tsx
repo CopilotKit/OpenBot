@@ -15,7 +15,10 @@ import { useSwitchOrganization } from "@/components/organizations/use-switch-org
 import { SettingsSidebar } from "@/components/settings/settings-sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SidebarInset } from "@/components/ui/sidebar";
-import { setCurrentOrganization } from "@/lib/organizations/current";
+import {
+  setCurrentOrganization,
+  useCurrentOrganizationId,
+} from "@/lib/organizations/current";
 import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
 import { Route as AuthedRoute } from "@/routes/_authed";
@@ -64,9 +67,13 @@ const authedRoute = createRoute({
  */
 function Home() {
   const switching = useSwitchOrganization();
+  // Which organization's home this is: the one the app works in.
+  const organization = useCurrentOrganizationId();
   return (
     <main>
-      <h1 data-app-home="">Home</h1>
+      <h1 data-app-home="" data-organization={organization}>
+        Home
+      </h1>
       <button onClick={() => switching.run("acme")} type="button">
         Work in Acme
       </button>

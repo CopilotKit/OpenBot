@@ -352,6 +352,32 @@ test("a move that fails removes nothing, and Try again moves again", async () =>
   }
 });
 
+test("a move OpenBot Cloud stopped for a reason says that reason, with no try again of its own", async () => {
+  const view = await atConfirm();
+  // As `move_to_cloud` answers when the import says why it stopped (`Failure::Stopped`).
+  const said =
+    "\"Field Researcher\" has new messages on your computer, and was also carried on in OpenBot Cloud. OpenBot won't overwrite what was said in OpenBot Cloud, so the new messages can't move.";
+  answers.move_to_cloud = () => {
+    throw { said, detail: null, kind: "move-stopped" };
+  };
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await view.findByText("Nothing was removed from this computer.");
+  expect(view.getByText(said)).toBeTruthy();
+  expect(view.queryByText(/Try again in a moment/)).toBe(null);
+  expect(view.queryByText(/You can try again/)).toBe(null);
+  expect(
+    view.getByText(
+      "Your Bots and their work are on this computer, just as they were. You can keep using OpenBot here.",
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText("Technical details")).toBe(null);
+  expect(
+    view.getByRole("heading", { name: "The move didn't finish" }),
+  ).toBeTruthy();
+});
+
 test("the move shows each stage, and Cancel while signing in goes back with nothing removed", async () => {
   const view = await atConfirm();
   let reject!: (error: unknown) => void;

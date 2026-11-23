@@ -483,7 +483,10 @@ export function MoveToCloud({
           <h2>{NOTHING_WAS_REMOVED}</h2>
           <p>
             Your Bots and their work are on this computer, just as they were.
-            You can try again, or keep using OpenBot here.
+            {/* OpenBot Cloud said why it stopped, and what to do: no try again of our own. */}
+            {problem.kind === "move-stopped"
+              ? " You can keep using OpenBot here."
+              : " You can try again, or keep using OpenBot here."}
           </p>
         </div>
         <SetupProgress steps={stageRows(stages)} label="Move progress" />

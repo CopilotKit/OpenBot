@@ -105,6 +105,11 @@ export const STATE_NAMES: readonly {
   { hash: "#move-signin", search: "", title: "Move: sign in" },
   { hash: "#move-midway", search: "", title: "Move: midway" },
   { hash: "#move-failed", search: "", title: "Move: failed" },
+  {
+    hash: "#move-stopped",
+    search: "",
+    title: "Move: OpenBot Cloud stopped the import",
+  },
   { hash: "#move-done", search: "", title: "Move: done" },
   {
     hash: "#move-done-held",
@@ -256,6 +261,16 @@ function createStates(where: Where): States {
     }
     progress("sign-in", "done");
     progress("export", "done");
+    // OpenBot Cloud stopped the import and said why: a conversation it won't overwrite.
+    if (move === "stopped") {
+      progress("upload", "done");
+      progress("import", "running");
+      throw {
+        said: "\"Field Researcher\" has new messages on your computer, and was also carried on in OpenBot Cloud. OpenBot won't overwrite what was said in OpenBot Cloud, so the new messages can't move.",
+        detail: null,
+        kind: "move-stopped",
+      } satisfies Problem;
+    }
     progress("upload", "running", 0.42);
     if (move === "midway") return new Promise(() => {});
     if (move === "failed")

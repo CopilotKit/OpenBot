@@ -2774,6 +2774,13 @@ describe.skipIf(!asked)(
       { hash: "#move-signin", heading: "Moving to OpenBot Cloud", move: true },
       { hash: "#move-midway", heading: "Moving to OpenBot Cloud", move: true },
       { hash: "#move-failed", heading: "The move didn't finish", move: true },
+      // OpenBot Cloud's own three-line sentence: a few pixels past the card, the buttons in view.
+      {
+        hash: "#move-stopped",
+        heading: "The move didn't finish",
+        move: true,
+        scrolls: true,
+      },
       { hash: "#move-done", heading: "You're on OpenBot Cloud", move: true },
       {
         hash: "#move-done-held",

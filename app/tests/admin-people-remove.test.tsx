@@ -225,10 +225,11 @@ test("somebody with no name is asked about by their address", async () => {
 });
 
 /*
- * Where everybody has an organization of their own, removing somebody ends their membership of this
- * organization and nothing else: they stay signed in, their own organization and any other stay
+ * Where people may create organizations, removing somebody ends their membership of this
+ * organization and nothing else: they stay signed in, any other organization they're in stays
  * theirs, and their API keys go on working there. The dialog said they were signed out everywhere
- * and their keys stopped working, every clause of which was false.
+ * and their keys stopped working, every clause of which was false. A self-hosted OpenBot gives
+ * nobody an organization of their own, so it doesn't promise one either.
  */
 test("with several organizations, Remove says it takes them out of this one alone", async () => {
   severalOrganizations = true;
@@ -242,7 +243,8 @@ test("with several organizations, Remove says it takes them out of this one alon
   expect(writes).toEqual([]);
   const said = dialog.textContent ?? "";
   expect(said).toContain("Acme Freight");
-  expect(said).toContain("their own organization");
+  expect(said).toContain("any other organization they're in");
+  expect(said).not.toContain("their own organization");
   expect(said).not.toContain("signed out");
   expect(said).not.toContain("can't sign in");
   expect(said).not.toContain("API keys");
