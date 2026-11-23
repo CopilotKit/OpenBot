@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+mod desktop_about;
 mod desktop_connected;
 mod desktop_connection;
 mod desktop_host_access;
@@ -13579,26 +13580,39 @@ fn desktop_version<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
 }
 
 /**
-What About OpenBot says: the version, and which build this is.
+What About OpenBot says: the version, where OpenBot runs and as whom (`desktop_about`), and which
+build this is.
 
 The build is the commit it was built from, marked `-dirty` when the tree had uncommitted changes,
 and when; see `build_identity` in build.rs. macOS shows the version and the build on one line and
-the credits under them; Windows and Linux show the comments.
+the credits under them; Windows and Linux show the comments. Where OpenBot runs goes first in both.
 */
-fn about_openbot(version: String) -> tauri::menu::AboutMetadata<'static> {
+fn about_openbot(version: String, runs: &[String]) -> tauri::menu::AboutMetadata<'static> {
     let built = build_description(
         env!("OPENBOT_BUILD_COMMIT"),
         env!("OPENBOT_BUILD_BRANCH"),
         env!("OPENBOT_BUILD_TIME").parse().unwrap_or_default(),
     );
+    let said = if runs.is_empty() {
+        built
+    } else {
+        format!("{}\n\n{built}", runs.join("\n"))
+    };
     tauri::menu::AboutMetadata {
         name: Some("OpenBot".into()),
         short_version: Some(version),
         version: Some(env!("OPENBOT_BUILD_COMMIT").into()),
-        credits: Some(built.clone()),
-        comments: Some(built),
+        credits: Some(said.clone()),
+        comments: Some(said),
         ..Default::default()
     }
+}
+
+/// About OpenBot for this app now: its version, and where OpenBot runs and as whom.
+fn about_openbot_now<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> tauri::menu::AboutMetadata<'static> {
+    about_openbot(desktop_version(app), &desktop_about::lines_now(app))
 }
 
 /// The first entry of each launch in the log file: which build, on what, where the log's UTC times
@@ -13760,7 +13774,7 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
                 MenuEntry::Native(PredefinedMenuItem::about(
                     app,
                     Some("About"),
-                    Some(about_openbot(desktop_version(app))),
+                    Some(about_openbot_now(app)),
                 )?),
             ];
             // The app itself still updates.
@@ -13818,7 +13832,7 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
         entries.push(MenuEntry::Native(PredefinedMenuItem::about(
             app,
             Some("About"),
-            Some(about_openbot(desktop_version(app))),
+            Some(about_openbot_now(app)),
         )?));
         if updates {
             entries.push(check_for_updates()?);
@@ -13843,7 +13857,7 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
         let mut entries = vec![MenuEntry::Native(PredefinedMenuItem::about(
             app,
             Some("About OpenBot"),
-            Some(about_openbot(desktop_version(app))),
+            Some(about_openbot_now(app)),
         )?)];
         // Where every Mac app keeps it: under About.
         if updates {
@@ -20792,13 +20806,104 @@ mod tests {
             build_description("397d98a", "", 0),
             "Built 1970-01-01 00:00 UTC from 397d98a"
         );
-        let about = about_openbot("0.3.4-internal.892.g0c140734ecf0".into());
+        let about = about_openbot("0.3.4-internal.892.g0c140734ecf0".into(), &[]);
         assert_eq!(
             about.short_version.as_deref(),
             Some("0.3.4-internal.892.g0c140734ecf0")
         );
         assert_eq!(about.version.as_deref(), Some(env!("OPENBOT_BUILD_COMMIT")));
         assert!(about.credits.unwrap().starts_with("Built "));
+    }
+
+    /*
+    Found in dogfooding: nothing in OpenBot Desktop said whether it ran OpenBot (Self-Contained) or
+    OpenBot Cloud, or which account it used there. About OpenBot said only the version and the
+    build. It now says where OpenBot runs, and on OpenBot Cloud as whom, above the build, on macOS
+    (the credits) and on Windows (the comments) alike, beside the version it already showed.
+    */
+    #[test]
+    fn about_openbot_says_self_contained_or_openbot_cloud_and_as_whom() {
+        use openbot_desktop_lib::connected::choice;
+        let base = temp_root("about-openbot-mode");
+        let root = base.join("OpenBot");
+        let config = base.join("config");
+        let said = |app: &tauri::App<tauri::test::MockRuntime>| {
+            let about = about_openbot_now(app.handle());
+            assert_eq!(about.short_version.as_deref(), Some("1.2.0"));
+            assert_eq!(
+                about.credits, about.comments,
+                "macOS and Windows say the same"
+            );
+            about.credits.unwrap()
+        };
+
+        // Nothing set up yet: About says nothing about where OpenBot runs.
+        let app = launched_at(&root, &config, "1.2.0");
+        assert!(said(&app).starts_with("Built "));
+
+        // OpenBot (Self-Contained): installed on this computer, no connection on record.
+        write_installed_deployment(&root);
+        let own = upgrade::own();
+        deployment::record(&root, &own.version, own.pinned).unwrap();
+        let app = launched_at(&root, &config, "1.2.0");
+        let credits = said(&app);
+        assert!(
+            credits.starts_with("OpenBot (Self-Contained)\n\nBuilt "),
+            "{credits}"
+        );
+        assert!(!credits.contains("OpenBot Cloud"));
+
+        // OpenBot Cloud, before it has said which account: the mode alone.
+        choice::write(
+            &config,
+            &choice::Choice {
+                mode: choice::Mode::Connected,
+                address: Some("https://api.open.bot".into()),
+                organization_id: Some("org_mine".into()),
+            },
+        )
+        .unwrap();
+        let app = launched_at(&root, &config, "1.2.0");
+        let credits = said(&app);
+        assert!(credits.starts_with("OpenBot Cloud\n\nBuilt "), "{credits}");
+        assert!(!credits.contains("Self-Contained"));
+
+        // Once it has said: the account too.
+        desktop_connected::remember_account(
+            app.handle(),
+            "https://api.open.bot",
+            "sam@example.com",
+        );
+        let credits = said(&app);
+        assert!(
+            credits.starts_with("OpenBot Cloud\nSigned in as sam@example.com\n\nBuilt "),
+            "{credits}"
+        );
+
+        // The sign-in ended: no account named.
+        desktop_connected::session_ended(app.handle(), "api.open.bot");
+        assert!(said(&app).starts_with("OpenBot Cloud\n\nBuilt "));
+
+        // An account from another address than the one on record is never named here.
+        desktop_connected::remember_account(
+            app.handle(),
+            "https://openbot.example.com",
+            "sam@example.com",
+        );
+        assert!(!said(&app).contains("sam@example.com"));
+
+        // Back on this computer: OpenBot (Self-Contained) again.
+        choice::write(
+            &config,
+            &choice::Choice {
+                mode: choice::Mode::Local,
+                address: Some("https://api.open.bot".into()),
+                organization_id: None,
+            },
+        )
+        .unwrap();
+        assert!(said(&app).starts_with("OpenBot (Self-Contained)\n\nBuilt "));
+        let _ = std::fs::remove_dir_all(base);
     }
 
     /// An internal build after 0.3.3 is packaged as `0.3.4-internal.892.g0c140734ecf0`, and the
@@ -20829,7 +20934,7 @@ mod tests {
             // The fake engine answered, so nothing on this machine was asked.
             assert_eq!(status["engine"], "docker");
             assert!(status["build"].as_str().unwrap().starts_with("Built "));
-            let about = about_openbot(desktop_version(app.handle()));
+            let about = about_openbot_now(app.handle());
             assert_eq!(about.short_version.as_deref(), Some(packaged));
             status["version"].as_str().unwrap().to_owned()
         };
