@@ -4,7 +4,11 @@ export type GridOverlayProps = {
   width: number;
   height: number;
   zoom: number;
-  color: string;
+  /**
+   * The color a person picked in the Window panel. Without one, the lines take the app's ring
+   * token: the minor lines at 15 %, the major lines at 30 %.
+   */
+  color?: string;
 };
 
 /** The 4px grid with an 8px major line drawn over the window, so a person or an agent can see what is off the grid. */
@@ -37,8 +41,9 @@ export function GridOverlay({ width, height, zoom, color }: GridOverlayProps) {
           <path
             d={`M ${minorSize} 0 L 0 0 0 ${minorSize}`}
             fill="none"
+            className={color ? undefined : "stroke-ring/15"}
             stroke={color}
-            strokeOpacity={0.12}
+            strokeOpacity={color ? 0.12 : undefined}
             strokeWidth={1}
           />
         </pattern>
@@ -51,8 +56,9 @@ export function GridOverlay({ width, height, zoom, color }: GridOverlayProps) {
           <path
             d={`M ${majorSize} 0 L 0 0 0 ${majorSize}`}
             fill="none"
+            className={color ? undefined : "stroke-ring/30"}
             stroke={color}
-            strokeOpacity={0.28}
+            strokeOpacity={color ? 0.28 : undefined}
             strokeWidth={1}
           />
         </pattern>

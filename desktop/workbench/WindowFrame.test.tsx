@@ -36,19 +36,19 @@ test("host browser shows the browser bar with the address and no Mac lights", ()
   const { container } = render(
     <WindowFrame {...props({ host: "browser", address: "/settings/ai" })} />,
   );
-  const bar = container.querySelector(".wb-window-bar-browser");
+  const bar = container.querySelector("[data-window-bar=browser]");
   expect(bar).not.toBeNull();
   expect(bar?.textContent).toContain("http://localhost:3010/settings/ai");
-  expect(container.querySelector(".wb-window-bar-mac")).toBeNull();
-  expect(container.querySelector(".wb-window-light")).toBeNull();
+  expect(container.querySelector("[data-window-bar=mac]")).toBeNull();
+  expect(container.querySelector("[data-window-button]")).toBeNull();
   // The bar sits above the iframe, not over it.
-  expect(bar?.closest(".wb-window-content")).toBeNull();
+  expect(bar?.closest("[data-window-content]")).toBeNull();
   expect(iframeSize(container)).toEqual({ width: "1000px", height: "800px" });
 });
 
 test("host browser with no address shows the root path", () => {
   const { container } = render(<WindowFrame {...props({ host: "browser" })} />);
-  expect(container.querySelector(".wb-browser-address")?.textContent).toBe(
+  expect(container.querySelector("[data-browser-address]")?.textContent).toBe(
     "http://localhost:3010/",
   );
 });
@@ -57,16 +57,16 @@ test("no host shows the Mac bar", () => {
   const { container } = render(
     <WindowFrame {...props({ width: 720, height: 560 })} />,
   );
-  expect(container.querySelector(".wb-window-bar-mac")).not.toBeNull();
-  expect(container.querySelectorAll(".wb-window-light")).toHaveLength(3);
-  expect(container.querySelector(".wb-window-bar-browser")).toBeNull();
+  expect(container.querySelector("[data-window-bar=mac]")).not.toBeNull();
+  expect(container.querySelectorAll("[data-window-button]")).toHaveLength(3);
+  expect(container.querySelector("[data-window-bar=browser]")).toBeNull();
   expect(iframeSize(container)).toEqual({ width: "720px", height: "560px" });
 });
 
 test("the Mac lights sit where macOS draws them: 21, 41 and 61 px in, 26.5 px down", () => {
   const { container } = render(<WindowFrame {...props()} />);
   const lights = Array.from(
-    container.querySelectorAll<HTMLElement>(".wb-window-light"),
+    container.querySelectorAll<HTMLElement>("[data-window-button]"),
   );
   expect(lights.map((l) => [l.style.left, l.style.top, l.style.width])).toEqual(
     [
@@ -76,6 +76,6 @@ test("the Mac lights sit where macOS draws them: 21, 41 and 61 px in, 26.5 px do
     ],
   );
   // Over the page: after the iframe in the window's content.
-  const bar = container.querySelector(".wb-window-bar-mac");
-  expect(bar?.closest(".wb-window-content")).not.toBeNull();
+  const bar = container.querySelector("[data-window-bar=mac]");
+  expect(bar?.closest("[data-window-content]")).not.toBeNull();
 });
