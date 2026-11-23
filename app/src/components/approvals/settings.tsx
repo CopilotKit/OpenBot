@@ -35,6 +35,7 @@ import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { queryClient } from "@/query-client";
+import { useKit } from "@/skins/store";
 import {
   ALWAYS_ASKS,
   ASK_FIRST_DESCRIPTION,
@@ -66,6 +67,7 @@ export function ApprovalSettings() {
   const revoke = useMutation(revokeApprovalRuleMutationOptions(queryClient));
   const error =
     inbox.error ?? preferences.error ?? changeRule.error ?? revoke.error;
+  const currentKit = useKit() === "current";
   if (inbox.isPending && !error) return null;
   const enforced = inbox.data?.team?.enforceAutoReview ?? false;
   const rulesOff = inbox.data?.team?.customRulesEnabled === false;
@@ -223,10 +225,23 @@ export function ApprovalSettings() {
         }
         title="Rules for every Bot"
       >
-        {saved === 0 ? (
+        {saved === 0 && !(currentKit && canAdd) ? (
           <PageEmpty icon={IconChecklist} title="No rules yet" />
         ) : null}
-        {saved > 0 || canAdd ? (
+        {saved === 0 && currentKit && canAdd ? (
+          /*
+           * The current kit says there are none as Figma's Approvals does: a muted line at the top of
+           * the Add a rule card, ruled off from it, rather than an empty state above a second card.
+           */
+          <PageRows>
+            <div>
+              <p className="flex min-h-14 items-center border-border border-b px-5 text-muted-foreground text-xs">
+                No rules yet
+              </p>
+              <RuleForm botField={false} label="Add a rule" save={addRule} />
+            </div>
+          </PageRows>
+        ) : saved > 0 || canAdd ? (
           <PageRows>
             {teamRules.map((rule, index) => (
               <Fragment key={rule.id}>

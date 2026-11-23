@@ -29,8 +29,12 @@ import {
  * at the pane's left edge, lined up with the table's first column rather than centred above a table
  * that is not, and the children fill what is left, so the table can be the one thing that scrolls.
  * It is not a licence for anything else to be wide. It is no column, so `PageShell` draws it itself.
+ *
+ * `wide` exists for one page too, the components gallery, which the designers asked for in three
+ * columns. In the current kit it reaches across the pane 44px in on each side, as `full` does, but
+ * scrolls as a column does; the legacy kit draws it as `prose`.
  */
-export type ShellWidth = "prose" | "full";
+export type ShellWidth = "prose" | "wide" | "full";
 
 /**
  * The scroller and the centred `prose` column every configuration screen sits in, without the bar. The

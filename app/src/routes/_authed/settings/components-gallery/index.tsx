@@ -65,7 +65,12 @@ function RouteComponent() {
   const published = components.data?.filter((component) => component.published);
 
   return (
-    <PageShell description={words.intro} title="Components gallery">
+    <PageShell
+      className="@container"
+      description={words.intro}
+      title="Components gallery"
+      width="wide"
+    >
       {components.isPending ? null : components.error ? (
         <p className="mt-12 text-destructive text-sm" role="alert">
           Couldn't load components. Try again in a moment.
@@ -80,7 +85,11 @@ function RouteComponent() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="mt-12 grid w-full grid-cols-1 gap-4 md:grid-cols-2 kit:gap-0.5">
+        /*
+         * The current kit's three columns once the page is 768px wide and two below, as the designers
+         * asked: measured on the page, not the window, as the sidebar takes its share of the window.
+         */
+        <div className="mt-12 grid w-full grid-cols-1 gap-4 md:grid-cols-2 kit:gap-0.5 kit:@min-[48rem]:grid-cols-3">
           {published?.map((component) => (
             /*
              * No status dot, unlike the Admin tiles. Everything listed here is published by
@@ -94,7 +103,8 @@ function RouteComponent() {
               params={{ name: component.name }}
               to="/settings/components-gallery/$name"
             >
-              <div className="min-h-28 p-4 kit:min-h-0 kit:p-0">
+              {/* The words take what the row leaves, so previews in a row share a top. */}
+              <div className="min-h-28 p-4 kit:min-h-0 kit:flex-1 kit:p-0">
                 <h4 className="line-clamp-1 font-medium text-sm kit:font-semibold kit:text-base kit:leading-heading kit:tracking-heading">
                   {component.title}
                 </h4>

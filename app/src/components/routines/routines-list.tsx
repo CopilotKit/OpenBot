@@ -47,10 +47,10 @@ import {
   type RoutineRecord,
   routinesQueryOptions,
 } from "@/lib/routines/queries";
-import { orbPalette } from "@/lib/orb-palette";
 import { cn } from "@/lib/utils";
 import { useKit } from "@/skins/store";
 import { NewRoutineButton } from "./new-routine-button";
+import { RoutineMedia } from "./routine-tile";
 import { lastRunLabel, nextRunWords, scheduleWords } from "./routine-page";
 
 type BotDirectory = Map<string, AgentProfile>;
@@ -172,9 +172,9 @@ function RoutineCard({
       }
       size="sm"
     >
-      <ItemMedia>
-        <RoutineTile paused={!routine.enabled} seed={bot?.avatarSeed ?? ""} />
-      </ItemMedia>
+      <RoutineMedia seed={bot?.avatarSeed ?? ""}>
+        {routine.enabled ? <IconClock /> : <IconPlayerPause />}
+      </RoutineMedia>
       <ItemContent className={cn("gap-1", routine.enabled ? "" : "opacity-60")}>
         <ItemTitle>
           <span className="line-clamp-2">{routine.title ?? does}</span>
@@ -227,25 +227,6 @@ function RoutineCard({
 }
 
 /**
- * The 44px tile a routine's card leads with: its clock (a pause, paused) over its Bot's colours, as
- * Figma lights the tile from the top left in the Bot's orb palette.
- */
-function RoutineTile({ seed, paused }: { seed: string; paused: boolean }) {
-  const { c1, c2, c4 } = orbPalette(seed);
-  return (
-    <span
-      aria-hidden="true"
-      className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-tile text-foreground [&_svg]:size-5"
-      style={{
-        backgroundImage: `radial-gradient(circle at 30% 22%, ${c1} 0%, transparent 60%), radial-gradient(circle at 60% 45%, ${c4}, ${c2})`,
-      }}
-    >
-      {paused ? <IconPlayerPause /> : <IconClock />}
-    </span>
-  );
-}
-
-/**
  * A goal's row: what it is (its title), when it starts (its schedules, events and triggers, or
  * when you ask), that it acts, and until when (its outcome). Its status and progress are on the
  * row. It opens the goal's own page, where its schedules are switched and deleted too: a link, so
@@ -259,6 +240,7 @@ function GoalItem({
   routines,
   botName,
   agentId,
+  seed,
 }: {
   goal: ResponsibilityRecord;
   /** Undefined when the routines read failed: its starts are then not known. */
@@ -267,6 +249,8 @@ function GoalItem({
   botName?: string;
   /** The Bot whose own list this is, so the goal's back link returns to it. */
   agentId?: string;
+  /** Its Bot's `avatarSeed`, for the tile's colours. */
+  seed: string;
 }) {
   /*
    * Its triggers, read only where the row uses them: an active goal's starts, and whether a goal
@@ -315,9 +299,9 @@ function GoalItem({
       }
       size="sm"
     >
-      <ItemMedia variant="icon">
+      <RoutineMedia seed={seed}>
         <Icon />
-      </ItemMedia>
+      </RoutineMedia>
       <ItemContent className={goal.status === "active" ? "" : "opacity-60"}>
         <ItemTitle>
           {goal.title}
@@ -454,6 +438,7 @@ export function RoutinesList({
                   agentId={agentId}
                   goal={row.goal}
                   routines={routines.error ? undefined : row.routines}
+                  seed={bots.get(row.agentId)?.avatarSeed ?? ""}
                 />
               ) : (
                 <SettingRow
@@ -461,6 +446,7 @@ export function RoutinesList({
                   blocked={blocked}
                   botName={bots.get(row.agentId)?.name ?? "A Bot"}
                   label="Check-in"
+                  seed={bots.get(row.agentId)?.avatarSeed ?? ""}
                   setting={row.checkIn}
                   showBot={showBot}
                 />

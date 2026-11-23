@@ -88,8 +88,9 @@ to it, so moving a skin to the current kit stays a change to `skins/kit.ts` and 
 `PageShell` takes a `width`: `prose` (`max-w-page`, Figma's 700px column plus the 16px gutter) is the default, and every
 configuration screen uses it so no screen is wider than another. Sentences inside it are held to
 `max-w-prose`, so the column has room for a label beside its control without stretching the text.
-`wide` (`max-w-5xl`) exists for one screen — `admin/audit.tsx`, because an audit log is a table to be
-scanned and prose width would wrap every row. It is not a licence for anything else to be wide.
+`full` exists for one screen — the audit log (`components/manage/audit-page.tsx`, Settings → Activity and Admin's), because it is a table to be scanned and prose width would wrap every row. The page is the window's height and only the rows scroll. In the current kit it stands 44px inside the pane on every side, as Figma's Activity does, so the table is a card; the legacy kit keeps it against the pane's edges. It is not a licence for anything else to be wide.
+
+`wide` exists for one screen too, the components gallery, which the designers asked for in three columns: in the current kit it reaches across the pane 44px in on each side as `full` does, but scrolls as a column does, and its grid goes from two columns to three once the page is 768px wide (a container query, `@container` on the page). The legacy kit draws it as `prose`.
 
 ## The Rhythm
 
@@ -251,7 +252,7 @@ is actually on screen. The root was once 15px, and every constant taken from the
 - A width, ratio or scale needs a number in pixels → the Units section. Measure, do not assume.
 - Choosing a margin or gap between blocks → the Rhythm table. If the frame already gives it, set none.
 - The screen genuinely does not fit this shape → say so in the response and comment the reason in the
-  code. There are two accepted precedents: a table (`admin/audit.tsx`, `width="wide"`), and the
+  code. There are two accepted precedents: a table (the audit log, `width="full"`), and the
   Connections tiles (`connections.index.tsx`), a grid of separate `variant="outline"` cards, 56px
   tall and 12px apart, because apps are picked out by their mark rather than read down as a list.
 - The question is which states the screen renders while loading or failing → not this skill;
@@ -263,7 +264,7 @@ is actually on screen. The root was once 15px, and every constant taken from the
 |--------|---------------|------------|
 | A hand-written `rounded-card bg-card` div wrapping rows, or a `gap-*` between them | `PageRows` re-implemented, and it will drift from every other screen | Use `PageRows`, which draws the cards and the 2px between them |
 | A `<Separator />` added between rows on a new screen | The old one-card-with-dividers shape; `PageRows` hides it anyway | Leave it out |
-| `width="wide"` on anything that is not a table | Prose width is the default for a reason; wide was for the audit log | Leave `width` alone |
+| `width="full"` on anything that is not a table | Prose width is the default for a reason; full is for the audit log | Leave `width` alone |
 | A `max-w-*`, `p-*` or text size invented for one screen | A fifth container width, which is what this layout exists to stop | Reach for the existing component |
 | Children on an element passed to `Item`'s `render` | They replace the row's own children; the row draws empty | Pass a childless element |
 | `bg-card` on a row inside a dialog | `--card` equals `--popover`; the row is invisible | `variant="muted"` |

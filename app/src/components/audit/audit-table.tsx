@@ -1,6 +1,7 @@
 import {
   IconArrowDown,
   IconArrowUp,
+  IconChevronDown,
   IconCirclePlus,
   IconSearch,
 } from "@/components/icons";
@@ -249,7 +250,7 @@ export function AuditTable({
         </TableBody>
       </Table>
       {events.length > 0 && rows.length === 0 ? (
-        <div className="px-4">
+        <div className="px-4 kit:px-0">
           <PageEmpty icon={IconSearch} title="No matches">
             Nothing loaded matches this search and these filters.
           </PageEmpty>
@@ -284,7 +285,11 @@ function tally(
     .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
 }
 
-/** A dashed button that opens a list of a column's values to tick, as in a data table's toolbar. */
+/**
+ * A button that opens a list of a column's values to tick, as in a data table's toolbar. The legacy
+ * kit draws it dashed. The current kit draws Figma's: a white pill with a field's edge, ending on
+ * the kit's chevron, as the menu it opens is a field's choice.
+ */
 function Facet({
   title,
   options,
@@ -300,7 +305,11 @@ function Facet({
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button className="border-dashed" size="sm" variant="outline" />
+          <Button
+            className="border-dashed kit:border-field-border kit:border-solid kit:bg-card kit:hover:border-field-border-hover kit:hover:bg-card kit:aria-expanded:border-field-border-hover kit:aria-expanded:bg-card"
+            size="sm"
+            variant="outline"
+          />
         }
       >
         <IconCirclePlus />
@@ -312,6 +321,7 @@ function Facet({
               : `${selected.length} selected`}
           </span>
         ) : null}
+        <IconChevronDown className="hidden kit:block" data-icon="inline-end" />
       </DropdownMenuTrigger>
       <DropdownMenuContent className="min-w-52">
         {options.map((option) => (

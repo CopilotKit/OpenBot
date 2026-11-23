@@ -11,6 +11,7 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuditPage } from "@/components/manage/audit-page";
 import { agentKeys } from "@/lib/agents/queries";
+import { clearSkin, setSkin } from "@/skins/store";
 import { seedAuditPage } from "./seed-audit-page";
 
 /**
@@ -96,6 +97,24 @@ async function renderAudit() {
   await view.findByText("Decision");
   return view;
 }
+
+test("the views are the kit's Tabs, and the legacy kit's pressed buttons", async () => {
+  const current = await renderAudit();
+  expect(current.getByRole("tablist", { name: "View" })).toBeTruthy();
+  expect(
+    current
+      .getByRole("tab", { name: "Everything" })
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+  cleanup();
+  setSkin("openduet");
+  const legacy = await renderAudit();
+  const pressed = legacy
+    .getByRole("button", { name: "Everything" })
+    .getAttribute("aria-pressed");
+  clearSkin();
+  expect(pressed).toBe("true");
+});
 
 test("five columns, not seven: what it acted on sits under the action, and who started it under the Bot", async () => {
   const view = await renderAudit();

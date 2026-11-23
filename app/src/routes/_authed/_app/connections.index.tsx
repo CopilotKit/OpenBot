@@ -453,12 +453,13 @@ function RouteComponent() {
       /*
        * The page's one verb: an MCP server OpenBot doesn't list, added by its address. Its own screen,
        * because it takes a name, an address and sometimes a key (the layout skill's Procedure 5).
+       * The current kit's 40px primary, as New routine is drawn on its page (the designers' answer).
        */
       action={
         <Button
           render={(props) => <Link {...props} to="/connections/new" />}
-          size="sm"
-          variant="outline"
+          size={currentKit ? "lg" : "sm"}
+          variant={currentKit ? "default" : "outline"}
         >
           <IconPlus />
           Add server

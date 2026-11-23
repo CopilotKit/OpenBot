@@ -22,10 +22,12 @@ import {
   scheduleWords,
 } from "@/components/routines/routine-page";
 import { RoutinesList } from "@/components/routines/routines-list";
+import { orbPalette } from "@/lib/orb-palette";
 import { mergeRoutines } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { Route as BotGoalsRoute } from "@/routes/_authed/_app/bots.$agentId.responsibilities";
 import { Route as ResponsibilitiesRoute } from "@/routes/_authed/_app/responsibilities";
+import { clearSkin, setSkin } from "@/skins/store";
 import { answerBotsList } from "./bots-api";
 import { CONVERSATIONS_PATH, conversationPage } from "./conversations-api";
 import {
@@ -167,8 +169,8 @@ function serving({
     }
     const bots = answerBotsList(input, init, {
       visible: [
-        { id: "expenses", name: "Expenses" },
-        { id: "knowledge", name: "Knowledge" },
+        { id: "expenses", name: "Expenses", avatarSeed: "expenses" },
+        { id: "knowledge", name: "Knowledge", avatarSeed: "knowledge" },
       ],
     });
     if (bots) return bots;
@@ -540,6 +542,48 @@ test("every kind of row is one link or button with a chevron, with no control in
   }
   expect(view.queryByRole("switch")).toBeNull();
   expect(view.queryByRole("button", { name: /^Delete/ })).toBeNull();
+});
+
+test("in the current kit every kind of row leads with its Bot's tile, in the Bot's colours", async () => {
+  serving({
+    routines: [routine("r1", "expenses")],
+    checkIns: [checkIn("c1", "expenses", "The launch brief")],
+  });
+  const view = draw();
+  await view.findByText("Post the standup summary.");
+  const { c1 } = orbPalette("expenses");
+  for (const text of [
+    "Post the standup summary.",
+    "Reconcile receipts",
+    "The launch brief",
+  ]) {
+    const row = view.getByText(text).closest("a, button") as HTMLElement;
+    const tile = row.querySelector("[data-routine-tile] > span");
+    expect(tile?.getAttribute("style")).toContain(c1);
+    expect(row.querySelector("[data-variant=icon]")).toBeNull();
+  }
+});
+
+test("the legacy kit keeps the plain icon tile on every kind of row", async () => {
+  setSkin("openduet");
+  serving({
+    routines: [routine("r1", "expenses")],
+    checkIns: [checkIn("c1", "expenses", "The launch brief")],
+  });
+  const view = draw();
+  await view.findByText("Post the standup summary.");
+  for (const text of [
+    "Post the standup summary.",
+    "Reconcile receipts",
+    "The launch brief",
+  ]) {
+    const row = view.getByText(text).closest("a, button") as HTMLElement;
+    expect(row.querySelector("[data-routine-tile]")).toBeNull();
+    expect(
+      row.querySelector("[data-slot=item-media][data-variant=icon]"),
+    ).not.toBeNull();
+  }
+  clearSkin();
 });
 
 test("a schedule's page pauses it, runs it, shows its runs and deletes it", async () => {
