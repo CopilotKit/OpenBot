@@ -382,8 +382,12 @@ function MembersSection({
                       {memberLine(member)}
                     </ItemDescription>
                   </ItemContent>
+                  {/*
+                   * A Role menu and a button are too much beside a name on a phone, so there they
+                   * take a line of their own under it, as on a team's people and Admin's People.
+                   */}
                   {control || roles.length > 0 ? (
-                    <ItemActions>
+                    <ItemActions className="max-sm:basis-full">
                       {roles.length > 0 ? (
                         <DropdownMenu>
                           <DropdownMenuTrigger
