@@ -60,14 +60,14 @@ paths:
       description: >-
         Add an app in one of two ways. With from=directory, add an entry of
         listAppDirectory: a catalogue entry, with the instance host or vault
-        credential it needs, or an app from the wider directory. Only an
-        administrator may. With from=address, add a server by its HTTPS
-        address, and anybody signed in may. OpenBot asks the server how it is
-        reached first. It refuses an address the MCP allowlist doesn't
-        approve, a server that needs a key nobody gave, and an address already
-        added, naming that app in the problem's appId. Only an administrator
-        may give a server a key, because every Bot that uses the server uses
-        it. A server that signs each person in answers with signIn true, and
+        credential it needs, or an app from the wider directory. With
+        from=address, add a server by its HTTPS address. Either way only an
+        administrator may, because the app is added for everyone in the
+        organization; anybody else is answered 403 PERMISSION_DENIED. OpenBot
+        asks a server added by its address how it is reached first. It refuses
+        an address the MCP allowlist doesn't approve, a server that needs a key
+        nobody gave, and an address already added, naming that app in the
+        problem's appId. A server that signs each person in answers with signIn true, and
         each person then connects their own account. Answers 201 with the app.
         Adding a directory entry that is already added updates that app with
         what the request names, and answers it the same way. A repeated
