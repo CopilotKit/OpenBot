@@ -307,6 +307,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- The composer's model picker names every model whole. On a phone, OpenBot's own model beside its
+  Default tag was cut to "GPT-6…"; a long name now takes a second line.
 - **After a move to OpenBot Cloud you can tell where everything went.** OpenBot Desktop stays on the
   move's screens until you move or keep OpenBot here: coming back to the window from the Dock while
   OpenBot got ready for the move used to show the OpenBot on this computer instead, and the move
