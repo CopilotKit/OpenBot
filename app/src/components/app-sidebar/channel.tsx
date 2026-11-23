@@ -44,6 +44,7 @@ export const Channel = memo(function Channel({
   emphasis,
   view = "detailed",
   avatar = true,
+  "data-slot": slot,
 }: {
   channelId: string;
   participantIds: string[];
@@ -63,6 +64,8 @@ export const Channel = memo(function Channel({
   view?: ConversationView;
   /** False under its Bot in the Bots panel: see `ChannelItemContent`. */
   avatar?: boolean;
+  /** Names the row's link for tests, as under its Bot in the Bots panel. Draws nothing. */
+  "data-slot"?: string;
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -101,6 +104,7 @@ export const Channel = memo(function Channel({
                 : "/channel/$channelId"
             }
             params={{ channelId }}
+            data-slot={slot}
             type="button"
             className={cn(
               "flex flex-row px-2.5 gap-2 items-center w-full hover:bg-foreground/5 rounded-lg [content-visibility:auto]",

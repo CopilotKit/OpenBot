@@ -49,14 +49,31 @@ const FEATURE_ICONS: Record<BusinessFeatureIcon, Icon> = {
  *
  * A calendar that can't load (offline, blocked, silent) gives way to Book a demo, which opens the
  * OpenBot for Business page in the person's browser, as the app's does on the Desktop.
+ *
+ * The calendar sits below the lists, past the bottom of the setup window, and the card scrolls to
+ * it. Book a demo under the first line takes the person there, so the way to book is in view the
+ * moment OpenBot for Business is picked: its heading comes to the top of the card and takes the
+ * focus, and the calendar follows it.
  */
 export function BusinessBooker() {
   const [failed, setFailed] = useState(false);
+  const booking = useRef<HTMLHeadingElement>(null);
+  const toBooking = () => {
+    const heading = booking.current;
+    if (!heading) return;
+    heading.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    heading.focus({ preventScroll: true });
+  };
   return (
     <section className="business-booker" aria-labelledby="business-deploy">
       <p id="business-deploy" className="business-deploy">
         {DEPLOY_LINE}
       </p>
+      <div className="business-book">
+        <button type="button" onClick={toBooking}>
+          Book a demo
+        </button>
+      </div>
       {BUSINESS_FEATURE_GROUPS.map((group) => (
         <section className="business-group" key={group.title}>
           <h3>{group.title}</h3>
@@ -77,7 +94,9 @@ export function BusinessBooker() {
       ))}
       <p className="business-more">{BUSINESS_FEATURES_MORE}</p>
       <section className="book-a-demo" aria-labelledby="book-a-demo-title">
-        <h2 id="book-a-demo-title">Book a demo</h2>
+        <h2 id="book-a-demo-title" ref={booking} tabIndex={-1}>
+          Book a demo
+        </h2>
         <p className="book-a-demo-line">{BOOK_A_DEMO_LINE}</p>
         {failed ? (
           <div className="book-a-demo-fallback">

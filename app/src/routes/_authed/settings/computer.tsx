@@ -74,7 +74,9 @@ function ComputerPage() {
       ) : (
         <>
           <ThisComputerSections />
-          {connection.canConnect ? <ConnectInsteadSection /> : null}
+          {connection.canConnect ? (
+            <ConnectInsteadSection moveToCloud={connection.moveToCloud} />
+          ) : null}
         </>
       )}
       <BrowserSections />

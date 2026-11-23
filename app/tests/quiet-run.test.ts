@@ -136,7 +136,7 @@ test("a run that keeps speaking is never asked about, and nothing is asked once 
   expect(asked).toBe(0);
 });
 
-test("between a turn's runs, with the turn in this browser's hands, nothing is asked until the next run speaks", async () => {
+test("between a turn's runs, with the turn in this browser's hands, no run going is not the end", async () => {
   let asked = 0;
   let settled: string | undefined;
   const watch = watchQuietRun({
@@ -149,15 +149,30 @@ test("between a turn's runs, with the turn in this browser's hands, nothing is a
   void watch.over.then((outcome) => {
     settled = outcome;
   });
-  // The server's run ended on a step the browser takes: quiet here is not a run gone missing.
+  // The server's run ended on a step the browser takes: quiet here is not a run gone missing, and
+  // a server that says it has no run going is still there to take the step.
   watch.rest();
   await later(90);
-  expect(asked).toBe(0);
+  expect(asked).toBeGreaterThan(0);
   expect(settled).toBeUndefined();
   // The next run speaks, then goes quiet for good.
   watch.heard();
   expect(await watch.over).toBe("over");
-  expect(asked).toBe(1);
+});
+
+/*
+ * FOUND ON A PERSON'S 1.1.2 DESKTOP. The server stopped in the middle of a long turn of file saves,
+ * while the browser was taking a save itself, and Docker started it again. Resting, the watch asked
+ * nothing, so the turn sat on "Thinking" for good with the person's next message queued behind it.
+ */
+test("a server that stops answering while the browser takes a step ends the turn", async () => {
+  const answers: RunLiveness[] = ["over", "unreachable"];
+  const watch = watchQuietRun({
+    quietMs: 20,
+    ask: async () => answers.shift() ?? "unreachable",
+  });
+  watch.rest();
+  expect(await watch.over).toBe("unreachable");
 });
 
 test("an answer about a run that spoke while the runtime was being asked is not taken", async () => {

@@ -14,7 +14,13 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { setCurrentOrganization } from "@/lib/organizations/current";
 import { queryClient } from "@/query-client";
 import { settleReactWork } from "./settle-react-work";
@@ -83,15 +89,25 @@ function json(status: number, body: unknown) {
 
 /** What a write answers next, when a test wants it refused. */
 let writeAnswer: { status: number; body: unknown } | null;
+/** The edition getDeployment says: the team edition unless a test says otherwise. */
+let edition: "team" | "personal" = "team";
+/** Every getManagementEnrollment the app made. */
+let reads = 0;
+const DEPLOYMENT = "/api/v2/organizations/default/deployment";
 
 function serving() {
   writes.length = 0;
   writeAnswer = null;
+  edition = "team";
+  reads = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const method = init?.method ?? "GET";
-    if (path === MANAGEMENT && method === "GET")
+    if (path === DEPLOYMENT && method === "GET") return json(200, { edition });
+    if (path === MANAGEMENT && method === "GET") {
+      reads += 1;
       return json(answer.status, answer.body);
+    }
     if (path === ENROLLMENT && (method === "POST" || method === "DELETE")) {
       writes.push({
         method,
@@ -509,4 +525,276 @@ test("a Connect refused for the licence shows the not-in-your-licence state at o
   };
   expect(await view.findByText("Not in your licence")).toBeTruthy();
   expect(view.queryByRole("button", { name: "Connect" })).toBeNull();
+});
+
+/*
+ * On by default: where OpenBot's chart installs the management agent, OpenBot connects by itself by
+ * its licence, and an admin's Disconnect turns managed updates off until Connect.
+ */
+const CHART_CONNECTED = {
+  state: "connected",
+  agentInstalledByChart: true,
+  installId: "6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d",
+  lastHeartbeatAt: new Date(Date.now() - 20_000).toISOString(),
+  agentVersion: "0.5.0",
+  window: { weekday: 2, startUtc: "14:00", hours: 4 },
+  upgrades: "not-set-up",
+};
+
+test("connecting by itself says so, with what CopilotKit gets, and Stop asks first", async () => {
+  answer = {
+    status: 200,
+    body: { state: "connecting", agentInstalledByChart: true },
+  };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Connecting")).toBeTruthy();
+  const connecting = view.getByText(
+    /CopilotKit sees this install's version/,
+  ).textContent;
+  // The consent and window sentences, then one short line on what is happening.
+  expect(connecting).toBe(
+    "CopilotKit sees this install's version and health, and upgrades it during a maintenance window. The window is agreed with CopilotKit; the default is Tuesdays, 14:00 to 18:00 UTC. OpenBot is connecting with its licence. This page updates itself.",
+  );
+  // Nothing to approve and nothing to install.
+  expect(view.queryByText(/approve/i)).toBeNull();
+  expect(view.queryByText(/helm install/)).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: "Stop" }));
+  expect(await view.findByText("Stop connecting?")).toBeTruthy();
+  expect(view.getByText(/doesn't try again by itself/).textContent).toContain(
+    "Connect turns managed updates back on.",
+  );
+  expect(writes).toHaveLength(0);
+  answer = {
+    status: 200,
+    body: { state: "opted-out", agentInstalledByChart: true },
+  };
+  fireEvent.click(view.getByRole("button", { name: "Stop connecting" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ method: "DELETE", path: ENROLLMENT });
+  expect(await view.findByText("Turned off")).toBeTruthy();
+});
+
+test("connected with the chart's agent says whether upgrades are set up, and links to how", async () => {
+  answer = { status: 200, body: CHART_CONNECTED };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Upgrades")).toBeTruthy();
+  expect(view.getByText("Not set up")).toBeTruthy();
+  const how = view.getByRole("link", { name: "How to set up upgrades" });
+  expect(how.getAttribute("href")).toBe(
+    "https://github.com/CopilotKit/OpenBot/blob/main/docs/managed-upgrades.md",
+  );
+  // On the Upgrades row itself, not a second line under the card.
+  expect(how.closest("[data-slot=item]")?.textContent).toContain("Upgrades");
+  expect(
+    view.getByText(/Needs a one-time setup in the cluster\./),
+  ).toBeTruthy();
+  // The section is named for what it does; only its button says Disconnect.
+  expect(view.getByText("Turn off managed updates")).toBeTruthy();
+  expect(
+    view.getByText(
+      "Managed updates stop, and you upgrade OpenBot yourself. Connect turns them back on.",
+    ),
+  ).toBeTruthy();
+  // The chart's agent: no uninstall command to run before Disconnect.
+  expect(view.queryByText(/helm uninstall/)).toBeNull();
+
+  queryClient.clear();
+  cleanup();
+  answer = { status: 200, body: { ...CHART_CONNECTED, upgrades: "on" } };
+  const on = await draw(ManagementPage);
+  expect(await on.findByText("On")).toBeTruthy();
+  expect(on.queryByRole("link", { name: "How to set up upgrades" })).toBeNull();
+});
+
+test("Disconnect of the chart's agent asks first, says Connect turns them back on, and lands on Turned off", async () => {
+  answer = { status: 200, body: CHART_CONNECTED };
+  const view = await draw(ManagementPage);
+  await view.findByText("Upgrades");
+  fireEvent.click(view.getByRole("button", { name: "Disconnect" }));
+  expect(await view.findByText("Disconnect managed updates?")).toBeTruthy();
+  expect(
+    view.getByText(/OpenBot stops getting managed updates/).textContent,
+  ).toBe(
+    "OpenBot stops getting managed updates, and you upgrade it yourself. Connect turns them back on.",
+  );
+  answer = {
+    status: 200,
+    body: { state: "opted-out", agentInstalledByChart: true },
+  };
+  fireEvent.click(
+    within(view.getByRole("dialog")).getByRole("button", {
+      name: "Disconnect",
+    }),
+  );
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ method: "DELETE", path: ENROLLMENT });
+  expect(await view.findByText("Turned off")).toBeTruthy();
+});
+
+/*
+ * Management turned off with Helm (`management.enabled=false`) after the chart's agent connected:
+ * that upgrade removed the agent along with OpenBot's own release, so there is no `openbot-agent`
+ * release, and `helm uninstall openbot-agent` would fail. The server says so with
+ * agentRemovedWithChart, and Disconnect finishes on its own.
+ */
+const REMOVED_WITH_CHART = {
+  ...CHART_CONNECTED,
+  agentInstalledByChart: false,
+  agentRemovedWithChart: true,
+};
+
+test("after management is turned off with Helm, the chart's agent is gone with OpenBot's release: no uninstall command, Disconnect finishes", async () => {
+  answer = { status: 200, body: REMOVED_WITH_CHART };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Upgrades")).toBeTruthy();
+  // Never a command that fails: there is no openbot-agent release to uninstall.
+  expect(view.queryByText(/helm uninstall/)).toBeNull();
+  expect(
+    view.queryByRole("button", { name: "Copy the uninstall command" }),
+  ).toBeNull();
+  expect(
+    view.getByText(/Turning management off with Helm removed/).textContent,
+  ).toBe(
+    "Turning management off with Helm removed the management agent along with OpenBot's own release, so there is nothing to uninstall. Choose Disconnect to finish. OpenBot keeps running as it is, and you upgrade it yourself from then on.",
+  );
+  fireEvent.click(view.getByRole("button", { name: "Disconnect" }));
+  expect(await view.findByText("Disconnect managed updates?")).toBeTruthy();
+  // The chart no longer installs the agent, so coming back is the approval flow.
+  expect(
+    view.getByText(/OpenBot stops getting managed updates/).textContent,
+  ).toBe(
+    "OpenBot stops getting managed updates, and you upgrade it yourself. Connecting again needs a new code and a new approval.",
+  );
+  answer = { status: 200, body: { state: "not-connected" } };
+  fireEvent.click(
+    within(view.getByRole("dialog")).getByRole("button", {
+      name: "Disconnect",
+    }),
+  );
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ method: "DELETE", path: ENROLLMENT });
+  expect(await view.findByText("Not connected")).toBeTruthy();
+});
+
+test("turned off offers Connect, which turns managed updates back on", async () => {
+  answer = {
+    status: 200,
+    body: { state: "opted-out", agentInstalledByChart: true },
+  };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Turned off")).toBeTruthy();
+  expect(view.getByText(/Managed updates are off/).textContent).toBe(
+    "Managed updates are off, so OpenBot doesn't connect by itself. Connect to turn them back on. CopilotKit sees this install's version and health, and upgrades it during a maintenance window. The window is agreed with CopilotKit; the default is Tuesdays, 14:00 to 18:00 UTC.",
+  );
+  fireEvent.click(view.getByRole("button", { name: "Connect" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ method: "POST", path: ENROLLMENT });
+});
+
+test("not connected with the chart's agent says OpenBot connects by itself, with no code to approve", async () => {
+  answer = {
+    status: 200,
+    body: {
+      state: "not-connected",
+      agentInstalledByChart: true,
+      lastError:
+        "Couldn't reach the managed updates service at enroll.bot.copilotkit.ai. Check that OpenBot can reach it, then try again.",
+      lastErrorCode: "unreachable",
+    },
+  };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Not connected")).toBeTruthy();
+  expect(view.getByRole("alert").textContent).toContain(
+    "Couldn't reach the managed updates service",
+  );
+  // Under the server's error, an instruction, never a claim that it connects by itself.
+  expect(view.getByText(/tries again every hour/).textContent).toContain(
+    "OpenBot tries again every hour. Connect to try now.",
+  );
+  expect(view.queryByText(/connects by itself/)).toBeNull();
+  expect(view.queryByText(/approve a code/)).toBeNull();
+  expect(view.getByRole("button", { name: "Connect" })).toBeTruthy();
+});
+
+test("on the personal edition Admin never asks for managed updates, so no request of it fails", async () => {
+  edition = "personal";
+  answer = problem(
+    404,
+    "MANAGEMENT_UNAVAILABLE",
+    "Managed updates aren't available for this OpenBot.",
+  );
+  const rail = await draw(Rail);
+  expect(await rail.findByText("Identity providers")).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      queryClient.getQueryState(["deployment", "capabilities"])?.status,
+    ).toBe("success"),
+  );
+  expect(rail.queryByText("Managed updates")).toBeNull();
+  cleanup();
+  const page = await draw(ManagementPage);
+  expect(await page.findByText("Not available here")).toBeTruthy();
+  expect(reads).toBe(0);
+});
+
+test("on the team edition Admin asks, and lists it where it applies", async () => {
+  edition = "team";
+  const view = await draw(Rail);
+  expect(await view.findByText("Managed updates")).toBeTruthy();
+  expect(reads).toBeGreaterThan(0);
+});
+
+/*
+ * A server from before connecting by licence answers only the four states of the approval flow, and
+ * neither agentInstalledByChart nor upgrades. The screen is the approval flow, whole.
+ */
+test("a server that doesn't say agentInstalledByChart or upgrades gets the approval flow, with no empty rows", async () => {
+  answer = { status: 200, body: { state: "not-connected" } };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Not connected")).toBeTruthy();
+  expect(view.getByText(/approve a code/)).toBeTruthy();
+  expect(view.queryByText(/every hour|by itself|with its licence/)).toBeNull();
+  expect(view.queryByRole("alert")).toBeNull();
+
+  queryClient.clear();
+  cleanup();
+  answer = {
+    status: 200,
+    body: {
+      state: "connected",
+      installId: "6f1d2c3b-8a4e-4b5f-9c7d-0e1f2a3b4c5d",
+      lastHeartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+      agentVersion: "0.4.0",
+      window: { weekday: 2, startUtc: "14:00", hours: 4 },
+    },
+  };
+  const connected = await draw(ManagementPage);
+  expect(await connected.findByText("Connected")).toBeTruthy();
+  const rows = [...document.querySelectorAll("[data-slot=item]")];
+  expect(
+    rows.map((row) => row.querySelector("[data-slot=item-title]")?.textContent),
+  ).toEqual([
+    "Status",
+    "Last heartbeat",
+    "Agent version",
+    "Maintenance window",
+    "Install ID",
+  ]);
+  for (const row of rows)
+    expect(row.querySelector("[data-slot=item-actions]")?.textContent).not.toBe(
+      "",
+    );
+  expect(connected.queryByText("Upgrades")).toBeNull();
+  expect(
+    connected.queryByRole("link", { name: "How to set up upgrades" }),
+  ).toBeNull();
+  // The agent installed by hand: uninstall with Helm first, under the section from before.
+  expect(
+    connected.getByText(
+      "helm uninstall openbot-agent --namespace openbot-system",
+    ),
+  ).toBeTruthy();
+  expect(connected.getByText("Disconnect", { selector: "h2,h3" })).toBeTruthy();
+  expect(connected.queryByText("Turn off managed updates")).toBeNull();
+  expect(connected.queryByRole("alert")).toBeNull();
 });

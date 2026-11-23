@@ -5,6 +5,7 @@ import { HttpResponse, http } from "msw";
 import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
 import type {
+  AcceptServiceTermsRequest,
   AdvanceOnboardingRequest,
   CompanySignIn,
   CompanySignInTicket,
@@ -14,6 +15,7 @@ import type {
   PersonPage,
   PersonResponse,
   Preferences,
+  ServiceTerms,
   StandingInstructions,
   UpdatePersonRequest,
   UpdatePreferencesRequest,
@@ -122,6 +124,26 @@ export const getAdvanceOnboardingResponseMock = (): OnboardingResponse => ({
 
 export const getCompleteOnboardingResponseMock = (): OnboardingResponse => ({
   onboarding: { step: 3, completedAt: "2026-11-14T09:30:00.000Z" },
+});
+
+export const getGetServiceTermsResponseMock = (): ServiceTerms => ({
+  current: {
+    version: "2026-11-21",
+    termsOfServiceUrl: "https://open.bot/legal/terms",
+    acceptableUseUrl: "https://open.bot/legal/acceptable-use",
+  },
+  accepted: null,
+  acceptanceNeeded: true,
+});
+
+export const getAcceptServiceTermsResponseMock = (): ServiceTerms => ({
+  current: {
+    version: "2026-11-21",
+    termsOfServiceUrl: "https://open.bot/legal/terms",
+    acceptableUseUrl: "https://open.bot/legal/acceptable-use",
+  },
+  accepted: { version: "2026-11-21", acceptedAt: "2026-11-21T18:04:00.000Z" },
+  acceptanceNeeded: false,
 });
 
 export const getGetStandingInstructionsResponseMock =
@@ -395,6 +417,75 @@ export const getCompleteOnboardingMockHandler = (
   );
 };
 
+export const getGetServiceTermsMockHandler = (
+  overrideResponse?:
+    | ServiceTerms
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; personId: string }>
+        >[0],
+      ) => Promise<ServiceTerms> | ServiceTerms),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string; personId: string }>(
+    "*/api/v2/organizations/:organizationId/people/:personId/terms",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; personId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetServiceTermsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getAcceptServiceTermsMockHandler = (
+  overrideResponse?:
+    | ServiceTerms
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; personId: string },
+            AcceptServiceTermsRequest
+          >
+        >[0],
+      ) => Promise<ServiceTerms> | ServiceTerms),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<
+    { organizationId: string; personId: string },
+    AcceptServiceTermsRequest
+  >(
+    "*/api/v2/organizations/:organizationId/people/:personId/terms/accept",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; personId: string },
+          AcceptServiceTermsRequest
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getAcceptServiceTermsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
 export const getGetStandingInstructionsMockHandler = (
   overrideResponse?:
     | StandingInstructions
@@ -609,6 +700,8 @@ export const getPeopleMock = () => [
   getRestorePersonAccessMockHandler(),
   getAdvanceOnboardingMockHandler(),
   getCompleteOnboardingMockHandler(),
+  getGetServiceTermsMockHandler(),
+  getAcceptServiceTermsMockHandler(),
   getGetStandingInstructionsMockHandler(),
   getUpdateStandingInstructionsMockHandler(),
   getGetPreferencesMockHandler(),

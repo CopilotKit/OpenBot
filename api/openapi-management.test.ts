@@ -74,6 +74,8 @@ test("the state is an open list a later server can add to", () => {
       "waiting-for-approval",
       "waiting-for-agent",
       "connected",
+      "connecting",
+      "opted-out",
     ],
   });
 });
@@ -93,6 +95,29 @@ test("the answer can carry the install's name and its maintenance window, and th
     expect.arrayContaining(["installName", "window", "lastErrorCode"]),
   );
   expect(properties.lastErrorCode).toMatchObject({
-    "x-extensible-enum": ["not-entitled"],
+    "x-extensible-enum": expect.arrayContaining(["not-entitled"]),
   });
+});
+
+test("connecting by licence: the answer says whether the chart installed the agent, and why the service refused", () => {
+  // A team OpenBot whose chart installs the agent connects by itself; the screen needs to know
+  // whether the agent is the chart's (no Helm command, Disconnect at once) and why a try failed.
+  const properties =
+    spec.components.schemas.ManagementEnrollment?.properties ?? {};
+  expect(properties.agentInstalledByChart).toMatchObject({ type: "boolean" });
+  expect(properties.upgrades).toMatchObject({
+    "x-extensible-enum": ["on", "not-set-up"],
+  });
+  expect(properties.lastErrorCode).toMatchObject({
+    "x-extensible-enum": ["not-entitled", "invalid-licence", "unreachable"],
+  });
+});
+
+test("the answer says when the chart's agent went with OpenBot's release, so there is no Helm release to uninstall", () => {
+  // Turning management off with Helm removes the agent the chart installed along with OpenBot's own
+  // release. The screen must not then ask for `helm uninstall openbot-agent`, which has no release
+  // to remove, while an agent installed as its own release still needs exactly that.
+  const properties =
+    spec.components.schemas.ManagementEnrollment?.properties ?? {};
+  expect(properties.agentRemovedWithChart).toMatchObject({ type: "boolean" });
 });

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckForUpdates } from "./CheckForUpdates";
+import { cloudEnabled } from "./CloudSignIn";
 import { CopilotKitAccount } from "./CopilotKitAccount";
 import {
   EarlyDownloadsLine,
@@ -30,6 +31,13 @@ import {
   resourcesShortSaid,
   updateRoomShort,
 } from "./localReadiness";
+import {
+  askMoveOffer,
+  type MoveHere,
+  type MoveOffer,
+  MoveToCloud,
+  moveOffered,
+} from "./MoveToCloud";
 import { PausePodman, PodmanGoAhead } from "./PodmanGoAhead";
 import { asProblem, Failure, InlineFailure, type Problem } from "./Problem";
 import {
@@ -331,6 +339,24 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   // Running-screen actions that wait on the native side, said while they do.
   const [stopping, setStopping] = useState(false);
   const [showing, setShowing] = useState(false);
+  /*
+   * The move to OpenBot Cloud, offered to a person who never answered, or asked for from Settings.
+   * Asked once per page; shown, it takes the window until the person keeps OpenBot here or moves
+   * (`MoveToCloud`).
+   *
+   * A launch that would start OpenBot asks it first, before anything starts or updates: OpenBot
+   * Cloud is the default, and a dogfooding report had three minutes of "Updating OpenBot
+   * (Self-Contained)" before the question. What moves is read from the OpenBot here, so it starts
+   * (and updates) only once the person picks OpenBot Cloud, under the move's own screen
+   * (`moveHere`). Keep starts it as this launch would have. Otherwise it is asked where this window
+   * would hand itself to the OpenBot running here.
+   */
+  const moveAsked = useRef<Promise<MoveOffer | null> | null>(null);
+  const [moveShown, setMoveShown] = useState<MoveOffer | null>(null);
+  // The OpenBot here, when the move was offered before it started. Unset: offered over it running.
+  const [moveHere, setMoveHere] = useState<MoveHere | undefined>(undefined);
+  // This Start is the move's: once OpenBot is up, the move's screens stay, and it doesn't show.
+  const startingForMove = useRef(false);
   // Start could not move the deployment to this app's release, and started the one it had.
   const [releaseNotice, setReleaseNotice] = useState<Problem | null>(null);
   // The back end is ready on the release it had, and its update did not finish.
@@ -611,6 +637,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   // A launch after the restart Windows needed, with Windows ready: the install asked for goes on.
   const [installAskedFor, setInstallAskedFor] = useState(false);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once per launch; `handOver` reads only refs and setters.
   useEffect(() => {
     let active = true;
     // A restart still owed comes first: a feature switched on reads as on before it runs. Only a
@@ -745,7 +772,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         ) {
           // Already up from a previous window: show it, rather than a screen about it.
           try {
-            await invoke("show_openbot");
+            await handOver();
           } catch (error) {
             /*
              * Up, and needing a newer version of this app: the shell holds it as this session's
@@ -759,6 +786,28 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
           }
           setRunning(true);
           return;
+        }
+        /*
+         * Set up and started here before, and able to start again: the move to OpenBot Cloud, when
+         * it is due, is asked now, before anything starts or updates. Whether this launch then
+         * starts OpenBot by itself is decided below as ever, and waits for the answer (`localAuto`).
+         */
+        if (
+          canResume &&
+          configured?.launch &&
+          configured.localEval &&
+          resumedModel &&
+          !changeAiConnection
+        ) {
+          moveAsked.current ??= askMoveOffer(cloudEnabled());
+          const offer = await moveAsked.current;
+          if (!active) return;
+          if (moveOffered(offer)) {
+            // Once per page: from here the person keeps OpenBot here or moves.
+            moveAsked.current = Promise.resolve(null);
+            setMoveHere({ at: "stopped" });
+            setMoveShown(offer);
+          }
         }
         if (
           !active ||
@@ -818,12 +867,25 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     ]);
     setPreparation({ key: installationKey, status: "preparing" });
     try {
-      await invoke("prepare_installation", {
-        root: root.trim(),
-        harness: nextHarness,
-      });
+      // The Bot it installed, which is the one asked for unless the folder's release does not
+      // include that one (`harness::the_release_includes`): Start then asks for what is there.
+      const installed = await invoke<HarnessChoice | null | undefined>(
+        "prepare_installation",
+        {
+          root: root.trim(),
+          harness: nextHarness,
+        },
+      );
       setSteps((current) => settleProgress(current));
-      setPreparation({ key: installationKey, status: "complete" });
+      if (installed?.id && installed.id !== nextHarness?.id) {
+        setHarness(installed);
+        setPreparation({
+          key: installationKeyFor(root, installed),
+          status: "complete",
+        });
+      } else {
+        setPreparation({ key: installationKey, status: "complete" });
+      }
       return true;
     } catch (error) {
       const problem = asProblem(error);
@@ -995,12 +1057,24 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         setSteps([]);
         setReleaseNotice(outcome?.notice ?? null);
         setBackEndNotice(intelligence.notice ?? null);
+        if (startingForMove.current) setMoveHere({ at: "up" });
+        return "started";
+      }
+      // Started for the move: its screens stay, and read what moves from the OpenBot now up.
+      if (startingForMove.current) {
+        setSteps((current) => settleProgress(current));
+        setMoveHere({ at: "up" });
         return "started";
       }
       // Straight from Starting to OpenBot, after an update as after any Start: the running screen
       // only if this page is still here once OpenBot's page had time to replace it (`handover.ts`).
       setHandingOver({ returning: returnedTo });
-      await invoke("show_openbot");
+      if (!(await handOver())) {
+        // The move to OpenBot Cloud is offered first, over the running OpenBot.
+        setHandingOver(null);
+        setSteps((current) => settleProgress(current));
+        return "started";
+      }
       if (handoverHeld.current !== null) clearTimeout(handoverHeld.current);
       handoverHeld.current = setTimeout(() => {
         handoverHeld.current = null;
@@ -1011,6 +1085,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     } catch (error) {
       setHandingOver(null);
       recoverFromStart(error);
+      // Said on the move's screen, with Try again, and Keep carries on here as it would have.
+      if (startingForMove.current)
+        setMoveHere({ at: "failed", problem: asProblem(error) });
       // Refused until OpenBot is installed again, which the window now does by itself and then
       // starts. Only once: refused again straight after that install, it is a failure.
       return asProblem(error).connection === "installation" &&
@@ -1139,13 +1216,71 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   async function showOpenBot() {
     setShowing(true);
     try {
-      await invoke("show_openbot");
+      await handOver();
     } catch (error) {
       recoverFromStart(error);
     } finally {
       setShowing(false);
     }
   }
+
+  /**
+   * The window to the OpenBot running here (`show_openbot`), unless the move to OpenBot Cloud is
+   * offered first: then its screens show instead, and this answers false. The shell is told whether
+   * this build offers OpenBot Cloud, and says the move is due only where it does.
+   */
+  async function handOver(): Promise<boolean> {
+    moveAsked.current ??= askMoveOffer(cloudEnabled());
+    const offer = await moveAsked.current;
+    if (moveOffered(offer)) {
+      // Once per page: from here the person keeps OpenBot here or moves.
+      moveAsked.current = Promise.resolve(null);
+      setMoveShown(offer);
+      return false;
+    }
+    await invoke("show_openbot");
+    return true;
+  }
+
+  /**
+   * Keep OpenBot on this computer, from the move's screens: recorded by them, then shown. Offered
+   * before OpenBot started, it starts as this launch would have, its update included (`localAuto`),
+   * and one already starting for the move carries on and opens OpenBot as any Start does.
+   */
+  async function keepHere() {
+    startingForMove.current = false;
+    setMoveShown(null);
+    setMoveHere(undefined);
+    if (running) await showOpenBot();
+  }
+
+  /** OpenBot Cloud picked over an OpenBot not yet started: it starts for the move to read it. */
+  function getReadyToMove() {
+    startingForMove.current = true;
+    setMoveHere({ at: "starting" });
+    setFailure(null);
+    setRecoveryFailure(null);
+    setSteps([]);
+    if (local.stopped) local.retry();
+    else local.start();
+  }
+
+  // The start for the move stopped before OpenBot's own (the backend, or this computer): said on
+  // the move's screen, as Start's own failure is.
+  useEffect(() => {
+    if (!startingForMove.current || !local.stopped) return;
+    // A Start that failed has said why already, in its own words.
+    setMoveHere((now) =>
+      now?.at === "failed"
+        ? now
+        : {
+            at: "failed",
+            problem: local.problem ?? {
+              said: local.blocked?.said ?? "OpenBot didn't start. Try again.",
+            },
+          },
+    );
+  }, [local.stopped, local.problem, local.blocked]);
 
   /*
    * Starts local Intelligence without a click: a recorded stack on a first run that was not
@@ -1156,6 +1291,8 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
     !checkingResume &&
     !running &&
     !choosing &&
+    // The move to OpenBot Cloud is answered first: nothing starts by itself while it is asked.
+    !moveShown &&
     step === "connect" &&
     modelCanStart() &&
     (resumingStart ||
@@ -1201,6 +1338,7 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   const startOnOffer =
     !running &&
     !choosing &&
+    !moveShown &&
     !blocker &&
     !blockerFailure &&
     !restartPending &&
@@ -1249,6 +1387,9 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   function installHere() {
     // The default Bot, recorded as a choice of it would be.
     recordSetupEvent(harnessChoiceEvent(DEFAULT_HARNESS));
+    // Chosen on the first screen in this version: the move to OpenBot Cloud is never offered.
+    // Best effort, and never in the install's way: an older shell has no such command.
+    invoke("keep_self_contained").catch(() => {});
     // The account is the first screen; OpenBot installs behind it meanwhile.
     setStep("account");
     void beginLocalInstall();
@@ -1293,6 +1434,18 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
   // Quit outranks every screen: the app is closing, whatever was on it.
   const quitting = useQuitStatus(false);
   if (quitting) return <ShuttingDown status={quitting} />;
+
+  if (moveShown)
+    return (
+      <main>
+        <MoveToCloud
+          offer={moveShown}
+          onKeep={keepHere}
+          here={moveHere}
+          onGetReady={getReadyToMove}
+        />
+      </main>
+    );
 
   // Nothing else on this screen can be done until the machine allows it, so nothing else is shown.
   if (blockerFailure) {

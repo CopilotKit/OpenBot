@@ -53,6 +53,7 @@ export function ConversationView({
   pending = false,
   autoFocus = false,
   stopped,
+  onCarryOn,
   working,
   stoppable,
   queueWhileBusy = false,
@@ -110,6 +111,8 @@ export function ConversationView({
   autoFocus?: boolean;
   /** Why the last turn ended without an answer. Drawn at the end of the transcript, not here. */
   stopped?: string;
+  /** Carry on with a turn that was cut off part way; a button beside `stopped`. */
+  onCarryOn?: () => void;
   /** Work the conversation waits on that is not this tab's run. Drawn at the end of the transcript. */
   working?: ReactNode;
   /**
@@ -545,6 +548,7 @@ export function ConversationView({
           queued={queued}
           restoring={restoring}
           {...(stopped ? { stopped } : {})}
+          {...(stopped && onCarryOn && !disabled ? { onCarryOn } : {})}
           working={working}
         />
       </div>

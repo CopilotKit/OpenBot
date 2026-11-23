@@ -27,6 +27,8 @@ import type {
   ComputerPageFrameAnswer,
   ComputerPageText,
   ComputerReset,
+  ComputerRestore,
+  ComputerRestoreRequest,
   ComputerScreenshot,
   ComputerScroll,
   ComputerSecretAsk,
@@ -38,6 +40,7 @@ import type {
   ComputerTarget,
   ComputerType,
   ComputerUpdated,
+  WorkspaceSnapshots,
 } from "../model";
 
 export const getListComputersResponseMock = (): ComputerPage => ({
@@ -88,6 +91,50 @@ export const getGetComputerResponseMock = (): ComputerStatus => ({
 export const getWakeComputerResponseMock = (): ComputerStatus => ({
   botId: "agent_9b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
   state: "ready",
+});
+
+export const getGetWorkspaceSnapshotsResponseMock = (): WorkspaceSnapshots => ({
+  computer: "person:user_2b8kq4",
+  available: true,
+  canRestore: true,
+  snapshots: [
+    {
+      id: "snap_20261121t1504z_9xq1",
+      takenAt: "2026-11-21T15:04:12Z",
+      kind: "before-restore",
+    },
+    {
+      id: "snap_20261121t0300z_4kq2",
+      takenAt: "2026-11-21T03:00:41Z",
+      kind: "daily",
+    },
+    {
+      id: "snap_20261120t0300z_7mn3",
+      takenAt: "2026-11-20T03:00:38Z",
+      kind: "daily",
+    },
+  ],
+  restore: {
+    id: "rst_5f2a9c",
+    snapshotId: "snap_20261120t0300z_7mn3",
+    snapshotTakenAt: "2026-11-20T03:00:38Z",
+    beforeSnapshotId: "snap_20261121t1504z_9xq1",
+    state: "done",
+    startedAt: "2026-11-21T15:04:10Z",
+    finishedAt: "2026-11-21T15:07:55Z",
+    error: null,
+  },
+});
+
+export const getRestoreComputerResponseMock = (): ComputerRestore => ({
+  id: "rst_5f2a9c",
+  snapshotId: "snap_20261120t0300z_7mn3",
+  snapshotTakenAt: "2026-11-20T03:00:38Z",
+  beforeSnapshotId: null,
+  state: "running",
+  startedAt: "2026-11-21T15:04:10Z",
+  finishedAt: null,
+  error: null,
 });
 
 export const getGetComputerScreenshotResponseMock = (): ComputerScreenshot => ({
@@ -422,6 +469,75 @@ export const getWakeComputerMockHandler = (
             : overrideResponse
           : getWakeComputerResponseMock(),
         { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getGetWorkspaceSnapshotsMockHandler = (
+  overrideResponse?:
+    | WorkspaceSnapshots
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; botId: string }>
+        >[0],
+      ) => Promise<WorkspaceSnapshots> | WorkspaceSnapshots),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string; botId: string }>(
+    "*/api/v2/organizations/:organizationId/computers/:botId/workspace-snapshots",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; botId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetWorkspaceSnapshotsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getRestoreComputerMockHandler = (
+  overrideResponse?:
+    | ComputerRestore
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; botId: string },
+            ComputerRestoreRequest
+          >
+        >[0],
+      ) => Promise<ComputerRestore> | ComputerRestore),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<
+    { organizationId: string; botId: string },
+    ComputerRestoreRequest
+  >(
+    "*/api/v2/organizations/:organizationId/computers/:botId/restore",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; botId: string },
+          ComputerRestoreRequest
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getRestoreComputerResponseMock(),
+        { status: 202 },
       );
     },
     options,
@@ -1199,6 +1315,8 @@ export const getComputersMock = () => [
   getUpdateComputerMockHandler(),
   getGetComputerMockHandler(),
   getWakeComputerMockHandler(),
+  getGetWorkspaceSnapshotsMockHandler(),
+  getRestoreComputerMockHandler(),
   getGetComputerScreenshotMockHandler(),
   getGetComputerPageFrameMockHandler(),
   getReadComputerPageMockHandler(),

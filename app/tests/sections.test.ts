@@ -9,6 +9,7 @@ import { sectionForPath, sectionHasPanel } from "@/lib/sections";
 const routes = [
   { id: "bots", to: "/bots" },
   { id: "routines", to: "/routines" },
+  { id: "connections", to: "/connections" },
 ] as const;
 
 test.each([
@@ -18,11 +19,14 @@ test.each([
   ["/bots", "bots"],
   ["/bots/x/activity", "bots"],
   ["/routines/r1", "routines"],
+  // The apps to reconnect after the move are Connections', loaded fresh or reloaded.
+  ["/reconnect", "connections"],
+  ["/reconnect/gmail", "connections"],
 ] as const)("%s belongs to %s", (pathname, section) => {
   expect(sectionForPath(pathname, routes)).toBe(section);
 });
 
-test.each(["/botsy", "/teams", "/channelled"])(
+test.each(["/botsy", "/teams", "/channelled", "/reconnecting"])(
   "%s belongs to no section",
   (pathname) => {
     expect(sectionForPath(pathname, routes)).toBeNull();

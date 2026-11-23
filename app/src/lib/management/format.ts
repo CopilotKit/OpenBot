@@ -6,6 +6,10 @@
 export const MANAGEMENT_SENTENCE =
   "OpenBot by CopilotKit upgrades this OpenBot for you, in your own cluster.";
 
+/** How to set up upgrades once the agent OpenBot's chart installs is connected (docs/managed-upgrades.md). */
+export const UPGRADES_SETUP_URL =
+  "https://github.com/CopilotKit/OpenBot/blob/main/docs/managed-upgrades.md";
+
 /** The Helm command with one flag per line and backslash line endings: it reads by hand and still pastes. */
 export function helmLines(command: string): string {
   return command.replace(/ (--?[a-z])/g, " \\\n  $1");

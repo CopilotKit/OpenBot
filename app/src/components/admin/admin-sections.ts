@@ -14,9 +14,13 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import type { LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { managePaths } from "@/lib/manage-paths";
 import { MANAGEMENT_SENTENCE } from "@/lib/management/format";
-import { managementQueryOptions } from "@/lib/management/queries";
+import {
+  asksForManagement,
+  managementQueryOptions,
+} from "@/lib/management/queries";
 import { primitive, VAULT } from "@/lib/primitives";
 
 export type AdminEntry = {
@@ -30,6 +34,9 @@ export type AdminEntry = {
 export type AdminSection = { title: string; items: AdminEntry[] };
 
 const team = managePaths("team");
+
+/** The Admin page where an organization sets up its own company sign-in. */
+export const IDENTITY_PROVIDERS_PATH = "/admin/identity-providers";
 
 /**
  * Admin's pages, grouped by the thing a Bot has that each one sets for everybody, in the fixed order
@@ -169,8 +176,11 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
         title: "Teams",
         description: "Put people in teams, and give a team its own Bots.",
         icon: IconUsersGroup,
-        /* Everybody's page, outside Admin: an admin does there what the server lets an admin do. */
-        linkOptions: { to: "/teams" },
+        /*
+         * The page everybody opens at /teams, drawn here in Admin's frame so Admin stays open. An
+         * admin does on it what the server lets an admin do, in either place.
+         */
+        linkOptions: { to: "/admin/teams" },
       },
       {
         title: "Permissions",
@@ -184,7 +194,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
         description:
           "Configure your company’s sign-in provider for each email domain, and require SSO.",
         icon: IconBuildingBank,
-        linkOptions: { to: "/admin/identity-providers" },
+        linkOptions: { to: IDENTITY_PROVIDERS_PATH },
       },
       {
         title: "Providers",
@@ -209,21 +219,44 @@ export const MANAGEMENT_ENTRY: AdminEntry = {
   linkOptions: { to: "/admin/management" },
 };
 
-/** Admin's pages, with Managed updates at the end of the organization's when it applies. */
-export function adminSections(management: boolean): readonly AdminSection[] {
-  if (!management) return ADMIN_SECTIONS;
-  return ADMIN_SECTIONS.map((section) =>
-    section.title === "Organization"
-      ? { ...section, items: [...section.items, MANAGEMENT_ENTRY] }
-      : section,
-  );
+/**
+ * Admin's pages, with Managed updates at the end of the organization's when it applies, and without
+ * Identity providers on OpenBot by CopilotKit (`hostedSignIn`): people sign in there with their
+ * CopilotKit account, so an organization has no identity provider of its own to set up.
+ */
+export function adminSections(
+  management: boolean,
+  hosted = false,
+): readonly AdminSection[] {
+  if (!management && !hosted) return ADMIN_SECTIONS;
+  return ADMIN_SECTIONS.map((section) => {
+    if (section.title !== "Organization") return section;
+    const items = hosted
+      ? section.items.filter(
+          (item) =>
+            (item.linkOptions as { to?: string }).to !==
+            IDENTITY_PROVIDERS_PATH,
+        )
+      : section.items;
+    return {
+      ...section,
+      items: management ? [...items, MANAGEMENT_ENTRY] : items,
+    };
+  });
 }
 
 /**
  * The sections the rail and the overview draw. Management is left out while its answer is loading
- * or failed, and wherever the server answers that it doesn't apply.
+ * or failed, and wherever the server answers that it doesn't apply. Identity providers is left out
+ * where the server says people sign in through OpenBot by CopilotKit; Admin's route has read that
+ * answer before any of its pages draws (`admin/route.tsx`).
  */
 export function useAdminSections(): readonly AdminSection[] {
-  const management = useQuery(managementQueryOptions());
-  return adminSections(management.data?.applies === true);
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  const asks = asksForManagement(capabilities);
+  const management = useQuery({ ...managementQueryOptions(), enabled: asks });
+  return adminSections(
+    asks && management.data?.applies === true,
+    capabilities.data?.hostedSignIn === true,
+  );
 }
