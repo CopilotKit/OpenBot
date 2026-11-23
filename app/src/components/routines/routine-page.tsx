@@ -110,7 +110,7 @@ export function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
   if (lastRun.status === "skipped")
     return {
       text: `Skipped ${when}`,
-      className: "text-amber-600 dark:text-amber-500",
+      className: "text-warning",
     };
   if (lastRun.status === "succeeded")
     return { text: `Ran ${when}`, className: "text-muted-foreground" };
@@ -131,7 +131,7 @@ function nextRunWords(routine: RoutineRecord): {
 } {
   if (!routine.enabled) return { text: "Paused" };
   if (new Date(routine.nextRunAt).getTime() <= Date.now())
-    return { text: "Due", className: "text-amber-600 dark:text-amber-500" };
+    return { text: "Due", className: "text-warning" };
   return { text: relativeTime(routine.nextRunAt) };
 }
 
@@ -142,10 +142,10 @@ const RUN_STATUS: Record<
   running: { text: "Running", className: "" },
   succeeded: {
     text: "Succeeded",
-    className: "text-emerald-600 dark:text-emerald-500",
+    className: "text-success",
   },
   failed: { text: "Failed", className: "text-destructive" },
-  skipped: { text: "Skipped", className: "text-amber-600 dark:text-amber-500" },
+  skipped: { text: "Skipped", className: "text-warning" },
   waiting: { text: "Waiting for you", className: "" },
 };
 

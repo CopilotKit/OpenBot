@@ -257,7 +257,7 @@ function HostRows({ hosts }: { hosts: NetworkReplayHost[] }) {
                   className={
                     block
                       ? "font-medium text-destructive text-sm"
-                      : "font-medium text-emerald-600 text-sm dark:text-emerald-400"
+                      : "font-medium text-success text-sm"
                   }
                 >
                   {block ? "Would block" : "Would allow"}

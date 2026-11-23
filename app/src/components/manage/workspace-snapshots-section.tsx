@@ -375,7 +375,7 @@ function RestoreStatus({
     >
       <IconCircleCheck
         aria-hidden="true"
-        className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
+        className="mt-0.5 size-4 shrink-0 text-success"
       />
       <span>
         Restored to how it was on {when}.

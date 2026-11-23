@@ -5,7 +5,6 @@ import { StatusLine } from "./SetupProgress";
 
 export type Blocker =
   | "wsl-absent"
-  | "wsl-one"
   | "wsl-no-kernel"
   | "virtual-machine-platform-disabled"
   | "virtualization-disabled"
@@ -56,15 +55,9 @@ const SCREENS: Record<
     },
     administrator: "you",
   },
-  "wsl-one": {
-    title: "Switch Windows Subsystem for Linux to version 2",
-    why: "WSL is installed but set to version 1. OpenBot needs version 2.",
-    fix: { asks: "OpenBot switches it now. This takes a few seconds." },
-    administrator: "you",
-  },
   "wsl-no-kernel": {
     title: "Finish installing Windows Subsystem for Linux",
-    why: "WSL is turned on, but part of it is missing, so OpenBot can't run yet.",
+    why: "WSL is turned on, but OpenBot needs WSL 2 and it isn't installed yet. Any Linux distributions you run on WSL 1 stay as they are.",
     fix: {
       asks: "Windows will ask for your permission so OpenBot can finish setting it up. Then Windows needs one restart.",
     },

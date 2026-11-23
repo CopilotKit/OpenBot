@@ -39,6 +39,10 @@ pub struct State {
     from_settings: AtomicBool,
     /// A move is running: a second one is refused.
     running: AtomicBool,
+    /// The move's screens are on setup, waiting for the person's answer: offered (`move_offer`
+    /// said due, or Settings sent the window), and neither kept here (`keep_self_contained`) nor
+    /// moved yet. A restore leaves the window on them (`offered_on_screen`).
+    on_screen: AtomicBool,
     /// The OpenBot Cloud sign-in this run made for the move, for Try again.
     signed_in:
         std::sync::Mutex<Option<std::sync::Arc<openbot_desktop_lib::connected::sign_in::Session>>>,
@@ -90,6 +94,29 @@ pub fn moving<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
 #[cfg(test)]
 pub(crate) fn set_moving_for_test<R: tauri::Runtime>(app: &tauri::AppHandle<R>, running: bool) {
     state(app).running.store(running, Ordering::SeqCst);
+}
+
+/**
+Whether the move's screens are on setup, waiting for the person's answer: the choice, what moves, or
+a move that stopped. The window stays on them when it is brought back, as it does while a move runs
+(`moving`).
+
+Seen on 1.2.0-rc.3: the person picked OpenBot Cloud, and while the OpenBot here started and updated
+for the move (two and a half minutes), came back to the window from the Dock. The restore showed the
+OpenBot here, now up, in place of the move's screens. The move was never started, nothing said so,
+and the person took the move as done.
+*/
+pub fn offered_on_screen<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    state(app).on_screen.load(Ordering::SeqCst)
+}
+
+/// The move's screens on setup, or not, for a test of what the window does meanwhile.
+#[cfg(test)]
+pub(crate) fn set_offered_on_screen_for_test<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    shown: bool,
+) {
+    state(app).on_screen.store(shown, Ordering::SeqCst);
 }
 
 /// The folder `connection.json` is in, the same in a test (`desktop_connected::config_dir`).
@@ -165,6 +192,10 @@ pub async fn move_offer<R: tauri::Runtime>(
             &recorded,
             &release(&app),
         );
+        // The window shows the move's screens before OpenBot now, and stays on them until answered.
+        state(&app)
+            .on_screen
+            .store(due || from_settings, Ordering::SeqCst);
         let footprint_bytes = if due || from_settings {
             begin_sizing(&app);
             sized_now(&app)
@@ -289,6 +320,8 @@ pub async fn keep_self_contained<R: tauri::Runtime>(
             error.to_string(),
         )
     })?;
+    // Answered: the window shows OpenBot here next, and a restore may take it there.
+    state(&app).on_screen.store(false, Ordering::SeqCst);
     match recorded.kept_after_failed_move_in {
         Some(_) => log::info!(
             "[move] the person keeps OpenBot (Self-Contained) after a failed move; offered again after the next update"
@@ -421,6 +454,11 @@ pub async fn move_to_cloud<R: tauri::Runtime>(
         )
     })
     .await;
+    // Moved, the app is connected to OpenBot Cloud and the result is the window's last move screen.
+    // Not moved, the window stays on the move until the person tries again or keeps OpenBot here.
+    if moved.is_ok() {
+        state(&app).on_screen.store(false, Ordering::SeqCst);
+    }
     state(&app).running.store(false, Ordering::SeqCst);
     openbot_desktop_lib::logging::outcome("move", asked, &moved);
     note_outcome(&app, &moved);
@@ -515,6 +553,22 @@ fn move_now<R: tauri::Runtime>(
         }
         Err(detail) => {
             log::warn!("[move] could not ask whether the person's AI is connected: {detail}");
+            None
+        }
+    };
+    // Which account and organization it went into, so the result says where everything is and as
+    // whom to sign in there. Never fails the move either.
+    moved.account = match cloud.account() {
+        Ok(account) => {
+            log::info!(
+                "[move] moved into organization {} on {}",
+                cloud.organization(),
+                openbot_desktop_lib::connected::host_of(session.address())
+            );
+            Some(account)
+        }
+        Err(detail) => {
+            log::warn!("[move] could not ask which account the move went into: {detail}");
             None
         }
     };

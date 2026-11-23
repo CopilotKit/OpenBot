@@ -13,6 +13,7 @@ COPY app/package.json app/package.json
 COPY shared/package.json shared/package.json
 COPY extension/package.json extension/package.json
 COPY management-agent/package.json management-agent/package.json
+COPY tokens/package.json tokens/package.json
 RUN bun install --frozen-lockfile --ignore-scripts --production \
       --filter @openbot/shared --filter @openbot/management-agent
 COPY shared/management-contract.ts shared/kubernetes-promotion.ts shared/release-manifest.ts shared/

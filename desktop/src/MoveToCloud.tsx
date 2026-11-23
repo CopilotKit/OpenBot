@@ -25,7 +25,8 @@ import {
   useState,
 } from "react";
 import { BusinessBooker } from "./BusinessBooker";
-import { cloudAddress } from "./CloudSignIn";
+import { cloudAddress, cloudHost, cloudWebAddress } from "./CloudSignIn";
+import { ExternalLink } from "./ExternalLink";
 import { asProblem, type Problem } from "./Problem";
 import {
   type Progress,
@@ -84,7 +85,39 @@ export type Moved = {
    * absent, from an older shell) when it couldn't be asked. Only true changes the result.
    */
   connectAi?: boolean | null;
+  /**
+   * The OpenBot Cloud account the move went into: the email the person signed in with and the
+   * organization's name. Null (or absent, from an older shell) when it couldn't be asked.
+   */
+  account?: MovedAccount | null;
 };
+
+/** The OpenBot Cloud account and organization a move went into (`Moved.account`). */
+export type MovedAccount = {
+  email: string;
+  organization?: string | null;
+};
+
+/** "You're signed in as sam@example.com, in Sam's organization." Said under the result's heading. */
+export function signedInAsSaid(account: MovedAccount): string {
+  const organization = account.organization?.trim();
+  return organization
+    ? `You're signed in as ${account.email}, in ${organization}.`
+    : `You're signed in as ${account.email}.`;
+}
+
+/**
+ * Where the result says OpenBot Cloud is in a browser, and as whom to sign in there: the place a
+ * person who goes to the website looks for the Bots they moved.
+ */
+export function inABrowserSaid(
+  account: MovedAccount | null | undefined,
+): string {
+  const host = cloudHost();
+  return account
+    ? `In a browser, OpenBot Cloud is at ${host}. Sign in there as ${account.email}.`
+    : `In a browser, OpenBot Cloud is at ${host}.`;
+}
 
 export type MoveStage =
   | "sign-in"
@@ -320,7 +353,9 @@ type Screen =
  *    Cloud in this window (`open_moved_cloud`), and Open OpenBot, which opens the list of apps to
  *    reconnect when there are any. When OpenBot Cloud still needs the person's AI (`connectAi`),
  *    Connect your AI comes first and is the only way on: the apps are named as the step after it,
- *    with nothing on them to press.
+ *    with nothing on them to press. It names the account and organization the move went into
+ *    (`account`), and where OpenBot Cloud is in a browser, with Open in browser: on 1.2.0-rc.3 a
+ *    person who moved went to the website, signed in with another account and found nothing.
  */
 export function MoveToCloud({
   offer,
@@ -352,10 +387,21 @@ export function MoveToCloud({
    * own (`move_footprint`): on a Mac with two older installs on its disk, measuring it first held
    * the question back 15 seconds. Until it arrives, or if it never does, the screens say the move
    * without it.
+   *
+   * One figure for what the move removes, the same on both screens. Offered before the OpenBot here
+   * started (`here`), its start for the move updates it first and adds the new release's files: a
+   * Mac said 23.1 GB on the choice and 26.6 GB on the next screen. So then the choice says no
+   * figure, and the next screen says the one measured from the OpenBot that moves (`move_preview`).
+   * Offered over it running, the next screen keeps the figure the choice said, and a size measured
+   * after the person left the choice is not taken.
    */
-  const [footprintBytes, setFootprintBytes] = useState(offer.footprintBytes);
+  const [sizedOnChoice] = useState(() => !here && !offer.fromSettings);
+  const [footprintBytes, setFootprintBytes] = useState(
+    sizedOnChoice ? offer.footprintBytes : null,
+  );
+  const onChoice = screen.at === "choice";
   useEffect(() => {
-    if (offer.footprintBytes != null) return;
+    if (!sizedOnChoice || !onChoice || offer.footprintBytes != null) return;
     let current = true;
     invoke<number | null>("move_footprint")
       .then((bytes) => {
@@ -367,7 +413,7 @@ export function MoveToCloud({
     return () => {
       current = false;
     };
-  }, [offer.footprintBytes]);
+  }, [sizedOnChoice, onChoice, offer.footprintBytes]);
   const keep = async () => {
     setKeeping(true);
     try {
@@ -461,7 +507,7 @@ export function MoveToCloud({
         preview={preview}
         problem={here?.at === "failed" ? here.problem : previewProblem}
         gettingReady={here?.at === "starting" || here?.at === "stopped"}
-        footprintBytes={preview?.footprintBytes ?? footprintBytes}
+        footprintBytes={footprintBytes ?? preview?.footprintBytes ?? null}
         includeKeys={includeKeys}
         onIncludeKeys={setIncludeKeys}
         keeping={keeping}
@@ -921,6 +967,7 @@ function Done({ moved }: { moved: Moved }) {
       <h1>You're on OpenBot Cloud</h1>
       <p className="lede">
         {WHAT_MOVES} are in your OpenBot Cloud account now.
+        {moved.account && ` ${signedInAsSaid(moved.account)}`}
       </p>
       {moved.removedBytes != null && moved.removedBytes > 0 && (
         <div className="move-freed">
@@ -1022,8 +1069,16 @@ function Done({ moved }: { moved: Moved }) {
               Open OpenBot
             </button>
           )}
+          {/* The same account in the person's own browser, where they may look for it next. */}
+          <ExternalLink className="button-link" href={cloudWebAddress()}>
+            Open in browser
+          </ExternalLink>
         </div>
-        {opening !== null && <StatusLine>Opening OpenBot Cloud…</StatusLine>}
+        {opening !== null ? (
+          <StatusLine>Opening OpenBot Cloud…</StatusLine>
+        ) : (
+          <p className="footnote">{inABrowserSaid(moved.account)}</p>
+        )}
       </StepFooter>
     </Sheet>
   );

@@ -9,6 +9,7 @@ mod desktop_connection;
 mod desktop_host_access;
 mod desktop_move;
 mod desktop_page;
+mod desktop_reload;
 mod desktop_stall;
 mod desktop_status;
 mod desktop_telemetry;
@@ -1048,26 +1049,31 @@ shows the file, as the menu's Get Troubleshooting Logs… does.
 */
 fn setup_page_stuck(app: &tauri::AppHandle) {
     let handle = app.clone();
-    show_prompt(
-        app,
-        app_update::Prompt {
-            title: SETUP_STUCK_TITLE.to_owned(),
-            message: SETUP_STUCK_MESSAGE.to_owned(),
-            buttons: Some(("Restart", "Get logs")),
-        },
-        move |restart| {
-            if restart {
-                log::info!("[ui] restarting OpenBot from the stuck window's alert");
-                restart_into_update(&handle);
-            }
-            log::info!("[ui] getting the troubleshooting logs from the stuck window's alert");
-            save_troubleshooting_logs_from_menu(handle);
-        },
-    );
+    show_prompt(app, setup_stuck_prompt(), move |restart| {
+        if restart {
+            log::info!("[ui] restarting OpenBot from the stuck window's alert");
+            restart_into_update(&handle);
+        }
+        log::info!("[ui] getting the troubleshooting logs from the stuck window's alert");
+        save_troubleshooting_logs_from_menu(handle);
+    });
+}
+
+/**
+The stuck window's alert. Its words hold for both ways a page gets stuck: a blank page, and one
+frozen on its last screen, which still shows that screen. Before, it said "it still isn't showing
+anything", which is false of a frozen page.
+*/
+pub(crate) fn setup_stuck_prompt() -> app_update::Prompt {
+    app_update::Prompt {
+        title: SETUP_STUCK_TITLE.to_owned(),
+        message: SETUP_STUCK_MESSAGE.to_owned(),
+        buttons: Some(("Restart", "Get logs")),
+    }
 }
 
 const SETUP_STUCK_TITLE: &str = "OpenBot's window isn't responding";
-const SETUP_STUCK_MESSAGE: &str = "OpenBot tried reloading it, and it still isn't showing anything. Restart OpenBot to try again. Get logs saves what happened to a file you can share.";
+const SETUP_STUCK_MESSAGE: &str = "OpenBot tried reloading it, and it still isn't updating. Restart OpenBot to try again. Get logs saves what happened to a file you can share.";
 
 /// The running step last written to the log, so a step that says the same thing on every poll
 /// (an engine that is still starting) is one entry rather than one a second.
@@ -1884,7 +1890,6 @@ async fn windows_blocker_from<R: tauri::Runtime>(
         let outcome = match &result {
             Ok(None) => Outcome::Ready,
             Ok(Some(win::Blocker::WslAbsent)) => Outcome::WslAbsent,
-            Ok(Some(win::Blocker::WslOne)) => Outcome::WslOne,
             Ok(Some(win::Blocker::WslNoKernel)) => Outcome::WslNoKernel,
             Ok(Some(win::Blocker::VirtualMachinePlatformDisabled)) => {
                 Outcome::VirtualMachinePlatformDisabled
@@ -8928,6 +8933,75 @@ mod app_page_tests {
         assert!(desktop_page::QUIT_SHORTCUT_PAGE.contains("\"plugin:openbot-desktop|quit\""));
     }
 
+    /**
+    Found in dogfooding: the app had no reload, and Command-R did nothing. View → Reload, with
+    Command-R, loads OpenBot's page again: on this computer (OpenBot (Self-Contained)) and through
+    the relay (OpenBot Cloud). Never the setup screens, which a reload would throw back mid-install,
+    and never another page the window shows. The page keeps itself when a field holds what the person
+    typed (`reload-page.js`, tested in `reloadPage.test.ts`).
+    */
+    #[test]
+    fn view_reload_reloads_openbots_page_and_never_setup() {
+        use desktop_reload::Reloaded;
+        let (app, window) = app();
+        let setup = if cfg!(windows) {
+            "http://tauri.localhost/"
+        } else {
+            "tauri://localhost/"
+        };
+        *app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let on = |url: &str| {
+            window.navigate(url.parse().unwrap()).unwrap();
+            let reloaded = desktop_reload::reload(app.handle());
+            assert_eq!(
+                window.url().unwrap().as_str(),
+                url,
+                "Reload never moves the window"
+            );
+            reloaded
+        };
+
+        // Mid-setup: left as it is.
+        assert_eq!(on(setup), Reloaded::NotOpenBot);
+        // A page on another loopback port: left as it is.
+        assert_eq!(on("http://127.0.0.1:3011/"), Reloaded::NotOpenBot);
+        // OpenBot (Self-Contained), the OpenBot this computer runs.
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        assert_eq!(on("http://127.0.0.1:3010/channel/c1"), Reloaded::Asked);
+        // OpenBot Cloud, through the relay.
+        desktop_connected::showing_for_test(app.handle(), "http://127.0.0.1:4410");
+        assert_eq!(on("http://127.0.0.1:4410/"), Reloaded::Asked);
+
+        // The page is told what Reload asks, as it loads (read as text: the real webview and
+        // AppKit's menus can't be built here).
+        let main = include_str!("main.rs");
+        let at = |pieces: &[&str]| main.find(&pieces.concat()).unwrap();
+        let page_load = &main[at(&[".on_page_load(", "|window, payload| {"])..];
+        let page_load = &page_load[..page_load.find("\n        })").unwrap()];
+        assert!(page_load.contains("let _ = window.eval(desktop_reload::PAGE);"));
+        assert!(desktop_reload::PAGE.contains("window.__openbotReload = "));
+        // In the View menu, first, with Command-R, and chosen there it reloads.
+        let menus = &main[at(&["\nfn install", "_menus"])..];
+        let view = &menus[menus.find("\"View\",").expect("a View menu")..];
+        let first = &view[view.find("&MenuItem::with_id(").unwrap()..];
+        let first = &first[..first.find(")?").unwrap()];
+        assert!(
+            first.contains("desktop_reload::MENU_ID")
+                && first.contains("desktop_reload::MENU_LABEL")
+                && first.contains("Some(desktop_reload::MENU_ACCELERATOR)"),
+            "{first}"
+        );
+        assert_eq!(desktop_reload::MENU_LABEL, "Reload");
+        assert_eq!(desktop_reload::MENU_ACCELERATOR, "CmdOrCtrl+R");
+        assert!(main.contains(
+            &[
+                "        desktop_reload::MENU_ID => {\n",
+                "            desktop_reload::reload(app);"
+            ]
+            .concat()
+        ));
+    }
+
     /// "The text is too small and you can't zoom in." The window now zooms as a browser does: the
     /// View menu on macOS and Linux, and the page's own shortcut (`zoom-shortcut.js`) for what no
     /// menu carries, every key on Windows and Command and + on macOS, which the setup screens and
@@ -12657,7 +12731,17 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
     if moving {
         log::info!("[window] a move to OpenBot Cloud is running; the window stays where it is");
     }
-    let startup = startup.filter(|_| !moving);
+    // Its screens waiting for an answer hold the window too, while it is on them: showing the
+    // OpenBot here in their place left the move unstarted with nothing to say so (1.2.0-rc.3).
+    let offered = !moving
+        && desktop_move::offered_on_screen(app)
+        && window.url().is_ok_and(|url| on_setup_page(app, &url));
+    if offered {
+        log::info!(
+            "[window] the move to OpenBot Cloud is waiting for an answer; the window stays on it"
+        );
+    }
+    let startup = startup.filter(|_| !moving && !offered);
     // Restore has the same deployment ownership requirement as the setup page's passive probe.
     // A successful app-port response alone may belong to another installation or application.
     // The page the window belongs on, and the address it loads it at: for the owned app, through its
@@ -13340,6 +13424,9 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         "quit" => {
             app.exit(0);
         }
+        desktop_reload::MENU_ID => {
+            desktop_reload::reload(app);
+        }
         other => {
             if let Some(step) = zoom::Step::of_menu(other) {
                 zoom_windows(app, step);
@@ -13877,13 +13964,22 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
      *
      * The page zooms as a browser's does, in the order and with the keys a Mac's View menu has
      * them. Items of our own, not the predefined zoom items: those ask the first responder, and a
-     * web view has no zoom of its own to answer them. See `zoom`.
+     * web view has no zoom of its own to answer them. See `zoom`. Reload first, as a browser's View
+     * menu has it: OpenBot's page loaded again, never the setup screens (`desktop_reload`).
      */
     let view = Submenu::with_items(
         app,
         "View",
         true,
         &[
+            &MenuItem::with_id(
+                app,
+                desktop_reload::MENU_ID,
+                desktop_reload::MENU_LABEL,
+                true,
+                Some(desktop_reload::MENU_ACCELERATOR),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(
                 app,
                 zoom::MENU_ACTUAL_SIZE,
@@ -14492,6 +14588,8 @@ fn main() {
                     window.app_handle(),
                     payload.url(),
                 )));
+                // What View → Reload would lose, and the reload (`desktop_reload`).
+                let _ = window.eval(desktop_reload::PAGE);
             }
             // Ctrl+Q quits, as the tray says. Windows only: no menu there carries the shortcut.
             if cfg!(target_os = "windows") && page != WindowPage::Other {
@@ -27915,6 +28013,55 @@ fn main() {
     }
 
     /*
+    Seen on 1.2.0-rc.3: the person picked OpenBot Cloud, and while the OpenBot here started and
+    updated for the move, came back to the window from the Dock. The restore showed that OpenBot, now
+    up, in place of the move's screens, so the move was never started and nothing said so. While the
+    move's screens wait for an answer, a restore leaves the window on them; once the person keeps
+    OpenBot here, a restore decides as it always has.
+    */
+    #[test]
+    fn a_dock_click_while_the_move_waits_for_an_answer_leaves_the_window_on_it() {
+        let f = RestoreFixture::new();
+        let setup = "tauri://localhost/";
+        let app = f.app(&f.owned, setup);
+        let config = f.base.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        desktop_connected::use_for_test(
+            app.handle(),
+            config,
+            openbot_desktop_lib::connected::credentials::Store::of(
+                keyring_core::mock::Store::new().unwrap(),
+            ),
+        );
+        let window = app.get_webview_window("main").unwrap();
+        window.navigate(setup.parse().unwrap()).unwrap();
+        window.hide().unwrap();
+        desktop_move::set_offered_on_screen_for_test(app.handle(), true);
+
+        restore_window_on(app.handle(), &f.ports);
+
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            setup,
+            "a restore must not replace the move's screens with the OpenBot here before it is answered"
+        );
+        assert!(
+            window.is_visible().unwrap(),
+            "the window still comes forward"
+        );
+
+        // Kept here: answered, and a restore shows the OpenBot here, as it always has.
+        tauri::async_runtime::block_on(desktop_move::keep_self_contained(app.handle().clone()))
+            .unwrap();
+        assert!(!desktop_move::offered_on_screen(app.handle()));
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            format!("http://127.0.0.1:{}/", f.ports.app)
+        );
+    }
+
+    /*
     The safety net under the above: a move that ends with the window somewhere other than setup
     (here the OpenBot on this computer, as the Dock click left it) sends it back to setup, which opens
     the OpenBot now chosen. After a move that is OpenBot Cloud, whose gate asks for its terms first.
@@ -28014,6 +28161,29 @@ fn main() {
         let mut problem = Problem::with("The move didn't finish.", "for the log".to_owned());
         problem.kind = Some(kind);
         desktop_move::note_outcome(app.handle(), &Err(problem));
+    }
+
+    /// The move's screens hold the window from the offer until the person answers it: offered at
+    /// launch, they are on screen; kept here, they are not, and a launch that isn't offered it never is.
+    #[test]
+    fn the_move_holds_the_window_from_its_offer_until_it_is_answered() {
+        let base = temp_root("move-offer-on-screen");
+        let root = base.join("OpenBot");
+        write_installed_deployment(&root);
+        let own = upgrade::own();
+        deployment::record(&root, &own.version, own.pinned).unwrap();
+        let config = base.join("config");
+        let app = launched_at(&root, &config, "1.2.0-rc.3");
+        assert!(!desktop_move::offered_on_screen(app.handle()));
+        assert!(move_due(&app));
+        assert!(desktop_move::offered_on_screen(app.handle()));
+        keep(&app);
+        assert!(!desktop_move::offered_on_screen(app.handle()));
+
+        // The next launch isn't offered it: nothing holds the window.
+        let next = launched_at(&root, &config, "1.2.0-rc.3");
+        assert!(!move_due(&next));
+        assert!(!desktop_move::offered_on_screen(next.handle()));
     }
 
     /*

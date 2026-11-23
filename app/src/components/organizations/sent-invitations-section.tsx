@@ -195,7 +195,8 @@ function SentInvitationRow({
           </ItemTitle>
           <ItemDescription>{sentInvitationLine(invitation)}</ItemDescription>
         </ItemContent>
-        <ItemActions>
+        {/* On a phone the buttons take a line under the address, as they do on a team's people. */}
+        <ItemActions className="max-sm:basis-full">
           {invitation.status === "pending" && !hosted ? (
             <CopyLinkButton
               label={`Copy link for ${invitation.email}`}

@@ -17,7 +17,7 @@ const NOTICE_ID_MAX = 64;
 const PREFIX = "moved-app-";
 
 /** FNV-1a, 32 bits, as 8 hex digits: the same on every device, for the same app id. */
-function shortHash(text: string): string {
+export function shortHash(text: string): string {
   let hash = 0x811c9dc5;
   for (let i = 0; i < text.length; i += 1) {
     hash ^= text.charCodeAt(i);

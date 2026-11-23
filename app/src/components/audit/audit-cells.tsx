@@ -1065,9 +1065,7 @@ export function StartedByCell({
   return (
     <span
       className={
-        unattended
-          ? "font-medium text-amber-600 dark:text-amber-500"
-          : "text-muted-foreground"
+        unattended ? "font-medium text-warning" : "text-muted-foreground"
       }
     >
       {startedByLine(startedByText(event, nameFor, deployment, viewer))}
@@ -1103,7 +1101,7 @@ export function DecisionCell({
           outcome === "refused"
             ? "font-medium text-destructive"
             : outcome === "did-not-happen"
-              ? "font-medium text-amber-600 dark:text-amber-500"
+              ? "font-medium text-warning"
               : "text-muted-foreground"
         }
       >
@@ -1189,14 +1187,14 @@ function RuleExpression({ expression }: { expression: string }) {
 /** The square at the start of each row: what happened, at a glance down the log. */
 export const OUTCOME_MARK: Record<AuditOutcome, string> = {
   refused: "bg-destructive",
-  "did-not-happen": "bg-amber-500",
+  "did-not-happen": "bg-warning",
   allowed: "bg-muted-foreground/20",
 };
 
 /** The faint tint on rows worth stopping at. Allowed rows stay plain. */
 export const OUTCOME_ROW: Record<AuditOutcome, string> = {
   refused: "bg-destructive/5 hover:bg-destructive/10",
-  "did-not-happen": "bg-amber-500/5 hover:bg-amber-500/10",
+  "did-not-happen": "bg-warning/5 hover:bg-warning/10",
   allowed: "",
 };
 
