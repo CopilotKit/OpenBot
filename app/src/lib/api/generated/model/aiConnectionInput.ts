@@ -5,7 +5,7 @@ import type { AiConnectionLogin } from "./aiConnectionLogin";
 import type { AiConnectionProvider } from "./aiConnectionProvider";
 
 /**
- * The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased and openai-compatible take endpoint. Any other pair is refused.
+ * The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased, trustedrouter and openai-compatible take endpoint. Any other pair is refused.
  */
 export interface AiConnectionInput {
   provider: AiConnectionProvider;

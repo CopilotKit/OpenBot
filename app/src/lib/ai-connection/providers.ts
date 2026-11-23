@@ -1,6 +1,7 @@
 import type {
   AiConnectionLogin,
   AiConnectionProvider,
+  AiConnectionProviderAnswer,
 } from "@/lib/api/generated/model";
 
 /**
@@ -67,6 +68,14 @@ export const AI_PROVIDERS: AiProvider[] = [
     mark: "unbiased",
   },
   {
+    id: "trustedrouter",
+    name: "TrustedRouter",
+    summary: "Use a TrustedRouter API key for models from many providers.",
+    keySummary: "Use a TrustedRouter API key for models from many providers.",
+    logins: ["endpoint"],
+    mark: "trustedrouter",
+  },
+  {
     id: "openai-compatible",
     name: "Any OpenAI-compatible endpoint",
     summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.",
@@ -104,6 +113,12 @@ export const ENDPOINT_PRESETS: Partial<
     keyUrl: "https://platform.unbiased.ai/dashboard/keys",
     keyLink: "Get an Unbiased AI API key",
   },
+  trustedrouter: {
+    baseUrl: "https://api.trustedrouter.com/v1",
+    model: "anthropic/claude-sonnet-5.5",
+    keyUrl: "https://trustedrouter.com/console/api-keys",
+    keyLink: "Get a TrustedRouter API key",
+  },
 };
 
 /**
@@ -128,7 +143,7 @@ export function loginsHere(
  */
 export function personalLogins(
   provider: AiProvider,
-  signIns: readonly AiConnectionProvider[],
+  signIns: readonly AiConnectionProviderAnswer[],
 ): AiConnectionLogin[] {
   const signIn = signIns.includes(provider.id)
     ? provider.logins.find((login) => login === "plan" || login === "oauth")
@@ -155,7 +170,7 @@ const SHAREABLE: readonly AiConnectionProvider[] = [
  */
 export function sharedLogins(
   provider: AiProvider,
-  signIns: readonly AiConnectionProvider[],
+  signIns: readonly AiConnectionProviderAnswer[],
 ): AiConnectionLogin[] {
   return SHAREABLE.includes(provider.id)
     ? personalLogins(provider, signIns)
@@ -177,8 +192,12 @@ export function isSignIn(login: AiConnectionLogin | null): boolean {
   return login === "plan" || login === "oauth";
 }
 
+/**
+ * The row for a provider, by its id. The server's answer can name a provider this app doesn't know
+ * (the list grows, api/README.md "Enums that grow"): that one has no row, and is shown by its id.
+ */
 export function providerById(
-  id: AiConnectionProvider | null | undefined,
+  id: AiConnectionProviderAnswer | null | undefined,
 ): AiProvider | undefined {
   return AI_PROVIDERS.find((provider) => provider.id === id);
 }

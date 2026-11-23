@@ -4,9 +4,12 @@ The move from OpenBot (Self-Contained) to OpenBot Cloud, as the setup window and
 The work is in `openbot_desktop_lib::move_to_cloud`. This is the wiring:
 
 - `move_offer`: whether the setup window shows the choice before it shows OpenBot (once per
-  person, after the update, for OpenBot (Self-Contained) only), whether Settings sent it there,
-  and how much OpenBot takes on this computer.
-- `keep_self_contained`: "Keep OpenBot (Self-Contained)", never asked again at launch.
+  person, after the update, for OpenBot (Self-Contained) only), and whether Settings sent it
+  there, answered at once.
+- `move_footprint`: how much OpenBot takes on this computer, measured on its own thread, which the
+  window asks for once it has the answer.
+- `keep_self_contained`: "Keep OpenBot (Self-Contained)", not asked again at launch, except once
+  after the next update when it followed a move that failed (`note_outcome`).
 - `move_preview`: what moves and which apps to connect again, from the OpenBot running here.
 - `move_to_cloud`: sign in to OpenBot Cloud in the browser, then the move, which removes OpenBot
   from this computer only once OpenBot Cloud has checked that everything arrived. Each step is
@@ -39,10 +42,54 @@ pub struct State {
     /// The OpenBot Cloud sign-in this run made for the move, for Try again.
     signed_in:
         std::sync::Mutex<Option<std::sync::Arc<openbot_desktop_lib::connected::sign_in::Session>>>,
+    /// What OpenBot's files take on this computer, measured once a run on a thread of its own
+    /// (`sized_within`).
+    sizing: std::sync::Mutex<Sizing>,
+    sized: std::sync::Condvar,
+    /// Sizing OpenBot's files takes this much longer, for a test of a computer where it is slow.
+    #[cfg(test)]
+    slow_sizing: std::sync::Mutex<Option<std::time::Duration>>,
+}
+
+/// Where the measure of OpenBot's files is: not begun, under way, or done, with its answer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Sizing {
+    #[default]
+    NotBegun,
+    Measuring,
+    Done(Option<u64>),
+}
+
+/// The longest the window waits for the size before it says the move without it.
+const SIZING_CAP: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Sizing OpenBot's files takes `delay` longer, as on a computer with old installs on its disk.
+#[cfg(test)]
+pub(crate) fn slow_sizing_for_test<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    delay: std::time::Duration,
+) {
+    *state(app).slow_sizing.lock().unwrap() = Some(delay);
 }
 
 fn state<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> &State {
     &app.state::<Shell>().inner().moving
+}
+
+/**
+Whether a move is running now. Its screens are setup's, and the window stays on them until it ends:
+a Dock click, the tray's Open, a second launch or a notice brings the window forward as it is
+(`restore_window_on`). Sending it to the OpenBot on this computer would show an app the move is
+about to remove, which then answers nothing.
+*/
+pub fn moving<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    state(app).running.load(Ordering::SeqCst)
+}
+
+/// A move running, or not, for a test of what the window does meanwhile.
+#[cfg(test)]
+pub(crate) fn set_moving_for_test<R: tauri::Runtime>(app: &tauri::AppHandle<R>, running: bool) {
+    state(app).running.store(running, Ordering::SeqCst);
 }
 
 /// The folder `connection.json` is in, the same in a test (`desktop_connected::config_dir`).
@@ -52,6 +99,11 @@ fn config_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
 
 fn answered<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<Answer> {
     config_dir(app).and_then(|dir| moving::answered(&dir))
+}
+
+/// This app's own version: a Keep that followed a failed move is offered again in any other.
+fn release<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
+    app.package_info().version.to_string()
 }
 
 fn root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
@@ -82,8 +134,15 @@ pub fn offered_in_settings<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool
     )
 }
 
-/// The setup window's question before it shows OpenBot. `cloud` is its own switch: whether this
-/// build offers OpenBot Cloud.
+/**
+The setup window's question before it shows OpenBot. `cloud` is its own switch: whether this build
+offers OpenBot Cloud.
+
+Answered at once. The window holds every start and update until it has the answer, and on a Mac
+with two older installs of OpenBot on its disk, sizing OpenBot's files first made that 15 seconds.
+So the size goes with the answer only when it is already known; otherwise it is measured on a
+thread of its own and the window asks for it with `move_footprint`.
+*/
 #[tauri::command]
 pub async fn move_offer<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -91,17 +150,37 @@ pub async fn move_offer<R: tauri::Runtime>(
 ) -> MoveOffer {
     let cloud = cloud.unwrap_or(false);
     state(&app).cloud.store(cloud, Ordering::SeqCst);
+    let asked = std::time::Instant::now();
+    log::info!("[move] offer asked");
     tauri::async_runtime::spawn_blocking(move || {
         let from_settings =
             state(&app).from_settings.swap(false, Ordering::SeqCst) && offered_in_settings(&app);
+        let recorded = config_dir(&app)
+            .map(|dir| moving::on_record(&dir))
+            .unwrap_or_default();
         let due = moving::due(
             cloud,
             crate::desktop_connected::is_connected(&app),
             installed_here(&app),
-            answered(&app),
+            &recorded,
+            &release(&app),
         );
-        let footprint_bytes = (due || from_settings).then(|| footprint(&app)).flatten();
-        log::info!("[move] offer: due {due}, from Settings {from_settings}");
+        let footprint_bytes = if due || from_settings {
+            begin_sizing(&app);
+            sized_now(&app)
+        } else {
+            None
+        };
+        let again = match (&recorded.kept_after_failed_move_in, due) {
+            (Some(kept_in), true) => {
+                format!(", again: kept after a failed move on {kept_in}")
+            }
+            _ => String::new(),
+        };
+        log::info!(
+            "[move] offer: due {due}, from Settings {from_settings}{again}, in {:.2}s",
+            asked.elapsed().as_secs_f64()
+        );
         MoveOffer {
             due,
             from_settings,
@@ -116,21 +195,131 @@ pub async fn move_offer<R: tauri::Runtime>(
     })
 }
 
-/// "Keep OpenBot (Self-Contained)": kept, and never asked again at launch.
+/**
+What OpenBot's files take on this computer, for the move's first screen when `move_offer` answered
+before the size was known: the size once it is measured, or None if it can't be, or if it takes
+longer than `SIZING_CAP`. The screen says the move without it meanwhile.
+*/
+#[tauri::command]
+pub async fn move_footprint<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Option<u64> {
+    tauri::async_runtime::spawn_blocking(move || sized_within(&app, SIZING_CAP))
+        .await
+        .ok()
+        .flatten()
+}
+
+/// Measure OpenBot's files on a thread of its own, once a run.
+fn begin_sizing<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    {
+        let mut sizing = state(app).sizing.lock().unwrap();
+        if *sizing != Sizing::NotBegun {
+            return;
+        }
+        *sizing = Sizing::Measuring;
+    }
+    let handle = app.clone();
+    let begun = std::thread::Builder::new()
+        .name("openbot-move-size".into())
+        .spawn(move || {
+            let started = std::time::Instant::now();
+            let total = footprint(&handle);
+            log::info!(
+                "[move] sized OpenBot's files on this computer in {:.1}s: {}",
+                started.elapsed().as_secs_f64(),
+                total.map_or_else(
+                    || "nothing measured".to_owned(),
+                    |bytes| format!("{bytes} bytes")
+                )
+            );
+            let moving = state(&handle);
+            *moving.sizing.lock().unwrap() = Sizing::Done(total);
+            moving.sized.notify_all();
+        });
+    if let Err(error) = begun {
+        log::warn!("[move] couldn't begin sizing OpenBot's files: {error}");
+        *state(app).sizing.lock().unwrap() = Sizing::Done(None);
+        state(app).sized.notify_all();
+    }
+}
+
+/// The size, if it is measured already.
+fn sized_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<u64> {
+    match *state(app).sizing.lock().unwrap() {
+        Sizing::Done(total) => total,
+        Sizing::NotBegun | Sizing::Measuring => None,
+    }
+}
+
+/// The size, waiting for it up to `cap` and beginning it if it hasn't begun.
+fn sized_within<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cap: std::time::Duration,
+) -> Option<u64> {
+    begin_sizing(app);
+    let moving = state(app);
+    let (sizing, waited) = moving
+        .sized
+        .wait_timeout_while(moving.sizing.lock().unwrap(), cap, |sizing| {
+            !matches!(sizing, Sizing::Done(_))
+        })
+        .unwrap();
+    if waited.timed_out() {
+        log::warn!(
+            "[move] sizing OpenBot's files is still going after {}s; the move is offered without it",
+            cap.as_secs()
+        );
+    }
+    match *sizing {
+        Sizing::Done(total) => total,
+        Sizing::NotBegun | Sizing::Measuring => None,
+    }
+}
+
+/// "Keep OpenBot (Self-Contained)": kept, and not asked again at launch, unless it followed a failed
+/// move (`moving::record_kept`).
 #[tauri::command]
 pub async fn keep_self_contained<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<(), Problem> {
     let dir = config_dir(&app)
         .ok_or_else(|| Problem::plain("OpenBot couldn't save your choice on this computer."))?;
-    moving::record(&dir, Answer::Kept).map_err(|error| {
+    let recorded = moving::record_kept(&dir, &release(&app)).map_err(|error| {
         Problem::with(
             "OpenBot couldn't save your choice on this computer. Try again.",
             error.to_string(),
         )
     })?;
-    log::info!("[move] the person keeps OpenBot (Self-Contained)");
+    match recorded.kept_after_failed_move_in {
+        Some(_) => log::info!(
+            "[move] the person keeps OpenBot (Self-Contained) after a failed move; offered again after the next update"
+        ),
+        None => log::info!("[move] the person keeps OpenBot (Self-Contained)"),
+    }
     Ok(())
+}
+
+/**
+A move that ran and didn't finish is kept on record (`moving::record_failed_move`), so a Keep chosen
+after it brings the offer back after the next update. Only the move's own failures: a sign-in that
+didn't finish (Cancel among them), a second move refused while one runs, or an app connected
+elsewhere never started it.
+*/
+pub(crate) fn note_outcome<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    moved: &Result<moving::Moved, Problem>,
+) {
+    let Err(problem) = moved else { return };
+    if !matches!(
+        problem.kind,
+        Some("move-failed" | "move-mismatch" | "move-stopped")
+    ) {
+        return;
+    }
+    let Some(dir) = config_dir(app) else { return };
+    match moving::record_failed_move(&dir) {
+        Ok(()) => log::info!("[move] a failed move is on record"),
+        Err(error) => log::warn!("[move] could not keep the failed move on record: {error}"),
+    }
 }
 
 /// What `move_preview` answers.
@@ -234,6 +423,8 @@ pub async fn move_to_cloud<R: tauri::Runtime>(
     .await;
     state(&app).running.store(false, Ordering::SeqCst);
     openbot_desktop_lib::logging::outcome("move", asked, &moved);
+    note_outcome(&app, &moved);
+    crate::setup_again_after_move(&app);
     if opened.load(Ordering::SeqCst) {
         crate::bring_to_front(&forward, "the move to OpenBot Cloud signed in");
     }
@@ -427,6 +618,10 @@ What OpenBot takes on this computer, as the move screens say it and the result c
 (`parts`, measured by `moving::footprint`).
 */
 fn footprint<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<u64> {
+    #[cfg(test)]
+    if let Some(delay) = *state(app).slow_sizing.lock().unwrap() {
+        std::thread::sleep(delay);
+    }
     let total = moving::footprint(&parts(app));
     (total > 0).then_some(total)
 }
@@ -512,7 +707,7 @@ impl<R: tauri::Runtime> moving::Here for ThisComputer<R> {
     /// next launch on, so a removal cut short never offers the move again.
     fn moved(&mut self) -> Result<(), String> {
         let dir = config_dir(&self.app).ok_or("the app has no configuration folder")?;
-        moving::record(&dir, Answer::Moved).map_err(|error| error.to_string())?;
+        moving::record_moved(&dir).map_err(|error| error.to_string())?;
         crate::desktop_connected::keep_moved_choice(&self.app, &self.address, &self.organization)
             .map_err(|problem| problem.detail.unwrap_or(problem.said))
     }

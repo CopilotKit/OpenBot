@@ -3,7 +3,8 @@
 //! OpenAI and Anthropic offer plan sign-in alongside API keys. Google and xAI use named endpoint
 //! presets with API keys; their official addresses are supplied by the frontend. Unbiased AI signs in
 //! through its own device authorization, which ends in an API key for the same named endpoint
-//! shape, so the key is then carried like a typed one.
+//! shape, so the key is then carried like a typed one. TrustedRouter is a named endpoint preset
+//! with an API key and no sign-in.
 //!
 //! The row that asks for a URL is the last one, and it is the only one that asks. Keeping it there
 //! is what keeps a base URL off the main path, which the audience rule at the top of the build doc
@@ -125,6 +126,14 @@ pub fn catalogue() -> Vec<Provider> {
             caution: None,
         },
         Provider {
+            id: "trustedrouter".into(),
+            name: "TrustedRouter".into(),
+            summary: "Use a TrustedRouter API key for models from many providers.".into(),
+            logins: vec![Login::Endpoint],
+            mark: Some("trustedrouter".into()),
+            caution: None,
+        },
+        Provider {
             id: "openai-compatible".into(),
             name: "Any OpenAI-compatible endpoint".into(),
             summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.".into(),
@@ -152,7 +161,13 @@ mod tests {
             .collect();
         assert_eq!(
             asking,
-            vec!["google", "xai", "unbiased", "openai-compatible"]
+            vec![
+                "google",
+                "xai",
+                "unbiased",
+                "trustedrouter",
+                "openai-compatible"
+            ]
         );
         for provider in catalogue()
             .into_iter()
@@ -180,7 +195,7 @@ mod tests {
 
     /// Named providers stay ahead of the custom endpoint escape hatch.
     #[test]
-    fn five_named_providers_and_one_custom_endpoint() {
+    fn six_named_providers_and_one_custom_endpoint() {
         let rows = catalogue();
         let ids: Vec<&str> = rows.iter().map(|provider| provider.id.as_str()).collect();
         assert_eq!(
@@ -191,6 +206,7 @@ mod tests {
                 "google",
                 "xai",
                 "unbiased",
+                "trustedrouter",
                 "openai-compatible"
             ]
         );
@@ -205,6 +221,17 @@ mod tests {
             .expect("unbiased is not offered");
         assert_eq!(unbiased.logins, vec![Login::Oauth, Login::Endpoint]);
         assert_eq!(unbiased.name, "Unbiased AI");
+    }
+
+    /// TrustedRouter has no sign-in, so its row asks for an API key and nothing else.
+    #[test]
+    fn trustedrouter_asks_only_for_a_key() {
+        let trustedrouter = catalogue()
+            .into_iter()
+            .find(|p| p.id == "trustedrouter")
+            .expect("trustedrouter is not offered");
+        assert_eq!(trustedrouter.logins, vec![Login::Endpoint]);
+        assert_eq!(trustedrouter.name, "TrustedRouter");
     }
 
     /// Every row is readable without recognising a logo.

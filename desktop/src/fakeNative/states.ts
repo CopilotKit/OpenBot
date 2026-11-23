@@ -38,6 +38,12 @@ export const STATE_NAMES: readonly {
     step: "welcome",
   },
   {
+    hash: "",
+    search: "?throws",
+    title: "First run, a screen fails to draw",
+    step: "welcome",
+  },
+  {
     hash: "#start",
     search: "",
     title: "Relaunch with an update",
@@ -157,6 +163,12 @@ export const STATE_NAMES: readonly {
     hash: "#local-running-fails",
     search: "",
     title: "Local running: show fails",
+    step: "welcome",
+  },
+  {
+    hash: "#image-list-gone",
+    search: "",
+    title: "Start: image list gone, offline",
     step: "welcome",
   },
   { hash: "#move-choice", search: "", title: "Move: choice", step: null },
@@ -303,6 +315,9 @@ function createStates(where: Where): States {
   const offered = where.search === "?offer";
   // A build that never updates itself (internal, candidate, or without the updater).
   const internal = where.search === "?internal";
+  // `?throws`: the update offer is handed an answer it can't draw, this app's version as an
+  // object, so a screen fails to draw as any might.
+  const throws = where.search === "?throws";
   // The move to OpenBot Cloud, offered over an OpenBot (Self-Contained) found running:
   // `#move-choice` after an update, and the rest from Settings, at the screen each names (see
   // `moveAnswer`).
@@ -315,6 +330,10 @@ function createStates(where: Where): States {
   const updated = new Promise((resolve) => {
     finishUpdate = resolve;
   });
+  // A relaunch whose image list something outside OpenBot deleted: Start refuses it as an
+  // unfinished install, as start_stack does, and the window installs before it starts again.
+  // Offline here, so that install fails and the window says so.
+  const imageListGone = where.hash === "#image-list-gone";
   // Found running by the launch is a relaunch too: an installation set up and started before.
   const relaunch =
     where.hash === "#start" ||
@@ -323,6 +342,7 @@ function createStates(where: Where): States {
     localTooOld ||
     runningTooOld ||
     launcherAhead ||
+    imageListGone ||
     Boolean(move);
   const MOVE_PREVIEW = {
     counts: [
@@ -448,6 +468,14 @@ function createStates(where: Where): States {
 
   const answer: FallbackAnswer = (command, args) => {
     const fake = globalThis.__fake;
+    if (throws && command === "app_update_offer")
+      return {
+        version: "1.3.0",
+        current: { broken: true },
+        installing: null,
+        updatesItself: true,
+        ready: null,
+      };
     if (connectedProblem && command === "connection")
       return {
         mode: "connected",
@@ -520,7 +548,11 @@ function createStates(where: Where): States {
             }
           : { values: {}, saved: { modelApiKeys: none, modelSessions: none } };
       case "upgrade_due":
-        return relaunch && !localTooOld && !runningTooOld && !launcherAhead
+        return relaunch &&
+          !localTooOld &&
+          !runningTooOld &&
+          !launcherAhead &&
+          !imageListGone
           ? { from: "1.0.0", to: "1.0.1" }
           : null;
       case "upgrade_and_start":
@@ -597,6 +629,15 @@ function createStates(where: Where): States {
             caution: null,
           },
           {
+            id: "trustedrouter",
+            name: "TrustedRouter",
+            summary:
+              "Use a TrustedRouter API key for models from many providers.",
+            logins: ["endpoint"],
+            mark: "trustedrouter",
+            caution: null,
+          },
+          {
             id: "openai-compatible",
             name: "Any OpenAI-compatible endpoint",
             summary:
@@ -625,6 +666,21 @@ function createStates(where: Where): States {
           running: false,
           detail: "The software OpenBot runs on is ready.",
         });
+        // Offline, so the install Start asked for cannot download the list again.
+        if (imageListGone) {
+          emit("setup:progress", {
+            step: "deployment",
+            ok: false,
+            running: false,
+            detail:
+              "could not fetch the image list for v1.1.2: error sending request",
+          });
+          throw {
+            said: "OpenBot could not download what it needs to run. Check the internet connection and try again.",
+            detail:
+              "could not fetch the image list for v1.1.2: error sending request",
+          } satisfies Problem;
+        }
         return installing
           ? installed
           : new Promise((resolve) => setTimeout(() => resolve(null), 50));
@@ -697,6 +753,13 @@ function createStates(where: Where): States {
       // Running, when the window is about to find it needs a newer app. Refused, when the release
       // laid out needs a newer launcher contract than this app speaks.
       case "start_stack":
+        if (imageListGone)
+          throw {
+            said: "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.",
+            detail:
+              "The image list /Users/you/OpenBot/container-images.json is missing. Install downloads it again.",
+            connection: "installation",
+          } satisfies Problem;
         if (launcherAhead)
           throw {
             said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
