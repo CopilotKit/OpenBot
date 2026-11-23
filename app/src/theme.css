@@ -24,6 +24,8 @@
   --accent-foreground: oklch(0.108 0.015 220.9);
   --destructive: oklch(0.504 0.178 22.9);
   --success: oklch(0.514 0.1 167.2);
+  /* What needs the person: something waits on them, or may not go as they expect. Never decoration. */
+  --warning: oklch(0.555 0.163 49);
   --border: oklch(0.894 0.014 286.1);
   --input: oklch(0.894 0.014 286.1);
   --ring: oklch(0.644 0.167 276.1);
@@ -74,6 +76,7 @@
   --accent-foreground: oklch(0.956 0.005 286.3);
   --destructive: oklch(0.792 0.121 16.4);
   --success: oklch(0.832 0.13 170.1);
+  --warning: oklch(0.828 0.189 84.4);
   --border: oklch(0.28 0.035 298.6);
   --input: oklch(0.28 0.035 298.6);
   --ring: oklch(0.713 0.151 277.7);
@@ -159,6 +162,7 @@ body {
   --color-border: var(--border);
   --color-destructive: var(--destructive);
   --color-success: var(--success);
+  --color-warning: var(--warning);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);

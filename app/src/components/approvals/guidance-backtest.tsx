@@ -61,7 +61,7 @@ const WOULD: Record<GuidanceBacktestRow["would"], string> = {
 
 const COLOURS: Record<GuidanceBacktestRow["outcome"], string> = {
   let_through_denied: "text-destructive",
-  asked_allowed: "text-amber-600 dark:text-amber-500",
+  asked_allowed: "text-warning",
   agree: "text-foreground",
   unreviewed: "text-muted-foreground",
 };
@@ -158,7 +158,7 @@ export function GuidanceBacktestField({
           </p>
         ) : null}
         {stale && !run.isPending ? (
-          <p className="text-amber-600 text-sm dark:text-amber-500">
+          <p className="text-warning text-sm">
             You've changed the guidance since it was tested. Test it again to
             see what your edit changes.
           </p>

@@ -180,7 +180,7 @@ export function PluginToolPage({
               <span
                 className={
                   tool.effect === "write"
-                    ? "text-amber-600 text-xs dark:text-amber-500"
+                    ? "text-warning text-xs"
                     : "text-muted-foreground text-xs"
                 }
               >

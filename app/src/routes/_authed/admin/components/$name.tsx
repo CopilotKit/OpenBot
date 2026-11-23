@@ -325,7 +325,7 @@ function ComponentDetail({
             <>
               <Item size="sm">
                 <ItemMedia variant="icon">
-                  <IconAlertTriangle className="text-amber-600 dark:text-amber-400" />
+                  <IconAlertTriangle className="text-warning" />
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>Not in this build</ItemTitle>
