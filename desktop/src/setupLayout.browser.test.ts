@@ -3524,3 +3524,70 @@ describe.skipIf(!asked)(
     }, 40_000);
   },
 );
+
+/*
+ * FOUND ON 1.2.0-rc.3, a Mac, after an update: the setup window stayed a plain ground with nothing
+ * on it, across two launches, while its page's code still ran. A screen that failed to draw took
+ * every screen with it, leaving only the ground behind them. Now it shows "OpenBot hit a problem"
+ * on the setup window's own failure box, with Reload and the logs, readable in light and dark.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each.
+ */
+describe.skipIf(!asked)("a screen that fails to draw", () => {
+  for (const colorScheme of ["light", "dark"] as const)
+    test(`shows OpenBot hit a problem, never the bare ground (${colorScheme})`, async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 800 },
+        colorScheme,
+      });
+      try {
+        await open(page, "?throws");
+        await page
+          .getByRole("heading", { name: "OpenBot hit a problem" })
+          .waitFor();
+        await page.waitForTimeout(300);
+        const shots = process.env.OPENBOT_APP_SHOTS;
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/page-problem-${colorScheme}-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}.png`,
+          });
+        const seen = await page.evaluate(() => {
+          const shown = (selector: string) => {
+            const element = document.querySelector(selector);
+            const rect = element?.getBoundingClientRect();
+            const style = element ? getComputedStyle(element) : null;
+            return Boolean(
+              rect &&
+                rect.width > 0 &&
+                rect.height > 0 &&
+                rect.bottom <= window.innerHeight &&
+                style?.visibility !== "hidden" &&
+                style?.color !== style?.backgroundColor,
+            );
+          };
+          const buttons = [...document.querySelectorAll("main button")].map(
+            (button) => button.textContent,
+          );
+          return {
+            // What a person reads, as the browser lays it out: not the bare ground.
+            text: (document.getElementById("root") as HTMLElement).innerText,
+            sheet: shown("main .sheet"),
+            heading: shown("main h1"),
+            box: shown("main .blocker"),
+            buttons,
+          };
+        });
+        expect(seen.text).toContain("OpenBot hit a problem");
+        expect(seen.text).toContain(
+          "This window stopped working. Reload it to carry on.",
+        );
+        expect(seen.sheet).toBe(true);
+        expect(seen.heading).toBe(true);
+        expect(seen.box).toBe(true);
+        expect(seen.buttons).toEqual(["Reload", "Copy logs", "Save to a file"]);
+        // The error reached the shell, for the Desktop log.
+        expect(await calls(page)).toContain("page_error");
+      } finally {
+        await page.close();
+      }
+    });
+});

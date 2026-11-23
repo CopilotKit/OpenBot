@@ -31,6 +31,12 @@ white (`drawsBackground`) and sets the colour behind its page ([`underPageBackgr
 wry 0.54.2 and later), so the ground shows through until the page paints. No cover is needed there:
 the wait is a fraction of a second, not Windows' minute.
 
+That ground is all a page that never draws leaves on screen, and on a Mac after an update (1.2.0-rc.3)
+it stayed so across two launches. So on every platform the setup page's heartbeat is watched as well
+(`stall::PageWatch`, `desktop_stall`): a setup page that hasn't answered with something drawn ten
+seconds after it loaded, or goes quiet, is reloaded once, and if it is still quiet OpenBot says so in
+a native alert with Restart and Get logs. The cover here is left as it was.
+
 [background]: https://learn.microsoft.com/microsoft-edge/webview2/reference/win32/icorewebview2controller2#put_defaultbackgroundcolor
 [tauri]: https://docs.rs/tauri/2/tauri/webview/struct.WebviewWindowBuilder.html#method.background_color
 [hook]: https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-setwineventhook

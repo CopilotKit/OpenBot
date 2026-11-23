@@ -20,6 +20,7 @@ export const STATE_NAMES: readonly {
   { hash: "", search: "", title: "First run" },
   { hash: "", search: "?offer", title: "First run, update offered" },
   { hash: "", search: "?internal", title: "First run, internal build" },
+  { hash: "", search: "?throws", title: "First run, a screen fails to draw" },
   { hash: "#start", search: "", title: "Relaunch with an update" },
   { hash: "#update-short", search: "", title: "OpenBot update: no room" },
   { hash: "#backend-short", search: "", title: "Services update: no room" },
@@ -210,6 +211,9 @@ function createStates(where: Where): States {
   const offered = where.search === "?offer";
   // A build that never updates itself (internal, candidate, or without the updater).
   const internal = where.search === "?internal";
+  // `?throws`: the update offer is handed an answer it can't draw, this app's version as an
+  // object, so a screen fails to draw as any might.
+  const throws = where.search === "?throws";
   // The move to OpenBot Cloud, offered over an OpenBot (Self-Contained) found running:
   // `#move-choice` after an update, and the rest from Settings, at the screen each names (see
   // `moveAnswer`).
@@ -360,6 +364,14 @@ function createStates(where: Where): States {
 
   const answer: FallbackAnswer = (command, args) => {
     const fake = globalThis.__fake;
+    if (throws && command === "app_update_offer")
+      return {
+        version: "1.3.0",
+        current: { broken: true },
+        installing: null,
+        updatesItself: true,
+        ready: null,
+      };
     if (connectedProblem && command === "connection")
       return {
         mode: "connected",

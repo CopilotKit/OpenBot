@@ -31,6 +31,10 @@ mock.module("@tauri-apps/api/event", () => ({
 
 const { startHeartbeat, SOONEST_MS } = await import("./heartbeat");
 
+/** What the window shows, as the page reads it: here a screen with its heading. */
+const SHOWN = { screen: "Starting OpenBot", drawn: true };
+const shown = () => SHOWN;
+
 function progress(payload: unknown) {
   for (const handler of listeners.get("setup:progress") ?? [])
     handler({ payload });
@@ -53,14 +57,14 @@ afterEach(() => {
 test("says it is here every few seconds, the first time as a fresh page, and never waits for an answer", async () => {
   // The native side never answers: the heartbeat goes on regardless.
   answer = () => new Promise(() => {});
-  const stop = startHeartbeat({ every: 20 });
+  const stop = startHeartbeat({ every: 20, shown });
   await pause(110);
   stop();
   const sent = beats();
   expect(sent.length).toBeGreaterThanOrEqual(4);
-  expect(sent[0]).toEqual({ seen: 0, fresh: true });
+  expect(sent[0]).toEqual({ seen: 0, fresh: true, ...SHOWN });
   for (const later of sent.slice(1))
-    expect(later).toEqual({ seen: 0, fresh: false });
+    expect(later).toEqual({ seen: 0, fresh: false, ...SHOWN });
   // Stopped: no more, and it no longer listens.
   const before = beats().length;
   await pause(60);
@@ -70,19 +74,19 @@ test("says it is here every few seconds, the first time as a fresh page, and nev
 
 test("says the highest progress number it has taken as soon as it arrives, at most once a second", async () => {
   let clock = 10_000;
-  const stop = startHeartbeat({ every: 60_000, now: () => clock });
+  const stop = startHeartbeat({ every: 60_000, now: () => clock, shown });
   await pause(0);
-  expect(beats()).toEqual([{ seen: 0, fresh: true }]);
+  expect(beats()).toEqual([{ seen: 0, fresh: true, ...SHOWN }]);
   clock += SOONEST_MS;
   progress({ step: "start-machine", ok: true, running: true, seq: 7 });
-  expect(beats().at(-1)).toEqual({ seen: 7, fresh: false });
+  expect(beats().at(-1)).toEqual({ seen: 7, fresh: false, ...SHOWN });
   // Within the second: taken, said with the next heartbeat.
   clock += 200;
   progress({ step: "start-machine", ok: true, running: true, seq: 8 });
   expect(beats().length).toBe(2);
   clock += SOONEST_MS;
   progress({ step: "start-machine", ok: true, running: true, seq: 9 });
-  expect(beats().at(-1)).toEqual({ seen: 9, fresh: false });
+  expect(beats().at(-1)).toEqual({ seen: 9, fresh: false, ...SHOWN });
   // An older number, or none, changes nothing.
   clock += SOONEST_MS;
   progress({ step: "start-machine", ok: true, running: true, seq: 4 });
@@ -95,7 +99,7 @@ test("a failed heartbeat is dropped, never thrown", async () => {
   answer = async () => {
     throw new Error("not in the desktop app");
   };
-  const stop = startHeartbeat({ every: 10 });
+  const stop = startHeartbeat({ every: 10, shown });
   await pause(40);
   stop();
   expect(beats().length).toBeGreaterThan(0);
