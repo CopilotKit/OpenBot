@@ -163,10 +163,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
     (the same parent domain, https and port). The token and revocation endpoints must still be on
     the address itself.
 - **Move OpenBot (Self-Contained) to OpenBot Cloud.** After the update, a computer that runs OpenBot
-  (Self-Contained) is asked once whether to move to OpenBot Cloud, with how much of OpenBot's files
-  the move removes, and Settings offers Move to OpenBot Cloud until it has moved. The question comes
-  as Desktop opens, before OpenBot (Self-Contained) updates or starts, and doesn't wait for OpenBot's
-  files to be measured: the space the move frees appears once it is known. Between OpenBot Cloud and
+  (Self-Contained) is asked once whether to move to OpenBot Cloud, and Settings offers Move to
+  OpenBot Cloud until it has moved. The question comes as Desktop opens, before OpenBot
+  (Self-Contained) updates or starts, and doesn't wait for OpenBot's files to be measured. Asked
+  before OpenBot starts, it gives no figure, and the next screen says how much of OpenBot's files the
+  move removes, measured once OpenBot is updated, so the two screens never give different figures.
+  Asked while OpenBot runs, both say the same figure. Between OpenBot Cloud and
   keeping OpenBot here, the question offers OpenBot for Business, with the same words and Book a
   demo as the first screen; picking it moves nothing and keeps nothing. Choosing OpenBot Cloud
   updates and starts it behind the move's own screen, which shows what moves once it can read it;
@@ -227,7 +229,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **The setup window never stays blank.** A screen that fails to draw shows "OpenBot hit a
   problem", with Reload and the troubleshooting logs, and the error goes to Desktop's log. A setup
   window on screen that draws nothing, or stops answering, is reloaded once; still stuck, a message
-  says so with Restart and Get logs.
+  says it still isn't updating, with Restart and Get logs.
 - **Start puts back a missing image list.** When OpenBot (Self-Contained)'s list of images on this
   computer was missing or couldn't be read, Start said this version of OpenBot doesn't include the
   Bot you picked, and every Retry failed. Start now finds an installation that needs laying out
