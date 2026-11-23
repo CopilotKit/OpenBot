@@ -287,6 +287,9 @@ mod macos {
     };
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
     use core_graphics::geometry::CGPoint;
+    use openbot_desktop_lib::quiet;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread::sleep;
     use std::time::Duration;
 
@@ -297,8 +300,6 @@ mod macos {
     /// The longest `screencapture` or `sips` may take.
     const TOOL_LIMIT: Duration = Duration::from_secs(15);
 
-    const NEEDS_SCREEN_RECORDING: &str = "OpenBot can't see the screen yet. The person needs to turn on OpenBot in System Settings, under Privacy & Security, Screen Recording, then ask again.";
-    const NEEDS_ACCESSIBILITY: &str = "OpenBot can't use the mouse and keyboard yet. The person needs to turn on OpenBot in System Settings, under Privacy & Security, Accessibility, then ask again.";
     const EVENTS_FAILED: &str = "Couldn't use the mouse or keyboard. Try again.";
     const SCREENSHOT_FAILED: &str = "Couldn't take a screenshot";
 
@@ -310,24 +311,113 @@ mod macos {
         fn CGRequestPostEventAccess() -> bool;
     }
 
+    /// Whether macOS was asked for each permission in this session: its own prompt shows once.
+    static ASKED_SCREEN: AtomicBool = AtomicBool::new(false);
+    static ASKED_EVENTS: AtomicBool = AtomicBool::new(false);
+    /// Whether System Settings was opened for the person in this session.
+    static OPENED_SETTINGS: AtomicBool = AtomicBool::new(false);
+
+    /**
+    Both permissions before anything is done, for every action: Screen Recording to see the screen,
+    Accessibility to use the mouse and keyboard. FOUND IN THE PROTOTYPE'S FIRST TRY: with only
+    Screen Recording granted, the first action took a screenshot, and the next asked for
+    Accessibility, which the person could not find to turn on. macOS shows its own prompt for each
+    at most once per session, and System Settings opens at the first one missing, once.
+    */
+    fn permitted() -> Result<(), String> {
+        // SAFETY: plain Quartz functions with no arguments, safe from any thread.
+        let screen = unsafe { CGPreflightScreenCaptureAccess() };
+        let events = unsafe { CGPreflightPostEventAccess() };
+        if screen && events {
+            return Ok(());
+        }
+        if !screen && !ASKED_SCREEN.swap(true, Ordering::SeqCst) {
+            unsafe { CGRequestScreenCaptureAccess() };
+        }
+        if !events && !ASKED_EVENTS.swap(true, Ordering::SeqCst) {
+            unsafe { CGRequestPostEventAccess() };
+        }
+        if !OPENED_SETTINGS.swap(true, Ordering::SeqCst) {
+            let pane = if events {
+                "Privacy_ScreenCapture"
+            } else {
+                "Privacy_Accessibility"
+            };
+            let _ = quiet::output_within(
+                quiet::command("/usr/bin/open").arg(format!(
+                    "x-apple.systempreferences:com.apple.preference.security?{pane}"
+                )),
+                Duration::from_secs(5),
+            );
+        }
+        let missing = match (screen, events) {
+            (false, false) => "Screen Recording and Accessibility",
+            (false, true) => "Screen Recording",
+            _ => "Accessibility",
+        };
+        let app = permission_holder();
+        Err(format!(
+            "Nothing was done on the computer. macOS needs {missing} for {app}. System Settings is open at Privacy & Security: the person turns on {app} under {missing}, adding it with the + button if it isn't listed, quits and reopens it if macOS asks, then asks again."
+        ))
+    }
+
+    /**
+    The app macOS holds these permissions against: this app's own bundle when it runs as one
+    (OpenBot, or OpenBot Dev for a test build), and otherwise the nearest app among the processes
+    that started it. A bare program has no entry of its own in System Settings, so a build run with
+    `tauri dev` asks for the terminal it came from.
+    */
+    fn permission_holder() -> String {
+        if let Some(name) = std::env::current_exe()
+            .ok()
+            .as_deref()
+            .and_then(app_bundle_name)
+        {
+            return name;
+        }
+        let ask = |field: &str, pid: u32| -> Option<String> {
+            let output = quiet::output_within(
+                quiet::command("/bin/ps").args(["-o", field, "-p", &pid.to_string()]),
+                Duration::from_secs(2),
+            )
+            .ok()?;
+            Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        };
+        let mut pid = std::process::id();
+        for _ in 0..16 {
+            let Some(parent) = ask("ppid=", pid).and_then(|ppid| ppid.parse::<u32>().ok()) else {
+                break;
+            };
+            if parent <= 1 {
+                break;
+            }
+            if let Some(name) = ask("comm=", parent).as_deref().map(Path::new).and_then(app_bundle_name) {
+                return format!("{name}, the app that started this test build of OpenBot");
+            }
+            pid = parent;
+        }
+        "the app that started this test build of OpenBot".into()
+    }
+
+    /// The name of the app bundle a program is in: `OpenBot Dev` for `…/OpenBot Dev.app/Contents/MacOS/…`.
+    pub(super) fn app_bundle_name(program: &Path) -> Option<String> {
+        program
+            .ancestors()
+            .find(|folder| folder.extension().is_some_and(|extension| extension == "app"))
+            .and_then(Path::file_stem)
+            .map(|name| name.to_string_lossy().into_owned())
+    }
+
     pub fn perform(
         app: &tauri::AppHandle,
         action: &Action,
         conversation: &Conversation,
     ) -> Result<Screen, String> {
-        // The person's answer first, so the system's own prompts come after OpenBot's explanation.
+        // The person's answer first, so the system's own prompts come after OpenBot's question.
         allow(app, conversation)?;
-        // SAFETY: plain Quartz functions with no arguments, safe from any thread.
-        if !unsafe { CGPreflightScreenCaptureAccess() } {
-            unsafe { CGRequestScreenCaptureAccess() };
-            return Err(NEEDS_SCREEN_RECORDING.into());
-        }
+        // Then every permission any action needs, before this one does anything.
+        permitted()?;
         let looks_only = matches!(action, Action::Screenshot | Action::Wait { .. });
-        // SAFETY: as above.
-        if !looks_only && !unsafe { CGPreflightPostEventAccess() } {
-            unsafe { CGRequestPostEventAccess() };
-            return Err(NEEDS_ACCESSIBILITY.into());
-        }
         let display = CGDisplay::main().bounds();
         let fit = Fit::new(display.size.width, display.size.height);
         let at = |x: f64, y: f64| {
@@ -762,5 +852,22 @@ mod tests {
         assert!(macos::combos("a+b").is_err());
         assert!(macos::combos("hyper").is_err());
         assert!(macos::combos("   ").is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_permissions_are_asked_for_the_app_the_program_is_in() {
+        use std::path::Path;
+        assert_eq!(
+            macos::app_bundle_name(Path::new(
+                "/Users/me/target/debug/bundle/macos/OpenBot Dev.app/Contents/MacOS/openbot-desktop"
+            ))
+            .as_deref(),
+            Some("OpenBot Dev")
+        );
+        assert_eq!(
+            macos::app_bundle_name(Path::new("/Users/me/target/debug/openbot-desktop")),
+            None
+        );
     }
 }
