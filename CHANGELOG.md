@@ -391,6 +391,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   providers, so its row asks only for an API key: OpenBot fills in
   `https://api.trustedrouter.com/v1` and the model `anthropic/claude-sonnet-5.5`, which can be
   changed to any name the gateway lists.
+- **A part of the app that didn't download loads again.** After a release replaced the app's files,
+  going back to a conversation could leave OpenBot Desktop's window on "Something went wrong!" with
+  "Importing a module script failed." The app now loads the page again, once, to get the files
+  OpenBot serves now. Failing that, it shows OpenBot's own error screen: what failed, Reload, the
+  details to copy into a bug report and, in OpenBot Desktop, its log folder.
 - **One press of Connect on an app's card.** For an app nobody had turned on yet, such as a key app
   like Fireflies or a sign-in app like Slack, a Bot's card offered Turn on, and pressing it only
   swapped in a second Connect. Now Connect turns the app on and carries straight on: a key app opens
