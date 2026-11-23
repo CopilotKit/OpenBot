@@ -90,6 +90,14 @@ export function readToolName(given: string, running = false): ToolName {
 const ROUTINES_APP = "routines";
 
 /**
+ * OpenBot's own apps whose names are not their keys in words: `openbot-settings` would read
+ * "Openbot Settings". Named as the catalogue names them.
+ */
+const OWN_APP_NAMES: Readonly<Record<string, string>> = {
+  "openbot-settings": "OpenBot settings",
+};
+
+/**
  * One app's tool, from its server key and the tool's own name: what `readToolName` reads out of an
  * `mcp__server__tool` name, and what an approval is asked about as `server/tool`.
  */
@@ -163,7 +171,9 @@ export function appToolName(server: string, tool: string): ToolName {
   const serverWords = wordsOf(server).map(singular);
   const named = containsPhrase(wordsActedOn, serverWords);
   const said = nameInWords(label);
-  return named ? { label: said } : { label: said, detail: server };
+  return named
+    ? { label: said }
+    : { label: said, detail: OWN_APP_NAMES[server] ?? server };
 }
 
 /**
@@ -171,6 +181,8 @@ export function appToolName(server: string, tool: string): ToolName {
  * Drive", and a broker's "composio-airtable" or "arcade-Gmail" as the app alone.
  */
 export function connectorName(server: string): string {
+  const own = OWN_APP_NAMES[server];
+  if (own) return own;
   return wordsOf(brokeredApp(server) ?? server)
     .map((word) => word[0]?.toUpperCase() + word.slice(1))
     .join(" ");
