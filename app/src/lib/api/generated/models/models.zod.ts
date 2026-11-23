@@ -1960,7 +1960,7 @@ export const ListAiConnectionsResponse = zod
             id: zod
               .string()
               .describe(
-                "The connection's id. Opaque; clients never read anything into it.",
+                "The connection's id. Opaque; clients never read anything into it. Unique within its list only: a person's own connection and the organization's may share an id, so a client says whose it means.",
               ),
             provider: zod
               .enum([
@@ -2175,7 +2175,7 @@ export const ConnectAiConnectionResponse = zod
     id: zod
       .string()
       .describe(
-        "The connection's id. Opaque; clients never read anything into it.",
+        "The connection's id. Opaque; clients never read anything into it. Unique within its list only: a person's own connection and the organization's may share an id, so a client says whose it means.",
       ),
     provider: zod
       .enum([
@@ -2346,7 +2346,7 @@ export const MakeAiConnectionDefaultResponse = zod
     id: zod
       .string()
       .describe(
-        "The connection's id. Opaque; clients never read anything into it.",
+        "The connection's id. Opaque; clients never read anything into it. Unique within its list only: a person's own connection and the organization's may share an id, so a client says whose it means.",
       ),
     provider: zod
       .enum([
@@ -2744,7 +2744,7 @@ export const ListPersonalAiConnectionsResponse = zod
             id: zod
               .string()
               .describe(
-                "The connection's id. Opaque; clients never read anything into it.",
+                "The connection's id. Opaque; clients never read anything into it. Unique within its list only: a person's own connection and the organization's may share an id, so a client says whose it means.",
               ),
             provider: zod
               .enum([
@@ -2971,7 +2971,7 @@ export const ConnectPersonalAiConnectionResponse = zod
     id: zod
       .string()
       .describe(
-        "The connection's id. Opaque; clients never read anything into it.",
+        "The connection's id. Opaque; clients never read anything into it. Unique within its list only: a person's own connection and the organization's may share an id, so a client says whose it means.",
       ),
     provider: zod
       .enum([
@@ -3166,7 +3166,7 @@ export const MakePersonalAiConnectionDefaultResponse = zod
     id: zod
       .string()
       .describe(
-        "The connection's id. Opaque; clients never read anything into it.",
+        "The connection's id. Opaque; clients never read anything into it. Unique within its list only: a person's own connection and the organization's may share an id, so a client says whose it means.",
       ),
     provider: zod
       .enum([

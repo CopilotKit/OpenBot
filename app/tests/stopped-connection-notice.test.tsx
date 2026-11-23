@@ -154,7 +154,9 @@ test("a refused run with stopped set draws the sentence, Reconnect and Choose an
   await view.findByText(SENTENCE);
   expect(choiceReads).toBeGreaterThan(0);
   const reconnect = view.getByRole("link", { name: "Reconnect" });
-  expect(reconnect.getAttribute("href")).toBe("/settings?connection=anthropic");
+  expect(reconnect.getAttribute("href")).toBe(
+    "/settings?connection=anthropic&owner=personal",
+  );
   await userEvent
     .setup({ document })
     .click(view.getByRole("button", { name: "Choose another model" }));
@@ -181,7 +183,9 @@ test("an admin on the organization's connection gets Reconnect to /settings?conn
     { wrapper },
   );
   const reconnect = await view.findByRole("link", { name: "Reconnect" });
-  expect(reconnect.getAttribute("href")).toBe("/settings?connection=anthropic");
+  expect(reconnect.getAttribute("href")).toBe(
+    "/settings?connection=anthropic&owner=organization",
+  );
 });
 
 test("a refused run with stopped null draws nothing here", async () => {

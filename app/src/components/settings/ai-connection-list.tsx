@@ -79,7 +79,7 @@ export function AiConnectionRows({
 }) {
   const { connections } = list;
   const [openId, setOpenId] = useState<string | null>(() =>
-    connectionInAddress(connections),
+    connectionInAddress(connections, scope),
   );
   // A new dialog each time one opens, so nothing typed into the last one is kept.
   const [opened, setOpened] = useState(0);
@@ -177,10 +177,20 @@ export function AiConnectionRows({
   );
 }
 
-/** The connection the address names (`?connection=<id>`, a conversation's Reconnect), if listed. */
-function connectionInAddress(connections: AiConnectionEntry[]): string | null {
+/**
+ * The connection the address names (`?connection=<id>&owner=<whose>`, a conversation's Reconnect),
+ * if this list holds it and the address names this list's owner (or none): a person's own and the
+ * organization's may share an id, and only the one meant opens.
+ */
+function connectionInAddress(
+  connections: AiConnectionEntry[],
+  scope: ConnectionScope,
+): string | null {
   if (typeof window === "undefined") return null;
-  const id = new URLSearchParams(window.location.search).get("connection");
+  const address = new URLSearchParams(window.location.search);
+  const id = address.get("connection");
+  const owner = address.get("owner");
+  if (owner && owner !== scope) return null;
   return id && connections.some((entry) => entry.id === id) ? id : null;
 }
 

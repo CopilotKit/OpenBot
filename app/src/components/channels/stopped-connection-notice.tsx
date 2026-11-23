@@ -17,9 +17,13 @@ export function openComposerModelPicker(): void {
     ?.click();
 }
 
-/** Where a connection is fixed: its row's dialog in Settings, opened by the address. */
-export function reconnectPath(connectionId: string): string {
-  return `/settings?connection=${encodeURIComponent(connectionId)}`;
+/**
+ * Where a connection is fixed: its row's dialog in Settings, opened by the address. `owner` says
+ * whose list it is in: on OpenBot Cloud a person's own and the organization's may share an id.
+ */
+export function reconnectPath(connectionId: string, owner?: string): string {
+  const whose = owner ? `&owner=${encodeURIComponent(owner)}` : "";
+  return `/settings?connection=${encodeURIComponent(connectionId)}${whose}`;
 }
 
 /**
@@ -74,7 +78,7 @@ export function StoppedConnectionNotice({
         {canFix ? (
           <a
             className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
-            href={reconnectPath(stopped.connection)}
+            href={reconnectPath(stopped.connection, owner)}
           >
             Reconnect
           </a>

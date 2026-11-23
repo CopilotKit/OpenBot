@@ -451,6 +451,28 @@ test("the address's connection opens that row's dialog", async () => {
   expect(within(dialog).getByText(/OpenAI API key/)).toBeDefined();
 });
 
+test("a connection the address names for a person's own AI opens only in Your AI, not the organization's list", async () => {
+  orgList = [entry("anthropic", { isDefault: true }), entry("openai")];
+  personal = PERSONAL;
+  personalList = [entry("anthropic", { isDefault: true })];
+  window.history.replaceState(
+    null,
+    "",
+    "/settings?connection=anthropic&owner=personal",
+  );
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <YourAiSection />
+      <AiModelSection organizationWide />
+    </QueryClientProvider>,
+  );
+  await view.findByRole("dialog", { hidden: true });
+  await view.findByText("Organization's AI");
+  // A modal dialog hides the page under it from role queries: count the hidden ones too.
+  await settleReactWork();
+  expect(view.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+});
+
 async function connectWithKey(
   view: ReturnType<typeof renderOrganization>,
   provider: RegExp,
