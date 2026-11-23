@@ -1,5 +1,5 @@
 import { type Icon, IconLogout, IconMessages } from "@tabler/icons-react";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import type { CSSProperties, ReactNode } from "react";
 import { BrandName } from "@/components/edition/brand-name";
 import { Strip, StripItem } from "@/components/layout/strip";
@@ -93,10 +93,14 @@ function PanelItem({
       icon={icon}
       label={label}
       onClick={() => {
-        show(id);
         // A narrow window's sheet shows the strip and the panel together: nothing to fold.
-        if (isMobile) return;
-        setOpen(current ? !open : true);
+        if (!isMobile) setOpen(current ? !open : true);
+        /*
+         * After opening the panel, not before: on a page whose section has none (Routines), opening
+         * it asks the frame for a section that has one, which is Conversations. The last section
+         * asked for is the one that opens, and it is this one.
+         */
+        show(id);
       }}
     />
   );
@@ -104,7 +108,10 @@ function PanelItem({
 
 /** One of the main menu's destinations with no panel, as a section whose pages it opens. */
 function PageItem({ item }: { item: NavigationLink }) {
-  const { section, page } = useOpenSection();
+  const { section, page, show } = useOpenSection();
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
   const recording = useLiveRecording();
   // Skills says when a recording is live: teaching a Bot a task is how a skill is recorded.
   const recordingHere = item.id === "skills" ? recording : null;
@@ -116,6 +123,14 @@ function PageItem({ item }: { item: NavigationLink }) {
       end={recordingHere ? <RecordingDot {...recordingHere} /> : null}
       icon={item.icon}
       label={item.label}
+      /*
+       * Already on its page, the link goes nowhere, so the page cannot hand the strip back: a
+       * panel opened over it (Bots on Routines) kept its icon lit and Routines could not be chosen.
+       * Opening the section here does what arriving on the page would have.
+       */
+      onClick={() => {
+        if (pathname === item.to) show(item.id);
+      }}
       render={<Link to={item.to} />}
       tooltip={recordingHere?.label}
     />

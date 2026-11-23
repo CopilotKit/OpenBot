@@ -3,6 +3,13 @@
 Thanks for helping. Open a pull request against `main` from your fork, and say in its description
 what it changes and why.
 
+## Don't break the API or the database
+
+**Before you change anything under `api/`, an app's requests, a database change or
+`release-policy.json`, read [docs/api-and-migrations.md](docs/api-and-migrations.md). Not
+optional.** OpenBot is live. Anything a released app uses keeps working for 12 months, and a
+migration never breaks a running server. CI enforces most of it; the page says what and how.
+
 ## How CI runs on your pull request
 
 - **A maintainer approves it first.** CI on a pull request from an outside contributor waits for a

@@ -6,7 +6,8 @@ The work is in `openbot_desktop_lib::move_to_cloud`. This is the wiring:
 - `move_offer`: whether the setup window shows the choice before it shows OpenBot (once per
   person, after the update, for OpenBot (Self-Contained) only), whether Settings sent it there,
   and how much OpenBot takes on this computer.
-- `keep_self_contained`: "Keep OpenBot (Self-Contained)", never asked again at launch.
+- `keep_self_contained`: "Keep OpenBot (Self-Contained)", not asked again at launch, except once
+  after the next update when it followed a move that failed (`note_outcome`).
 - `move_preview`: what moves and which apps to connect again, from the OpenBot running here.
 - `move_to_cloud`: sign in to OpenBot Cloud in the browser, then the move, which removes OpenBot
   from this computer only once OpenBot Cloud has checked that everything arrived. Each step is
@@ -45,6 +46,22 @@ fn state<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> &State {
     &app.state::<Shell>().inner().moving
 }
 
+/**
+Whether a move is running now. Its screens are setup's, and the window stays on them until it ends:
+a Dock click, the tray's Open, a second launch or a notice brings the window forward as it is
+(`restore_window_on`). Sending it to the OpenBot on this computer would show an app the move is
+about to remove, which then answers nothing.
+*/
+pub fn moving<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    state(app).running.load(Ordering::SeqCst)
+}
+
+/// A move running, or not, for a test of what the window does meanwhile.
+#[cfg(test)]
+pub(crate) fn set_moving_for_test<R: tauri::Runtime>(app: &tauri::AppHandle<R>, running: bool) {
+    state(app).running.store(running, Ordering::SeqCst);
+}
+
 /// The folder `connection.json` is in, the same in a test (`desktop_connected::config_dir`).
 fn config_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
     crate::desktop_connected::config_dir(app)
@@ -52,6 +69,11 @@ fn config_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
 
 fn answered<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<Answer> {
     config_dir(app).and_then(|dir| moving::answered(&dir))
+}
+
+/// This app's own version: a Keep that followed a failed move is offered again in any other.
+fn release<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
+    app.package_info().version.to_string()
 }
 
 fn root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
@@ -94,14 +116,24 @@ pub async fn move_offer<R: tauri::Runtime>(
     tauri::async_runtime::spawn_blocking(move || {
         let from_settings =
             state(&app).from_settings.swap(false, Ordering::SeqCst) && offered_in_settings(&app);
+        let recorded = config_dir(&app)
+            .map(|dir| moving::on_record(&dir))
+            .unwrap_or_default();
         let due = moving::due(
             cloud,
             crate::desktop_connected::is_connected(&app),
             installed_here(&app),
-            answered(&app),
+            &recorded,
+            &release(&app),
         );
         let footprint_bytes = (due || from_settings).then(|| footprint(&app)).flatten();
-        log::info!("[move] offer: due {due}, from Settings {from_settings}");
+        let again = match (&recorded.kept_after_failed_move_in, due) {
+            (Some(kept_in), true) => {
+                format!(", again: kept after a failed move on {kept_in}")
+            }
+            _ => String::new(),
+        };
+        log::info!("[move] offer: due {due}, from Settings {from_settings}{again}");
         MoveOffer {
             due,
             from_settings,
@@ -116,21 +148,51 @@ pub async fn move_offer<R: tauri::Runtime>(
     })
 }
 
-/// "Keep OpenBot (Self-Contained)": kept, and never asked again at launch.
+/// "Keep OpenBot (Self-Contained)": kept, and not asked again at launch, unless it followed a failed
+/// move (`moving::record_kept`).
 #[tauri::command]
 pub async fn keep_self_contained<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<(), Problem> {
     let dir = config_dir(&app)
         .ok_or_else(|| Problem::plain("OpenBot couldn't save your choice on this computer."))?;
-    moving::record(&dir, Answer::Kept).map_err(|error| {
+    let recorded = moving::record_kept(&dir, &release(&app)).map_err(|error| {
         Problem::with(
             "OpenBot couldn't save your choice on this computer. Try again.",
             error.to_string(),
         )
     })?;
-    log::info!("[move] the person keeps OpenBot (Self-Contained)");
+    match recorded.kept_after_failed_move_in {
+        Some(_) => log::info!(
+            "[move] the person keeps OpenBot (Self-Contained) after a failed move; offered again after the next update"
+        ),
+        None => log::info!("[move] the person keeps OpenBot (Self-Contained)"),
+    }
     Ok(())
+}
+
+/**
+A move that ran and didn't finish is kept on record (`moving::record_failed_move`), so a Keep chosen
+after it brings the offer back after the next update. Only the move's own failures: a sign-in that
+didn't finish (Cancel among them), a second move refused while one runs, or an app connected
+elsewhere never started it.
+*/
+pub(crate) fn note_outcome<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    moved: &Result<moving::Moved, Problem>,
+) {
+    let Err(problem) = moved else { return };
+    if !matches!(
+        problem.kind,
+        Some("move-failed" | "move-mismatch" | "move-stopped")
+    ) {
+        return;
+    }
+    let Some(dir) = config_dir(app) else { return };
+    match moving::record_failed_move(&dir) {
+        Ok(()) => log::info!("[move] a failed move is on record"),
+        Err(error) => log::warn!("[move] could not keep the failed move on record: {error}"),
+    }
 }
 
 /// What `move_preview` answers.
@@ -234,6 +296,8 @@ pub async fn move_to_cloud<R: tauri::Runtime>(
     .await;
     state(&app).running.store(false, Ordering::SeqCst);
     openbot_desktop_lib::logging::outcome("move", asked, &moved);
+    note_outcome(&app, &moved);
+    crate::setup_again_after_move(&app);
     if opened.load(Ordering::SeqCst) {
         crate::bring_to_front(&forward, "the move to OpenBot Cloud signed in");
     }
@@ -512,7 +576,7 @@ impl<R: tauri::Runtime> moving::Here for ThisComputer<R> {
     /// next launch on, so a removal cut short never offers the move again.
     fn moved(&mut self) -> Result<(), String> {
         let dir = config_dir(&self.app).ok_or("the app has no configuration folder")?;
-        moving::record(&dir, Answer::Moved).map_err(|error| error.to_string())?;
+        moving::record_moved(&dir).map_err(|error| error.to_string())?;
         crate::desktop_connected::keep_moved_choice(&self.app, &self.address, &self.organization)
             .map_err(|problem| problem.detail.unwrap_or(problem.said))
     }

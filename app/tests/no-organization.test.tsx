@@ -113,6 +113,13 @@ async function answer(request: Request): Promise<Response> {
     });
   if (mine && path === `/api/v2/organizations/${mine.id}/shortened-tool-names`)
     return NativeResponse.json({ tools: [] });
+  // No terms to agree to, as an OpenBot that isn't OpenBot Cloud answers.
+  if (mine && path === `/api/v2/organizations/${mine.id}/people/me/terms`)
+    return NativeResponse.json({
+      current: null,
+      accepted: null,
+      acceptanceNeeded: false,
+    });
   return problem(
     404,
     "ORGANIZATION_NOT_FOUND",

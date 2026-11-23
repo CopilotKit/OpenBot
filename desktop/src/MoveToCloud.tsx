@@ -3,6 +3,7 @@ import {
   IconBell,
   IconBook,
   IconBrain,
+  IconBuilding,
   IconCircleCheck,
   IconClock,
   IconCloud,
@@ -23,6 +24,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { BusinessBooker } from "./BusinessBooker";
 import { cloudAddress } from "./CloudSignIn";
 import { asProblem, type Problem } from "./Problem";
 import {
@@ -31,10 +33,12 @@ import {
   StatusLine,
   StepFooter,
 } from "./SetupProgress";
+import { BUSINESS_SUMMARY, CloudMarks, HostingMark } from "./Welcome";
 
 /**
  * Whether this window offers the move to OpenBot Cloud, as the shell answers `move_offer`. `due`:
- * OpenBot is set up and runs on this computer, and the person has never answered. `fromSettings`:
+ * OpenBot is set up and runs on this computer, and the person has never answered, or kept OpenBot
+ * here after a move that failed and the app has updated since (once). `fromSettings`:
  * Settings' "Move to OpenBot Cloud" sent the window here, answered once. `footprintBytes`: what
  * OpenBot's own files take on this computer now, which the move removes, or null when it couldn't
  * be measured. The finished move's `removedBytes` counts the same files the same way.
@@ -301,7 +305,10 @@ type Screen =
  * offered once after an update, or opened from Settings.
  *
  * 1. The choice: OpenBot Cloud, recommended and picked to begin with, or keep everything here. With
- *    the space the move frees. Keep is recorded and never asked again (`onKeep`).
+ *    the space the move frees. Keep is recorded and not asked again at launch, except once after the
+ *    next update when it followed a failed move (`onKeep`). Between them,
+ *    OpenBot for Business as the first screen draws it, which books a demo (`BusinessBooker`) and
+ *    moves nothing: while it is picked there is no Continue and no Keep.
  * 2. What moves, from the OpenBot running here (`move_preview`), and the app connections that can't
  *    move, by name, to reconnect in OpenBot Cloud. Settings opens here. Offered at launch, before
  *    OpenBot started (`here`), it starts now (`onGetReady`), and the figures arrive once it is up.
@@ -582,8 +589,9 @@ function Choice({
   onCloud: () => void;
   onKeep: () => void;
 }) {
-  const [picked, setPicked] = useState<"cloud" | "keep">("cloud");
-  const rowClass = (chosen: boolean) => (chosen ? "tile chosen" : "tile");
+  const [picked, setPicked] = useState<"cloud" | "business" | "keep">("cloud");
+  const rowClass = (chosen: boolean, base = "tile") =>
+    chosen ? `${base} chosen` : base;
   return (
     <Sheet>
       <h1>Move to OpenBot Cloud?</h1>
@@ -612,6 +620,24 @@ function Choice({
             {footprintBytes != null && ` ${removesSaid(footprintBytes)}`}
           </span>
         </label>
+        {/* The first screen's OpenBot for Business row: a company's own cloud or on-prem. */}
+        <label className={rowClass(picked === "business", "tile with-marks")}>
+          <input
+            type="radio"
+            name="move"
+            className="tile-input"
+            value="business"
+            checked={picked === "business"}
+            disabled={keeping}
+            onChange={() => setPicked("business")}
+          />
+          <HostingMark>
+            <IconBuilding stroke={1.75} />
+          </HostingMark>
+          <span className="tile-name">OpenBot for Business</span>
+          <span className="tile-summary">{BUSINESS_SUMMARY}</span>
+          <CloudMarks />
+        </label>
         <label className={rowClass(picked === "keep")}>
           <input
             type="radio"
@@ -629,25 +655,32 @@ function Choice({
           </span>
         </label>
       </fieldset>
-      <div className="row">
-        {picked === "cloud" ? (
-          <button type="button" onClick={onCloud}>
-            Continue
-          </button>
-        ) : (
-          <button type="button" disabled={keeping} onClick={onKeep}>
-            Keep OpenBot on this computer
-          </button>
-        )}
-      </div>
-      {keeping ? (
-        <StatusLine>Opening OpenBot…</StatusLine>
+      {/* OpenBot for Business books a demo: it moves nothing and keeps nothing, so neither shows. */}
+      {picked === "business" ? (
+        <BusinessBooker />
       ) : (
-        <p className="footnote">
-          {picked === "cloud"
-            ? NOTHING_REMOVED_UNTIL_CHECKED
-            : MOVE_LATER_IN_SETTINGS}
-        </p>
+        <>
+          <div className="row">
+            {picked === "cloud" ? (
+              <button type="button" onClick={onCloud}>
+                Continue
+              </button>
+            ) : (
+              <button type="button" disabled={keeping} onClick={onKeep}>
+                Keep OpenBot on this computer
+              </button>
+            )}
+          </div>
+          {keeping ? (
+            <StatusLine>Opening OpenBot…</StatusLine>
+          ) : (
+            <p className="footnote">
+              {picked === "cloud"
+                ? NOTHING_REMOVED_UNTIL_CHECKED
+                : MOVE_LATER_IN_SETTINGS}
+            </p>
+          )}
+        </>
       )}
     </Sheet>
   );

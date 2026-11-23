@@ -273,12 +273,48 @@ at a container nobody started — which looks like a broken Bot rather than a ba
 */
 pub fn picked(
     choice: Option<&HarnessChoice>,
+    root: &std::path::Path,
+) -> Result<Option<crate::env::PickedHarness>, String> {
+    pick(choice, root).map_err(String::from)
+}
+
+/// Why [`pick`] refused: the pick itself, or an image list it could not read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PickError {
+    /// The release's image list is missing or unreadable. Not about the pick: the installation is
+    /// damaged, and Install puts the list back (`deployment::ReferenceError::Unreadable`).
+    ImageList(String),
+    /// The pick itself: a Bot this build does not have, one this release does not publish, or an
+    /// address that is not one.
+    Refused(String),
+}
+
+impl From<PickError> for String {
+    fn from(error: PickError) -> Self {
+        match error {
+            PickError::ImageList(detail) | PickError::Refused(detail) => detail,
+        }
+    }
+}
+
+impl From<crate::deployment::ReferenceError> for PickError {
+    fn from(error: crate::deployment::ReferenceError) -> Self {
+        match error {
+            crate::deployment::ReferenceError::Unreadable(detail) => Self::ImageList(detail),
+            crate::deployment::ReferenceError::NotIncluded(detail) => Self::Refused(detail),
+        }
+    }
+}
+
+/// [`picked`], saying whether the refusal is about the pick or about an unreadable image list.
+pub fn pick(
+    choice: Option<&HarnessChoice>,
     // Where the deployment is, because the image reference is read from the manifest laid down
     // beside it. A name built from a version was what this took before, and an unqualified name
     // sends every engine to Docker Hub: the pull was refused there and the person was shown a
     // registry permissions error for a repository that had never been pushed.
     root: &std::path::Path,
-) -> Result<Option<crate::env::PickedHarness>, String> {
+) -> Result<Option<crate::env::PickedHarness>, PickError> {
     let Some(choice) = choice else {
         return Ok(None);
     };
@@ -289,7 +325,9 @@ pub fn picked(
     let row = catalogue()
         .into_iter()
         .find(|row| row.id == id)
-        .ok_or_else(|| format!("There is no Bot called \"{id}\" to install."))?;
+        .ok_or_else(|| {
+            PickError::Refused(format!("There is no Bot called \"{id}\" to install."))
+        })?;
     if row.id == "byo-url" {
         let url = choice
             .agent_url
@@ -297,7 +335,8 @@ pub fn picked(
             .ok_or_else(|| {
                 "Enter a valid http:// or https:// address for the agent endpoint.".to_string()
             })
-            .and_then(byo_remote_ag_ui_url)?;
+            .and_then(byo_remote_ag_ui_url)
+            .map_err(PickError::Refused)?;
         return Ok(Some(crate::env::PickedHarness::RemoteAgUi {
             url,
             name: row.name,
@@ -305,11 +344,13 @@ pub fn picked(
         }));
     }
     let (Some(image), Some(port)) = (row.image, row.port) else {
-        return Err(format!("\"{id}\" is not a Bot this can install."));
+        return Err(PickError::Refused(format!(
+            "\"{id}\" is not a Bot this can install."
+        )));
     };
     let mastra = row.id == "mastra";
     Ok(Some(crate::env::PickedHarness::Installed {
-        image: crate::deployment::reference(root, &image)?,
+        image: crate::deployment::image_reference(root, &image)?,
         port,
         name: row.name,
         mastra,

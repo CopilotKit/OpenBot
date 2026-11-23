@@ -26827,19 +26827,20 @@ components:
         label:
           type: string
           description: Its name, as a model picker shows it.
-    AiConnectionProvider:
+    AiConnectionProviderAnswer:
       type: string
-      description: 'The AI provider OpenBot''s Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI''s API, at an address given.'
-      enum:
+      x-extensible-enum:
         - openai
         - anthropic
         - google
         - xai
         - unbiased
+        - trustedrouter
         - openai-compatible
+      description: 'The AI provider OpenBot''s Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI''s API, at an address given. The list can grow: a client shows a provider it doesn''t know by its id. A request still names one of AiConnectionProvider.'
     AiConnectionLogin:
       type: string
-      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, openai-compatible). oauth: the person''s Google or xAI sign-in (google, xai).'
+      description: 'How OpenBot signs in to the provider. plan: the person''s Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person''s Google or xAI sign-in (google, xai).'
       enum:
         - plan
         - api-key
@@ -26854,7 +26855,7 @@ components:
         - endpointHost
       properties:
         provider:
-          $ref: '#/components/schemas/AiConnectionProvider'
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
         login:
           $ref: '#/components/schemas/AiConnectionLogin'
         endpointHost:
@@ -26897,7 +26898,7 @@ components:
         provider:
           description: The provider. Null while none is chosen yet.
           oneOf:
-            - $ref: '#/components/schemas/AiConnectionProvider'
+            - $ref: '#/components/schemas/AiConnectionProviderAnswer'
             - type: 'null'
         login:
           description: How OpenBot signs in to it. Null while none is chosen yet.
@@ -26946,10 +26947,21 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AiConnectionSharedSignIn'
             - type: 'null'
+    AiConnectionProvider:
+      type: string
+      description: 'The AI provider OpenBot''s Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI''s API, at an address given.'
+      enum:
+        - openai
+        - anthropic
+        - google
+        - xai
+        - unbiased
+        - trustedrouter
+        - openai-compatible
     AiConnectionInput:
       type: object
       additionalProperties: false
-      description: The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased and openai-compatible take endpoint. Any other pair is refused.
+      description: The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased, trustedrouter and openai-compatible take endpoint. Any other pair is refused.
       required:
         - provider
         - login
@@ -26992,7 +27004,7 @@ components:
         provider:
           description: The organization's provider. Null while it has none.
           oneOf:
-            - $ref: '#/components/schemas/AiConnectionProvider'
+            - $ref: '#/components/schemas/AiConnectionProviderAnswer'
             - type: 'null'
     PersonalAiConnection:
       type: object
@@ -27026,7 +27038,7 @@ components:
           type: array
           description: 'The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), Google and xAI sign-ins, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.'
           items:
-            $ref: '#/components/schemas/AiConnectionProvider'
+            $ref: '#/components/schemas/AiConnectionProviderAnswer'
     AiSignInInput:
       type: object
       additionalProperties: false
@@ -27064,7 +27076,7 @@ components:
           pattern: ^[A-Za-z0-9_-]+$
           description: The sign-in's id, for reading where it stands.
         provider:
-          $ref: '#/components/schemas/AiConnectionProvider'
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
         url:
           type: string
           format: uri
@@ -27104,7 +27116,7 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
         provider:
-          $ref: '#/components/schemas/AiConnectionProvider'
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
         status:
           type: string
           x-extensible-enum:

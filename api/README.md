@@ -1,5 +1,8 @@
 # OpenBot's API spec
 
+**Before you change anything here, read [docs/api-and-migrations.md](../docs/api-and-migrations.md).
+Not optional.** Anything a released app uses keeps working for 12 months.
+
 `api/openapi.yaml` is the REST API every client is generated from and every check reads: the app's
 client (Orval), the breaking-change check (oasdiff), the lint (`bun run api:lint`) and the server's
 contract tests. It is a bundle. Never edit it by hand: edit its sources and bundle.

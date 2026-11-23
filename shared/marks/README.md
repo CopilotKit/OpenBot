@@ -14,6 +14,7 @@ own repository:
 | `mastra.svg` | The glyph from Mastra's own favicon, [mastra.ai/favicon/new-brand/icon.svg](https://mastra.ai/favicon/new-brand/icon.svg) (downloaded 2026-11-18), the mark from its November 2025 [rebrand](https://mastra.ai/blog/rebrand). Its path is verbatim; the black tile behind it is dropped and the glyph drawn in `currentColor`, scaled into the 24-unit box, with a `<title>` and `1em` sizing. The lobehub set still has the old orb, so `shared/marks.test.ts` pins this path |
 | `kubernetes.svg` | The Kubernetes icon from the CNCF's own artwork repository, [`cncf/artwork`](https://github.com/cncf/artwork) `projects/kubernetes/icon/color/kubernetes-icon-color.svg`, verbatim apart from a `<title>`. Used under the Linux Foundation's trademark usage guidelines, to name the project |
 | `unbiased.svg` | Unbiased AI's own icon, as served at `platform.unbiased.ai/logos/unbiased-icon.svg` and supplied by Unbiased AI for this row, verbatim apart from a `<title>` and `1em` sizing |
+| `trustedrouter.svg` | TrustedRouter's own monochrome mark, `trustedrouter-mono.svg` from the public media kit at [trustedrouter.com/media-kit](https://trustedrouter.com/media-kit) (downloaded 2026-11-19), verbatim apart from a `<title>` and `1em` sizing. It is already drawn in `currentColor` in the 24-unit box |
 
 The clouds on Desktop's OpenBot for Business choice come from that set too, as its colour marks:
 `aws.svg` (`aws-color.svg`), `azure.svg` (`azure-color.svg`) and `google-cloud.svg`
