@@ -119,8 +119,12 @@ const moveFirst = move === "first";
 let finishUpdate;
 const updated = new Promise((resolve) => (finishUpdate = resolve));
 fake.finishUpdate = () => finishUpdate({ from: "1.1.3", to: "1.2.0", moved: true });
+// A relaunch whose image list something outside OpenBot deleted: Start refuses it as an unfinished
+// install, as start_stack does, and the window installs before it starts again. Offline here, so
+// that install fails and the window says so.
+const imageListGone = location.hash === "#image-list-gone";
 // Found running by the launch is a relaunch too: an installation set up and started before.
-const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld || runningTooOld || launcherAhead || Boolean(move);
+const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld || runningTooOld || launcherAhead || imageListGone || Boolean(move);
 const MOVE_APPS = [
   { appId: "gmail", appName: "Gmail", accountLabel: "sam@example.com", botNames: ["Inbox helper", "Standup"] },
   { appId: "slack", appName: "Slack", accountLabel: "Northwind" },
@@ -262,7 +266,7 @@ export async function invoke(command, args) {
           }
         : { values: {}, saved: { modelApiKeys: none, modelSessions: none } };
     case "upgrade_due":
-      return relaunch && !localTooOld && !runningTooOld && !launcherAhead ? { from: "1.0.0", to: "1.0.1" } : null;
+      return relaunch && !localTooOld && !runningTooOld && !launcherAhead && !imageListGone ? { from: "1.0.0", to: "1.0.1" } : null;
     case "upgrade_and_start":
       if (updateShort)
         throw {
@@ -292,6 +296,14 @@ export async function invoke(command, args) {
         return new Promise(() => {});
       }
       emit("setup:progress", { step: "engine", ok: true, running: false, detail: "The software OpenBot runs on is ready." });
+      // Offline, so the install Start asked for cannot download the list again.
+      if (imageListGone) {
+        emit("setup:progress", { step: "deployment", ok: false, running: false, detail: "could not fetch the image list for v1.1.2: error sending request" });
+        throw {
+          said: "OpenBot could not download what it needs to run. Check the internet connection and try again.",
+          detail: "could not fetch the image list for v1.1.2: error sending request",
+        };
+      }
       return installing ? installed : new Promise((resolve) => setTimeout(() => resolve(null), 50));
     case "sign_in_to_copilotkit":
       if (slowCheck) return new Promise((resolve) => setTimeout(() => resolve({ signedIn: true }), 1500));
@@ -327,6 +339,12 @@ export async function invoke(command, args) {
     // when the window is about to find it needs a newer app. Refused, when the release laid out
     // needs a newer launcher contract than this app speaks.
     case "start_stack":
+      if (imageListGone)
+        throw {
+          said: "Finish installing OpenBot's local software before signing in or starting. Return to Install and try again.",
+          detail: "The image list /Users/you/OpenBot/container-images.json is missing. Install downloads it again.",
+          connection: "installation",
+        };
       if (launcherAhead)
         throw {
           said: "The OpenBot on this computer needs a newer version of this app. Update OpenBot to keep going.",
@@ -2161,6 +2179,68 @@ describe.skipIf(!asked)("an update this computer has no room for", () => {
           await page.close();
         }
       }, 40_000);
+});
+
+/*
+ * An image list something outside OpenBot deleted. Start used to say "This version of OpenBot does
+ * not include the Bot you picked. Go back and choose another, or update OpenBot.", and every Retry
+ * failed the same way. Start says it is an unfinished install now, so the window runs Install by
+ * itself (which downloads only the list again) before it starts. Offline here, so that install
+ * fails: the window is on Installing OpenBot with the download row failed and Retry installation,
+ * and says nothing about the Bot. `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot, light and dark.
+ */
+describe.skipIf(!asked)("a Start whose image list is gone", () => {
+  for (const colorScheme of ["light", "dark"] as const)
+    test(`installs again by itself, and offline says the download failed, not the Bot (${colorScheme})`, async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 800 },
+        colorScheme,
+      });
+      try {
+        await open(page, "#image-list-gone");
+        await page
+          .getByRole("button", { name: "Retry installation", exact: true })
+          .waitFor();
+        await page.waitForTimeout(600);
+        const shots = process.env.OPENBOT_APP_SHOTS;
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/image-list-gone-${colorScheme}-${process.env.OPENBOT_APP_ENGINE ?? "chromium"}.png`,
+          });
+        const seen = await page.evaluate(() => {
+          const calls = (
+            globalThis as unknown as { __fake: { calls: string[] } }
+          ).__fake.calls;
+          const text = document.querySelector("main")?.textContent ?? "";
+          const failed = [...document.querySelectorAll("main li")].filter(
+            (row) => row.textContent?.includes("Failed"),
+          );
+          return {
+            heading: document.querySelector("main h1")?.textContent,
+            failedRows: failed.length,
+            failedDownload: failed.some((row) =>
+              row.textContent?.includes("Downloading OpenBot"),
+            ),
+            blamesTheBot: text.includes("does not include"),
+            saysDidNotStart: text.includes("did not start"),
+            starts: calls.filter((call) => call === "start_stack").length,
+            installs: calls.filter((call) => call === "prepare_installation")
+              .length,
+          };
+        });
+        expect(seen).toEqual({
+          heading: "Installing OpenBot",
+          failedRows: 1,
+          failedDownload: true,
+          blamesTheBot: false,
+          saysDidNotStart: false,
+          starts: 1,
+          installs: 1,
+        });
+      } finally {
+        await page.close();
+      }
+    }, 40_000);
 });
 
 /** Opens a relaunch whose Start updates OpenBot, at its last step, OpenBot opening. */

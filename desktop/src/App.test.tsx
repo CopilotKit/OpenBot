@@ -6234,6 +6234,34 @@ test("a Start that waits for the install it asked for carries on with the saved 
   ).toHaveLength(1);
 });
 
+/**
+ * An image list something outside OpenBot deleted: Start says it is an unfinished install, the
+ * window installs (which downloads only the list again) and starts, with no "does not include the
+ * Bot you picked" and nothing for the person to choose.
+ */
+test("a Start refused for a missing image list installs it again and starts", async () => {
+  const root = "/tmp/installed-image-list-gone";
+  const { view, installed } = await reopenAfterUpdate(root, (starts) => {
+    if (starts === 1)
+      throw {
+        ...INSTALL_AGAIN,
+        detail: `The image list ${root}/container-images.json is missing. Install downloads it again.`,
+      };
+    return null;
+  });
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByText(/does not include/)).toBeNull();
+
+  await act(async () => installed.resolve(null));
+  await view.findByRole("heading", { name: "OpenBot is running" });
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByText(/does not include/)).toBeNull();
+  expect(startsMade()).toHaveLength(2);
+  expect(
+    invokeCalls.filter((call) => call.command === "prepare_installation"),
+  ).toHaveLength(1);
+});
+
 test("a saved sign-in refused after the install sends the person to refresh it", async () => {
   const root = "/tmp/installed-upgrade-refused-sign-in";
   const { view, installed } = await reopenAfterUpdate(root, (starts) => {
