@@ -31,7 +31,11 @@ import {
   makeDefaultAiConnectionMutationOptions,
   removeAiConnectionMutationOptions,
 } from "@/lib/ai-connection/mutations";
-import { AI_PROVIDERS, providerById } from "@/lib/ai-connection/providers";
+import {
+  AI_PROVIDERS,
+  isSignIn,
+  providerById,
+} from "@/lib/ai-connection/providers";
 import {
   type AiConnectionEntry,
   type AiConnections,
@@ -238,6 +242,7 @@ type Step =
   | { at: "current" }
   | { at: "disconnect" }
   | { at: "choose" }
+  | { at: "fix" }
   | {
       at: "done";
       connection: DescribedConnection;
@@ -319,6 +324,24 @@ function ConnectionDialog({
                   connected: list.connections.map((other) => other.provider),
                 }
           }
+          onBack={() => setStep({ at: "current" })}
+          onConnected={(next) => setStep({ at: "done", ...next })}
+        />
+      </DialogContent>
+    );
+  // A stopped connection, fixed where it is: its provider, ready to sign in again or take a new key.
+  if (step.at === "fix")
+    return (
+      <DialogContent>
+        <ChooseConnection
+          mode={{
+            kind: "adding",
+            scope,
+            signIns: list.signIns,
+            connected: list.connections.map((other) => other.provider),
+            provider: entry.provider,
+            reconnecting: name,
+          }}
           onBack={() => setStep({ at: "current" })}
           onConnected={(next) => setStep({ at: "done", ...next })}
         />
@@ -441,10 +464,20 @@ function ConnectionDialog({
           disabled={busy}
           onClick={() => setStep({ at: "choose" })}
           size="sm"
-          variant={entry.isDefault ? "default" : "outline"}
+          variant={entry.isDefault && entry.ready ? "default" : "outline"}
         >
           Change
         </Button>
+        {entry.ready ? null : (
+          // Stopped: the fix comes first, on its own provider.
+          <Button
+            disabled={busy}
+            onClick={() => setStep({ at: "fix" })}
+            size="sm"
+          >
+            {isSignIn(entry.login) ? "Sign in again" : "Replace key"}
+          </Button>
+        )}
         {entry.isDefault ? null : (
           <Button
             disabled={busy || !entry.ready}

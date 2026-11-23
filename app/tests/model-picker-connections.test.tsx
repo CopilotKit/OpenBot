@@ -291,6 +291,41 @@ test("search finds a model in a later group", async () => {
   expect(within(popup).queryByText("ChatGPT plan")).toBeNull();
 });
 
+test("a stopped connection of the person's own offers Reconnect in its group; the organization's doesn't", async () => {
+  const stoppedOwn = {
+    ...CLAUDE,
+    ready: false,
+    problem: { code: "sign-in-ended", detail: "Sign in again." },
+  };
+  const view = render(
+    <ModelPicker
+      catalogue={catalogueOf([CHATGPT, stoppedOwn])}
+      onChange={() => {}}
+      value={{ model: SOL.id, effort: null, connection: "openai" }}
+    />,
+  );
+  const { popup } = await open(view, "Model: GPT-6.2 Sol");
+  expect(
+    within(popup).getByRole("link", { name: "Reconnect" }).getAttribute("href"),
+  ).toBe("/settings?connection=anthropic&owner=personal");
+  cleanup();
+  const theirs = render(
+    <ModelPicker
+      catalogue={catalogueOf([
+        { ...CHATGPT, owner: "organization" },
+        { ...stoppedOwn, owner: "organization" },
+      ])}
+      onChange={() => {}}
+      value={{ model: SOL.id, effort: null, connection: "openai" }}
+    />,
+  );
+  const second = await open(theirs, "Model: GPT-6.2 Sol");
+  expect(within(second.popup).getByText("Sign in again.")).toBeTruthy();
+  expect(
+    within(second.popup).queryByRole("link", { name: "Reconnect" }),
+  ).toBeNull();
+});
+
 test("one connection and no default: the picker names it, and a pick saves with its connection", async () => {
   const alone = catalogueOf([CLAUDE]);
   const picks: ModelPick[] = [];

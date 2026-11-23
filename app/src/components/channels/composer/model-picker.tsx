@@ -8,6 +8,7 @@ import {
 } from "@tabler/icons-react";
 import { useMemo, useRef, useState } from "react";
 import { HarnessMark } from "@/components/agents/harness-mark";
+import { reconnectPath } from "@/components/channels/stopped-connection-notice";
 import { Button } from "@/components/ui/button";
 import {
   Combobox,
@@ -513,6 +514,19 @@ function Picker({
                           <p className="pt-1 text-destructive">
                             {choice.connection.problem?.detail}
                           </p>
+                        )}
+                        {choice.connection.ready ||
+                        choice.connection.owner !== "personal" ? null : (
+                          // Theirs to fix: the organization's waits on an admin, in Settings.
+                          <a
+                            className="mt-1 inline-block text-foreground underline underline-offset-4"
+                            href={reconnectPath(
+                              choice.connection.id,
+                              "personal",
+                            )}
+                          >
+                            Reconnect
+                          </a>
                         )}
                       </div>
                     ) : choice.kind === "model" ? (

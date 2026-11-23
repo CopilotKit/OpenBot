@@ -473,6 +473,55 @@ test("a connection the address names for a person's own AI opens only in Your AI
   expect(view.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
 });
 
+test("a stopped sign-in leads with Sign in again, which opens its provider ready to sign in", async () => {
+  orgSignIns = ["google"];
+  orgList = [
+    entry("anthropic", { isDefault: true }),
+    entry("google", {
+      login: "oauth",
+      model: "gemini-3.8-flash",
+      ready: false,
+      problem: { code: "sign-in-ended", detail: "Your Google sign-in ended." },
+    }),
+  ];
+  const user = userEvent.setup({ document });
+  const view = renderOrganization();
+  await user.click(await view.findByRole("button", { name: /Google sign-in/ }));
+  const dialog = await view.findByRole("dialog");
+  await user.click(
+    within(dialog).getByRole("button", { name: "Sign in again" }),
+  );
+  expect(
+    await within(dialog).findByRole("heading", {
+      name: "Reconnect Google sign-in",
+    }),
+  ).toBeDefined();
+  expect(
+    within(dialog).getByRole("button", { name: "Sign in with Google" }),
+  ).toBeDefined();
+});
+
+test("a stopped key leads with Replace key, which opens its provider's key field", async () => {
+  orgList = [
+    entry("anthropic", { isDefault: true }),
+    entry("openai", {
+      ready: false,
+      problem: { code: "key-refused", detail: "OpenAI refused the key." },
+    }),
+  ];
+  const user = userEvent.setup({ document });
+  const view = renderOrganization();
+  await user.click(await view.findByRole("button", { name: /OpenAI API key/ }));
+  const dialog = await view.findByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: "Replace key" }));
+  expect(
+    await within(dialog).findByRole("heading", {
+      name: "Reconnect OpenAI API key",
+    }),
+  ).toBeDefined();
+  expect(within(dialog).getByLabelText(/API key/)).toBeDefined();
+});
+
 async function connectWithKey(
   view: ReturnType<typeof renderOrganization>,
   provider: RegExp,

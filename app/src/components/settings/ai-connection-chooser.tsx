@@ -164,6 +164,9 @@ export type ChooserMode =
       scope: ConnectionScope;
       signIns: readonly AiConnectionProviderAnswer[];
       connected: readonly AiConnectionProviderAnswer[];
+      /** Open on this provider, to fix its connection: `reconnecting` names it in the title. */
+      provider?: AiConnectionProviderAnswer;
+      reconnecting?: string;
     };
 
 export type ChooserSurface = "dialog" | "card";
@@ -454,6 +457,14 @@ export function ChooseConnection({
   const stopLatest = useRef(stopSignIn);
   stopLatest.current = stopSignIn;
   useEffect(() => () => stopLatest.current(), []);
+  // Reconnecting one connection: open on its provider, ready to sign in or take its key.
+  const opening = useRef(adding?.provider);
+  const chooseLatest = useRef<(next: AiProvider | null) => void>(() => {});
+  useEffect(() => {
+    const id = opening.current;
+    opening.current = undefined;
+    if (id) chooseLatest.current(providerById(id) ?? null);
+  }, []);
 
   function choose(next: AiProvider | null) {
     stopSignIn();
@@ -474,6 +485,7 @@ export function ChooseConnection({
     setPasteBack(false);
     minted.current = null;
   }
+  chooseLatest.current = choose;
 
   /** Switch ChatGPT's way in, before a sign-in starts: what failed the other way no longer applies. */
   function chooseChatGptWay(next: ChatGptWay) {
@@ -837,7 +849,9 @@ export function ChooseConnection({
    * Back from a chosen provider: to the dialog's previous screen for the organization's AI, as it
    * always was; to the list for a person's own, which has no screen before it on a page.
    */
-  const back = serverOwned && provider ? () => choose(null) : onBack;
+  // Reconnecting one connection has no list to go back to: Back is the dialog's.
+  const back =
+    serverOwned && provider && !adding?.provider ? () => choose(null) : onBack;
 
   return (
     <form
@@ -863,7 +877,9 @@ export function ChooseConnection({
         }
         title={
           adding
-            ? "Connect another AI"
+            ? adding.reconnecting
+              ? `Reconnect ${adding.reconnecting}`
+              : "Connect another AI"
             : personal
               ? "Connect your AI"
               : organizationWide
