@@ -296,6 +296,13 @@ export const ALLOWED: Allowed[] = [
     rule: "installed-client",
     why: "where released Desktop shells, 1.0.2 and 1.0.3, ask for the connect code they hand a Recorder",
   },
+  // The app's own page.
+  {
+    file: "app/src/lib/chunk-recovery.ts",
+    what: "fetch()",
+    rule: "before-sign-in",
+    why: "reads the app's own page, `/`, which answers anybody, to learn which build the OpenBot serves before loading it again; it calls nothing of the API",
+  },
   // Desktop's native side.
   {
     file: "desktop/src-tauri/src/main.rs",
