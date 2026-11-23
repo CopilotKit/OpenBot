@@ -7,6 +7,16 @@ import {
   useRef,
   useState,
 } from "react";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Toaster } from "@/components/ui/toast";
+import { cn } from "@/lib/utils";
 import type { Answer, Call, NativeControl } from "../src/fakeNative/control";
 import {
   HANDBACK_COMMANDS,
@@ -65,6 +75,7 @@ import {
   runActions,
 } from "./runner";
 import { SceneList, type SceneListHandle } from "./SceneList";
+import { Fold, HandoverCard, NoticeList, tell } from "./Shell";
 import { Splitter } from "./Splitter";
 import { StreamPanel } from "./StreamPanel";
 import {
@@ -367,10 +378,6 @@ async function walkTo(
   return true;
 }
 
-/** True when the window has handed over to OpenBot: a call to `show_openbot` resolved. */
-/** The buttons of a handover or handback card, in one row (workbench.css styles one button). */
-const HANDOVER_ACTIONS = { display: "flex", gap: 8, flexWrap: "wrap" } as const;
-
 const HANDBACK: readonly string[] = HANDBACK_COMMANDS;
 
 /** True for a call of a handback command that resolved: the app handed back to OpenBot Desktop. */
@@ -378,6 +385,7 @@ function isHandback(call: Call): boolean {
   return call.settled === "resolved" && HANDBACK.includes(call.command);
 }
 
+/** True when the window has handed over to OpenBot: a call to `show_openbot` resolved. */
 function handedOverIn(win: FrameWindow | undefined): boolean {
   const control = win?.__workbench;
   if (!control) return false;
@@ -536,17 +544,20 @@ export function Workbench() {
       current = false;
     };
   }, []);
-  if (!catalog)
-    return (
-      <div className="wb-page">
-        <p role="status">Loading scenes…</p>
-      </div>
-    );
+  // The app's toasts ("Copied."), once for the page.
   return (
-    <WorkbenchLoaded
-      catalog={catalog.scenes}
-      catalogNotices={catalog.notices}
-    />
+    <Toaster>
+      {catalog ? (
+        <WorkbenchLoaded
+          catalog={catalog.scenes}
+          catalogNotices={catalog.notices}
+        />
+      ) : (
+        <div className="flex h-full items-center justify-center bg-background text-sm text-muted-foreground">
+          <p role="status">Loading scenes…</p>
+        </div>
+      )}
+    </Toaster>
   );
 }
 
@@ -583,7 +594,6 @@ export function WorkbenchLoaded({
   /** "Critique this screen": the impeccable command, and what the copy did. */
   const [screenCommand, setScreenCommand] =
     useState<CritiqueCommand>("critique");
-  const [screenStatus, setScreenStatus] = useState<string | null>(null);
   /** Scenes made from logs in this page: only in this browser tab, and not in links elsewhere. */
   const [imported, setImported] = useState<Scene[]>(boot.imported);
   const scenes: readonly SceneEntry[] = [...catalog, ...imported];
@@ -640,7 +650,10 @@ export function WorkbenchLoaded({
   const [frameSockets, setFrameSockets] = useState<SocketControl | null>(null);
   /** The route the Requests panel picked, for the API answers panel. */
   const [pickedRoute, setPickedRoute] = useState<ApiRoute | null>(null);
-  const answersFoldRef = useRef<HTMLDetailsElement | null>(null);
+  /** The API answers section: a route picked in the Requests panel opens it. */
+  const [answersOpen, setAnswersOpen] = useState(false);
+  /** The Import a log section: open when the tab has imported scenes. */
+  const [importOpen, setImportOpen] = useState(() => boot.imported.length > 0);
   /** The layout warning shown over the window, from a hover or a click in the warnings list. */
   const [highlight, setHighlight] = useState<Highlight | null>(null);
   const highlightRef = useRef(highlight);
@@ -1637,11 +1650,10 @@ export function WorkbenchLoaded({
     );
     try {
       await copyText(text);
-      setScreenStatus("Copied.");
+      tell("Copied.");
     } catch {
-      setScreenStatus("The workbench cannot write to the clipboard.");
+      tell("The workbench cannot write to the clipboard.", "error");
     }
-    setTimeout(() => setScreenStatus(null), 2000);
   };
 
   /**
@@ -1702,17 +1714,46 @@ export function WorkbenchLoaded({
     "--wb-right": `${rightWidth}px`,
   } as CSSProperties;
   const underMax = Math.round(window.innerHeight * 0.7);
+  /** `embed=1` shows only the window and its warnings: the columns stay mounted, but hidden. */
+  const embedHidden = extras.embed ? "hidden" : undefined;
 
   return (
     <div
-      className="wb-page"
+      className={cn(
+        "grid h-full bg-background text-foreground",
+        extras.embed
+          ? "grid-cols-1"
+          : "grid-cols-[var(--wb-left)_auto_minmax(0,1fr)_auto_var(--wb-right)]",
+      )}
       style={pageStyle}
       data-embed={extras.embed ? "" : undefined}
     >
-      <aside className="wb-side wb-side-left">
-        <nav className="wb-pages" aria-label="Workbench pages">
-          <span aria-current="page">Scenes</span>
-          <a href="/workbench/findings/">Findings</a>
+      {/* wb-side: the panels not moved yet still style their controls under it (workbench.css). */}
+      <aside
+        className={cn(
+          "wb-side wb-side-left flex min-w-0 flex-col gap-3 overflow-y-auto rounded-none border-0 bg-sidebar px-3 py-4 text-sidebar-foreground [scrollbar-width:thin]",
+          embedHidden,
+        )}
+      >
+        <nav className="flex gap-1" aria-label="Workbench pages">
+          <span
+            aria-current="page"
+            className={cn(
+              buttonVariants({ variant: "secondary", size: "sm" }),
+              "flex-1",
+            )}
+          >
+            Scenes
+          </span>
+          <a
+            href="/workbench/findings/"
+            className={cn(
+              buttonVariants({ variant: "ghost", size: "sm" }),
+              "flex-1 text-muted-foreground",
+            )}
+          >
+            Findings
+          </a>
         </nav>
         <SceneList
           scenes={catalog}
@@ -1721,8 +1762,12 @@ export function WorkbenchLoaded({
           groups={ALL_SCENE_GROUPS}
           handle={sceneListRef}
         />
-        <details className="wb-fold" open={imported.length > 0 || undefined}>
-          <summary>Import a log</summary>
+        <Fold
+          title="Import a log"
+          className="wb-fold"
+          open={importOpen}
+          onOpenChange={setImportOpen}
+        >
           <ImportLogPanel
             scenes={imported}
             current={state.scene}
@@ -1733,6 +1778,7 @@ export function WorkbenchLoaded({
               ];
               setImported(next);
               saveImported(next);
+              setImportOpen(true);
               // A new scene of the same id loads again.
               setRemountCount((count) => count + 1);
               scenesRef.current = [...catalog, ...next];
@@ -1740,7 +1786,7 @@ export function WorkbenchLoaded({
             }}
             onPick={pickScene}
           />
-        </details>
+        </Fold>
       </aside>
       <Splitter
         axis="x"
@@ -1758,33 +1804,21 @@ export function WorkbenchLoaded({
           setLeftWidth(LEFT.initial);
           writePref(LEFT.pref, null);
         }}
+        className={embedHidden}
       />
-      <main className="wb-center">
-        {notices.length > 0 && (
-          <div className="wb-notices">
-            {notices.map((text, index) => (
-              <div
-                // A notice has no id, and the list only shrinks.
-                // biome-ignore lint/suspicious/noArrayIndexKey: fixed list
-                key={`${index}|${text}`}
-                className="wb-notice"
-                role="status"
-              >
-                <span>{text}</span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setNotices((all) => all.filter((_, i) => i !== index))
-                  }
-                >
-                  Close
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="wb-stage" ref={stageRef}>
-          <div className="wb-window-wrap" ref={wrapRef}>
+      <main className="relative flex min-h-0 min-w-0 flex-col bg-background">
+        <NoticeList
+          notices={notices}
+          onClose={(index) =>
+            setNotices((all) => all.filter((_, i) => i !== index))
+          }
+        />
+        {/* The window's space. It scrolls when the window is bigger than it (a zoom you set). */}
+        <div
+          className="relative min-h-0 flex-[1_1_0] overflow-auto p-4"
+          ref={stageRef}
+        >
+          <div className="relative inline-block align-top" ref={wrapRef}>
             <WindowFrame
               src={config ? frameUrl(config) : (appScene?.start.route ?? "/")}
               frameKey={frameKey}
@@ -1842,63 +1876,55 @@ export function WorkbenchLoaded({
             )}
           </div>
           {showHandover && (
-            // A sibling of the window, so a shot of the window does not show it.
-            <section
-              className="wb-handover"
-              aria-labelledby="wb-handover-heading"
-            >
-              <div className="wb-handover-card">
-                <h2 id="wb-handover-heading">OpenBot opens here</h2>
-                <p>
-                  The real window now shows OpenBot's own page. The workbench
-                  shows only the setup window.
-                </p>
-                <div className="wb-handover-actions" style={HANDOVER_ACTIONS}>
+            <HandoverCard
+              headingId="wb-handover-heading"
+              title="OpenBot opens here"
+              actions={
+                <>
                   {openbotScene !== null && (
-                    <button
-                      type="button"
-                      onClick={() => pickScene(openbotScene)}
-                    >
+                    <Button size="sm" onClick={() => pickScene(openbotScene)}>
                       Open OpenBot
-                    </button>
+                    </Button>
                   )}
-                  <button type="button" onClick={() => setOverlayClosed(true)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setOverlayClosed(true)}
+                  >
                     Show the setup window
-                  </button>
-                </div>
-              </div>
-            </section>
+                  </Button>
+                </>
+              }
+            >
+              The real window now shows OpenBot's own page. The workbench shows
+              only the setup window.
+            </HandoverCard>
           )}
           {shownHandback !== null && (
-            // A sibling of the window, as the handover card, so a shot of the window does not show it.
-            <section
-              className="wb-handover"
-              aria-labelledby="wb-handback-heading"
-            >
-              <div className="wb-handover-card">
-                <h2 id="wb-handback-heading">
-                  OpenBot Desktop shows its setup window here
-                </h2>
-                <p>
-                  The app asked OpenBot Desktop to{" "}
-                  {HANDBACK_WORDS[shownHandback] ?? shownHandback}. The real
-                  window now shows the setup window.
-                </p>
-                <div className="wb-handover-actions" style={HANDOVER_ACTIONS}>
+            <HandoverCard
+              headingId="wb-handback-heading"
+              title="OpenBot Desktop shows its setup window here"
+              actions={
+                <>
                   {handbackScene !== null && (
-                    <button
-                      type="button"
-                      onClick={() => pickScene(handbackScene)}
-                    >
+                    <Button size="sm" onClick={() => pickScene(handbackScene)}>
                       Open the setup window
-                    </button>
+                    </Button>
                   )}
-                  <button type="button" onClick={() => setHandbackClosed(true)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setHandbackClosed(true)}
+                  >
                     Show OpenBot
-                  </button>
-                </div>
-              </div>
-            </section>
+                  </Button>
+                </>
+              }
+            >
+              The app asked OpenBot Desktop to{" "}
+              {HANDBACK_WORDS[shownHandback] ?? shownHandback}. The real window
+              now shows the setup window.
+            </HandoverCard>
           )}
         </div>
         <Splitter
@@ -1918,8 +1944,17 @@ export function WorkbenchLoaded({
             writePref(UNDER.pref, null);
           }}
         />
+        {/*
+         * Below the window. The warnings scroll on their own; a drag on the handle sets the height.
+         * The height does not follow the number of warnings: a stage that changed height would
+         * change Fit's zoom during a walk, and a zoom change moves the window's elements by a pixel
+         * or two. wb-under: the warnings list still styles its rows under it (workbench.css).
+         */}
         <div
-          className="wb-under"
+          className={cn(
+            "wb-under flex-none overflow-y-auto px-3 pb-3",
+            extras.embed ? "h-[18vh] max-h-[30vh]" : "h-[25vh] max-h-[30vh]",
+          )}
           ref={underRef}
           style={
             underHeight === null
@@ -1962,11 +1997,18 @@ export function WorkbenchLoaded({
           setRightWidth(RIGHT.initial);
           writePref(RIGHT.pref, null);
         }}
+        className={embedHidden}
       />
-      <aside className="wb-side wb-side-right">
-        <section className="wb-run-panel">
-          <div className="wb-panel-head">
-            <h2>Run</h2>
+      {/* wb-side: the panels not moved yet still style their controls under it (workbench.css). */}
+      <aside
+        className={cn(
+          "wb-side wb-side-right flex min-w-0 flex-col gap-6 overflow-y-auto rounded-none border-0 bg-sidebar px-3 py-4 text-sidebar-foreground [scrollbar-width:thin]",
+          embedHidden,
+        )}
+      >
+        <section className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="m-0 text-sm font-medium">Run</h2>
             <KeysHelp />
           </div>
           {steps.length > 0 ? (
@@ -1996,9 +2038,9 @@ export function WorkbenchLoaded({
               next={nextAction?.label ?? null}
             />
           ) : (
-            <p className="wb-run-still">
+            <p className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>No run. The scene plays on its own.</span>
-              <span className="wb-time">{formatTime(now)}</span>
+              <span className="font-mono tabular-nums">{formatTime(now)}</span>
             </p>
           )}
         </section>
@@ -2024,10 +2066,7 @@ export function WorkbenchLoaded({
           onAppChange={appConfig ? changeApp : undefined}
           onCopyLink={() => {
             void copyText(window.location.href).catch(() =>
-              setNotices((all) => [
-                ...all,
-                "The browser did not let the page copy the link.",
-              ]),
+              tell("The browser did not let the page copy the link.", "error"),
             );
             if (imported.some((s) => s.id === state.scene))
               setNotices((all) => [
@@ -2036,108 +2075,117 @@ export function WorkbenchLoaded({
               ]);
           }}
         />
-        <section className="wb-comment-toggle">
-          <h2>Review</h2>
-          <div className="wb-presets">
-            <button
-              type="button"
+        <section className="flex flex-col gap-2">
+          <h2 className="m-0 text-sm font-medium">Review</h2>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant={commenting ? "default" : "outline"}
               aria-pressed={commenting}
               aria-keyshortcuts="C"
               title="Comment (C)"
               onClick={() => setCommenting((on) => !on)}
             >
               Comment
-            </button>
+            </Button>
           </div>
           {commenting && (
-            <p>
+            <p className="text-xs text-muted-foreground">
               Click an element or drag over an area in the window. Press C to
               stop.
             </p>
           )}
-          <div className="wb-inline">
-            <select
-              aria-label="Impeccable command"
+          <div className="flex items-center gap-2">
+            <Select
               value={screenCommand}
-              onChange={(event) =>
-                setScreenCommand(event.target.value as CritiqueCommand)
+              onValueChange={(value) =>
+                setScreenCommand(value as CritiqueCommand)
               }
             >
-              {CRITIQUE_COMMANDS.map((command) => (
-                <option key={command} value={command}>
-                  {command}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
+              <SelectTrigger
+                size="sm"
+                aria-label="Impeccable command"
+                className="min-w-0 flex-1"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CRITIQUE_COMMANDS.map((command) => (
+                  <SelectItem key={command} value={command}>
+                    {command}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              variant="outline"
               title="Copy an impeccable prompt about the whole window"
               disabled={!frameEl}
               onClick={() => void copyScreenPrompt()}
             >
               Critique this screen
-            </button>
+            </Button>
           </div>
-          {screenStatus && <p role="status">{screenStatus}</p>}
         </section>
-        {appConfig ? (
-          <>
-            <details className="wb-fold">
-              <summary>
-                {`Desktop commands (${Object.keys(state.answers).join(", ") || "none set"})`}
-              </summary>
-              <CommandsPanel
-                control={frameControl}
-                onAnswer={keepAnswer}
-                commands={PAGE_COMMANDS}
-              />
-            </details>
-            <details className="wb-fold">
-              <summary>Calls</summary>
-              <CallLog control={frameControl} />
-            </details>
-            <details className="wb-fold wb-app-fold">
-              <summary>Requests</summary>
-              <RequestLog
-                api={frameApi}
-                onPick={(route) => {
-                  setPickedRoute(route);
-                  if (answersFoldRef.current)
-                    answersFoldRef.current.open = true;
-                }}
-              />
-            </details>
-            <details className="wb-fold wb-app-fold" ref={answersFoldRef}>
-              <summary>API answers</summary>
-              <ApiAnswersPanel
-                api={frameApi}
-                picked={pickedRoute}
-                onAnswer={keepApi}
-              />
-            </details>
-            <details className="wb-fold wb-app-fold">
-              <summary>Stream and sockets</summary>
-              <StreamPanel streams={frameStreams} sockets={frameSockets} />
-            </details>
-          </>
-        ) : (
-          <>
-            <details className="wb-fold">
-              <summary>
-                {`Commands (${Object.keys(state.answers).join(", ") || "none set"})`}
-              </summary>
-              <CommandsPanel control={frameControl} onAnswer={keepAnswer} />
-            </details>
-            <details className="wb-fold">
-              <summary>Calls</summary>
-              <CallLog control={frameControl} />
-            </details>
-            <details className="wb-fold">
-              <summary>Events</summary>
-              <EventsPanel control={frameControl} />
-            </details>
-          </>
-        )}
+        <div className="flex flex-col gap-2">
+          {appConfig ? (
+            <>
+              <Fold
+                className="wb-fold"
+                title={`Desktop commands (${Object.keys(state.answers).join(", ") || "none set"})`}
+              >
+                <CommandsPanel
+                  control={frameControl}
+                  onAnswer={keepAnswer}
+                  commands={PAGE_COMMANDS}
+                />
+              </Fold>
+              <Fold className="wb-fold" title="Calls">
+                <CallLog control={frameControl} />
+              </Fold>
+              <Fold className="wb-fold wb-app-fold" title="Requests">
+                <RequestLog
+                  api={frameApi}
+                  onPick={(route) => {
+                    setPickedRoute(route);
+                    setAnswersOpen(true);
+                  }}
+                />
+              </Fold>
+              <Fold
+                className="wb-fold wb-app-fold"
+                title="API answers"
+                open={answersOpen}
+                onOpenChange={setAnswersOpen}
+              >
+                <ApiAnswersPanel
+                  api={frameApi}
+                  picked={pickedRoute}
+                  onAnswer={keepApi}
+                />
+              </Fold>
+              <Fold className="wb-fold wb-app-fold" title="Stream and sockets">
+                <StreamPanel streams={frameStreams} sockets={frameSockets} />
+              </Fold>
+            </>
+          ) : (
+            <>
+              <Fold
+                className="wb-fold"
+                title={`Commands (${Object.keys(state.answers).join(", ") || "none set"})`}
+              >
+                <CommandsPanel control={frameControl} onAnswer={keepAnswer} />
+              </Fold>
+              <Fold className="wb-fold" title="Calls">
+                <CallLog control={frameControl} />
+              </Fold>
+              <Fold className="wb-fold" title="Events">
+                <EventsPanel control={frameControl} />
+              </Fold>
+            </>
+          )}
+        </div>
       </aside>
     </div>
   );

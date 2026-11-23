@@ -21,6 +21,13 @@ type Page = {
   evaluate<T>(run: () => T): Promise<T>;
   on(event: "console", handler: (message: { text(): string }) => void): void;
   close(): Promise<void>;
+  getByRole(
+    role: string,
+    options: { name: string; exact?: boolean },
+  ): {
+    click(): Promise<void>;
+    getAttribute(name: string): Promise<string | null>;
+  };
 };
 type Browser = {
   newPage(options: {
@@ -87,4 +94,43 @@ describe.skipIf(!asked)("the workbench page", () => {
       }
     }, 60_000);
   }
+
+  test("the columns stand on the app's surfaces, and a section opens from its trigger", async () => {
+    if (!browser || !server) throw new Error("No browser or server.");
+    const page = await browser.newPage({
+      viewport: { width: 1600, height: 1000 },
+    });
+    try {
+      await page.goto(`${server.url}/workbench/`);
+      await page.waitForFunction(() => window.__workbenchPage?.ready === true);
+      const seen = await page.evaluate(() => {
+        const color = (value: string) => {
+          const probe = document.createElement("div");
+          probe.style.backgroundColor = value;
+          document.body.append(probe);
+          const computed = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return computed;
+        };
+        const background = (el: Element | null) =>
+          el ? getComputedStyle(el).backgroundColor : null;
+        return {
+          sidebar: color("var(--sidebar)"),
+          ground: color("var(--background)"),
+          columns: [...document.querySelectorAll("aside")].map(background),
+          center: background(document.querySelector("main")),
+        };
+      });
+      expect(seen.columns).toEqual([seen.sidebar, seen.sidebar]);
+      expect(seen.center).toBe(seen.ground);
+
+      const calls = page.getByRole("button", { name: "Calls", exact: true });
+      expect(await calls.getAttribute("data-slot")).toBe("collapsible-trigger");
+      expect(await calls.getAttribute("aria-expanded")).toBe("false");
+      await calls.click();
+      expect(await calls.getAttribute("aria-expanded")).toBe("true");
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
 });

@@ -1,4 +1,5 @@
 import { type KeyboardEvent, type PointerEvent, useRef } from "react";
+import { cn } from "@/lib/utils";
 import { clamp } from "./viewerPrefs";
 
 /** The keyboard step of a splitter, in pixels. Shift moves four steps. */
@@ -20,7 +21,18 @@ export type SplitterProps = {
   onReset(): void;
   /** The size shown to screen readers; null when the panel has its default, automatic size. */
   value: number | null;
+  /** More classes for the handle: the page hides the column handles when it is embedded. */
+  className?: string;
 };
+
+/*
+ * A 1px line in the border color, with a wider grab area around it (the ::after box). It takes the
+ * ring color on hover and while it is dragged, and the app's focus ring.
+ */
+const SPLIT =
+  "relative z-10 shrink-0 touch-none bg-border outline-none transition-colors hover:bg-ring/40 active:bg-ring/40 focus-visible:ring-2 focus-visible:ring-ring after:absolute after:content-[''] motion-reduce:transition-none";
+const SPLIT_X = `${SPLIT} w-px cursor-col-resize after:inset-y-0 after:-inset-x-1`;
+const SPLIT_Y = `${SPLIT} h-px cursor-row-resize after:inset-x-0 after:-inset-y-1`;
 
 /**
  * A drag handle between two panels. A drag, the arrow keys (Shift for bigger steps), Home and End
@@ -83,7 +95,7 @@ export function Splitter(props: SplitterProps) {
       aria-valuemax={max}
       aria-valuenow={props.value ?? undefined}
       title={`${props.label}: drag, or use the arrow keys. Double-click to reset.`}
-      className={`wb-split wb-split-${axis}`}
+      className={cn(axis === "x" ? SPLIT_X : SPLIT_Y, props.className)}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={end}
