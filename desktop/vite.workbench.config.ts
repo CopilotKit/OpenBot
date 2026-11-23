@@ -95,7 +95,8 @@ function isFrameNavigation(req: {
   if (dest !== undefined) return dest === "iframe";
   const accept = String(req.headers.accept ?? "");
   const referer = req.headers.referer;
-  if (!accept.includes("text/html") || typeof referer !== "string") return false;
+  if (!accept.includes("text/html") || typeof referer !== "string")
+    return false;
   let from: URL;
   try {
     from = new URL(referer);

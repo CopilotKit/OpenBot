@@ -111,6 +111,12 @@ const ALLOWED: { file: string; word: RegExp; why: string }[] = [
     why: "the pause offer copied from own_machine.rs PAUSE_OFFER, and the scene that shows it",
   },
   {
+    // The workbench's fake native side, never in a shipped build (desktop/workbench/shippedBuild.test.ts).
+    file: "desktop/src/fakeNative/states.ts",
+    word: /container/,
+    why: "the image list's file name, container-images.json, in the detail of the Start that finds it gone",
+  },
+  {
     file: "desktop/src-tauri/src/acquire.rs",
     word: /\bCompose\b/,
     why: "the last resort: the person installs Compose v2 themselves",
