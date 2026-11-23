@@ -23,9 +23,9 @@ mod zoom;
 mod test_support;
 
 use openbot_desktop_lib::{
-    acquire, app_update, cgroup_delegation, deployment, deployment_release, docker_config,
-    early_downloads, engine, engine_versions, env as openbot_env, harness, host_access, install,
-    local_eval, local_eval_state, logging, machine_size, own_machine, preparation,
+    acquire, app_update, deployment, deployment_release, docker_config, early_downloads, engine,
+    engine_versions, env as openbot_env, harness, host_access, install, local_eval,
+    local_eval_state, logging, machine_size, own_machine, preparation,
     problem::{LeftoverReset, Problem},
     provider, pull_metrics, quiet, recorder_external, recorder_host, recorder_install,
     security_floor, stack, superseded_images, telemetry, tray, troubleshooting, uninstall,
@@ -4363,8 +4363,9 @@ fn ensure_linux_podman_api(shell: &Shell, address: &engine::Address) -> Result<(
         .ensure(&address.pin()?, &stack::default_root())?;
     // A Podman OpenBot did not install never went through the prompt that delegates the cgroup
     // controllers the backend's rootless node needs. Asked for here, once, only when missing.
-    if address.engine == engine::Engine::Podman {
-        cgroup_delegation::ensure()?;
+    // Rootful Podman runs its containers under root's own cgroups and needs none of this.
+    if address.engine == engine::Engine::Podman && engine::rootless_socket().is_some() {
+        openbot_desktop_lib::cgroup_delegation::ensure()?;
     }
     Ok(())
 }
@@ -26873,6 +26874,16 @@ fn main() {
             std::fs::create_dir_all(&bin).unwrap();
             Self::write_binary_under(&bin, binary, scenario);
             Self::write_binary_under(&bin, "bun", "runtime");
+            // Start on rootless Linux Podman asks `pkexec` to delegate cgroup controllers when the
+            // host lacks them (`cgroup_delegation`). A test must never raise a real password
+            // prompt, so this one answers "granted" and does nothing.
+            #[cfg(target_os = "linux")]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let pkexec = bin.join("pkexec");
+                std::fs::write(&pkexec, "#!/bin/sh\nexit 0\n").unwrap();
+                std::fs::set_permissions(&pkexec, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
             let mut path = std::ffi::OsString::from(bin.clone());
             if inherit_path {
                 if let Some(previous) = previous.as_ref().filter(|previous| !previous.is_empty()) {
