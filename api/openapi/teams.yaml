@@ -13,14 +13,26 @@ paths:
       description: >-
         Return one page of the organization's teams, in the order they were
         created. Any member of the organization can read it. Each team says
-        the caller's own role in it and whether the caller may manage it. A
-        missing cursor starts at the first page and nextCursor null ends the
-        list.
+        the caller's own role in it and whether the caller may manage it.
+        search narrows the list to the teams whose name holds it, ignoring
+        case; it finds only this organization's teams. A missing cursor starts
+        at the first page and nextCursor null ends the list. A cursor belongs
+        to the search that made it, so changing the search starts again
+        without one.
       security:
         - webSession: []
         - appOAuth: [organizations:read]
         - apiKey: []
       parameters:
+        - name: search
+          in: query
+          description: >-
+            Part of a team's name, matched without regard to case. Leading and
+            trailing spaces are ignored; empty lists every team.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
         - $ref: './common.yaml#/components/parameters/Limit'
         - $ref: './common.yaml#/components/parameters/Cursor'
       responses:
@@ -248,13 +260,27 @@ paths:
       description: >-
         Return one page of the people in a team, in the order they joined
         it. Any member of the organization can read it. People who are only
-        in a team beneath this one are not listed. A missing cursor starts at
-        the first page and nextCursor null ends the list.
+        in a team beneath this one are not listed, and nor is anybody who is
+        not a member of the organization now: somebody removed from it is
+        listed again once they are restored. search narrows the list to the
+        people whose address or name holds it, ignoring case. A missing cursor
+        starts at the first page and nextCursor null ends the list. A cursor
+        belongs to the search that made it, so changing the search starts
+        again without one.
       security:
         - webSession: []
         - appOAuth: [organizations:read]
         - apiKey: []
       parameters:
+        - name: search
+          in: query
+          description: >-
+            Part of an address or a name, matched without regard to case.
+            Leading and trailing spaces are ignored; empty lists everybody.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
         - $ref: './common.yaml#/components/parameters/Limit'
         - $ref: './common.yaml#/components/parameters/Cursor'
       responses:
@@ -452,7 +478,9 @@ components:
         memberCount:
           type: integer
           minimum: 0
-          description: How many people are in the team itself.
+          description: >-
+            How many people are in the team itself: the people its members
+            list shows.
         role:
           oneOf:
             - $ref: '#/components/schemas/TeamRole'

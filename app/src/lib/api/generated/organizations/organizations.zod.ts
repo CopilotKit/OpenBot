@@ -521,7 +521,7 @@ export const RemoveOrganizationMemberHeader = zod.object({
 export const RemoveOrganizationMemberResponse = zod.void();
 
 /**
- * Return one page of the organization's invitations that have not been accepted or canceled, the newest first: the ones still waiting, the ones that expired and the ones that were declined. Only an owner or an admin of this organization can read it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's invitations that have not been accepted or canceled, the newest first: the ones still waiting, the ones that expired and the ones that were declined. Only an owner or an admin of this organization can read it. search narrows the list to the invitations whose address holds it, ignoring case; it finds only this organization's invitations. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List the invitations an organization has sent
  */
 
@@ -534,6 +534,11 @@ export const ListOrganizationInvitationsParams = zod.object({
     ),
 });
 
+export const listOrganizationInvitationsQuerySearchMax = 200;
+
+export const listOrganizationInvitationsQuerySearchRegExp = new RegExp(
+  "^[^\\x00]*$",
+);
 export const listOrganizationInvitationsQueryLimitDefault = 50;
 export const listOrganizationInvitationsQueryLimitMax = 100;
 
@@ -544,6 +549,14 @@ export const listOrganizationInvitationsQueryCursorRegExp = new RegExp(
 );
 
 export const ListOrganizationInvitationsQueryParams = zod.object({
+  search: zod
+    .string()
+    .max(listOrganizationInvitationsQuerySearchMax)
+    .regex(listOrganizationInvitationsQuerySearchRegExp)
+    .optional()
+    .describe(
+      "Part of an address, matched without regard to case. Leading and trailing spaces are ignored; empty lists every invitation.",
+    ),
   limit: zod
     .int()
     .min(1)
