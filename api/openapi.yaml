@@ -49866,7 +49866,7 @@ components:
           - google
           - xai
     AiConnectionPageNoDefaultExample:
-      summary: An OpenAI key still connected after the default was disconnected.
+      summary: Two connections left after an older app disconnected the default, neither the default.
       value:
         connections:
           - id: openai
@@ -49878,6 +49878,15 @@ components:
             ready: true
             problem: null
             connectedAt: '2026-11-20T09:00:00.000Z'
+          - id: google
+            provider: google
+            login: endpoint
+            model: gemini-3.8-flash
+            endpointHost: generativelanguage.googleapis.com
+            isDefault: false
+            ready: true
+            problem: null
+            connectedAt: '2026-11-21T09:00:00.000Z'
         nextCursor: null
         signIns: []
     AiConnectionEntryExample:
