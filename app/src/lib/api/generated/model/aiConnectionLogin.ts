@@ -3,7 +3,7 @@
  */
 
 /**
- * How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).
+ * How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).
  */
 export type AiConnectionLogin =
   (typeof AiConnectionLogin)[keyof typeof AiConnectionLogin];
