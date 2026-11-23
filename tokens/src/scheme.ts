@@ -8,6 +8,10 @@
  *
  * The names are shadcn's, so a stock shadcn theme drops in, plus `success`, `warning` and the
  * empty-state pattern's color.
+ *
+ * A color is never renamed or removed. A customer's theme (brand.yaml's `skin.stylesheet`) sets
+ * these names, and a theme that sets one the scheme no longer has would quietly stop working. Change
+ * a value; add a color; never take a name away.
  */
 
 /** What each color is for. A color that doesn't mean one of these is no color. */

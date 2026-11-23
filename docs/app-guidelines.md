@@ -35,6 +35,8 @@ and the chart and sidebar sets.
 - **A new color is a change to the scheme.** If a screen needs a color the scheme doesn't have,
   agree it first. Then it becomes a token in `tokens/src/scheme.ts`, with a light and a dark value
   and what it means, for every app. It is never added in one app only.
+- **A color is never renamed or removed.** A customer's theme sets the scheme's colors by name, so a
+  name the scheme drops leaves their theme doing nothing. Change its value instead.
 
 ### Where the scheme lives
 
