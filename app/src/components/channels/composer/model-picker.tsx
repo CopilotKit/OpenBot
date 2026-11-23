@@ -369,12 +369,21 @@ function Picker({
                     choice.kind === "model" ? (
                       <ComboboxItem
                         // `pl` only: the item keeps its own right padding, where the check sits.
-                        className="h-9 gap-2.5 pl-2.5"
+                        // At least a row's height, and taller where a name takes two lines.
+                        className="min-h-9 gap-2.5 py-1.5 pl-2.5"
                         key={choice.model.id}
                         value={choice}
                       >
                         <ModelMark model={choice.model} />
-                        <span className="min-w-0 truncate">
+                        {/*
+                         * Whole words onto a second line, never cut off: on a phone the models
+                         * share the popup with the Thinking column, and the Default tag beside
+                         * OpenBot's own model left room for "GPT-6…" alone.
+                         */}
+                        <span
+                          className="min-w-0 break-words"
+                          data-slot="model-name"
+                        >
                           {choice.model.label}
                         </span>
                         {choice.model.id === defaultModel ? (

@@ -255,7 +255,7 @@ export function SkillTools({
                        * worth seeing before ticking it.
                        */}
                       {tool.writes ? (
-                        <span className="text-amber-600 text-xs dark:text-amber-500">
+                        <span className="text-warning text-xs">
                           changes things
                         </span>
                       ) : null}

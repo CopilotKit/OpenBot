@@ -8,7 +8,6 @@ import { sectionForPath, sectionHasPanel } from "@/lib/sections";
 
 const routes = [
   { id: "bots", to: "/bots" },
-  { id: "agents", to: "/agents" },
   { id: "routines", to: "/routines" },
   { id: "connections", to: "/connections" },
 ] as const;

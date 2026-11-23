@@ -61,13 +61,18 @@ impl Progress for Steps {
 /// and never by a build that doesn't offer Cloud.
 #[test]
 fn the_move_is_offered_once_and_only_to_self_contained() {
-    assert!(due(true, false, true, None));
+    let said = |answer| Recorded {
+        answer,
+        ..Recorded::default()
+    };
+    let release = "1.2.0";
+    assert!(due(true, false, true, &said(None), release));
     // OpenBot Cloud or OpenBot for Business: connected to an OpenBot elsewhere.
-    assert!(!due(true, true, true, None));
-    assert!(!due(true, false, false, None));
-    assert!(!due(false, false, true, None));
-    assert!(!due(true, false, true, Some(Answer::Kept)));
-    assert!(!due(true, false, true, Some(Answer::Moved)));
+    assert!(!due(true, true, true, &said(None), release));
+    assert!(!due(true, false, false, &said(None), release));
+    assert!(!due(false, false, true, &said(None), release));
+    assert!(!due(true, false, true, &said(Some(Answer::Kept)), release));
+    assert!(!due(true, false, true, &said(Some(Answer::Moved)), release));
     // Keep never asks again at launch, and Settings still offers it; a move is final.
     assert!(offered_in_settings(true, false, Some(Answer::Kept)));
     assert!(offered_in_settings(true, false, None));
@@ -81,18 +86,116 @@ fn the_move_is_offered_once_and_only_to_self_contained() {
 fn keep_is_remembered_across_launches() {
     let dir = crate::test_support::temp_root("move-answer");
     assert_eq!(answered(&dir), None);
-    record(&dir, Answer::Kept).unwrap();
-    // A later launch reads the folder afresh.
-    let next_launch = answered(&dir);
-    assert_eq!(next_launch, Some(Answer::Kept));
-    assert!(!due(true, false, true, next_launch));
-    record(&dir, Answer::Moved).unwrap();
+    record_kept(&dir, "1.2.0").unwrap();
+    // A later launch reads the folder afresh, in the next release too.
+    let next_launch = on_record(&dir);
+    assert_eq!(next_launch.answer, Some(Answer::Kept));
+    assert!(!due(true, false, true, &next_launch, "1.2.0"));
+    assert!(!due(true, false, true, &next_launch, "1.3.0"));
+    record_moved(&dir).unwrap();
     assert_eq!(answered(&dir), Some(Answer::Moved));
     assert!(!dir.join(format!("{FILE}.partial")).exists());
     // A file that isn't an answer is no answer, and the offer stands.
     std::fs::write(dir.join(FILE), "{").unwrap();
     assert_eq!(answered(&dir), None);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/**
+FOUND ON 1.2.0-rc.2: five moves failed their last check, the person quit, and at the next launch
+chose Keep to get back to work. rc.3 fixed the move and never offered it again. A Keep chosen while a
+failed move is on record is offered again at the first launch of another release, once; a second
+Keep then sticks. A plain Keep never comes back at launch, and a finished move never comes back at
+all, whatever failed before it.
+*/
+#[test]
+fn a_keep_after_a_failed_move_is_offered_again_once_after_an_update() {
+    let offered = |dir: &Path, release: &str| due(true, false, true, &on_record(dir), release);
+
+    // Failed, then Keep: not again in the same release, again in the next.
+    let dir = crate::test_support::temp_root("move-kept-after-failure");
+    record_failed_move(&dir).unwrap();
+    assert!(offered(&dir, "1.2.0-rc.2"), "a failed move is no answer");
+    record_kept(&dir, "1.2.0-rc.2").unwrap();
+    assert!(!offered(&dir, "1.2.0-rc.2"), "not again before an update");
+    assert!(
+        offered(&dir, "1.2.0-rc.3"),
+        "offered again after the update"
+    );
+    assert!(offered(&dir, "1.2.0-rc.3"), "until it is answered");
+    // Answered again with Keep, even after another failed move: it sticks.
+    record_failed_move(&dir).unwrap();
+    record_kept(&dir, "1.2.0-rc.3").unwrap();
+    assert!(!offered(&dir, "1.2.0-rc.3"));
+    assert!(
+        !offered(&dir, "1.2.0"),
+        "offered again once, not every update"
+    );
+    assert_eq!(
+        on_record(&dir),
+        Recorded {
+            answer: Some(Answer::Kept),
+            ..Recorded::default()
+        },
+        "the failed move is cleared once the offer is answered again"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // Kept again in the same release, before any update: still offered once after it.
+    let dir = crate::test_support::temp_root("move-kept-twice");
+    record_failed_move(&dir).unwrap();
+    record_kept(&dir, "1.2.0-rc.3").unwrap();
+    record_kept(&dir, "1.2.0-rc.3").unwrap();
+    assert!(offered(&dir, "1.2.0"));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // A plain Keep: never again at launch, whatever the release.
+    let dir = crate::test_support::temp_root("move-plain-keep");
+    record_kept(&dir, "1.2.0-rc.2").unwrap();
+    assert!(!offered(&dir, "1.2.0-rc.3"));
+    assert!(!offered(&dir, "1.2.0"));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // Moved: never again, and nothing failed stays on record.
+    let dir = crate::test_support::temp_root("move-moved-after-failure");
+    record_failed_move(&dir).unwrap();
+    record_kept(&dir, "1.2.0-rc.2").unwrap();
+    record_moved(&dir).unwrap();
+    record_failed_move(&dir).unwrap();
+    assert!(!offered(&dir, "1.2.0-rc.3"));
+    assert_eq!(
+        on_record(&dir),
+        Recorded {
+            answer: Some(Answer::Moved),
+            ..Recorded::default()
+        }
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The file reads both ways: what 1.2.0-rc.3 and earlier wrote reads here as it did there, and what
+/// this release writes reads there as the same answer.
+#[test]
+fn the_answer_file_reads_across_releases() {
+    let dir = crate::test_support::temp_root("move-answer-file");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(FILE), r#"{"answer":"kept"}"#).unwrap();
+    assert_eq!(answered(&dir), Some(Answer::Kept));
+    assert!(!due(true, false, true, &on_record(&dir), "1.2.0"));
+
+    record_failed_move(&dir).unwrap();
+    record_kept(&dir, "1.2.0").unwrap();
+    // As 1.2.0-rc.3 reads it: `{ answer: Answer }`, other fields passed over.
+    #[derive(Deserialize)]
+    struct Before {
+        answer: Answer,
+    }
+    let bytes = std::fs::read(dir.join(FILE)).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Before>(&bytes).unwrap().answer,
+        Answer::Kept
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1136,7 +1239,7 @@ impl Here for RealHere {
         )))
     }
     fn moved(&mut self) -> Result<(), String> {
-        record(&self.config, Answer::Moved).map_err(|error| error.to_string())
+        record_moved(&self.config).map_err(|error| error.to_string())
     }
     fn remove(&mut self) -> Vec<String> {
         crate::uninstall::stop_with(
@@ -1386,4 +1489,54 @@ fn after_the_move_cloud_is_asked_whether_the_person_still_needs_an_ai() {
     });
     let cloud = Api::open(&address, Box::new(Bearer), their_own_organization).unwrap();
     assert!(cloud.needs_ai_connection().is_err());
+}
+
+/**
+Seen on 1.2.0-rc.3: after a move the person couldn't tell where OpenBot Cloud was or which account
+held their Bots, and signed up again on my.open.bot. After the move, Cloud is asked who signed in, in
+the organization the move went into, and the result names the address, the email and the
+organization.
+*/
+#[test]
+fn after_the_move_cloud_is_asked_which_account_it_went_into() {
+    let address = serve(|request| {
+        if request.headers.get("authorization").map(String::as_str)
+            != Some(&format!("Bearer {BEARER}"))
+        {
+            return json_response(401, serde_json::json!({"code": "UNAUTHENTICATED"}));
+        }
+        match (request.method.as_str(), request.path.as_str()) {
+            ("GET", "/api/v2/people/me/organizations") => json_response(
+                200,
+                serde_json::json!({"organizations": [
+                    {"id": "org_team", "slug": "acme", "name": "Acme", "role": "member", "active": false, "personal": false},
+                    {"id": "org_mine", "slug": "sam", "name": " Sam's organization ", "role": "owner", "active": true, "personal": true}
+                ], "canCreate": true, "nextCursor": null}),
+            ),
+            ("GET", "/api/v2/organizations/org_mine/people/me") => json_response(
+                200,
+                serde_json::json!({"person": {"id": "per_1", "email": "sam@example.com", "name": "Sam", "role": "owner"}}),
+            ),
+            _ => json_response(404, serde_json::json!({"code": "NOT_FOUND"})),
+        }
+    });
+    let cloud = Api::open(&address, Box::new(Bearer), their_own_organization).unwrap();
+    assert_eq!(
+        cloud.account(),
+        Ok(CloudAccount {
+            email: "sam@example.com".into(),
+            organization: Some("Sam's organization".into()),
+        })
+    );
+
+    // A Cloud that can't say is an error the move logs, and the result says the move without it.
+    let address = serve(|request| match request.path.as_str() {
+        "/api/v2/people/me/organizations" => json_response(
+            200,
+            serde_json::json!({"organizations": [{"id": "org_mine", "personal": true}]}),
+        ),
+        _ => json_response(404, serde_json::json!({"code": "NOT_FOUND"})),
+    });
+    let cloud = Api::open(&address, Box::new(Bearer), their_own_organization).unwrap();
+    assert!(cloud.account().is_err());
 }

@@ -197,6 +197,40 @@ test("every example the spec shows is one the generated client accepts", () => {
   }
 });
 
+test("an answer may name a provider this client doesn't know, and a switch is refused one the server doesn't take", () => {
+  const answer = {
+    provider: "a-provider-added-later",
+    login: "endpoint",
+    model: "model-a",
+    endpointHost: "api.example.com",
+    keySet: true,
+    ready: true,
+    source: "stored",
+    editable: true,
+    saved: [
+      {
+        provider: "a-provider-added-later",
+        login: "endpoint",
+        endpointHost: "api.example.com",
+      },
+    ],
+    changedAt: "2026-11-20T00:00:00Z",
+  };
+  expect(GetAiConnectionResponse.safeParse(answer).success).toBe(true);
+  const body = (provider: string) =>
+    ReplaceAiConnectionBody.safeParse({
+      provider,
+      login: "endpoint",
+      baseUrl: "https://api.trustedrouter.com/v1",
+      model: "anthropic/claude-sonnet-5.5",
+      apiKey: "sk-example",
+    }).success;
+  expect(body("trustedrouter")).toBe(true);
+  expect(body("unbiased")).toBe(true);
+  expect(body("a-provider-added-later")).toBe(false);
+  expect(body("")).toBe(false);
+});
+
 test("an endpoint address is http or https with nothing in it that signs in", () => {
   const endpoint = (baseUrl: string) =>
     ReplaceAiConnectionBody.safeParse({

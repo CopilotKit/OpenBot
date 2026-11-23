@@ -4,7 +4,6 @@ import {
   IconPlug,
   IconSettings,
   IconShieldLock,
-  IconSitemap,
   IconUsersGroup,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -27,8 +26,7 @@ import { primitive } from "@/lib/primitives";
  * `section` says where OpenBot's sidebar puts each entry: `primary` destinations sit in its footer,
  * `account` ones in the menu under the person's name. A skin may group them its own way.
  *
- * The primary entries are what a person makes and comes back to: their Bots and the agents they
- * hand work to, then the every-Bot
+ * The primary entries are what a person makes and comes back to: their Bots, then the every-Bot
  * pages of Routines, Memory, Skills and Apps (Connections: the apps a Bot reaches as you), in the
  * order of `lib/primitives.ts`. Each is somebody's own, so none is inside Admin. What is set once
  * for every Bot (the computer, approvals, activity) is in Settings, and a Bot's own is on its page
@@ -39,7 +37,6 @@ export type NavigationItem =
       kind?: undefined;
       id:
         | "bots"
-        | "agents"
         | "routines"
         | "memory"
         | "skills"
@@ -50,7 +47,6 @@ export type NavigationItem =
       label: string;
       to:
         | "/bots"
-        | "/agents"
         | "/routines"
         | "/memory"
         | "/skills"
@@ -66,8 +62,6 @@ export type NavigationItem =
       teamOnly?: boolean;
       /** Shown only where OpenBot offers memory (see `offersMemory`). */
       memoryOnly?: boolean;
-      /** Kept in the list but shown to nobody, for now. Its page sends people home. */
-      hidden?: boolean;
     }
   | {
       /**
@@ -103,17 +97,6 @@ export const NAVIGATION: readonly NavigationItem[] = [
     to: "/bots",
     icon: IconBolt,
     section: "primary",
-  },
-  {
-    // The agents Bots hand work to: the organization's, and a person's own private ones.
-    // Hidden for now: most people never hand work out, and "Agents" beside "Bots" reads as another
-    // name for a Bot. A Bot's own Agents page is hidden with it (routes/_authed/_app/bots.$agentId.agents.tsx).
-    id: "agents",
-    label: "Agents",
-    to: "/agents",
-    icon: IconSitemap,
-    section: "primary",
-    hidden: true,
   },
   {
     id: "routines",
@@ -187,12 +170,9 @@ export function navigationFor(
   edition: "team" | "personal" = "team",
 ): readonly NavigationItem[] {
   const offered = NAVIGATION.filter(
-    (item) => item.kind === "dialog" || !item.hidden,
+    (item) =>
+      item.kind === "dialog" || !item.memoryOnly || offersMemory({ edition }),
   )
-    .filter(
-      (item) =>
-        item.kind === "dialog" || !item.memoryOnly || offersMemory({ edition }),
-    )
     .filter(
       (item) =>
         item.kind === "dialog" || !item.adminOnly || isOrganizationAdmin(role),

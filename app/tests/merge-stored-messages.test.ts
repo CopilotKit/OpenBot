@@ -189,4 +189,46 @@ describe("mergeStoredMessages", () => {
       "assistant-call_2",
     ]);
   });
+
+  /*
+   * Seen on OpenBot Cloud: a person came back to a conversation while its Bot was answering, and the
+   * join replayed some of the answer's pieces and dropped the rest. The stored answer, from the
+   * reply as it was first drawn; the screen held every other piece of it.
+   */
+  const STORED_ANSWER =
+    "**The three options**\n\n- **A · The Ledger** is blue-black ink on pale green ledger paper, with a margin rule and Caslon headlines. It has a monthly-report visual and a Hands-on / Light touch switch.\n- **B · The Key Cabinet** is deep green with brass and stamped condensed numerals. A staggered statement layout replaces feature cards.";
+  const piecesOf = (text: string) =>
+    Array.from({ length: Math.ceil(text.length / 11) }, (_, index) =>
+      text.slice(index * 11, index * 11 + 11),
+    );
+
+  test("an answer the screen holds in pieces reads as stored", () => {
+    const pieces = piecesOf(STORED_ANSWER);
+    const inPieces = pieces.filter((_, index) => index % 2 === 0).join("");
+    const local: Message[] = [
+      question,
+      { id: "answer-1", role: "assistant", content: inPieces },
+    ];
+    const stored: Message[] = [
+      question,
+      { id: "answer-1", role: "assistant", content: STORED_ANSWER },
+    ];
+    expect(mergeStoredMessages(local, stored)).toEqual(stored);
+  });
+
+  test("a store behind the screen never cuts an answer short", () => {
+    const local: Message[] = [
+      question,
+      { id: "answer-1", role: "assistant", content: STORED_ANSWER },
+    ];
+    const behind: Message[] = [
+      question,
+      {
+        id: "answer-1",
+        role: "assistant",
+        content: STORED_ANSWER.slice(0, 60),
+      },
+    ];
+    expect(mergeStoredMessages(local, behind)).toBe(local);
+  });
 });

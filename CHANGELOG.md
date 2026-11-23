@@ -307,6 +307,48 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- The composer's model picker names every model whole. On a phone, OpenBot's own model beside its
+  Default tag was cut to "GPT-6…"; a long name now takes a second line.
+- **After a move to OpenBot Cloud you can tell where everything went.** OpenBot Desktop stays on the
+  move's screens until you move or keep OpenBot here: coming back to the window from the Dock while
+  OpenBot got ready for the move used to show the OpenBot on this computer instead, and the move
+  never started. The result names the account and organization the move went into, says where
+  OpenBot Cloud is in a browser and opens it there. Settings → Computer names the account the app
+  is signed in as. In OpenBot Cloud, a bar says when your moved Bots are in another of your
+  organizations than the one you're working in, with a way to switch to it.
+- **Warnings and successes are drawn with the theme's colors.** What waits on a person, or may not go
+  as they expect, is the new `--warning` token, and what worked is `--success`, in place of Tailwind's
+  amber and green. A skin's `--success` now colors them too, and a theme in `brand.yaml`'s
+  `skin.stylesheet` may set `--success`, `--warning` and `--empty-pattern-color`. The light warning
+  is a darker amber than before, easier to read on white.
+- After connecting an app from a Bot's card or a Bot's page, you're back where you pressed Connect.
+  The sign-in's tab closes once the app is connected, or, where the browser won't close it, goes back
+  to the conversation or the Bot's page. It used to stay on the app's page under Connections.
+- **A Bot on a harness takes its orders from OpenBot only, not from extra fields on a run.** A run's
+  sender could add fields the harness's framework obeyed. On the Claude Agent SDK harness: loading
+  another saved conversation (`resume`), a model the organization never allowed (`model`,
+  `fallback_model`), beta features, and turn and budget limits. On the LangGraph harness:
+  `nodeName`, which started the run past the model, so a call left in the thread ran with the
+  arguments it carried. On the ADK and Strands harnesses: `injectA2UITool`, which added a tool and
+  could take a granted one away. Each harness now ignores them.
+- **OpenBot Desktop has Reload.** View → Reload, or Command-R on a Mac (Ctrl+R on Linux), loads
+  OpenBot's page again, on OpenBot (Self-Contained) and on OpenBot Cloud. It never reloads the setup
+  screens, and while a field holds something you typed, it leaves the page as it is.
+- **A Bot's command is no longer refused as "not saved", and the Bot gets what it printed.** Every
+  command a Bot runs is checked against its conversation first, and that check read only the saved
+  copy, which can trail the conversation on screen by several seconds on a busy day. Every command
+  checked too soon was refused with "That unanswered tool call is not saved in this conversation":
+  its card said Didn't run, and the Bot told its person it had no command access. The server now
+  keeps each command as the Bot's run streams it, so the check passes at once, on any server, however
+  far the saved copy trails. A command the stream doesn't hold as sent is still checked against the
+  saved copy, for up to 20 seconds, and the server's log says when it waited
+  (`computer-step-call-saved-late`). One that still can't be confirmed tells the Bot that nothing was
+  done and that it can try again, rather than reading as a computer it can't reach.
+- A command, a click or any other change a Bot makes on a computer that is still starting waits for
+  it, up to three minutes, as the Bot's other computer calls already did. Its card used to say the
+  computer was starting, and the Bot was told to try again.
+- Activity no longer says "Ran … Exit 0" about a command that didn't run. It says Didn't run, with
+  why, as the command's card in the conversation does.
 - **A model that goes quiet while it works no longer has its answer cut off.** OpenBot's model
   gateway closed an answer that sent nothing for 10 seconds, so a model that thought for longer
   before its next words (a large prompt, a long think) ended the turn with a raw `ECONNRESET` error.
@@ -432,6 +474,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **Search an organization's members.** `listOrganizationMembers` takes `search`, which narrows the
   list to the members whose name or address starts with it or holds it, ignoring case, best
   matches first. Only that organization's current members are ever listed.
+- **TrustedRouter as an AI connection, and the AI provider in answers can gain values.**
+  `PUT /api/v2/organizations/{organizationId}/ai-connection` (`replaceAiConnection`) takes
+  `provider: trustedrouter` with `login: endpoint`, an address and a key, like `unbiased`. In
+  answers, the provider is now declared open (`x-extensible-enum`, `AiConnectionProviderAnswer`):
+  the organization's and a person's AI connection, a person's `signIns`, and a sign-in. A script
+  that reads one should show a provider it doesn't know by its id rather than fail. A request still
+  names one of the closed `AiConnectionProvider` list.
 - New optional fields: `organizationId` on a conversation event and on a Recorder connection, and
   `hostedSignIn` on `deployment`, true where people sign in through OpenBot by CopilotKit's own
   sign-in, starting at `/api/auth/hosted/sign-in`.
@@ -481,8 +530,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   back to Detailed, in this browser. Message list emphasis applies to Detailed only.
 - **A Bots panel.** Every Bot, ordered by its latest conversation. The top three open with their
   five latest conversations, and Show more lists the next five.
-- **Agents are hidden for now.** The Agents page is out of the menu and `/agents` goes home. A
-  Bot's page has no Agents row, and `/bots/<id>/agents` goes to the Bot's page.
+- **No more Agents pages.** A person has Bots and picks their model. Nothing else says what runs a
+  Bot. The Agents page and a Bot's Agents page are gone: `/agents` goes to the Bots, and
+  `/bots/<id>/agents` to the Bot's page. A Bot that runs inside OpenBot has no Connection section
+  on Setup and no "Built in". Only a Bot connected at an address shows its Agent URL. Connecting
+  your own AG-UI agent stays in New Bot, under Bring your own agent.
 - **The sidebar drags narrower, and never takes more than two-fifths of the window.** Its edge
   stopped at 220px; a panel now drags down to 180px (228px beside the strip), where every heading
   still reads whole. Zooming in used to leave the sidebar its full width, so it could take more than
@@ -558,6 +610,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **TrustedRouter is on the Connect your AI screen**, and in Settings where the AI connection is
+  changed. TrustedRouter is an OpenAI-compatible gateway in front of many providers. A TrustedRouter
+  API key is all the row asks for: OpenBot fills in `https://api.trustedrouter.com/v1` and the model
+  `anthropic/claude-sonnet-5.5`, which can be changed to any name the gateway lists. The model list
+  reads the gateway's `/models`, as it does for any other compatible endpoint.
 - **OpenBot Desktop's back end moves to CopilotKit Intelligence 0.17.0-rc.4.** The bundled CLI
   moves to `copilotkit@3e64135`, so an install or update runs Intelligence 0.17.0-rc.4.
 - **Setup no longer stops for good after the back end's saved settings were deleted.** With

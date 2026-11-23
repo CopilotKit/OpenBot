@@ -207,10 +207,7 @@ function MovedAppRow({
       <ItemActions className="shrink-0">
         {app.reconnected ? (
           <span className="flex items-center gap-1 text-muted-foreground text-xs">
-            <IconCheck
-              aria-hidden="true"
-              className="size-3.5 text-emerald-600 dark:text-emerald-400"
-            />
+            <IconCheck aria-hidden="true" className="size-3.5 text-success" />
             Reconnected
           </span>
         ) : (

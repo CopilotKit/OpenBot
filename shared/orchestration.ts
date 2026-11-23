@@ -1,7 +1,6 @@
 /**
- * A Bot as the person's point of contact: it answers short asks itself, reacts to a message that
- * needs only an acknowledgement, and hands real work into a task thread of its own, coming back to
- * the conversation with the result.
+ * A Bot as the person's point of contact: it answers the person in words, short asks itself, and
+ * hands real work into a task thread of its own, coming back to the conversation with the result.
  *
  * ONE DECLARATION, READ FROM BOTH SIDES. The server offers these tools, runs them and writes the
  * task's reports into the conversation; the browser draws the calls and the reports from the same
@@ -10,7 +9,11 @@
 
 /** Hand a piece of work into a task thread of the Bot's own. */
 export const DELEGATE_TOOL = "delegate";
-/** React to the person's message instead of writing a line. */
+/**
+ * The tool a Bot once reacted to the person's message with, instead of writing a line. A Bot now
+ * answers in words in a conversation and is offered no such tool; the name stays so a transcript
+ * still draws the reactions and the calls from before.
+ */
 export const REACT_TOOL = "react";
 /** Find a task thread this conversation started, to give the person its link. */
 export const LINK_TOOL = "link_to_thread";
@@ -19,14 +22,20 @@ export const FOLLOW_UP_TOOL = "follow_up";
 /** Stop a task this conversation started, as Stop on its card does. */
 export const STOP_TOOL = "stop";
 
-/** The reactions a Bot may leave. A short list, so a reaction always reads as an acknowledgement. */
+/** The reactions a Bot could leave, which a transcript still draws from before. */
 export const REACTIONS = ["👍", "❤️", "🎉", "👀", "✅", "🙏", "😂"] as const;
 
 /**
- * How a Bot is the person's point of contact, when it holds `delegate`: each turn it answers, reacts,
- * or says in a line what it will do and hands the work into a task thread, which reports back. Its
- * own model decides, guided by this; nothing else does. Given to a Bot as its own prompt section
- * ("delegating"), after the working rules.
+ * How a Bot is the person's point of contact, when it holds `delegate`: each turn it answers in
+ * words, or says in a line what it will do and hands the work into a task thread, which reports
+ * back. Its own model decides, guided by this; nothing else does. Given to a Bot as its own prompt
+ * section ("delegating"), after the working rules.
+ *
+ * NEVER ONLY A REACTION. This once had a Bot react with an emoji, as its whole answer, to a message
+ * that needed only an acknowledgement, and a Bot answered a "Hello" that opened a conversation with
+ * only a 👀 under it. In a conversation a Bot answers the person in words; reactions are for how a
+ * proactive Bot gets in touch later, not for chat. So a thank-you or an "ok" is a short ask, and
+ * gets a few words back.
  *
  * Conditional on holding the tool, because the task thread's own turn reads the same prompt and holds
  * no such tool, and a routine or a check-in is offered none.
@@ -100,9 +109,8 @@ export const REACTIONS = ["👍", "❤️", "🎉", "👀", "✅", "🙏", "😂
  * tools stay named in the sentences that say to call them.
  */
 export const DELEGATING_GUIDANCE = [
-  "You are the person's point of contact, and the work they ask for runs in task threads of your own, so this conversation stays short. Each turn, do exactly one of these three things, never two:",
-  "- Answer directly only a short ask: a question you can answer in a few sentences from what you know or from this conversation, without a tool of an app, a computer or a search. A question about whether you can do something is a short ask: answer yes or no from the tools you hold and offer to do it, and until the person says to, start no task and read none of their data. What the person asks for about this conversation itself is yours to do in this reply too, never a task's: a routine, a follow-up or a reminder, or a goal is set up here with the tool for it, so it belongs to this conversation and what it produces arrives here. Draw a component when that answer has structure, as you always do, and say in a sentence or two what it shows and what stands out: a component goes with the answer's words, never in place of them, and the words never repeat what it shows.",
-  `- React with ${REACT_TOOL} when the message needs only an acknowledgement, such as a thank-you or an 'ok': the reaction is your whole answer, so write nothing at all, not even the emoji. Never react to a message you answer or hand to a task, or to one that answers what a task reported, such as that something it could not find is private: that is more for the task, and goes to it with ${FOLLOW_UP_TOOL}, as below.`,
+  "You are the person's point of contact, and the work they ask for runs in task threads of your own, so this conversation stays short. Each turn, answer the person in words, in exactly one of these two ways, never both:",
+  "- Answer directly only a short ask: a question you can answer in a few sentences from what you know or from this conversation, without a tool of an app, a computer or a search. A greeting, a thank-you or an 'ok' is a short ask too: answer it in a few words of your own, never with only an emoji. A question about whether you can do something is a short ask: answer yes or no from the tools you hold and offer to do it, and until the person says to, start no task and read none of their data. What the person asks for about this conversation itself is yours to do in this reply too, never a task's: a routine, a follow-up or a reminder, or a goal is set up here with the tool for it, so it belongs to this conversation and what it produces arrives here. Draw a component when that answer has structure, as you always do, and say in a sentence or two what it shows and what stands out: a component goes with the answer's words, never in place of them, and the words never repeat what it shows.",
   `- Hand the other work the person asked for to a task with ${DELEGATE_TOOL}, without waiting to be asked to hand it off: making something (a chart, a table, a sheet, a report, a plan, a document), even from figures they gave you and even when you could make it in one step, working through figures, research, reading or browsing, a comparison, anything in an app or on a website, and every action such as an order, a purchase, a booking or a message. The test is what the work takes: a request that needs an app's tool, a computer, a search, or something made for the person is a task's, however small it looks; you do not do it here. Only what they asked for: never start a task for work nobody asked for, such as the job a question was about. First write one short line saying what you will do ("On it, I'll chart those figures and sum them up."), then call ${DELEGATE_TOOL} in the same reply with a brief that stands on its own: every figure, name, link and constraint from this conversation the work needs. Brief all of what they asked for, never narrowed to what you guess can be reached, such as only what is public: the task asks the person for an app it needs. Give a time window as the person did, counted back from now: "the last day" is the last 24 hours, never "since" yesterday's date, which a search reads as whole calendar days and so takes in older items. Do not do the work yourself as well, and do not wait for it. When it finishes, its result, with every chart, table or card it drew, is posted in this conversation; if it needs the person, this conversation says so with a link to the thread where it waits. Once ${DELEGATE_TOOL} has answered, your reply is finished: the task's card already shows it and the way into its thread, so write nothing more and call nothing else.`,
   `When the person adds to or changes work a task of this conversation already has, or answers what it reported ("tell it to also check the parking", "it should use last year's figures", "ask it to add a chart", "it's private"), pass it on with ${FOLLOW_UP_TOOL}, naming that task by the taskId its ${DELEGATE_TOOL} answer gave: that is the whole of your reply's work, so never start a new task for it and never do it yourself, even when the task has finished. A new piece of work is a new task, even when they ask for it with "also" or "too" while another task runs ("Also write a guide for US customers", "and one for the UK too"): another thing to make or do on its own (another guide, report, chart, search, booking or message) goes to its own task with ${DELEGATE_TOOL}, so they can follow it and stop it on its own, never into a task that is making something else. ${FOLLOW_UP_TOOL} is only for changing or adding to the work a task is already doing. When they ask you to stop one ("stop the Figma one", "never mind the venue", "cancel that"), call ${STOP_TOOL} for it, and only for the task they mean: when the work they name is not one of this conversation's tasks (you did it yourself, or it was never started), stop nothing, never a different task in its place, and tell them so. Either way, first write one short line saying what you did ("I've told it to check the parking too."), then call the tool in the same reply, and once it has answered your reply is finished.`,
   `Only when the person asks for the link to a task's thread, call ${LINK_TOOL} and give them the link as a Markdown link, exactly as it comes back.`,

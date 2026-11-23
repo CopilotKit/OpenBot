@@ -148,7 +148,7 @@ function OutcomeStatus({
     );
   if (outcome.state === "failed")
     return (
-      <span className="shrink-0 text-xs text-amber-600 dark:text-amber-500">
+      <span className="shrink-0 text-xs text-warning">
         {outcome.exitCode === undefined
           ? "Didn't work"
           : `Exit code ${outcome.exitCode}`}
@@ -252,14 +252,14 @@ function diffRows(before: string, after: string): DiffRow[] {
 }
 
 const ROW_TONES = {
-  add: "bg-emerald-500/10 dark:bg-emerald-500/15",
+  add: "bg-success/10",
   del: "bg-red-500/10 dark:bg-red-500/15",
   same: "text-muted-foreground",
   gap: "text-muted-foreground",
 } as const;
 
 const MARK_TONES = {
-  add: "text-emerald-700 dark:text-emerald-400",
+  add: "text-success",
   del: "text-red-700 dark:text-red-400",
 } as const;
 
@@ -418,7 +418,7 @@ export function TodoCard({ todos }: { todos: readonly Todo[] }) {
                 className={cn(
                   "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[5px] border text-[10px]",
                   status === "completed"
-                    ? "border-transparent bg-emerald-500 text-white"
+                    ? "border-transparent bg-success text-white"
                     : status === "in_progress"
                       ? "border-foreground/60"
                       : "border-border",

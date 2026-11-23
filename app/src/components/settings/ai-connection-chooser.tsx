@@ -100,6 +100,7 @@ import type {
   AiConnectionInput,
   AiConnectionLogin,
   AiConnectionProvider,
+  AiConnectionProviderAnswer,
   AiSignIn,
   AiSignInInputMethod,
 } from "@/lib/api/generated/model";
@@ -144,11 +145,11 @@ export type ChooserMode =
        * for them and can use now, which they can share without signing in again.
        */
       share?: {
-        signIns: readonly AiConnectionProvider[];
+        signIns: readonly AiConnectionProviderAnswer[];
         mine: AiConnection | null;
       };
     }
-  | { kind: "personal"; signIns: readonly AiConnectionProvider[] };
+  | { kind: "personal"; signIns: readonly AiConnectionProviderAnswer[] };
 
 export type ChooserSurface = "dialog" | "card";
 
@@ -768,14 +769,15 @@ export function ChooseConnection({
    * sign-in runs on the model their own AI names, or the provider's usual one.
    */
   function shareMine(mine: AiConnection) {
-    if (!mine.provider || (mine.login !== "plan" && mine.login !== "oauth"))
-      return;
-    const named = mine.model ?? ENDPOINT_PRESETS[mine.provider]?.model;
+    // The server's answer can name a provider this app doesn't know: that one isn't offered.
+    const known = providerById(mine.provider)?.id;
+    if (!known || (mine.login !== "plan" && mine.login !== "oauth")) return;
+    const named = mine.model ?? ENDPOINT_PRESETS[known]?.model;
     if (mine.login === "oauth" && !named) return;
     send(
       mine.login === "oauth" && named
-        ? { provider: mine.provider, login: mine.login, model: named }
-        : { provider: mine.provider, login: mine.login },
+        ? { provider: known, login: mine.login, model: named }
+        : { provider: known, login: mine.login },
     );
   }
 
@@ -1230,7 +1232,7 @@ function SignInFields({
   if (kept)
     return (
       <p className="flex items-center gap-2 text-sm">
-        <IconCircleCheckFilled className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <IconCircleCheckFilled className="size-4 shrink-0 text-success" />
         You're signed in with your {signInWords(provider.id, login)}.
       </p>
     );
@@ -1268,7 +1270,7 @@ function SignInFields({
       )}
       {signedIn ? (
         <p className="flex items-center gap-2 text-sm">
-          <IconCircleCheckFilled className="size-4 text-emerald-600 dark:text-emerald-400" />
+          <IconCircleCheckFilled className="size-4 text-success" />
           Signed in to {provider.name}.
         </p>
       ) : waiting ? (
@@ -1509,7 +1511,7 @@ export function ConnectedRow({
       <ItemActions>
         <IconCircleCheckFilled
           aria-label="Connected"
-          className="size-5 text-emerald-600 dark:text-emerald-400"
+          className="size-5 text-success"
         />
       </ItemActions>
     </Item>

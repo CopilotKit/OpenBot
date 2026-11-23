@@ -403,8 +403,8 @@ export function LearningNextRow({
       <ItemMedia
         variant="icon"
         className={cn(
-          tone === "ok" && "text-emerald-600 dark:text-emerald-400",
-          tone === "warn" && "text-amber-600 dark:text-amber-400",
+          tone === "ok" && "text-success",
+          tone === "warn" && "text-warning",
           tone === "busy" && "[&_svg]:animate-spin",
         )}
       >

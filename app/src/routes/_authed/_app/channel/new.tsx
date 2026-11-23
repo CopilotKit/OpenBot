@@ -198,7 +198,7 @@ function NewConversation({ composition }: { composition: string }) {
   const takesModel = useBotTakesModelChoice(
     !group && selected.length === 1 ? selected[0] : undefined,
   );
-  // Not a Bot that hands work to agents: its model is set on its Agents page.
+  // Not a Bot that hands work out: it answers on its own model.
   const pickable = !group && selected.length === 1 && takesModel;
   const models = useQuery({
     ...modelCatalogueQueryOptions(),

@@ -506,10 +506,7 @@ function DirectoryRowState({
     return (
       <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
         {/* Decorative: the word beside it already says which. */}
-        <span
-          aria-hidden="true"
-          className="size-1.5 rounded-full bg-emerald-500"
-        />
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
         Connected
       </span>
     );

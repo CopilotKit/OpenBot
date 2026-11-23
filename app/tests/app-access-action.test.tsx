@@ -274,13 +274,15 @@ test("not connected offers Connect, which starts the person's own consent in a n
   await view.findByText("Finish in the tab that opened.");
 });
 
-test("an app connected with a typed key goes to its page in Settings, where the form is", async () => {
+test("an app connected with a typed key goes to its page in Settings, with the key form open", async () => {
   const { view } = mounted(
     appAccess({ state: "not_connected", connect: "key" }),
   );
   // Drawn as a button (`Button` over a `Link`), and an anchor underneath with the address.
   const link = (await view.findByText("Connect")).closest("a");
-  expect(link?.getAttribute("href")).toBe("/connections/composio-gmail");
+  expect(link?.getAttribute("href")).toBe(
+    "/connections/composio-gmail?connect=true",
+  );
 });
 
 test("a brokered app to reconnect goes to its page in Settings, on Composio and on Arcade alike", async () => {

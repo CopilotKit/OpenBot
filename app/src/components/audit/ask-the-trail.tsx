@@ -114,10 +114,7 @@ export function AuditAnswerNote({
   return (
     <div className="flex max-w-3xl flex-col gap-1.5 text-sm">
       {answer.answerable === "no" ? (
-        <p
-          className="flex gap-1.5 text-amber-700 dark:text-amber-500"
-          data-audit-unanswered
-        >
+        <p className="flex gap-1.5 text-warning" data-audit-unanswered>
           <IconInfoCircle className="mt-0.5 size-4 shrink-0" />
           <span>The trail can't answer this. {answer.unanswered}</span>
         </p>
@@ -136,10 +133,7 @@ export function AuditAnswerNote({
             </p>
           ) : null}
           {answer.answerable === "partly" && answer.unanswered ? (
-            <p
-              className="flex gap-1.5 text-amber-700 dark:text-amber-500"
-              data-audit-unanswered
-            >
+            <p className="flex gap-1.5 text-warning" data-audit-unanswered>
               <IconAlertTriangle className="mt-0.5 size-4 shrink-0" />
               <span>The rows answer part of this. {answer.unanswered}</span>
             </p>

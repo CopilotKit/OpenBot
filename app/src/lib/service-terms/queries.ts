@@ -24,16 +24,17 @@ const NO_TERMS: ServiceTerms = {
 };
 
 /**
- * A 404 that says the person isn't there is about them, and fails like any other refusal. Any
- * other 404 is an OpenBot older than this operation, which has no terms. An organization not found
- * is read the same way: every other read in it fails too, and the app's own page for that answers
- * the person (OrganizationBoundary), where the terms screen would only say it couldn't load.
+ * Whether a failed read is an OpenBot older than this operation, which has no terms: the address
+ * is not served, so it is the API's plain not found (`NOT_FOUND`), or a 404 that names no code at
+ * all, as `noSuchAddress` reads it in lib/organizations/queries.ts. Every other 404 is a refusal
+ * about this request (the person or the organization it names not found) and fails like any other.
+ * It says nothing about whether the person agreed, so it never lets them past the terms.
  */
 function olderOpenBot(error: unknown): boolean {
   return (
     error instanceof ClientError &&
     error.status === 404 &&
-    error.code !== "PERSON_NOT_FOUND"
+    (error.code === undefined || error.code === "NOT_FOUND")
   );
 }
 
