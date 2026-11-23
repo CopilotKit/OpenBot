@@ -35,6 +35,7 @@ import { appFrameConfig } from "./appFrameConfig";
 import { buildScreenPrompt } from "./askPrompt";
 import { CallLog } from "./CallLog";
 import { CommandsPanel } from "./CommandsPanel";
+import { copyText } from "./clipboard";
 import type { PageClock } from "./clock";
 import { CRITIQUE_COMMANDS, type CritiqueCommand } from "./critiquePrompt";
 import { EventsPanel } from "./EventsPanel";
@@ -1681,7 +1682,7 @@ export function WorkbenchLoaded({
       { kind, warnings },
     );
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       setScreenStatus("Copied.");
     } catch {
       setScreenStatus("The workbench cannot write to the clipboard.");
@@ -2065,7 +2066,12 @@ export function WorkbenchLoaded({
           }
           onAppChange={appConfig ? changeApp : undefined}
           onCopyLink={() => {
-            void navigator.clipboard.writeText(window.location.href);
+            void copyText(window.location.href).catch(() =>
+              setNotices((all) => [
+                ...all,
+                "The browser did not let the page copy the link.",
+              ]),
+            );
             if (imported.some((s) => s.id === state.scene))
               setNotices((all) => [
                 ...all,

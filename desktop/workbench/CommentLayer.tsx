@@ -7,6 +7,7 @@ import {
   buildAskPrompt,
   isAskFor,
 } from "./askPrompt";
+import { copyText } from "./clipboard";
 import type { CommentContext, CommentTarget } from "./commentPrompt";
 import type { Box } from "./geometry";
 import { Measurement, measure, type Reading } from "./Inspector";
@@ -322,7 +323,7 @@ export function CommentLayer({
       frameInfo ?? { kind: app ? "app" : "desktop", warnings: [] },
     );
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       setStatus("Copied.");
     } catch {
       setStatus("The workbench cannot write to the clipboard.");

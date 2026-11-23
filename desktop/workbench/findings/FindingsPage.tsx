@@ -14,6 +14,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { copyText } from "../clipboard";
 import {
   CLASS_LABELS,
   FINDING_KINDS,
@@ -319,7 +320,7 @@ export function FindingsPage() {
       origin: window.location.origin,
     });
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       setCopied("Copied. Paste it into your agent.");
     } catch {
       setCopied("The browser did not let the page copy.");
