@@ -2753,6 +2753,11 @@ p.move-key-none {
   margin-top: 12px;
 }
 
+/* While the move runs, its promise keeps the gap it had before its foot was pinned. */
+.move-sheet .step-footer .footnote.move-moving-footnote {
+  margin-top: 16px;
+}
+
 .move-detail {
   margin-top: 16px;
 }

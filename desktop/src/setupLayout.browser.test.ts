@@ -158,10 +158,23 @@ function moveAnswer(command) {
   }
   progress("sign-in", "done");
   progress("export", "done");
+  // OpenBot Cloud stopped the import and said why: a conversation it won't overwrite.
+  if (move === "stopped") {
+    progress("upload", "done");
+    progress("import", "running");
+    throw { said: "\\"Field Researcher\\" has new messages on your computer, and was also carried on in OpenBot Cloud. OpenBot won't overwrite what was said in OpenBot Cloud, so the new messages can't move.", detail: null, kind: "move-stopped" };
+  }
   progress("upload", "running", 0.42);
   if (move === "midway") return new Promise(() => {});
   if (move === "failed")
     throw { said: "OpenBot couldn't send your Bots to OpenBot Cloud. Check your internet connection, then try again.", kind: "move-failed" };
+  // As most real failures are: with the technical details for the log.
+  if (move === "failed-detail")
+    throw {
+      said: "OpenBot couldn't send your Bots to OpenBot Cloud. Check your internet connection, then try again.",
+      detail: "part 3 of 7: the connection was reset while sending (tried 3 times over 41s); the last try answered 502 bad-gateway with no body",
+      kind: "move-failed",
+    };
   // \`#move-done-held\`: as on a Mac, the disk shows 4.5 of the 20.2 GB removed free so far.
   // \`#move-done-ai\`: OpenBot Cloud still needs the person's AI, so the result leads with it.
   return {
@@ -3018,23 +3031,40 @@ describe.skipIf(!asked)(
 );
 
 /*
- * The move to OpenBot Cloud, each of its screens at the window's size less a title bar (1000x760),
- * in the first screen's card: every common case fits with nothing scrolled inside the card, and the
- * page never scrolls either way. Only a long list of apps to reconnect scrolls, inside the card,
- * with Move still in view. `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each, light and dark,
- * taken before anything is asserted.
+ * The move to OpenBot Cloud, each of its screens in the first screen's card, at the window's
+ * default size (1000x800, tauri.conf.json), that less a title bar (1000x760), and its smallest
+ * (720x560). The page never scrolls, and every one of a screen's buttons is whole in the window and
+ * in the card's view, not under anything, as the screen opens. At 1000x760 every common case fits
+ * with nothing scrolled inside the card; what is taller scrolls inside the card above its buttons.
+ *
+ * Seen on 1.2.0-rc.2: a move that failed showed its technical details, the screen ran past the
+ * card's foot, and Try again and Keep OpenBot on this computer were out of view. The person quit
+ * and reopened OpenBot to get past it. `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each,
+ * light and dark, taken before anything is asserted.
  */
 describe.skipIf(!asked)(
   "the move to OpenBot Cloud at the window's size",
   () => {
     const shots = process.env.OPENBOT_APP_SHOTS;
     const engine = process.env.OPENBOT_APP_ENGINE ?? "chromium";
+    const SIZES = [
+      [1000, 760],
+      [1000, 800],
+      [720, 560],
+    ] as const;
     const SCREENS: {
       hash: string;
+      /** The test's and the screenshot's name, when one hash shows two ways. */
+      name?: string;
       heading: string;
       /** Pressed on the confirm screen, once what moves has loaded. */
       move?: boolean;
+      /** Technical details opened, as the person would. */
+      openDetail?: boolean;
+      /** Scrolls inside the card at 1000x760. */
       scrolls?: boolean;
+      /** Nothing to press: sending, past signing in, has no Cancel. */
+      noButtons?: boolean;
     }[] = [
       { hash: "#move-choice", heading: "Move to OpenBot Cloud?" },
       { hash: "#move-confirm", heading: "Move to OpenBot Cloud" },
@@ -3045,8 +3075,34 @@ describe.skipIf(!asked)(
         scrolls: true,
       },
       { hash: "#move-signin", heading: "Moving to OpenBot Cloud", move: true },
-      { hash: "#move-midway", heading: "Moving to OpenBot Cloud", move: true },
+      {
+        hash: "#move-midway",
+        heading: "Moving to OpenBot Cloud",
+        move: true,
+        noButtons: true,
+      },
       { hash: "#move-failed", heading: "The move didn't finish", move: true },
+      {
+        hash: "#move-failed-detail",
+        heading: "The move didn't finish",
+        move: true,
+        scrolls: true,
+      },
+      {
+        hash: "#move-failed-detail",
+        name: "move-failed-detail-open",
+        heading: "The move didn't finish",
+        move: true,
+        openDetail: true,
+        scrolls: true,
+      },
+      // OpenBot Cloud's own three-line sentence: a few pixels past the card, the buttons in view.
+      {
+        hash: "#move-stopped",
+        heading: "The move didn't finish",
+        move: true,
+        scrolls: true,
+      },
       { hash: "#move-done", heading: "You're on OpenBot Cloud", move: true },
       {
         hash: "#move-done-held",
@@ -3060,86 +3116,212 @@ describe.skipIf(!asked)(
       },
       { hash: "#move-done-ai", heading: "You're on OpenBot Cloud", move: true },
     ];
-    for (const colorScheme of ["light", "dark"] as const) {
-      for (const screen of SCREENS) {
-        test(`${screen.hash.slice(1)} fits the window (${colorScheme})`, async () => {
-          const page = await browser.newPage({
-            viewport: { width: 1000, height: 760 },
-            colorScheme,
-          });
-          try {
-            await open(page, screen.hash, cloudBuilt);
-            if (screen.move) {
-              await page.getByRole("list", { name: "What moves" }).waitFor();
+    for (const [width, height] of SIZES)
+      for (const colorScheme of ["light", "dark"] as const) {
+        for (const screen of SCREENS) {
+          const name = screen.name ?? screen.hash.slice(1);
+          test(`at ${width}x${height}, ${name} fits the window, its buttons in view (${colorScheme})`, async () => {
+            const page = await browser.newPage({
+              viewport: { width, height },
+              colorScheme,
+            });
+            try {
+              await open(page, screen.hash, cloudBuilt);
+              if (screen.move) {
+                await page.getByRole("list", { name: "What moves" }).waitFor();
+                await page
+                  .getByRole("button", { name: "Move to OpenBot Cloud" })
+                  .click();
+              }
               await page
-                .getByRole("button", { name: "Move to OpenBot Cloud" })
-                .click();
-            }
-            await page
-              .getByRole("heading", { name: screen.heading, exact: true })
-              .waitFor();
-            if (screen.hash === "#move-confirm")
-              await page.getByRole("list", { name: "What moves" }).waitFor();
-            // The card's entrance over, and the pointer off whatever it pressed.
-            await page.mouse.move(0, 0);
-            await page.waitForTimeout(600);
-            if (shots)
-              await page.screenshot({
-                path: `${shots}/${screen.hash.slice(1)}-${colorScheme}-${engine}.png`,
+                .getByRole("heading", { name: screen.heading, exact: true })
+                .waitFor();
+              if (screen.hash === "#move-confirm")
+                await page.getByRole("list", { name: "What moves" }).waitFor();
+              if (screen.openDetail) {
+                await page
+                  .getByText("Technical details", { exact: true })
+                  .click();
+                await page.waitForTimeout(100);
+                // Opened, they show: whole, in the card's view, clear of its pinned foot.
+                const shown = await page.evaluate(() => {
+                  const sheet = document.querySelector("main > .sheet");
+                  const said = document.querySelector("main details pre");
+                  const foot = document.querySelector(
+                    "main > .sheet > .step-footer",
+                  );
+                  const box = said?.getBoundingClientRect();
+                  return {
+                    top: box?.top ?? 0,
+                    bottom: box?.bottom ?? 0,
+                    ceiling: sheet?.getBoundingClientRect().top ?? 0,
+                    floor: Math.min(
+                      foot?.getBoundingClientRect().top ??
+                        Number.POSITIVE_INFINITY,
+                      sheet?.getBoundingClientRect().bottom ?? 0,
+                    ),
+                  };
+                });
+                expect(shown.bottom).toBeGreaterThan(shown.top);
+                expect(shown.top).toBeGreaterThanOrEqual(shown.ceiling);
+                // Within the pixel the card's scroll snaps to.
+                expect(shown.bottom).toBeLessThanOrEqual(shown.floor + 1);
+              }
+              // The card's entrance over, and the pointer off whatever it pressed.
+              await page.mouse.move(0, 0);
+              await page.waitForTimeout(600);
+              if (shots)
+                await page.screenshot({
+                  path: `${shots}/${name}-${width}x${height}-${colorScheme}-${engine}.png`,
+                });
+              const fit = await page.evaluate(() => {
+                const sheet = document.querySelector("main > .sheet");
+                const card = sheet?.getBoundingClientRect();
+                const style = sheet ? getComputedStyle(sheet) : null;
+                // The card's view: inside its border, and inside the window.
+                const top = Math.max(
+                  0,
+                  (card?.top ?? 0) +
+                    (Number.parseFloat(style?.borderTopWidth ?? "") || 0),
+                );
+                const bottom = Math.min(
+                  window.innerHeight,
+                  (card?.bottom ?? 0) -
+                    (Number.parseFloat(style?.borderBottomWidth ?? "") || 0),
+                );
+                // The screen's own buttons, not those in a list inside it.
+                const buttons = [
+                  ...document.querySelectorAll(
+                    "main > .sheet > .row button, main > .sheet > .step-footer button",
+                  ),
+                ];
+                return {
+                  cardScrolls: sheet
+                    ? sheet.scrollHeight > sheet.clientHeight + 1
+                    : true,
+                  pageScrolls:
+                    document.documentElement.scrollHeight >
+                      window.innerHeight ||
+                    document.documentElement.scrollWidth > window.innerWidth,
+                  buttons: buttons.length,
+                  outOfView: buttons
+                    .filter((button) => {
+                      const box = button.getBoundingClientRect();
+                      const hit = document.elementFromPoint(
+                        box.left + box.width / 2,
+                        box.top + box.height / 2,
+                      );
+                      return !(
+                        box.top >= top &&
+                        box.bottom <= bottom &&
+                        box.left >= 0 &&
+                        box.right <= window.innerWidth &&
+                        hit !== null &&
+                        button.contains(hit)
+                      );
+                    })
+                    .map((button) => button.textContent),
+                };
               });
-            const fit = await page.evaluate(() => {
-              const sheet = document.querySelector("main > .sheet");
-              const move = [...document.querySelectorAll("button")].find(
-                (button) => button.textContent === "Move to OpenBot Cloud",
+              if (screen.noButtons) expect(fit.buttons).toBe(0);
+              else expect(fit.buttons).toBeGreaterThan(0);
+              expect({
+                pageScrolls: fit.pageScrolls,
+                outOfView: fit.outOfView,
+              }).toEqual({ pageScrolls: false, outOfView: [] });
+              if (height === 760)
+                expect(fit.cardScrolls).toBe(screen.scrolls === true);
+              // The result says the figure the move screens said, counted the same way.
+              const said = await page.evaluate(
+                () => document.querySelector("main")?.textContent ?? "",
               );
-              const bottom = move?.getBoundingClientRect().bottom ?? 0;
-              return {
-                cardScrolls: sheet
-                  ? sheet.scrollHeight > sheet.clientHeight + 1
-                  : true,
-                pageScrolls:
-                  document.documentElement.scrollHeight > window.innerHeight ||
-                  document.documentElement.scrollWidth > window.innerWidth,
-                moveInView: !move || bottom <= window.innerHeight,
-              };
-            });
-            expect(fit).toEqual({
-              cardScrolls: screen.scrolls === true,
-              pageScrolls: false,
-              moveInView: true,
-            });
-            // The result says the figure the move screens said, counted the same way.
-            const said = await page.evaluate(
-              () => document.querySelector("main")?.textContent ?? "",
-            );
-            if (screen.hash === "#move-choice")
-              expect(said).toContain(
-                "This removes about 20.2 GB of OpenBot files from this computer.",
+              if (screen.hash === "#move-choice")
+                expect(said).toContain(
+                  "This removes about 20.2 GB of OpenBot files from this computer.",
+                );
+              if (screen.hash === "#move-confirm")
+                expect(said).toContain(
+                  "Removes about 20.2 GB of OpenBot files.",
+                );
+              if (screen.hash.startsWith("#move-done"))
+                expect(said).toContain("20.2 GB of OpenBot files removed");
+              expect(said.includes("of that is free space on your disk")).toBe(
+                screen.hash === "#move-done-held",
               );
-            if (screen.hash === "#move-confirm")
-              expect(said).toContain("Removes about 20.2 GB of OpenBot files.");
-            if (screen.hash.startsWith("#move-done"))
-              expect(said).toContain("20.2 GB of OpenBot files removed");
-            expect(said.includes("of that is free space on your disk")).toBe(
-              screen.hash === "#move-done-held",
-            );
-            // Still needing an AI: Connect your AI leads, and no Reconnect skips it.
-            if (screen.hash === "#move-done-ai") {
-              expect(said).toContain("Connect your AI first");
-              expect(said).toContain("Then reconnect your apps");
-              const buttons = await page.evaluate(() =>
-                [...document.querySelectorAll("main button")].map(
-                  (button) => button.textContent,
-                ),
-              );
-              expect(buttons).toEqual(["Connect your AI"]);
+              // Still needing an AI: Connect your AI leads, and no Reconnect skips it.
+              if (screen.hash === "#move-done-ai") {
+                expect(said).toContain("Connect your AI first");
+                expect(said).toContain("Then reconnect your apps");
+                const buttons = await page.evaluate(() =>
+                  [...document.querySelectorAll("main button")].map(
+                    (button) => button.textContent,
+                  ),
+                );
+                expect(buttons).toEqual(["Connect your AI"]);
+              }
+            } finally {
+              await page.close();
             }
-          } finally {
-            await page.close();
-          }
-        }, 30_000);
+          }, 30_000);
+        }
       }
-    }
+
+    // Keep, pressed where it shows with nothing scrolled first, leaves the move for OpenBot here.
+    for (const [width, height] of [
+      [1000, 800],
+      [720, 560],
+    ] as const)
+      test(`at ${width}x${height}, Keep on a failed move with its technical details open opens OpenBot here`, async () => {
+        const page = await browser.newPage({ viewport: { width, height } });
+        try {
+          await open(page, "#move-failed-detail", cloudBuilt);
+          await page.getByRole("list", { name: "What moves" }).waitFor();
+          await page
+            .getByRole("button", { name: "Move to OpenBot Cloud" })
+            .click();
+          await page
+            .getByRole("heading", {
+              name: "The move didn't finish",
+              exact: true,
+            })
+            .waitFor();
+          await page.getByText("Technical details", { exact: true }).click();
+          await page.evaluate(() => {
+            const sheet = document.querySelector("main > .sheet");
+            if (sheet) sheet.scrollTop = 0;
+          });
+          await page.waitForTimeout(600);
+          const keep = await page
+            .getByRole("button", { name: "Keep OpenBot on this computer" })
+            .boundingBox();
+          expect(keep).not.toBeNull();
+          if (!keep) return;
+          expect(keep.y + keep.height).toBeLessThanOrEqual(height);
+          // The mouse, not a locator's click, which would scroll the button into view first.
+          await page.mouse.click(
+            keep.x + keep.width / 2,
+            keep.y + keep.height / 2,
+          );
+          for (let i = 0; i < 50; i += 1) {
+            if ((await calls(page)).includes("show_openbot")) break;
+            await page.waitForTimeout(100);
+          }
+          const made = await calls(page);
+          expect(made).toContain("keep_self_contained");
+          expect(made).toContain("show_openbot");
+          expect(made.indexOf("show_openbot")).toBeGreaterThan(
+            made.indexOf("keep_self_contained"),
+          );
+          await page
+            .getByRole("heading", {
+              name: "The move didn't finish",
+              exact: true,
+            })
+            .waitFor({ state: "hidden" });
+        } finally {
+          await page.close();
+        }
+      }, 30_000);
   },
 );
 

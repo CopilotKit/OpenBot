@@ -247,12 +247,27 @@ function useBookDemoStep(): OnboardingStep {
   };
 }
 
+/**
+ * DECIDED FROM THE ORGANIZATION'S ANSWERS, NEVER FROM NONE. The steps decide once, on arrival,
+ * from the person and their AI connection, which `beforeLoad` puts in the cache first. Working in
+ * another organization (Connect your AI's way out, the account menu) drops both and builds the
+ * page again for the new one (OrganizationBoundary) before it has answered. Decided from nothing,
+ * Connect your AI fell out of the list in an organization with no AI, the name step came in for a
+ * name that was known, and its Get started faded the page out while the gate sent it straight
+ * back: a blank page (reported on 1.2.0-rc.2). So the steps wait for both answers.
+ */
 function RouteComponent() {
+  const me = useQuery(currentUserQueryOptions());
+  const personal = useQuery(personalAiConnectionQueryOptions());
+  if (me.isPending || personal.isPending) return null;
+  return <OnboardingSteps />;
+}
+
+function OnboardingSteps() {
   const navigate = useNavigate();
   const router = useRouter();
   const location = useLocation();
   const search = Route.useSearch();
-  const complete = useMutation(completeOnboardingMutationOptions(queryClient));
   const advance = useMutation(advanceOnboardingMutationOptions(queryClient));
   const me = useQuery(currentUserQueryOptions());
 
@@ -343,21 +358,57 @@ function RouteComponent() {
   // Where the gate found them headed, kept on every step's address so a reload keeps it too.
   const next = search.next;
   const keepNext = next ? { next } : {};
+
+  /*
+   * PAST CONNECT YOUR AI WITH NOTHING LEFT TO DO, ONBOARDING IS DONE. Somebody who reached Connect
+   * your AI and arrives with an AI they no longer have to connect (they chose to work in another
+   * organization that has one for everyone, or an admin set one up) goes on to their next step.
+   * With none after it, onboarding finishes on arrival and the app opens, in the organization they
+   * are now working in. Decided once, on arrival, like the steps. A completion that fails shows the
+   * last step, with Get started to try again.
+   */
+  const complete = useMutation(completeOnboardingMutationOptions(queryClient));
+  const [arrivedPastAi] = React.useState(
+    () =>
+      !onboarded &&
+      !aiNeeded &&
+      (isStepId(search.step)
+        ? search.step
+        : stepForNumber(me.data?.onboarding?.step)) === "ai",
+  );
+  const nothingAfterAi =
+    capabilities !== undefined &&
+    !ids.some((id) => ORDER.indexOf(id) > ORDER.indexOf("ai"));
+  const finishingEarly = arrivedPastAi && nothingAfterAi && !complete.isError;
+  const startedEarly = React.useRef(false);
+  const { mutate: completeNow } = complete;
   React.useEffect(() => {
+    if (!finishingEarly || startedEarly.current) return;
+    startedEarly.current = true;
+    completeNow(undefined, {
+      onSuccess: () =>
+        void navigate({ href: afterOnboarding(next), replace: true }),
+    });
+  }, [finishingEarly, completeNow, navigate, next]);
+  // Nothing is drawn while that is decided and done: the app opens next.
+  const holding = arrivedPastAi && (askingCapabilities || finishingEarly);
+
+  React.useEffect(() => {
+    if (holding) return;
     if (asked !== undefined && asked === search.step) return;
     navigate({
       to: "/onboarding",
       search: next ? { step: current, next } : { step: current },
       replace: true,
     });
-  }, [navigate, current, asked, search.step, next]);
+  }, [navigate, current, asked, search.step, next, holding]);
 
   // Saved wherever the person goes, by Continue, Back or the browser.
   const savedStep = me.data?.onboarding?.step;
   const { mutate: save } = advance;
   React.useEffect(() => {
-    // Somebody who finished onboarding has no place in it to keep.
-    if (onboarded) return;
+    // Somebody who finished onboarding, or is finishing it on arrival, has no place in it to keep.
+    if (onboarded || holding) return;
     if (savedStep === undefined || savedStep === STEP_NUMBER[current]) return;
     // OpenBot for Business waits for the answer that says whether this person has one.
     if (current === "selfhost" && !capabilities) return;
@@ -370,7 +421,7 @@ function RouteComponent() {
       onError: (error) =>
         console.warn("Your place in onboarding was not saved.", error),
     });
-  }, [current, savedStep, save, capabilities, onboarded]);
+  }, [current, savedStep, save, capabilities, onboarded, holding]);
 
   /*
    * CONTINUE PUSHES, AND BACK RETURNS THROUGH HISTORY WHEN IT CAN. Continue adds an entry carrying
@@ -513,7 +564,7 @@ function RouteComponent() {
       initial={false}
       transition={{ duration: reduced ? 0 : 0.3, ease: "easeOut" }}
     >
-      {waiting ? null : (
+      {waiting || holding ? null : (
         <OnboardingWizard
           onMove={(to, way) => move(to, way)}
           stepId={current}

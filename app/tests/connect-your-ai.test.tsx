@@ -71,7 +71,8 @@ const engines = (process.env.OPENBOT_APP_ENGINES ?? "chromium")
 )[];
 
 const APP = join(import.meta.dir, "..");
-const ORIGIN = "http://openbot.test";
+/** On https, as OpenBot Cloud is: the page is a secure context, so the clipboard is offered. */
+const ORIGIN = "https://openbot.test";
 const ORGANIZATION = "/api/v2/organizations/default";
 const ME = `${ORGANIZATION}/people/me`;
 const PERSONAL = `${ME}/ai-connection`;
@@ -323,8 +324,11 @@ function organizationAi(personal: PersonalAiConnection) {
   return GetAiConnectionResponse.parse(organization);
 }
 
-/** A second organization the person is in, beside `default`. */
-const ACME = "/api/v2/organizations/acme";
+/** The other organizations a person can be in, beside `default`, by id, with their names. */
+const OTHERS = { acme: "Acme", globex: "Globex" } as const;
+type Other = keyof typeof OTHERS;
+const isOther = (id: string | undefined): id is Other =>
+  id !== undefined && Object.hasOwn(OTHERS, id);
 
 /** One organization, as the person's list of their own answers it. */
 function organizationRow(id: string, name: string, active: boolean) {
@@ -339,6 +343,8 @@ class FakeServer {
    * `default` (the list of their organizations is then not served, as OpenBot with one answers).
    */
   acme: PersonalAiConnection | null = null;
+  /** The person's answer in Globex, a third organization, or null when they are not in it. */
+  globex: PersonalAiConnection | null = null;
   /** The organization the session works in. */
   active = "default";
   onboarding: { step: number; completedAt: string | null };
@@ -378,22 +384,32 @@ class FakeServer {
   answer(request: Request): { status: number; json: unknown } {
     const url = new URL(request.url());
     const method = request.method();
-    // Acme answers as `default` does, but for the person's AI there.
-    const inAcme = url.pathname.startsWith(`${ACME}/`) && this.acme !== null;
-    const path = inAcme
-      ? `${ORGANIZATION}${url.pathname.slice(ACME.length)}`
-      : url.pathname;
-    if (inAcme && this.acme && path === PERSONAL && method === "GET")
-      return { status: 200, json: this.acme };
-    if (inAcme && this.acme && path === `${ORGANIZATION}/ai-connection`)
-      return { status: 200, json: organizationAi(this.acme) };
-    if (url.pathname === "/api/v2/people/me/organizations" && this.acme)
+    // Another organization answers as `default` does, but for the person's AI there.
+    const named = /^\/api\/v2\/organizations\/([^/]+)(\/.*)$/.exec(
+      url.pathname,
+    );
+    const other = isOther(named?.[1]) ? named[1] : undefined;
+    const there = other ? this[other] : null;
+    const path = there && named ? `${ORGANIZATION}${named[2]}` : url.pathname;
+    if (there && path === PERSONAL && method === "GET")
+      return { status: 200, json: there };
+    if (there && path === `${ORGANIZATION}/ai-connection`)
+      return { status: 200, json: organizationAi(there) };
+    const memberOf = (Object.keys(OTHERS) as Other[]).filter(
+      (id) => this[id] !== null,
+    );
+    if (
+      url.pathname === "/api/v2/people/me/organizations" &&
+      memberOf.length > 0
+    )
       return {
         status: 200,
         json: ListOrganizationsResponse.parse({
           organizations: [
             organizationRow("default", "Default", this.active === "default"),
-            organizationRow("acme", "Acme", this.active === "acme"),
+            ...memberOf.map((id) =>
+              organizationRow(id, OTHERS[id], this.active === id),
+            ),
           ],
           canCreate: false,
           nextCursor: null,
@@ -577,6 +593,20 @@ class FakeServer {
           openbotVersion: "v1.1.3",
         },
       };
+    // The name step's save: the name is the one they have, as far as these screens care.
+    if (path === ME && method === "PATCH")
+      return {
+        status: 200,
+        json: {
+          person: personBody({
+            id: "dana",
+            name: "Dana Whitfield",
+            email: "dana@example.com",
+            role: "admin",
+            onboarding: this.onboarding,
+          }),
+        },
+      };
     if (path === `${ME}/onboarding/advance` && method === "POST") {
       const { step } = request.postDataJSON() as { step: number };
       this.onboarding = { ...this.onboarding, step };
@@ -730,15 +760,7 @@ beforeAll(async () => {
     browsers.set(
       engine,
       // The CI job installs full Chromium without the headless shell.
-      // The page's origin counts as secure, as OpenBot Cloud's https is: the clipboard is offered.
-      await type.launch(
-        engine === "chromium"
-          ? {
-              channel: "chromium",
-              args: [`--unsafely-treat-insecure-origin-as-secure=${ORIGIN}`],
-            }
-          : {},
-      ),
+      await type.launch(engine === "chromium" ? { channel: "chromium" } : {}),
     );
   }
 }, 120_000);
@@ -1878,6 +1900,94 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
       }
     }, 90_000);
 
+  /** Welcome's button, once it can be pressed, and on to Connect your AI with its way out drawn. */
+  async function toTheStep(page: Page, other: string) {
+    await heading(page, "Welcome to OpenBot");
+    await page.waitForFunction(
+      () =>
+        !document
+          .querySelector("[data-onboarding-primary]")
+          ?.hasAttribute("disabled"),
+    );
+    await primary(page).click();
+    await heading(page, "Connect your AI");
+    await page.getByText(other).first().waitFor();
+    // Styled: the way out is drawn beside the words on a desktop, and the stylesheet hides the other.
+    await style(page);
+    return page.getByRole("group", { name: "Or work in another organization" });
+  }
+
+  /*
+   * Reported on 1.2.0-rc.2: on Connect your AI, picking another organization skipped the step to the
+   * name, its Get started left a blank page, and a reload was back at Connect your AI offering the
+   * organization just left. Only an organization with an AI for everyone is offered, and picking it
+   * finishes onboarding there and opens the app in it.
+   */
+  for (const engine of engines)
+    test(`a new person picks another organization's AI on the step and the app opens there, in ${engine}`, async () => {
+      // Default and Acme have no AI, and neither does the person; Globex has one for everyone.
+      const server = new FakeServer("none");
+      server.acme = personalFor("none");
+      server.globex = personalFor("organization");
+      const page = await open("/", server, engine, "light", WIDE);
+      try {
+        const others = await toTheStep(page, "Globex");
+        // Acme has no AI either, so it is no way out.
+        expect(
+          await others.locator("[data-slot=item-title]").allTextContents(),
+        ).toEqual(["Globex"]);
+        await others.getByRole("button", { name: /Globex/ }).click();
+        // Nothing left to do: onboarding is finished there, and the app opens in Globex.
+        const home = page.locator("[data-app-home]");
+        await home.waitFor();
+        expect(await home.getAttribute("data-organization")).toBe("globex");
+        expect(new URL(page.url()).pathname).toBe("/");
+        expect(server.active).toBe("globex");
+        expect(server.completes).toBe(1);
+        expect(
+          await page
+            .getByRole("heading", { name: "What should we call you?" })
+            .count(),
+        ).toBe(0);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+  for (const engine of engines)
+    test(`an organization whose AI is gone by the time it is picked holds them at the step there, in ${engine}`, async () => {
+      const server = new FakeServer("none");
+      server.globex = personalFor("organization");
+      const page = await open("/", server, engine, "light", WIDE);
+      try {
+        const others = await toTheStep(page, "Globex");
+        // Its AI is removed after the list was drawn and before the pick.
+        server.globex = personalFor("none");
+        const asked = page.waitForResponse((response) =>
+          response
+            .url()
+            .endsWith("/api/v2/organizations/globex/people/me/ai-connection"),
+        );
+        await others.getByRole("button", { name: /Globex/ }).click();
+        await asked;
+        await page.waitForFunction(() => document.querySelector("h1") !== null);
+        // Held at Connect your AI in Globex: not the name step, and not finished.
+        await heading(page, "Connect your AI");
+        expect(
+          await page
+            .getByRole("heading", { name: "What should we call you?" })
+            .count(),
+        ).toBe(0);
+        expect(server.active).toBe("globex");
+        expect(new URL(page.url()).searchParams.get("step")).toBe("ai");
+        expect(server.completes).toBe(0);
+        expect(server.onboarding.step).toBe(4);
+        expect(await primary(page).isDisabled()).toBe(true);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
   for (const engine of engines)
     for (const theme of THEMES)
       test(`at a phone's width, scrolled to the end, Sign out stops just above the buttons' fade as every step's last line does, in ${engine}, ${theme}`, async () => {
@@ -2256,6 +2366,88 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         expect(await connected.textContent()).toContain(
           "Signed in with your ChatGPT plan.",
         );
+      } finally {
+        await page.close();
+      }
+    }, 90_000);
+
+  for (const engine of engines)
+    test(`the code to enter on the provider's page copies with one press, for ChatGPT and xAI, in ${engine}`, async () => {
+      const server = new FakeServer("none", true);
+      // Both wait to be approved, so the code stays on screen.
+      server.outcomes = ["never", "never"];
+      const page = await open(
+        "/onboarding?step=ai",
+        server,
+        engine,
+        "light",
+        WIDE,
+      );
+      // Chromium reads the clipboard back with leave to. WebKit writes on a press without asking,
+      // but refuses a read that no press started, so there the test notes what the page handed
+      // the real clipboard and reads that.
+      if (engine === "chromium")
+        await page
+          .context()
+          .grantPermissions(["clipboard-read", "clipboard-write"], {
+            origin: ORIGIN,
+          });
+      const clipboard = () =>
+        engine === "chromium"
+          ? page.evaluate(() => navigator.clipboard.readText())
+          : page.evaluate(
+              () =>
+                (window as unknown as { __written?: string }).__written ?? "",
+            );
+      try {
+        await heading(page, "Connect your AI");
+        if (engine !== "chromium")
+          await page.evaluate(() => {
+            const board = navigator.clipboard;
+            const write = board.writeText.bind(board);
+            board.writeText = async (text: string) => {
+              await write(text);
+              (window as unknown as { __written?: string }).__written = text;
+            };
+          });
+        const chooser = page.locator("[data-ai-chooser]");
+        const copy = chooser.getByRole("button", { name: "Copy the code" });
+
+        // ChatGPT's code: copied as shown, and the button says so.
+        await chooser.getByRole("button", { name: /^OpenAI/ }).click();
+        await chooser
+          .getByRole("button", { name: "Sign in with ChatGPT", exact: true })
+          .click();
+        await chooser.getByText("VU3W-87566").waitFor();
+        expect(await copy.textContent()).toBe("Copy");
+        await copy.click();
+        await chooser
+          .getByRole("button", { name: "Copy the code" })
+          .filter({
+            hasText: "Copied",
+          })
+          .waitFor();
+        expect(await clipboard()).toBe("VU3W-87566");
+        expect(await chooser.getByRole("alert").count()).toBe(0);
+
+        // xAI's, the same way.
+        await chooser.getByRole("button", { name: "Cancel sign-in" }).click();
+        await copy.waitFor({ state: "detached" });
+        await chooser.getByRole("button", { name: "Back" }).click();
+        await chooser.getByRole("button", { name: /^xAI/ }).click();
+        await chooser
+          .getByRole("button", { name: "Sign in with xAI", exact: true })
+          .click();
+        await chooser.getByText("MQ7T-WD4X").waitFor();
+        expect(await copy.textContent()).toBe("Copy");
+        await copy.click();
+        await chooser
+          .getByRole("button", { name: "Copy the code" })
+          .filter({
+            hasText: "Copied",
+          })
+          .waitFor();
+        expect(await clipboard()).toBe("MQ7T-WD4X");
       } finally {
         await page.close();
       }

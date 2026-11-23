@@ -370,7 +370,8 @@ jobs:
       # only when it is opened, counted on the wire, and the AI connection changed in Settings, a
       # key the provider refuses saying why and changing nothing, and on OpenBot Cloud a person
       # held at Connect your AI until they connect their own, and Admin's Providers where an admin
-      # changes, disconnects and connects the organization's AI, told apart from their own. The
+      # changes, disconnects and connects the organization's AI, told apart from their own, and
+      # People's Remove dialog and the SCIM row fitting wide and on a phone. The
       # onboarding frame reads the generated app config, which `bun test` alone doesn't write (the
       # test script's pretest does).
       - run: bun run generate:app-config
@@ -380,7 +381,7 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 \
             "$PLAYWRIGHT_IMAGE" \
-            bun test --parallel app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/compact-avatar-layout.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx app/tests/audit-computer-limit-layout.test.tsx app/tests/ai-connection-dialog.test.tsx app/tests/connect-your-ai.test.tsx app/tests/admin-providers-connection.test.tsx
+            bun test --parallel app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/compact-avatar-layout.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx app/tests/audit-computer-limit-layout.test.tsx app/tests/ai-connection-dialog.test.tsx app/tests/connect-your-ai.test.tsx app/tests/admin-providers-connection.test.tsx app/tests/admin-people-remove-layout.test.tsx
 
   # Dictation in the Desktop window on a Mac whose recognizer has no English (United Kingdom) on
   # the device, in Chromium and in WebKit, the engine the Mac window draws with: it listens in the
@@ -415,6 +416,15 @@ jobs:
             --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
             "$PLAYWRIGHT_IMAGE" \
             bun test app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx app/tests/move-to-cloud-settings.test.tsx
+      # Connect your AI's sign-in code, copied with one press and read back from WebKit's clipboard.
+      # Only that test: the rest of the file runs in Chromium in the job above.
+      - run: |
+          docker run --rm --ipc=host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --volume "$(command -v bun):/usr/local/bin/bun:ro" \
+            --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=webkit \
+            "$PLAYWRIGHT_IMAGE" \
+            bun test app/tests/connect-your-ai.test.tsx -t "copies with one press"
 
   # The desktop setup window's, for the same reason as the list above: the AI step's form holding
   # still while the install behind it comes and goes. It bundles the window from the desktop's own

@@ -7,6 +7,7 @@
     "extensionApi": 1,
     "database": {
       "from": [
+        "0162_computer_restores",
         "0161_ai_connection_shared_sign_in",
         "0151_sign_up_switch",
         "0137_ai_connections",
@@ -24,6 +25,7 @@
   },
   "upgrade": {
     "fromVersions": [
+      "v1.2.0-rc.2",
       "v1.2.0-rc.1",
       "v1.1.3",
       "v1.1.2",

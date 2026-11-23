@@ -37,6 +37,8 @@ export interface ManagementEnrollment {
   helmCommandNote?: string;
   /** True when OpenBot's own chart installs the management agent beside it (`management.enabled`, on by default), so connecting needs no Helm command and OpenBot connects by itself. False when the chart turned it off: connecting then gives helmCommand to install the agent by hand. Present in every state. */
   agentInstalledByChart?: boolean;
+  /** True when OpenBot is connected through the agent its own chart installed, and the chart has since turned management off (`management.enabled=false`, so agentInstalledByChart is false). That Helm upgrade removed the agent along with OpenBot's own release, so there is no Helm release to uninstall: Disconnect retires the install at the service at once. Absent when the connected agent is a release of its own (installed with helmCommand, or the openbot-agent release that runs upgrades), which is uninstalled with Helm before Disconnect, and in every other state. */
+  agentRemovedWithChart?: boolean;
   /**
    * The name this OpenBot gave itself when it asked to be connected, which the approval page shows the approver, so they can match it. Present while waiting for approval.
    * @minLength 1
