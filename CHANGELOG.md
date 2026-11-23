@@ -264,6 +264,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `Idempotency-Key`; one runs at a time per computer (409 `COMPUTER_RESTORE_RUNNING`). An admin may
   name another person's computer with `computer`. A Bot's action on a computer being restored is
   answered 503 `COMPUTER_RESTORING`, worth retrying. Both are recorded on the trail.
+- **Search invitations, teams and a team's people.** `listOrganizationInvitations`, `listTeams`
+  and `listTeamMembers` take an optional `search`, which narrows each list to the invitations
+  whose address holds it, the teams whose name holds it, or the people whose name or address holds
+  it, ignoring case. Each finds only that organization's own, and a cursor belongs to the search
+  that made it. A team's people, and its `memberCount`, leave out anybody removed from the
+  organization until they are restored.
 - The model catalogue's `exposure` and its description say an empty allowlist means every model.
 - `ManagementEnrollment` carries `agentRemovedWithChart`, true only while OpenBot is connected
   through the agent its own chart installed after the chart turned management off. Optional, and

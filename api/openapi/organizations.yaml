@@ -451,13 +451,25 @@ paths:
         Return one page of the organization's invitations that have not been
         accepted or canceled, the newest first: the ones still waiting, the
         ones that expired and the ones that were declined. Only an owner or an
-        admin of this organization can read it. A missing cursor starts at the
-        first page and nextCursor null ends the list.
+        admin of this organization can read it. search narrows the list to
+        the invitations whose address holds it, ignoring case; it finds only
+        this organization's invitations. A missing cursor starts at the
+        first page and nextCursor null ends the list. A cursor belongs to the
+        search that made it, so changing the search starts again without one.
       security:
         - webSession: []
         - appOAuth: [organizations:read]
         - apiKey: []
       parameters:
+        - name: search
+          in: query
+          description: >-
+            Part of an address, matched without regard to case. Leading and
+            trailing spaces are ignored; empty lists every invitation.
+          schema:
+            type: string
+            maxLength: 200
+            pattern: ^[^\x00]*$
         - $ref: './common.yaml#/components/parameters/Limit'
         - $ref: './common.yaml#/components/parameters/Cursor'
       responses:

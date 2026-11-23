@@ -94,7 +94,7 @@ export const getListTeamsUrl = (
 };
 
 /**
- * Return one page of the organization's teams, in the order they were created. Any member of the organization can read it. Each team says the caller's own role in it and whether the caller may manage it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's teams, in the order they were created. Any member of the organization can read it. Each team says the caller's own role in it and whether the caller may manage it. search narrows the list to the teams whose name holds it, ignoring case; it finds only this organization's teams. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List an organization's teams
  */
 export const listTeams = async (
@@ -933,7 +933,7 @@ export const getListTeamMembersUrl = (
 };
 
 /**
- * Return one page of the people in a team, in the order they joined it. Any member of the organization can read it. People who are only in a team beneath this one are not listed. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the people in a team, in the order they joined it. Any member of the organization can read it. People who are only in a team beneath this one are not listed, and nor is anybody who is not a member of the organization now: somebody removed from it is listed again once they are restored. search narrows the list to the people whose address or name holds it, ignoring case. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List a team's members
  */
 export const listTeamMembers = async (

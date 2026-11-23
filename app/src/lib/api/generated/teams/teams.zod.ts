@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return one page of the organization's teams, in the order they were created. Any member of the organization can read it. Each team says the caller's own role in it and whether the caller may manage it. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the organization's teams, in the order they were created. Any member of the organization can read it. Each team says the caller's own role in it and whether the caller may manage it. search narrows the list to the teams whose name holds it, ignoring case; it finds only this organization's teams. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List an organization's teams
  */
 
@@ -17,6 +17,9 @@ export const ListTeamsParams = zod.object({
     ),
 });
 
+export const listTeamsQuerySearchMax = 200;
+
+export const listTeamsQuerySearchRegExp = new RegExp("^[^\\x00]*$");
 export const listTeamsQueryLimitDefault = 50;
 export const listTeamsQueryLimitMax = 100;
 
@@ -25,6 +28,14 @@ export const listTeamsQueryCursorMax = 4096;
 export const listTeamsQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
 export const ListTeamsQueryParams = zod.object({
+  search: zod
+    .string()
+    .max(listTeamsQuerySearchMax)
+    .regex(listTeamsQuerySearchRegExp)
+    .optional()
+    .describe(
+      "Part of a team's name, matched without regard to case. Leading and trailing spaces are ignored; empty lists every team.",
+    ),
   limit: zod
     .int()
     .min(1)
@@ -75,7 +86,9 @@ export const ListTeamsResponse = zod.object({
           memberCount: zod
             .int()
             .min(listTeamsResponseTeamsItemMemberCountMin)
-            .describe("How many people are in the team itself."),
+            .describe(
+              "How many people are in the team itself: the people its members list shows.",
+            ),
           role: zod
             .union([
               zod
@@ -214,7 +227,9 @@ export const CreateTeamResponse = zod.object({
       memberCount: zod
         .int()
         .min(createTeamResponseTeamMemberCountMin)
-        .describe("How many people are in the team itself."),
+        .describe(
+          "How many people are in the team itself: the people its members list shows.",
+        ),
       role: zod
         .union([
           zod
@@ -302,7 +317,9 @@ export const GetTeamResponse = zod.object({
       memberCount: zod
         .int()
         .min(getTeamResponseTeamMemberCountMin)
-        .describe("How many people are in the team itself."),
+        .describe(
+          "How many people are in the team itself: the people its members list shows.",
+        ),
       role: zod
         .union([
           zod
@@ -439,7 +456,9 @@ export const UpdateTeamResponse = zod.object({
       memberCount: zod
         .int()
         .min(updateTeamResponseTeamMemberCountMin)
-        .describe("How many people are in the team itself."),
+        .describe(
+          "How many people are in the team itself: the people its members list shows.",
+        ),
       role: zod
         .union([
           zod
@@ -515,7 +534,7 @@ export const DeleteTeamHeader = zod.object({
 export const DeleteTeamResponse = zod.void();
 
 /**
- * Return one page of the people in a team, in the order they joined it. Any member of the organization can read it. People who are only in a team beneath this one are not listed. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the people in a team, in the order they joined it. Any member of the organization can read it. People who are only in a team beneath this one are not listed, and nor is anybody who is not a member of the organization now: somebody removed from it is listed again once they are restored. search narrows the list to the people whose address or name holds it, ignoring case. A missing cursor starts at the first page and nextCursor null ends the list. A cursor belongs to the search that made it, so changing the search starts again without one.
  * @summary List a team's members
  */
 
@@ -538,6 +557,9 @@ export const ListTeamMembersParams = zod.object({
     .describe("The team's id. Opaque."),
 });
 
+export const listTeamMembersQuerySearchMax = 200;
+
+export const listTeamMembersQuerySearchRegExp = new RegExp("^[^\\x00]*$");
 export const listTeamMembersQueryLimitDefault = 50;
 export const listTeamMembersQueryLimitMax = 100;
 
@@ -546,6 +568,14 @@ export const listTeamMembersQueryCursorMax = 4096;
 export const listTeamMembersQueryCursorRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 
 export const ListTeamMembersQueryParams = zod.object({
+  search: zod
+    .string()
+    .max(listTeamMembersQuerySearchMax)
+    .regex(listTeamMembersQuerySearchRegExp)
+    .optional()
+    .describe(
+      "Part of an address or a name, matched without regard to case. Leading and trailing spaces are ignored; empty lists everybody.",
+    ),
   limit: zod
     .int()
     .min(1)
