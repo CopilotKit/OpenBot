@@ -397,3 +397,34 @@ export function describeElements(
     };
   });
 }
+
+/**
+ * What screen a check saw, and what had the focus: one entry each time either changes. The
+ * findings use it to tell a move across a screen change, or of the focused element, from the rest.
+ */
+export type ScreenMark = {
+  /** The clock time of the check, in ms. */
+  at: number;
+  /** The route and the main heading, for example `/settings · General`. */
+  screen: string;
+  /** The label of the focused element, or null when nothing has the focus. */
+  focus: string | null;
+};
+
+/** The route and the main heading of a window: its `h1`, or else its first heading. */
+export function screenOf(root: Document): string {
+  const loc = root.defaultView?.location;
+  const route = loc ? `${loc.pathname}${loc.hash}` : "";
+  const heading =
+    root.querySelector("h1") ?? root.querySelector("h2, h3, [role='heading']");
+  const words = collapse(heading?.textContent).slice(0, 80);
+  return words ? `${route} · ${words}` : route;
+}
+
+/** The label of the focused element of a window, or null for none (the body). */
+export function focusOf(root: Document): string | null {
+  const active = root.activeElement;
+  if (!active || active === root.body || active === root.documentElement)
+    return null;
+  return elementLabel(active);
+}

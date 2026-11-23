@@ -14,6 +14,7 @@ import {
   type ViteDevServer,
 } from "vite";
 import { APP_PREFIX } from "./workbench/appContract";
+import { findingsApi } from "./workbench/findingsServer";
 import { noConfigRestart } from "./workbench/noConfigRestart";
 import {
   APP_PID_FILE,
@@ -73,7 +74,8 @@ const APP_START_TIMEOUT_MS = 90_000;
 const APP_STDERR_KEEP = 4096;
 
 // The workbench's own paths. An iframe navigation to any other path is a route of the app.
-const WORKBENCH_PATH = /^\/(?:workbench|src|node_modules|__app)(?:\/|$)|^\/@/;
+const WORKBENCH_PATH =
+  /^\/(?:workbench|src|node_modules|__app|__workbench)(?:\/|$)|^\/@/;
 
 /** True when an iframe navigation to this URL gets the app's HTML. */
 function isAppRoute(url: string): boolean {
@@ -313,6 +315,10 @@ export default defineConfig(({ mode }) => ({
     workbenchHome(),
     appFrames(),
     appServer(),
+    findingsApi({
+      desktopDir,
+      ports: () => ({ workbench: PORT, app: APP_PORT }),
+    }),
   ],
   root: desktopDir,
   // A dependency cache for each port: a second workbench (another port, the same checkout) never

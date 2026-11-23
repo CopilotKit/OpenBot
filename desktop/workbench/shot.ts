@@ -25,6 +25,18 @@ import {
   unknownScene,
 } from "./cliPage";
 import {
+  buildFindings,
+  type ChainLink,
+  classifyMoves,
+  type FindingKind,
+  type FindingsFile,
+  type Occurrence,
+  type SceneRef,
+  userActions,
+  warningMark,
+} from "./findings";
+import type { ScreenMark } from "./layoutWatch";
+import {
   isApp,
   loadScenesInBun,
   type SceneEntry,
@@ -135,6 +147,73 @@ function parseArgs(argv: string[]): Options {
 /** One thing `--check` found: a run that went wrong in a scene at a time. */
 type Problem = { scene: string; at: number; message: string };
 
+/** The kind of finding a problem is, from the start of its message. */
+export function problemKind(message: string): FindingKind {
+  if (message.startsWith("No answer for ")) return "no-answer";
+  if (message.startsWith("Error in the app: ")) return "app-error";
+  if (message.startsWith("Run step:")) return "step";
+  return "stalled";
+}
+
+/** The element and the components of a layout warning, found in the page while it shows. */
+type Resolved = { elementKey: string; chain: ChainLink[] };
+
+/**
+ * For each warning of the loaded window whose mark is not in `skip`: the element with the same
+ * label whose box is nearest the warning's box, its key and its component chain (with source
+ * lines). It runs in the page and loads the workbench's own modules, as critique.ts does. A
+ * warning whose element is gone (or "The whole page") is left out: a later stop tries again.
+ */
+function resolveScript(skip: readonly string[]): string {
+  return `(async (skip) => {
+  const page = window.__workbenchPage;
+  const frame = document.querySelector("[data-workbench-window] iframe");
+  const doc = frame && frame.contentDocument;
+  if (!page || !doc) return [];
+  const [{ componentChain }, { visibleElements }, { resolveLines }] = await Promise.all([
+    import("/workbench/componentChain.ts"),
+    import("/workbench/layoutWatch.ts"),
+    import("/workbench/sourceLines.ts"),
+  ]);
+  window.__findingsMaps = window.__findingsMaps || new Map();
+  const elements = visibleElements(doc);
+  const result = [];
+  for (const w of page.warnings()) {
+    const mark = w.kind + "|" + w.at + "|" + w.label;
+    if (skip.includes(mark)) continue;
+    const target = w.kind === "moved" ? w.to : w.box;
+    let best = null;
+    let bestOff = Infinity;
+    for (const e of elements) {
+      if (e.label !== w.label) continue;
+      const off = Math.abs(e.box.x - target.x) + Math.abs(e.box.y - target.y) +
+        Math.abs(e.box.width - target.width) + Math.abs(e.box.height - target.height);
+      if (off < bestOff) { best = e; bestOff = off; }
+    }
+    if (!best) continue;
+    let chain = [];
+    try {
+      chain = await resolveLines(componentChain(best.element, 12), undefined, window.__findingsMaps);
+    } catch {}
+    result.push({
+      mark,
+      elementKey: best.key,
+      chain: chain.map(({ name, file, line }) => ({ name, file, line })),
+    });
+  }
+  return result;
+})(${JSON.stringify(skip)})`;
+}
+
+function sceneRef(scene: SceneEntry): SceneRef {
+  return {
+    id: scene.id,
+    title: scene.title,
+    group: scene.group,
+    kind: isApp(scene) ? "app" : "desktop",
+  };
+}
+
 async function takeShots(
   browser: Browser,
   url: string,
@@ -142,11 +221,73 @@ async function takeShots(
   scene: SceneEntry,
   times: number[],
   problems: Problem[],
+  occurrences: Occurrence[],
 ): Promise<void> {
   const sceneId = scene.id;
+  const ref = sceneRef(scene);
   let now = 0;
   const problem = (message: string): void => {
     problems.push({ scene: sceneId, at: now, message });
+    occurrences.push({
+      scene: ref,
+      at: Math.round(now * 1000),
+      kind: problemKind(message),
+      label: message,
+      elementKey: null,
+      chain: [],
+      warning: null,
+    });
+  };
+  /** The elements of the warnings found up to now, by mark. */
+  const resolved = new Map<string, Resolved>();
+  const resolveWarnings = async (): Promise<void> => {
+    if (!options.check) return;
+    try {
+      const found = await page.evaluate<({ mark: string } & Resolved)[]>(
+        resolveScript([...resolved.keys()]),
+      );
+      for (const { mark, ...rest } of found) resolved.set(mark, rest);
+    } catch {
+      // Best effort: a warning without its element is still a finding.
+    }
+  };
+  /** Every layout warning of the scene's run, with its element where it was found. */
+  const collectWarnings = async (): Promise<void> => {
+    if (!options.check) return;
+    let warnings: Awaited<ReturnType<typeof readPageReport>>["warnings"] = [];
+    let screens: ScreenMark[] = [];
+    try {
+      warnings = (await readPageReport(page)).warnings;
+      screens = await page.evaluate(
+        () =>
+          (
+            window.__workbenchPage as
+              | { screens?: () => ScreenMark[] }
+              | undefined
+          )?.screens?.() ?? [],
+      );
+    } catch {
+      return;
+    }
+    // Which moves are bugs (jitter, shift under hand) and which are expected.
+    const classes = classifyMoves(
+      warnings,
+      userActions(sceneSteps(scene)),
+      screens,
+    );
+    for (const warning of warnings) {
+      const found = resolved.get(warningMark(warning));
+      occurrences.push({
+        scene: ref,
+        at: warning.at,
+        kind: warning.kind,
+        label: warning.label,
+        elementKey: found?.elementKey ?? null,
+        chain: found?.chain ?? [],
+        warning,
+        movement: classes.get(warningMark(warning)) ?? null,
+      });
+    }
   };
   const page = await openScenePage(browser, url, sceneId, options, (page) => {
     if (!options.check) return;
@@ -178,6 +319,7 @@ async function takeShots(
     }
     if (stalled) break;
     await nextFrame(page);
+    await resolveWarnings();
     // With --check only the end of a run is saved: the steps before it are there to be walked.
     if (options.check && at !== last) continue;
     const base = `${options.out}/${sceneId}@${at}s`;
@@ -204,6 +346,7 @@ async function takeShots(
     console.log(`${base}.png`);
     console.log(`${base}.json`);
   }
+  await collectWarnings();
   await page.close();
 }
 
@@ -215,6 +358,8 @@ async function main(): Promise<void> {
   mkdirSync(options.out, { recursive: true });
 
   const problems: Problem[] = [];
+  const occurrences: Occurrence[] = [];
+  let checked = 0;
   const server = await ensureServer();
   let browser: Browser | undefined;
   try {
@@ -233,22 +378,47 @@ async function main(): Promise<void> {
           `Skipped ${picked.skipped} imported scene(s) from troubleshooting logs. Add --include-imported to check them too.`,
         );
       }
-      for (const scene of picked.scenes) {
+      for (const [index, scene] of picked.scenes.entries()) {
+        // The Findings page reads this line to show how far a check is.
+        console.log(`Scene ${index + 1}/${picked.scenes.length}: ${scene.id}`);
         const steps = sceneSteps(scene).map((s) => s.at);
         const times = [...new Set([...steps, sceneEnd(scene)])].sort(
           (a, b) => a - b,
         );
-        await takeShots(browser, server.url, options, scene, times, problems);
+        await takeShots(
+          browser,
+          server.url,
+          options,
+          scene,
+          times,
+          problems,
+          occurrences,
+        );
+        checked += 1;
       }
     } else if (chosen) {
+      // With --check the walk stops at each run step on the way, as --all does, so the check
+      // finds the elements of warnings that are gone by the end. Only the last time is saved.
+      const times = options.check
+        ? [
+            ...new Set([
+              ...sceneSteps(chosen)
+                .map((s) => s.at)
+                .filter((at) => at < options.at),
+              options.at,
+            ]),
+          ].sort((a, b) => a - b)
+        : [options.at];
       await takeShots(
         browser,
         server.url,
         options,
         chosen,
-        [options.at],
+        times,
         problems,
+        occurrences,
       );
+      checked += 1;
     }
   } finally {
     await browser?.close();
@@ -256,6 +426,18 @@ async function main(): Promise<void> {
     // stops the server only when no other live lease remains (never one started by hand). The
     // exit hook alone can leave a reused server running with no lease.
     await server.stop();
+  }
+  if (options.check) {
+    const file: FindingsFile = {
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      sceneCount: checked,
+      window: options.window,
+      findings: buildFindings(occurrences),
+    };
+    const path = join(options.out, "findings.json");
+    await Bun.write(path, `${JSON.stringify(file, null, 2)}\n`);
+    console.log(path);
   }
   for (const p of problems) {
     console.error(`${p.scene} at ${p.at}s: ${p.message}`);

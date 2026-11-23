@@ -52,7 +52,7 @@ A running workbench keeps its config. If you change `vite.workbench.config.ts` o
 
 The page has three columns:
 
-- On the left: **Scenes** (a filter and the scene groups), and **Import a log** folded under them.
+- On the left: two links, **Scenes** (this page) and **Findings** (see [Findings](#findings)). Under them, **Scenes** (a filter and the scene groups), and **Import a log** folded under them.
 - In the center: the window, the notices and the layout warnings.
 - On the right: **Run** (the run controls and the **?** keys help), **Window**, **Review** (Comment mode and Critique this screen) and the panels that fold open.
 
@@ -312,6 +312,10 @@ The address of the workbench holds all of its state:
 | `host` | `desktop` or `browser`. If it is missing, the scene's host applies |
 | `role` | `member`, `admin` or `owner`. If it is missing, the scene's role applies |
 | `motion` | `real`. If it is missing, the motion is still |
+| `mark` | A layout warning to show when the page opens: `<kind>\|<ms>\|<label>`, for example `moved\|44000\|span "Opening OpenBot"`. See below |
+| `embed` | `1` shows only the window and the layout warnings. The Findings page uses it |
+
+With `mark`, the workbench goes to the warning's time after it opens the scene, finds the warning of the same kind and label (at most 1 s from that time), and keeps its mark over the window, as a click on its row does. If the run does not show the warning again, a notice says so. The workbench reads `mark` once: it is not in the address after that.
 
 Press **Copy link** in the Window panel to copy the address. Open it to get the same frame again.
 
@@ -413,7 +417,7 @@ In the JSON:
 - `requests` lists the `/api` requests of an app scene. A request with `source: "none"` had no answer.
 - `errors` lists the uncaught errors in the app frame.
 
-`bun run workbench:check` is `workbench:shot --all --check`. It walks every scene to its end and saves only the last shot of each. It skips the imported scenes unless you add `--include-imported`. It fails on these problems:
+`bun run workbench:check` is `workbench:shot --all --check --out workbench-shots/check`. It walks every scene to its end and saves only the last shot of each. It also writes `findings.json` (see [Findings](#findings)). With one scene and `--check`, the walk also stops at each run step before `--at`. It skips the imported scenes unless you add `--include-imported`. It fails on these problems:
 
 - A run step that finds nothing to click or type into.
 - A run that stalls.
@@ -425,6 +429,80 @@ Exit codes:
 - `0`: the shots are saved. Warnings do not change this. Read `warnings` in the JSON.
 - `1`: `--check` found a problem. Each problem is one line on stderr, with the scene and the time.
 - `2`: the scene is unknown or a flag is bad. For an unknown scene, the CLI lists the scene ids.
+
+## Findings
+
+The Findings page puts every finding of the last check in one list. Open it with the **Findings** link at the top left of the workbench, or at http://localhost:3021/workbench/findings/.
+
+### What a finding is
+
+`bun run workbench:check` also writes `workbench-shots/check/findings.json`. It holds every layout warning (moved, cut off, outside the window) and every problem of the runs (a request with no answer, an error in the app, a run that stalls, a run step that finds nothing) of every committed scene.
+
+For each warning, the check finds its element in the window while the run is at a step, and reads the element's component chain and source file. When the element is gone by then, it takes them from another warning of the same kind and label.
+
+The same problem can show in many scenes. One finding holds all of them. Warnings are the same finding when they have the same kind, element, component file and size (a move in steps of 4 px). Each finding has:
+
+| Field | Holds |
+| --- | --- |
+| `id` | A short id made from the finding's key. The same key gives the same id in every check |
+| `title` | For example `span "Opening OpenBot" moves 245 px up` |
+| `kind` | `moved`, `clipped`, `outside`, `no-answer`, `app-error`, `stalled` or `step` |
+| `severity` | How bad it is: how far it moved, how many px are cut off or outside. A problem of a run is always 10000 |
+| `component` | The nearest component with a source file, and the line |
+| `movement` | For a move: its class, the rule it hit and why (see below) |
+| `occurrences` | Each scene and time (ms) it shows at, with the warning, its boxes and its own class |
+
+### Which moves are findings
+
+A layout changes, and things move: most moves are normal. The check gives each move a class, and the page shows only the two classes that are bugs:
+
+| Class | Rule | A move is in it when |
+| --- | --- | --- |
+| Shift under hand (worst) | Shift under hand | The element the person is about to click or type into moves, with no input in the last 500 ms. A run has no real pointer, so this is the element of the next click or type step (at most 2 s later), the element of the last click or type step on the same screen, or the focused element |
+| Jitter | Jitter | The same element moves back and forth 3 or more times on the same screen, with no input between the moves |
+| Expected | After an input | It moves at most 500 ms after a click, typing or a route change of the run (as CLS leaves out moves after input) |
+| Expected | New screen | The screen changed between the two checks: another route or another main heading |
+| Expected | While the screen loads | It moves before the screen is first quiet (500 ms with no move, at most 5 s after the screen starts) |
+| Expected | Late load shift | Any other move: a late move on a quiet screen. This is normal |
+
+The rules are tried in this order: after an input, new screen, while the screen loads, shift under hand, jitter, late load shift. The screen is the route and the main heading (the `h1`, or else the first heading). For each check, the workbench keeps the screen and the focused element (`__workbenchPage.screens()`), so the check can read them after the run.
+
+Each finding says the rule it hit and why, for example `Jitter: moved up to 13 px 14 times on "Finishing setup" with no input`. The moves of a jitter are one finding, whatever their size. `classifyMoves` in `findings.ts` does this, and `findings.test.ts` tests each rule.
+
+`findings.ts` makes the findings. It has no browser and no files, and `findings.test.ts` tests it.
+
+### The page
+
+On the left:
+
+- When the check ran, and **Run the check again**. The check runs in the background on the workbench server, one at a time. The page shows how many scenes are done, and loads the new findings at the end. A check that finds problems still writes its findings.
+- Filters: words, the kind, the window (setup window or app), the component file and the smallest size. **Sort by** size, number of scenes or time. By size, shift under hand comes first, then jitter.
+- **Show expected moves**: off by default, so the list shows shift under hand, jitter, cut off, outside and the run problems. Turn it on to see the expected moves too.
+- The findings. Each row has the title, the kind or the class, the size, the number of scenes and the file.
+
+On the right, the selected finding:
+
+- Its title, kind or class, size, scenes and file, and the rule it hit at this time and why.
+- **Previous** and **Next** go to its other times. The row of buttons under them lists every time.
+- The real workbench page in a frame, with `embed=1` and `mark`. It opens the scene at the time and marks the warning (the dashed box where it was, the box where it is, the arrow and the label). The frame is the workbench itself, not a copy: what it shows is what **Open in workbench** shows. A time in the same scene goes there in the frame, without a new load.
+- **Copy as prompt** copies a change request for an agent: the finding, every scene and time, the file, and the element at this time.
+- **Open in workbench** opens the same time in the full workbench.
+
+Keys: `j` and `k` go to the next and the previous finding. `←` and `→` go to the previous and the next time. They do nothing while the focus is in a field.
+
+The address keeps the selected finding (`finding`) and the time (`o`).
+
+### The server
+
+The workbench server (`findingsServer.ts`) answers these requests:
+
+| Request | Does |
+| --- | --- |
+| `GET /__workbench/findings` | The newest `findings.json` in `workbench-shots/check/` or a folder under it, with its time. A 404 with a message when there is none |
+| `POST /__workbench/findings/run` | Starts `workbench:check` with the server's own ports, so it uses this server and its leases. A 409 when a check already runs |
+| `GET /__workbench/findings/status` | Whether a check runs, how many scenes are done of how many, and the last lines of its errors |
+
+CI keeps `findings.json` of each check as the artifact `workbench-findings`, also when the check fails.
 
 ## Add a desktop scene
 
@@ -504,6 +582,7 @@ OPENBOT_APP_BROWSER=1 bun test workbench/appDeterminism.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/appShot.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/critique.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/motion.browser.test.ts
+OPENBOT_APP_BROWSER=1 bun test workbench/findings.browser.test.ts
 ```
 
 - `appFrame.browser.test.ts` checks the app frame: it boots, the bridge and the fake API answer, and Vite does not load it two times. It also checks that a seek ends when the frame loads again.
@@ -512,7 +591,9 @@ OPENBOT_APP_BROWSER=1 bun test workbench/motion.browser.test.ts
 - `critique.browser.test.ts` runs `workbench:critique` and checks the folder it writes: `frame.png`, `frame.json` and `prompt.md`.
 - `motion.browser.test.ts` checks that the paused "Next:" marker stays on its element after Fit and a splitter drag, that the Install marker (or its ghost) shows for at least 400 ms after the click, and that a warning hover that seeks back keeps a still of the window over the replay that looks like the window did (less than 2% of its pixels differ).
 
-You can also run all nine files in one `bun test` command, as CI does. Each file gets the workbench server in its `beforeAll` hook and gives it back with `stop()` in its `afterAll` hook. The hooks have their own time limits, because bun gives a hook only 5 seconds. `bun test` does not send the process `exit` event, so a file that does not call `stop()` leaves the server running.
+- `findings.browser.test.ts` runs the check on one scene, then opens the Findings page. It checks that the page lists the findings, that a finding opens its scene at its time with the warning marked, and that the next time works.
+
+You can also run all ten files in one `bun test` command, as CI does. Each file gets the workbench server in its `beforeAll` hook and gives it back with `stop()` in its `afterAll` hook. The hooks have their own time limits, because bun gives a hook only 5 seconds. `bun test` does not send the process `exit` event, so a file that does not call `stop()` leaves the server running.
 
 `desktop/workbench/shippedBuild.test.ts` runs a full build. It takes up to three minutes. To run the full build check of the app, run this in the repository root:
 
@@ -526,7 +607,8 @@ The CI job "app (real browser, desktop setup window)" runs the workbench checks.
 
 1. It runs `bun run generate:app-config`.
 2. It runs the full build check of the app with `OPENBOT_APP_BUILD_GUARD=1`, on the runner. It runs before the steps in the image: those run as root, and after them the build cannot write its config into `app/node_modules/.vite-temp`.
-3. It runs the nine browser tests in the Playwright image.
+3. It runs the ten browser tests in the Playwright image.
 4. It runs `bun run workbench:check` in the Playwright image.
+5. It keeps `workbench-shots/check/findings.json` as the artifact `workbench-findings`.
 
 Both image steps run with `docker run --init`. Then tini is PID 1 and reaps the app servers whose workbench server exited. Without it, such an app server stays a zombie that looks alive, and each stop waits out its time limits.

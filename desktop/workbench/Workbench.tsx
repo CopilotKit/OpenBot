@@ -41,8 +41,9 @@ import { type FrameConfig, frameUrl } from "./frameConfig";
 import { appSceneAfter, desktopSceneFor, HANDBACK_WORDS } from "./handover";
 import { ImportLogPanel } from "./ImportLogPanel";
 import "./appPanels.css";
+import { type Mark, matchWarning, parseMark } from "./findings";
 import { KeysHelp } from "./KeysHelp";
-import { describeElements, type Warning } from "./layoutWatch";
+import { describeElements, type ScreenMark, type Warning } from "./layoutWatch";
 import { pickArea } from "./pickElement";
 import { RequestLog } from "./RequestLog";
 import { formatTime, RunControls, type Speed } from "./RunControls";
@@ -118,12 +119,19 @@ export type WorkbenchPage = {
   handedBack(): string | null;
   /** The layout warnings of the loaded window, oldest first. */
   warnings(): Warning[];
+  /** The screens and the focus the layout checks of the loaded window saw, oldest first. */
+  screens(): ScreenMark[];
   /** The elements the layout warnings know in the loaded window, in document order. */
   elements(): ReturnType<typeof describeElements>;
   /** The `/api` requests of the loaded app window, oldest first. Empty for a desktop window. */
   requests(): readonly ApiRecord[];
   /** The errors the loaded app window caught. Empty for a desktop window. */
   errors(): readonly string[];
+  /**
+   * Seeks to the time of a mark (`<kind>|<ms>|<label>`, as the `mark` link parameter) and keeps
+   * the matching warning shown over the window. False when the run does not show it.
+   */
+  mark(text: string): Promise<boolean>;
 };
 
 type RunInfo = { end: number; nextAt(ms: number): number | null };
@@ -437,6 +445,21 @@ function withoutZoom(query: string): string {
   return params.toString();
 }
 
+/**
+ * What a link asks for once, when the page opens: `embed=1` shows only the window and the layout
+ * warnings (the Findings page holds the workbench so), and `mark` names a warning to show.
+ */
+function linkExtras(search: string): { embed: boolean; mark: Mark | null } {
+  const params = new URLSearchParams(search);
+  return {
+    embed: params.get("embed") === "1",
+    mark: parseMark(params.get("mark")),
+  };
+}
+
+/** How many animation frames a mark waits for its warning after the seek. */
+const MARK_WAIT_FRAMES = 30;
+
 /** Waits until the window's boot script has set up its clock. */
 async function booted(win: FrameWindow): Promise<boolean> {
   const deadline = Date.now() + BOOT_TIMEOUT_MS;
@@ -575,6 +598,7 @@ export function WorkbenchLoaded({
   catalogNotices,
 }: WorkbenchLoadedProps) {
   const [boot] = useState(() => initial(catalog));
+  const [extras] = useState(() => linkExtras(window.location.search));
   const [state, setState] = useState<WorkbenchState>(boot.state);
   /** Fit: with no zoom in the URL, the window zooms to fit the stage. A zoom you set turns it off. */
   const [fit, setFit] = useState(
@@ -686,6 +710,7 @@ export function WorkbenchLoaded({
     checkedAt,
     flush: checkLayout,
     hold: holdLayout,
+    screens: layoutScreens,
   } = useLayoutWatch(frameEl, {
     width: state.window.width,
     height: state.window.height,
@@ -713,15 +738,16 @@ export function WorkbenchLoaded({
       setState((prev) => {
         const value = typeof next === "function" ? next(prev) : next;
         const query = encodeState(value);
+        const shown = fitRef.current ? withoutZoom(query) : query;
         window.history.replaceState(
           null,
           "",
-          `?${fitRef.current ? withoutZoom(query) : query}`,
+          `?${extras.embed ? `${shown}&embed=1` : shown}`,
         );
         return value;
       });
     },
-    [],
+    [extras.embed],
   );
 
   const scene = scenes.find((s) => s.id === state.scene);
@@ -1117,6 +1143,63 @@ export function WorkbenchLoaded({
     [clearHighlight, seek],
   );
 
+  /**
+   * Goes to a mark's time and keeps its warning shown, as a click on its row does. The warning is
+   * the one of this run that matches the mark (kind, label, nearest time). Without one, a notice
+   * says so.
+   */
+  const markWarning = useCallback(
+    async (mark: Mark): Promise<boolean> => {
+      await whenReady();
+      const now = liveRef.current?.clock.now() ?? 0;
+      if (now !== mark.at) {
+        // A seek back covers the window with a still, as a warning hover does: this mark owns
+        // it, and it goes when the seek ends, unless a newer jump took it over.
+        const owner = ++highlightIdRef.current;
+        stillOwnerRef.current = owner;
+        try {
+          await seek(mark.at, { cover: now > mark.at });
+        } finally {
+          if (stillOwnerRef.current === owner) setStill(null);
+        }
+      }
+      let found: Warning | null = null;
+      for (let i = 0; i < MARK_WAIT_FRAMES && !found; i++) {
+        found = matchWarning(warningsRef.current, mark);
+        if (!found) await new Promise((done) => requestAnimationFrame(done));
+      }
+      if (!found) {
+        setNotices((all) => [
+          ...all,
+          `The warning "${mark.label}" (${mark.kind}) did not show again at ${formatTime(mark.at)}. The run may have changed since the check.`,
+        ]);
+        return false;
+      }
+      const id = ++highlightIdRef.current;
+      setHighlight({
+        id,
+        warning: found,
+        key: warningKey(found),
+        pinned: true,
+        jumping: false,
+      });
+      return true;
+    },
+    [seek, whenReady],
+  );
+  const markWarningRef = useRef(markWarning);
+  markWarningRef.current = markWarning;
+
+  // A link with `mark` shows its warning once the window is at the link's time. Once only, also
+  // when React runs the effect twice.
+  const markedRef = useRef(false);
+  useEffect(() => {
+    const mark = extras.mark;
+    if (!mark || markedRef.current) return;
+    markedRef.current = true;
+    void markWarningRef.current(mark).catch(() => {});
+  }, [extras.mark]);
+
   const hoverWarning = (warning: Warning) => {
     const current = highlightRef.current;
     // A pinned warning stays until a click on another one; the same warning does not jump again.
@@ -1208,14 +1291,19 @@ export function WorkbenchLoaded({
       handedOver: () => handedOverIn(liveRef.current?.win),
       handedBack: () => handedBackRef.current,
       warnings: () => [...warningsRef.current],
+      screens: layoutScreens,
       elements: () => {
         const doc = frameRef.current?.contentDocument;
         return doc ? describeElements(doc) : [];
       },
       requests: () => liveRef.current?.win.__workbenchApi?.requests() ?? [],
       errors: () => [...(liveRef.current?.win.__workbenchErrors ?? [])],
+      mark: async (text) => {
+        const mark = parseMark(text);
+        return mark ? markWarningRef.current(mark) : false;
+      },
     };
-  }, [seek]);
+  }, [seek, layoutScreens]);
 
   useEffect(() => {
     const markTimers = markTimersRef.current;
@@ -1626,8 +1714,16 @@ export function WorkbenchLoaded({
   const underMax = Math.round(window.innerHeight * 0.7);
 
   return (
-    <div className="wb-page" style={pageStyle}>
+    <div
+      className="wb-page"
+      style={pageStyle}
+      data-embed={extras.embed ? "" : undefined}
+    >
       <aside className="wb-side wb-side-left">
+        <nav className="wb-pages" aria-label="Workbench pages">
+          <span aria-current="page">Scenes</span>
+          <a href="/workbench/findings/">Findings</a>
+        </nav>
         <SceneList
           scenes={catalog}
           current={state.scene}

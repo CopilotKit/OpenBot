@@ -1212,3 +1212,49 @@ kbd {
 .wb-highlight-label-below {
   transform: translateY(6px);
 }
+
+/* The workbench pages: Scenes (this page) and Findings (findings/). */
+.wb-pages {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 12px;
+  padding: 2px;
+  border-radius: var(--ck-radius-sm);
+  background: var(--ck-grey-200);
+}
+
+.wb-pages > * {
+  flex: 1;
+  padding: 2px 8px;
+  border-radius: var(--ck-radius-xs);
+  text-align: center;
+  font-weight: 500;
+  color: var(--ck-text-secondary);
+  text-decoration: none;
+}
+
+.wb-pages > a:hover {
+  color: var(--ck-text-primary);
+  background: var(--ck-white-70);
+}
+
+.wb-pages > [aria-current="page"] {
+  color: var(--ck-text-primary);
+  background: var(--ck-surface-container);
+  box-shadow: var(--ck-elevation-sm);
+}
+
+/* `embed=1`: only the window and its layout warnings, for the Findings page's frame. */
+.wb-page[data-embed] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.wb-page[data-embed] > .wb-side,
+.wb-page[data-embed] > .wb-split-x {
+  display: none;
+}
+
+/* The frame is small: the warnings get less room, so the window gets more. */
+.wb-page[data-embed] .wb-under {
+  height: 18vh;
+}

@@ -5,8 +5,10 @@ import {
   clippedAndOutside,
   compare,
   elementKey,
+  focusOf,
   isVisuallyHidden,
   type Snapshot,
+  screenOf,
   snapshot,
   WHOLE_PAGE,
 } from "./layoutWatch";
@@ -323,4 +325,19 @@ test("a cut-off warning has the box and the full size of the content", () => {
       ],
     );
   });
+});
+
+test("the screen is the route and the main heading, and the focus is the focused element's label", () => {
+  document.body.innerHTML =
+    '<nav><h2>Conversations</h2></nav><main><h1>Finishing  setup</h1><input aria-label="Base URL" /></main>';
+  expect(screenOf(document)).toBe(
+    `${location.pathname}${location.hash} · Finishing setup`,
+  );
+  expect(focusOf(document)).toBeNull();
+  document.querySelector("input")?.focus();
+  expect(focusOf(document)).toBe('textbox "Base URL"');
+  document.body.innerHTML = "<h2>Status</h2>";
+  expect(screenOf(document)).toBe(
+    `${location.pathname}${location.hash} · Status`,
+  );
 });

@@ -3,7 +3,10 @@ import type { Change } from "../src/fakeNative/control";
 import {
   clippedAndOutside,
   compare,
+  focusOf,
+  type ScreenMark,
   type Snapshot,
+  screenOf,
   snapshot,
   type Warning,
 } from "./layoutWatch";
@@ -52,6 +55,8 @@ export function useLayoutWatch(
   checkedAt: number;
   flush(): void;
   hold(on: boolean): void;
+  /** The screens and the focus this window's checks saw, oldest first (see ScreenMark). */
+  screens(): ScreenMark[];
 } {
   const [warnings, setWarnings] = useState<Warning[]>([]);
   const [checkedAt, setCheckedAt] = useState(0);
@@ -59,12 +64,14 @@ export function useLayoutWatch(
   viewportRef.current = viewport;
   const flushRef = useRef<() => void>(() => {});
   const heldRef = useRef(false);
+  const screensRef = useRef<ScreenMark[]>([]);
 
   useEffect(() => {
     /** Watches the window the iframe holds now, from no warnings and time 0. Gives the stop. */
     const watch = (frame: HTMLIFrameElement): (() => void) => {
       setWarnings([]);
       setCheckedAt(0);
+      screensRef.current = [];
       const win = frame.contentWindow as (Window & typeof globalThis) | null;
       if (!win) return () => {};
       let stopped = false;
@@ -86,6 +93,11 @@ export function useLayoutWatch(
         const cause = causes.join(", ");
         causes = [];
         const next = snapshot(doc);
+        const screen = screenOf(doc);
+        const focus = focusOf(doc);
+        const seen = screensRef.current[screensRef.current.length - 1];
+        if (!seen || seen.screen !== screen || seen.focus !== focus)
+          screensRef.current.push({ at, screen, focus });
         const found: Warning[] = last ? compare(last, next, at, cause) : [];
         last = next;
         const now = new Set<string>();
@@ -182,5 +194,6 @@ export function useLayoutWatch(
   const hold = useCallback((on: boolean) => {
     heldRef.current = on;
   }, []);
-  return { warnings, checkedAt, flush, hold };
+  const screens = useCallback(() => [...screensRef.current], []);
+  return { warnings, checkedAt, flush, hold, screens };
 }
