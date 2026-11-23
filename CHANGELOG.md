@@ -264,6 +264,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `Idempotency-Key`; one runs at a time per computer (409 `COMPUTER_RESTORE_RUNNING`). An admin may
   name another person's computer with `computer`. A Bot's action on a computer being restored is
   answered 503 `COMPUTER_RESTORING`, worth retrying. Both are recorded on the trail.
+- **Which models a team's people may run.** `getTeamModels`, `replaceTeamModels` and
+  `deleteTeamModels` under `teams/{teamId}/models`. Any member reads a team's list; only an owner or
+  an admin sets or clears it, as provider/model names the organization's catalogue offers (400
+  naming a model it doesn't, 403 for anyone else). A person in teams with lists, or under a parent
+  team with one, runs only a model one of those lists names, within what the organization allows; a
+  team with no list sets nothing. `getModelCatalogue` is narrowed for the caller the same way, and
+  a change is recorded on the trail as `team.models_changed`.
 - The model catalogue's `exposure` and its description say an empty allowlist means every model.
 - `ManagementEnrollment` carries `agentRemovedWithChart`, true only while OpenBot is connected
   through the agent its own chart installed after the chart turned management off. Optional, and
