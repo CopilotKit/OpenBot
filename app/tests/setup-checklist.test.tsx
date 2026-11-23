@@ -184,15 +184,20 @@ test("a required gap is red, an optional one amber, and Ready green", async () =
   const view = draw();
   await view.findByRole("list", { name: "Setup" });
 
-  expect(rowOf(view, "model").getByText("Needs setup").className).toContain(
-    "text-destructive",
+  // The tone is the kit's badge variant in the current kit, the pill's colour in the legacy kit.
+  const tone = (element: HTMLElement) => {
+    const badge = element.closest("[data-slot=badge]");
+    if (badge) return badge.getAttribute("data-variant");
+    if (element.className.includes("text-destructive")) return "destructive";
+    if (element.className.includes("text-warning-ink")) return "warning";
+    if (element.className.includes("text-success-ink")) return "success";
+    return null;
+  };
+  expect(tone(rowOf(view, "model").getByText("Needs setup"))).toBe(
+    "destructive",
   );
-  expect(rowOf(view, "chat").getByText("Needs setup").className).toContain(
-    "text-warning-ink",
-  );
-  expect(rowOf(view, "apps").getByText("Ready").className).toContain(
-    "text-success-ink",
-  );
+  expect(tone(rowOf(view, "chat").getByText("Needs setup"))).toBe("warning");
+  expect(tone(rowOf(view, "apps").getByText("Ready"))).toBe("success");
 });
 
 test("an admin is shown the variable to set, the page, and the guide", async () => {

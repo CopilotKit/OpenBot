@@ -160,3 +160,26 @@ export function SettingsItemBackground(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/**
+ * The current kit's backdrop for a component's tile in the gallery (Figma "Component item"): a
+ * cyan light from the top left over a blue wash, with the empty states' dot matrix laid over it in
+ * soft light. Drawn with CSS from Figma's own two gradients rather than a picture.
+ */
+export function ComponentTileBackdrop({ className }: { className?: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={className}
+      style={{
+        backgroundImage:
+          "radial-gradient(ellipse 90% 140% at 28% -19%, rgb(80 216 209) 0%, rgb(124 226 221 / 0.75) 25%, rgb(168 236 232 / 0.5) 50%, transparent 100%), radial-gradient(ellipse 70% 130% at 60% 40%, rgb(49 181 255) 0%, rgb(92 171 255) 50%, rgb(135 161 255) 100%)",
+      }}
+    >
+      <div
+        className="size-full bg-white opacity-50 mix-blend-soft-light"
+        style={{ maskImage: "var(--empty-pattern)" }}
+      />
+    </div>
+  );
+}

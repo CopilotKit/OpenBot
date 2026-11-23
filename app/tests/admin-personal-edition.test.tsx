@@ -196,7 +196,10 @@ test.each([
     const box = await view.findByText((_, node) =>
       Boolean(
         node?.textContent?.startsWith(FOR_A_TEAM) &&
-          node.getAttribute("data-slot") === "empty-description",
+          // The legacy kit's empty state, or the current kit's outlined row (PageEmpty).
+          ["empty-description", "item-description"].includes(
+            node.getAttribute("data-slot") ?? "",
+          ),
       ),
     );
     if (more) expect(box.textContent).toContain(more);

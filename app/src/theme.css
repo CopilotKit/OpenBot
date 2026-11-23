@@ -418,6 +418,17 @@ body {
   --text-table-head-size: 0.75rem;
   --table-head-weight: 400;
   /*
+   * And the table around them (Figma's Activity, "Table header" and "Table item"): a white card with
+   * the card's corners, its column names on a 44px band of the secondary fill, and every cell 20px
+   * in, so a row with a title and a line under it is 76px.
+   */
+  --color-table: var(--card);
+  --radius-table: var(--radius-card);
+  --color-table-head-bg: var(--secondary);
+  --spacing-table-head: 2.75rem;
+  --spacing-table-cell-x: 1.25rem;
+  --spacing-table-cell-y: 1.25rem;
+  /*
    * Search ("Search"): a pill, 32px (S) or 48px (M), white with a 12% edge that darkens under the
    * pointer, a 4px #d8dee9 band round it while focused, and its glyph gray until something is typed
    * (search-field.tsx).

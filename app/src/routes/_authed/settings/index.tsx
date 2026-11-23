@@ -93,8 +93,9 @@ function RouteComponent() {
                 <ItemActions>
                   <span className="flex gap-1">
                     {formatHotkey(hotkey.combo).map((part) => (
+                      // A key as Figma draws one in the current kit: a 32px square of the secondary fill.
                       <kbd
-                        className="rounded-md border bg-muted px-1.5 py-0.5 font-sans text-xs text-muted-foreground"
+                        className="rounded-md border bg-muted px-1.5 py-0.5 font-sans text-xs text-muted-foreground kit:grid kit:size-8 kit:place-items-center kit:rounded-sm kit:border-transparent kit:bg-secondary kit:p-0 kit:text-foreground kit:text-sm"
                         key={part}
                       >
                         {part}

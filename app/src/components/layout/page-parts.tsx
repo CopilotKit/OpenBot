@@ -1,5 +1,6 @@
 import type * as React from "react";
 import { cn } from "@/lib/utils";
+import { useKit } from "@/skins/store";
 import {
   Empty,
   EmptyContent,
@@ -8,6 +9,14 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "../ui/empty";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "../ui/item";
 
 /**
  * `prose` is the default because configuration is mostly reading, and every screen uses it so none is
@@ -230,14 +239,19 @@ export function PageCard({
 }
 
 /**
- * What a section says when it has nothing to list, drawn as shadcn's empty state.
+ * What a section says when it has nothing to list.
  *
- * A dashed box where the rows would be, so the section keeps its shape: the icon says what kind of
- * thing would be here, the title says that there is none, the description says how one arrives, and
- * `action` is the button that adds the first one when the page has one to offer.
+ * The current kit draws it as Figma does (Notifications' "No devices yet", Master screens): one of
+ * the kit's rows in its empty state, `variant="outline"`, an edge with no fill where the rows would
+ * be, with the icon on its tile, the title, the description, and `action` at the row's end. The
+ * legacy kit keeps shadcn's empty state: a box with the pattern behind the icon, title,
+ * description and action, centred.
  *
- * Only the description is required. A section that is empty for a reason rather than because
- * nothing was added yet (a feature turned off, a search with no match) can say just that.
+ * Either way the section keeps its shape: the icon says what kind of thing would be here, the title
+ * says that there is none, the description says how one arrives, and `action` is the button that
+ * adds the first one when the page has one to offer. Only the description is required. A section
+ * that is empty for a reason rather than because nothing was added yet (a feature turned off, a
+ * search with no match) can say just that.
  */
 export function PageEmpty({
   action,
@@ -250,6 +264,26 @@ export function PageEmpty({
   icon?: React.ComponentType<{ className?: string }>;
   title?: string;
 }) {
+  const currentKit = useKit() === "current";
+  if (currentKit)
+    return (
+      <Item className="mt-3" data-page-empty="" size="sm" variant="outline">
+        {Icon ? (
+          <ItemMedia variant="icon">
+            <Icon />
+          </ItemMedia>
+        ) : null}
+        <ItemContent>
+          {title ? <ItemTitle>{title}</ItemTitle> : null}
+          {children ? (
+            <ItemDescription className="line-clamp-none">
+              {children}
+            </ItemDescription>
+          ) : null}
+        </ItemContent>
+        {action ? <ItemActions>{action}</ItemActions> : null}
+      </Item>
+    );
   return (
     // `isolate` gives the pattern its own stacking context, so it sits behind the text, not on it.
     <Empty className="relative isolate mt-3 overflow-hidden rounded-card border border-border">

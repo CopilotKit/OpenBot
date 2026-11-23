@@ -220,6 +220,12 @@
   --color-table-head: var(--muted-foreground);
   --text-table-head-size: 0.875rem;
   --table-head-weight: 500;
+  --color-table: transparent;
+  --radius-table: 0px;
+  --color-table-head-bg: var(--background);
+  --spacing-table-head: 2.5rem;
+  --spacing-table-cell-x: 0.75rem;
+  --spacing-table-cell-y: 0.5rem;
 
   --color-composer-placeholder-hover: var(--color-composer-placeholder);
   --composer-focus-ring: 0px;

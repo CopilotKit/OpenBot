@@ -2,7 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ComponentPreview } from "@/components/component-preview";
 import { PageShell } from "@/components/layout/page-shell";
-import { SettingsItemBackground } from "@/components/settings/background";
+import {
+  ComponentTileBackdrop,
+  SettingsItemBackground,
+} from "@/components/settings/background";
 import {
   Empty,
   EmptyDescription,
@@ -12,6 +15,7 @@ import {
 import { componentListQueryOptions } from "@/lib/components/queries";
 import { galleryComponent } from "@/lib/copilot/gallery-registry";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { useKit } from "@/skins/store";
 
 /**
  * What a Bot can draw, for the person it draws for.
@@ -52,6 +56,7 @@ const WORDS = {
 } as const;
 
 function RouteComponent() {
+  const currentKit = useKit() === "current";
   const components = useQuery(componentListQueryOptions());
   // Until the edition is known, the team edition's words, as everywhere else that reads it.
   const edition =
@@ -75,21 +80,22 @@ function RouteComponent() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="mt-12 grid w-full grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="mt-12 grid w-full grid-cols-1 gap-4 md:grid-cols-2 kit:gap-0.5">
           {published?.map((component) => (
             /*
              * No status dot, unlike the Admin tiles. Everything listed here is published by
              * definition, so a dot saying so would be the same mark on every tile.
              */
             <Link
-              className="flex aspect-square flex-col overflow-hidden rounded-lg border border-border bg-card text-left outline-none transition-colors hover:border-ring focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              // Figma's "Component Card" in the current kit: white, 20px in, the preview 24px under the words.
+              className="flex aspect-square flex-col overflow-hidden rounded-lg border border-border bg-card text-left outline-none transition-colors hover:border-ring focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 kit:aspect-auto kit:gap-6 kit:rounded-card kit:border-transparent kit:p-5 kit:hover:border-transparent kit:hover:bg-bot-card-hover"
               data-testid={`gallery-${component.name}`}
               key={component.name}
               params={{ name: component.name }}
               to="/settings/components-gallery/$name"
             >
-              <div className="min-h-28 p-4">
-                <h4 className="line-clamp-1 font-medium text-sm">
+              <div className="min-h-28 p-4 kit:min-h-0 kit:p-0">
+                <h4 className="line-clamp-1 font-medium text-sm kit:font-semibold kit:text-base kit:leading-heading kit:tracking-heading">
                   {component.title}
                 </h4>
                 <p className="mt-2 line-clamp-2 text-muted-foreground text-xs">
@@ -97,9 +103,13 @@ function RouteComponent() {
                     component.publishedDescription}
                 </p>
               </div>
-              <div className="relative flex-1">
-                <div className="absolute top-0 left-0 h-full w-full p-3">
-                  <SettingsItemBackground className="h-full w-full rounded-md" />
+              <div className="relative flex-1 kit:h-40 kit:flex-none kit:overflow-hidden kit:rounded-md kit:border kit:border-sidebar">
+                <div className="absolute top-0 left-0 h-full w-full p-3 kit:p-0">
+                  {currentKit ? (
+                    <ComponentTileBackdrop className="h-full w-full" />
+                  ) : (
+                    <SettingsItemBackground className="h-full w-full rounded-md" />
+                  )}
                 </div>
                 <div className="absolute top-0 left-0 z-10 h-full w-full p-3">
                   <ComponentPreview
