@@ -6,10 +6,12 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { createRoot } from "react-dom/client";
+import { InlineApproval } from "@/components/approvals/inline-approval";
 import { SettingsToolCall } from "@/components/settings-tools/settings-tool-card";
 import { agentKeys } from "@/lib/agents/queries";
 import { setCurrentOrganization } from "@/lib/organizations/current";
 import { queryClient } from "@/query-client";
+import { approvalInboxResponse } from "./approvals-api";
 
 /**
  * The personal settings cards, `update_my_settings` and `update_my_bot`, in every state a
@@ -19,7 +21,9 @@ import { queryClient } from "@/query-client";
  * Each is drawn the way the transcript draws it, by the call's name, arguments and result
  * (`SettingsToolCall`): the result as the server writes it for the model, the tool's output as JSON
  * with the line and the envelope it puts around every app answer, or its refusal. In the chat's
- * column, at the window's width. Nothing is asked of a server.
+ * column, at the window's width. A call still waiting on the person is the approval card the
+ * transcript draws in its place (`InlineApproval`), from the approvals API's answer as the server
+ * gives it, with the preview the server worked out. Nothing else is asked of a server.
  */
 setCurrentOrganization("default");
 queryClient.setDefaultOptions({
@@ -29,7 +33,76 @@ queryClient.setQueryData(agentKeys.list(false), [
   { id: "bot-scout", name: "Scout", avatarSeed: "scout" },
   { id: "bot-ledger", name: "Ledger", avatarSeed: "ledger" },
 ] as never);
-window.fetch = (async () =>
+
+/** The calls waiting on the person, as the approval gate stored them: ref, arguments and preview. */
+const WAITING = [
+  {
+    id: "approval-settings",
+    action: {
+      botId: "bot-scout",
+      toolRef: "openbot-settings/update_my_settings",
+      effect: "write",
+      scope: "openbot-settings",
+      threadId: "thread-personal",
+      toolCallId: "call-settings-waiting",
+      args: { instructions: "Lead with the answer." },
+      target: {
+        serverId: "openbot-settings",
+        toolName: "update_my_settings",
+        effect: "write",
+        change: {
+          before: { instructions: "Reply in Slack threads." },
+          after: { instructions: "Lead with the answer." },
+          summary: "Rewrite your standing instructions.",
+          changes: [
+            {
+              label: "Standing instructions",
+              before: "Reply in Slack threads.",
+              after: "Lead with the answer.",
+            },
+          ],
+        },
+      },
+      policy: {
+        behaviour: "ask",
+        source: "default",
+        reason: "You asked to review changes before they happen.",
+      },
+    },
+  },
+  {
+    id: "approval-bot",
+    action: {
+      botId: "bot-scout",
+      toolRef: "openbot-settings/update_my_bot",
+      effect: "write",
+      scope: "openbot-settings",
+      threadId: "thread-personal",
+      toolCallId: "call-bot-waiting",
+      args: { name: "Scout Prime" },
+      target: {
+        serverId: "openbot-settings",
+        toolName: "update_my_bot",
+        effect: "write",
+        change: {
+          bot: { id: "bot-scout", name: "Scout" },
+          before: { name: "Scout" },
+          after: { name: "Scout Prime" },
+          summary: 'Rename "Scout" to "Scout Prime".',
+          changes: [{ label: "Name", before: "Scout", after: "Scout Prime" }],
+        },
+      },
+      policy: {
+        behaviour: "ask",
+        source: "default",
+        reason: "You asked to review changes before they happen.",
+      },
+    },
+  },
+];
+
+window.fetch = (async (input: unknown) =>
+  approvalInboxResponse(input, { enabled: true, requests: WAITING }) ??
   new Response("{}", { status: 404 })) as unknown as typeof fetch;
 
 /** A tool's output as the server hands it to the model: a line saying it ran, then the envelope. */
@@ -189,6 +262,14 @@ function Page() {
               args={JSON.stringify(call.args)}
               name={`mcp__openbot-settings__${call.tool}`}
               {...(call.result === undefined ? {} : { result: call.result })}
+            />
+          </div>
+        ))}
+        {WAITING.map((request) => (
+          <div data-part={request.id} key={request.id}>
+            <InlineApproval
+              fallback={null}
+              toolCallId={request.action.toolCallId}
             />
           </div>
         ))}
