@@ -1,4 +1,9 @@
-import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useId, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Item } from "@/components/ui/item";
+import { cn } from "@/lib/utils";
 import {
   CLASS_LABELS,
   type Movement,
@@ -125,6 +130,7 @@ export function WarningsList({
   movements,
 }: WarningsListProps) {
   const [showExpected, setShowExpected] = useState(false);
+  const expectedId = useId();
   /**
    * While the pointer is in the list, the rows stay the same: a seek back that drops a row or
    * finds a new one would move the row under the pointer. A row the run does not have now shows
@@ -204,7 +210,7 @@ export function WarningsList({
     // The pointer leaving the list is not an action of its own; the rows are buttons.
     // biome-ignore lint/a11y/noStaticElementInteractions: a hover preview only
     <section
-      className="wb-warnings"
+      className="flex flex-col gap-2 pt-3"
       aria-busy={seekingTo !== null ? true : undefined}
       onMouseEnter={() => setInside(true)}
       onMouseLeave={(event) => {
@@ -214,44 +220,50 @@ export function WarningsList({
         onLeave?.();
       }}
     >
-      <h3>
+      <h3 className="flex items-center gap-2 px-1 text-sm font-medium">
         {`Layout warnings (${split.shown.length})`}
         {seekingTo !== null && (
-          <span className="wb-warning-status" role="status">
+          <span className="font-normal text-muted-foreground" role="status">
             {`Seeking to ${formatTime(seekingTo)}…`}
           </span>
         )}
       </h3>
       {split.expected.length > 0 && (
-        <label className="wb-warning-expected">
-          <input
-            type="checkbox"
+        <Field orientation="horizontal" className="px-1">
+          <Checkbox
+            id={expectedId}
             checked={showExpected}
-            onChange={(event) => setShowExpected(event.target.checked)}
+            onCheckedChange={(checked) => setShowExpected(checked === true)}
           />
-          {`Show expected moves (${split.expected.length})`}
-        </label>
+          <FieldLabel
+            htmlFor={expectedId}
+            className="font-normal text-muted-foreground"
+          >
+            {`Show expected moves (${split.expected.length})`}
+          </FieldLabel>
+        </Field>
       )}
       {rows.length === 0 ? (
-        <p>No layout warnings.</p>
+        <p className="px-1 text-sm text-muted-foreground">
+          No layout warnings.
+        </p>
       ) : (
-        <ul className="wb-warning-list">
+        <ul aria-label="Layout warnings" className="flex flex-col gap-0.5">
           {rows.map(({ warning, rowKey }) => {
             const key = warningKey(warning);
             const current = highlight?.key === key ? highlight : null;
             const later = foundKeys !== null && !foundKeys.has(key);
-            const className =
-              [
-                current ? "wb-warning-current" : "",
-                later ? "wb-warning-later" : "",
-              ]
-                .filter(Boolean)
-                .join(" ") || undefined;
             return (
               <li key={rowKey}>
-                <button
-                  type="button"
-                  className={className}
+                <Item
+                  size="xs"
+                  data-current={current ? "" : undefined}
+                  data-later={later ? "" : undefined}
+                  className={cn(
+                    "block h-auto py-1 text-left font-normal whitespace-normal data-current:border-ring dark:data-current:border-ring aria-pressed:font-medium",
+                    later && "text-muted-foreground opacity-70",
+                  )}
+                  render={<Button variant="ghost" size="sm" />}
                   title={
                     later
                       ? "Later in the run: the run has not got there since the seek."
@@ -270,18 +282,21 @@ export function WarningsList({
                 >
                   {warningText(warning)}
                   {movements?.has(warningMark(warning)) && (
-                    <span className="wb-warning-class">
+                    <span className="ml-2 text-muted-foreground">
                       {movementTag(
                         movements.get(warningMark(warning)) as Movement,
                       )}
                     </span>
                   )}
                   {current?.jumping && (
-                    <span className="wb-warning-status" role="status">
+                    <span
+                      className="ml-2 font-medium text-muted-foreground"
+                      role="status"
+                    >
                       Jumping…
                     </span>
                   )}
-                </button>
+                </Item>
               </li>
             );
           })}

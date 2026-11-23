@@ -6,6 +6,21 @@ import {
   useRef,
   useState,
 } from "react";
+import { IconChevronRight, IconSearch, IconX } from "@tabler/icons-react";
+import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import { Item } from "@/components/ui/item";
+import { cn } from "@/lib/utils";
 import { SCENE_GROUPS } from "./scenes/types";
 import { isStringList, readPref, writePref } from "./viewerPrefs";
 
@@ -46,27 +61,6 @@ export function sceneMatches(scene: SceneListItem, filter: string): boolean {
   if (needle === "") return true;
   return [scene.title, scene.id, scene.group].some((text) =>
     text.toLowerCase().includes(needle),
-  );
-}
-
-function Chevron() {
-  return (
-    <svg
-      className="wb-chevron"
-      width="12"
-      height="12"
-      viewBox="0 0 12 12"
-      aria-hidden="true"
-    >
-      <path
-        d="M4.5 2.5 8 6l-3.5 3.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }
 
@@ -202,58 +196,83 @@ export function SceneList({
   );
 
   return (
-    <nav aria-label="Scenes" className="wb-scenes">
-      <div className="wb-scenes-head">
-        <h2>Scenes</h2>
-        <button
-          type="button"
-          className="wb-link-button"
+    <nav aria-label="Scenes" className="flex flex-col gap-1">
+      <div className="flex items-center justify-between gap-2 px-1 pb-1">
+        <h2 className="m-0 p-0 text-sm font-medium">Scenes</h2>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="bg-transparent shadow-none"
           onClick={() =>
             store(allFolded ? new Set() : new Set(sections.map((s) => s.group)))
           }
         >
           {allFolded ? "Expand all" : "Collapse all"}
-        </button>
+        </Button>
       </div>
-      <input
-        ref={filterRef}
-        type="search"
-        className="wb-scene-filter"
-        aria-label="Filter scenes"
-        placeholder="Filter scenes"
-        aria-keyshortcuts="/"
-        aria-controls="wb-scene-rows"
-        aria-activedescendant={
-          visible.includes(cursor) ? sceneRowId(cursor) : undefined
-        }
-        value={filter}
-        onChange={(event) => setFilter(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-            event.preventDefault();
-            move(event.key === "ArrowDown" ? 1 : -1);
-          } else if (event.key === "Enter") {
-            event.preventDefault();
-            pickCursor();
-          } else if (event.key === "Escape") {
-            if (filter !== "") setFilter("");
-            else event.currentTarget.blur();
+      <InputGroup className="h-8">
+        <InputGroupAddon>
+          <IconSearch aria-hidden="true" />
+        </InputGroupAddon>
+        <InputGroupInput
+          ref={filterRef}
+          type="search"
+          aria-label="Filter scenes"
+          placeholder="Filter scenes"
+          aria-keyshortcuts="/"
+          aria-controls="wb-scene-rows"
+          aria-activedescendant={
+            visible.includes(cursor) ? sceneRowId(cursor) : undefined
           }
-        }}
-      />
-      <div id="wb-scene-rows">
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              move(event.key === "ArrowDown" ? 1 : -1);
+            } else if (event.key === "Enter") {
+              event.preventDefault();
+              pickCursor();
+            } else if (event.key === "Escape") {
+              if (filter !== "") setFilter("");
+              else event.currentTarget.blur();
+            }
+          }}
+        />
+        {filter !== "" && (
+          <InputGroupAddon align="inline-end">
+            <InputGroupButton
+              size="icon-xs"
+              className="bg-transparent"
+              aria-label="Clear the filter"
+              onClick={() => {
+                setFilter("");
+                filterRef.current?.focus();
+              }}
+            >
+              <IconX aria-hidden="true" />
+            </InputGroupButton>
+          </InputGroupAddon>
+        )}
+      </InputGroup>
+      <div id="wb-scene-rows" className="flex flex-col gap-2">
         {shown.length === 0 && (
-          <p className="wb-empty">{`No scene matches “${filter.trim()}”.`}</p>
+          <p className="px-1 py-2 text-sm text-muted-foreground">{`No scene matches “${filter.trim()}”.`}</p>
         )}
         {shown.map(({ group, items, total, open }) => {
           const pinned = !filtering && group === currentGroup;
           return (
-            <section key={group}>
-              <h3>
-                <button
-                  type="button"
-                  className="wb-group-toggle"
-                  aria-expanded={open}
+            <Collapsible
+              key={group}
+              open={open}
+              onOpenChange={() => {
+                if (!pinned && !filtering) toggle(group);
+              }}
+              render={<section />}
+            >
+              <h3 className="m-0 block p-0 after:hidden">
+                <CollapsibleTrigger
+                  className="group/trigger flex w-full items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-left text-xs font-medium text-muted-foreground shadow-none outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 aria-disabled:cursor-default after:ml-auto after:font-mono after:tabular-nums after:content-[attr(data-count)]"
                   aria-disabled={pinned || filtering ? true : undefined}
                   data-count={filtering ? `${items.length}/${total}` : total}
                   title={
@@ -261,40 +280,43 @@ export function SceneList({
                       ? "The group of the current scene stays open."
                       : undefined
                   }
-                  onClick={() => {
-                    if (!pinned && !filtering) toggle(group);
-                  }}
                 >
-                  <Chevron />
+                  <IconChevronRight
+                    aria-hidden="true"
+                    className="size-3 shrink-0 transition-transform duration-150 group-aria-expanded/trigger:rotate-90 motion-reduce:transition-none"
+                  />
                   {group}
-                </button>
+                </CollapsibleTrigger>
               </h3>
-              {open &&
-                items.map((scene) => {
+              <CollapsibleContent className="flex flex-col gap-px pt-0.5">
+                {items.map((scene) => {
                   const isCurrent = scene.id === current;
-                  const classes = [
-                    "wb-scene",
-                    isCurrent ? "wb-scene-current" : "",
-                    scene.id === cursor && !isCurrent ? "wb-scene-cursor" : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ");
                   return (
-                    <button
+                    <Item
                       key={scene.id}
+                      size="xs"
                       id={sceneRowId(scene.id)}
-                      type="button"
                       // A long title ends in an ellipsis: the tooltip has all of it, and the id for links and the CLI.
                       title={`${scene.title} (${scene.id})`}
                       aria-current={isCurrent ? "true" : undefined}
-                      className={classes}
+                      data-scene={scene.id}
+                      data-current={isCurrent ? "" : undefined}
+                      data-cursor={
+                        scene.id === cursor && !isCurrent ? "" : undefined
+                      }
+                      className={cn(
+                        "block h-7 truncate bg-transparent py-1 text-left font-normal shadow-none data-cursor:inset-ring data-cursor:inset-ring-ring",
+                        isCurrent && "bg-muted font-medium",
+                      )}
+                      render={<Button variant="ghost" size="sm" />}
                       onClick={() => onPick(scene.id)}
                     >
                       {scene.title}
-                    </button>
+                    </Item>
                   );
                 })}
-            </section>
+              </CollapsibleContent>
+            </Collapsible>
           );
         })}
       </div>

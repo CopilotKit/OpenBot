@@ -201,3 +201,26 @@ test("a Spacing warning boxes the element, shades the window buttons and labels 
     "window buttons 11 px off the column's middle",
   );
 });
+
+test("the highlight takes its colors from the app's tokens: a problem is destructive, a move the ring", () => {
+  const box = (warning: Warning) => {
+    const view = render(
+      <WarningHighlight
+        warning={warning}
+        origin={{ x: 0, y: 0, scale: 1 }}
+        viewport={VIEWPORT}
+      />,
+    );
+    const el = view.container.querySelector(
+      "[data-highlight-box='box'], [data-highlight-box='to']",
+    );
+    const classes = el?.className ?? "";
+    cleanup();
+    return classes;
+  };
+  const cut = box(clipped);
+  expect(cut).toContain("border-destructive");
+  expect(cut).toContain("bg-destructive/10");
+  expect(box(outside)).toContain("border-destructive");
+  expect(box(moved)).toContain("border-ring");
+});

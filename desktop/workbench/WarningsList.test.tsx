@@ -1,6 +1,12 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  within,
+} from "@testing-library/react";
 import { type Movement, warningMark } from "./findings";
 import type { Warning } from "./layoutWatch";
 import { formatTime } from "./RunControls";
@@ -28,6 +34,14 @@ const clipped = (at: number, label: string): Warning => ({
   scrollWidth: 20,
   scrollHeight: 10,
 });
+
+/** The rows of the list, by its name: the same name as its heading. */
+function rowsIn(container: HTMLElement): HTMLElement[] {
+  const list = within(container).getByRole("list", { name: "Layout warnings" });
+  return within(list)
+    .getAllByRole("listitem")
+    .map((item) => within(item).getByRole("button"));
+}
 
 /** Waits real time: the list's hover delay uses the page's timers. */
 const wait = (ms: number) =>
@@ -297,9 +311,7 @@ test("after a seek back the list keeps its rows: the ones not reached show muted
   const full = render(
     <WarningsList warnings={[early, late]} onSeek={() => {}} />,
   );
-  const before = [...full.container.querySelectorAll("li")].map(
-    (li) => li.textContent,
-  );
+  const before = rowsIn(full.container).map((row) => row.textContent);
   full.unmount();
 
   const view = render(
@@ -309,10 +321,10 @@ test("after a seek back the list keeps its rows: the ones not reached show muted
       onSeek={() => {}}
     />,
   );
-  const rows = [...view.container.querySelectorAll("li button")];
+  const rows = rowsIn(view.container);
   expect(rows.map((row) => row.textContent)).toEqual(before);
-  expect(rows[0]?.className ?? "").not.toContain("wb-warning-later");
-  expect(rows[1]?.className).toContain("wb-warning-later");
+  expect(rows[0]?.hasAttribute("data-later")).toBe(false);
+  expect(rows[1]?.hasAttribute("data-later")).toBe(true);
   expect(view.getByText(/Layout warnings \(2\)/)).toBeTruthy();
 });
 
@@ -329,10 +341,7 @@ test("while the pointer is in the list, a seek back that drops a row keeps every
     />,
   );
   const section = view.container.querySelector("section") as Element;
-  const texts = () =>
-    [...view.container.querySelectorAll("li button")].map(
-      (row) => row.textContent,
-    );
+  const texts = () => rowsIn(view.container).map((row) => row.textContent);
   const before = texts();
   fireEvent.mouseEnter(section, { clientX: 5, clientY: 40 });
   fireEvent.mouseMove(view.getAllByRole("button")[1] as Element, {
@@ -351,10 +360,10 @@ test("while the pointer is in the list, a seek back that drops a row keeps every
     />,
   );
   expect(texts()).toEqual(before);
-  const rows = [...view.container.querySelectorAll("li button")];
-  expect(rows[0]?.className).toContain("wb-warning-later");
-  expect(rows[1]?.className ?? "").not.toContain("wb-warning-later");
-  expect(rows[2]?.className).toContain("wb-warning-later");
+  const rows = rowsIn(view.container);
+  expect(rows[0]?.hasAttribute("data-later")).toBe(true);
+  expect(rows[1]?.hasAttribute("data-later")).toBe(false);
+  expect(rows[2]?.hasAttribute("data-later")).toBe(true);
 
   // The pointer leaves: the rows of now show.
   fireEvent.mouseLeave(section, { clientX: 500, clientY: 40 });
@@ -439,4 +448,34 @@ test("with no expected moves there is no toggle", () => {
     />,
   );
   expect(queryByRole("checkbox")).toBeNull();
+});
+
+test("the list is drawn with the app's components", () => {
+  const warning = clipped(250, "A");
+  const view = render(
+    <WarningsList
+      warnings={[warning, moved(37_000, 'p "Done"')]}
+      movements={
+        new Map<string, Movement>([
+          [
+            warningMark(moved(37_000, 'p "Done"')),
+            { class: "expected", rule: "after-action", why: "after the click" },
+          ],
+        ])
+      }
+      onSeek={() => {}}
+      onPin={() => {}}
+      highlight={{ key: warningKey(warning), pinned: false, jumping: false }}
+    />,
+  );
+  const [row] = rowsIn(view.container);
+  expect(row?.getAttribute("data-slot")).toBe("item");
+  // The warning shown over the window: the app's ring around its row.
+  expect(row?.hasAttribute("data-current")).toBe(true);
+  expect(row?.className).toContain("data-current:border-ring");
+  expect(
+    view
+      .getByRole("checkbox", { name: "Show expected moves (1)" })
+      .getAttribute("data-slot"),
+  ).toBe("checkbox");
 });

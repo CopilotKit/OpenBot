@@ -219,6 +219,9 @@ export function WarningHighlight({
 }) {
   const shapes = highlightShapes(warning, origin, viewport);
   const arrow = shapes.arrow ? arrowParts(shapes.arrow) : null;
+  // A problem in the app's destructive color, a move in its ring color. Each line has a 1px halo
+  // in the page's background, so it reads on a light and on a dark window.
+  const tone = shapes.kind === "moved" ? MOVE_TONE : PROBLEM_TONE;
   return (
     <div
       className={`wb-highlight wb-highlight-${shapes.kind}`}
@@ -228,19 +231,19 @@ export function WarningHighlight({
       {shapes.shaded.map((part) => (
         <span
           key={`${part.x},${part.y},${part.width},${part.height}`}
-          className="wb-highlight-shade"
+          className={`wb-highlight-shade outline outline-background ${tone.shade}`}
           style={at(part)}
         />
       ))}
       {shapes.ghost && (
         <span
-          className="wb-highlight-ghost"
+          className={`wb-highlight-ghost border-2 border-dashed shadow-[0_0_0_1px_var(--background)] ${tone.ghost}`}
           data-highlight-box="from"
           style={at(shapes.ghost)}
         />
       )}
       <span
-        className="wb-highlight-box"
+        className={`wb-highlight-box border-2 shadow-[0_0_0_1px_var(--background),inset_0_0_0_1px_var(--background)] ${tone.box}`}
         data-highlight-box={shapes.ghost ? "to" : "box"}
         style={at(shapes.box)}
       />
@@ -251,14 +254,26 @@ export function WarningHighlight({
           height="1"
           aria-hidden="true"
         >
-          <line className="wb-highlight-halo" {...arrow.line} />
-          <polygon className="wb-highlight-halo" points={arrow.head} />
-          <line {...arrow.line} />
-          <polygon points={arrow.head} />
+          <line
+            className="fill-background stroke-background stroke-4"
+            strokeLinejoin="round"
+            {...arrow.line}
+          />
+          <polygon
+            className="fill-background stroke-background stroke-4"
+            strokeLinejoin="round"
+            points={arrow.head}
+          />
+          <line
+            className={`stroke-2 ${tone.stroke}`}
+            strokeLinecap="round"
+            {...arrow.line}
+          />
+          <polygon className={tone.fill} points={arrow.head} />
         </svg>
       )}
       <span
-        className={`wb-highlight-label${shapes.labelBelow ? " wb-highlight-label-below" : ""}`}
+        className={`wb-highlight-label rounded-sm px-1.5 py-0.5 text-xs leading-4 font-semibold whitespace-nowrap text-background shadow-[0_0_0_1px_var(--background)] ${tone.label}${shapes.labelBelow ? " wb-highlight-label-below" : ""}`}
         style={{
           left: shapes.labelAt.x,
           top: shapes.labelBelow
@@ -271,6 +286,24 @@ export function WarningHighlight({
     </div>
   );
 }
+
+/** The app's tokens a highlight draws with. Whole class names, so Tailwind finds them. */
+const PROBLEM_TONE = {
+  box: "border-destructive bg-destructive/10",
+  ghost: "border-destructive bg-destructive/10",
+  shade: "bg-destructive/40",
+  stroke: "stroke-destructive",
+  fill: "fill-destructive",
+  label: "bg-destructive",
+};
+const MOVE_TONE = {
+  box: "border-ring bg-ring/10",
+  ghost: "border-ring bg-ring/10",
+  shade: "bg-ring/40",
+  stroke: "stroke-ring",
+  fill: "fill-ring",
+  label: "bg-ring",
+};
 
 /**
  * Where the window `iframe` is in the coordinates of `wrap`, an element of the parent page around

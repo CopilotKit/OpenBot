@@ -100,13 +100,9 @@ async function openScene(page: Page, scene: string, at = 0): Promise<void> {
  * are all expected (after an input, while a screen loads), and these tests are about the rows.
  */
 async function showExpectedMoves(page: Page): Promise<void> {
-  await page.waitForSelector(".wb-warning-expected input");
-  await page.evaluate(() => {
-    const box = document.querySelector<HTMLInputElement>(
-      ".wb-warning-expected input",
-    );
-    if (box && !box.checked) box.click();
-  });
+  const box = page.getByRole("checkbox", { name: /^Show expected moves/ });
+  await box.waitFor();
+  await box.check();
 }
 
 function markerInWindow(page: Page) {
@@ -279,9 +275,11 @@ describe.skipIf(!asked)("the workbench's motion", () => {
       await openScene(page, "install-mac");
       const rows = () =>
         page.evaluate(() => ({
-          all: document.querySelectorAll(".wb-warning-list li").length,
-          muted: document.querySelectorAll(".wb-warning-list .wb-warning-later")
+          all: document.querySelectorAll('ul[aria-label="Layout warnings"] li')
             .length,
+          muted: document.querySelectorAll(
+            'ul[aria-label="Layout warnings"] [data-later]',
+          ).length,
         }));
       const warnings = () =>
         page.evaluate(() =>
@@ -415,7 +413,7 @@ describe.skipIf(!asked)("the workbench's motion", () => {
         await page.evaluate(() => window.__workbenchPage?.seek(240_000));
         await showExpectedMoves(page);
         await showExpectedMoves(page);
-        await page.waitForSelector(".wb-warning-list button");
+        await page.waitForSelector('ul[aria-label="Layout warnings"] button');
         // The part of the window on screen: the stage clips it, and the warnings panel under the
         // stage (where the hovered row changes) is not the window.
         const clip = await page.evaluate(() => {
@@ -463,7 +461,10 @@ describe.skipIf(!asked)("the workbench's motion", () => {
             highlight:
               document.querySelector("[data-workbench-highlight]") !== null,
           }));
-        await page.locator(".wb-warning-list button").first().hover();
+        await page
+          .locator('ul[aria-label="Layout warnings"] button')
+          .first()
+          .hover();
         const shares: number[] = [];
         let dumped = 0;
         const deadline = Date.now() + 15_000;
@@ -551,12 +552,14 @@ describe.skipIf(!asked)("the workbench's motion", () => {
         await page.evaluate(() => window.__workbenchPage?.seek(240_000));
         await showExpectedMoves(page);
         await showExpectedMoves(page);
-        await page.waitForSelector(".wb-warning-list button");
+        await page.waitForSelector('ul[aria-label="Layout warnings"] button');
         const rows = await page.evaluate(
           () =>
-            [...document.querySelectorAll(".wb-warning-list button")].map(
-              (b) => b.textContent ?? "",
-            ).length,
+            [
+              ...document.querySelectorAll(
+                'ul[aria-label="Layout warnings"] button',
+              ),
+            ].map((b) => b.textContent ?? "").length,
         );
         expect(rows).toBeGreaterThan(1);
 
@@ -581,7 +584,9 @@ describe.skipIf(!asked)("the workbench's motion", () => {
               stillLoaded:
                 (still?.contentDocument?.body?.childElementCount ?? 0) > 0,
               seeking: /Seeking to/.test(
-                document.querySelector(".wb-warnings h3")?.textContent ?? "",
+                [...document.querySelectorAll("h3")].find((h) =>
+                  (h.textContent ?? "").startsWith("Layout warnings"),
+                )?.textContent ?? "",
               ),
               highlight:
                 document.querySelector("[data-workbench-highlight]") !== null,
@@ -591,10 +596,15 @@ describe.skipIf(!asked)("the workbench's motion", () => {
           requestAnimationFrame(tick);
         });
         const rowCount = await page.evaluate(
-          () => document.querySelectorAll(".wb-warning-list li").length,
+          () =>
+            document.querySelectorAll('ul[aria-label="Layout warnings"] li')
+              .length,
         );
         // The first row is the earliest warning: a seek back from the end.
-        await page.locator(".wb-warning-list button").first().hover();
+        await page
+          .locator('ul[aria-label="Layout warnings"] button')
+          .first()
+          .hover();
         await page.waitForSelector("[data-workbench-highlight]");
         await page.waitForTimeout(100);
         const samples = await page.evaluate(
@@ -631,7 +641,9 @@ describe.skipIf(!asked)("the workbench's motion", () => {
         // machine draws other frames.
         expect(
           await page.evaluate(
-            () => document.querySelectorAll(".wb-warning-list li").length,
+            () =>
+              document.querySelectorAll('ul[aria-label="Layout warnings"] li')
+                .length,
           ),
         ).toBeGreaterThanOrEqual(rowCount);
       } finally {
@@ -671,16 +683,20 @@ describe.skipIf(!asked)("the workbench's motion", () => {
         await page.evaluate(() => window.__workbenchPage?.seek(240_000));
         await showExpectedMoves(page);
         await showExpectedMoves(page);
-        await page.waitForSelector(".wb-warning-list button");
+        await page.waitForSelector('ul[aria-label="Layout warnings"] button');
         await page.waitForTimeout(300);
         const rowCount = await page.evaluate(
-          () => document.querySelectorAll(".wb-warning-list li").length,
+          () =>
+            document.querySelectorAll('ul[aria-label="Layout warnings"] li')
+              .length,
         );
         expect(rowCount).toBeGreaterThan(1);
         const rows = await page.evaluate(() =>
-          [...document.querySelectorAll(".wb-warning-list button")].map(
-            (b) => b.textContent ?? "",
-          ),
+          [
+            ...document.querySelectorAll(
+              'ul[aria-label="Layout warnings"] button',
+            ),
+          ].map((b) => b.textContent ?? ""),
         );
         const index = rows.findIndex((t) => / at 0:37 /.test(t));
         expect(index).toBeGreaterThan(0);
@@ -695,20 +711,29 @@ describe.skipIf(!asked)("the workbench's motion", () => {
           (window as unknown as { __rows: typeof samples }).__rows = samples;
           const tick = () => {
             const row = [
-              ...document.querySelectorAll(".wb-warning-list button"),
+              ...document.querySelectorAll(
+                'ul[aria-label="Layout warnings"] button',
+              ),
             ].find((b) => (b.textContent ?? "").startsWith(hovered));
             samples.push({
-              rows: document.querySelectorAll(".wb-warning-list li").length,
+              rows: document.querySelectorAll(
+                'ul[aria-label="Layout warnings"] li',
+              ).length,
               y: row ? row.getBoundingClientRect().top : null,
               seeking: /Seeking to/.test(
-                document.querySelector(".wb-warnings h3")?.textContent ?? "",
+                [...document.querySelectorAll("h3")].find((h) =>
+                  (h.textContent ?? "").startsWith("Layout warnings"),
+                )?.textContent ?? "",
               ),
             });
             requestAnimationFrame(tick);
           };
           requestAnimationFrame(tick);
         }, text);
-        await page.locator(".wb-warning-list button").nth(index).hover();
+        await page
+          .locator('ul[aria-label="Layout warnings"] button')
+          .nth(index)
+          .hover();
         await page.waitForSelector("[data-workbench-highlight]");
         // The replay goes on after the warning shows; the pointer stays in the list.
         await page.waitForTimeout(1500);
