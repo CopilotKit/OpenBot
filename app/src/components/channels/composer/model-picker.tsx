@@ -341,7 +341,8 @@ function Picker({
               className={cn(
                 showValue
                   ? "min-w-0 w-full justify-start gap-2 px-3 font-normal"
-                  : "h-8 shrink-0 gap-1 px-2 font-normal text-muted-foreground",
+                  : // As its neighbours in the row draw theirs: the + and the clock.
+                    "h-8 shrink-0 gap-1 px-2 font-normal",
                 className,
               )}
               data-slot="composer-model"
@@ -354,7 +355,10 @@ function Picker({
               }
               nativeButton
             >
-              <IconCpu aria-hidden className="size-4 shrink-0" />
+              <IconCpu
+                aria-hidden
+                className={cn("shrink-0", showValue ? "size-4" : "size-5")}
+              />
               {showValue ? (
                 <span className="min-w-0 flex-1 truncate text-left">
                   {shown}
