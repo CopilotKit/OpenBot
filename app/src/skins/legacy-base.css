@@ -17,8 +17,9 @@
   /*
    * The status colours as the legacy screens drew them, in Tailwind's palette, so a screen drawn
    * with the kit's status tokens (theme.css) looks as it did: emerald-500 dots, emerald-600 words,
-   * 10% tints of emerald-500, amber-500 and red-500, amber-600 words. Values rather than Tailwind's
-   * variables, which Tailwind leaves out once no class asks for them.
+   * 10% tints of emerald-500 and amber-500, amber-600 words. Error's tint stays the skin's own red
+   * at 10%, as its notices drew it. Values rather than Tailwind's variables, which Tailwind leaves
+   * out once no class asks for them.
    */
   --color-success: oklch(69.6% 0.17 162.48); /* emerald-500 */
   --color-success-ink: oklch(59.6% 0.145 163.225); /* emerald-600 */
@@ -34,11 +35,35 @@
     oklch(76.9% 0.188 70.08) 10%,
     transparent
   );
-  --color-destructive-subtle: color-mix(
+  /*
+   * A notice as the legacy screens drew one by hand: a box with smaller corners, 12px by 8px in,
+   * edged in its status colour at 40% (neutral: the hairline) over its 10% fill, neutral a 40% muted.
+   */
+  --radius-notice: var(--radius-md);
+  --spacing-notice-x: 0.75rem;
+  --spacing-notice-y: 0.5rem;
+  --color-notice-neutral: color-mix(in oklab, var(--muted) 40%, transparent);
+  --color-notice-edge-success: color-mix(
     in oklab,
-    oklch(63.7% 0.237 25.331) 10%,
+    var(--color-success) 40%,
     transparent
   );
+  --color-notice-edge-warning: color-mix(
+    in oklab,
+    var(--color-warning) 40%,
+    transparent
+  );
+  --color-notice-edge-destructive: color-mix(
+    in oklab,
+    var(--destructive) 40%,
+    transparent
+  );
+  --color-notice-edge-additional: color-mix(
+    in oklab,
+    var(--color-additional) 40%,
+    transparent
+  );
+  --color-notice-edge-neutral: var(--border);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -218,14 +243,9 @@
   --badge-count-weight: 500;
 }
 :root[data-kit="legacy"].dark {
-  /* The legacy screens' status words in dark: emerald-400 and amber-500; red's tint at 15%. */
+  /* The legacy screens' status words in dark: emerald-400 and amber-500. */
   --color-success-ink: oklch(76.5% 0.177 163.223); /* emerald-400 */
   --color-warning-ink: oklch(76.9% 0.188 70.08); /* amber-500 */
-  --color-destructive-subtle: color-mix(
-    in oklab,
-    oklch(63.7% 0.237 25.331) 15%,
-    transparent
-  );
   --color-search-lg: color-mix(in oklab, var(--input) 40%, transparent);
   --color-ghost-hover: color-mix(in oklab, var(--muted) 50%, transparent);
   --color-ghost-active: var(--color-ghost-hover);

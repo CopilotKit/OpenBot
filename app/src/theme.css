@@ -483,6 +483,22 @@ body {
   --spacing-badge-count-x: 0.25rem;
   --text-badge-count: 0.75rem;
   --badge-count-weight: 400;
+  /*
+   * Notices (components/ui/notice.tsx): a sentence about how things stand, in its status's subtle
+   * fill with its glyph in the status colour and its words in ink, the language of the kit's status
+   * badge and its warning table row (Figma has no notice of its own yet). 12px corners, 16px in from
+   * the sides and 12px from the top, and no edge; a neutral one is the secondary fill. The legacy kit
+   * puts back the outlined box its screens drew (skins/legacy-base.css).
+   */
+  --radius-notice: var(--radius-tile);
+  --spacing-notice-x: 1rem;
+  --spacing-notice-y: 0.75rem;
+  --color-notice-neutral: var(--secondary);
+  --color-notice-edge-success: transparent;
+  --color-notice-edge-warning: transparent;
+  --color-notice-edge-destructive: transparent;
+  --color-notice-edge-additional: transparent;
+  --color-notice-edge-neutral: transparent;
 }
 
 @theme inline {

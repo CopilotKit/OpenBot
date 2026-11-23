@@ -54,6 +54,12 @@ on the page. The bare `text-success` is the kit's light green for a glyph on its
 draws it, and too light to read as words. Each has its dark value built in, so a status class needs
 no `dark:` partner, and the legacy kit maps them back to the Tailwind shades its screens used.
 
+A sentence about how things stand, set apart from the page (couldn't save, the desktop app is
+offline, restoring this computer), is a `Notice` from `components/ui/notice.tsx`, never a box drawn
+by hand: `variant` is the badge's (`destructive`, `warning`, `success`, `additional`, `neutral`),
+`icon` leads in the status colour and `action` holds a button at the end. Give it `role="alert"` or
+`role="status"` as the moment needs. A screen sets only its margin on it.
+
 ## The Shape
 
 Four components make the frame. They compose in this order and nest no other way.
@@ -270,6 +276,7 @@ is actually on screen. The root was once 15px, and every constant taken from the
 | A set of chips or toggles crammed into `ItemActions` | It competes with the label for width and wraps badly | `ItemFooter`, which is `basis-full` |
 | A back link in `PageShell`'s `action` | `action` is the page's primary verb, on the title's baseline | `backButton={{ label, linkProps }}` |
 | `text-emerald-600`, `bg-[#…]`, `rounded-[20px]` or `shadow-[…]` in a screen | A look the UI Kit does not have, which no token change reaches; `ui-kit-guard.test.ts` fails | A token (`text-success-ink`, `bg-warning-subtle`, `bg-secondary`, `rounded-card`, `shadow-composer`) or a `components/ui` primitive such as `Badge` |
+| A `rounded-md border bg-destructive/10 px-3 py-2` box around a sentence | A notice drawn by hand, a sixth shade of it | `Notice` with its `variant` |
 
 ## Error Handling
 

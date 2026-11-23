@@ -11,6 +11,7 @@ import { PageSection } from "@/components/layout/page-shell";
 import { SuggestionRow } from "@/components/suggestions/suggestion-row";
 import { TaskBoardRow } from "@/components/tasks/task-row";
 import { Button } from "@/components/ui/button";
+import { Notice } from "@/components/ui/notice";
 import { Separator } from "@/components/ui/separator";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
@@ -207,21 +208,23 @@ function ReadFailureNotice({
   failure: ReadFailure;
 }) {
   return (
-    <div
-      className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5"
+    <Notice
+      action={
+        <Button
+          disabled={failure.retrying}
+          onClick={failure.retry}
+          size="sm"
+          variant="outline"
+        >
+          {failure.retrying ? "Retrying…" : "Retry"}
+        </Button>
+      }
       data-needs-you-failure={what}
       role="alert"
+      variant="destructive"
     >
-      <p className="text-sm">Couldn't load {what}. Some may be missing here.</p>
-      <Button
-        disabled={failure.retrying}
-        onClick={failure.retry}
-        size="sm"
-        variant="outline"
-      >
-        {failure.retrying ? "Retrying…" : "Retry"}
-      </Button>
-    </div>
+      Couldn't load {what}. Some may be missing here.
+    </Notice>
   );
 }
 

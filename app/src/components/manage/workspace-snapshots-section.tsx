@@ -31,6 +31,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { Notice } from "@/components/ui/notice";
 import { Separator } from "@/components/ui/separator";
 import {
   restoreComputerMutationOptions,
@@ -133,9 +134,9 @@ export function RestoreComputerDialog({
         </DialogHeader>
         <DialogBody className="mt-4">
           {snapshots.isPending ? null : snapshots.error ? (
-            <p className={DESTRUCTIVE_NOTICE} role="alert">
+            <Notice role="alert" variant="destructive">
               {snapshots.error.message}
-            </p>
+            </Notice>
           ) : !snapshots.data.available ? (
             <p className="text-muted-foreground text-sm">
               This OpenBot doesn't keep saved copies of computers.
@@ -160,8 +161,6 @@ export function RestoreComputerDialog({
 }
 
 /** The destructive notice the Computer page uses for a refusal. */
-const DESTRUCTIVE_NOTICE =
-  "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm";
 
 /** The latest restore, said once above the copies, and the copies with Restore where allowed. */
 function SnapshotsBody({
@@ -329,38 +328,28 @@ function RestoreStatus({
   const when = copyDate(restore.snapshotTakenAt);
   if (restore.state === "running")
     return (
-      <div
-        className={cn(
-          "flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm",
-          className,
-        )}
+      <Notice
+        className={className}
+        icon={
+          <IconLoader2 className="animate-spin motion-reduce:animate-none" />
+        }
         role="status"
       >
-        <IconLoader2
-          aria-hidden="true"
-          className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none"
-        />
-        <p>
-          Restoring this computer to how it was on {when}. Bots on it wait until
-          it's back, in a few minutes.
-        </p>
-      </div>
+        Restoring this computer to how it was on {when}. Bots on it wait until
+        it's back, in a few minutes.
+      </Notice>
     );
   if (restore.state === "failed")
     return (
-      <div
-        className={cn("flex items-start gap-2", DESTRUCTIVE_NOTICE, className)}
+      <Notice
+        className={className}
+        icon={<IconAlertTriangle />}
         role="alert"
+        variant="destructive"
       >
-        <IconAlertTriangle
-          aria-hidden="true"
-          className="mt-0.5 size-4 shrink-0 text-destructive"
-        />
-        <p>
-          {restore.error ??
-            "Couldn't restore this computer. It's as it was before. Try again in a moment."}
-        </p>
-      </div>
+        {restore.error ??
+          "Couldn't restore this computer. It's as it was before. Try again in a moment."}
+      </Notice>
     );
   // The copy saved just before is pointed at only while it is still listed.
   const before = snapshots.some(

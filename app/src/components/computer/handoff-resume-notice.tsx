@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Notice } from "@/components/ui/notice";
 import { BOT_GONE, readControlOrGone } from "@/lib/computers/control";
 import {
   forgetHandoff,
@@ -120,34 +122,35 @@ export function HandoffResumeNotice({
   };
   if (!pending && !busy && !problem) return null;
   return (
-    <div
-      className="mb-3 flex flex-wrap items-center gap-2 rounded-md border bg-warning-subtle p-3 text-sm"
+    <Notice
+      action={
+        busy ? (
+          <Button
+            onClick={() => controller.current?.abort()}
+            size="sm"
+            variant="outline"
+          >
+            Stop waiting
+          </Button>
+        ) : (
+          <Button
+            disabled={!pending || agent.isRunning}
+            onClick={() => void resume()}
+            size="sm"
+            variant="outline"
+          >
+            Resume task
+          </Button>
+        )
+      }
+      className="mb-3"
       role="status"
+      variant="warning"
     >
-      <span>
-        {problem ??
-          (busy
-            ? "Waiting for this browser handoff to finish."
-            : "A browser task is paused in this conversation.")}
-      </span>
-      {busy ? (
-        <button
-          type="button"
-          className="underline"
-          onClick={() => controller.current?.abort()}
-        >
-          Stop waiting
-        </button>
-      ) : (
-        <button
-          type="button"
-          className="underline"
-          disabled={!pending || agent.isRunning}
-          onClick={() => void resume()}
-        >
-          Resume task
-        </button>
-      )}
-    </div>
+      {problem ??
+        (busy
+          ? "Waiting for this browser handoff to finish."
+          : "A browser task is paused in this conversation.")}
+    </Notice>
   );
 }
