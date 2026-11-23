@@ -10,8 +10,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 **Before upgrading.**
 
-- **Migrations run at start: nine, and none removes anything.** The database moves from
-  `0151_sign_up_switch`, where 1.1.3 left it, to `0162_computer_restores`. Every one is
+- **Migrations run at start: eleven, and none removes anything.** The database moves from
+  `0151_sign_up_switch`, where 1.1.3 left it, to `0164_schedules_held_by_move`. Every one is
   an expand: a 1.1.3 server works against the new schema, so 1.1.3 upgrades with its servers
   rolling one by one, with no downtime. There is no `0154` or `0155`.
   - `0152_bot_run_client_and_outcome` keeps, for each Bot run, which app asked for it (web,
@@ -32,6 +32,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
     shares their own (below).
   - `0162_computer_restores` keeps each restore of a computer from a saved copy (below): who asked,
     which copy, and how it ended.
+  - `0163_ai_connections_trustedrouter` lets an organization's AI and a person's own be
+    TrustedRouter (below).
+  - `0164_schedules_held_by_move` keeps which move to OpenBot Cloud holds a routine, check-in or
+    goal it brought, until the move is checked (below).
 - **Product analytics are on by default.** While an install is connected to CopilotKit management,
   it sends a daily rollup of counts with its health metrics: how many people, organizations and Bots
   there are, how many people are active, how many come back, and how many Bot runs there were. It is
@@ -161,7 +165,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **Move OpenBot (Self-Contained) to OpenBot Cloud.** After the update, a computer that runs OpenBot
   (Self-Contained) is asked once whether to move to OpenBot Cloud, with how much of OpenBot's files
   the move removes, and Settings offers Move to OpenBot Cloud until it has moved. The question comes
-  as Desktop opens, before OpenBot (Self-Contained) updates or starts. Choosing OpenBot Cloud
+  as Desktop opens, before OpenBot (Self-Contained) updates or starts, and doesn't wait for OpenBot's
+  files to be measured: the space the move frees appears once it is known. Between OpenBot Cloud and
+  keeping OpenBot here, the question offers OpenBot for Business, with the same words and Book a
+  demo as the first screen; picking it moves nothing and keeps nothing. Choosing OpenBot Cloud
   updates and starts it behind the move's own screen, which shows what moves once it can read it;
   keeping it here runs the update as before. The move lists
   what moves (Bots, skills, conversations, memories, routines, goals, check-ins and files) and the
@@ -181,15 +188,29 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   reconnected. An app you don't want can be dismissed, on every device. Onboarding and Connect your
   AI now keep where you were headed, and take you there once they're done. On Windows, the Podman
   that OpenBot installed is removed too when nothing else uses it; a Podman you installed or use
-  stays. Keep OpenBot on this computer is remembered and never asked again at launch.
+  stays. While the move runs, the window stays on it: bringing the window back, from the Dock or
+  anywhere else, no longer opens the OpenBot on this computer that the move is about to remove.
+  When the move ends, the window opens the OpenBot now chosen. Keep OpenBot on this computer is
+  remembered and never asked again at launch, unless it was chosen after a move that didn't finish:
+  then the move is offered once more at the first launch of the next release, and a second Keep
+  sticks.
+  - **What a move brings to run waits for its check.** Routines, check-ins and goals a move brings
+    arrive in OpenBot Cloud held, and run there on their own only once the move's check passes, so a
+    move that fails its check leaves them running on this computer alone. A person's own Run now
+    still runs. Moving again first holds what an earlier move left running in OpenBot Cloud. Before,
+    a failed move left the same routines running in both places.
   - **A long history moves.** OpenBot Cloud's check counts each conversation's messages as OpenBot
     Cloud lists them. A Bot's thinking moves with the answer it came with, and a turn cut off before
     its first word holds nothing and is left out. Before, a long history failed the check on its
     messages the same way on every try.
-  - **Moving again brings what was said since.** A conversation an earlier, failed move already
-    brought to OpenBot Cloud is brought again with what was said on this computer since. One that
-    was also carried on in OpenBot Cloud is never overwritten: the move stops, names it, and
-    removes nothing here.
+  - **Moving again brings what was said since, wherever it was said.** A conversation an earlier,
+    failed move already brought to OpenBot Cloud is brought again with what was said on this
+    computer since. One that was also carried on in OpenBot Cloud keeps both: it goes onto a new
+    thread holding this computer's history and then what was said only in OpenBot Cloud, in order,
+    and the conversation, with any goal or check-in on it, moves to that thread. Nothing said in
+    OpenBot Cloud is overwritten. The move stops on a conversation only while a Bot is answering in
+    it in OpenBot Cloud, and says to start again once it's done. Before, every try stopped on a
+    conversation carried on in OpenBot Cloud.
   - **A failed move says why, and its buttons stay in view.** When OpenBot Cloud stops the import for
     a reason of its own, the screen shows that reason and says you can keep using OpenBot here. It
     no longer says to try again. Try again and Keep OpenBot on this computer stay at the foot of the
@@ -203,6 +224,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   paste. The sign-in runs in Desktop itself, so it no longer downloads the Claude Agent SDK image
   or starts a container first. That image still downloads when a Claude plan's Bot first starts.
   An app page from before this keeps its paste box and still finishes from the code.
+- **The setup window never stays blank.** A screen that fails to draw shows "OpenBot hit a
+  problem", with Reload and the troubleshooting logs, and the error goes to Desktop's log. A setup
+  window on screen that draws nothing, or stops answering, is reloaded once; still stuck, a message
+  says so with Restart and Get logs.
+- **Start puts back a missing image list.** When OpenBot (Self-Contained)'s list of images on this
+  computer was missing or couldn't be read, Start said this version of OpenBot doesn't include the
+  Bot you picked, and every Retry failed. Start now finds an installation that needs laying out
+  again, downloads the list, and starts. Only a Bot the release really lacks still gets that
+  sentence, in Start and in Change AI connection.
 
 ### Admin
 
@@ -222,9 +252,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   own release still shows the uninstall command.
 - People, Remove says the person keeps their account and any other organization they're in. It no
   longer promises an organization of their own (Before upgrading).
+- When an admin asks a Bot for an app it can't use yet, the Bot names the step the admin's own app
+  card offers (Give it to, Turn on and give it to, Set it up, or Connect the shared account). It
+  used to tell them to ask an administrator, even when they were the organization's only one.
 
 ### API
 
+- **TrustedRouter as an AI connection, and the AI provider in answers can gain values.**
+  `replaceAiConnection` and `replacePersonalAiConnection` take `provider: trustedrouter` with
+  `login: endpoint`, an address and a key, like `unbiased`. In answers, the provider is now declared
+  open (`x-extensible-enum`, `AiConnectionProviderAnswer`): the organization's and a person's AI
+  connection, a person's `signIns`, and a sign-in. A script that reads one should show a provider it
+  doesn't know by its id rather than fail. A request still names one of the closed
+  `AiConnectionProvider` list.
 - **A person's own AI connection.** `getPersonalAiConnection`, `replacePersonalAiConnection` and
   `deletePersonalAiConnection` under `people/{personId}/ai-connection`, own only, on the new scopes
   `personal-ai-connection:read` and `personal-ai-connection:write`. The answer says which AI the
@@ -321,6 +361,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   amber and green. A skin's `--success` now colors them too, and a theme in `brand.yaml`'s
   `skin.stylesheet` may set `--success`, `--warning` and `--empty-pattern-color`. The light warning
   is a darker amber than before, easier to read on white.
+- **TrustedRouter is an AI provider.** It is listed between Unbiased AI and the custom endpoint
+  wherever an AI is chosen: OpenBot Desktop's setup window and Settings; Connect your AI; Settings,
+  Your AI; and Admin, Providers. TrustedRouter is an OpenAI-compatible gateway in front of many
+  providers, so its row asks only for an API key: OpenBot fills in
+  `https://api.trustedrouter.com/v1` and the model `anthropic/claude-sonnet-5.5`, which can be
+  changed to any name the gateway lists.
+- **A Bot answers in words.** In a conversation a Bot is no longer offered reactions, so it never
+  answers a greeting, a thank-you or an "ok" with only an emoji. Reactions already in a
+  conversation still show.
+- A request that gets no answer says "Couldn't reach OpenBot. Check your connection and try
+  again." instead of the browser's own "Load failed" or "Failed to fetch".
+- The terms screen lets a person past only where OpenBot has no terms at all. Any other failed read
+  keeps them at the terms.
+- On Routines, the strip lights Routines, and Routines' icon brings its section back after another
+  one, such as Bots, was opened there.
 - After connecting an app from a Bot's card or a Bot's page, you're back where you pressed Connect.
   The sign-in's tab closes once the app is connected, or, where the browser won't close it, goes back
   to the conversation or the Bot's page. It used to stay on the app's page under Connections.
@@ -474,13 +529,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **Search an organization's members.** `listOrganizationMembers` takes `search`, which narrows the
   list to the members whose name or address starts with it or holds it, ignoring case, best
   matches first. Only that organization's current members are ever listed.
-- **TrustedRouter as an AI connection, and the AI provider in answers can gain values.**
-  `PUT /api/v2/organizations/{organizationId}/ai-connection` (`replaceAiConnection`) takes
-  `provider: trustedrouter` with `login: endpoint`, an address and a key, like `unbiased`. In
-  answers, the provider is now declared open (`x-extensible-enum`, `AiConnectionProviderAnswer`):
-  the organization's and a person's AI connection, a person's `signIns`, and a sign-in. A script
-  that reads one should show a provider it doesn't know by its id rather than fail. A request still
-  names one of the closed `AiConnectionProvider` list.
 - New optional fields: `organizationId` on a conversation event and on a Recorder connection, and
   `hostedSignIn` on `deployment`, true where people sign in through OpenBot by CopilotKit's own
   sign-in, starting at `/api/auth/hosted/sign-in`.
@@ -610,11 +658,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
-- **TrustedRouter is on the Connect your AI screen**, and in Settings where the AI connection is
-  changed. TrustedRouter is an OpenAI-compatible gateway in front of many providers. A TrustedRouter
-  API key is all the row asks for: OpenBot fills in `https://api.trustedrouter.com/v1` and the model
-  `anthropic/claude-sonnet-5.5`, which can be changed to any name the gateway lists. The model list
-  reads the gateway's `/models`, as it does for any other compatible endpoint.
 - **OpenBot Desktop's back end moves to CopilotKit Intelligence 0.17.0-rc.4.** The bundled CLI
   moves to `copilotkit@3e64135`, so an install or update runs Intelligence 0.17.0-rc.4.
 - **Setup no longer stops for good after the back end's saved settings were deleted.** With
