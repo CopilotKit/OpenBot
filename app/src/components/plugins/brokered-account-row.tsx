@@ -1282,7 +1282,7 @@ export function BrokeredAccountRow({
                 {/* Decorative: the word beside it already says which. */}
                 <span
                   aria-hidden="true"
-                  className="size-1.5 rounded-full bg-emerald-500"
+                  className="size-1.5 rounded-full bg-success"
                 />
                 {/* The same word for both kinds. The line beneath says what it rests on. */}
                 <span className="text-muted-foreground text-xs">Connected</span>

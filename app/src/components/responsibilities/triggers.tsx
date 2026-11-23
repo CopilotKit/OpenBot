@@ -368,7 +368,7 @@ function TriggerRow({
               <CopyButton value={trigger.address} label="Copy address" />
             </div>
           ) : (
-            <p className="text-amber-600 text-xs dark:text-amber-500">
+            <p className="text-warning-ink text-xs">
               Email isn't set up on OpenBot yet, so this address can't receive
               mail. An admin has to turn it on.
             </p>
@@ -420,9 +420,7 @@ function TriggerRow({
           >
             <span
               className={
-                trigger.hasSecret
-                  ? "text-xs"
-                  : "text-amber-600 text-xs dark:text-amber-500"
+                trigger.hasSecret ? "text-xs" : "text-warning-ink text-xs"
               }
             >
               {trigger.hasSecret

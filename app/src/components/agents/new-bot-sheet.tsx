@@ -631,7 +631,7 @@ function CreatedView({ name }: { name: string }) {
         </motion.div>
         <motion.span
           animate={{ opacity: 1, scale: 1 }}
-          className="absolute -right-0.5 -bottom-0.5 flex size-7 items-center justify-center rounded-full bg-emerald-500 text-white ring-3 ring-popover"
+          className="absolute -right-0.5 -bottom-0.5 flex size-7 items-center justify-center rounded-full bg-success text-white ring-3 ring-popover"
           initial={{ opacity: 0, scale: 0 }}
           transition={{
             delay: 0.45,

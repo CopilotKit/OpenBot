@@ -1212,7 +1212,7 @@ export function PluginPage({
                           {/* Decorative: the word beside it already says which. */}
                           <span
                             aria-hidden="true"
-                            className="size-1.5 rounded-full bg-emerald-500"
+                            className="size-1.5 rounded-full bg-success"
                           />
                           <span className="text-muted-foreground text-xs">
                             Connected
@@ -1459,7 +1459,7 @@ export function PluginPage({
                       <span
                         className={
                           tool.effect === "write"
-                            ? "text-amber-600 text-xs dark:text-amber-500"
+                            ? "text-warning-ink text-xs"
                             : "text-muted-foreground text-xs"
                         }
                       >
@@ -1788,7 +1788,7 @@ export function PluginPage({
                   >
                     <div className="mb-1 flex items-center justify-between">
                       <p
-                        className="font-medium text-amber-600 text-sm dark:text-amber-500"
+                        className="font-medium text-warning-ink text-sm"
                         id="grant-writes-heading"
                       >
                         Changes things

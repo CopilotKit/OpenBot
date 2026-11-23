@@ -1,5 +1,6 @@
 import { IconArrowRight } from "@/components/icons";
 import { Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { Button } from "@/components/ui/button";
 import type { AgentProfile } from "@/lib/agents/queries";
@@ -7,9 +8,15 @@ import type { AgentProfile } from "@/lib/agents/queries";
 export function AgentCard({
   agent,
   appearance = "compact",
+  description,
+  trailing,
 }: {
   agent: AgentProfile;
   appearance?: "compact" | "row";
+  /** In place of what the Bot is for, on a row: what it is doing or waiting on (the Bots page). */
+  description?: string;
+  /** At the row's end, such as how many things wait on the person. */
+  trailing?: ReactNode;
 }) {
   if (appearance === "row") {
     return (
@@ -21,11 +28,14 @@ export function AgentCard({
        * the Bot is for, turning the page's colour under the pointer. Every card is two lines tall
        * whatever its description, so a grid of them keeps its rows even.
        */
-      <div className="flex min-w-0 items-center gap-3 rounded-card bg-card p-5 transition-colors hover:bg-bot-card-hover">
+      <div
+        className="flex min-w-0 items-center gap-3 rounded-card bg-card p-5 transition-colors hover:bg-bot-card-hover"
+        data-slot="bot-card"
+      >
         <div aria-hidden="true" className="flex shrink-0">
           <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={44} />
         </div>
-        <div className="flex min-w-0 flex-col gap-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
           <span
             className="truncate font-semibold text-base leading-heading tracking-heading"
             title={agent.name}
@@ -33,9 +43,10 @@ export function AgentCard({
             {agent.name}
           </span>
           <span className="line-clamp-2 min-h-[2lh] break-words text-muted-foreground text-sm">
-            {agent.roleDescription}
+            {description || agent.roleDescription}
           </span>
         </div>
+        {trailing ? <div className="flex shrink-0">{trailing}</div> : null}
       </div>
     );
   }

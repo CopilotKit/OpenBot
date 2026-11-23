@@ -47,6 +47,13 @@ corner of its own (`rounded-[20px]`) or a shadow of its own (`shadow-[…]`), an
 kit are counted in `app/tests/ui-kit-guard.baseline.json`; cleaning one up lowers its count, and
 the test says how to write the new counts.
 
+A status is drawn with the kit's status tokens, in three uses: `bg-success` / `bg-warning` for a
+dot, `bg-success-subtle` / `bg-warning-subtle` / `bg-destructive-subtle` for a tint (`/50` for a
+fainter one), and `text-success-ink` / `text-warning-ink` / `text-destructive` for words and an icon
+on the page. The bare `text-success` is the kit's light green for a glyph on its own tint, as `Badge`
+draws it, and too light to read as words. Each has its dark value built in, so a status class needs
+no `dark:` partner, and the legacy kit maps them back to the Tailwind shades its screens used.
+
 ## The Shape
 
 Four components make the frame. They compose in this order and nest no other way.
@@ -61,8 +68,16 @@ PageShell        the page: header (title, description, action, backButton) then 
 
 This is the November 2026 redesign (Figma "Master screens"): Sora on Tailwind's 16px type scale,
 cool neutral grays, ink-black pill buttons, and rows as separate 20px-cornered cards. The tokens
-are in `theme.css`, scoped to OpenBot's own look (`:root:not([data-skin])`); the alternate skins
-keep the old palette and type through `skins/legacy-base.css`.
+are in `theme.css`. Tailwind's own corner steps sit on the kit's scale there too (`rounded-lg` is
+the 12px tile, `rounded-2xl` the 20px card), so a screen's existing corners follow the kit.
+
+Which UI Kit a skin is drawn with is one switch, `skins/kit.ts`: OpenBot's own skin is on the
+current kit, the alternate skins on the legacy one, whose sizes, corners and type
+`skins/legacy-base.css` puts back under `<html data-kit="legacy">`. A screen never asks which skin
+it is. Where the two kits differ, it asks the kit: a class with the `kit:` variant (current kit
+only) or `legacy:` (inside a primitive only), and `useKit()` from `skins/store.ts` where the
+structure differs (Bot Cards on Bots, the onboarding). `app/tests/skins-kit.test.ts` holds the app
+to it, so moving a skin to the current kit stays a change to `skins/kit.ts` and its own skin.css.
 
 `PageShell` takes a `width`: `prose` (`max-w-page`, Figma's 700px column plus the 16px gutter) is the default, and every
 configuration screen uses it so no screen is wider than another. Sentences inside it are held to
@@ -254,7 +269,7 @@ is actually on screen. The root was once 15px, and every constant taken from the
 | A chevron on a row that opens nothing | Announces a destination that does not exist | Value in `ItemActions`, no chevron |
 | A set of chips or toggles crammed into `ItemActions` | It competes with the label for width and wraps badly | `ItemFooter`, which is `basis-full` |
 | A back link in `PageShell`'s `action` | `action` is the page's primary verb, on the title's baseline | `backButton={{ label, linkProps }}` |
-| `text-emerald-600`, `bg-[#…]`, `rounded-[20px]` or `shadow-[…]` in a screen | A look the UI Kit does not have, which no token change reaches; `ui-kit-guard.test.ts` fails | A token (`text-success`, `bg-secondary`, `rounded-card`, `shadow-composer`) or a `components/ui` primitive such as `Badge` |
+| `text-emerald-600`, `bg-[#…]`, `rounded-[20px]` or `shadow-[…]` in a screen | A look the UI Kit does not have, which no token change reaches; `ui-kit-guard.test.ts` fails | A token (`text-success-ink`, `bg-warning-subtle`, `bg-secondary`, `rounded-card`, `shadow-composer`) or a `components/ui` primitive such as `Badge` |
 
 ## Error Handling
 

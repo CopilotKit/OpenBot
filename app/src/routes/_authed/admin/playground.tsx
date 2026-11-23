@@ -246,7 +246,7 @@ function PlaygroundPage() {
       ) : null}
       {notice ? (
         <div
-          className="border-border border-b bg-emerald-50 px-6 py-2 text-emerald-700 text-sm"
+          className="border-border border-b bg-success-subtle px-6 py-2 text-success-ink text-sm"
           role="status"
         >
           {notice}

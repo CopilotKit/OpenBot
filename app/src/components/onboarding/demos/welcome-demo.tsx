@@ -133,13 +133,13 @@ function WelcomeScene({
             aria-hidden
             className={cn(
               "size-1.5 rounded-full",
-              beat === 2 ? "bg-emerald-500" : "bg-blue-500",
+              beat === 2 ? "bg-success" : "bg-blue-500",
             )}
           />
           <span
             className={
               beat === 2
-                ? "text-emerald-600 dark:text-emerald-400"
+                ? "text-success-ink"
                 : "text-blue-600 dark:text-blue-400"
             }
           >

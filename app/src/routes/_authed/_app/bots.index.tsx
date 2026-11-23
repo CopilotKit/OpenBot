@@ -28,6 +28,7 @@ import {
   deploymentCapabilitiesQueryOptions,
   useOffersMemory,
 } from "@/lib/deployment/queries";
+import { useKit } from "@/skins/store";
 
 /** Just longer than the sheet's 200ms exit, so it has finished sliding away before the page changes. */
 const SHEET_CLOSE_MS = 240;
@@ -43,6 +44,8 @@ function BotsPage() {
   const navigate = Route.useNavigate();
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  // The current kit draws New Bot as Figma's 40px primary button; the legacy kit keeps its quiet one.
+  const currentKit = useKit() === "current";
   return (
     <PageShell
       action={
@@ -50,8 +53,8 @@ function BotsPage() {
           render={(props) => (
             <Link {...props} search={{ new: true }} to="/bots" />
           )}
-          size="sm"
-          variant="ghost"
+          size={currentKit ? "lg" : "sm"}
+          variant={currentKit ? "default" : "ghost"}
         >
           <IconPlus />
           New Bot

@@ -1,14 +1,51 @@
 /*
- * What every alternate skin was drawn on, before OpenBot's own look moved to Sora on a 16px scale.
+ * THE LEGACY UI KIT: what every alternate skin was drawn on, before the November 2026 redesign moved
+ * OpenBot to Sora on a 16px scale and the UI Kit's primitives. A skin is drawn with it while
+ * skins/kit.ts says so, which puts `data-kit="legacy"` on `<html>`; moving a skin to the current
+ * kit is a change there, and nothing here or in a screen.
  *
- * The colours need nothing here: the old palette is still `:root` in theme.css and only OpenBot's
- * own look replaces it. Type does, because Tailwind reads it from one set of variables for every
- * skin. So a skin starts from Inter at the sizes it had, each Tailwind's default times 15/16
- * (`text-sm` 13.125px), with Tailwind's own line heights and no tightening. A skin that sets its own
- * face (OpenFuse's `--font-sans`) still wins: its selector is as specific as this one and comes
- * later.
+ * The colours need nothing here: each skin sets its own palette in its skin.css. Type does, because
+ * Tailwind reads it from one set of variables for every skin. So a skin starts from Inter at the
+ * sizes it had, each Tailwind's default times 15/16 (`text-sm` 13.125px), with Tailwind's own line
+ * heights and no tightening. A skin that sets its own face (OpenFuse's `--font-sans`) still wins:
+ * its selector is as specific as this one and comes later.
+ *
+ * And Tailwind's corner steps, as multiples of the skin's `--radius` again, where the current kit
+ * puts them on its own scale (theme.css).
  */
-:root[data-skin] {
+:root[data-kit="legacy"] {
+  /*
+   * The status colours as the legacy screens drew them, in Tailwind's palette, so a screen drawn
+   * with the kit's status tokens (theme.css) looks as it did: emerald-500 dots, emerald-600 words,
+   * 10% tints of emerald-500, amber-500 and red-500, amber-600 words. Values rather than Tailwind's
+   * variables, which Tailwind leaves out once no class asks for them.
+   */
+  --color-success: oklch(69.6% 0.17 162.48); /* emerald-500 */
+  --color-success-ink: oklch(59.6% 0.145 163.225); /* emerald-600 */
+  --color-success-subtle: color-mix(
+    in oklab,
+    oklch(69.6% 0.17 162.48) 10%,
+    transparent
+  );
+  --color-warning: oklch(76.9% 0.188 70.08); /* amber-500 */
+  --color-warning-ink: oklch(66.6% 0.179 58.318); /* amber-600 */
+  --color-warning-subtle: color-mix(
+    in oklab,
+    oklch(76.9% 0.188 70.08) 10%,
+    transparent
+  );
+  --color-destructive-subtle: color-mix(
+    in oklab,
+    oklch(63.7% 0.237 25.331) 10%,
+    transparent
+  );
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-brand: var(--font-sans);
   --text-xs: 0.703125rem; /* 11.25px */
@@ -38,7 +75,7 @@
  * 14px medium; a count is a small 11px pill. The message box keeps one look in every state but
  * listening.
  */
-:root[data-skin] {
+:root[data-kit="legacy"] {
   --color-primary-hover: color-mix(in oklab, var(--primary) 85%, transparent);
   --color-primary-active: var(--color-primary-hover);
   --color-primary-disabled: var(--primary-foreground);
@@ -180,7 +217,15 @@
   --text-badge-count: 11px;
   --badge-count-weight: 500;
 }
-:root[data-skin].dark {
+:root[data-kit="legacy"].dark {
+  /* The legacy screens' status words in dark: emerald-400 and amber-500; red's tint at 15%. */
+  --color-success-ink: oklch(76.5% 0.177 163.223); /* emerald-400 */
+  --color-warning-ink: oklch(76.9% 0.188 70.08); /* amber-500 */
+  --color-destructive-subtle: color-mix(
+    in oklab,
+    oklch(63.7% 0.237 25.331) 15%,
+    transparent
+  );
   --color-search-lg: color-mix(in oklab, var(--input) 40%, transparent);
   --color-ghost-hover: color-mix(in oklab, var(--muted) 50%, transparent);
   --color-ghost-active: var(--color-ghost-hover);

@@ -52,11 +52,11 @@ function SelectTrigger({
       {/* The kit's chevron in ink; the skins keep their muted up-and-down arrows. */}
       <SelectPrimitive.Icon
         render={
-          <span className="pointer-events-none flex text-foreground skin:text-muted-foreground" />
+          <span className="pointer-events-none flex text-foreground legacy:text-muted-foreground" />
         }
       >
-        <IconChevronDown className="size-field-icon skin:hidden" />
-        <IconSelector className="hidden size-field-icon skin:block" />
+        <IconChevronDown className="size-field-icon legacy:hidden" />
+        <IconSelector className="hidden size-field-icon legacy:block" />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );

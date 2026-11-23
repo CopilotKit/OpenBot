@@ -110,13 +110,13 @@ export const Channel = memo(function Channel({
             // a white pill under the pointer. The open conversation keeps that pill: beside the strip
             // the panel is off the window's edge, where the frame used to mark it.
             className={cn(
-              "flex flex-row px-2.5 gap-2 items-center w-full hover:bg-sidebar-item-hover rounded-[20px] own:rounded-full own:px-2 [content-visibility:auto]",
+              "flex flex-row px-2.5 gap-2 items-center w-full hover:bg-sidebar-item-hover rounded-[20px] kit:rounded-full kit:px-2 [content-visibility:auto]",
               view === "compact"
                 ? "py-1.5 [contain-intrinsic-size:auto_2rem]"
-                : "py-2 own:py-1 [contain-intrinsic-size:auto_3.25rem]",
+                : "py-2 kit:py-1 [contain-intrinsic-size:auto_3.25rem]",
             )}
             activeProps={{
-              className: "bg-foreground/5 own:bg-sidebar-item-hover",
+              className: "bg-foreground/5 kit:bg-sidebar-item-hover",
             }}
           >
             <ChannelItemContent

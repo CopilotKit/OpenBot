@@ -30,7 +30,7 @@ import {
   setupChecklistQueryOptions,
 } from "@/lib/setup/queries";
 import { cn } from "@/lib/utils";
-import { useSkinId } from "@/skins/store";
+import { useKit } from "@/skins/store";
 import { queryClient } from "@/query-client";
 
 const ICONS: Record<SetupRowId, typeof IconBrain> = {
@@ -84,7 +84,7 @@ export function SetupChecklist({
    * that could not be read at all is read again first.
    */
   const checking = checklist.isFetching || recheck.isPending;
-  const own = useSkinId() === "openbot";
+  const currentKit = useKit() === "current";
   const checkAgain = (
     <Button
       className="self-center lg:self-start"
@@ -98,7 +98,7 @@ export function SetupChecklist({
     >
       {checking ? "Checking…" : "Check again"}
       {/* Figma's "setup/check-again-button": the refresh glyph after the words, turning while it checks. */}
-      {own ? (
+      {currentKit ? (
         <IconRefresh
           className={cn(checking && "animate-spin motion-reduce:animate-none")}
           data-icon="inline-end"
@@ -203,18 +203,18 @@ function pillFor(row: SetupRow) {
   if (row.status === "ready")
     return {
       label: "Ready",
-      tone: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+      tone: "bg-success-subtle text-success-ink",
     };
   if (row.status === "not_checked")
     return {
       label: "Not checked",
-      tone: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+      tone: "bg-warning-subtle text-warning-ink",
     };
   return {
     label: "Needs setup",
     tone: row.required
       ? "bg-destructive/10 text-destructive"
-      : "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+      : "bg-warning-subtle text-warning-ink",
   };
 }
 

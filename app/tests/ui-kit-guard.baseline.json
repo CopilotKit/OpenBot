@@ -1,42 +1,12 @@
 {
-  "components/admin/controls/describe-capabilities.tsx": {
-    "palette": 6
-  },
-  "components/admin/controls/network-describe.tsx": {
-    "palette": 2
-  },
-  "components/admin/shared-computers-notice.tsx": {
-    "palette": 2
-  },
-  "components/agents/new-bot-sheet.tsx": {
-    "palette": 1
-  },
   "components/app-sidebar/channel-item-content.tsx": {
     "palette": 2
   },
   "components/app-sidebar/channel.tsx": {
     "radius": 1
   },
-  "components/approvals/describe-rules.tsx": {
-    "palette": 2
-  },
-  "components/approvals/guidance-backtest.tsx": {
-    "palette": 4
-  },
-  "components/audit/ask-the-trail.tsx": {
-    "palette": 4
-  },
-  "components/audit/audit-cells.tsx": {
-    "palette": 7
-  },
   "components/audit/audit-table.tsx": {
     "radius": 1
-  },
-  "components/bot-profile/activity.tsx": {
-    "palette": 2
-  },
-  "components/boundaries/rule-reading.tsx": {
-    "palette": 6
   },
   "components/browser/browser-bar.tsx": {
     "radius": 1
@@ -44,27 +14,11 @@
   "components/browser/browser-screen.tsx": {
     "radius": 1
   },
-  "components/browser/learning-next.tsx": {
-    "palette": 4
-  },
-  "components/browser/narration.tsx": {
-    "palette": 5
-  },
   "components/browser/recording.tsx": {
-    "palette": 5
+    "palette": 1
   },
   "components/channels/coding-tool-cards.tsx": {
-    "palette": 11,
     "radius": 1
-  },
-  "components/channels/subtask-step.tsx": {
-    "palette": 2
-  },
-  "components/channels/tool-activity.tsx": {
-    "palette": 2
-  },
-  "components/channels/tool-line.tsx": {
-    "palette": 2
   },
   "components/channels/voice-call-widget.tsx": {
     "palette": 4
@@ -72,70 +26,23 @@
   "components/component-preview.tsx": {
     "palette": 1
   },
-  "components/computer/command-output.tsx": {
-    "palette": 2
-  },
-  "components/computer/computer-controls.tsx": {
-    "palette": 1
-  },
-  "components/computer/computer-panel.tsx": {
-    "palette": 3
-  },
-  "components/computer/computer-terminal.tsx": {
-    "palette": 1
-  },
   "components/computer/computer-view.tsx": {
-    "palette": 3
+    "palette": 1
   },
   "components/computer/desktop-illustration.tsx": {
     "radius": 3
   },
-  "components/computer/handoff-resume-notice.tsx": {
-    "palette": 1
-  },
-  "components/computer/help-request-card.tsx": {
-    "palette": 4
-  },
-  "components/decisions/decision-card.tsx": {
-    "palette": 2
-  },
   "components/gallery/cards.tsx": {
-    "palette": 1,
     "radius": 1
   },
   "components/gallery/charts.tsx": {
-    "palette": 2,
     "radius": 3
-  },
-  "components/gallery/frame.tsx": {
-    "palette": 12
-  },
-  "components/manage/computers-page.tsx": {
-    "palette": 4
-  },
-  "components/manage/describe-grants.tsx": {
-    "palette": 2
-  },
-  "components/manage/new-credential-page.tsx": {
-    "palette": 2
-  },
-  "components/manage/plugin-page.tsx": {
-    "palette": 5
-  },
-  "components/manage/plugin-tool-page.tsx": {
-    "palette": 2
-  },
-  "components/manage/workspace-snapshots-section.tsx": {
-    "palette": 2
-  },
-  "components/needs-you/board-row.tsx": {
-    "palette": 4
   },
   "components/onboarding/demos/team-demo.tsx": {
     "palette": 3
   },
   "components/onboarding/demos/welcome-demo.tsx": {
-    "palette": 6,
+    "palette": 3,
     "shadow": 1
   },
   "components/onboarding/laptop-illustration.tsx": {
@@ -146,78 +53,12 @@
     "shadow": 1
   },
   "components/onboarding/organization-flow.tsx": {
-    "palette": 18
-  },
-  "components/plugins/broker-directory.tsx": {
-    "palette": 1
-  },
-  "components/plugins/brokered-account-row.tsx": {
-    "palette": 1
-  },
-  "components/plugins/shared-app-notice.tsx": {
-    "palette": 2
-  },
-  "components/plugins/skipped-tools-notice.tsx": {
-    "palette": 4
-  },
-  "components/responsibilities/goal-page.tsx": {
-    "palette": 2
-  },
-  "components/responsibilities/triggers.tsx": {
-    "palette": 4
-  },
-  "components/routines/routine-page.tsx": {
-    "palette": 8
+    "palette": 12
   },
   "components/routines/routine-runs.tsx": {
-    "palette": 9
-  },
-  "components/settings/ai-connection-chooser.tsx": {
-    "palette": 6
-  },
-  "components/setup/setup-checklist.tsx": {
-    "palette": 9
-  },
-  "components/skills/skill-tools.tsx": {
-    "palette": 2
-  },
-  "components/tasks/task-row.tsx": {
-    "palette": 3
-  },
-  "components/tasks/task-thread.tsx": {
-    "palette": 11
-  },
-  "components/what-if/what-if-result.tsx": {
-    "palette": 23
-  },
-  "components/what-if/why-button.tsx": {
-    "palette": 2
+    "palette": 1
   },
   "lib/copilot/a2ui-breakdown.tsx": {
     "radius": 2
-  },
-  "routes/_authed/_app/connections.$key.tsx": {
-    "palette": 1
-  },
-  "routes/_authed/_app/connections.index.tsx": {
-    "palette": 2
-  },
-  "routes/_authed/_app/reconnect.tsx": {
-    "palette": 2
-  },
-  "routes/_authed/admin/boundaries_.$index.tsx": {
-    "palette": 2
-  },
-  "routes/_authed/admin/boundaries_.new.tsx": {
-    "palette": 2
-  },
-  "routes/_authed/admin/components/$name.tsx": {
-    "palette": 2
-  },
-  "routes/_authed/admin/playground.tsx": {
-    "palette": 2
-  },
-  "routes/_authed/admin/what-if.tsx": {
-    "palette": 2
   }
 }

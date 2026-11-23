@@ -45,11 +45,11 @@ export function AdminSidebar({
              * and the sidebar's white pill under the pointer. The skins keep their arrow and fill.
              */}
             <SidebarMenuButton
-              className="own:h-9 own:rounded-full own:px-2 own:font-semibold own:hover:bg-sidebar-item-hover"
+              className="kit:h-9 kit:rounded-full kit:px-2 kit:font-semibold kit:hover:bg-sidebar-item-hover"
               render={(props) => (
                 <Link {...appLinkOptions} {...props}>
-                  <IconArrowLeft className="mr-2 h-4 w-4 own:hidden" />
-                  <IconChevronLeft className="hidden own:mr-1 own:block own:size-5" />
+                  <IconArrowLeft className="mr-2 h-4 w-4 kit:hidden" />
+                  <IconChevronLeft className="hidden kit:mr-1 kit:block kit:size-5" />
                   Back to app
                 </Link>
               )}

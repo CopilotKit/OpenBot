@@ -10,10 +10,12 @@
 @import "./skins/skins.css";
 
 /*
- * OpenBot's own look only, never an alternate skin's: for a screen redrawn from the November 2026
- * Figma whose old drawing the skins keep (onboarding). The opposite of theme.css's `skin:`.
+ * The current UI Kit only, never the legacy one (skins/kit.ts): for a screen redrawn from the
+ * November 2026 Figma whose old drawing a legacy skin keeps (onboarding, the sidebars). The opposite
+ * of theme.css's `legacy:`. Rules below that hold for the current kit alone are scoped the same way,
+ * `:root:not([data-kit="legacy"])`.
  */
-@custom-variant own (&:is(:root:not([data-skin]) *));
+@custom-variant kit (&:is(:root:not([data-kit="legacy"]) *));
 
 /*
  * Streamdown draws a Bot's prose, and Tailwind only ships classes it can see used. Its markup lives
@@ -73,14 +75,14 @@
 }
 
 @media (min-width: 768px) {
-  :root:not([data-skin]) [data-slot="sidebar-wrapper"] {
+  :root:not([data-kit="legacy"]) [data-slot="sidebar-wrapper"] {
     position: relative;
     isolation: isolate;
     padding: --spacing(3);
     background-color: var(--frame);
   }
 
-  :root:not([data-skin]) [data-slot="sidebar-wrapper"]::before {
+  :root:not([data-kit="legacy"]) [data-slot="sidebar-wrapper"]::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -91,7 +93,7 @@
     opacity: var(--frame-dither-opacity);
   }
 
-  :root:not([data-skin]) [data-slot="sidebar-container"] {
+  :root:not([data-kit="legacy"]) [data-slot="sidebar-container"] {
     top: --spacing(3);
     bottom: --spacing(3);
     left: --spacing(3);
@@ -115,14 +117,14 @@
    * under it: the inset grows by what the sidebar moves, with the window's 18px corners, and on the
    * right it closes over the notches and the rail. Both use the primitive's 200ms linear easing.
    */
-  :root:not([data-skin])
+  :root:not([data-kit="legacy"])
     [data-slot="sidebar"][data-collapsible="offcanvas"]
     [data-slot="sidebar-container"] {
     left: calc(--spacing(3) - var(--sidebar-width));
     clip-path: inset(0 0 0 var(--sidebar-width) round 18px 0 0 18px);
   }
 
-  :root:not([data-skin]) [data-slot="sidebar-inner"] {
+  :root:not([data-kit="legacy"]) [data-slot="sidebar-inner"] {
     position: relative;
     border-radius: 18px 0 0 18px;
   }
@@ -134,8 +136,8 @@
    * starts at the seam and so is centred half a pixel to its right. Meeting at the seam itself put
    * the notch's point beside the line rather than on it.
    */
-  :root:not([data-skin]) [data-slot="sidebar-inner"]::before,
-  :root:not([data-skin]) [data-slot="sidebar-inner"]::after {
+  :root:not([data-kit="legacy"]) [data-slot="sidebar-inner"]::before,
+  :root:not([data-kit="legacy"]) [data-slot="sidebar-inner"]::after {
     content: "";
     position: absolute;
     right: -0.5px;
@@ -148,11 +150,11 @@
       no-repeat center / 100% 100%;
   }
 
-  :root:not([data-skin]) [data-slot="sidebar-inner"]::before {
+  :root:not([data-kit="legacy"]) [data-slot="sidebar-inner"]::before {
     top: 0;
   }
 
-  :root:not([data-skin]) [data-slot="sidebar-inner"]::after {
+  :root:not([data-kit="legacy"]) [data-slot="sidebar-inner"]::after {
     bottom: 0;
     transform: scaleY(-1);
   }
@@ -168,12 +170,14 @@
    * sidebar clips (`overflow-hidden`, so its panel is cut off as it narrows), and which is wider
    * than the gap by 2px while narrowed. The gap is stretched to the window's height for the bottom one.
    */
-  :root:not([data-skin]) [data-slot="sidebar-wrapper"] > [data-slot="sidebar"] {
+  :root:not([data-kit="legacy"])
+    [data-slot="sidebar-wrapper"]
+    > [data-slot="sidebar"] {
     display: flex;
   }
 
-  :root:not([data-skin]) [data-slot="sidebar-gap"]::before,
-  :root:not([data-skin]) [data-slot="sidebar-gap"]::after {
+  :root:not([data-kit="legacy"]) [data-slot="sidebar-gap"]::before,
+  :root:not([data-kit="legacy"]) [data-slot="sidebar-gap"]::after {
     content: "";
     position: absolute;
     z-index: 1;
@@ -189,16 +193,16 @@
    * They shrink into the page's corner while its own corners round, so one shape turns into the
    * other. Fading them instead left a grey patch: the dark notch half see-through over the page.
    */
-  :root:not([data-skin])
+  :root:not([data-kit="legacy"])
     [data-slot="sidebar"][data-collapsible="offcanvas"]
     [data-slot="sidebar-gap"]::before,
-  :root:not([data-skin])
+  :root:not([data-kit="legacy"])
     [data-slot="sidebar"][data-collapsible="offcanvas"]
     [data-slot="sidebar-gap"]::after {
     scale: 0;
   }
 
-  :root:not([data-skin]) [data-slot="sidebar-gap"]::before {
+  :root:not([data-kit="legacy"]) [data-slot="sidebar-gap"]::before {
     top: 0;
     transform-origin: left top;
     mask:
@@ -206,7 +210,7 @@
       no-repeat center / 100% 100%;
   }
 
-  :root:not([data-skin]) [data-slot="sidebar-gap"]::after {
+  :root:not([data-kit="legacy"]) [data-slot="sidebar-gap"]::after {
     bottom: 0;
     transform-origin: left bottom;
     mask:
@@ -214,7 +218,7 @@
       no-repeat center / 100% 100%;
   }
 
-  :root:not([data-skin]) [data-slot="sidebar-wrapper"] > main {
+  :root:not([data-kit="legacy"]) [data-slot="sidebar-wrapper"] > main {
     margin: 0;
     border: 0;
     border-left: 1px solid var(--sidebar-border);
@@ -224,7 +228,7 @@
     transition: border-radius 200ms linear;
   }
 
-  :root:not([data-skin])
+  :root:not([data-kit="legacy"])
     [data-slot="sidebar-wrapper"]:has(
       > [data-slot="sidebar"][data-collapsible="offcanvas"]
     )
@@ -239,13 +243,13 @@
    * outside it. Every destination and conversation in the sidebar is a router link, which marks
    * itself `data-status="active"`; the header's links (the name, New conversation) are left out.
    */
-  :root:not([data-skin])
+  :root:not([data-kit="legacy"])
     :is([data-slot="sidebar-content"], [data-slot="sidebar-footer"])
     :is(
       [data-slot="sidebar-menu-item"]:has(> [data-status="active"]),
       [data-sidebar-row]:has([data-status="active"])
     )::before,
-  :root:not([data-skin])
+  :root:not([data-kit="legacy"])
     :is([data-slot="sidebar-content"], [data-slot="sidebar-footer"])
     :is(
       [data-slot="sidebar-menu-item"]:has(> [data-status="active"]),
@@ -257,7 +261,7 @@
     pointer-events: none;
   }
 
-  :root:not([data-skin])
+  :root:not([data-kit="legacy"])
     :is([data-slot="sidebar-content"], [data-slot="sidebar-footer"])
     :is(
       [data-slot="sidebar-menu-item"]:has(> [data-status="active"]),
@@ -273,7 +277,7 @@
       no-repeat center / 100% 100%;
   }
 
-  :root:not([data-skin])
+  :root:not([data-kit="legacy"])
     :is([data-slot="sidebar-content"], [data-slot="sidebar-footer"])
     :is(
       [data-slot="sidebar-menu-item"]:has(> [data-status="active"]),
@@ -292,7 +296,7 @@
    * #7D8DC5 ellipses, the group at 15%), anchored where Figma anchors it, to the page's bottom left.
    * One picture, painted once: the gradients drawn here before read brighter than Figma's blur.
    */
-  :root:not([data-skin]) [data-slot="sidebar-wrapper"] > main::before {
+  :root:not([data-kit="legacy"]) [data-slot="sidebar-wrapper"] > main::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -313,14 +317,14 @@
  * (`data-onboarding-pane`), which are three rows of the frame's grid rather than one box.
  */
 @media (min-width: 1024px) {
-  :root:not([data-skin]) [data-onboarding-frame] {
+  :root:not([data-kit="legacy"]) [data-onboarding-frame] {
     position: relative;
     isolation: isolate;
     padding: --spacing(3);
     background-color: var(--frame);
   }
 
-  :root:not([data-skin]) [data-onboarding-frame]::before {
+  :root:not([data-kit="legacy"]) [data-onboarding-frame]::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -331,15 +335,15 @@
     opacity: var(--frame-dither-opacity);
   }
 
-  :root:not([data-skin]) [data-onboarding-pane] {
+  :root:not([data-kit="legacy"]) [data-onboarding-pane] {
     position: relative;
     border-radius: 18px 0 0 18px;
     background-color: var(--sidebar);
   }
 
-  :root:not([data-skin]) [data-onboarding-pane]::before,
-  :root:not([data-skin]) [data-onboarding-pane]::after,
-  :root:not([data-skin]) [data-onboarding-notch] {
+  :root:not([data-kit="legacy"]) [data-onboarding-pane]::before,
+  :root:not([data-kit="legacy"]) [data-onboarding-pane]::after,
+  :root:not([data-kit="legacy"]) [data-onboarding-notch] {
     content: "";
     position: absolute;
     z-index: 2;
@@ -349,35 +353,35 @@
     background-color: var(--frame);
   }
 
-  :root:not([data-skin]) [data-onboarding-pane]::before,
-  :root:not([data-skin]) [data-onboarding-pane]::after {
+  :root:not([data-kit="legacy"]) [data-onboarding-pane]::before,
+  :root:not([data-kit="legacy"]) [data-onboarding-pane]::after {
     right: -0.5px;
     mask:
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
       no-repeat center / 100% 100%;
   }
 
-  :root:not([data-skin]) [data-onboarding-pane]::before {
+  :root:not([data-kit="legacy"]) [data-onboarding-pane]::before {
     top: 0;
   }
 
-  :root:not([data-skin]) [data-onboarding-pane]::after {
+  :root:not([data-kit="legacy"]) [data-onboarding-pane]::after {
     bottom: 0;
     transform: scaleY(-1);
   }
 
-  :root:not([data-skin]) [data-onboarding-notch] {
+  :root:not([data-kit="legacy"]) [data-onboarding-notch] {
     left: calc(100% + 0.5px);
   }
 
-  :root:not([data-skin]) [data-onboarding-notch="top"] {
+  :root:not([data-kit="legacy"]) [data-onboarding-notch="top"] {
     top: 0;
     mask:
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath transform='matrix(-1 0 0 1 30 0)' d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
       no-repeat center / 100% 100%;
   }
 
-  :root:not([data-skin]) [data-onboarding-notch="bottom"] {
+  :root:not([data-kit="legacy"]) [data-onboarding-notch="bottom"] {
     bottom: 0;
     mask:
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 16'%3E%3Cpath transform='matrix(-1 0 0 -1 30 16)' d='M0 0C11.06 0 20.74 5.87 26.09 14.57C26.68 15.52 28.34 16 30 16V0H0Z'/%3E%3C/svg%3E")
@@ -385,7 +389,7 @@
   }
 
   /* The picture's pane: the page, with its soft shapes, as the app's page has them. */
-  :root:not([data-skin]) [data-onboarding-demo] {
+  :root:not([data-kit="legacy"]) [data-onboarding-demo] {
     border-left: 1px solid var(--sidebar-border);
     border-radius: 0 18px 18px 0;
     background-color: var(--background);
@@ -439,11 +443,11 @@
  * every skin and the setup screens share, so that is a separate change. The header stays the drag
  * handle the desktop makes it, band included.
  */
-:root[data-desktop-titlebar="overlay"]:not([data-skin]) {
+:root[data-desktop-titlebar="overlay"]:not([data-kit="legacy"]) {
   --desktop-titlebar-band: 41px;
 }
 
-:root[data-desktop-titlebar="overlay"]:not([data-skin])
+:root[data-desktop-titlebar="overlay"]:not([data-kit="legacy"])
   [data-slot="sidebar-header"][data-titlebar-band] {
   height: calc(var(--spacing) * 12 + var(--desktop-titlebar-band));
   padding-top: calc(var(--spacing) * 2 + var(--desktop-titlebar-band));

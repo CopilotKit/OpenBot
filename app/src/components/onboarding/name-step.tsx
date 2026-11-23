@@ -44,7 +44,7 @@ export function useNameStep({
       <StepIntro
         after={
           <form
-            className="flex w-full flex-col gap-3 own:lg:gap-2"
+            className="flex w-full flex-col gap-3 kit:lg:gap-2"
             id={formId}
             onSubmit={(event) => {
               event.preventDefault();
@@ -53,7 +53,7 @@ export function useNameStep({
             }}
           >
             <label
-              className="text-left own:lg:text-xs own:lg:font-semibold"
+              className="text-left kit:lg:text-xs kit:lg:font-semibold"
               htmlFor={fieldId}
             >
               Name

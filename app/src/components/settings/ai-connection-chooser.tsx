@@ -1230,7 +1230,7 @@ function SignInFields({
   if (kept)
     return (
       <p className="flex items-center gap-2 text-sm">
-        <IconCircleCheck className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <IconCircleCheck className="size-4 shrink-0 text-success-ink" />
         You're signed in with your {signInWords(provider.id, login)}.
       </p>
     );
@@ -1268,7 +1268,7 @@ function SignInFields({
       )}
       {signedIn ? (
         <p className="flex items-center gap-2 text-sm">
-          <IconCircleCheck className="size-4 text-emerald-600 dark:text-emerald-400" />
+          <IconCircleCheck className="size-4 text-success-ink" />
           Signed in to {provider.name}.
         </p>
       ) : waiting ? (
@@ -1509,7 +1509,7 @@ export function ConnectedRow({
       <ItemActions>
         <IconCircleCheck
           aria-label="Connected"
-          className="size-5 text-emerald-600 dark:text-emerald-400"
+          className="size-5 text-success-ink"
         />
       </ItemActions>
     </Item>

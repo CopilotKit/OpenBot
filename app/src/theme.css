@@ -1,11 +1,11 @@
 @custom-variant dark (&:is(.dark *));
 /*
- * For the alternate skins only, and only inside a primitive where no call site's class can reach,
- * such as which chevron a select draws. Anything a call site may set itself (a size, a gap, a
- * colour) goes through a token instead, below, which the skins set in skins/legacy-base.css: a
- * `skin:` class would outrank the call site's own class under a skin.
+ * For the legacy UI Kit only (skins/kit.ts), and only inside a primitive where no call site's class
+ * can reach, such as which chevron a select draws. Anything a call site may set itself (a size, a
+ * gap, a colour) goes through a token instead, below, which the legacy kit sets in
+ * skins/legacy-base.css: a `legacy:` class would outrank the call site's own class there.
  */
-@custom-variant skin (:root[data-skin] &);
+@custom-variant legacy (:root[data-kit="legacy"] &);
 
 :root {
   color-scheme: light;
@@ -141,7 +141,7 @@ body {
  * 32px, so `text-3xl` is 32px rather than Tailwind's 30.
  *
  * Not `inline`, so every size and face is read through its variable, and the alternate skins put
- * back the 15px scale and Inter they were drawn in (`:root[data-skin]` in skins/legacy-base.css).
+ * back the 15px scale and Inter they were drawn in (`:root[data-kit="legacy"]` in skins/legacy-base.css).
  *
  * Sora runs wide, and Figma tightens it by 4% at 12px and in every heading: `--text-xs` carries
  * that itself, and a heading takes `tracking-heading`. Body text at 12 and 14px sits at Figma's 1.35.
@@ -159,6 +159,20 @@ body {
   /* A row card and the tile behind its icon (Figma: 20px and 12px). */
   --radius-card: 1.25rem;
   --radius-tile: 0.75rem;
+  /*
+   * Tailwind's own corner steps, on the kit's scale (Figma's border-radius 100–500: 4, 8, 12, 16 and
+   * 20px), so a screen's `rounded-lg` or `rounded-2xl` draws a corner the kit has: `lg` is the tile,
+   * `2xl` the card. `3xl` and `4xl`, which nothing in the kit uses, keep Tailwind's 24 and 32px. Not
+   * `inline`, so the legacy kit can put back the steps it was drawn with, each a multiple of the
+   * skin's own `--radius` (skins/legacy-base.css).
+   */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: var(--radius-tile);
+  --radius-xl: 1rem;
+  --radius-2xl: var(--radius-card);
+  --radius-3xl: 1.5rem;
+  --radius-4xl: 2rem;
   /* The page column: Figma's 700px of content, with the 16px gutter either side. */
   --container-page: 45.75rem;
   /* The bubble behind what a person sent (Figma's surface/50, #d8dee9). Not redrawn for dark yet. */
@@ -422,7 +436,26 @@ body {
    * Success and error are shadcn's `--success` and `--destructive` (above), which the skins set to
    * their own; warning and additional are OpenBot's alone, the same in both themes until the dark
    * theme is drawn.
+   *
+   * A screen draws a status with these and never with Tailwind's palette: `bg-success` or
+   * `bg-warning` for a dot, `bg-*-subtle` for a tint, and `text-*-ink` for words and an icon on the
+   * page. The kit's success and warning are drawn for dots and badges and are too light to read as
+   * text (#12c89c is 2.2:1 on white), so their ink is the same colour pulled toward the text colour:
+   * 35% and 25%, 4.6:1 and 4.9:1 on the page in light and lighter still in dark. Error's own red
+   * reads at 4.7:1, so its words are `text-destructive`. The legacy kit puts back the Tailwind shades
+   * its screens were drawn with (skins/legacy-base.css), so `--color-success` is not `inline` either.
    */
+  --color-success: var(--success);
+  --color-success-ink: color-mix(
+    in oklab,
+    var(--success),
+    var(--foreground) 35%
+  );
+  --color-warning-ink: color-mix(
+    in oklab,
+    var(--color-warning),
+    var(--foreground) 25%
+  );
   --color-warning: oklch(0.68 0.19 46.5);
   --color-additional: oklch(0.557 0.243 262);
   --color-success-subtle: color-mix(in oklab, var(--success) 20%, transparent);
@@ -470,7 +503,6 @@ body {
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
-  --color-success: var(--success);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -485,13 +517,6 @@ body {
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 @layer base {

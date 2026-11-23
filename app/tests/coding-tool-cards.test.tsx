@@ -201,8 +201,8 @@ test("an edit is a diff of what it replaced, in red, and what it put in, in gree
   const added = edit.getByText("Added:").parentElement;
   expect(removed?.textContent).toBe('Removed:     return f"Hello, {name}!"');
   expect(added?.textContent).toBe('Added:     return f"Hi, {name}!"');
-  expect(removed?.parentElement?.className).toContain("bg-red-500/10");
-  expect(added?.parentElement?.className).toContain("bg-emerald-500/10");
+  expect(removed?.parentElement?.className).toContain("bg-destructive-subtle");
+  expect(added?.parentElement?.className).toContain("bg-success-subtle");
 });
 
 test("an edit that replaced every occurrence says so", async () => {

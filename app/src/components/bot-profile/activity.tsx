@@ -144,7 +144,7 @@ export function ActivityRow({
             aria-hidden="true"
             className={cn(
               "absolute -top-0.5 -right-0.5 size-2 animate-pulse rounded-full ring-2 ring-card",
-              item.needsYou ? "bg-amber-500" : "bg-emerald-500",
+              item.needsYou ? "bg-warning" : "bg-success",
             )}
           />
         ) : null}

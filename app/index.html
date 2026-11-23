@@ -27,6 +27,12 @@
         // A skin saved under the id it was renamed from (shared/user-preferences.ts RENAMED_SKIN_IDS).
         const skin = saved === "openmuse" ? "openfuse" : saved;
         if (skin && skin !== "openbot") document.documentElement.dataset.skin = skin;
+        // The UI Kit that skin is drawn with, as the app last recorded it (app/src/skins/kit.ts). A
+        // skin cached before the app recorded kits is an alternate skin, all drawn with the legacy kit.
+        const kit =
+          window.localStorage.getItem("openbot-kit") ??
+          (skin && skin !== "openbot" ? "legacy" : null);
+        if (kit === "legacy") document.documentElement.dataset.kit = "legacy";
       } catch {}
     </script>
   </head>

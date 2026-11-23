@@ -10,7 +10,8 @@ import ts from "typescript";
  * page UI Kit). A screen that writes `text-emerald-600`, `bg-[#f1f2f7]`, `rounded-[20px]` or
  * `shadow-[…]` draws a colour, a corner or a shadow the kit does not have, which no token change
  * reaches: the next redesign, a theme and the dark theme all pass it by. Use a token instead
- * (`text-success`, `bg-secondary`, `rounded-card`, `shadow-composer`) or a primitive that has the look.
+ * (`text-success-ink`, `bg-warning-subtle`, `bg-secondary`, `rounded-card`, `shadow-composer`) or a
+ * primitive that has the look.
  *
  * Icons come from components/icons only, which maps the app's names onto the free Hugeicons set;
  * the app has no Tabler dependency, so an import of it would also fail the build.

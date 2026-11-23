@@ -44,7 +44,7 @@ import {
 import { BUSINESS_URL } from "@/lib/openbot-for-business";
 import { setupChecklistQueryOptions } from "@/lib/setup/queries";
 import { queryClient } from "@/query-client";
-import { useSkinId } from "@/skins/store";
+import { useKit } from "@/skins/store";
 import businessVideo from "@/assets/onboarding/business.mp4";
 import businessPoster from "@/assets/onboarding/business-poster.png";
 import nameVideo from "@/assets/onboarding/name.mp4";
@@ -132,8 +132,8 @@ export const Route = createFileRoute("/_authed/onboarding")({
  */
 
 /*
- * The pictures in OpenBot's own look (Figma "Onboarding"): one video a step, filling the pane, which
- * the alternate skins draw as their animated demos instead. Each video plays its scenes one after
+ * The pictures in the current kit (Figma "Onboarding"): one video a step, filling the pane, which
+ * the legacy kit's skins draw as their animated demos instead. Each video plays its scenes one after
  * another and ends on the start of its first, so it loops without a jump; `from` is where each scene
  * starts, in seconds, read off the designers' cut.
  */
@@ -199,7 +199,7 @@ const NAME_SCENES: OnboardingScene[] = [
  * The animation is a picture and the switch is real, so they never share a pane: the switch sits
  * with the words, and the picture stays a picture.
  */
-function welcomeStep(computer: boolean, own: boolean): OnboardingStep {
+function welcomeStep(computer: boolean, currentKit: boolean): OnboardingStep {
   return {
     id: "welcome",
     title: `Welcome to ${PRODUCT}`,
@@ -210,19 +210,19 @@ function welcomeStep(computer: boolean, own: boolean): OnboardingStep {
             aria-labelledby="onboarding-permissions"
             className="flex flex-col gap-3 text-left"
           >
-            <div className="flex flex-col gap-1 own:lg:gap-1.5">
+            <div className="flex flex-col gap-1 kit:lg:gap-1.5">
               <h2
-                className="text-lg font-semibold text-pretty own:lg:text-base own:lg:leading-heading own:lg:tracking-heading"
+                className="text-lg font-semibold text-pretty kit:lg:text-base kit:lg:leading-heading kit:lg:tracking-heading"
                 id="onboarding-permissions"
               >
                 Choose when Bots ask
               </h2>
-              <p className="text-pretty text-muted-foreground own:lg:text-sm own:lg:font-light">
+              <p className="text-pretty text-muted-foreground kit:lg:text-sm kit:lg:font-light">
                 {ALWAYS_ASKS_SHORT}
               </p>
             </div>
             <AskFirstSwitch />
-            <p className="text-sm text-pretty text-muted-foreground own:lg:text-xs">
+            <p className="text-sm text-pretty text-muted-foreground kit:lg:text-xs">
               You can change this anytime in Settings.
             </p>
           </section>
@@ -232,7 +232,7 @@ function welcomeStep(computer: boolean, own: boolean): OnboardingStep {
       </StepIntro>
     ),
     demo: () =>
-      own ? (
+      currentKit ? (
         <OnboardingSlides
           kind="intro"
           poster={welcomePoster}
@@ -265,7 +265,7 @@ function welcomeStep(computer: boolean, own: boolean): OnboardingStep {
  * A calendar that can't load (offline, blocked, silent) puts the picture back, with Book a call, which
  * opens the OpenBot for Business page in a new tab (on the Desktop, in the person's browser).
  */
-function useBookDemoStep(own: boolean): OnboardingStep {
+function useBookDemoStep(currentKit: boolean): OnboardingStep {
   const [calendar, setCalendar] = React.useState(false);
   const [failed, setFailed] = React.useState(false);
   const [booked, setBooked] = React.useState(false);
@@ -285,7 +285,7 @@ function useBookDemoStep(own: boolean): OnboardingStep {
       </StepIntro>
     ),
     demo: () =>
-      own ? (
+      currentKit ? (
         <OnboardingSlides
           kind="self-host"
           poster={businessPoster}
@@ -562,10 +562,10 @@ function OnboardingSteps() {
     return () => clearTimeout(timer);
   }, [leaving, navigate, reduced, next]);
 
-  // OpenBot's own look draws the November 2026 onboarding; an alternate skin keeps its own.
-  const own = useSkinId() === "openbot";
+  // The current kit draws the November 2026 onboarding; the legacy kit keeps its own (skins/kit.ts).
+  const currentKit = useKit() === "current";
   const nameStep = useNameStep({ finish, finished });
-  const name: OnboardingStep = own
+  const name: OnboardingStep = currentKit
     ? {
         ...nameStep,
         demo: () => (
@@ -578,7 +578,7 @@ function OnboardingSteps() {
         ),
       }
     : nameStep;
-  const selfhost = useBookDemoStep(own);
+  const selfhost = useBookDemoStep(currentKit);
   const ai = useAiStep();
   /*
    * The checklist says whether there is a Bot computer, and the intro shows one only where there
@@ -619,7 +619,7 @@ function OnboardingSteps() {
 
   const byId: Record<StepId, OnboardingStep> = {
     welcome: {
-      ...welcomeStep(!computerMissing, own),
+      ...welcomeStep(!computerMissing, currentKit),
       primaryDisabled: !capabilities,
       notice: capabilitiesFailed,
     },

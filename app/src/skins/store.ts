@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { KIT_STORAGE_KEY, type Kit, kitOf } from "./kit";
 import { currentSkinId, DEFAULT_SKIN, type SkinId } from "./types";
 
 /*
@@ -7,7 +8,8 @@ import { currentSkinId, DEFAULT_SKIN, type SkinId } from "./types";
  * frame reads.
  *
  * localStorage holds it only as a pre-paint cache. `index.html` reads the same key before the first
- * paint and sets `data-skin`, so a reload never flashes the default while the preferences load. Once
+ * paint and sets `data-skin`, so a reload never flashes the default while the preferences load, and
+ * `data-kit` from the kit cached beside it (skins/kit.ts). Once
  * they have loaded, `SkinAccountSync` applies the account's skin over whatever the cache held, so
  * the account always wins. Signing out clears the cache, so the next person on a shared machine
  * starts from the default.
@@ -59,11 +61,22 @@ const browserEffects: SkinEffects = {
   setRootSkin: (id) => {
     // Importing the registry outside a browser (a test with no DOM) has no document to mark.
     if (typeof document === "undefined") return;
+    const root = document.documentElement;
     if (id) {
-      document.documentElement.dataset.skin = id;
+      root.dataset.skin = id;
     } else {
-      delete document.documentElement.dataset.skin;
+      delete root.dataset.skin;
     }
+    // The kit goes wherever the skin does, and is cached for the next pre-paint (skins/kit.ts).
+    const kit = kitOf(id ?? DEFAULT_SKIN);
+    if (kit === "legacy") {
+      root.dataset.kit = kit;
+    } else {
+      delete root.dataset.kit;
+    }
+    try {
+      window.localStorage.setItem(KIT_STORAGE_KEY, kit);
+    } catch {}
   },
 };
 
@@ -148,4 +161,12 @@ export function useSkinId() {
     () => current,
     () => DEFAULT_SKIN,
   );
+}
+
+/**
+ * The UI Kit the skin drawn right now is drawn with. A screen whose structure differs between the
+ * two asks this, never which skin it is, so a skin moving kits changes no screen (skins/kit.ts).
+ */
+export function useKit(): Kit {
+  return kitOf(useSkinId());
 }

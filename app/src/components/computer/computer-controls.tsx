@@ -104,7 +104,7 @@ export function ComputerChatControls({
       {needsYou ? (
         <span
           aria-label="Needs you"
-          className="absolute top-1 right-1 size-2 rounded-full bg-amber-500 ring-2 ring-background"
+          className="absolute top-1 right-1 size-2 rounded-full bg-warning ring-2 ring-background"
           role="img"
         />
       ) : null}

@@ -42,11 +42,9 @@ export type Tone = "neutral" | "positive" | "caution" | "negative";
 
 const TONES: Record<Tone, string> = {
   neutral: "bg-foreground/5 text-foreground/70",
-  positive:
-    "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 dark:bg-emerald-500/15",
-  caution:
-    "bg-amber-500/10 text-amber-700 dark:text-amber-400 dark:bg-amber-500/15",
-  negative: "bg-red-500/10 text-red-700 dark:text-red-400 dark:bg-red-500/15",
+  positive: "bg-success-subtle text-success-ink",
+  caution: "bg-warning-subtle text-warning-ink",
+  negative: "bg-destructive-subtle text-destructive",
 };
 
 export function Badge({

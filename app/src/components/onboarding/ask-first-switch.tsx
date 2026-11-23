@@ -41,7 +41,7 @@ export function AskFirstSwitch() {
     <div className="flex w-full flex-col gap-2 text-left">
       {/* The UI Kit's Action Card in OpenBot's own look: a white card on the gray pane, no edge. */}
       <Item
-        className="own:lg:border-transparent own:lg:bg-card"
+        className="kit:lg:border-transparent kit:lg:bg-card"
         size="sm"
         variant="outline"
       >

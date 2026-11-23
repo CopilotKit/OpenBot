@@ -58,9 +58,9 @@ const ICONS: Partial<Record<TaskStatus, typeof IconProgress>> = {
  * runs, amber while it waits on the person, red when it couldn't finish. A resolved task has none.
  */
 const DOT: Partial<Record<TaskStatus, string>> = {
-  working: "animate-pulse bg-emerald-500",
-  needs_input: "bg-amber-500",
-  ready_for_review: "bg-amber-500",
+  working: "animate-pulse bg-success",
+  needs_input: "bg-warning",
+  ready_for_review: "bg-warning",
   failed: "bg-destructive",
 };
 

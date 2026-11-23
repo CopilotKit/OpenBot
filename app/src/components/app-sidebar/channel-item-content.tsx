@@ -2,7 +2,7 @@ import { IconPinFilled } from "@/components/icons";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import type { ConversationView } from "@/lib/settings/conversation-view";
 import type { MessageListEmphasis } from "@/lib/settings/message-list";
-import { useSkinId } from "@/skins/store";
+import { useKit } from "@/skins/store";
 
 /**
  * Shared by live conversations and the appearance preference previews.
@@ -40,7 +40,7 @@ export function ChannelItemContent({
   /** False where the row sits under its Bot already (the Bots panel), so the orb is not said twice. */
   avatar?: boolean;
 }) {
-  const own = useSkinId() === "openbot";
+  const currentKit = useKit() === "current";
   const unreadDot = unread ? (
     <span
       className="size-2 shrink-0 rounded-full bg-primary"
@@ -111,10 +111,10 @@ export function ChannelItemContent({
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
       <div className="shrink-0">
-        {/* Figma's 28px avatar in OpenBot's own look; the skins keep 32. */}
+        {/* Figma's 28px avatar in the current kit; the legacy kit keeps 32. */}
         <ChannelAvatar
           participantIds={participantIds}
-          size={own ? 28 : 32}
+          size={currentKit ? 28 : 32}
           typing={busy}
         />
       </div>

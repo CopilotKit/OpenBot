@@ -820,10 +820,7 @@ function ConnectionStateLabel({
   if (state === "connected") {
     return (
       <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        <IconCheck
-          aria-hidden="true"
-          className="size-3.5 text-emerald-600 dark:text-emerald-400"
-        />
+        <IconCheck aria-hidden="true" className="size-3.5 text-success-ink" />
         {row.noAccount ? "On" : "Connected"}
       </span>
     );
