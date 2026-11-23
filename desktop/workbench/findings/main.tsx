@@ -1,8 +1,12 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { followPageTheme } from "../pageTheme";
 import { FindingsPage } from "./FindingsPage";
+import "../../../app/workbench/page.css";
 import "../workbench.css";
 import "./findings.css";
+
+followPageTheme();
 
 const root = document.getElementById("root");
 if (!root)

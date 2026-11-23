@@ -5,6 +5,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import {
   defineConfig,
@@ -34,6 +35,7 @@ const PORT = portArg(process.argv) ?? WORKBENCH_PORT;
 const APP_PORT = appPort(process.env.WORKBENCH_APP_PORT, PORT);
 
 const desktopDir = fileURLToPath(new URL(".", import.meta.url));
+const appSrcDir = normalizePath(join(desktopDir, "..", "app", "src"));
 const srcDir = `${normalizePath(desktopDir).replace(/\/$/, "")}/src/`;
 
 const ENV_NAMES = [
@@ -333,6 +335,8 @@ async function startAppServer(server: ViteDevServer): Promise<void> {
 export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
+    // The workbench page uses the app's components and theme (app/workbench/page.css).
+    tailwindcss(),
     workbenchEnv(mode),
     noConfigRestart(),
     workbenchHome(),
@@ -354,6 +358,10 @@ export default defineConfig(({ mode }) => ({
     proxy: { "/__app": { target: APP_ORIGIN, ws: true } },
   },
   resolve: {
+    // One React: the app's components import it from app/node_modules, the workbench from
+    // desktop/node_modules. Two copies fail with "Invalid hook call". tests/support/one-react.ts
+    // does the same for bun test.
+    dedupe: ["react", "react-dom"],
     alias: [
       {
         find: /^@tauri-apps\/api\/core$/,
@@ -363,6 +371,8 @@ export default defineConfig(({ mode }) => ({
         find: /^@tauri-apps\/api\/event$/,
         replacement: `${desktopDir}src/fakeNative/event.ts`,
       },
+      // The app's components, as the app imports them (`@/components/ui/button`).
+      { find: /^@\//, replacement: `${appSrcDir}/` },
     ],
   },
 }));

@@ -1,7 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Workbench } from "./Workbench";
+import { followPageTheme } from "./pageTheme";
+import "../../app/workbench/page.css";
 import "./workbench.css";
+
+followPageTheme();
 
 const root = document.getElementById("root");
 if (!root)

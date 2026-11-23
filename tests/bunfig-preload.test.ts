@@ -43,6 +43,18 @@ describe("bunfig preload", () => {
     });
   }
 
+  /*
+   * The desktop runs its own tests from inside desktop/ too, with all of the root's preloads but the
+   * network guard (desktop/bunfig.toml says why).
+   */
+  test("the desktop config preloads the root's scripts but the network guard", () => {
+    const bunfig = resolve(repositoryRoot, "desktop", "bunfig.toml");
+    const guard = resolve(repositoryRoot, "tests/support/network-guard.ts");
+    expect(preloadedScripts(bunfig)).toEqual(
+      preloadedScripts(rootBunfig).filter((script) => script !== guard),
+    );
+  });
+
   test("every preloaded script exists", () => {
     const scripts = preloadedScripts(rootBunfig);
 

@@ -96,19 +96,7 @@ body,
   margin: 0;
 }
 
-body {
-  background: var(--ck-surface-main);
-  color: var(--ck-text-primary);
-  font-family: var(--ck-sans);
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 20px;
-  -webkit-font-smoothing: antialiased;
-}
-
-::selection {
-  background: color-mix(in srgb, var(--ck-text-primary) 18%, transparent);
-}
+/* The page ground, text and font are the app's (app/workbench/page.css). */
 
 code,
 kbd,
