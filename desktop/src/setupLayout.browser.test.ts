@@ -188,6 +188,7 @@ function moveAnswer(command) {
     apps: MOVE_APPS,
     notes: move === "done" || move === "done-held" ? ["Research runs on an ordinary computer here, because OpenBot Cloud has no isolated computers."] : [],
     leftBehind: move === "done-left" ? ["Some of OpenBot's software is still on this computer. Restart your computer to finish removing it."] : [],
+    account: { email: "sam.longname-for-wrapping@example.com", organization: "Sam's organization" },
   };
 }
 const signingIn = location.hash === "#signin";

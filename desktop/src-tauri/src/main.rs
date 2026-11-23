@@ -12657,7 +12657,17 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
     if moving {
         log::info!("[window] a move to OpenBot Cloud is running; the window stays where it is");
     }
-    let startup = startup.filter(|_| !moving);
+    // Its screens waiting for an answer hold the window too, while it is on them: showing the
+    // OpenBot here in their place left the move unstarted with nothing to say so (1.2.0-rc.3).
+    let offered = !moving
+        && desktop_move::offered_on_screen(app)
+        && window.url().is_ok_and(|url| on_setup_page(app, &url));
+    if offered {
+        log::info!(
+            "[window] the move to OpenBot Cloud is waiting for an answer; the window stays on it"
+        );
+    }
+    let startup = startup.filter(|_| !moving && !offered);
     // Restore has the same deployment ownership requirement as the setup page's passive probe.
     // A successful app-port response alone may belong to another installation or application.
     // The page the window belongs on, and the address it loads it at: for the owned app, through its
@@ -27915,6 +27925,55 @@ fn main() {
     }
 
     /*
+    Seen on 1.2.0-rc.3: the person picked OpenBot Cloud, and while the OpenBot here started and
+    updated for the move, came back to the window from the Dock. The restore showed that OpenBot, now
+    up, in place of the move's screens, so the move was never started and nothing said so. While the
+    move's screens wait for an answer, a restore leaves the window on them; once the person keeps
+    OpenBot here, a restore decides as it always has.
+    */
+    #[test]
+    fn a_dock_click_while_the_move_waits_for_an_answer_leaves_the_window_on_it() {
+        let f = RestoreFixture::new();
+        let setup = "tauri://localhost/";
+        let app = f.app(&f.owned, setup);
+        let config = f.base.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        desktop_connected::use_for_test(
+            app.handle(),
+            config,
+            openbot_desktop_lib::connected::credentials::Store::of(
+                keyring_core::mock::Store::new().unwrap(),
+            ),
+        );
+        let window = app.get_webview_window("main").unwrap();
+        window.navigate(setup.parse().unwrap()).unwrap();
+        window.hide().unwrap();
+        desktop_move::set_offered_on_screen_for_test(app.handle(), true);
+
+        restore_window_on(app.handle(), &f.ports);
+
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            setup,
+            "a restore must not replace the move's screens with the OpenBot here before it is answered"
+        );
+        assert!(
+            window.is_visible().unwrap(),
+            "the window still comes forward"
+        );
+
+        // Kept here: answered, and a restore shows the OpenBot here, as it always has.
+        tauri::async_runtime::block_on(desktop_move::keep_self_contained(app.handle().clone()))
+            .unwrap();
+        assert!(!desktop_move::offered_on_screen(app.handle()));
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            format!("http://127.0.0.1:{}/", f.ports.app)
+        );
+    }
+
+    /*
     The safety net under the above: a move that ends with the window somewhere other than setup
     (here the OpenBot on this computer, as the Dock click left it) sends it back to setup, which opens
     the OpenBot now chosen. After a move that is OpenBot Cloud, whose gate asks for its terms first.
@@ -28014,6 +28073,29 @@ fn main() {
         let mut problem = Problem::with("The move didn't finish.", "for the log".to_owned());
         problem.kind = Some(kind);
         desktop_move::note_outcome(app.handle(), &Err(problem));
+    }
+
+    /// The move's screens hold the window from the offer until the person answers it: offered at
+    /// launch, they are on screen; kept here, they are not, and a launch that isn't offered it never is.
+    #[test]
+    fn the_move_holds_the_window_from_its_offer_until_it_is_answered() {
+        let base = temp_root("move-offer-on-screen");
+        let root = base.join("OpenBot");
+        write_installed_deployment(&root);
+        let own = upgrade::own();
+        deployment::record(&root, &own.version, own.pinned).unwrap();
+        let config = base.join("config");
+        let app = launched_at(&root, &config, "1.2.0-rc.3");
+        assert!(!desktop_move::offered_on_screen(app.handle()));
+        assert!(move_due(&app));
+        assert!(desktop_move::offered_on_screen(app.handle()));
+        keep(&app);
+        assert!(!desktop_move::offered_on_screen(app.handle()));
+
+        // The next launch isn't offered it: nothing holds the window.
+        let next = launched_at(&root, &config, "1.2.0-rc.3");
+        assert!(!move_due(&next));
+        assert!(!desktop_move::offered_on_screen(next.handle()));
     }
 
     /*

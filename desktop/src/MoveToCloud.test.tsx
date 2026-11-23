@@ -578,6 +578,57 @@ test("a finished move says what it removed and one Reconnect per app, each openi
   expect(called("open_moved_cloud")).toHaveLength(1);
 });
 
+/**
+ * Seen on 1.2.0-rc.3: after a move the person found nothing that said where OpenBot Cloud was or
+ * which account held their Bots, went to the website, signed in with another account and found an
+ * empty OpenBot. The result names the account and organization the move went into, says where
+ * OpenBot Cloud is in a browser, and opens it there.
+ */
+test("a finished move names the account and organization it went into, and opens OpenBot Cloud in the browser", async () => {
+  const view = await atConfirm();
+  answers.move_to_cloud = {
+    ...MOVED,
+    connectAi: false,
+    account: { email: "sam@example.com", organization: "Sam's organization" },
+  };
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
+  expect(
+    view.getByText(
+      /You're signed in as sam@example\.com, in Sam's organization\./,
+    ),
+  ).toBeTruthy();
+  expect(
+    view.getByText(
+      "In a browser, OpenBot Cloud is at my.open.bot. Sign in there as sam@example.com.",
+    ),
+  ).toBeTruthy();
+  const browser = view.getByRole("link", { name: "Open in browser" });
+  expect(browser.getAttribute("href")).toBe("https://my.open.bot");
+  await userEvent.click(browser);
+  expect(called("plugin:opener|open_url").map((call) => call.args)).toEqual([
+    { url: "https://my.open.bot" },
+  ]);
+  // The window's own way on is still there, and the browser didn't take it.
+  expect(called("open_moved_cloud")).toHaveLength(0);
+  expect(view.getByRole("button", { name: "Open OpenBot" })).toBeTruthy();
+});
+
+test("a finished move an older shell answered without the account still says where OpenBot Cloud is", async () => {
+  const view = await atConfirm();
+  answers.move_to_cloud = { ...MOVED, connectAi: false };
+  await userEvent.click(
+    view.getByRole("button", { name: "Move to OpenBot Cloud" }),
+  );
+  await view.findByRole("heading", { name: "You're on OpenBot Cloud" });
+  expect(view.queryByText(/You're signed in as/)).toBe(null);
+  expect(
+    view.getByText("In a browser, OpenBot Cloud is at my.open.bot."),
+  ).toBeTruthy();
+});
+
 test("Open OpenBot after a move that left apps to reconnect opens the list of them", async () => {
   const view = await atConfirm();
   answers.move_to_cloud = { ...MOVED, connectAi: null };

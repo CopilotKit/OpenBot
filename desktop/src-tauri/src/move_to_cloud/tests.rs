@@ -1490,3 +1490,53 @@ fn after_the_move_cloud_is_asked_whether_the_person_still_needs_an_ai() {
     let cloud = Api::open(&address, Box::new(Bearer), their_own_organization).unwrap();
     assert!(cloud.needs_ai_connection().is_err());
 }
+
+/**
+Seen on 1.2.0-rc.3: after a move the person couldn't tell where OpenBot Cloud was or which account
+held their Bots, and signed up again on my.open.bot. After the move, Cloud is asked who signed in, in
+the organization the move went into, and the result names the address, the email and the
+organization.
+*/
+#[test]
+fn after_the_move_cloud_is_asked_which_account_it_went_into() {
+    let address = serve(|request| {
+        if request.headers.get("authorization").map(String::as_str)
+            != Some(&format!("Bearer {BEARER}"))
+        {
+            return json_response(401, serde_json::json!({"code": "UNAUTHENTICATED"}));
+        }
+        match (request.method.as_str(), request.path.as_str()) {
+            ("GET", "/api/v2/people/me/organizations") => json_response(
+                200,
+                serde_json::json!({"organizations": [
+                    {"id": "org_team", "slug": "acme", "name": "Acme", "role": "member", "active": false, "personal": false},
+                    {"id": "org_mine", "slug": "sam", "name": " Sam's organization ", "role": "owner", "active": true, "personal": true}
+                ], "canCreate": true, "nextCursor": null}),
+            ),
+            ("GET", "/api/v2/organizations/org_mine/people/me") => json_response(
+                200,
+                serde_json::json!({"person": {"id": "per_1", "email": "sam@example.com", "name": "Sam", "role": "owner"}}),
+            ),
+            _ => json_response(404, serde_json::json!({"code": "NOT_FOUND"})),
+        }
+    });
+    let cloud = Api::open(&address, Box::new(Bearer), their_own_organization).unwrap();
+    assert_eq!(
+        cloud.account(),
+        Ok(CloudAccount {
+            email: "sam@example.com".into(),
+            organization: Some("Sam's organization".into()),
+        })
+    );
+
+    // A Cloud that can't say is an error the move logs, and the result says the move without it.
+    let address = serve(|request| match request.path.as_str() {
+        "/api/v2/people/me/organizations" => json_response(
+            200,
+            serde_json::json!({"organizations": [{"id": "org_mine", "personal": true}]}),
+        ),
+        _ => json_response(404, serde_json::json!({"code": "NOT_FOUND"})),
+    });
+    let cloud = Api::open(&address, Box::new(Bearer), their_own_organization).unwrap();
+    assert!(cloud.account().is_err());
+}
