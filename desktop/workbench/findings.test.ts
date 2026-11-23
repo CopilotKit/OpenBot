@@ -2,12 +2,15 @@ import { describe, expect, test } from "bun:test";
 import {
   buildFindings,
   classifyMoves,
+  FINDING_KINDS,
   filterFindings,
   findingFiles,
   findingId,
   findingKey,
   findingPrompt,
   isExpected,
+  isLayoutKind,
+  KIND_LABELS,
   type Movement,
   matchWarning,
   moveWords,
@@ -19,6 +22,8 @@ import {
   PROBLEM_SEVERITY,
   parseMark,
   type SceneRef,
+  SPACING_RULE,
+  SPACING_WHY,
   sortFindings,
   splitWarnings,
   userActions,
@@ -629,5 +634,83 @@ describe("movement classes", () => {
     expect(
       filterFindings(findings, { ...NO_FILTER, showExpected: true }),
     ).toHaveLength(4);
+  });
+});
+
+describe("the Spacing class", () => {
+  const CONNECTIONS: SceneRef = {
+    id: "app-settings-connections",
+    title: "Connections",
+    group: "App: Settings",
+    kind: "app",
+  };
+  const BUTTONS = { x: 21, y: 26.5, width: 52, height: 12 };
+  function spacing(at: number, size: number): Occurrence {
+    const warning: Warning = {
+      kind: "spacing",
+      at,
+      label: 'panel <main data-slot="sidebar-inset">',
+      rule: "clearance",
+      box: { x: 73, y: 8, width: 919, height: 784 },
+      buttons: BUTTONS,
+      size,
+      text: `panel <main data-slot="sidebar-inset"> is ${8 - size} px from the window buttons`,
+    };
+    return {
+      scene: CONNECTIONS,
+      at,
+      kind: "spacing",
+      label: warning.label,
+      elementKey: null,
+      chain: [],
+      warning,
+    };
+  }
+
+  test("a Spacing finding is a layout finding, titled by its sentence, sized by the rule", () => {
+    const [finding] = buildFindings([spacing(0, 8), spacing(500, 8)]);
+    expect(finding?.kind).toBe("spacing");
+    expect(isLayoutKind("spacing")).toBe(true);
+    expect(KIND_LABELS.spacing).toBe("Spacing");
+    expect(finding?.title).toBe(
+      'panel <main data-slot="sidebar-inset"> is 0 px from the window buttons',
+    );
+    expect(finding?.size).toBe(8);
+    expect(finding?.occurrences).toHaveLength(2);
+    expect(findingKey(spacing(0, 8))).toBe(
+      'spacing|panel <main data-slot="sidebar-inset">||clearance,8',
+    );
+  });
+
+  test("shown by default: Spacing is never an expected move", () => {
+    const findings = buildFindings([spacing(0, 8)]);
+    expect(filterFindings(findings, NO_FILTER)).toHaveLength(1);
+    expect(
+      filterFindings(findings, { ...NO_FILTER, kind: "spacing" }),
+    ).toHaveLength(1);
+    expect(FINDING_KINDS).toContain("spacing");
+    expect(SPACING_RULE).toContain("8 px");
+    expect(SPACING_WHY).toContain("TRAFFIC_LIGHTS");
+  });
+
+  test("a Spacing mark round-trips", () => {
+    const warning = spacing(1200, 8).warning as Warning;
+    const mark = parseMark(warningMark(warning));
+    expect(warningMark(warning)).toBe(
+      `spacing|1200|clearance|${warning.label}`,
+    );
+    expect(mark).toEqual({
+      kind: "spacing",
+      at: 1200,
+      label: `clearance|${warning.label}`,
+    });
+    // The same panel under another rule at the same time is another warning.
+    const row = { ...warning, rule: "row" } as Warning;
+    expect(matchWarning([row, warning], mark as NonNullable<typeof mark>)).toBe(
+      warning,
+    );
+    expect(matchWarning([warning], mark as NonNullable<typeof mark>)).toBe(
+      warning,
+    );
   });
 });

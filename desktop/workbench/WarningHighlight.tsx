@@ -58,6 +58,25 @@ export function highlightLabel(warning: Warning): string {
     }
     case "outside":
       return `${Math.round(warning.overBy)} px outside the window`;
+    case "spacing":
+      return spacingLabel(warning);
+  }
+}
+
+/** The words on a Spacing highlight: the rule's measure, short. */
+export function spacingLabel(
+  warning: Extract<Warning, { kind: "spacing" }>,
+): string {
+  const n = Math.round(warning.size);
+  switch (warning.rule) {
+    case "clearance":
+      return `${Math.max(0, 8 - n)} px from the window buttons`;
+    case "column":
+      return `window buttons ${n} px off the column's middle`;
+    case "fit":
+      return `column ${n} px too narrow for the window buttons`;
+    case "row":
+      return `${n} px off the window buttons' row`;
   }
 }
 
@@ -97,6 +116,8 @@ export type HighlightShapes = {
   label: string;
   /** The label goes below the box when there is no room above it. */
   labelBelow: boolean;
+  /** The box the label sits on: the box, or the window's buttons for a Spacing warning. */
+  labelAt: Box;
 };
 
 function place(box: Box, origin: FrameOrigin): Box {
@@ -131,11 +152,17 @@ export function highlightShapes(
     if (hidden.x > 0) shaded.push({ x: x + width, y, width: hidden.x, height });
     if (hidden.y > 0)
       shaded.push({ x, y: y + height, width, height: hidden.y });
+  } else if (warning.kind === "spacing") {
+    frameBox = warning.box;
+    // The window's buttons, shaded: what the element is too near.
+    shaded = [warning.buttons];
   } else {
     frameBox = warning.box;
     shaded = outsideParts(warning.box, viewport);
   }
   const box = place(frameBox, origin);
+  const labelAt =
+    warning.kind === "spacing" ? place(warning.buttons, origin) : box;
   let arrow: Arrow | null = null;
   if (ghost) {
     const from = center(ghost);
@@ -150,7 +177,8 @@ export function highlightShapes(
     arrow,
     shaded: shaded.map((part) => place(part, origin)),
     label: highlightLabel(warning),
-    labelBelow: box.y - origin.y < LABEL_ROOM,
+    labelBelow: labelAt.y - origin.y < LABEL_ROOM,
+    labelAt,
   };
 }
 
@@ -232,10 +260,10 @@ export function WarningHighlight({
       <span
         className={`wb-highlight-label${shapes.labelBelow ? " wb-highlight-label-below" : ""}`}
         style={{
-          left: shapes.box.x,
+          left: shapes.labelAt.x,
           top: shapes.labelBelow
-            ? shapes.box.y + shapes.box.height
-            : shapes.box.y,
+            ? shapes.labelAt.y + shapes.labelAt.height
+            : shapes.labelAt.y,
         }}
       >
         {shapes.label}

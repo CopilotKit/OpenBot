@@ -18,12 +18,14 @@ export function warningText(warning: Warning): string {
       return `${warning.label} is cut off at ${when}`;
     case "outside":
       return `${warning.label} is ${Math.round(warning.overBy)}px outside the window at ${when}`;
+    case "spacing":
+      return `${warning.text} at ${when}`;
   }
 }
 
 /** The same key for the same warning, also after a seek back finds the warnings again. */
 export function warningKey(warning: Warning): string {
-  return `${warning.kind}|${warning.at}|${warning.label}`;
+  return warningMark(warning);
 }
 
 /**

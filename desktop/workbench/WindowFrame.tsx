@@ -8,6 +8,7 @@ import {
 import { CommentLayer, type CommentLayerProps } from "./CommentLayer";
 import { GridOverlay } from "./GridOverlay";
 import { Inspector } from "./Inspector";
+import { macButtonCircles } from "./titleBar";
 import "./windowFrame.css";
 
 export type WindowFrameProps = {
@@ -38,16 +39,27 @@ export type WindowFrameProps = {
 const LIGHTS = ["#ff5f57", "#febc2e", "#28c840"];
 const INACTIVE_LIGHT = "#8e8e93";
 
+/**
+ * The Mac window's close, minimise and zoom buttons, where macOS draws them over the page
+ * (titleBar.ts: `TRAFFIC_LIGHTS` in main.rs, AppKit's sizes), above the page's own content.
+ */
 function MacBar({ active }: { active: boolean }) {
   return (
     <div className="wb-window-bar wb-window-bar-mac" aria-hidden="true">
-      {LIGHTS.map((color, index) => (
+      {macButtonCircles().map((circle, index) => (
         <span
           // The three lights never change order.
           // biome-ignore lint/suspicious/noArrayIndexKey: fixed list
           key={index}
           className="wb-window-light"
-          style={{ background: active ? color : INACTIVE_LIGHT }}
+          data-window-button={["close", "minimise", "zoom"][index]}
+          style={{
+            left: circle.x,
+            top: circle.y,
+            width: circle.width,
+            height: circle.height,
+            background: active ? LIGHTS[index] : INACTIVE_LIGHT,
+          }}
         />
       ))}
     </div>

@@ -175,3 +175,29 @@ test("the still of a window in a forced theme keeps that theme, not the system's
   document.head.innerHTML = "";
   document.body.innerHTML = "";
 });
+
+test("a Spacing warning boxes the element, shades the window buttons and labels them", () => {
+  const buttons = { x: 21, y: 26.5, width: 52, height: 12 };
+  const warning: Warning = {
+    kind: "spacing",
+    at: 0,
+    label: 'panel <main data-slot="sidebar-inset">',
+    rule: "clearance",
+    box: { x: 73, y: 8, width: 700, height: 500 },
+    buttons,
+    size: 8,
+    text: 'panel <main data-slot="sidebar-inset"> is 0 px from the window buttons',
+  };
+  const shapes = highlightShapes(
+    warning,
+    { x: 100, y: 50, scale: 2 },
+    VIEWPORT,
+  );
+  expect(shapes.box).toEqual({ x: 246, y: 66, width: 1400, height: 1000 });
+  expect(shapes.shaded).toEqual([{ x: 142, y: 103, width: 104, height: 24 }]);
+  expect(shapes.labelAt).toEqual({ x: 142, y: 103, width: 104, height: 24 });
+  expect(highlightLabel(warning)).toBe("0 px from the window buttons");
+  expect(highlightLabel({ ...warning, rule: "column", size: 11 })).toBe(
+    "window buttons 11 px off the column's middle",
+  );
+});

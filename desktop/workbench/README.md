@@ -239,7 +239,7 @@ Rules for new app scenes:
 The Window panel sets how the frame looks:
 
 - **Size**: two presets (1000 × 800 and 720 × 560), or any width and height. The minimum is 720 × 560.
-- **OS**: Mac or Windows. This changes the frame (traffic lights or Windows title bar). It also changes the user agent of the window. Windows also sets the answers the Windows setup needs.
+- **OS**: Mac or Windows. This changes the frame (traffic lights or Windows title bar). The Mac lights are where macOS draws them, over the page (see [Spacing](#spacing)). It also changes the user agent of the window. Windows also sets the answers the Windows setup needs.
 - **Active**: sets whether the window has focus. An inactive window has gray controls.
 - **Theme**: Light or Dark. The default is Dark.
 - **Zoom**: from 0.5 to 2, or **Fit**. Fit makes the window as big as the space for it, up to 100%. The button shows the zoom, for example "Fit (75%)". When the link has no `zoom`, Fit is on. When you type a zoom, Fit goes off. Press **Fit** to turn it on or off. With Fit on, the link has no `zoom`, so the link opens with Fit too. The CLI and the browser tests always give a `zoom`, so their shots never use Fit.
@@ -346,8 +346,9 @@ Under the window, the workbench lists layout warnings as the clock moves. The li
 - **moved**: an element moved more than 2 px between two checks. The warning names the cause, for example a command or a request. If most of the page moved by the same amount, one warning says "The whole page".
 - **cut off**: a box with hidden overflow (the element or a box around it) hides more than 2 px of the element's text. Text cut on purpose does not count: an ellipsis (`text-overflow: ellipsis`, as Tailwind's `truncate`) or a line clamp, on the element or on the box that cuts it. Text that is larger than its box but shows (overflow visible), and text in a box that scrolls, do not count either.
 - **outside the window**: an element goes past the edge of the window, and no scroll brings it into view. An element in a box that scrolls, or past the bottom or the right of a page that scrolls itself, is not outside; an element fixed to the window (`position: fixed`) still is.
+- **spacing**: on a Mac in OpenBot Desktop, the page comes too near the window's close, minimise and zoom buttons, or the buttons do not sit well in the column under them. See [Spacing](#spacing).
 
-Each move gets a class by the same rules as the findings (see [Which moves are findings](#which-moves-are-findings)), and its row names it. The list shows shift under hand, jitter, cut off and outside. The expected moves (after an input, a new screen, a load, a late load shift) are behind **Show expected moves (N)**, as on the Findings page. The heading counts the rows shown without the expected moves.
+Each move gets a class by the same rules as the findings (see [Which moves are findings](#which-moves-are-findings)), and its row names it. The list shows shift under hand, jitter, cut off, outside and spacing. The expected moves (after an input, a new screen, a load, a late load shift) are behind **Show expected moves (N)**, as on the Findings page. The heading counts the rows shown without the expected moves.
 
 The workbench checks after each native call and event. In an app scene, it also checks after each request, stream event and socket message. Elements that are hidden from view, such as labels for screen readers only, do not get warnings.
 
@@ -356,6 +357,30 @@ Hold the pointer on a warning for 250 ms to jump to its time. The row says "Jump
 - For **moved**: a dashed box where the element was, a solid box where it is, and an arrow between them. A label says how far it moved, for example "moved 157 px down".
 - For **cut off**: a box around the element, with a shaded strip for the hidden part. A label says "cut off by N px".
 - For **outside the window**: the part past the edge is shaded. A label says "N px outside the window".
+- For **spacing**: a box around the element (or the column), with the window's buttons shaded. A label on the buttons says what is wrong, for example "0 px from the window buttons".
+
+### Spacing
+
+macOS draws the window's buttons over OpenBot's page, so the page must leave room for them. "Little details matter": a panel's rounded corner 5 px from the green light, or buttons that miss the middle of the icons under them, makes the window look unfinished. The Spacing check runs on every check of every scene, with the other warnings, for a Mac window in OpenBot Desktop. A Windows window has its own title bar above the page, and a browser draws no buttons, so they get no Spacing warnings.
+
+Where the buttons are (`titleBar.ts`, one place for every number):
+
+| Number | Value | Source |
+| --- | --- | --- |
+| Close button's frame | 20 px in | `TRAFFIC_LIGHTS` (`x: 20.0, y: 31.0`) in `desktop/src-tauri/src/main.rs`, set with `.traffic_light_position` on the window's builder. tao 0.37.2 (`inset_traffic_lights` in `src/platform_impl/macos/view.rs`) puts button *i* at `x + i × space_between` and does not move them up or down. |
+| Circles | 12 px, 8 px apart (20 px from middle to middle), each in a 14 px frame | AppKit's standard window buttons: the first circle is 21 to 33 px in, its middle at 27. |
+| Middle of the row | 32.5 px down | main.rs: on macOS 26 the circles' middle lands about 1.5 px below `y` (31). |
+| Check | — | Dusty's capture of Settings → Connections (1252 px wide; the window's edge at x 55, y 37): centres at 27, 48, 68 and 33 from the window, so the scale is 1.0 and the numbers above agree within the capture's 1 px. |
+
+So the circles run from 21 to 73 px in and from 26.5 to 38.5 px down. The workbench draws the Mac lights there, over the page.
+
+The rules (`spacing.ts`, pure geometry; `layoutWatch.ts` reads the boxes from the page):
+
+- **Clearance**: nothing a person sees (text, an icon, an image, a field) comes within 8 px of the buttons or goes under them, and no panel's edge or rounded corner does either. A panel is a box that paints itself: a border, a background unlike its parent's, or a rounded box with a shadow. The page's own background (a box as big as the window) does not count, nor a panel's edges on the window's own edges, nor the drag region, which paints nothing. A painted panel that also moves the window (the inset `main`) is still a panel.
+- **Column**: the column the buttons sit over (the sidebar, with its gutter on to the panel beside it) is at least the buttons' width plus 8 px on each side ("The window buttons do not fit their column: N px for M px"), and, in a rail of icons (at most twice that room wide), the buttons sit in its middle, over its icons. In a wider sidebar macOS puts them at its top left, so only the fit counts there.
+- **Row**: the buttons' middle is the middle of the nearest item on their row (for example Back to app in Admin), and no panel beside them starts above their middle with its corner next to them.
+
+The scene `app-settings-connections` (Settings → Connections, dark) shows all three: the inset panel starts at 72 px, under the zoom button's last 1 px; the buttons sit 11 px right of the middle of the 72 px column (21 px from its left edge, -1 px from its right); and the panel's top is 25 px above the buttons' middle. Dusty's capture has the same three, with the panel 5 px past the green light.
 
 The row of the marked warning has a tint and a dot in the color of the mark. When the pointer leaves the list, the mark goes away. Click a warning to keep its mark. A kept mark stays until you click another warning. A play, a step, a seek or another scene removes every mark. The mark is outside the window, so a shot of the window does not show it.
 
@@ -448,8 +473,8 @@ The same problem can show in many scenes. One finding holds all of them. Warning
 | --- | --- |
 | `id` | A short id made from the finding's key. The same key gives the same id in every check |
 | `title` | For example `span "Opening OpenBot" moves 245 px up` |
-| `kind` | `moved`, `clipped`, `outside`, `no-answer`, `app-error`, `stalled` or `step` |
-| `severity` | How bad it is: how far it moved, how many px are cut off or outside. A problem of a run is always 10000 |
+| `kind` | `moved`, `clipped`, `outside`, `spacing`, `no-answer`, `app-error`, `stalled` or `step` |
+| `severity` | How bad it is: how far it moved, how many px are cut off or outside, or for spacing how far inside the 8 px, off the middle or short of room. A problem of a run is always 10000 |
 | `component` | The nearest component with a source file, and the line |
 | `movement` | For a move: its class, the rule it hit and why (see below) |
 | `occurrences` | Each scene and time (ms) it shows at, with the warning, its boxes and its own class |
@@ -479,12 +504,12 @@ On the left:
 
 - When the check ran, and **Run the check again**. The check runs in the background on the workbench server, one at a time. The page shows how many scenes are done, and loads the new findings at the end. A check that finds problems still writes its findings.
 - Filters: words, the kind, the window (setup window or app), the component file and the smallest size. **Sort by** size, number of scenes or time. By size, shift under hand comes first, then jitter.
-- **Show expected moves**: off by default, so the list shows shift under hand, jitter, cut off, outside and the run problems. Turn it on to see the expected moves too.
+- **Show expected moves**: off by default, so the list shows shift under hand, jitter, cut off, outside, spacing and the run problems. Turn it on to see the expected moves too.
 - The findings. Each row has the title, the kind or the class, the size, the number of scenes and the file.
 
 On the right, the selected finding:
 
-- Its title, kind or class, size, scenes and file, and the rule it hit at this time and why.
+- Its title, kind or class, size, scenes and file, and the rule it hit at this time and why. A Spacing finding shows the Spacing rule and why it matters.
 - **Previous** and **Next** go to its other times. The row of buttons under them lists every time.
 - The real workbench page in a frame, with `embed=1` and `mark`. It opens the scene at the time and marks the warning (the dashed box where it was, the box where it is, the arrow and the label). The frame is the workbench itself, not a copy: what it shows is what **Open in workbench** shows. A time in the same scene goes there in the frame, without a new load.
 - **Copy as prompt** copies a change request for an agent: the finding, every scene and time, the file, and the element at this time.

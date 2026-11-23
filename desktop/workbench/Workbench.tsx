@@ -76,6 +76,7 @@ import {
 } from "./sceneCatalog";
 import type { Scene } from "./scenes/types";
 import { resolveTarget } from "./sourceLines";
+import { windowButtonsBox } from "./titleBar";
 import {
   DEFAULT_APP,
   decodeState,
@@ -713,6 +714,12 @@ export function WorkbenchLoaded({
   });
   const stillOwnerRef = useRef(0);
   const stillShownRef = useRef<(() => void) | null>(null);
+  /** Who hosts the watched window: the Spacing check needs the Mac buttons only in Desktop. */
+  const watchedScene = scenes.find((s) => s.id === state.scene);
+  const watchedHost =
+    watchedScene && isApp(watchedScene)
+      ? (state.app?.host ?? watchedScene.start.host)
+      : "desktop";
   const {
     warnings,
     checkedAt,
@@ -722,6 +729,7 @@ export function WorkbenchLoaded({
   } = useLayoutWatch(frameEl, {
     width: state.window.width,
     height: state.window.height,
+    buttons: windowButtonsBox(state.window.os, watchedHost),
   });
   const warningsRef = useRef(warnings);
   warningsRef.current = warnings;

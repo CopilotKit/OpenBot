@@ -23,6 +23,7 @@ export type FindingKind =
   | "moved"
   | "clipped"
   | "outside"
+  | "spacing"
   | "no-answer"
   | "app-error"
   | "stalled"
@@ -32,6 +33,7 @@ export const FINDING_KINDS: readonly FindingKind[] = [
   "moved",
   "clipped",
   "outside",
+  "spacing",
   "no-answer",
   "app-error",
   "stalled",
@@ -43,6 +45,7 @@ export const KIND_LABELS: Record<FindingKind, string> = {
   moved: "Moved",
   clipped: "Cut off",
   outside: "Outside",
+  spacing: "Spacing",
   "no-answer": "No answer",
   "app-error": "App error",
   stalled: "Stalled",
@@ -52,9 +55,23 @@ export const KIND_LABELS: Record<FindingKind, string> = {
 /** The kinds that are layout warnings: they have an element and a box in the window. */
 export function isLayoutKind(
   kind: FindingKind,
-): kind is "moved" | "clipped" | "outside" {
-  return kind === "moved" || kind === "clipped" || kind === "outside";
+): kind is "moved" | "clipped" | "outside" | "spacing" {
+  return (
+    kind === "moved" ||
+    kind === "clipped" ||
+    kind === "outside" ||
+    kind === "spacing"
+  );
 }
+
+/**
+ * The Spacing class: what the rule checks and why, as the Findings page shows it. Every Spacing
+ * finding shows by default (it is never an expected move).
+ */
+export const SPACING_RULE =
+  "On a Mac, nothing of the page comes within 8 px of the window's close, minimise and zoom buttons, and no panel's edge or rounded corner does either. The buttons fit the column they sit over with 8 px on each side, sit in its middle over its icons, and share a middle with the row beside them.";
+export const SPACING_WHY =
+  "macOS draws the buttons over the page at a fixed place (TRAFFIC_LIGHTS in main.rs). A panel's corner or an icon jammed against them, or buttons that miss the column's middle, reads as a page that does not know the window it is in. Little details matter.";
 
 /** The severity of a problem of the run: higher than any layout warning in a window. */
 export const PROBLEM_SEVERITY = 10_000;
@@ -143,6 +160,8 @@ export function occurrenceSize(occurrence: Occurrence): number | null {
       );
     case "outside":
       return Math.round(w.overBy);
+    case "spacing":
+      return Math.round(w.size);
   }
 }
 
@@ -175,6 +194,8 @@ export function findingKey(occurrence: Occurrence): string {
   if (w.kind === "moved" && occurrence.movement?.class === "jitter")
     delta = "jitter";
   else if (w.kind === "moved") delta = `${bucket(w.dx)},${bucket(w.dy)}`;
+  else if (w.kind === "spacing")
+    delta = `${w.rule},${bucket(occurrenceSize(occurrence) ?? 0)}`;
   else delta = String(bucket(occurrenceSize(occurrence) ?? 0));
   return `${w.kind}|${element}|${file}|${delta}`;
 }
@@ -224,6 +245,8 @@ export function occurrenceTitle(occurrence: Occurrence): string {
           : `${w.label} is cut off`;
       case "outside":
         return `${w.label} is ${size} px outside the window`;
+      case "spacing":
+        return w.text;
     }
   }
   return shorten(occurrence.label, MAX_TITLE_MESSAGE);
@@ -719,17 +742,32 @@ function turnsBack(run: readonly Move[]): boolean {
 
 // --- The `mark` link parameter ------------------------------------------------------------------
 
-/** A warning the workbench marks over the window when a link opens: `mark=<kind>|<ms>|<label>`. */
+/**
+ * A warning the workbench marks over the window when a link opens: `mark=<kind>|<ms>|<label>`, and
+ * for a Spacing warning `mark=spacing|<ms>|<rule>|<label>` (`label` then holds `<rule>|<label>`).
+ */
 export type Mark = { kind: Warning["kind"]; at: number; label: string };
+
+/**
+ * The label part of a warning's mark: its label, and for a Spacing warning its rule first, since
+ * one panel can break two rules at the same time (`clearance|panel <main>`).
+ */
+export function markLabel(warning: Warning): string {
+  return warning.kind === "spacing"
+    ? `${warning.rule}|${warning.label}`
+    : warning.label;
+}
 
 /** The mark of a warning. The same text as WarningsList's `warningKey`. */
 export function warningMark(warning: Warning): string {
-  return `${warning.kind}|${warning.at}|${warning.label}`;
+  return `${warning.kind}|${warning.at}|${markLabel(warning)}`;
 }
 
 export function parseMark(text: string | null): Mark | null {
   if (!text) return null;
-  const m = /^(moved|clipped|outside)\|(\d+(?:\.\d+)?)\|(.+)$/s.exec(text);
+  const m = /^(moved|clipped|outside|spacing)\|(\d+(?:\.\d+)?)\|(.+)$/s.exec(
+    text,
+  );
   if (!m) return null;
   return {
     kind: m[1] as Mark["kind"],
@@ -751,7 +789,7 @@ export function matchWarning(
 ): Warning | null {
   let best: Warning | null = null;
   for (const w of warnings) {
-    if (w.kind !== mark.kind || w.label !== mark.label) continue;
+    if (w.kind !== mark.kind || markLabel(w) !== mark.label) continue;
     const off = Math.abs(w.at - mark.at);
     if (off > MARK_TOLERANCE_MS) continue;
     if (!best || off < Math.abs(best.at - mark.at)) best = w;

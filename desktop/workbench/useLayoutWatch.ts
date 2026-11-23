@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Change } from "../src/fakeNative/control";
+import type { Box } from "./geometry";
 import {
   clippedAndOutside,
   compare,
@@ -8,10 +9,15 @@ import {
   type Snapshot,
   screenOf,
   snapshot,
+  spacingWarnings,
   type Warning,
 } from "./layoutWatch";
 
-type Viewport = { width: number; height: number };
+/**
+ * The window's size, and where the OS draws its buttons over the page (titleBar.ts), or null where
+ * none sit over it: the Spacing check measures the page against them.
+ */
+type Viewport = { width: number; height: number; buttons?: Box | null };
 
 /** How many changes name the cause of a check. */
 const MAX_CAUSES = 3;
@@ -29,15 +35,17 @@ function causeOf(change: Change): string {
   }
 }
 
-/** The key that says a clipped or outside warning is the same one as before. */
+/** The key that says a clipped, outside or spacing warning is the same one as before. */
 function stillKey(warning: Warning): string {
-  return `${warning.kind}|${warning.label}`;
+  return warning.kind === "spacing"
+    ? `${warning.kind}|${warning.rule}|${warning.label}`
+    : `${warning.kind}|${warning.label}`;
 }
 
 /**
  * Watches the layout of a loaded window. After each change of the fake native side or of the
  * clock, one frame later, it compares the window with how it was before, and finds text that is
- * cut off and elements outside the window. While `hold(true)` is in force (a seek walks the
+ * cut off, elements outside the window, and what comes too near the window's buttons (Spacing). While `hold(true)` is in force (a seek walks the
  * clock), it checks only when `flush` is called: at each stop of the walk, where a frame may not
  * come between two moves of the clock, and where the window is the same each time.
  */
@@ -101,7 +109,11 @@ export function useLayoutWatch(
         const found: Warning[] = last ? compare(last, next, at, cause) : [];
         last = next;
         const now = new Set<string>();
-        for (const warning of clippedAndOutside(doc, at, viewportRef.current)) {
+        const { buttons = null, ...size } = viewportRef.current;
+        for (const warning of [
+          ...clippedAndOutside(doc, at, size),
+          ...spacingWarnings(doc, at, size, buttons),
+        ]) {
           const key = stillKey(warning);
           if (now.has(key)) continue;
           now.add(key);

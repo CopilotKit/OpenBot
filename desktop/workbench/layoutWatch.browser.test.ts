@@ -150,6 +150,55 @@ describe.skipIf(!asked)("the workbench's layout watch", () => {
     }
   }, 60_000);
 
+  test("Spacing: Dusty's Connections layout is too near the Mac buttons", async () => {
+    if (!browser) throw new Error("No browser.");
+    const page = await browser.newPage({
+      viewport: { width: 1200, height: 800 },
+    });
+    try {
+      await openScene(page, "state-first-run");
+      // Dusty's capture as DOM: a 73 px strip with the orb, and an inset panel 5 px past the
+      // green light, 8 px down, with a border and a rounded corner. A string, so the import runs
+      // in the page as written.
+      const texts = await page.evaluate<string[]>(`(async () => {
+        const body = document.createElement("body");
+        body.style.cssText = "margin: 0; background: rgb(17, 17, 20); width: 1142px; height: 800px";
+        body.innerHTML = [
+          '<div data-slot="strip" style="position: absolute; left: 0; top: 0; width: 73px; height: 800px">',
+          '<img alt="OpenBot" style="position: absolute; left: 22px; top: 54px; width: 28px; height: 28px; background: #888">',
+          '</div>',
+          '<main data-slot="sidebar-inset" style="position: absolute; left: 79px; top: 8px; width: 1055px; height: 784px; border: 1px solid rgb(60, 60, 66); border-radius: 12px; background: rgb(24, 24, 28)"></main>',
+        ].join("");
+        document.body.replaceWith(body);
+        const { spacingWarnings } = await import("/workbench/layoutWatch.ts");
+        const buttons = { x: 21, y: 27, width: 53, height: 12 };
+        return spacingWarnings(document, 0, { width: 1142, height: 800 }, buttons)
+          .map((warning) => warning.rule + ": " + warning.text);
+      })()`);
+      expect(texts).toContain(
+        'clearance: panel <main data-slot="sidebar-inset"> is 5 px from the window buttons',
+      );
+      expect(
+        texts.some((t) =>
+          t.startsWith("column: The window buttons sit 8 px right"),
+        ),
+      ).toBe(true);
+      expect(
+        texts.some((t) =>
+          t.startsWith('row: panel <main data-slot="sidebar-inset"> starts'),
+        ),
+      ).toBe(true);
+      // No buttons (Windows, a browser): no Spacing check.
+      const none = await page.evaluate<number>(`(async () => {
+        const { spacingWarnings } = await import("/workbench/layoutWatch.ts");
+        return spacingWarnings(document, 0, { width: 1142, height: 800 }, null).length;
+      })()`);
+      expect(none).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
   test("text in a narrow box that does not wrap is cut off", async () => {
     if (!browser) throw new Error("No browser.");
     const page = await browser.newPage({

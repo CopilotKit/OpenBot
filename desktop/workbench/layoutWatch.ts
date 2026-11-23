@@ -1,4 +1,10 @@
 import type { Box } from "./geometry";
+import {
+  type SpacingElement,
+  type SpacingRule,
+  spacingIssues,
+  spacingZone,
+} from "./spacing";
 
 export type Snapshot = Map<string, { box: Box; label: string }>;
 /**
@@ -26,7 +32,22 @@ export type Warning =
       scrollWidth: number;
       scrollHeight: number;
     }
-  | { kind: "outside"; at: number; label: string; overBy: number; box: Box };
+  | { kind: "outside"; at: number; label: string; overBy: number; box: Box }
+  | {
+      kind: "spacing";
+      at: number;
+      label: string;
+      /** Which rule of the Spacing check (spacing.ts). */
+      rule: SpacingRule;
+      /** The element's box, or the column's for the column rules. */
+      box: Box;
+      /** Where the window's buttons are (titleBar.ts). */
+      buttons: Box;
+      /** How bad, in px (spacing.ts `SpacingIssue.size`). */
+      size: number;
+      /** The sentence, for example `panel <main> is 0 px from the window buttons`. */
+      text: string;
+    };
 
 const TEXT_INPUTS = new Set([
   "",
@@ -547,4 +568,154 @@ export function focusOf(root: Document): string | null {
   if (!active || active === root.body || active === root.documentElement)
     return null;
   return elementLabel(active);
+}
+
+// --- The Spacing check ------------------------------------------------------------------------
+
+/** True when a computed color shows nothing. */
+export function transparentColor(color: string): boolean {
+  const c = color.trim();
+  if (c === "" || c === "transparent") return true;
+  if (/^rgba\(.*,\s*0(\.0+)?\)$/.test(c)) return true;
+  return /\/\s*0(\.0+)?%?\)$/.test(c);
+}
+
+/** The first color painted under an element's own box: its parents' background, or none. */
+function backgroundUnder(element: Element, view: Window): string {
+  for (let at = element.parentElement; at; at = at.parentElement) {
+    const color = view.getComputedStyle(at).backgroundColor;
+    if (!transparentColor(color)) return color;
+  }
+  return "";
+}
+
+/** True when an element paints a box of its own: a border, a background unlike its parent's, or a rounded shadowed card. */
+export function paintsPanel(element: Element, view: Window): boolean {
+  const s = view.getComputedStyle(element);
+  const border = (["Top", "Right", "Bottom", "Left"] as const).some(
+    (side) =>
+      Number.parseFloat(
+        s.getPropertyValue(`border-${side.toLowerCase()}-width`),
+      ) > 0 &&
+      s.getPropertyValue(`border-${side.toLowerCase()}-style`) !== "none" &&
+      !transparentColor(
+        s.getPropertyValue(`border-${side.toLowerCase()}-color`),
+      ),
+  );
+  if (border) return true;
+  const background =
+    (!transparentColor(s.backgroundColor) &&
+      s.backgroundColor !== backgroundUnder(element, view)) ||
+    (s.backgroundImage !== "" && s.backgroundImage !== "none");
+  if (background) return true;
+  const rounded = Number.parseFloat(s.borderTopLeftRadius) > 0;
+  return rounded && s.boxShadow !== "" && s.boxShadow !== "none";
+}
+
+/** A name for an element with no words: its tag and its `data-slot`, id or first class. */
+export function boxName(element: Element): string {
+  const tag = element.tagName.toLowerCase();
+  const slot = element.getAttribute("data-slot");
+  if (slot) return `<${tag} data-slot="${slot}">`;
+  const id = element.getAttribute("id");
+  if (id) return `<${tag} id="${id}">`;
+  const first = (element.getAttribute("class") ?? "").trim().split(/\s+/)[0];
+  return first ? `<${tag} class="${first}">` : `<${tag}>`;
+}
+
+/** Elements that show something of their own with no text: an image, an icon, a field. */
+const MEDIA = new Set([
+  "img",
+  "svg",
+  "canvas",
+  "video",
+  "picture",
+  "input",
+  "textarea",
+  "select",
+]);
+
+/**
+ * True when an element shows a person something: text, an image or icon, a field, or a painted
+ * box, of its own or inside it. A control that paints nothing (the sidebar's rail, a hover target
+ * along an edge) is not something a person sees near the window's buttons.
+ */
+function showsSomething(
+  element: Element,
+  view: Window,
+  known: Map<Element, boolean>,
+): boolean {
+  if (MEDIA.has(element.tagName.toLowerCase()) || ownText(element)) return true;
+  if (paintsPanel(element, view)) return true;
+  for (const inner of Array.from(element.querySelectorAll("*"))) {
+    const shows =
+      MEDIA.has(inner.tagName.toLowerCase()) ||
+      ownText(inner) !== "" ||
+      paintsPanel(inner, view);
+    if (!shows || isHidden(inner) || isVisuallyHidden(inner, known)) continue;
+    return true;
+  }
+  return false;
+}
+
+function intersectsBox(a: Box, b: Box): boolean {
+  return (
+    Math.min(a.x + a.width, b.x + b.width) > Math.max(a.x, b.x) &&
+    Math.min(a.y + a.height, b.y + b.height) > Math.max(a.y, b.y)
+  );
+}
+
+/** The elements near the window's buttons, as the Spacing check reads them (spacing.ts). */
+export function spacingElements(
+  root: Document,
+  buttons: Box,
+): SpacingElement[] {
+  const view = root.defaultView;
+  const body = root.body;
+  if (!view || !body) return [];
+  const zone = spacingZone(buttons);
+  const known = new Map<Element, boolean>();
+  const result: SpacingElement[] = [];
+  for (const element of Array.from(body.querySelectorAll("*"))) {
+    const box = boxOf(element);
+    if (box.width === 0 || box.height === 0) continue;
+    if (!intersectsBox(box, zone)) continue;
+    if (isHidden(element) || isVisuallyHidden(element, known)) continue;
+    const identity = identify(element);
+    // The drag region itself (a title bar strip, `data-tauri-drag-region` or `data-desktop-drag`)
+    // paints nothing, so it is no panel; a painted panel that also moves the window (the inset
+    // `main`) is still a panel a person sees.
+    const panel = paintsPanel(element, view);
+    result.push({
+      label: identity
+        ? identity.label
+        : `${panel ? "panel " : ""}${boxName(element)}`,
+      box,
+      content: identity !== null && showsSomething(element, view, known),
+      panel,
+    });
+  }
+  return result;
+}
+
+/** The Spacing check's warnings of a window whose buttons are at `buttons` (none: no buttons). */
+export function spacingWarnings(
+  root: Document,
+  at: number,
+  viewport: { width: number; height: number },
+  buttons: Box | null,
+): Warning[] {
+  if (!buttons) return [];
+  return spacingIssues(buttons, spacingElements(root, buttons), viewport).map(
+    (issue) => ({
+      kind: "spacing" as const,
+      at,
+      label: issue.label,
+      rule: issue.rule,
+      box: issue.box,
+      buttons,
+      size: issue.size,
+      text: issue.text,
+    }),
+  );
 }

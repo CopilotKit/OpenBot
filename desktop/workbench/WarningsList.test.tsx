@@ -57,6 +57,20 @@ test("describes each kind of warning", () => {
       box: BOX,
     }),
   ).toBe(`Menu is 12px outside the window at ${t}`);
+  expect(
+    warningText({
+      kind: "spacing",
+      at: 1500,
+      label: "The window buttons",
+      rule: "column",
+      box: BOX,
+      buttons: BOX,
+      size: 11,
+      text: "The window buttons sit 11 px right of the middle of their column",
+    }),
+  ).toBe(
+    `The window buttons sit 11 px right of the middle of their column at ${t}`,
+  );
 });
 
 test("lists by time, then by label, in a fixed order", () => {

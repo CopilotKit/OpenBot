@@ -179,7 +179,8 @@ function resolveScript(skip: readonly string[]): string {
   const elements = visibleElements(doc);
   const result = [];
   for (const w of page.warnings()) {
-    const mark = w.kind + "|" + w.at + "|" + w.label;
+    // The same text as findings.ts's warningMark.
+    const mark = w.kind + "|" + w.at + "|" + (w.kind === "spacing" ? w.rule + "|" : "") + w.label;
     if (skip.includes(mark)) continue;
     const target = w.kind === "moved" ? w.to : w.box;
     let best = null;

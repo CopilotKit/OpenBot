@@ -62,3 +62,20 @@ test("no host shows the Mac bar", () => {
   expect(container.querySelector(".wb-window-bar-browser")).toBeNull();
   expect(iframeSize(container)).toEqual({ width: "720px", height: "560px" });
 });
+
+test("the Mac lights sit where macOS draws them: 21, 41 and 61 px in, 26.5 px down", () => {
+  const { container } = render(<WindowFrame {...props()} />);
+  const lights = Array.from(
+    container.querySelectorAll<HTMLElement>(".wb-window-light"),
+  );
+  expect(lights.map((l) => [l.style.left, l.style.top, l.style.width])).toEqual(
+    [
+      ["21px", "26.5px", "12px"],
+      ["41px", "26.5px", "12px"],
+      ["61px", "26.5px", "12px"],
+    ],
+  );
+  // Over the page: after the iframe in the window's content.
+  const bar = container.querySelector(".wb-window-bar-mac");
+  expect(bar?.closest(".wb-window-content")).not.toBeNull();
+});

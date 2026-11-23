@@ -35,6 +35,8 @@ import {
   type Occurrence,
   occurrenceQuery,
   RULE_LABELS,
+  SPACING_RULE,
+  SPACING_WHY,
   sortFindings,
   warningMark,
 } from "../findings";
@@ -485,8 +487,12 @@ export function FindingsPage() {
         </label>
         <p className="fd-hint">
           Expected moves come after an input, on a new screen or while a screen
-          loads. Shown by default: shift under hand, jitter, cut off, outside
-          and run problems.
+          loads. Shown by default: shift under hand, jitter, cut off, outside,
+          spacing and run problems.
+        </p>
+        <p className="fd-hint" data-spacing-rule>
+          <strong>Spacing</strong>
+          {`: ${SPACING_RULE} Why: ${SPACING_WHY}`}
         </p>
 
         <div className="fd-count">
@@ -572,6 +578,12 @@ export function FindingsPage() {
                   <span className="fd-muted">No component file found</span>
                 ) : null}
               </p>
+              {selected.kind === "spacing" && (
+                <p className="fd-why" data-rule="spacing">
+                  <strong>{KIND_LABELS.spacing}</strong>
+                  {`: ${SPACING_RULE} ${SPACING_WHY}`}
+                </p>
+              )}
               {movement && (
                 <p className="fd-why" data-rule={movement.rule}>
                   <strong>{RULE_LABELS[movement.rule]}</strong>
