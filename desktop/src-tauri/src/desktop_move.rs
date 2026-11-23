@@ -45,6 +45,22 @@ fn state<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> &State {
     &app.state::<Shell>().inner().moving
 }
 
+/**
+Whether a move is running now. Its screens are setup's, and the window stays on them until it ends:
+a Dock click, the tray's Open, a second launch or a notice brings the window forward as it is
+(`restore_window_on`). Sending it to the OpenBot on this computer would show an app the move is
+about to remove, which then answers nothing.
+*/
+pub fn moving<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    state(app).running.load(Ordering::SeqCst)
+}
+
+/// A move running, or not, for a test of what the window does meanwhile.
+#[cfg(test)]
+pub(crate) fn set_moving_for_test<R: tauri::Runtime>(app: &tauri::AppHandle<R>, running: bool) {
+    state(app).running.store(running, Ordering::SeqCst);
+}
+
 /// The folder `connection.json` is in, the same in a test (`desktop_connected::config_dir`).
 fn config_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
     crate::desktop_connected::config_dir(app)
@@ -234,6 +250,7 @@ pub async fn move_to_cloud<R: tauri::Runtime>(
     .await;
     state(&app).running.store(false, Ordering::SeqCst);
     openbot_desktop_lib::logging::outcome("move", asked, &moved);
+    crate::setup_again_after_move(&app);
     if opened.load(Ordering::SeqCst) {
         crate::bring_to_front(&forward, "the move to OpenBot Cloud signed in");
     }

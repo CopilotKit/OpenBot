@@ -282,6 +282,7 @@ export async function invoke(command, args) {
         { id: "google", name: "Google Gemini", summary: "Use a Google AI Studio key or sign in for Gemini API access.", logins: ["endpoint", "oauth"], mark: "google-color", caution: null },
         { id: "xai", name: "xAI", summary: "Use an xAI API key or sign in to your xAI account.", logins: ["endpoint", "oauth"], mark: "xai", caution: null },
         { id: "unbiased", name: "Unbiased AI", summary: "Sign in with Unbiased AI to use Pareto, or use an API key.", logins: ["oauth", "endpoint"], mark: "unbiased", caution: null },
+        { id: "trustedrouter", name: "TrustedRouter", summary: "Use a TrustedRouter API key for models from many providers.", logins: ["endpoint"], mark: "trustedrouter", caution: null },
         { id: "openai-compatible", name: "Any OpenAI-compatible endpoint", summary: "Azure, Bedrock, Mistral, DeepSeek, Ollama, vLLM or your own.", logins: ["endpoint"], mark: null, caution: null },
       ];
     case "prepare_installation":
@@ -1687,6 +1688,7 @@ const PROVIDERS = [
   "Google Gemini",
   "xAI",
   "Unbiased AI",
+  "TrustedRouter",
   "Any OpenAI-compatible endpoint",
 ];
 
@@ -3116,6 +3118,77 @@ describe.skipIf(!asked)(
       },
       { hash: "#move-done-ai", heading: "You're on OpenBot Cloud", move: true },
     ];
+    /*
+     * The move screen's choices: OpenBot Cloud, then OpenBot for Business as the first screen draws
+     * it, then OpenBot (Self-Contained), one above the other at one width. Business's four clouds
+     * are drawn, on one line, inside its row past its words.
+     */
+    const MOVE_CHOICE_ROWS = {
+      names: [
+        "OpenBot Cloud Recommended",
+        "OpenBot for Business",
+        "OpenBot (Self-Contained)",
+      ],
+      stacked: true,
+      drawn: [
+        ["aws", true],
+        ["azure", true],
+        ["google-cloud", true],
+        ["kubernetes", true],
+      ],
+      marks: true,
+    };
+    const moveChoiceRows = async (page: Page) => {
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+      });
+      return page.evaluate(() => {
+        const rows = [
+          ...document.querySelectorAll("fieldset.picker.hosting > .tile"),
+        ];
+        const boxes = rows.map((row) => row.getBoundingClientRect());
+        const business = document.querySelector(
+          "fieldset.picker.hosting > .tile.with-marks",
+        );
+        const box = business?.getBoundingClientRect();
+        const words = business
+          ?.querySelector(".tile-summary")
+          ?.getBoundingClientRect();
+        const marks = [
+          ...(business?.querySelectorAll(".cloud-mark") ?? []),
+        ].map((mark) => mark.getBoundingClientRect());
+        return {
+          names: rows.map(
+            (row) => row.querySelector(".tile-name")?.textContent ?? "",
+          ),
+          stacked: boxes.every(
+            (row, at) =>
+              row.width === boxes[0]?.width &&
+              (at === 0 || row.top >= (boxes[at - 1]?.bottom ?? 0)),
+          ),
+          drawn: [
+            ...(business?.querySelectorAll<HTMLImageElement>(
+              ".cloud-mark img",
+            ) ?? []),
+          ].map((image) => [
+            image.dataset.mark,
+            image.complete && image.naturalWidth > 0,
+          ]),
+          marks:
+            marks.length === 4 &&
+            !!box &&
+            !!words &&
+            marks.every(
+              (mark) =>
+                mark.top >= box.top &&
+                mark.bottom <= box.bottom &&
+                mark.right <= box.right &&
+                mark.left >= words.right &&
+                mark.top === marks[0]?.top,
+            ),
+        };
+      });
+    };
     for (const [width, height] of SIZES)
       for (const colorScheme of ["light", "dark"] as const) {
         for (const screen of SCREENS) {
@@ -3235,10 +3308,12 @@ describe.skipIf(!asked)(
               const said = await page.evaluate(
                 () => document.querySelector("main")?.textContent ?? "",
               );
-              if (screen.hash === "#move-choice")
+              if (screen.hash === "#move-choice") {
                 expect(said).toContain(
                   "This removes about 20.2 GB of OpenBot files from this computer.",
                 );
+                expect(await moveChoiceRows(page)).toEqual(MOVE_CHOICE_ROWS);
+              }
               if (screen.hash === "#move-confirm")
                 expect(said).toContain(
                   "Removes about 20.2 GB of OpenBot files.",
@@ -3322,6 +3397,163 @@ describe.skipIf(!asked)(
           await page.close();
         }
       }, 30_000);
+
+    /*
+     * OpenBot for Business, picked on the move screen: the first screen's booker under the rows,
+     * Book a demo in view at once, and nothing that moves or keeps. Taller than the window, it
+     * scrolls in the card as it does on the first screen; the page never does, and nothing runs off
+     * the card's side. OpenBot Cloud again brings back Continue and its promise, fitting as before.
+     */
+    for (const [width, height] of [
+      [1000, 760],
+      [720, 560],
+    ] as const)
+      for (const colorScheme of ["light", "dark"] as const)
+        test(`at ${width}x${height}, OpenBot for Business on the move screen books a demo in the card and moves nothing (${colorScheme})`, async () => {
+          const page = await browser.newPage({
+            viewport: { width, height },
+            colorScheme,
+          });
+          try {
+            await routeCalendar(page);
+            await open(page, "#move-choice", cloudBuilt);
+            await page
+              .getByRole("heading", {
+                name: "Move to OpenBot Cloud?",
+                exact: true,
+              })
+              .waitFor();
+            await page
+              .getByText("Your own cloud or on-prem. Book a demo.")
+              .click();
+            await page
+              .locator(
+                '.booking-calendar[data-ready] iframe[title="Booking calendar"]',
+              )
+              .waitFor();
+            await page.mouse.move(0, 0);
+            await page.waitForTimeout(600);
+            if (shots)
+              await page.screenshot({
+                path: `${shots}/move-choice-business-${width}x${height}-${colorScheme}-${engine}.png`,
+              });
+            expect(await moveChoiceRows(page)).toEqual(MOVE_CHOICE_ROWS);
+            const shape = await page.evaluate(() => {
+              const card = document.querySelector(
+                "main > .sheet",
+              ) as HTMLElement;
+              const view = card.getBoundingClientRect();
+              const rows = [
+                ...document.querySelectorAll("fieldset.picker.hosting > .tile"),
+              ];
+              const last = rows[rows.length - 1]?.getBoundingClientRect();
+              const booker = document
+                .querySelector(".business-booker")
+                ?.getBoundingClientRect();
+              const book = [...document.querySelectorAll("button")]
+                .find((button) => button.textContent === "Book a demo")
+                ?.getBoundingClientRect();
+              const wider = [...card.querySelectorAll("*")].filter(
+                (element) =>
+                  element.getBoundingClientRect().right > view.right + 0.5,
+              );
+              return {
+                page:
+                  document.documentElement.scrollHeight <= window.innerHeight &&
+                  document.documentElement.scrollWidth <= window.innerWidth,
+                cardScrolls: card.scrollHeight > card.clientHeight + 1,
+                sideways: card.scrollWidth - card.clientWidth <= 0,
+                wider: wider.map((element) => element.className),
+                chosen: document.querySelector(".tile.chosen .tile-name")
+                  ?.textContent,
+                underRows: !!booker && !!last && booker.top >= last.bottom,
+                // Its first line shows under the rows without a scroll, at every size.
+                bookerShows: !!booker && booker.top + 24 <= view.bottom,
+                bookInView:
+                  !!book && book.top >= view.top && book.bottom <= view.bottom,
+                // The screen's own buttons: none moves and none keeps.
+                own: [
+                  ...document.querySelectorAll(
+                    "main > .sheet > .row button, main > .sheet > .step-footer button",
+                  ),
+                ].map((button) => button.textContent),
+                footnote: document.querySelector("main > .sheet > .footnote")
+                  ?.textContent,
+              };
+            });
+            const { bookInView, ...laid } = shape;
+            expect(laid).toEqual({
+              page: true,
+              cardScrolls: true,
+              sideways: true,
+              wider: [],
+              chosen: "OpenBot for Business",
+              underRows: true,
+              bookerShows: true,
+              own: [],
+              footnote: undefined,
+            });
+            // At the window's default size Book a demo is in view at once; in the smallest window
+            // the card scrolls to it, as it does to anything below the rows.
+            if (height === 760) expect(bookInView).toBe(true);
+            const scrolled = await page.evaluate(() => {
+              const card = document.querySelector(
+                "main > .sheet",
+              ) as HTMLElement;
+              const button = [...document.querySelectorAll("button")].find(
+                (each) => each.textContent === "Book a demo",
+              );
+              button?.scrollIntoView({ block: "nearest" });
+              const view = card.getBoundingClientRect();
+              const box = button?.getBoundingClientRect();
+              return (
+                !!box &&
+                box.top >= view.top &&
+                box.bottom <= Math.min(window.innerHeight, view.bottom)
+              );
+            });
+            expect(scrolled).toBe(true);
+            const made = await calls(page);
+            expect(made).not.toContain("move_preview");
+            expect(made).not.toContain("move_to_cloud");
+            expect(made).not.toContain("keep_self_contained");
+            // OpenBot Cloud again: Continue and the promise, in view, the calendar gone.
+            await page.getByText(/move to your OpenBot Cloud account/).click();
+            await page
+              .getByRole("button", { name: "Continue", exact: true })
+              .waitFor();
+            await page.mouse.move(0, 0);
+            await page.waitForTimeout(300);
+            const back = await page.evaluate(() => {
+              const card = document.querySelector(
+                "main > .sheet",
+              ) as HTMLElement;
+              const view = card.getBoundingClientRect();
+              const go = [...document.querySelectorAll("button")]
+                .find((button) => button.textContent === "Continue")
+                ?.getBoundingClientRect();
+              return {
+                calendar: document.querySelectorAll(
+                  'iframe[title="Booking calendar"]',
+                ).length,
+                continueInView:
+                  !!go &&
+                  go.top >= Math.max(0, view.top) &&
+                  go.bottom <= Math.min(window.innerHeight, view.bottom),
+                footnote: document.querySelector("main > .sheet > .footnote")
+                  ?.textContent,
+              };
+            });
+            expect(back).toEqual({
+              calendar: 0,
+              continueInView: true,
+              footnote:
+                "Nothing is removed from this computer until everything has arrived in OpenBot Cloud and been checked.",
+            });
+          } finally {
+            await page.close();
+          }
+        }, 30_000);
   },
 );
 

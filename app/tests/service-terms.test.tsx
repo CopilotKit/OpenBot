@@ -649,6 +649,43 @@ describe.skipIf(!asked)("The terms on OpenBot Cloud", () => {
     }, 60_000);
 });
 
+describe.skipIf(!asked)("A refusal is never read as no terms", () => {
+  /*
+   * Only the API's plain not found is an OpenBot older than the terms. Any other 404 is a refusal
+   * about this request, the organization it names included, and says nothing about whether the
+   * person has agreed: read as no terms, it let them past the terms on OpenBot Cloud.
+   */
+  for (const engine of engines)
+    test(`an organization not found holds the person at the terms, in ${engine}`, async () => {
+      const server = new FakeServer("toAgree", true);
+      server.termsAnswer = {
+        status: 404,
+        json: {
+          status: 404,
+          code: "ORGANIZATION_NOT_FOUND",
+          detail: "That organization wasn't found.",
+        },
+      };
+      const page = await open("/settings", server, engine, "light", WIDE);
+      try {
+        // Wherever the gate sends them, the first page they see is the terms.
+        const first = page.getByRole("heading", { level: 1 }).first();
+        await first.waitFor();
+        expect(await first.textContent()).toBe("Agree to the terms");
+        expect(at(page)).toBe("/terms");
+        // Once the read answers, the person agrees and goes on, as after any failed read.
+        server.termsAnswer = null;
+        await page.getByRole("button", { name: "Try again" }).click();
+        await tick(page);
+        await primary(page).click();
+        await page.locator("[data-app-settings]").waitFor();
+        expect(server.accepts).toEqual([{ version: "2026-11-21" }]);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+});
+
 describe.skipIf(!asked)("On a phone", () => {
   for (const engine of engines)
     test(`nothing at the end of the terms or of Welcome sits under the fade above the buttons, in ${engine}`, async () => {

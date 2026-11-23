@@ -5,6 +5,9 @@ failure. Read this before you change the spec (`api/`), an app's requests (the w
 Desktop, the phone app, the Recorder), what OpenBot Desktop hands the OpenBot it starts, or a
 release's `release-policy.json`.
 
+The short version, and the rules for the database, are in
+[api-and-migrations.md](api-and-migrations.md). Read that first.
+
 Each rule lives in one place. This page holds the rules, what CI checks, and the checklist. The
 mechanics of marking a deprecation and opening an enum are in [api/README.md](../api/README.md),
 what OpenBot Desktop does with a release it can't launch is in

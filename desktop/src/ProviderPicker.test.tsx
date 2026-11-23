@@ -79,9 +79,19 @@ const unbiased = {
   keyLink: "Get an Unbiased AI API key",
 };
 
+/** A gateway in front of many providers, with an API key and no sign-in. */
+const trustedRouter = {
+  id: "trustedrouter",
+  name: "TrustedRouter",
+  baseUrl: "https://api.trustedrouter.com/v1",
+  model: "anthropic/claude-sonnet-5.5",
+  keyUrl: "https://trustedrouter.com/console/api-keys",
+  keyLink: "Get a TrustedRouter API key",
+};
+
 const allProviders: Provider[] = [
   ...providers,
-  ...[...cloudProviders, unbiased].map(
+  ...[...cloudProviders, unbiased, trustedRouter].map(
     (provider): Provider => ({
       id: provider.id,
       name: provider.name,
@@ -1244,7 +1254,7 @@ for (const provider of cloudProviders) {
   });
 }
 
-for (const provider of [...cloudProviders, unbiased]) {
+for (const provider of [...cloudProviders, unbiased, trustedRouter]) {
   test(`${provider.name} opens its API key page externally without sending entered credentials`, async () => {
     invokeHandler = async (command) => {
       if (command === "providers") return allProviders;

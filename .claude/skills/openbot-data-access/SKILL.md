@@ -18,6 +18,10 @@ else.
 
 ## API First
 
+**Before you change `api/` or a request an app makes, read
+[docs/api-and-migrations.md](../../../docs/api-and-migrations.md). Not optional.** Anything a
+released app uses keeps working for 12 months: add beside the old, deprecate, never change in place.
+
 OpenBot's API is described in `api/openapi.yaml` (OpenAPI 3.1), and that file is the single source of
 truth: the browser's client, its types, the server's types, the docs and the contract tests all come
 from it. It is a bundle of one source file per area under `api/openapi/`; edit those, never the
