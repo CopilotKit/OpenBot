@@ -25,15 +25,18 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { describeConnection } from "@/lib/ai-connection/describe";
+import {
+  type DescribedConnection,
+  describeConnection,
+} from "@/lib/ai-connection/describe";
 import { removePersonalAiMutationOptions } from "@/lib/ai-connection/mutations";
 import { isSignIn, providerById } from "@/lib/ai-connection/providers";
 import {
+  aiConnectionsQueryOptions,
   needsAiConnection,
   type PersonalAiConnection,
   personalAiConnectionQueryOptions,
 } from "@/lib/ai-connection/queries";
-import type { AiConnection } from "@/lib/api/generated/model";
 import { queryClient } from "@/query-client";
 import {
   ChooseConnection,
@@ -42,6 +45,7 @@ import {
   ProviderTile,
 } from "./ai-connection-chooser";
 import { failureSaid } from "@/lib/load-failure";
+import { AiConnectionRows, SEVERAL } from "./ai-connection-list";
 
 /**
  * Settings → General → Your AI: the AI a person's Bots use when they work for them, on an OpenBot
@@ -55,18 +59,36 @@ import { failureSaid } from "@/lib/load-failure";
  */
 export function YourAiSection() {
   const personal = useQuery(personalAiConnectionQueryOptions());
+  const available = personal.data?.available === true;
+  const list = useQuery({
+    ...aiConnectionsQueryOptions("personal"),
+    enabled: available,
+  });
   // Pending, failed, or an OpenBot without this: the section isn't there.
-  if (!personal.data?.available) return null;
+  if (!personal.data?.available || list.isPending) return null;
+  // Their own connections, where the server lists them and they have any; the one row otherwise.
+  const own = list.data && list.data.connections.length > 0 ? list.data : null;
   return (
     <PageSection
-      description="Bots use your own AI when they work for you. It's personal to you and never shared with your organization."
+      description={`Bots use your own AI when they work for you. It's personal to you and never shared with your organization.${
+        own && own.connections.length > 1 ? ` ${SEVERAL}` : ""
+      }`}
       // Admin → Providers links here.
       id="your-ai"
       title="Your AI"
     >
-      <PageRows>
-        <YourAiRow personal={personal.data} />
-      </PageRows>
+      {own ? (
+        <AiConnectionRows
+          inDesktop={false}
+          list={own}
+          organizationWide={false}
+          scope="personal"
+        />
+      ) : (
+        <PageRows>
+          <YourAiRow personal={personal.data} />
+        </PageRows>
+      )}
     </PageSection>
   );
 }
@@ -138,7 +160,7 @@ function YourAiRow({ personal }: { personal: PersonalAiConnection }) {
 type Step =
   | { at: "current" }
   | { at: "choose" }
-  | { at: "done"; connection: AiConnection };
+  | { at: "done"; connection: DescribedConnection };
 
 function YourAiDialog({
   personal,

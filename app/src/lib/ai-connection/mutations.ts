@@ -1,6 +1,7 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import type {
   AiConnection,
+  AiConnectionEntry,
   AiConnectionInput,
   AiConnectionProvider,
   AiSignIn,
@@ -9,20 +10,30 @@ import type {
   PersonalAiConnection,
 } from "@/lib/api/generated/model";
 import {
+  connectAiConnection,
+  connectPersonalAiConnection,
   deleteAiConnection,
   deletePersonalAiConnection,
+  finishAiSignIn,
   finishPersonalAiSignIn,
   getAiConnection,
+  getAiSignIn,
   getPersonalAiSignIn,
+  makeAiConnectionDefault,
+  makePersonalAiConnectionDefault,
+  removeAiConnection,
+  removePersonalAiConnection,
   replaceAiConnection,
   replacePersonalAiConnection,
+  startAiSignIn,
   startPersonalAiSignIn,
 } from "@/lib/api/generated/models/models";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { desktopKeys } from "@/lib/desktop/queries";
 import { modelKeys } from "@/lib/models/queries";
+import type { DescribedConnection } from "./describe";
 import { prepareAiConnection, settleAiConnection } from "./desktop";
-import { aiConnectionKeys } from "./queries";
+import { aiConnectionKeys, type ConnectionScope } from "./queries";
 
 const FALLBACK = "Couldn't change the AI connection. Try again.";
 
@@ -38,7 +49,7 @@ export type ConnectVariables = {
 
 /** What a switch ends with: the connection in use, and anything Desktop couldn't finish after it. */
 export type Connected = {
-  connection: AiConnection;
+  connection: DescribedConnection;
   /** Desktop's sentence when it couldn't record the switch or move the default Bot. */
   desktopProblem: string | null;
 };
@@ -251,4 +262,194 @@ export function finishPersonalSignIn(
     { "Idempotency-Key": idempotencyKey() },
     { fallback: "Couldn't check the code. Try again." },
   );
+}
+
+/** The three steps of a sign-in the server runs, for one scope. */
+export type SignInSteps = {
+  start: (
+    provider: AiConnectionProvider,
+    method?: AiSignInInputMethod,
+    options?: { loopbackPort?: number },
+  ) => Promise<AiSignIn>;
+  read: (signInId: string) => Promise<AiSignInStatus>;
+  finish: (signInId: string, code: string) => Promise<AiSignInStatus>;
+};
+
+export const personalSignInSteps: SignInSteps = {
+  start: startPersonalSignIn,
+  read: readPersonalSignIn,
+  finish: finishPersonalSignIn,
+};
+
+/**
+ * The organization's sign-in (startAiSignIn), which an admin runs for everyone: what the provider
+ * hands back is kept for the organization, and connected with connectAiConnection.
+ */
+export const organizationSignInSteps: SignInSteps = {
+  start: (provider, method, options) =>
+    startAiSignIn(
+      organizationId(),
+      {
+        provider,
+        ...(method ? { method } : {}),
+        ...(options?.loopbackPort !== undefined
+          ? { loopbackPort: options.loopbackPort }
+          : {}),
+      },
+      { "Idempotency-Key": idempotencyKey() },
+      { fallback: "Couldn't start the sign-in. Try again." },
+    ),
+  read: (signInId) =>
+    getAiSignIn(organizationId(), signInId, {
+      fallback: "Couldn't check the sign-in. Try again.",
+    }),
+  finish: (signInId, code) =>
+    finishAiSignIn(
+      organizationId(),
+      signInId,
+      { code },
+      { "Idempotency-Key": idempotencyKey() },
+      { fallback: "Couldn't check the code. Try again." },
+    ),
+};
+
+export function signInStepsFor(scope: ConnectionScope): SignInSteps {
+  return scope === "organization"
+    ? organizationSignInSteps
+    : personalSignInSteps;
+}
+
+/*
+ * Several AI connections at once: connect one more, make one the default, remove one. Each reads
+ * every AI connection again afterwards, with the models and every conversation's choice, since
+ * which models a person may pick follows from them.
+ */
+
+/** Connect one more AI connection beside the others (connectAiConnection). */
+export function addAiConnectionMutationOptions(
+  queryClient: QueryClient,
+  scope: ConnectionScope,
+) {
+  return mutationOptions({
+    mutationFn: async ({ input }: ConnectVariables): Promise<Connected> => {
+      const connection =
+        scope === "organization"
+          ? await connectAiConnection(
+              organizationId(),
+              input,
+              { "Idempotency-Key": idempotencyKey() },
+              { fallback: FALLBACK },
+            )
+          : await connectPersonalAiConnection(
+              organizationId(),
+              "me",
+              input,
+              { "Idempotency-Key": idempotencyKey() },
+              { fallback: PERSONAL_FALLBACK },
+            );
+      return { connection, desktopProblem: null };
+    },
+    onSuccess: () => invalidateAiConnection(queryClient),
+  });
+}
+
+export type MakeDefaultVariables = {
+  entry: AiConnectionEntry;
+  /** In an OpenBot Desktop that changes the connection in place: a plan's engine starts first. */
+  desktop: boolean;
+};
+
+/**
+ * Make one connection the default. In Desktop the order is connectAi's: a plan's engine starts
+ * first, then the server, then Desktop settles to it; anything failing before settles back.
+ */
+async function makeDefault(
+  scope: ConnectionScope,
+  { entry, desktop }: MakeDefaultVariables,
+): Promise<AiConnectionEntry> {
+  const fallback = "Couldn't make it the default. Try again.";
+  if (scope === "personal")
+    return makePersonalAiConnectionDefault(
+      organizationId(),
+      "me",
+      entry.id,
+      { "Idempotency-Key": idempotencyKey() },
+      { fallback },
+    );
+  try {
+    if (desktop && entry.login === "plan")
+      await prepareAiConnection(entry.provider, entry.login);
+    const made = await makeAiConnectionDefault(
+      organizationId(),
+      entry.id,
+      { "Idempotency-Key": idempotencyKey() },
+      { fallback },
+    );
+    if (desktop)
+      await settleAiConnection({
+        provider: made.provider,
+        login: made.login,
+        model: made.model,
+        endpointHost: made.endpointHost,
+      }).catch(() => {});
+    return made;
+  } catch (error) {
+    if (desktop) await settleBack();
+    throw error;
+  }
+}
+
+export function makeDefaultAiConnectionMutationOptions(
+  queryClient: QueryClient,
+  scope: ConnectionScope,
+) {
+  return mutationOptions({
+    mutationFn: (variables: MakeDefaultVariables) =>
+      makeDefault(scope, variables),
+    onSuccess: () => invalidateAiConnection(queryClient),
+  });
+}
+
+export type RemoveVariables = {
+  id: string;
+  /** The connection that takes over as the default, made default before the remove. */
+  nextDefault?: AiConnectionEntry;
+  desktop?: boolean;
+};
+
+/**
+ * Remove one connection. The server never moves the default by itself, so when another takes over
+ * it is made the default first, and only then is this one removed.
+ */
+export function removeAiConnectionMutationOptions(
+  queryClient: QueryClient,
+  scope: ConnectionScope,
+) {
+  return mutationOptions({
+    mutationFn: async ({
+      id,
+      nextDefault,
+      desktop = false,
+    }: RemoveVariables): Promise<void> => {
+      if (nextDefault)
+        await makeDefault(scope, { entry: nextDefault, desktop });
+      const fallback = "Couldn't disconnect it. Try again.";
+      if (scope === "organization")
+        await removeAiConnection(
+          organizationId(),
+          id,
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback },
+        );
+      else
+        await removePersonalAiConnection(
+          organizationId(),
+          "me",
+          id,
+          { "Idempotency-Key": idempotencyKey() },
+          { fallback },
+        );
+    },
+    onSettled: () => invalidateAiConnection(queryClient),
+  });
 }

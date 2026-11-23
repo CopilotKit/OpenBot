@@ -20,11 +20,15 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { describeConnection } from "@/lib/ai-connection/describe";
+import {
+  type DescribedConnection,
+  describeConnection,
+} from "@/lib/ai-connection/describe";
 import { disconnectAiMutationOptions } from "@/lib/ai-connection/mutations";
 import { isSignIn, providerById } from "@/lib/ai-connection/providers";
 import {
   aiConnectionQueryOptions,
+  aiConnectionsQueryOptions,
   desktopAiSupportQueryOptions,
   personalAiConnectionQueryOptions,
 } from "@/lib/ai-connection/queries";
@@ -45,6 +49,7 @@ import {
   ProviderTile,
 } from "./ai-connection-chooser";
 import { failureSaid } from "@/lib/load-failure";
+import { AiConnectionRows, SEVERAL } from "./ai-connection-list";
 
 /**
  * Settings → General's AI model: the AI provider OpenBot's Bots run on and how OpenBot signs in to
@@ -67,7 +72,8 @@ export function AiModelSection({
 }) {
   const connection = useQuery(aiConnectionQueryOptions());
   const support = useQuery(desktopAiSupportQueryOptions());
-  if (connection.isPending || support.isPending) return null;
+  const list = useQuery(aiConnectionsQueryOptions("organization"));
+  if (connection.isPending || support.isPending || list.isPending) return null;
   if (
     connection.error ||
     support.error ||
@@ -76,22 +82,34 @@ export function AiModelSection({
   )
     return <DesktopAiModelSection />;
   if (!connection.data.editable) return null;
+  const inDesktop = support.data === "in-place";
+  // Several connections, where the server lists them; the one connection it had before otherwise.
+  const several = list.data ? list.data.connections.length > 1 : false;
   return (
     <PageSection
-      description={
+      description={`${
         organizationWide
           ? "Choose an AI for everyone in your organization. Bots use it for anyone who hasn't connected their own."
           : "Choose the AI provider your Bots use and how OpenBot signs in to it."
-      }
+      }${several ? ` ${SEVERAL}` : ""}`}
       title={organizationWide ? "Organization's AI" : "AI model"}
     >
-      <PageRows>
-        <AiConnectionRow
-          connection={connection.data}
-          inDesktop={support.data === "in-place"}
+      {list.data && list.data.connections.length > 0 ? (
+        <AiConnectionRows
+          inDesktop={inDesktop}
+          list={list.data}
           organizationWide={organizationWide}
+          scope="organization"
         />
-      </PageRows>
+      ) : (
+        <PageRows>
+          <AiConnectionRow
+            connection={connection.data}
+            inDesktop={inDesktop}
+            organizationWide={organizationWide}
+          />
+        </PageRows>
+      )}
     </PageSection>
   );
 }
@@ -191,7 +209,11 @@ function useViewerId(connection: AiConnection): string | undefined {
 type Step =
   | { at: "current" }
   | { at: "choose" }
-  | { at: "done"; connection: AiConnection; desktopProblem: string | null };
+  | {
+      at: "done";
+      connection: DescribedConnection;
+      desktopProblem: string | null;
+    };
 
 function AiConnectionDialog({
   connection,

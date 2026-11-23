@@ -1,5 +1,34 @@
-import type { AiConnection } from "@/lib/api/generated/model";
-import { providerById } from "./providers";
+import type {
+  AiConnection,
+  AiConnectionLogin,
+  AiConnectionProvider,
+} from "@/lib/api/generated/model";
+import { providerById, signInWords } from "./providers";
+
+/** What describing a connection reads: the single connection's fields, or one in a list. */
+export type DescribedConnection = Pick<
+  AiConnection,
+  "provider" | "login" | "model" | "endpointHost" | "sharedSignIn"
+>;
+
+/**
+ * A connection's name in a list or a picker group, one per provider: "Claude plan", "ChatGPT plan",
+ * "Google sign-in", "OpenAI API key", "Google Gemini API key", or an address's host. Without a way in
+ * (a member reading the organization's connections), the provider's name.
+ */
+export function connectionName(connection: {
+  provider: AiConnectionProvider;
+  login: AiConnectionLogin | null;
+  endpointHost?: string | null;
+}): string {
+  const { provider, login, endpointHost } = connection;
+  const name = providerById(provider)?.name ?? provider;
+  if (login === "plan" || login === "oauth")
+    return signInWords(provider, login);
+  if (provider === "openai-compatible") return endpointHost ?? name;
+  if (login === "api-key" || login === "endpoint") return `${name} API key`;
+  return name;
+}
 
 /** One line of the AI connection dialog: what it is, and this OpenBot's answer. */
 export type AiConnectionDetail = { label: string; value: string };
@@ -31,10 +60,7 @@ export type AiConnectionOwner = "you" | "organization";
 
 /** What Settings says about the AI connection; null when none has been chosen yet. */
 export function describeConnection(
-  connection: Pick<
-    AiConnection,
-    "provider" | "login" | "model" | "endpointHost" | "sharedSignIn"
-  >,
+  connection: DescribedConnection,
   owner: AiConnectionOwner = "you",
   /** The reader's person id, so a sign-in they shared reads as theirs. */
   viewerId?: string,
