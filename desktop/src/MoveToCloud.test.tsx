@@ -57,7 +57,26 @@ const { countLines, formatSpace, reconnectPage } = await import(
   "./MoveToCloud"
 );
 
-beforeAll(() => GlobalRegistrator.register());
+/*
+ * OpenBot for Business's booking calendar is never fetched from Calendly: its frame gets an empty
+ * page, as `App.test.tsx` gives it, and a test of the window goes nowhere on the web.
+ */
+beforeAll(() =>
+  GlobalRegistrator.register({
+    settings: {
+      fetch: {
+        interceptor: {
+          beforeAsyncRequest: async ({ request, window }) =>
+            new URL(request.url).hostname === "calendly.com"
+              ? new window.Response("<!doctype html><title></title>", {
+                  headers: { "content-type": "text/html" },
+                })
+              : undefined,
+        },
+      },
+    },
+  }),
+);
 afterAll(() => GlobalRegistrator.unregister());
 
 let before: string | undefined;
@@ -211,6 +230,87 @@ test("after the update, OpenBot (Self-Contained) asks once, before showing OpenB
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
   await view.findByRole("heading", { name: "Move to OpenBot Cloud" });
   expect(called("move_preview")).toHaveLength(1);
+});
+
+/*
+ * A company that wants OpenBot on its own cloud learns it can, on the move screen too: OpenBot for
+ * Business, between OpenBot Cloud and OpenBot (Self-Contained), as the first screen draws it. It
+ * books a demo and moves nothing. Before, the move screen offered only the other two.
+ */
+test("the move screen offers OpenBot for Business between Cloud and Self-Contained, which books a demo and moves nothing", async () => {
+  selfContainedRunning({ due: true });
+  const view = await launch();
+  await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+  // Three choices, in this order on screen, for the keyboard and for a screen reader.
+  const names = view
+    .getAllByRole("radio")
+    .map(
+      (radio) =>
+        radio.closest("label")?.querySelector(".tile-name")?.textContent,
+    );
+  expect(names).toEqual([
+    "OpenBot Cloud Recommended",
+    "OpenBot for Business",
+    "OpenBot (Self-Contained)",
+  ]);
+  const cloud = view.getByRole("radio", {
+    name: /^OpenBot Cloud/,
+  }) as HTMLInputElement;
+  const business = view.getByRole("radio", {
+    name: /^OpenBot for Business/,
+  }) as HTMLInputElement;
+  expect(cloud.checked).toBe(true);
+  expect(business.checked).toBe(false);
+  // The first screen's row: its words and the clouds it runs on.
+  const row = business.closest("label") as HTMLElement;
+  expect(row.textContent).toContain("Your own cloud or on-prem. Book a demo.");
+  expect(
+    [...row.querySelectorAll(".cloud-mark img")].map((mark) =>
+      mark.getAttribute("alt"),
+    ),
+  ).toEqual(["AWS", "Azure", "Google Cloud", "Kubernetes"]);
+  expect(view.queryByTitle("Booking calendar")).toBeNull();
+
+  // Picked: what it adds and the calendar to book a demo, and nothing that moves or keeps.
+  await userEvent.click(business);
+  expect(business.checked).toBe(true);
+  expect(
+    view.getByText(
+      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud.",
+    ),
+  ).toBeTruthy();
+  expect(view.getByRole("heading", { name: "Book a demo" })).toBeTruthy();
+  expect(view.getByTitle("Booking calendar")).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Continue" })).toBeNull();
+  expect(
+    view.queryByRole("button", { name: "Keep OpenBot on this computer" }),
+  ).toBeNull();
+  expect(view.queryByText(/Nothing is removed/)).toBeNull();
+  expect(
+    view.queryByText("You can still move to OpenBot Cloud later in Settings."),
+  ).toBeNull();
+
+  // OpenBot Cloud again: Continue and the promise, exactly as before, and no calendar.
+  await userEvent.click(cloud);
+  expect(view.queryByTitle("Booking calendar")).toBeNull();
+  expect(view.getByRole("button", { name: "Continue" })).toBeTruthy();
+  view.getByText(
+    "Nothing is removed from this computer until everything has arrived in OpenBot Cloud and been checked.",
+  );
+  // OpenBot (Self-Contained): Keep and its note, as before.
+  await userEvent.click(
+    view.getByRole("radio", { name: /^OpenBot \(Self-Contained\)/ }),
+  );
+  expect(view.queryByTitle("Booking calendar")).toBeNull();
+  expect(
+    view.getByRole("button", { name: "Keep OpenBot on this computer" }),
+  ).toBeTruthy();
+  view.getByText("You can still move to OpenBot Cloud later in Settings.");
+  // Looking at OpenBot for Business moved, kept and started nothing.
+  expect(called("move_preview")).toEqual([]);
+  expect(called("move_to_cloud")).toEqual([]);
+  expect(called("keep_self_contained")).toEqual([]);
+  expect(called("show_openbot")).toEqual([]);
 });
 
 test("a launch that isn't due shows OpenBot straight away, and a connected app is never asked", async () => {

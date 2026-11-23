@@ -503,8 +503,8 @@ function Install({
   );
 }
 
-/** The clouds OpenBot for Business runs on, by their marks. */
-function CloudMarks() {
+/** The clouds OpenBot for Business runs on, by their marks. The move screen's row draws them too. */
+export function CloudMarks() {
   return (
     <span className="cloud-marks">
       {CLOUDS.map((each) => (
@@ -517,7 +517,7 @@ function CloudMarks() {
 }
 
 /** A row's mark: the window's plain icon tile, decorative, since the row's name says what it is. */
-function HostingMark({ children }: { children: ReactNode }) {
+export function HostingMark({ children }: { children: ReactNode }) {
   return (
     <div className="mark-tile mark-icon" aria-hidden="true">
       {children}
