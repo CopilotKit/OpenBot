@@ -307,6 +307,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- **A Bot's command is no longer refused as "not saved", and the Bot gets what it printed.** Every
+  command a Bot runs is checked against the saved conversation first, and the saved copy can trail
+  the conversation on screen by several seconds on a busy day. A command checked too soon was
+  refused with "That unanswered tool call is not saved in this conversation": its card said Didn't
+  run, and the Bot answered without the output. The check now waits up to 20 seconds for the copy to
+  catch up, and says in the server's log (`computer-step-call-saved-late`) when it had to.
+- A command, a click or any other change a Bot makes on a computer that is still starting waits for
+  it, up to three minutes, as the Bot's other computer calls already did. Its card used to say the
+  computer was starting, and the Bot was told to try again.
+- Activity no longer says "Ran … Exit 0" about a command that didn't run. It says Didn't run, with
+  why, as the command's card in the conversation does.
 - **A model that goes quiet while it works no longer has its answer cut off.** OpenBot's model
   gateway closed an answer that sent nothing for 10 seconds, so a model that thought for longer
   before its next words (a large prompt, a long think) ended the turn with a raw `ECONNRESET` error.
