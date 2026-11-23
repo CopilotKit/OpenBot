@@ -522,6 +522,65 @@ test("a stopped key leads with Replace key, which opens its provider's key field
   expect(within(dialog).getByLabelText(/API key/)).toBeDefined();
 });
 
+test("removing a person's last own connection says what happens next, and sends them to connect one when it is required", async () => {
+  personal = PERSONAL;
+  personalList = [entry("anthropic", { isDefault: true })];
+  const user = userEvent.setup({ document });
+  const view = renderPersonal();
+  await user.click(await view.findByRole("button", { name: /Claude plan/ }));
+  const dialog = await view.findByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  expect(
+    await within(dialog).findByText(
+      "Remove it and Bots can't work for you until you connect another.",
+    ),
+  ).toBeDefined();
+  // After the removal the server says the person has no AI, and one is required.
+  personal = { ...PERSONAL, uses: "none" };
+  await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  await waitFor(() =>
+    expect(`${window.location.pathname}${window.location.search}`).toBe(
+      "/onboarding?step=ai",
+    ),
+  );
+});
+
+test("removing a person's last own connection where the organization has an AI says Bots use the organization's", async () => {
+  personal = {
+    ...PERSONAL,
+    organization: { ready: true, provider: "openai" },
+  };
+  personalList = [entry("anthropic", { isDefault: true })];
+  const user = userEvent.setup({ document });
+  const view = renderPersonal();
+  await user.click(await view.findByRole("button", { name: /Claude plan/ }));
+  const dialog = await view.findByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  expect(
+    await within(dialog).findByText(
+      "Remove it and Bots use your organization's AI for you.",
+    ),
+  ).toBeDefined();
+});
+
+test("disconnecting the organization's last connection on OpenBot Cloud says Bots work only for people with their own", async () => {
+  orgList = [entry("anthropic", { isDefault: true })];
+  const user = userEvent.setup({ document });
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <AiModelSection organizationWide />
+    </QueryClientProvider>,
+  );
+  await user.click(await view.findByRole("button", { name: /Claude plan/ }));
+  const dialog = await view.findByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  expect(
+    await within(dialog).findByText(
+      "Disconnect it and Bots work only for people who connected their own AI.",
+    ),
+  ).toBeDefined();
+});
+
 async function connectWithKey(
   view: ReturnType<typeof renderOrganization>,
   provider: RegExp,

@@ -1,6 +1,7 @@
 import { IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
+import { CONNECT_YOUR_AI_PATH } from "@/components/channels/add-model-key-link";
 import { PageRows } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +42,9 @@ import {
   type AiConnections,
   aiConnectionQueryOptions,
   type ConnectionScope,
+  needsAiConnection,
+  type PersonalAiConnection,
+  personalAiConnectionQueryOptions,
 } from "@/lib/ai-connection/queries";
 import { queryClient } from "@/query-client";
 import {
@@ -281,6 +285,25 @@ function ConnectionDialog({
   const remove = useMutation(
     removeAiConnectionMutationOptions(queryClient, scope),
   );
+  const personal = useQuery({
+    ...personalAiConnectionQueryOptions(),
+    enabled: scope === "personal",
+  }).data;
+  /**
+   * After a removal: a person whose runs now have no AI, where one is required, is sent to connect
+   * one, as removing their own AI always did (the server's verdict, read again).
+   */
+  const afterRemoving = () => {
+    onClose();
+    if (scope !== "personal") return;
+    void queryClient
+      .fetchQuery({ ...personalAiConnectionQueryOptions(), staleTime: 0 })
+      .then((after) => {
+        if (needsAiConnection(after))
+          window.location.assign(CONNECT_YOUR_AI_PATH);
+      })
+      .catch(() => {});
+  };
   /*
    * The organization's default, changed as it always was (replaceAiConnection): inside OpenBot
    * Desktop that is the one way to a plan Desktop holds. Every other row connects its provider
@@ -355,7 +378,7 @@ function ConnectionDialog({
           <DialogDescription>
             {others.length > 0
               ? "It's the default AI. Choose which one Bots use when nobody picked a model."
-              : "Bots can't start work until another AI is connected."}
+              : lastGoes(scope, organizationWide, personal)}
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 flex flex-col gap-3 text-sm">
@@ -404,7 +427,7 @@ function ConnectionDialog({
                   nextDefault: others.find((other) => other.id === nextDefault),
                   desktop,
                 },
-                { onSuccess: onClose },
+                { onSuccess: afterRemoving },
               )
             }
             size="sm"
@@ -449,7 +472,8 @@ function ConnectionDialog({
             disabled={busy}
             onClick={() => {
               if (entry.isDefault) setStep({ at: "disconnect" });
-              else remove.mutate({ id: entry.id }, { onSuccess: onClose });
+              else
+                remove.mutate({ id: entry.id }, { onSuccess: afterRemoving });
             }}
             size="sm"
             variant="destructive"
@@ -492,6 +516,27 @@ function ConnectionDialog({
       </DialogFooter>
     </DialogContent>
   );
+}
+
+/**
+ * What happens when the last connection that can run goes, in the words the single connection's
+ * dialogs always used: a person's runs fall back to the organization's, an organization's on OpenBot
+ * Cloud leaves only people with their own, and otherwise Bots can't run.
+ */
+function lastGoes(
+  scope: ConnectionScope,
+  organizationWide: boolean,
+  personal: PersonalAiConnection | null | undefined,
+): string {
+  if (scope === "personal")
+    return personal?.organization.ready
+      ? "Remove it and Bots use your organization's AI for you."
+      : personal?.required
+        ? "Remove it and Bots can't work for you until you connect another."
+        : "Remove it and Bots stop using it for you.";
+  return organizationWide
+    ? "Disconnect it and Bots work only for people who connected their own AI."
+    : "Disconnect it and Bots can't run until you connect another.";
 }
 
 function AddingDialog({
