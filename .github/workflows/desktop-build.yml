@@ -16,7 +16,7 @@ on:
         type: string
         default: internal
       bundle_cli:
-        description: Bundle the CLI and its Node runtime into the macOS and Windows installers.
+        description: Bundle the CLI and its Node runtime into the macOS, Windows and Linux installers.
         type: boolean
         default: false
       manifest_artifact:
