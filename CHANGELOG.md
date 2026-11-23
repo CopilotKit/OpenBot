@@ -230,6 +230,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   problem", with Reload and the troubleshooting logs, and the error goes to Desktop's log. A setup
   window on screen that draws nothing, or stops answering, is reloaded once; still stuck, a message
   says it still isn't updating, with Restart and Get logs.
+- **On Windows, WSL 1 stays your default.** Setup stopped where WSL's default version was 1, and
+  its fix switched the default to 2, which OpenBot doesn't need: its Podman machine and Docker
+  Desktop run on WSL 2 either way. It no longer asks. Where WSL 2 isn't installed yet, the screen
+  says OpenBot needs WSL 2 and that distributions you run on WSL 1 stay as they are.
 - **Start puts back a missing image list.** When OpenBot (Self-Contained)'s list of images on this
   computer was missing or couldn't be read, Start said this version of OpenBot doesn't include the
   Bot you picked, and every Retry failed. Start now finds an installation that needs laying out
