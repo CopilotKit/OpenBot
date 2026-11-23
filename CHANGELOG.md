@@ -307,6 +307,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- **After a move to OpenBot Cloud you can tell where everything went.** OpenBot Desktop stays on the
+  move's screens until you move or keep OpenBot here: coming back to the window from the Dock while
+  OpenBot got ready for the move used to show the OpenBot on this computer instead, and the move
+  never started. The result names the account and organization the move went into, says where
+  OpenBot Cloud is in a browser and opens it there. Settings → Computer names the account the app
+  is signed in as. In OpenBot Cloud, a bar says when your moved Bots are in another of your
+  organizations than the one you're working in, with a way to switch to it.
 - After connecting an app from a Bot's card or a Bot's page, you're back where you pressed Connect.
   The sign-in's tab closes once the app is connected, or, where the browser won't close it, goes back
   to the conversation or the Bot's page. It used to stay on the app's page under Connections.
