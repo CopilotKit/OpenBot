@@ -12,14 +12,21 @@ import type {
  */
 
 /**
- * The groups a picker draws: none when the catalogue has fewer than two connections (draw it as
- * before), otherwise every connection, the default first.
+ * The groups a picker draws: none when the catalogue has no connections or one that is the default
+ * (draw it as before), otherwise every connection, the default first. A lone connection that isn't
+ * the default (an older app disconnected the default) is grouped, so a pick can name it: with no
+ * default, a run with no pick is refused.
  */
 export function pickerGroups(
   catalogue: ModelCatalogue | undefined,
 ): CatalogueConnection[] {
   const connections = catalogue?.connections ?? [];
-  if (connections.length < 2) return [];
+  // One connection draws as before, unless it isn't the default: then only naming it runs.
+  if (
+    connections.length === 0 ||
+    (connections.length === 1 && connections[0]?.isDefault)
+  )
+    return [];
   return [
     ...connections.filter((one) => one.isDefault),
     ...connections.filter((one) => !one.isDefault),

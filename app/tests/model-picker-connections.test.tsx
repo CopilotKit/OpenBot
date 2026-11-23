@@ -109,7 +109,7 @@ async function open(view: ReturnType<typeof render>, name: string | RegExp) {
 }
 
 test("one connection: the picker is as before and the pick is sent without a connection", async () => {
-  const one = catalogueOf([CLAUDE]);
+  const one = catalogueOf([{ ...CLAUDE, isDefault: true }]);
   const view = render(
     <ModelPicker
       catalogue={one}
@@ -289,4 +289,61 @@ test("search finds a model in a later group", async () => {
     within(popup).queryByRole("option", { name: /GPT-6.2 Sol/ }),
   ).toBeNull();
   expect(within(popup).queryByText("ChatGPT plan")).toBeNull();
+});
+
+test("one connection and no default: the picker names it, and a pick saves with its connection", async () => {
+  const alone = catalogueOf([CLAUDE]);
+  const picks: ModelPick[] = [];
+  const view = render(
+    <ModelPicker
+      catalogue={alone}
+      onChange={(pick) => picks.push(pick)}
+      value={shownPick({ model: null, effort: null }, alone)}
+    />,
+  );
+  const { user, popup } = await open(view, /Choose a model/);
+  expect(within(popup).getByText("Claude plan")).toBeTruthy();
+  await user.click(within(popup).getByRole("option", { name: /Sonnet/ }));
+  expect(picks[0]).toEqual({
+    model: SONNET.id,
+    effort: null,
+    connection: "anthropic",
+  });
+  expect(requestFor(picks[0] as ModelPick, alone)).toEqual({
+    model: SONNET.id,
+    effort: null,
+    connection: "anthropic",
+  });
+});
+
+test("a pick on a stopped connection stays on it, even when that connection lists no models", () => {
+  const stopped = catalogueOf([
+    CHATGPT,
+    {
+      ...CLAUDE,
+      ready: false,
+      problem: { code: "sign-in-ended", detail: "Sign in again." },
+      models: [],
+    },
+  ]);
+  const shown = shownPick(
+    { model: OPUS.id, effort: "high", connection: "anthropic" },
+    stopped,
+  );
+  expect(shown).toEqual({
+    model: OPUS.id,
+    effort: "high",
+    connection: "anthropic",
+  });
+  const view = render(
+    <ModelPicker
+      catalogue={stopped}
+      onChange={() => {}}
+      stopped
+      value={shown}
+    />,
+  );
+  expect(
+    view.getByRole("combobox", { name: new RegExp(`Model: ${OPUS.id}`) }),
+  ).toBeTruthy();
 });

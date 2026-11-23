@@ -136,6 +136,13 @@ export function shownPick(
   const named = saved?.connection
     ? connectionOf(catalogue, saved.connection)
     : undefined;
+  // A stopped connection's pick is not moved anywhere: its run is refused and the person told so.
+  if (named && !named.ready && saved?.model)
+    return {
+      model: saved.model,
+      effort: saved.effort ?? null,
+      connection: named.id,
+    };
   if (named && optionFor(catalogueFor(catalogue, named), saved?.model)) {
     const pick = shownPickIn(saved, catalogueFor(catalogue, named));
     return pick && { ...pick, connection: named.id };

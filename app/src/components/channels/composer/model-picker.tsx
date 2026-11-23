@@ -170,7 +170,12 @@ export function ModelPicker({
   if (groups.length > 0) {
     // Several connections: the pick's own, and nothing selected while there is no default.
     const on = value ? connectionOf(catalogue, value.connection) : undefined;
-    const selected = on?.models.find((model) => model.id === value?.model);
+    // A stopped connection may list nothing: its pick is still named, by its id.
+    const selected =
+      on?.models.find((model) => model.id === value?.model) ??
+      (on && !on.ready && value
+        ? { id: value.model, label: value.model }
+        : undefined);
     const fallback = connectionOf(catalogue, null);
     return (
       <Picker
