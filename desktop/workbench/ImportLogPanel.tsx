@@ -1,8 +1,29 @@
-import { useState } from "react";
+import { IconChevronRight } from "@tabler/icons-react";
+import { useId, useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { parseTroubleshooting, toScene } from "./logImport";
 import type { Scene } from "./scenes/types";
 
 type Start = "first-run" | "relaunch";
+
+const STARTS: readonly { start: Start; label: string }[] = [
+  { start: "first-run", label: "First run" },
+  { start: "relaunch", label: "Relaunch" },
+];
 
 export type ImportLogPanelProps = {
   /** The scenes imported in this browser tab. */
@@ -40,6 +61,7 @@ export function ImportLogPanel({
 }: ImportLogPanelProps) {
   const [start, setStart] = useState<Start>("first-run");
   const [problem, setProblem] = useState<string | null>(null);
+  const id = useId();
 
   const read = async (input: HTMLInputElement) => {
     const file = input.files?.[0];
@@ -63,18 +85,28 @@ export function ImportLogPanel({
   };
 
   return (
-    <section className="wb-import" aria-label="Import a log">
-      <label className="wb-prop">
-        <span>Start</span>
-        <select
+    <section className="flex flex-col gap-3" aria-label="Import a log">
+      <Field orientation="horizontal">
+        <FieldLabel htmlFor={`${id}-start`}>Start</FieldLabel>
+        <Select
           value={start}
-          onChange={(event) => setStart(event.target.value as Start)}
+          onValueChange={(value) => setStart(value as Start)}
         >
-          <option value="first-run">First run</option>
-          <option value="relaunch">Relaunch</option>
-        </select>
-      </label>
-      <input
+          <SelectTrigger id={`${id}-start`} size="sm" aria-label="Start">
+            <SelectValue>
+              {STARTS.find((s) => s.start === start)?.label}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {STARTS.map((s) => (
+              <SelectItem key={s.start} value={s.start}>
+                {s.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      <Input
         type="file"
         accept=".txt,.md"
         aria-label="Troubleshooting file"
@@ -82,33 +114,60 @@ export function ImportLogPanel({
           void read(event.currentTarget);
         }}
       />
-      {problem && <p role="alert">{problem}</p>}
-      <details className="wb-import-save">
-        <summary>Save for agents</summary>
-        <p>
-          The browser cannot write files. A scene you import here stays only in
-          this browser tab. To save it for agents and the shot CLI, run this in
-          the desktop folder:
+      {problem && (
+        <p role="alert" className="text-sm text-destructive">
+          {problem}
         </p>
-        <code>{importCommand(start)}</code>
-        <p>It writes the scene to workbench/scenes/imported/.</p>
-      </details>
+      )}
+      <Collapsible>
+        <CollapsibleTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="sm"
+              className="group/save -ml-2 justify-start"
+            />
+          }
+        >
+          <IconChevronRight
+            aria-hidden
+            className="transition-transform group-data-panel-open/save:rotate-90"
+          />
+          Save for agents
+        </CollapsibleTrigger>
+        <CollapsibleContent
+          keepMounted
+          className="flex flex-col gap-2 pt-1 text-sm text-muted-foreground"
+        >
+          <p>
+            The browser cannot write files. A scene you import here stays only
+            in this browser tab. To save it for agents and the shot CLI, run
+            this in the desktop folder:
+          </p>
+          <code className="block rounded-md bg-muted p-2 font-mono text-xs break-all text-foreground">
+            {importCommand(start)}
+          </code>
+          <p>It writes the scene to workbench/scenes/imported/.</p>
+        </CollapsibleContent>
+      </Collapsible>
       {scenes.length > 0 && (
-        <nav aria-label="Imported scenes">
-          <h3>Imported</h3>
+        <nav aria-label="Imported scenes" className="flex flex-col gap-0.5">
+          <h3 className="text-sm font-medium">Imported</h3>
           {scenes.map((scene) => {
             const isCurrent = scene.id === current;
             return (
-              <button
+              <Button
                 key={scene.id}
-                type="button"
+                variant="ghost"
+                size="sm"
                 title={scene.id}
                 aria-current={isCurrent ? "true" : undefined}
-                className={isCurrent ? "wb-scene wb-scene-current" : "wb-scene"}
+                // "wb-scene": the page's Space key plays on a scene row instead of pressing it.
+                className="wb-scene justify-start truncate aria-[current=true]:bg-muted aria-[current=true]:font-medium"
                 onClick={() => onPick(scene.id)}
               >
                 {scene.title}
-              </button>
+              </Button>
             );
           })}
         </nav>

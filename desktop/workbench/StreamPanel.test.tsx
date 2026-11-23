@@ -7,6 +7,7 @@ import {
   render,
   within,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type {
   SocketControl,
   SocketRecord,
@@ -68,6 +69,15 @@ function section(view: ReturnType<typeof render>, name: string) {
   return within(heading.closest("section") as HTMLElement);
 }
 
+/** Opens the Agent list of the Streams section and picks the agent with that name. */
+async function pickAgent(box: ReturnType<typeof within>, name: string) {
+  const person = userEvent.setup({ document });
+  await person.click(box.getByRole("combobox", { name: "Agent" }));
+  await person.click(
+    await within(document.body).findByRole("option", { name }),
+  );
+}
+
 const OPEN_STREAM: StreamRecord = {
   id: 1,
   agent: "default",
@@ -76,7 +86,7 @@ const OPEN_STREAM: StreamRecord = {
   sent: 3,
 };
 
-test("lists streams and sends an event array to the picked agent", () => {
+test("lists streams and sends an event array to the picked agent", async () => {
   const streams = fakeStreams([OPEN_STREAM]);
   const view = render(<StreamPanel streams={streams.control} sockets={null} />);
   const box = section(view, "Streams");
@@ -85,7 +95,7 @@ test("lists streams and sends an event array to the picked agent", () => {
   expect(row.textContent).toContain("/api/copilotkit");
   expect(row.textContent).toContain("Open");
   expect(row.textContent).toContain("3 sent");
-  edit(box.getByLabelText("Agent"), "default");
+  await pickAgent(box, "default");
   const events = [
     { type: "TEXT_MESSAGE_START", messageId: "m1" },
     { type: "TEXT_MESSAGE_END", messageId: "m1" },
@@ -119,23 +129,27 @@ test("bad JSON or an event without a type shows the error and sends nothing", ()
   expect(streams.push).not.toHaveBeenCalled();
 });
 
-test("End the stream ends the picked agent", () => {
+test("End the stream ends the picked agent", async () => {
   const streams = fakeStreams([OPEN_STREAM]);
   const view = render(<StreamPanel streams={streams.control} sockets={null} />);
   const box = section(view, "Streams");
-  edit(box.getByLabelText("Agent"), "default");
+  await pickAgent(box, "default");
   fireEvent.click(box.getByText("End the stream"));
   expect(streams.end).toHaveBeenCalledWith("default");
 });
 
-test("a stream opened after render shows in the list and the agents", () => {
+test("a stream opened after render shows in the list and the agents", async () => {
   const streams = fakeStreams([]);
   const view = render(<StreamPanel streams={streams.control} sockets={null} />);
   const box = section(view, "Streams");
   expect(box.queryAllByTestId("stream")).toHaveLength(0);
   act(() => streams.add(OPEN_STREAM));
   expect(box.queryAllByTestId("stream")).toHaveLength(1);
-  expect(box.getByRole("option", { name: "default" })).not.toBeNull();
+  await userEvent
+    .setup({ document })
+    .click(box.getByRole("combobox", { name: "Agent" }));
+  const options = await within(document.body).findAllByRole("option");
+  expect(options.map((o) => o.textContent)).toEqual(["* (all)", "default"]);
 });
 
 test("socket send shows the count and parses JSON", () => {
@@ -168,4 +182,10 @@ test("socket send shows the count and parses JSON", () => {
   fireEvent.click(box.getByText("Send"));
   expect(sockets.send).toHaveBeenLastCalledWith("nowhere", "hello");
   expect(box.getByRole("status").textContent).toBe("Sent to 0 sockets.");
+});
+
+test("with nothing open, the sections say so", () => {
+  const view = render(<StreamPanel streams={null} sockets={null} />);
+  expect(view.getByText("No streams yet.")).not.toBeNull();
+  expect(view.getByText("No sockets yet.")).not.toBeNull();
 });

@@ -1,6 +1,13 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ImportLogPanel, importCommand, sceneFromLog } from "./ImportLogPanel";
 import type { Scene } from "./scenes/types";
 
@@ -63,9 +70,11 @@ test("a chosen file becomes a scene; imported scenes show and can be picked", as
       onPick={onPick}
     />,
   );
-  fireEvent.change(view.getByLabelText("Start"), {
-    target: { value: "relaunch" },
-  });
+  const person = userEvent.setup({ document });
+  await person.click(view.getByRole("combobox", { name: "Start" }));
+  await person.click(
+    await within(document.body).findByRole("option", { name: "Relaunch" }),
+  );
   expect(
     view.getByText("bun run workbench:import <file> --start relaunch"),
   ).toBeTruthy();
@@ -77,4 +86,20 @@ test("a chosen file becomes a scene; imported scenes show and can be picked", as
   expect(onImport.mock.calls[0]?.[0].start.hash).toBe("#start");
   fireEvent.click(view.getByText("Install (from a log)"));
   expect(onPick).toHaveBeenCalledWith("log-x");
+});
+
+test("Save for agents folds open and shows the command", async () => {
+  const view = render(
+    <ImportLogPanel
+      scenes={[]}
+      current="other"
+      onImport={() => {}}
+      onPick={() => {}}
+    />,
+  );
+  const trigger = view.getByRole("button", { name: "Save for agents" });
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  await userEvent.setup({ document }).click(trigger);
+  expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  expect(view.getByText("bun run workbench:import <file>")).not.toBeNull();
 });

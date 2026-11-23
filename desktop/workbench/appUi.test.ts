@@ -11,18 +11,11 @@ import { join, relative } from "node:path";
  * file is already clean, fails too.
  */
 const PENDING: readonly string[] = [
-  "ApiAnswersPanel.tsx",
-  "appPanels.css",
-  "CommandsPanel.tsx",
   "CommentLayer.tsx",
-  "EventsPanel.tsx",
   "findings/FindingsPage.tsx",
   "findings/findings.css",
-  "ImportLogPanel.tsx",
   "Inspector.tsx",
-  "RequestLog.tsx",
   "SceneList.tsx",
-  "StreamPanel.tsx",
   "WarningsList.tsx",
   "windowFrame.css",
   "WindowSettingsPanel.tsx",

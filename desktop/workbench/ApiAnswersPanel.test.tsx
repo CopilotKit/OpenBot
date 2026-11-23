@@ -1,8 +1,15 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ApiAnswersPanel } from "./ApiAnswersPanel";
-import type { ApiAnswer, ApiChange, ApiControl, ApiRoute } from "./appContract";
+import type {
+  ApiAnswer,
+  ApiChange,
+  ApiControl,
+  ApiRecord,
+  ApiRoute,
+} from "./appContract";
 
 beforeAll(() => GlobalRegistrator.register());
 afterEach(cleanup);
@@ -10,7 +17,10 @@ afterAll(() => GlobalRegistrator.unregister());
 
 const BOTS: ApiRoute = "GET /api/v2/organizations/:organizationId/bots";
 
-function fakeApi(initial: [ApiRoute, ApiAnswer][] = []) {
+function fakeApi(
+  initial: [ApiRoute, ApiAnswer][] = [],
+  requests: ApiRecord[] = [],
+) {
   const map = new Map<ApiRoute, ApiAnswer>(initial);
   const listeners = new Set<(change: ApiChange) => void>();
   const notify = (route: ApiRoute) => {
@@ -30,7 +40,7 @@ function fakeApi(initial: [ApiRoute, ApiAnswer][] = []) {
     clearAnswer,
     answers: () => new Map(map),
     answerFor: () => null,
-    requests: () => [],
+    requests: () => requests,
     onChange(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -43,6 +53,15 @@ function edit(el: HTMLElement, value: string) {
   fireEvent.focusIn(el);
   fireEvent.change(el, { target: { value } });
   fireEvent.keyUp(el);
+}
+
+/** Opens the Mode list and picks the option with that name. */
+async function pickMode(view: ReturnType<typeof render>, name: string) {
+  const person = userEvent.setup({ document });
+  await person.click(view.getByRole("combobox", { name: "Mode" }));
+  await person.click(
+    await within(document.body).findByRole("option", { name }),
+  );
 }
 
 test("a value answer reaches the API and onAnswer", () => {
@@ -102,13 +121,13 @@ test("a bad route shows the error and calls nothing", () => {
   expect(setAnswer).not.toHaveBeenCalled();
 });
 
-test("offline needs no body", () => {
+test("offline needs no body", async () => {
   const { api, setAnswer } = fakeApi();
   const onAnswer = mock();
   const view = render(
     <ApiAnswersPanel api={api} picked={BOTS} onAnswer={onAnswer} />,
   );
-  edit(view.getByLabelText("Mode"), "offline");
+  await pickMode(view, "Offline");
   expect(view.queryByLabelText("Body (JSON)")).toBeNull();
   expect(view.queryByLabelText("Status")).toBeNull();
   fireEvent.click(view.getByText("Set answer"));
@@ -116,24 +135,24 @@ test("offline needs no body", () => {
   expect(onAnswer).toHaveBeenCalledWith(BOTS, { mode: "offline" });
 });
 
-test("fail defaults to 422 and an empty body uses the default body", () => {
+test("fail defaults to 422 and an empty body uses the default body", async () => {
   const { api, setAnswer } = fakeApi();
   const view = render(
     <ApiAnswersPanel api={api} picked={BOTS} onAnswer={() => {}} />,
   );
-  edit(view.getByLabelText("Mode"), "fail");
+  await pickMode(view, "Fail");
   expect((view.getByLabelText("Status") as HTMLInputElement).value).toBe("422");
   edit(view.getByLabelText("Body (JSON)"), "");
   fireEvent.click(view.getByText("Set answer"));
   expect(setAnswer).toHaveBeenCalledWith(BOTS, { mode: "fail", status: 422 });
 });
 
-test("delay sends the milliseconds", () => {
+test("delay sends the milliseconds", async () => {
   const { api, setAnswer } = fakeApi();
   const view = render(
     <ApiAnswersPanel api={api} picked={BOTS} onAnswer={() => {}} />,
   );
-  edit(view.getByLabelText("Mode"), "delay");
+  await pickMode(view, "Delay");
   edit(view.getByLabelText("Delay in ms"), "500");
   fireEvent.click(view.getByText("Set answer"));
   expect(setAnswer).toHaveBeenCalledWith(BOTS, {
@@ -155,4 +174,71 @@ test("Clear in the list calls clearAnswer and onAnswer with null", () => {
   expect(clearAnswer).toHaveBeenCalledWith(BOTS);
   expect(onAnswer).toHaveBeenCalledWith(BOTS, null);
   expect(view.queryAllByTestId("api-answer")).toHaveLength(0);
+});
+
+test("the modes are Value, Never, Fail, Delay and Offline", async () => {
+  const { api } = fakeApi();
+  const view = render(
+    <ApiAnswersPanel api={api} picked={null} onAnswer={() => {}} />,
+  );
+  const trigger = view.getByRole("combobox", { name: "Mode" });
+  expect(trigger.textContent).toContain("Value");
+  await userEvent.setup({ document }).click(trigger);
+  const options = await within(document.body).findAllByRole("option");
+  expect(options.map((o) => o.textContent)).toEqual([
+    "Value",
+    "Never",
+    "Fail",
+    "Delay",
+    "Offline",
+  ]);
+});
+
+test("the Route list offers the routes the window asked for, and the set ones", async () => {
+  const PERSON: ApiRoute = "GET /api/v2/person";
+  const { api } = fakeApi(
+    [[PERSON, { mode: "never" }]],
+    [
+      {
+        id: 1,
+        method: "GET",
+        path: "/api/v2/organizations/default/bots",
+        at: 0,
+        source: "spec",
+        route: BOTS,
+        status: 200,
+        state: "answered",
+      },
+    ],
+  );
+  const view = render(
+    <ApiAnswersPanel api={api} picked={null} onAnswer={() => {}} />,
+  );
+  const person = userEvent.setup({ document });
+  await person.click(view.getByLabelText("Route"));
+  await person.keyboard("{ArrowDown}");
+  const options = await within(document.body).findAllByRole("option");
+  expect(options.map((o) => o.textContent).sort()).toEqual(
+    [BOTS, PERSON].sort(),
+  );
+  await person.click(within(document.body).getByRole("option", { name: BOTS }));
+  expect((view.getByLabelText("Route") as HTMLInputElement).value).toBe(BOTS);
+});
+
+test("a route that is not in the list stays as typed", async () => {
+  const { api, setAnswer } = fakeApi();
+  const view = render(
+    <ApiAnswersPanel api={api} picked={null} onAnswer={() => {}} />,
+  );
+  const route = view.getByLabelText("Route") as HTMLInputElement;
+  const person = userEvent.setup({ document });
+  await person.click(route);
+  await person.keyboard("POST /api/copilotkit");
+  await person.click(view.getByText("Set answer"));
+  expect(route.value).toBe("POST /api/copilotkit");
+  expect(setAnswer).toHaveBeenCalledWith("POST /api/copilotkit", {
+    mode: "value",
+    status: 200,
+    body: {},
+  });
 });

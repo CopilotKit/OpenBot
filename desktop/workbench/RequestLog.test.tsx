@@ -1,6 +1,12 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  within,
+} from "@testing-library/react";
 import type { ApiChange, ApiControl, ApiRecord } from "./appContract";
 import { RequestLog } from "./RequestLog";
 
@@ -77,10 +83,12 @@ test("lists requests newest first with status, source and time", () => {
   expect(rows[0]?.textContent).toContain("Waiting");
   expect(rows[0]?.textContent).toContain("Scene answer");
   expect(rows[0]?.textContent).toContain("0:02");
-  expect(rows[1]?.querySelector(".wb-req-method")?.textContent).toBe("GET");
-  expect(rows[1]?.querySelector(".wb-req-route")?.textContent).toBe(
-    "/api/v2/person",
-  );
+  const cells = within(rows[1] as HTMLElement).getAllByRole("cell");
+  expect(cells.map((cell) => cell.textContent)).toEqual([
+    "0:01",
+    "GET/api/v2/personSpec example",
+    "200",
+  ]);
   expect(rows[1]?.textContent).toContain("200");
   expect(rows[1]?.textContent).toContain("Spec example");
 });
@@ -105,13 +113,13 @@ test("the filter keeps the matching requests", () => {
   expect(rows[0]?.getAttribute("title")).toBe("POST /api/copilotkit");
 });
 
-test("a request with no answer says so and has the class", () => {
+test("a request with no answer says so and is marked", () => {
   const { api } = fakeApi([record(1, { source: "none", status: 404 })]);
   const view = render(<RequestLog api={api} />);
   const row = view.getByTestId("request");
   expect(row.textContent).toContain("No answer");
   expect(row.textContent).toContain("404");
-  expect(row.className).toBe("wb-request-missing");
+  expect(row.getAttribute("data-source")).toBe("none");
 });
 
 test("Answer this gives the route without the query", () => {
@@ -128,4 +136,24 @@ test("without onPick there is no Answer this button", () => {
   const { api } = fakeApi([record(1, {})]);
   const view = render(<RequestLog api={api} />);
   expect(view.queryByText("Answer this")).toBeNull();
+});
+
+test("the requests are rows of a table with a header", () => {
+  const { api } = fakeApi([record(1, {}), record(2, {})]);
+  const view = render(<RequestLog api={api} />);
+  const table = view.getByRole("table");
+  const heads = within(table).getAllByRole("columnheader");
+  expect(heads.map((head) => head.textContent)).toEqual([
+    "Time",
+    "Request",
+    "Status",
+  ]);
+  expect(within(table).getAllByTestId("request")).toHaveLength(2);
+});
+
+test("with no requests it says so", () => {
+  const { api } = fakeApi([]);
+  const view = render(<RequestLog api={api} />);
+  expect(view.getByText("No requests yet.")).not.toBeNull();
+  expect(view.queryByRole("table")).toBeNull();
 });
