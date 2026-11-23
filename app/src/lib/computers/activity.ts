@@ -841,6 +841,18 @@ export function detailsOf(
       ...(typeof result.exitCode === "number"
         ? { exitCode: result.exitCode }
         : {}),
+      /*
+       * Not run: the pane must not say "Exit 0" about a command the computer never ran. A command
+       * that ran has an exit code; an answer with none that did not work (the gate refused the step,
+       * the computer could not be reached) is a command that did not run. It read as "Ran … Exit 0"
+       * beside a card saying "Didn't run", and that was taken for the command having run.
+       */
+      ...(result.ok === false &&
+      typeof result.exitCode !== "number" &&
+      result.refused !== true &&
+      result.doneByPerson !== true
+        ? { failed: true }
+        : {}),
       ...notTheBot,
       ...(result.truncated === true ? { truncated: true } : {}),
       ...(result.timedOut === true ? { timedOut: true } : {}),
