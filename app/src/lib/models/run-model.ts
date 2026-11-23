@@ -155,6 +155,11 @@ export function useConversationModel(
         : shownPick(picked, catalogue, botDefault),
     saving: save.isPending,
     /**
+     * The AI connection the next run would use, when it is connected but can't run now, and why
+     * (the choice's `stopped`). Null when it can run, or from an OpenBot older than several.
+     */
+    stopped: saved.data?.stopped ?? null,
+    /**
      * What the composer says about the pick: the chosen model doesn't work with this Bot yet, or
      * it stopped being offered.
      */

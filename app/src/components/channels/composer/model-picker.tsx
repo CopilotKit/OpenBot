@@ -1,5 +1,6 @@
 import { Combobox as ComboboxPrimitive } from "@base-ui/react";
 import {
+  IconAlertTriangle,
   IconCheck,
   IconChevronDown,
   IconCpu,
@@ -144,6 +145,7 @@ export function ModelPicker({
   showValue = false,
   disabled,
   saving,
+  stopped = false,
   className,
 }: {
   catalogue: ModelCatalogue | undefined;
@@ -156,6 +158,11 @@ export function ModelPicker({
   disabled?: boolean;
   /** A pick is being saved: the picker shows it and holds still until the save settles. */
   saving?: boolean;
+  /**
+   * The AI connection the conversation's next run would use can't run now (the model choice's
+   * `stopped`): the trigger carries a warning mark until the choice changes.
+   */
+  stopped?: boolean;
   className?: string;
 }) {
   if (!catalogue || (!catalogue.choosable && !allowSingle)) return null;
@@ -178,6 +185,7 @@ export function ModelPicker({
         selected={selected}
         selectedConnection={selected ? on?.id : undefined}
         showValue={showValue}
+        stopped={stopped}
       />
     );
   }
@@ -197,12 +205,16 @@ export function ModelPicker({
       onChange={onChange}
       selected={selected}
       showValue={showValue}
+      stopped={stopped}
     />
   );
 }
 
 /** What the trigger says while several connections have no default and nothing is picked. */
 const CHOOSE_A_MODEL = "Choose a model";
+
+/** Added to the trigger's name while the connection the next run would use can't run. */
+const STOPPED_SAYS = ". Its AI connection can't run now";
 
 function Picker({
   catalogue,
@@ -215,6 +227,7 @@ function Picker({
   effort,
   onChange,
   disabled,
+  stopped,
   className,
 }: {
   catalogue: ModelCatalogue;
@@ -230,6 +243,7 @@ function Picker({
   effort: string | null;
   onChange: (pick: ModelPick) => void;
   disabled?: boolean;
+  stopped: boolean;
   className?: string;
 }) {
   const grouped = connections.length > 0;
@@ -381,13 +395,13 @@ function Picker({
              */
             <ComboboxPrimitive.Trigger
               ref={trigger}
-              aria-label={
+              aria-label={`${
                 !selected
                   ? CHOOSE_A_MODEL
                   : effortText
                     ? `Model: ${selected.label}, thinking: ${effortText}`
                     : `Model: ${selected.label}`
-              }
+              }${stopped ? STOPPED_SAYS : ""}`}
               className={cn(
                 showValue
                   ? "min-w-0 w-full justify-start gap-2 px-3 font-normal"
@@ -404,7 +418,14 @@ function Picker({
               }
               nativeButton
             >
-              <IconCpu aria-hidden className="size-4 shrink-0" />
+              {stopped ? (
+                <IconAlertTriangle
+                  aria-hidden
+                  className="size-4 shrink-0 text-destructive"
+                />
+              ) : (
+                <IconCpu aria-hidden className="size-4 shrink-0" />
+              )}
               {showValue ? (
                 <span className="min-w-0 flex-1 truncate text-left">
                   {shown}
