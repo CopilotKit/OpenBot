@@ -647,6 +647,13 @@ describe("the words and the controls", () => {
     expect(
       memberControl(row("dana", "owner"), { id: "dana", role: "owner" }),
     ).toBeNull();
+    // With two owners either can go, but only an owner removes one. An owner may still leave.
+    const coOwner = row("ona", "owner", true);
+    expect(memberControl(coOwner, { id: "dana", role: "owner" })).toBe(
+      "remove",
+    );
+    expect(memberControl(coOwner, { id: "dana", role: "admin" })).toBeNull();
+    expect(memberControl(coOwner, { id: "ona", role: "owner" })).toBe("leave");
   });
 
   test("somebody who hasn't opened OpenBot yet is offered no role, and removal only where the server says they can be removed", () => {
