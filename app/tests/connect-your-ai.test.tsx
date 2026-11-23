@@ -2383,20 +2383,33 @@ describe.skipIf(!asked)("Connect your AI on OpenBot Cloud", () => {
         "light",
         WIDE,
       );
-      // Leave to read the clipboard back. WebKit writes on a press without asking, and knows only
-      // the read permission.
-      await page
-        .context()
-        .grantPermissions(
-          engine === "webkit"
-            ? ["clipboard-read"]
-            : ["clipboard-read", "clipboard-write"],
-          { origin: ORIGIN },
-        );
+      // Chromium reads the clipboard back with leave to. WebKit writes on a press without asking,
+      // but refuses a read that no press started, so there the test notes what the page handed
+      // the real clipboard and reads that.
+      if (engine === "chromium")
+        await page
+          .context()
+          .grantPermissions(["clipboard-read", "clipboard-write"], {
+            origin: ORIGIN,
+          });
       const clipboard = () =>
-        page.evaluate(() => navigator.clipboard.readText());
+        engine === "chromium"
+          ? page.evaluate(() => navigator.clipboard.readText())
+          : page.evaluate(
+              () =>
+                (window as unknown as { __written?: string }).__written ?? "",
+            );
       try {
         await heading(page, "Connect your AI");
+        if (engine !== "chromium")
+          await page.evaluate(() => {
+            const board = navigator.clipboard;
+            const write = board.writeText.bind(board);
+            board.writeText = async (text: string) => {
+              await write(text);
+              (window as unknown as { __written?: string }).__written = text;
+            };
+          });
         const chooser = page.locator("[data-ai-chooser]");
         const copy = chooser.getByRole("button", { name: "Copy the code" });
 
