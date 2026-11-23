@@ -74,6 +74,200 @@
   --backdrop-shape: oklch(0.653 0.086 271.6 / 15%);
 }
 
+/*
+ * A Bot's tile (UI Kit, section "colors", 7038:37626; Figma styles "Gradients/*"): the designers'
+ * gradient behind a 44px icon in the Bot's colours, one for each palette in `ORB_PALETTES` and named
+ * as `ORB_NAMES` names them, so a tile matches its Bot's orb (a routine's tile on Routines,
+ * `RoutineTile`). Each is Figma's own layers, topmost first: a light from the top left, a second
+ * from the lower right, over the base. Centres and radii are in % of the tile, so they hold at any
+ * size; Figma's two tilted ellipses (red, teal) are drawn upright, as wide and tall as Figma's.
+ * Red's base carries Figma's #ff0000 "color" blend worked in, so no blend mode is needed.
+ * Generated from Figma's values; change them in Figma first.
+ */
+:root {
+  /* Figma style Gradients/mint */
+  --gradient-bot-mint:
+    radial-gradient(
+      56.6% 56.6% at 31% 22.5%,
+      rgb(0 203 160) 0%,
+      rgb(16 207 166 / 0.938) 6.25%,
+      rgb(32 210 172 / 0.875) 12.5%,
+      rgb(64 216 184 / 0.75) 25%,
+      rgb(128 229 208 / 0.5) 50%,
+      rgb(255 255 255 / 0) 100%
+    ),
+    radial-gradient(
+      65.3% 65.6% at 100% 76.4%,
+      rgb(255 250 102) 0%,
+      rgb(255 250 102 / 0) 100%
+    ),
+    radial-gradient(
+      60.3% 60.3% at 59.7% 40.5%,
+      rgb(29 255 4) 0%,
+      rgb(26 246 20) 12.5%,
+      rgb(22 237 36) 25%,
+      rgb(15 220 67) 50%,
+      rgb(7 202 98) 75%,
+      rgb(0 185 129) 100%
+    );
+  /* Figma style Gradients/purple-pink */
+  --gradient-bot-violet:
+    radial-gradient(
+      56.6% 56.6% at 31% 22.5%,
+      rgb(82 0 255) 0%,
+      rgb(92 16 255 / 0.938) 6.25%,
+      rgb(103 32 255 / 0.875) 12.5%,
+      rgb(125 64 255 / 0.75) 25%,
+      rgb(168 128 255 / 0.5) 50%,
+      rgb(255 255 255 / 0) 100%
+    ),
+    radial-gradient(
+      62.6% 62.9% at 126.4% 92.2%,
+      rgb(149 0 255) 0%,
+      rgb(149 0 255 / 0) 100%
+    ),
+    radial-gradient(
+      60.3% 60.3% at 59.7% 40.5%,
+      rgb(49 181 255) 0%,
+      rgb(75 175 248) 12.5%,
+      rgb(100 169 241) 25%,
+      rgb(152 158 227) 50%,
+      rgb(203 146 214) 75%,
+      rgb(255 135 200) 100%
+    );
+  /* Figma style Gradients/periwinkle */
+  --gradient-bot-periwinkle:
+    radial-gradient(
+      44.3% 44.5% at 110.2% 89.8%,
+      rgb(185 224 254) 0%,
+      rgb(185 224 254 / 0) 100%
+    ),
+    radial-gradient(
+      56.6% 56.6% at 31% 22.5%,
+      rgb(209 184 255) 0%,
+      rgb(255 255 255 / 0) 100%
+    ),
+    radial-gradient(
+      60.3% 60.3% at 59.7% 40.5%,
+      rgb(84 89 251) 0%,
+      rgb(107 142 250) 50%,
+      rgb(130 194 250) 100%
+    );
+  /* Figma style Gradients/blue-teal */
+  --gradient-bot-sky:
+    radial-gradient(
+      56.6% 56.6% at 31% 22.5%,
+      rgb(80 216 209) 0%,
+      rgb(124 226 221 / 0.75) 25%,
+      rgb(168 236 232 / 0.5) 50%,
+      rgb(255 255 255 / 0) 100%
+    ),
+    radial-gradient(
+      66.6% 66.3% at 111.4% 90.9%,
+      rgb(0 68 255) 0%,
+      rgb(0 115 242 / 0.75) 25%,
+      rgb(0 161 229 / 0.5) 50%,
+      rgb(0 255 204 / 0) 100%
+    ),
+    radial-gradient(
+      60.3% 60.3% at 59.7% 40.5%,
+      rgb(49 181 255) 0%,
+      rgb(92 171 255) 50%,
+      rgb(135 161 255) 100%
+    );
+  /* Figma style Gradients/pink-orange */
+  --gradient-bot-orange:
+    radial-gradient(
+      56.6% 56.6% at 31% 22.5%,
+      rgb(255 106 0) 0%,
+      rgb(255 116 16 / 0.938) 6.25%,
+      rgb(255 125 32 / 0.875) 12.5%,
+      rgb(255 143 64 / 0.75) 25%,
+      rgb(255 181 128 / 0.5) 50%,
+      rgb(255 255 255 / 0) 100%
+    ),
+    radial-gradient(
+      39.2% 39.3% at 109.1% 79.5%,
+      rgb(255 230 0) 0%,
+      rgb(255 230 0 / 0) 100%
+    ),
+    radial-gradient(
+      60.3% 60.3% at 59.7% 40.5%,
+      rgb(255 248 49) 0%,
+      rgb(255 220 87) 25%,
+      rgb(255 192 124) 50%,
+      rgb(255 163 162) 75%,
+      rgb(255 135 200) 100%
+    );
+  /* Figma style Gradients/red-yelloy */
+  --gradient-bot-red:
+    radial-gradient(
+      51.8% 61.8% at 100% 71.6%,
+      rgb(255 234 0) 0%,
+      rgb(255 189 0 / 0.75) 19.77%,
+      rgb(255 144 0 / 0.5) 39.54%,
+      rgb(255 55 0 / 0) 79.07%
+    ),
+    radial-gradient(
+      56.6% 56.6% at 31% 22.5%,
+      rgb(255 212 112) 0%,
+      rgb(255 234 184 / 0.5) 50%,
+      rgb(255 255 255 / 0) 100%
+    ),
+    radial-gradient(
+      60.3% 60.3% at 59.7% 40.5%,
+      rgb(255 55 55) 0%,
+      rgb(255 85 85) 50%,
+      rgb(255 100 100) 75%,
+      rgb(255 115 115) 100%
+    );
+  /* Figma style Gradients/lilac */
+  --gradient-bot-lilac:
+    radial-gradient(
+      56.6% 56.6% at 31% 22.5%,
+      rgb(255 226 246) 0%,
+      rgb(255 255 255 / 0) 100%
+    ),
+    radial-gradient(
+      62.6% 62.9% at 126.4% 92.2%,
+      rgb(149 0 255) 0%,
+      rgb(149 0 255 / 0) 100%
+    ),
+    radial-gradient(
+      60.3% 60.3% at 59.7% 40.5%,
+      rgb(252 118 194) 0%,
+      rgb(207 135 225) 50%,
+      rgb(162 152 255) 100%
+    );
+  /* Figma style Gradients/turquoise */
+  --gradient-bot-teal:
+    radial-gradient(
+      56.6% 56.6% at 31% 22.5%,
+      rgb(49 181 255) 0%,
+      rgb(75 190 255 / 0.875) 12.5%,
+      rgb(101 200 255 / 0.75) 25%,
+      rgb(152 218 255 / 0.5) 50%,
+      rgb(255 255 255 / 0) 100%
+    ),
+    radial-gradient(
+      66.4% 70.8% at 107% 78.2%,
+      rgb(88 91 255) 0%,
+      rgb(66 127 231 / 0.75) 25%,
+      rgb(44 164 206 / 0.5) 50%,
+      rgb(0 237 158 / 0) 100%
+    ),
+    radial-gradient(
+      60.3% 60.3% at 59.7% 40.5%,
+      rgb(171 255 231) 0%,
+      rgb(129 235 210) 25%,
+      rgb(86 216 189) 50%,
+      rgb(43 196 168) 75%,
+      rgb(21 186 158) 87.5%,
+      rgb(11 181 152) 93.75%,
+      rgb(0 176 147) 100%
+    );
+}
+
 @media (min-width: 768px) {
   :root:not([data-kit="legacy"]) [data-slot="sidebar-wrapper"] {
     position: relative;

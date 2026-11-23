@@ -29,6 +29,26 @@ export const ORB_PALETTES: readonly OrbColors[] = [
   { bg: BG, c1: "#8dc1f1", c2: "#23d5a2", c3: "#189370", c4: "#85ecce" },
 ];
 
+/**
+ * Each palette's name, in `ORB_PALETTES`'s order: the Bot's orb picture (`ORB_IMAGES`) and its tile
+ * gradient (`--gradient-bot-<name>`, styles.css) are found by it.
+ */
+export const ORB_NAMES = [
+  "mint",
+  "violet",
+  "periwinkle",
+  "sky",
+  "orange",
+  "red",
+  "lilac",
+  "teal",
+] as const;
+
+/** A Bot's palette name, from its seed, as `orbPalette` picks its colours. */
+export function orbName(seed: string): (typeof ORB_NAMES)[number] {
+  return ORB_NAMES[ORB_PALETTES.indexOf(orbPalette(seed))] ?? ORB_NAMES[0];
+}
+
 const FNV_OFFSET = 0x811c9dc5;
 const FNV_PRIME = 0x01000193;
 

@@ -22,7 +22,7 @@ import {
   scheduleWords,
 } from "@/components/routines/routine-page";
 import { RoutinesList } from "@/components/routines/routines-list";
-import { orbPalette } from "@/lib/orb-palette";
+import { orbName } from "@/lib/orb-palette";
 import { mergeRoutines } from "@/lib/routines/merged";
 import type { RoutineRecord } from "@/lib/routines/queries";
 import { Route as BotGoalsRoute } from "@/routes/_authed/_app/bots.$agentId.responsibilities";
@@ -544,14 +544,14 @@ test("every kind of row is one link or button with a chevron, with no control in
   expect(view.queryByRole("button", { name: /^Delete/ })).toBeNull();
 });
 
-test("in the current kit every kind of row leads with its Bot's tile, in the Bot's colours", async () => {
+test("in the current kit every kind of row leads with its Bot's tile, the designers' gradient for its colour", async () => {
   serving({
     routines: [routine("r1", "expenses")],
     checkIns: [checkIn("c1", "expenses", "The launch brief")],
   });
   const view = draw();
   await view.findByText("Post the standup summary.");
-  const { c1 } = orbPalette("expenses");
+  const gradient = `var(--gradient-bot-${orbName("expenses")})`;
   for (const text of [
     "Post the standup summary.",
     "Reconcile receipts",
@@ -559,7 +559,7 @@ test("in the current kit every kind of row leads with its Bot's tile, in the Bot
   ]) {
     const row = view.getByText(text).closest("a, button") as HTMLElement;
     const tile = row.querySelector("[data-routine-tile] > span");
-    expect(tile?.getAttribute("style")).toContain(c1);
+    expect(tile?.getAttribute("style")).toContain(gradient);
     expect(row.querySelector("[data-variant=icon]")).toBeNull();
   }
 });
