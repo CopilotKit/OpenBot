@@ -278,6 +278,14 @@ function createStates(where: Where): States {
         said: "OpenBot couldn't send everything to OpenBot Cloud. Check your internet connection and try again.",
         kind: "move-failed",
       } satisfies Problem;
+    // As most real failures are: with the technical details for the log.
+    if (move === "failed-detail")
+      throw {
+        said: "OpenBot couldn't send everything to OpenBot Cloud. Check your internet connection and try again.",
+        detail:
+          "part 3 of 7: the connection was reset while sending (tried 3 times over 41s); the last try answered 502 bad-gateway with no body",
+        kind: "move-failed",
+      } satisfies Problem;
     // `#move-done-held`: as on a Mac, the disk shows 4.5 of the 20.2 GB removed free so far.
     // `#move-done-ai`: OpenBot Cloud still needs the person's AI, so the result leads with it.
     return {
