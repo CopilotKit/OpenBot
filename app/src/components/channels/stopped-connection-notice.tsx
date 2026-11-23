@@ -26,6 +26,11 @@ export function reconnectPath(connectionId: string, owner?: string): string {
   return `/settings?connection=${encodeURIComponent(connectionId)}${whose}`;
 }
 
+/** Where a default is chosen: the list in Settings, named by whose it is. */
+export function chooseDefaultPath(owner?: string): string {
+  return owner ? `/settings?owner=${encodeURIComponent(owner)}` : "/settings";
+}
+
 /**
  * Under a refused turn: the AI connection the conversation's next run would use stopped working,
  * and why, with Reconnect for whoever can fix it and Choose another model for everybody.
@@ -58,8 +63,11 @@ export function StoppedConnectionNotice({
     { ...modelCatalogueQueryOptions(), enabled: stopped !== null },
     queryClient,
   ).data;
+  // With no default there is no connection to name: whose they are is any listed one's.
   const owner = stopped
-    ? connectionOf(catalogue, stopped.connection)?.owner
+    ? stopped.connection
+      ? connectionOf(catalogue, stopped.connection)?.owner
+      : catalogue?.connections?.[0]?.owner
     : undefined;
   const me = useQuery(
     { ...currentUserQueryOptions(), enabled: owner === "organization" },
@@ -78,9 +86,13 @@ export function StoppedConnectionNotice({
         {canFix ? (
           <a
             className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
-            href={reconnectPath(stopped.connection, owner)}
+            href={
+              stopped.connection
+                ? reconnectPath(stopped.connection, owner)
+                : chooseDefaultPath(owner)
+            }
           >
-            Reconnect
+            {stopped.connection ? "Reconnect" : "Choose a default"}
           </a>
         ) : null}
         <Button onClick={onChooseModel} size="sm" variant="outline">

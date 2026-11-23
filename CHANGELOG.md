@@ -376,10 +376,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `listPersonalAiConnections`, `connectPersonalAiConnection`, `removePersonalAiConnection` and
   `makePersonalAiConnectionDefault` under `people/{personId}/ai-connections`. Connecting a
   provider that already has a connection replaces it and keeps its id; the first one is the
-  default; the server never moves the default by itself, so removing it leaves none until another
-  is made default (`AI_CONNECTION_NOT_READY` refuses one that can't run). `startAiSignIn`,
+  default; the server moves the default only when a removal leaves exactly one connection, and
+  otherwise a removed default leaves none until another is made default (`AI_CONNECTION_NOT_READY`
+  refuses one that can't run; a run with no pick then gets a `stopped` choice with `no-default`). `startAiSignIn`,
   `getAiSignIn` and `finishAiSignIn` under `ai-connection-sign-ins` sign the organization in to a
-  provider the way a person's sign-in does. The single-connection operations keep their meaning
+  provider the way a person's sign-in does, on OpenBot Cloud and a self-hosted OpenBot. The single-connection operations keep their meaning
   and describe the default connection. `ModelCatalogue` gains `connections` (each connection's own
   models, `owner`, `source`, `ready` and `problem`), `ModelChoice` gains `connection` and
   `stopped`, `ModelChoiceInput` gains `connection`, and a Bot's `defaultModel` input gains

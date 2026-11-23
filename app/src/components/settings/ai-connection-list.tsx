@@ -275,6 +275,13 @@ function ConnectionDialog({
   const others = list.connections.filter(
     (other) => other.id !== entry.id && other.ready,
   );
+  /*
+   * The one connection a removal would leave, which the server then makes the default itself. With
+   * more left, the person chooses which takes over, from those that can run.
+   */
+  const left = list.connections.filter((other) => other.id !== entry.id);
+  const onlyOne = left.length === 1 ? left[0] : undefined;
+  const choosing = !onlyOne && others.length > 0;
   const [nextDefault, setNextDefault] = useState<string | null>(
     others[0]?.id ?? null,
   );
@@ -376,13 +383,15 @@ function ConnectionDialog({
         <DialogHeader>
           <DialogTitle>Disconnect {name}?</DialogTitle>
           <DialogDescription>
-            {others.length > 0
-              ? "It's the default AI. Choose which one Bots use when nobody picked a model."
-              : lastGoes(scope, organizationWide, personal)}
+            {onlyOne
+              ? `Bots will use ${connectionName(onlyOne)} when nobody picked a model.`
+              : choosing
+                ? "It's the default AI. Choose which one Bots use when nobody picked a model."
+                : lastGoes(scope, organizationWide, personal)}
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 flex flex-col gap-3 text-sm">
-          {others.length > 0 ? (
+          {choosing ? (
             <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
               <legend className="mb-2 text-muted-foreground">
                 Bots will use
@@ -424,7 +433,9 @@ function ConnectionDialog({
               remove.mutate(
                 {
                   id: entry.id,
-                  nextDefault: others.find((other) => other.id === nextDefault),
+                  nextDefault: choosing
+                    ? others.find((other) => other.id === nextDefault)
+                    : undefined,
                   desktop,
                 },
                 { onSuccess: afterRemoving },

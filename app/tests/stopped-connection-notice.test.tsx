@@ -221,3 +221,55 @@ test("the trigger shows the warning mark while stopped is set, and none after th
   expect(after.getAttribute("aria-label")).not.toContain("can't run now");
   expect(after.querySelector("svg.tabler-icon-alert-triangle")).toBeNull();
 });
+
+const NO_DEFAULT = "Choose a default AI in Settings so Bots can start work.";
+
+function serveNoDefault(
+  role: "admin" | "member",
+  owner: "personal" | "organization",
+) {
+  const person = getGetPersonResponseMock();
+  server.use(
+    getGetPersonMockHandler({ ...person, person: { ...person.person, role } }),
+    http.get(`*${ORG}/model-catalogue`, () =>
+      HttpResponse.json(catalogueWith(owner)),
+    ),
+    http.get(`*${ORG}/people/me/model-choices/${CHANNEL}`, () => {
+      choiceReads += 1;
+      return HttpResponse.json({
+        model: null,
+        effort: null,
+        connection: null,
+        stopped: {
+          connection: null,
+          problem: { code: "no-default", detail: NO_DEFAULT },
+        },
+      });
+    }),
+  );
+}
+
+test("no default: it says to choose one, with Choose a default into Settings for whoever can fix it", async () => {
+  serveNoDefault("member", "personal");
+  const view = render(
+    <StoppedConnectionNotice channelId={CHANNEL} onChooseModel={() => {}} />,
+    { wrapper },
+  );
+  await view.findByText(NO_DEFAULT);
+  const link = view.getByRole("link", { name: "Choose a default" });
+  expect(link.getAttribute("href")).toBe("/settings?owner=personal");
+  expect(view.queryByRole("link", { name: "Reconnect" })).toBeNull();
+  expect(
+    view.getByRole("button", { name: "Choose another model" }),
+  ).toBeTruthy();
+});
+
+test("no default on the organization's connections: a member reads it and gets no link", async () => {
+  serveNoDefault("member", "organization");
+  const view = render(
+    <StoppedConnectionNotice channelId={CHANNEL} onChooseModel={() => {}} />,
+    { wrapper },
+  );
+  await view.findByText(NO_DEFAULT);
+  expect(view.queryByRole("link")).toBeNull();
+});

@@ -6,7 +6,7 @@
  * Why an AI connection can't run now, in OpenBot's own words.
  */
 export interface AiConnectionProblem {
-  /** sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. */
+  /** sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept. no-default: several connections are connected and none is the default, so a run with no pick has nothing to use until one is made default. */
   code: string;
   /** One sentence a person reads, saying what to do. */
   detail: string;

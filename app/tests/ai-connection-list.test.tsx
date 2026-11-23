@@ -581,6 +581,28 @@ test("disconnecting the organization's last connection on OpenBot Cloud says Bot
   ).toBeDefined();
 });
 
+test("disconnecting the default with exactly one other left removes it alone, and says which becomes the default", async () => {
+  orgList = [entry("anthropic", { isDefault: true }), entry("openai")];
+  const user = userEvent.setup({ document });
+  const view = renderOrganization();
+  await user.click(await view.findByRole("button", { name: /Claude plan/ }));
+  const dialog = await view.findByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  expect(
+    await within(dialog).findByText(
+      "Bots will use OpenAI API key when nobody picked a model.",
+    ),
+  ).toBeDefined();
+  expect(within(dialog).queryByRole("radio")).toBeNull();
+  await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  // The server makes the one left the default; the app asks for nothing else.
+  await waitFor(() =>
+    expect(writes().map((call) => `${call.method} ${call.path}`)).toEqual([
+      `DELETE ${ORG}/ai-connections/anthropic`,
+    ]),
+  );
+});
+
 async function connectWithKey(
   view: ReturnType<typeof renderOrganization>,
   provider: RegExp,

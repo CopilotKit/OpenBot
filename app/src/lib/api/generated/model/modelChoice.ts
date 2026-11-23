@@ -21,6 +21,6 @@ export interface ModelChoice {
    * @nullable
    */
   connection?: string | null;
-  /** The connection the conversation's next run would use (the choice's, or the default with no choice) when it is connected but can't run now, and why. Null when it can run. A client shows this after a refused run instead of reading the refusal's words. */
+  /** The connection the conversation's next run would use (the choice's, or the default with no choice) when it is connected but can't run now, and why; or, with no choice and no default, that a default has to be chosen (connection null, code no-default). Null when it can run. A client shows this after a refused run instead of reading the refusal's words. */
   stopped?: StoppedAiConnection | null;
 }

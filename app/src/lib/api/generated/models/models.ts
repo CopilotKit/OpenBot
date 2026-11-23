@@ -2386,7 +2386,7 @@ export const getListAiConnectionsUrl = (
 };
 
 /**
- * Return one page of the AI connections the organization's Bots can run on, one per provider, never a key. A person picks a model from any of them for a conversation (replaceModelChoice with connection); a run with no pick uses the one that isDefault, which is the connection getAiConnection describes. Connections can exist with none of them the default, after an older app disconnected the default (deleteAiConnection): a run with no pick is then refused until one is made default, and a run whose pick names a connection that is ready still runs. signIns names the providers the server signs in to for the organization itself (startAiSignIn). Where whoever runs OpenBot sets the provider, the list holds that one connection and none can be added. Only an administrator of the organization may list them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * Return one page of the AI connections the organization's Bots can run on, one per provider, never a key. A person picks a model from any of them for a conversation (replaceModelChoice with connection); a run with no pick uses the one that isDefault, which is the connection getAiConnection describes. When a removal leaves exactly one connection, it becomes the default. With more left and none the default (after an older app disconnected the default, deleteAiConnection), a run with no pick is refused with a stopped choice saying to choose a default (getModelChoice, no-default), and a run whose pick names a connection that is ready still runs. signIns names the providers the server signs in to for the organization itself (startAiSignIn): on OpenBot Cloud and a self-hosted OpenBot. OpenBot Desktop running its own OpenBot keeps its own plan sign-in, and its signIns is empty. Where whoever runs OpenBot sets the provider, the list holds that one connection and none can be added. Only an administrator of the organization may list them. A missing cursor starts at the first page and nextCursor null ends the list.
  * @summary List the organization's AI connections
  */
 export const listAiConnections = async (
@@ -2773,7 +2773,7 @@ export const getRemoveAiConnectionUrl = (
 };
 
 /**
- * Stop the organization's Bots using one AI connection, with no restart, and revoke its key or sign-in. Runs already going finish on it. Conversations that picked it keep their pick, which stops applying: their next run uses the default. The server never moves the default by itself: removing the default leaves the organization with no default until an administrator makes another one default (makeAiConnectionDefault), and a client that wants another to take over makes it default first. Recorded on the audit trail, never with a key. Only an administrator of the organization may remove one, and not where whoever runs OpenBot sets the provider.
+ * Stop the organization's Bots using one AI connection, with no restart, and revoke its key or sign-in. Runs already going finish on it. Conversations that picked it keep their pick, which stops applying: their next run uses the default. The server moves the default only when a removal leaves exactly one connection, which becomes the default. Removing the default with more than one left leaves the organization with no default until an administrator makes another one default (makeAiConnectionDefault), and a client that wants a particular one to take over makes it default first. Recorded on the audit trail, never with a key. Only an administrator of the organization may remove one, and not where whoever runs OpenBot sets the provider.
  * @summary Remove one of the organization's AI connections
  */
 export const removeAiConnection = async (
@@ -3078,7 +3078,7 @@ export const getStartAiSignInUrl = (organizationId: string) => {
 };
 
 /**
- * Start a sign-in to an AI provider that the server runs itself, for the organization, for a provider listAiConnections names in signIns. It works as startPersonalAiSignIn does, and what the provider hands back is kept for the organization: connect it with connectAiConnection and login plan or oauth (or useSavedKey for an Unbiased AI key). The server renews it itself. Only an administrator of the organization may sign in for it.
+ * Start a sign-in to an AI provider that the server runs itself, for the organization, for a provider listAiConnections names in signIns. It works as startPersonalAiSignIn does, and what the provider hands back is kept for the organization: connect it with connectAiConnection and login plan or oauth (or useSavedKey for an Unbiased AI key). The server renews it itself. Offered on OpenBot Cloud and a self-hosted OpenBot; OpenBot Desktop running its own OpenBot keeps its own plan sign-in and offers none here. Only an administrator of the organization may sign in for it.
  * @summary Start signing in to an AI provider for the organization
  */
 export const startAiSignIn = async (
@@ -4024,7 +4024,7 @@ export const getRemovePersonalAiConnectionUrl = (
 };
 
 /**
- * Stop a person's runs using one of their own AI connections and revoke its key or sign-in, as removeAiConnection does for the organization: picks on it stop applying, and removing the default leaves no default until they make another one default. Removing their last one sends their runs back to the organization's AI. Recorded on the audit trail. Only the person themselves may remove one.
+ * Stop a person's runs using one of their own AI connections and revoke its key or sign-in, as removeAiConnection does for the organization: picks on it stop applying, and the default moves as removeAiConnection says: to the one left, when exactly one is left. Removing their last one sends their runs back to the organization's AI. Recorded on the audit trail. Only the person themselves may remove one.
  * @summary Remove one of a person's own AI connections
  */
 export const removePersonalAiConnection = async (

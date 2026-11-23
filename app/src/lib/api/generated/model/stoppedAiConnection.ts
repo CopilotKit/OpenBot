@@ -4,10 +4,13 @@
 import type { AiConnectionProblem } from "./aiConnectionProblem";
 
 /**
- * An AI connection a conversation's run would use, which can't run now.
+ * Why a conversation's next run can't start: the connection it would use can't run now, or there is no default to use.
  */
 export interface StoppedAiConnection {
-  /** The connection's id. */
-  connection: string;
+  /**
+   * The connection's id. Null when there is no default connection to name (no-default).
+   * @nullable
+   */
+  connection: string | null;
   problem: AiConnectionProblem;
 }
