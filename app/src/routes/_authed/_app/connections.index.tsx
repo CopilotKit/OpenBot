@@ -50,6 +50,8 @@ import {
   appsQueryOptions,
   catalogueQueryOptions,
 } from "@/lib/apps/queries";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { useConnectApp } from "@/lib/connections/connect-app";
 import {
   type ConnectionRow,
@@ -377,6 +379,13 @@ function RouteComponent() {
   /** Undefined until it answers, and on a failed read: neither edition's guidance is assumed. */
   const edition = capabilities.data?.edition;
   const personal = edition === "personal";
+  /*
+   * A server added by its address is added for everyone in the organization, so only an admin adds
+   * one (the personal edition's one person is its admin). Nobody else is offered a button the server
+   * would refuse.
+   */
+  const role = useQuery(currentUserQueryOptions()).data?.role;
+  const mayAddServer = personal || isOrganizationAdmin(role);
   const connectApp = useConnectApp();
   const paths = useManagePaths();
   // The broker's directory of more apps, as one more tile, where a broker is set up.
@@ -450,14 +459,16 @@ function RouteComponent() {
        * because it takes a name, an address and sometimes a key (the layout skill's Procedure 5).
        */
       action={
-        <Button
-          render={(props) => <Link {...props} to="/connections/new" />}
-          size="sm"
-          variant="outline"
-        >
-          <IconPlus />
-          Add server
-        </Button>
+        mayAddServer ? (
+          <Button
+            render={(props) => <Link {...props} to="/connections/new" />}
+            size="sm"
+            variant="outline"
+          >
+            <IconPlus />
+            Add server
+          </Button>
+        ) : undefined
       }
       className="@container"
       description={
