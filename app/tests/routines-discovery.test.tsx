@@ -133,8 +133,8 @@ test("the Routines page says which Bot each routine belongs to", async () => {
   const view = draw(<RoutinesList />, {
     routines: [routine({})],
   });
-  // On the row, by name, and the row links to its page.
-  const row = (await view.findByText(/^Lead Desk · /)).closest(
+  // On the row, by name (on the line, or as the card's first chip), and the row links to its page.
+  const row = (await view.findByText(/^Lead Desk( · |$)/)).closest(
     "a",
   ) as HTMLAnchorElement;
   expect(row.getAttribute("href")).toMatch(/^\/routines\/schedules\//);

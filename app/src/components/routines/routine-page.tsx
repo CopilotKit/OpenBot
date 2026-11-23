@@ -125,7 +125,7 @@ export function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
  * re-enable, so a paused routine's stamp is frozen in the past. A stamp in the past is a firing the
  * sweep has not picked up, and "Next 5 hours ago" is nonsense, so it is said as Due.
  */
-function nextRunWords(routine: RoutineRecord): {
+export function nextRunWords(routine: RoutineRecord): {
   text: string;
   className?: string;
 } {

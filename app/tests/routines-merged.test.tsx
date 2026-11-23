@@ -663,7 +663,10 @@ test("a skipped last run is on the row, and a quiet success is not", async () =>
 test("on the every-Bot list a schedule's row names its Bot, and its page leads to that Bot", async () => {
   serving({ goals: [], routines: [routine("r1", "expenses")] });
   const view = draw(null);
-  expect(await view.findByText(/^Expenses · Weekdays at 09:00/)).toBeTruthy();
+  // On its line, or as the current kit's card's first chip beside the schedule on its own.
+  expect(
+    await view.findByText(/^(Expenses · Weekdays at 09:00|Expenses$)/),
+  ).toBeTruthy();
   const details = within(await openSchedule(view));
   expect(
     details.getByRole("link", { name: /Expenses/ }).getAttribute("href"),
