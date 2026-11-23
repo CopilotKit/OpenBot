@@ -25,6 +25,7 @@ import { disconnectAiMutationOptions } from "@/lib/ai-connection/mutations";
 import { isSignIn, providerById } from "@/lib/ai-connection/providers";
 import {
   aiConnectionQueryOptions,
+  aiConnectionsQueryOptions,
   desktopAiSupportQueryOptions,
   personalAiConnectionQueryOptions,
 } from "@/lib/ai-connection/queries";
@@ -44,6 +45,7 @@ import {
   Details,
   ProviderTile,
 } from "./ai-connection-chooser";
+import { AiProviderRows } from "./ai-providers";
 
 /**
  * Settings → General's AI model: the AI provider OpenBot's Bots run on and how OpenBot signs in to
@@ -66,7 +68,9 @@ export function AiModelSection({
 }) {
   const connection = useQuery(aiConnectionQueryOptions());
   const support = useQuery(desktopAiSupportQueryOptions());
-  if (connection.isPending || support.isPending) return null;
+  // Every provider connected at once, where this OpenBot keeps several (getAiConnections).
+  const set = useQuery(aiConnectionsQueryOptions());
+  if (connection.isPending || support.isPending || set.isPending) return null;
   if (
     connection.error ||
     support.error ||
@@ -75,6 +79,25 @@ export function AiModelSection({
   )
     return <DesktopAiModelSection />;
   if (!connection.data.editable) return null;
+  if (set.data)
+    return (
+      <PageSection
+        description={
+          organizationWide
+            ? "Connect each AI your organization uses. Each conversation picks one in its model menu, and new ones start on the default."
+            : "Connect each AI you use. Each conversation picks one in its model menu, and new ones start on the default."
+        }
+        title="AI providers"
+      >
+        <PageRows>
+          <AiProviderRows
+            inDesktop={support.data === "in-place"}
+            organizationWide={organizationWide}
+            set={set.data}
+          />
+        </PageRows>
+      </PageSection>
+    );
   return (
     <PageSection
       description={

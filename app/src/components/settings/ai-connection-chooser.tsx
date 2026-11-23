@@ -147,6 +147,11 @@ export type ChooserMode =
         signIns: readonly AiConnectionProvider[];
         mine: AiConnection | null;
       };
+      /**
+       * Connect a provider beside the ones already connected: the default stays where it is, and
+       * conversations pick between them.
+       */
+      additional?: boolean;
     }
   | { kind: "personal"; signIns: readonly AiConnectionProvider[] };
 
@@ -782,7 +787,12 @@ export function ChooseConnection({
   function send(body: AiConnectionInput) {
     if (connect.isPending) return;
     connect.mutate(
-      { input: body, desktop: inDesktop, onPhase: setPhase },
+      {
+        input: body,
+        desktop: inDesktop,
+        onPhase: setPhase,
+        additional: mode.kind === "organization" && mode.additional === true,
+      },
       {
         onSuccess: (connected) => {
           minted.current = null;

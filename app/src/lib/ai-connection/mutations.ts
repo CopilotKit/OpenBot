@@ -10,11 +10,14 @@ import type {
 } from "@/lib/api/generated/model";
 import {
   deleteAiConnection,
+  deleteAiProviderConnection,
   deletePersonalAiConnection,
   finishPersonalAiSignIn,
   getAiConnection,
   getPersonalAiSignIn,
   replaceAiConnection,
+  replaceAiProviderConnection,
+  replaceDefaultAiConnection,
   replacePersonalAiConnection,
   startPersonalAiSignIn,
 } from "@/lib/api/generated/models/models";
@@ -34,6 +37,11 @@ export type ConnectVariables = {
   /** In an OpenBot Desktop that changes the connection in place: it starts and settles engines. */
   desktop: boolean;
   onPhase?: (phase: ConnectPhase) => void;
+  /**
+   * Connect it beside the providers already connected (replaceAiProviderConnection), leaving the
+   * default where it is. Desktop's own connection isn't moved.
+   */
+  additional?: boolean;
 };
 
 /** What a switch ends with: the connection in use, and anything Desktop couldn't finish after it. */
@@ -55,7 +63,24 @@ export async function connectAi({
   input,
   desktop,
   onPhase,
+  additional,
 }: ConnectVariables): Promise<Connected> {
+  if (additional) {
+    onPhase?.("checking");
+    const { provider, ...rest } = input;
+    const set = await replaceAiProviderConnection(
+      organizationId(),
+      provider,
+      rest,
+      { "Idempotency-Key": idempotencyKey() },
+      { fallback: FALLBACK },
+    );
+    const connection =
+      set.connections.find((each) => each.provider === provider) ??
+      set.connections[0];
+    if (!connection) throw new Error(FALLBACK);
+    return { connection, desktopProblem: null };
+  }
   try {
     if (desktop && input.login === "plan") {
       onPhase?.("starting");
@@ -116,6 +141,34 @@ async function settleBack() {
 export function connectAiMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (variables: ConnectVariables) => connectAi(variables),
+    onSuccess: () => invalidateAiConnection(queryClient),
+  });
+}
+
+/** Disconnect one provider, leaving the others connected. */
+export function disconnectAiProviderMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (provider: AiConnectionProvider) =>
+      deleteAiProviderConnection(
+        organizationId(),
+        provider,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't disconnect it. Try again." },
+      ),
+    onSuccess: () => invalidateAiConnection(queryClient),
+  });
+}
+
+/** Make a connected provider the default for new conversations. */
+export function makeDefaultAiProviderMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (provider: AiConnectionProvider) =>
+      replaceDefaultAiConnection(
+        organizationId(),
+        { provider },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't make it the default. Try again." },
+      ),
     onSuccess: () => invalidateAiConnection(queryClient),
   });
 }

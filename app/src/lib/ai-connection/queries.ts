@@ -1,10 +1,12 @@
 import { type QueryClient, queryOptions } from "@tanstack/react-query";
 import type {
   AiConnection,
+  AiConnectionSet,
   PersonalAiConnection,
 } from "@/lib/api/generated/model";
 import {
   getAiConnection,
+  getAiConnections,
   getPersonalAiConnection,
 } from "@/lib/api/generated/models/models";
 import { organizationId } from "@/lib/api/request";
@@ -17,11 +19,13 @@ import { desktopShell } from "@/lib/desktop/shell";
  * may be in can change it in place. And a person's own AI connection (getPersonalAiConnection),
  * which on OpenBot Cloud each person brings for themselves.
  */
-export type { AiConnection, PersonalAiConnection };
+export type { AiConnection, AiConnectionSet, PersonalAiConnection };
 
 export const aiConnectionKeys = {
   all: ["ai-connection"] as const,
   current: ["ai-connection", "current"] as const,
+  /** Every provider connected at once, the default first. */
+  set: ["ai-connection", "set"] as const,
   personal: ["ai-connection", "personal"] as const,
   /** The person's answer in another of their organizations, named by its id. */
   personalIn: (organizationId: string) =>
@@ -42,6 +46,27 @@ export function aiConnectionQueryOptions() {
         return await getAiConnection(organizationId(), {
           signal,
           fallback: "Couldn't load the AI connection",
+        });
+      } catch (error) {
+        if (error instanceof ClientError && error.status === 404) return null;
+        throw error;
+      }
+    },
+  });
+}
+
+/**
+ * Every AI provider the organization connected, the default first. Never a key. Null from an
+ * OpenBot older than this operation (404), where Settings keeps the one connection's row.
+ */
+export function aiConnectionsQueryOptions() {
+  return queryOptions({
+    queryKey: aiConnectionKeys.set,
+    queryFn: async ({ signal }): Promise<AiConnectionSet | null> => {
+      try {
+        return await getAiConnections(organizationId(), {
+          signal,
+          fallback: "Couldn't load your AI providers",
         });
       } catch (error) {
         if (error instanceof ClientError && error.status === 404) return null;
