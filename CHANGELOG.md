@@ -43,6 +43,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   model allowed. Before, an organization with Only allowed models off offered only its default model
   and showed no model picker, and one with it on and nothing allowed refused every run. An
   organization that has allowed models is unchanged.
+- **Self-hosted OpenBot keeps one shared organization.** Since 1.1.3, an install on the bundle chart
+  gave everybody who signed in an organization of their own, and only `INITIAL_ADMIN_EMAILS` joined
+  `default`. Now everybody who signs in joins `default`, and nobody is given an organization of
+  their own. Anybody may still create another organization, and people join it by invitation. At
+  its first start, an install that gave people their own makes each of them a member of `default`
+  (an admin there if they are an admin of the install). They keep their own as an ordinary
+  organization they own, with its Bots and everything else, to switch to or delete. Nobody removed
+  from `default` or turned away is put back, and it runs once: somebody who leaves `default` later
+  isn't added again at the next start. `config.organizations.ownOrganizations: true`
+  (`OPENBOT_OWN_ORGANIZATIONS=true`) gives everybody their own instead. OpenBot Cloud is unchanged.
 - Nothing in a Helm values file has to change. Every new chart value (under Kubernetes) is off or
   empty by default, except `config.productAnalytics` (above).
 
@@ -52,7 +62,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   is theirs alone: it follows them into every organization they are in, is never shared with an
   organization, and comes ahead of the organization's AI on their runs. A new person meets a Connect
   your AI step right after Welcome, only where the organization has no AI. Its button waits until
-  they connect, and the step offers their other organizations and Sign out as the ways out. The gate
+  they connect, and the step offers Sign out and, as the other way out, only those of their other
+  organizations that have an AI set up for everyone. Picking one goes on with onboarding there, or
+  opens OpenBot there when nothing is left to do. An organization whose AI was removed meanwhile
+  holds them at Connect your AI, never on a blank page. The gate
   sends anybody in that state there from anywhere, including after switching to an organization
   with no AI. A run refused for want of an AI says "Connect your AI to use Bots. An admin can also
   set one up for everyone in your organization." with a Connect your AI button. Self-hosted
@@ -68,7 +81,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   load, and that page's address is pasted back, by keyboard or the Paste button. A wrong address
   keeps the box open with the reason. OpenBot Desktop's setup window still signs in to ChatGPT in
   the browser first. A Claude plan finishes with the code Claude's page shows. Google,
-  xAI and Unbiased AI finish by themselves. The server runs each sign-in, keeps what the provider
+  xAI and Unbiased AI finish by themselves. Wherever a code is shown to enter on the provider's
+  page (ChatGPT's code sign-in, xAI and Unbiased AI), a Copy button sits beside it. Inside OpenBot
+  Desktop, Claude and ChatGPT finish by themselves too, with nothing to paste: Desktop catches the
+  browser's return on your computer and OpenBot finishes the sign-in. There, ChatGPT signs in in the
+  browser first, with the code sign-in as the other way. An older Desktop, or a port Desktop can't
+  use, falls back to the paste or the code. The server runs each sign-in, keeps what the provider
   hands back sealed for that person, renews it itself, and never sends it to the browser. Every
   model call of the person's runs goes through the model gateway with their credential.
 - **Your own AI offers every model it lists.** A person on their own Claude or ChatGPT plan, Google
@@ -147,10 +165,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   updates and starts it behind the move's own screen, which shows what moves once it can read it;
   keeping it here runs the update as before. The move lists
   what moves (Bots, skills, conversations, memories, routines, goals, check-ins and files) and the
-  app connections to connect again, which never move. Your AI key comes along, sealed so only your
-  OpenBot Cloud account can read it, unless you untick it. Desktop signs in to OpenBot Cloud, packs
-  everything up, sends it part by part, has OpenBot Cloud add it and check it, and only once
-  OpenBot Cloud's counts match removes OpenBot from this computer, its volumes and images included.
+  app connections to connect again, which never move. Only apps you connected are listed: an app a
+  Bot could use but nobody connected, such as Gmail on a new install, isn't. Your AI key comes
+  along, sealed so only your OpenBot Cloud account can read it, unless you untick it. Desktop signs
+  in to OpenBot Cloud, packs everything up, sends it part by part, has OpenBot Cloud add it and
+  check it, and only once OpenBot Cloud's counts match removes OpenBot from this computer, its
+  volumes and images included.
   The result says how much it removed, counted as the move screen counted it. When the disk shows
   much less of that free so far (a Mac can keep deleted files in a local snapshot for a while), it
   says that too. Any failure before that removes nothing. A moved person skips first-run setup in
@@ -162,6 +182,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   AI now keep where you were headed, and take you there once they're done. On Windows, the Podman
   that OpenBot installed is removed too when nothing else uses it; a Podman you installed or use
   stays. Keep OpenBot on this computer is remembered and never asked again at launch.
+  - **A long history moves.** OpenBot Cloud's check counts each conversation's messages as OpenBot
+    Cloud lists them. A Bot's thinking moves with the answer it came with, and a turn cut off before
+    its first word holds nothing and is left out. Before, a long history failed the check on its
+    messages the same way on every try.
+  - **Moving again brings what was said since.** A conversation an earlier, failed move already
+    brought to OpenBot Cloud is brought again with what was said on this computer since. One that
+    was also carried on in OpenBot Cloud is never overwritten: the move stops, names it, and
+    removes nothing here.
+  - **A failed move says why, and its buttons stay in view.** When OpenBot Cloud stops the import for
+    a reason of its own, the screen shows that reason and says you can keep using OpenBot here. It
+    no longer says to try again. Try again and Keep OpenBot on this computer stay at the foot of the
+    window at every size, with Technical details scrolling above them.
 - **Sign-out ends the browser's session at a hosted OpenBot.** A connected Desktop signs in through
   the system browser, which stayed signed in after sign-out, so the next sign-in on that computer
   came back as the previous person. Desktop now opens the OpenBot's `end_session_endpoint`, where it
@@ -183,6 +215,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **The model allowlist says what it does.** In conversations says "Every listed model" until the
   allowlist narrows anything, and Only allowed models says what each state does. On OpenBot Cloud
   with no organization AI, it says each person picks from their own AI's models.
+- **Managed updates after turning management off with Helm.** `management.enabled=false` removes
+  the agent the chart installed along with OpenBot's own release. Managed updates now says so, with
+  no `helm uninstall openbot-agent` command (there is no such release to uninstall), and Disconnect
+  finishes at once. Before, Disconnect was refused for up to five minutes. An agent installed as its
+  own release still shows the uninstall command.
+- People, Remove says the person keeps their account and any other organization they're in. It no
+  longer promises an organization of their own (Before upgrading).
 
 ### API
 
@@ -226,6 +265,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   name another person's computer with `computer`. A Bot's action on a computer being restored is
   answered 503 `COMPUTER_RESTORING`, worth retrying. Both are recorded on the trail.
 - The model catalogue's `exposure` and its description say an empty allowlist means every model.
+- `ManagementEnrollment` carries `agentRemovedWithChart`, true only while OpenBot is connected
+  through the agent its own chart installed after the chart turned management off. Optional, and
+  absent in every other state.
+- The introduction and the descriptions of `createOrganization`, `revokePersonAccess` and
+  `restorePersonAccess` no longer say everybody has an organization of their own.
 
 ### Kubernetes
 
@@ -250,7 +294,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   VolumeSnapshots, the newest `keepDaily` (7), and lets people restore one (above). It needs the
   snapshot controller and its CRDs in the cluster (on EKS, the `snapshot-controller` add-on) and a
   VolumeSnapshotClass of the volumes' CSI driver named `className` (`openbot-workspace`). Without
-  them the server logs `computer-snapshots-unavailable` once and keeps no copies.
+  them the server logs `computer-snapshots-unavailable` once and keeps no copies. The
+  openbot-agent chart's `openbot-deployer` holds the VolumeSnapshot rights the server's Role
+  grants, so a managed upgrade that turns copies on no longer fails at that Role with "attempting
+  to grant RBAC permissions not currently held".
+- **`config.organizations.ownOrganizations`** (false) gives everybody who signs in an organization of
+  their own on the `intelligence-platform` organization authority (Before upgrading). Anything but
+  `true` or `false` is refused at install and at start.
 - **`config.productAnalytics`** (on) is the product analytics switch (Before upgrading).
 - **`config.cloudAnalytics`** (off) is OpenBot Cloud's own counts for CopilotKit's staff console.
   Leave it off.
@@ -275,6 +325,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   to answer the step "The computer is still starting", and a task's next step then read "Not done. A
   step before it didn't work." The Computer panel keeps saying the computer is starting for as long
   as the step waits.
+- **A reopened conversation keeps its history in order.** A conversation moved to OpenBot Cloud and
+  carried on there could open with its last turns under its first one, when the history arrived
+  slower than usual. The stored history lists a Bot's thinking with the turn that sent it back, and
+  a piece listed out of place no longer decides where the rest goes.
 - The memory sweep asks Intelligence whether memory is available only when it has something to
   mirror, and waits longer after each failed answer (up to 30 minutes), so an organization whose
   entitlement never becomes ready is no longer asked every minute on every replica.
