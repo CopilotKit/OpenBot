@@ -1,4 +1,5 @@
 import type { AgentProfile } from "@/lib/agents/queries";
+import { catalogueFor, connectionOf, pickerGroups } from "./connections";
 import type {
   ConversationModel,
   ConversationModelInput,
@@ -13,7 +14,15 @@ import type {
  * only where the person chose one. What is saved is the same pick with each default written as
  * null (`requestFor`), so a default follows the model and the provider rather than being pinned.
  */
-export type ModelPick = { model: string; effort: string | null };
+export type ModelPick = {
+  model: string;
+  effort: string | null;
+  /**
+   * The AI connection the model is on, where several are connected (catalogue `connections`).
+   * Absent or null: the default connection, and the only one there is with one connection.
+   */
+  connection?: string | null;
+};
 
 const EFFORT_LABELS: Record<string, string> = {
   none: "None",
@@ -89,6 +98,12 @@ export function offeredBotDefault(
 /**
  * What a picker shows for a saved pick: the saved model when the catalogue still offers it,
  * otherwise the default, and the saved effort only where that model accepts it.
+ *
+ * With several connections, a pick that names one is shown on it while that connection still
+ * lists the model. One whose connection left the catalogue (removed, or a person who just connected
+ * their own on OpenBot Cloud) shows the default instead, as a model no longer offered does. A pick
+ * that names none is the default connection's. With no default connection, nothing is shown until
+ * someone picks.
  */
 export function shownPick(
   saved: ConversationModel | null | undefined,
@@ -96,6 +111,33 @@ export function shownPick(
   botDefault?: ModelPick,
 ): ModelPick | undefined {
   if (!catalogue) return undefined;
+  if (pickerGroups(catalogue).length === 0)
+    return shownPickIn(saved, catalogue, botDefault);
+  const named = saved?.connection
+    ? connectionOf(catalogue, saved.connection)
+    : undefined;
+  if (named && optionFor(catalogueFor(catalogue, named), saved?.model)) {
+    const pick = shownPickIn(saved, catalogueFor(catalogue, named));
+    return pick && { ...pick, connection: named.id };
+  }
+  // The pick's connection or model is gone: what a run uses now, nothing pinned.
+  const followed = saved?.connection ? null : saved;
+  if (botDefault?.connection && !followed?.model) return botDefault;
+  const fallback = connectionOf(catalogue, null);
+  if (!fallback) return botDefault?.connection ? botDefault : undefined;
+  const pick = shownPickIn(
+    followed,
+    catalogueFor(catalogue, fallback),
+    botDefault && !botDefault.connection ? botDefault : undefined,
+  );
+  return pick && { ...pick, connection: fallback.id };
+}
+
+function shownPickIn(
+  saved: ConversationModel | null | undefined,
+  catalogue: ModelCatalogue,
+  botDefault?: ModelPick,
+): ModelPick | undefined {
   if (
     botDefault &&
     (saved?.model
@@ -119,6 +161,44 @@ export function shownPick(
  * or one it does not accept, so the server is never asked for an effort it would refuse.
  */
 export function requestFor(
+  pick: ModelPick,
+  catalogue: ModelCatalogue | undefined,
+  botDefault?: ModelPick,
+): ConversationModelInput {
+  if (!catalogue || pickerGroups(catalogue).length === 0)
+    return requestIn(pick, catalogue, botDefault);
+  /*
+   * Several connections. The default connection's own default is saved as null, so it follows the
+   * default; any other model is saved with its connection, so changing the default never moves it.
+   */
+  const connection = connectionOf(catalogue, pick.connection ?? null);
+  if (!connection) return requestIn(pick, catalogue, botDefault);
+  const own = catalogueFor(catalogue, connection);
+  const sameDefault =
+    botDefault &&
+    (botDefault.connection ?? connectionOf(catalogue, null)?.id) ===
+      connection.id;
+  if (connection.isDefault && (!botDefault || sameDefault)) {
+    const request = requestIn(pick, own, botDefault);
+    return request.model === null
+      ? request
+      : { ...request, connection: connection.id };
+  }
+  const option = optionFor(own, pick.model);
+  const effort =
+    accepts(option, pick.effort) && pick.effort !== option?.defaultEffort
+      ? pick.effort
+      : null;
+  if (
+    sameDefault &&
+    botDefault?.model === pick.model &&
+    shownEffort(option, effort) === shownEffort(option, botDefault.effort)
+  )
+    return { model: null, effort: null };
+  return { model: pick.model, effort, connection: connection.id };
+}
+
+function requestIn(
   pick: ModelPick,
   catalogue: ModelCatalogue | undefined,
   botDefault?: ModelPick,

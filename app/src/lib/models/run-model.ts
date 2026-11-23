@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { queryClient } from "@/query-client";
+import { everyModel } from "./connections";
 import {
   type ModelPick,
   offeredBotDefault,
@@ -86,7 +87,7 @@ export function useConversationModel(
   );
   /** Every model's label seen here, so one dropped from the list is still named by its label. */
   const labels = useRef(new Map<string, string>());
-  for (const option of catalogue?.models ?? [])
+  for (const option of everyModel(catalogue))
     labels.current.set(option.id, option.label);
   /** The check of a pick that turned into the default, while one is under way. */
   const checking = useRef<Promise<void> | null>(null);
@@ -103,7 +104,7 @@ export function useConversationModel(
     if (data.model !== null) {
       setWithdrawn(null);
       // Offered again since the list here was read: read it again, so the picker shows it.
-      if (catalogue && !catalogue.models.some((m) => m.id === data.model))
+      if (catalogue && !everyModel(catalogue).some((m) => m.id === data.model))
         return queryClient
           .invalidateQueries({
             queryKey: modelCatalogueQueryOptions().queryKey,
@@ -115,7 +116,7 @@ export function useConversationModel(
     const check = queryClient
       .fetchQuery({ ...modelCatalogueQueryOptions(), staleTime: 0 })
       .then((fresh) => {
-        if (fresh.models.some((option) => option.id === before)) return;
+        if (everyModel(fresh).some((option) => option.id === before)) return;
         const defaultModel =
           offeredBotDefault(data.defaultModel, fresh)?.model ?? fresh.default;
         const now =
