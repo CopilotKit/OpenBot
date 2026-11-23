@@ -184,7 +184,7 @@ async function open(
     });
   });
   await page.goto(`${ORIGIN}/`, { waitUntil: "domcontentloaded" });
-  await page.getByText("Agents it may use").first().waitFor();
+  await page.locator("[data-surface]").first().waitFor({ state: "attached" });
   const classes = await page.evaluate(() =>
     [...document.querySelectorAll("[class]")].flatMap((element) => [
       ...element.classList,
