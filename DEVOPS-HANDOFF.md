@@ -14,13 +14,13 @@ This branch is the AgentForce product layer on current OpenBot. It is **not** a 
 
 ## What this tree is
 
-| Piece | Where it lives |
-| ----- | -------------- |
-| Tenant identity | `examples/fintech/brand.yaml` — `tenant.id: plugiq-agentforce`, `tenant.product_name: PlugiQ AgentForce` |
+| Piece                    | Where it lives                                                                                                 |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Tenant identity          | `examples/fintech/brand.yaml` — `tenant.id: plugiq-agentforce`, `tenant.product_name: PlugiQ AgentForce`       |
 | Bots / channels / skills | Fintech package + Descasio wording; includes `implement-a-ticket` skill (points people at `/product-engineer`) |
-| API + Bot computers | Published image `ghcr.io/copilotkit/openbot:v1.1.0` (pin via `OPENBOT_BACKEND_TAG`) |
-| App UI | Built from this checkout (`bun run generate:app-config` reads `brand.yaml`); includes `/product-engineer` |
-| Product Engineer | **Sidecar** `product-engineer-sidecar/` + library `product-engineer-loop/` — **not** inside the OpenBot image |
+| API + Bot computers      | Published image `ghcr.io/copilotkit/openbot:v1.1.0` (pin via `OPENBOT_BACKEND_TAG`)                            |
+| App UI                   | Built from this checkout (`bun run generate:app-config` reads `brand.yaml`); includes `/product-engineer`      |
+| Product Engineer         | **Sidecar** `product-engineer-sidecar/` + library `product-engineer-loop/` — **not** inside the OpenBot image  |
 
 There is **no** in-image mount for PE. Coding credentials stay on the sidecar.
 
@@ -38,10 +38,10 @@ bun run dev:pe
 bun run dev   # Vite proxies /api/product-engineer → :3020
 ```
 
-| Service | URL |
-| ------- | --- |
-| App | http://localhost:3010 |
-| API | http://localhost:3001 |
+| Service                  | URL                          |
+| ------------------------ | ---------------------------- |
+| App                      | http://localhost:3010        |
+| API                      | http://localhost:3001        |
 | Product Engineer sidecar | http://localhost:3020/health |
 
 Stop OpenBot: `bash scripts/stop.sh`. Stop PE with Ctrl-C in its terminal.
@@ -74,15 +74,15 @@ Until this branch becomes the default line, hosted/testing continues to follow w
 
 Add a **second** ECS service (or extra container) built from `product-engineer-sidecar/Dockerfile`. Keep the OpenBot task on the published image digest.
 
-| Variable | Notes |
-| -------- | ----- |
-| `CURSOR_API_KEY` | [cursor.com/dashboard/api](https://cursor.com/dashboard/api) — not Integrations |
-| `LINEAR_API_KEY` | Linear API key for ticket intake (separate from Composio) |
-| `PE_REPOS` | Comma-separated GitHub URLs (frontend + backend) the Cursor account can access |
-| `PE_STARTING_REF` | Optional starting branch/ref |
-| `PE_MODEL` | Default `composer-2.5` |
-| `PE_SIDECAR_TOKEN` | Recommended in prod; require `Authorization: Bearer …` |
-| `PE_RUNS_DIR` | Persist on a volume (`/data/runs`) |
+| Variable           | Notes                                                                           |
+| ------------------ | ------------------------------------------------------------------------------- |
+| `CURSOR_API_KEY`   | [cursor.com/dashboard/api](https://cursor.com/dashboard/api) — not Integrations |
+| `LINEAR_API_KEY`   | Linear API key for ticket intake (separate from Composio)                       |
+| `PE_REPOS`         | Comma-separated GitHub URLs (frontend + backend) the Cursor account can access  |
+| `PE_STARTING_REF`  | Optional starting branch/ref                                                    |
+| `PE_MODEL`         | Default `composer-2.5`                                                          |
+| `PE_SIDECAR_TOKEN` | Recommended in prod; require `Authorization: Bearer …`                          |
+| `PE_RUNS_DIR`      | Persist on a volume (`/data/runs`)                                              |
 
 **Ingress:** route `/api/product-engineer/*` to the sidecar (ALB path rule or reverse proxy). The app calls that path same-origin; without the route, PE 404s on the OpenBot container.
 
@@ -96,13 +96,13 @@ Add a **second** ECS service (or extra container) built from `product-engineer-s
 
 ## Required env (OpenBot container)
 
-| Variable | Notes |
-| -------- | ----- |
-| `DATABASE_URL` | Postgres. Prefer `?sslmode=require` for RDS/managed DB. Use the published image’s own DB client — **do not** port the September `postgres-js.ts` TLS fork. Skip if `EMBEDDED_POSTGRES=on`. |
-| `KEY_ENCRYPTION_KEY` | `openssl rand -base64 32`. Example key refused in production |
-| `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, Intelligence key | CopilotKit Intelligence (`CPK_INTELLIGENCE_API_KEY` / legacy `INTELLIGENCE_API_KEY`) |
-| Model key | e.g. `OPENAI_API_KEY` |
-| Auth | Google / Microsoft / Okta **or** `OPENBOT_SINGLE_USER=true` |
+| Variable                                                                | Notes                                                                                                                                                                                      |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DATABASE_URL`                                                          | Postgres. Prefer `?sslmode=require` for RDS/managed DB. Use the published image’s own DB client — **do not** port the September `postgres-js.ts` TLS fork. Skip if `EMBEDDED_POSTGRES=on`. |
+| `KEY_ENCRYPTION_KEY`                                                    | `openssl rand -base64 32`. Example key refused in production                                                                                                                               |
+| `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, Intelligence key | CopilotKit Intelligence (`CPK_INTELLIGENCE_API_KEY` / legacy `INTELLIGENCE_API_KEY`)                                                                                                       |
+| Model key                                                               | e.g. `OPENAI_API_KEY`                                                                                                                                                                      |
+| Auth                                                                    | Google / Microsoft / Okta **or** `OPENBOT_SINGLE_USER=true`                                                                                                                                |
 
 Leave `MANAGED_AGENT_AG_UI_URL` unset unless a Bot is reachable from the container.
 
@@ -112,10 +112,10 @@ Migrations: the published server applies schema changes when it starts; the ECS 
 
 ## Linear
 
-| Path | Role |
-| ---- | ---- |
+| Path                            | Role                                                                  |
+| ------------------------------- | --------------------------------------------------------------------- |
 | **PE sidecar `LINEAR_API_KEY`** | Ticket intake for Product Engineer (required for `/product-engineer`) |
-| **Composio Linear** | Chat tools for people who connect Linear under `/connections` |
+| **Composio Linear**             | Chat tools for people who connect Linear under `/connections`         |
 
 Composio alone does **not** open multi-repo Cursor PRs.
 
