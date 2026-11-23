@@ -109,7 +109,7 @@ export function BoardRow({
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <span
           className={cn(
-            "flex size-7 shrink-0 items-center justify-center rounded-md border border-border text-[13px] [&_svg]:size-4",
+            "flex size-7 shrink-0 items-center justify-center rounded-md border border-border text-sm [&_svg]:size-4",
             waiting && "border-warning/30 bg-warning-subtle",
           )}
         >
@@ -293,7 +293,7 @@ function RowText({
       {detail ? (
         <span
           className={cn(
-            "mt-0.5 block text-[13px] text-muted-foreground",
+            "mt-0.5 block text-sm text-muted-foreground",
             whole
               ? "line-clamp-none break-all"
               : open
@@ -311,7 +311,7 @@ function RowText({
 /** A tag in a row's meta line: the app it was read with. */
 export function MetaTag({ children }: { children: ReactNode }) {
   return (
-    <span className="rounded-full border border-border px-1.5 py-px text-[11px]">
+    <span className="rounded-full border border-border px-1.5 py-px text-xs">
       {children}
     </span>
   );

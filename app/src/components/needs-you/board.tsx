@@ -257,7 +257,7 @@ function BotGroup({
     >
       <div className="flex items-center gap-2.5 border-border border-b bg-muted px-3.5 py-2.5">
         <BotOrb name={name} seed={bot?.avatarSeed || botId} size={22} />
-        <span className="font-semibold text-[13px]">{name}</span>
+        <span className="font-semibold text-sm">{name}</span>
         <span className="truncate text-muted-foreground text-xs">· {note}</span>
       </div>
       <div className="flex flex-col">
@@ -303,7 +303,7 @@ function FoundGroup({
   if (folded)
     rows.push(
       <button
-        className="flex w-full items-center justify-between px-3.5 py-2.5 text-left text-muted-foreground text-[13px] hover:bg-muted"
+        className="flex w-full items-center justify-between px-3.5 py-2.5 text-left text-muted-foreground text-sm hover:bg-muted"
         key="more"
         onClick={() => setExpanded(true)}
         type="button"

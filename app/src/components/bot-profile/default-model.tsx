@@ -14,6 +14,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+  FieldTitle,
+} from "@/components/ui/field";
+import {
   Item,
   ItemActions,
   ItemContent,
@@ -21,6 +28,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
 import {
@@ -141,82 +149,79 @@ export function DefaultModelSection({
               </DialogDescription>
             </DialogHeader>
             <DialogBody className="mt-4 grid gap-3">
-              <fieldset
+              {/* The kit's radios, each choice a card that is its own label. */}
+              <RadioGroup
                 aria-label="Default model options"
-                className="grid gap-2"
+                className="gap-2"
                 disabled={saving}
+                onValueChange={(value) => {
+                  setUseDeploymentDefault(value === "default");
+                  setError(undefined);
+                }}
+                value={useDeploymentDefault ? "default" : "custom"}
               >
-                <label className={optionClass}>
-                  <input
-                    checked={useDeploymentDefault}
-                    className={radioClass}
-                    name={sourceField}
-                    onChange={() => {
-                      setUseDeploymentDefault(true);
+                <FieldLabel htmlFor={`${sourceField}-default`}>
+                  <Field orientation="horizontal">
+                    <RadioGroupItem
+                      id={`${sourceField}-default`}
+                      value="default"
+                    />
+                    <FieldContent>
+                      <FieldTitle>Use OpenBot's default</FieldTitle>
+                      {deploymentSummary ? (
+                        <FieldDescription>{deploymentSummary}</FieldDescription>
+                      ) : null}
+                    </FieldContent>
+                  </Field>
+                </FieldLabel>
+                <FieldLabel htmlFor={`${sourceField}-custom`}>
+                  <Field orientation="horizontal">
+                    <RadioGroupItem
+                      id={`${sourceField}-custom`}
+                      value="custom"
+                    />
+                    <FieldContent>
+                      <FieldTitle>Choose a model for this Bot</FieldTitle>
+                    </FieldContent>
+                  </Field>
+                </FieldLabel>
+              </RadioGroup>
+              {/*
+               * Under the choices rather than inside the second, which is a label: a click on the
+               * picker would also reach its radio.
+               */}
+              {!useDeploymentDefault ? (
+                <div className="grid gap-1.5">
+                  <p className="text-muted-foreground text-xs">
+                    Model and thinking level
+                  </p>
+                  <ModelPicker
+                    allowSingle
+                    catalogue={catalogue}
+                    disabled={saving}
+                    onChange={(pick) => {
+                      setDraft({
+                        ...pick,
+                        effort:
+                          catalogue?.models.find(({ id }) => id === pick.model)
+                            ?.defaultEffort === pick.effort
+                            ? null
+                            : pick.effort,
+                      });
                       setError(undefined);
                     }}
-                    type="radio"
+                    showValue
+                    value={custom}
                   />
-                  <span className="grid gap-0.5">
-                    <span className="font-medium">Use OpenBot's default</span>
-                    {deploymentSummary ? (
-                      <span className="text-muted-foreground text-xs">
-                        {deploymentSummary}
-                      </span>
-                    ) : null}
-                  </span>
-                </label>
-                <div className="grid gap-2 rounded-lg border border-border has-checked:border-foreground/40 has-checked:bg-muted/30">
-                  <label className="flex cursor-pointer items-start gap-3 px-3 py-2.5">
-                    <input
-                      checked={!useDeploymentDefault}
-                      className={radioClass}
-                      name={sourceField}
-                      onChange={() => {
-                        setUseDeploymentDefault(false);
-                        setError(undefined);
-                      }}
-                      type="radio"
-                    />
-                    <span className="font-medium">
-                      Choose a model for this Bot
-                    </span>
-                  </label>
-                  {!useDeploymentDefault ? (
-                    <div className="grid gap-1.5 px-3 pb-3">
-                      <p className="text-muted-foreground text-xs">
-                        Model and thinking level
-                      </p>
-                      <ModelPicker
-                        allowSingle
-                        catalogue={catalogue}
-                        disabled={saving}
-                        onChange={(pick) => {
-                          setDraft({
-                            ...pick,
-                            effort:
-                              catalogue?.models.find(
-                                ({ id }) => id === pick.model,
-                              )?.defaultEffort === pick.effort
-                                ? null
-                                : pick.effort,
-                          });
-                          setError(undefined);
-                        }}
-                        showValue
-                        value={custom}
-                      />
-                      {!catalogue ? (
-                        <p className="text-sm text-muted-foreground">
-                          {models.isError
-                            ? "Couldn't load the models."
-                            : "Loading models…"}
-                        </p>
-                      ) : null}
-                    </div>
+                  {!catalogue ? (
+                    <p className="text-sm text-muted-foreground">
+                      {models.isError
+                        ? "Couldn't load the models."
+                        : "Loading models…"}
+                    </p>
                   ) : null}
                 </div>
-              </fieldset>
+              ) : null}
               {error ? (
                 <p role="alert" className="text-destructive text-sm">
                   {error}
@@ -246,10 +251,6 @@ export function DefaultModelSection({
     </PageSection>
   );
 }
-
-const optionClass =
-  "flex cursor-pointer items-start gap-3 rounded-lg border border-border px-3 py-2.5 has-checked:border-foreground/40 has-checked:bg-muted/30";
-const radioClass = "mt-0.5 size-4 shrink-0 accent-foreground";
 
 function modelSummary(model: ModelOption, effort: string | null) {
   const thinking = shownEffort(model, effort);

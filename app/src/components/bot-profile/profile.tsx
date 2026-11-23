@@ -45,6 +45,7 @@ import {
   useNotificationPermission,
 } from "@/lib/notifications/permission";
 import { queryClient } from "@/query-client";
+import { useKit } from "@/skins/store";
 import { BotActivityGlance, BotActivityRow } from "./activity";
 import { BotPausedBanner } from "./pause-banner";
 
@@ -63,6 +64,37 @@ export function BotProfileHeader({
     "name" | "title" | "roleDescription" | "avatarSeed"
   >;
 }) {
+  const currentKit = useKit() === "current";
+  if (currentKit)
+    return (
+      /*
+       * Figma's summary card (Master screens, "bots/personal-assistant"): one of the kit's rows,
+       * opening nothing, with the Bot's 66px orb beside what it is in 16px and what it does in 14px.
+       * It belongs to the name above it, so it sits 20px under it rather than the 36px the page puts
+       * under a title; `kit:` is what outranks that rule (PageColumn).
+       */
+      <PageRows className="kit:mt-5">
+        <Item>
+          <ItemMedia>
+            <AbstractAvatar
+              name={agent.name}
+              seed={agent.avatarSeed}
+              size={66}
+            />
+          </ItemMedia>
+          <ItemContent className="gap-2">
+            {agent.title && (
+              <ItemTitle className="line-clamp-3 text-pretty">
+                {shownSubtitle(agent.title)}
+              </ItemTitle>
+            )}
+            <ItemDescription className="line-clamp-none text-sm">
+              {agent.roleDescription}
+            </ItemDescription>
+          </ItemContent>
+        </Item>
+      </PageRows>
+    );
   return (
     <div className="mt-6 flex items-center gap-3">
       <AbstractAvatar name={agent.name} seed={agent.avatarSeed} size={40} />
