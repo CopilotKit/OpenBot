@@ -156,7 +156,13 @@ async function fakeFetch(input: RequestInfo | URL, init?: RequestInit) {
         : notFound();
     if (path === base && method === "POST") {
       const input = ConnectAiConnectionBody.parse(body);
-      const added = entry(input.provider, { login: input.login });
+      // As the server answers: a provider already connected keeps its id and whether it is the default.
+      const added = entry(input.provider, {
+        login: input.login,
+        isDefault:
+          list?.find((one) => one.provider === input.provider)?.isDefault ??
+          (list ?? []).length === 0,
+      });
       return json(201, ConnectAiConnectionResponse.parse(added));
     }
     const makeDefault = new RegExp(`^${base}/([^/]+)/make-default$`).exec(path);
@@ -443,4 +449,40 @@ test("the address's connection opens that row's dialog", async () => {
   const view = renderOrganization();
   const dialog = await view.findByRole("dialog");
   expect(within(dialog).getByText(/OpenAI API key/)).toBeDefined();
+});
+
+async function connectWithKey(
+  view: ReturnType<typeof renderOrganization>,
+  provider: RegExp,
+) {
+  const user = userEvent.setup({ document });
+  await user.click(
+    await view.findByRole("button", { name: /Connect another AI/ }),
+  );
+  const dialog = await view.findByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: provider }));
+  await user.type(within(dialog).getByLabelText(/API key/), "sk-example");
+  await user.click(within(dialog).getByRole("button", { name: /Connect/ }));
+  return dialog;
+}
+
+test("after connecting, it says what the server answered: beside the default, even with no default", async () => {
+  orgList = [entry("openai")];
+  const view = renderOrganization();
+  const dialog = await connectWithKey(view, /Anthropic/);
+  expect(
+    await within(dialog).findByText(/Pick one of its models in a conversation/),
+  ).toBeDefined();
+});
+
+test("after connecting the provider that is the default again, it says the next message runs on it", async () => {
+  orgList = [
+    entry("openai", { isDefault: true }),
+    entry("anthropic", { login: "api-key" }),
+  ];
+  const view = renderOrganization();
+  const dialog = await connectWithKey(view, /^OpenAI/);
+  expect(
+    await within(dialog).findByText(/Your next message runs on it/),
+  ).toBeDefined();
 });

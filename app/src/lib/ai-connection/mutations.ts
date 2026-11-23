@@ -52,6 +52,11 @@ export type Connected = {
   connection: DescribedConnection;
   /** Desktop's sentence when it couldn't record the switch or move the default Bot. */
   desktopProblem: string | null;
+  /**
+   * Whether a run with no pick now uses it, as the server answered one more connection
+   * (connectAiConnection). Absent from a switch, which always makes it the one in use.
+   */
+  isDefault?: boolean;
 };
 
 /**
@@ -347,7 +352,11 @@ export function addAiConnectionMutationOptions(
               { "Idempotency-Key": idempotencyKey() },
               { fallback: PERSONAL_FALLBACK },
             );
-      return { connection, desktopProblem: null };
+      return {
+        connection,
+        desktopProblem: null,
+        isDefault: connection.isDefault,
+      };
     },
     onSuccess: () => invalidateAiConnection(queryClient),
   });

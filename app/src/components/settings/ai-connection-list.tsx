@@ -232,6 +232,7 @@ type Step =
       at: "done";
       connection: DescribedConnection;
       desktopProblem: string | null;
+      isDefault?: boolean;
     };
 
 function ConnectionDialog({
@@ -285,7 +286,7 @@ function ConnectionDialog({
     return (
       <DialogContent>
         <Connected
-          added={!entry.isDefault}
+          added={step.isDefault === false}
           connection={step.connection}
           desktopProblem={step.desktopProblem}
           onClose={onClose}
@@ -464,12 +465,13 @@ function AddingDialog({
   const [done, setDone] = useState<{
     connection: DescribedConnection;
     desktopProblem: string | null;
+    isDefault?: boolean;
   } | null>(null);
   return (
     <DialogContent>
       {done ? (
         <Connected
-          added={list.connections.some((entry) => entry.isDefault)}
+          added={done.isDefault === false}
           connection={done.connection}
           desktopProblem={done.desktopProblem}
           onClose={onClose}
