@@ -1,6 +1,13 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  within,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { type Answer, nativeControl } from "../src/fakeNative/control";
 import { PAGE_COMMANDS } from "../src/fakeNative/pageRegistry";
 import { CommandsPanel } from "./CommandsPanel";
@@ -20,6 +27,7 @@ test("Apply sets the answer, and a bad edit keeps the last good one", () => {
   control.reset();
   const onAnswer = mock();
   const view = render(<CommandsPanel control={control} onAnswer={onAnswer} />);
+  fireEvent.click(view.getByRole("button", { name: "default_root (Default)" }));
   const area = view.getByLabelText("Answer for default_root");
   type(area, '"/x"');
   fireEvent.click(view.getByLabelText("Apply default_root"));
@@ -48,13 +56,20 @@ test("an outside answer change updates the editor until the person edits", () =>
   expect(area.value).toBe('"/mine"');
 });
 
-test("a problem without said shows an error", () => {
+test("a problem without said shows an error", async () => {
   const control = nativeControl();
   control.reset();
   const view = render(<CommandsPanel control={control} onAnswer={mock()} />);
-  const select = view.getByLabelText("Mode for default_root");
-  fireEvent.focusIn(select);
-  fireEvent.change(select, { target: { value: "fail" } });
+  const person = userEvent.setup({ document });
+  await person.click(
+    view.getByRole("button", { name: "default_root (Default)" }),
+  );
+  await person.click(
+    view.getByRole("combobox", { name: "Mode for default_root" }),
+  );
+  await person.click(
+    await within(document.body).findByRole("option", { name: "fail" }),
+  );
   type(view.getByLabelText("Answer for default_root"), "{}");
   fireEvent.click(view.getByLabelText("Apply default_root"));
   expect(view.getByText("A problem needs a said text.")).not.toBeNull();
@@ -66,9 +81,7 @@ test("search filters the commands", () => {
   control.reset();
   const view = render(<CommandsPanel control={control} onAnswer={mock()} />);
   type(view.getByLabelText("Search commands"), "local_eval");
-  const rows = Array.from(
-    view.container.querySelectorAll("details[data-command]"),
-  );
+  const rows = Array.from(view.container.querySelectorAll("[data-command]"));
   expect(rows.length).toBeGreaterThan(0);
   for (const row of rows) {
     expect(row.getAttribute("data-command")).toContain("local_eval");
@@ -77,9 +90,10 @@ test("search filters the commands", () => {
 
 test("with no control the Apply buttons are disabled", () => {
   const view = render(<CommandsPanel control={null} onAnswer={mock()} />);
-  const buttons = Array.from(
-    view.container.querySelectorAll<HTMLButtonElement>("button"),
-  );
+  const buttons = view.getAllByRole("button", {
+    name: /^Apply /,
+    hidden: true,
+  }) as HTMLButtonElement[];
   expect(buttons.length).toBeGreaterThan(0);
   expect(buttons.every((b) => b.disabled)).toBe(true);
 });
@@ -109,4 +123,20 @@ test("with the page commands, the search filters that list", () => {
     el.getAttribute("data-command"),
   );
   expect(all).toEqual([...PAGE_COMMANDS]);
+});
+
+test("a command row folds open and shows the mode, the answer and Apply", async () => {
+  const control = nativeControl();
+  control.reset();
+  const view = render(<CommandsPanel control={control} onAnswer={mock()} />);
+  expect(view.queryByRole("button", { name: "Apply default_root" })).toBeNull();
+  await userEvent
+    .setup({ document })
+    .click(view.getByRole("button", { name: "default_root (Default)" }));
+  expect(
+    view.getByRole("button", { name: "Apply default_root" }),
+  ).not.toBeNull();
+  expect(
+    view.getByRole("combobox", { name: "Mode for default_root" }).textContent,
+  ).toContain("value");
 });

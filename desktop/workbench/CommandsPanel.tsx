@@ -1,4 +1,25 @@
+import { IconChevronRight, IconSearch } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import type { Answer, NativeControl } from "../src/fakeNative/control";
 import { COMMANDS } from "../src/fakeNative/registry";
 import { parseAnswer } from "./answerEditor";
@@ -73,54 +94,81 @@ function CommandRow({
   }
 
   return (
-    <details data-command={name}>
-      <summary>
-        {name} ({modeLabel(answer)})
-      </summary>
-      <select
-        aria-label={`Mode for ${name}`}
-        value={mode}
-        onChange={(e) => {
-          setDirty(true);
-          setMode(e.target.value as Mode);
-        }}
+    <Collapsible data-command={name}>
+      <CollapsibleTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            className="group/command w-full justify-start font-mono text-xs"
+          />
+        }
       >
-        {MODES.map((m) => (
-          <option key={m.mode} value={m.mode}>
-            {m.mode}
-          </option>
-        ))}
-      </select>
-      <textarea
-        aria-label={`Answer for ${name}`}
-        rows={4}
-        value={text}
-        onChange={(e) => {
-          setDirty(true);
-          setText(e.target.value);
-        }}
-      />
-      {mode === "delay" && (
-        <input
-          type="number"
-          aria-label={`Delay for ${name}`}
-          value={ms}
+        <IconChevronRight
+          aria-hidden
+          className="transition-transform group-data-panel-open/command:rotate-90"
+        />
+        <span className="truncate">
+          {name} ({modeLabel(answer)})
+        </span>
+      </CollapsibleTrigger>
+      {/* Kept mounted: a folded row keeps what the person typed. */}
+      <CollapsibleContent keepMounted className="flex flex-col gap-2 py-2 pl-6">
+        <Select
+          value={mode}
+          onValueChange={(value) => {
+            setDirty(true);
+            setMode(value as Mode);
+          }}
+        >
+          <SelectTrigger size="sm" aria-label={`Mode for ${name}`}>
+            <SelectValue>{mode}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {MODES.map((m) => (
+              <SelectItem key={m.mode} value={m.mode}>
+                {m.mode}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Textarea
+          aria-label={`Answer for ${name}`}
+          rows={4}
+          className="font-mono text-xs"
+          value={text}
           onChange={(e) => {
             setDirty(true);
-            setMs(e.target.valueAsNumber);
+            setText(e.target.value);
           }}
         />
-      )}
-      {error && <p role="alert">{error}</p>}
-      <button
-        type="button"
-        aria-label={`Apply ${name}`}
-        disabled={!control}
-        onClick={apply}
-      >
-        Apply
-      </button>
-    </details>
+        {mode === "delay" && (
+          <Input
+            type="number"
+            aria-label={`Delay for ${name}`}
+            value={ms}
+            onChange={(e) => {
+              setDirty(true);
+              setMs(e.target.valueAsNumber);
+            }}
+          />
+        )}
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+        <Button
+          size="sm"
+          className="self-start"
+          aria-label={`Apply ${name}`}
+          disabled={!control}
+          onClick={apply}
+        >
+          Apply
+        </Button>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -150,13 +198,18 @@ export function CommandsPanel({
   const shown = commands.filter((name) => name.toLowerCase().includes(needle));
 
   return (
-    <section>
-      <h3>Commands</h3>
-      <input
-        aria-label="Search commands"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
+    <section className="flex flex-col gap-1">
+      <h3 className="text-sm font-medium">Commands</h3>
+      <InputGroup className="mb-1">
+        <InputGroupAddon>
+          <IconSearch aria-hidden />
+        </InputGroupAddon>
+        <InputGroupInput
+          aria-label="Search commands"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </InputGroup>
       {shown.map((name) => (
         <CommandRow
           key={name}

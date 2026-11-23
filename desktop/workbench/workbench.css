@@ -164,8 +164,7 @@
   }
 
   /* Buttons: a visible edge on the glass, in light and in dark. Pressed is dark fill, light text. */
-  .wb-side button,
-  .wb-import input[type="file"]::file-selector-button {
+  .wb-side button {
     font: inherit;
     font-size: 13px;
     font-weight: 500;
@@ -180,8 +179,7 @@
     cursor: pointer;
   }
 
-  .wb-side button:hover,
-  .wb-import input[type="file"]::file-selector-button:hover {
+  .wb-side button:hover {
     background: var(--ck-surface-hovered);
   }
 
@@ -403,42 +401,6 @@
     border: 0;
     pointer-events: none;
     background: transparent;
-  }
-
-  /* Import a log: folded under the scenes. */
-  .wb-import {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .wb-import input[type="file"] {
-    max-width: 100%;
-    border: 0;
-    padding: 0 4px;
-    background: transparent;
-  }
-
-  .wb-import input[type="file"]::file-selector-button {
-    margin-right: 8px;
-  }
-
-  .wb-import code {
-    display: block;
-    overflow-wrap: anywhere;
-    padding: 8px;
-    font: 12px / 1.5 var(--ck-mono);
-    background: var(--ck-white-65);
-    border-radius: var(--ck-radius-xs);
-  }
-
-  .wb-import-save > summary {
-    padding: 0 4px;
-    cursor: pointer;
-  }
-
-  .wb-side .wb-import-save p {
-    margin: 4px 0;
   }
 
   /*

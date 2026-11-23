@@ -1,4 +1,13 @@
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import type { NativeControl } from "../src/fakeNative/control";
 import { EVENTS, type EventName } from "../src/fakeNative/registry";
 
@@ -36,34 +45,48 @@ export function EventsPanel({ control }: EventsPanelProps) {
   }
 
   return (
-    <section>
-      <h3>Events</h3>
-      <select
-        aria-label="Event"
+    <section className="flex flex-col gap-2">
+      <h3 className="text-sm font-medium">Events</h3>
+      <Select
         value={event}
-        onChange={(e) => {
-          const next = e.target.value as EventName;
+        onValueChange={(value) => {
+          const next = value as EventName;
           setEvent(next);
           setText(defaultText(next));
           setError(null);
         }}
       >
-        {EVENTS.map((name) => (
-          <option key={name} value={name}>
-            {name}
-          </option>
-        ))}
-      </select>
-      <textarea
+        <SelectTrigger size="sm" aria-label="Event" className="font-mono">
+          <SelectValue>{event}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {EVENTS.map((name) => (
+            <SelectItem key={name} value={name} className="font-mono">
+              {name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Textarea
         aria-label="Payload (JSON)"
         rows={6}
+        className="font-mono text-xs"
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
-      {error && <p role="alert">{error}</p>}
-      <button type="button" disabled={!control} onClick={send}>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      <Button
+        size="sm"
+        className="self-start"
+        disabled={!control}
+        onClick={send}
+      >
         Send
-      </button>
+      </Button>
     </section>
   );
 }

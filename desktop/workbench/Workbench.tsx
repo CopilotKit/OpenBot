@@ -52,7 +52,6 @@ import { EventsPanel } from "./EventsPanel";
 import { type FrameConfig, frameUrl } from "./frameConfig";
 import { appSceneAfter, desktopSceneFor, HANDBACK_WORDS } from "./handover";
 import { ImportLogPanel } from "./ImportLogPanel";
-import "./appPanels.css";
 import {
   classifyMoves,
   type Mark,
