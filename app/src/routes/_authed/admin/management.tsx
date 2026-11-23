@@ -22,7 +22,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { copyText } from "@/components/settings/linked-accounts";
+import { CopyButton } from "@/components/copy-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -312,30 +312,6 @@ function Notice({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** A Copy button that says whether the text landed on the clipboard. */
-function CopyButton({ label, text }: { label: string; text: string }) {
-  const [copied, setCopied] = useState<boolean | null>(null);
-  return (
-    <div className="flex shrink-0 flex-col items-end gap-1">
-      <Button
-        aria-label={label}
-        onClick={async () =>
-          setCopied(await copyText(text, navigator.clipboard))
-        }
-        size="sm"
-        variant="outline"
-      >
-        {copied ? "Copied" : "Copy"}
-      </Button>
-      {copied === false ? (
-        <span className="text-destructive text-xs" role="alert">
-          Couldn't copy. Select it and copy it yourself.
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
 function WaitingForApproval({
   status,
   cancelButton,
@@ -551,6 +527,14 @@ function Connected({
           description="Managed updates stop, and you upgrade OpenBot yourself. Connect turns them back on."
           title="Turn off managed updates"
         />
+      ) : status.agentRemovedWithChart === true ? (
+        // The chart's agent, removed with OpenBot's release when management was turned off with
+        // Helm: there is no openbot-agent release, so no uninstall command. Disconnect finishes.
+        <PageSection
+          action={disconnectButton}
+          description={REMOVED_WITH_CHART}
+          title="Disconnect"
+        />
       ) : (
         <PageSection
           description="Uninstall the management agent with Helm, then choose Disconnect. OpenBot keeps running as it is, and you upgrade it yourself from then on."
@@ -570,4 +554,7 @@ function Connected({
   );
 }
 
+/** For an agent installed as its own Helm release (the Helm command, or the release that runs upgrades). */
 const UNINSTALL = "helm uninstall openbot-agent --namespace openbot-system";
+const REMOVED_WITH_CHART =
+  "Turning management off with Helm removed the management agent along with OpenBot's own release, so there is nothing to uninstall. Choose Disconnect to finish. OpenBot keeps running as it is, and you upgrade it yourself from then on.";

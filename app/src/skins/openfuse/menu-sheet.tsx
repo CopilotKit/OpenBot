@@ -189,8 +189,8 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
               disabled={signOut.isPending}
               icon={IconLogout}
               onClick={async () => {
-                await signOut.mutateAsync();
-                await navigate({ to: "/sign" });
+                const { leaving } = await signOut.mutateAsync();
+                if (!leaving) await navigate({ to: "/sign" });
               }}
               small
             >

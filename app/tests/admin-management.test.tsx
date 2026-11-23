@@ -631,6 +631,51 @@ test("Disconnect of the chart's agent asks first, says Connect turns them back o
   expect(await view.findByText("Turned off")).toBeTruthy();
 });
 
+/*
+ * Management turned off with Helm (`management.enabled=false`) after the chart's agent connected:
+ * that upgrade removed the agent along with OpenBot's own release, so there is no `openbot-agent`
+ * release, and `helm uninstall openbot-agent` would fail. The server says so with
+ * agentRemovedWithChart, and Disconnect finishes on its own.
+ */
+const REMOVED_WITH_CHART = {
+  ...CHART_CONNECTED,
+  agentInstalledByChart: false,
+  agentRemovedWithChart: true,
+};
+
+test("after management is turned off with Helm, the chart's agent is gone with OpenBot's release: no uninstall command, Disconnect finishes", async () => {
+  answer = { status: 200, body: REMOVED_WITH_CHART };
+  const view = await draw(ManagementPage);
+  expect(await view.findByText("Upgrades")).toBeTruthy();
+  // Never a command that fails: there is no openbot-agent release to uninstall.
+  expect(view.queryByText(/helm uninstall/)).toBeNull();
+  expect(
+    view.queryByRole("button", { name: "Copy the uninstall command" }),
+  ).toBeNull();
+  expect(
+    view.getByText(/Turning management off with Helm removed/).textContent,
+  ).toBe(
+    "Turning management off with Helm removed the management agent along with OpenBot's own release, so there is nothing to uninstall. Choose Disconnect to finish. OpenBot keeps running as it is, and you upgrade it yourself from then on.",
+  );
+  fireEvent.click(view.getByRole("button", { name: "Disconnect" }));
+  expect(await view.findByText("Disconnect managed updates?")).toBeTruthy();
+  // The chart no longer installs the agent, so coming back is the approval flow.
+  expect(
+    view.getByText(/OpenBot stops getting managed updates/).textContent,
+  ).toBe(
+    "OpenBot stops getting managed updates, and you upgrade it yourself. Connecting again needs a new code and a new approval.",
+  );
+  answer = { status: 200, body: { state: "not-connected" } };
+  fireEvent.click(
+    within(view.getByRole("dialog")).getByRole("button", {
+      name: "Disconnect",
+    }),
+  );
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ method: "DELETE", path: ENROLLMENT });
+  expect(await view.findByText("Not connected")).toBeTruthy();
+});
+
 test("turned off offers Connect, which turns managed updates back on", async () => {
   answer = {
     status: 200,

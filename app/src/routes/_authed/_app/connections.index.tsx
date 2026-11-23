@@ -23,6 +23,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
+import { MovedAppsNotice } from "@/components/moves/moved-apps-notice";
 import { AppInitial, PluginLogo } from "@/components/plugins/plugin-logo";
 import { providerIcon } from "@/components/settings/linked-accounts";
 import {
@@ -62,6 +63,7 @@ import {
 } from "@/lib/identity/queries";
 import { keyedLookup } from "@/lib/lookup";
 import { useManagePaths } from "@/lib/manage-paths";
+import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
 import {
   addedByUrlListedOn,
   brokeredAccountsListedOn,
@@ -300,6 +302,12 @@ function RouteComponent() {
       replace: true,
     });
   }, [outcome, authorized, linked, navigate]);
+  /*
+   * A browser's sign-in can come back here (`?connected=<key>`): an app opened from the reconnect
+   * list goes back to the list once it is connected. `?connected=failed` connects nothing, so the
+   * person stays here with the failure said, and the notice below is the way back to the list.
+   */
+  useReturnToReconnectList();
   const [search, setSearch] = React.useState("");
   const apps = useQuery(appsQueryOptions());
   const catalogue = useQuery(catalogueQueryOptions());
@@ -495,6 +503,8 @@ function RouteComponent() {
           {connectApp.error}
         </p>
       ) : null}
+      {/* What a move to OpenBot Cloud left to connect again, and the way to the list of it. */}
+      <MovedAppsNotice />
       {/*
        * The first section has no heading of its own: in the team edition it is the page's one list,
        * and "Your connections" under "Connections" said the same thing twice. It holds the search,

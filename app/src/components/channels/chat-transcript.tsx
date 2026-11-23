@@ -44,6 +44,7 @@ import {
   useState,
 } from "react";
 import { InlineApproval } from "@/components/approvals/inline-approval";
+import { AddModelKeyLink } from "@/components/channels/add-model-key-link";
 import {
   ArgumentsArrivingContext,
   TurnInFlightContext,
@@ -373,8 +374,12 @@ function Stopped({
           Carry on
         </Button>
       ) : (
-        // A run refused because the organization needs a card is answered where it was refused.
-        <AddCardButton />
+        <>
+          {/* A run refused because the organization needs a card is answered where it was refused. */}
+          <AddCardButton />
+          {/* And one with no model key, for an admin who can add it. */}
+          <AddModelKeyLink reason={reason} />
+        </>
       )}
     </div>
   );
@@ -974,7 +979,9 @@ const TranscriptMessage = memo(function TranscriptMessage({
             variant={isUser ? "sent" : "ghost"}
             className={isUser ? undefined : "w-full"}
           >
-            <BubbleContent className={isUser ? undefined : "w-full"}>
+            <BubbleContent
+              className={cn("text-[1rem]/[1.5]", !isUser && "w-full")}
+            >
               {isUser ? (
                 // A person's own message is shown exactly as they typed it. Rendering it as markdown
                 // would silently reformat what they said, and an asterisk in a sentence is not

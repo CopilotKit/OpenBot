@@ -17,13 +17,13 @@ import { useOrganizationChoices } from "@/lib/organizations/queries";
 import { ControlsSection } from "./controls-section";
 
 /**
- * What the directory deactivating somebody does. Where everybody has an organization of their own
- * and may create others (`canCreate`, the server's verdict), it ends their membership of this
- * organization alone; where OpenBot keeps one, it ends their access to OpenBot.
+ * What the directory deactivating somebody does. Where people may create organizations
+ * (`canCreate`, the server's verdict), it ends their membership of this organization alone; where
+ * OpenBot keeps one, it ends their access to OpenBot.
  */
 function deprovisioning(severalOrganizations: boolean): string {
   return severalOrganizations
-    ? "Deprovisioning removes the person from this organization, retires the connector credentials they granted here and stops their computers. They keep their own organization and any other."
+    ? "Deprovisioning removes the person from this organization, retires the connector credentials they granted here and stops their computers. They keep any other organization they're in."
     : "Deprovisioning ends sessions, blocks the address, retires connector credentials and stops their computers.";
 }
 

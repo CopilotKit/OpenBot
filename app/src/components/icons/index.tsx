@@ -111,11 +111,13 @@ import {
   CheckmarkCircle02Icon,
   CheckmarkSquare02Icon,
   CircleDashedIcon,
+  ClipboardIcon,
   Clock01Icon,
   Clock03Icon,
   CloudCogIcon,
   CloudIcon,
   CloudOffIcon,
+  CloudUploadIcon,
   ComputerIcon,
   ComputerPhoneSyncIcon,
   ComputerRemoveIcon,
@@ -227,6 +229,7 @@ import {
   RepeatIcon,
   Robot01Icon,
   Route01Icon,
+  Sad01Icon,
   Search01Icon,
   SearchList01Icon,
   SearchList02Icon,
@@ -361,12 +364,14 @@ export const IconCircleCheck = defineIcon(
 export const IconCircleDashed = defineIcon("circle-dashed", CircleDashedIcon);
 export const IconCircleMinus = defineIcon("circle-minus", MinusSignCircleIcon);
 export const IconCirclePlus = defineIcon("circle-plus", PlusSignCircleIcon);
+export const IconClipboard = defineIcon("clipboard", ClipboardIcon);
 export const IconClock = defineIcon("clock", Clock01Icon);
 export const IconClockHour3 = defineIcon("clock-hour-3", Clock03Icon);
 export const IconClockPlay = defineIcon("clock-play", TimeScheduleIcon);
 export const IconCloud = defineIcon("cloud", CloudIcon);
 export const IconCloudCog = defineIcon("cloud-cog", CloudCogIcon);
 export const IconCloudOff = defineIcon("cloud-off", CloudOffIcon);
+export const IconCloudUpload = defineIcon("cloud-upload", CloudUploadIcon);
 export const IconCode = defineIcon("code", SourceCodeIcon);
 export const IconCopy = defineIcon("copy", Copy01Icon);
 export const IconCornerDownLeft = defineIcon(
@@ -468,6 +473,7 @@ export const IconMessagePlus = defineIcon("message-plus", MessageAdd01Icon);
 export const IconMicrophone = defineIcon("microphone", Mic01Icon);
 export const IconMicrophoneOff = defineIcon("microphone-off", MicOff01Icon);
 export const IconMinus = defineIcon("minus", MinusSignIcon);
+export const IconMoodSad = defineIcon("mood-sad", Sad01Icon);
 export const IconMoon = defineIcon("moon", Moon02Icon);
 export const IconNetwork = defineIcon("network", NetworkIcon);
 export const IconNotes = defineIcon("notes", Note01Icon);

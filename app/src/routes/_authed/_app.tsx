@@ -5,6 +5,7 @@ import { PlanBanner } from "@/components/layout/plan-banner";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { UpdateBanner } from "@/components/layout/update-banner";
+import { MovedAppsBanner } from "@/components/moves/moved-apps-notice";
 import { SidebarInset } from "@/components/ui/sidebar";
 import {
   CONVERSATIONS,
@@ -63,6 +64,7 @@ function AppFrame() {
       <SidebarInset className="min-h-0 overflow-hidden">
         <ConnectionBanner />
         <PlanBanner />
+        <MovedAppsBanner />
         <UpdateBanner />
         <SelfHostBanner />
         <Outlet />

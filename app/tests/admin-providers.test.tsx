@@ -205,13 +205,48 @@ test("a team's admin allows the models people pick, with no separate switch", as
   ).toBeTruthy();
 });
 
-test("a team with nothing allowed is told people see no picker until it allows one", async () => {
-  settings = { ...settings, modelAllowlist: { enabled: false, models: [] } };
+test("a team that hasn't narrowed the allowlist is told people pick every listed model", async () => {
+  // Off with nothing allowed, as every organization starts, and on with nothing allowed yet:
+  // an empty allowlist means every model, as the server offers and runs them.
+  for (const [modelAllowlist, switchSays] of [
+    [
+      { enabled: false, models: [] },
+      "Off. People can pick any listed model, and no run is refused for its model.",
+    ],
+    [
+      { enabled: true, models: [] },
+      "On, but no model is allowed yet, so every model stays open. Allow models below to narrow it.",
+    ],
+  ] as const) {
+    settings = { ...settings, modelAllowlist };
+    queryClient.clear();
+    seedTeamEdition();
+    const view = await draw(ProvidersPage);
+    expect(await view.findByText("Every listed model")).toBeTruthy();
+    expect(
+      view.getByText("3 models, kept current from your provider."),
+    ).toBeTruthy();
+    expect(view.queryByText(/No models allowed yet/)).toBeNull();
+    expect(view.queryByText(/don't see a model picker/)).toBeNull();
+    // A team's admin can still narrow it.
+    expect(
+      view.getByRole("switch", { name: "Only allowed models" }),
+    ).toBeTruthy();
+    expect(view.getByText(switchSays)).toBeTruthy();
+    view.unmount();
+  }
+});
+
+test("a team whose allowed models aren't listed is told people only get the default", async () => {
+  settings = {
+    ...settings,
+    modelAllowlist: { enabled: true, models: ["openai/gpt-retired"] },
+  };
   const view = await draw(ProvidersPage);
-  expect(await view.findByText("No models allowed yet")).toBeTruthy();
+  expect(await view.findByText("No allowed model is listed")).toBeTruthy();
   expect(
     view.getByText(
-      "People don't see a model picker. Allow models below to offer them.",
+      "Your provider doesn't list any model you allowed, so people only get gpt-5.6-terra.",
     ),
   ).toBeTruthy();
 });

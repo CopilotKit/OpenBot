@@ -122,16 +122,16 @@ fn repository(image: &str) -> Option<(String, String)> {
 }
 
 /**
-The two images only a plan runs, by their published names. Each carries its vendor's sign-in, and
-each runs only on that vendor's plan:
+The two images only a plan runs, by their published names. Each runs only on that vendor's plan:
 
 - `plan::SIGN_IN_IMAGE`, the Claude Agent SDK, is the Bot a Claude plan runs on.
 - `plan::CHATGPT_SIGN_IN_IMAGE`, the Python LangGraph image, is a ChatGPT plan's model service
-  beside the Bot (`plan::CHATGPT_PLAN_SERVICE`).
+  beside the Bot (`plan::CHATGPT_PLAN_SERVICE`), and runs its sign-in.
 
-Install pulls one only for an installation on its plan ([`plan_images`]). A sign-in to a plan pulls
-its image, and a Start on a plan pulls whatever its Bot and services need that is not there, each
-showing the download as Install does (`main.rs`). So a switch to a plan downloads its image then.
+Install pulls one only for an installation on its plan ([`plan_images`]). A ChatGPT plan's sign-in
+pulls its image. A Claude plan's sign-in needs none: it is native (`claude_sign_in`). A Start on a
+plan pulls whatever its Bot and services need that is not there, each showing the download as
+Install does (`main.rs`). So a switch to a plan downloads its image then.
 */
 pub const PLAN_IMAGES: [&str; 2] = [
     crate::plan::SIGN_IN_IMAGE,

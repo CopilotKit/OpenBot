@@ -882,6 +882,33 @@ fieldset.picker.hosting .tile.chosen {
   color: var(--text-secondary);
 }
 
+/*
+ * OpenBot (Self-Contained) with OpenBot Cloud on: the foot of the card, below everything else, set
+ * off by a rule. A line in the footnote's size and colour with its link, as "Already have OpenBot
+ * at work?" is; opened, its name leads the line and what this computer needs follows it.
+ */
+.this-computer-foot {
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.this-computer-aside {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.this-computer-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.this-computer-foot .needs {
+  margin-top: 10px;
+}
+
 /* The clouds it runs on: each mark on the marks' white ground, as the provider tiles draw theirs. */
 .cloud-marks {
   grid-area: marks;
@@ -1017,6 +1044,18 @@ button.text-link.inline-link {
 
 .book-a-demo h2 {
   margin: 0;
+  scroll-margin-top: 20px;
+}
+
+/* Focused by Book a demo above, not by a person's Tab: no ring around a heading. */
+.book-a-demo h2:focus {
+  outline: none;
+}
+
+/* Book a demo, under where it runs: one button that takes the card down to the calendar. */
+.business-book {
+  display: flex;
+  margin-top: -4px;
 }
 
 .book-a-demo-line {
@@ -1123,6 +1162,11 @@ fieldset.picker.hosting .tile.held:active {
 
 .connect-to-openbot .footnote {
   margin-top: 8px;
+}
+
+/* Who has the address, right under the field. */
+.connect-to-openbot .field .address-help {
+  margin-top: 6px;
 }
 
 /*
@@ -2522,4 +2566,290 @@ main > .sheet > .step-footer > .row:first-child:empty:has(+ .behind-slot) {
 
 .usage-choice .usage-choice-failed {
   grid-column: 2;
+}
+
+/*
+ * The move to OpenBot Cloud (`MoveToCloud`): the first screen's card, mark, rows and buttons, with
+ * what moves, the apps to reconnect and the move's rows in the shapes the other steps draw.
+ */
+
+/* A row not started yet, in a list shown whole: an empty ring, its name quieter, no badge. */
+.step.pending .step-label {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.step .mark.pending {
+  width: 14px;
+  height: 14px;
+  margin: 0 1px;
+  border: 1.5px solid
+    color-mix(in srgb, var(--muted-foreground) 45%, transparent);
+  border-radius: 50%;
+}
+
+/* "Recommended" beside OpenBot Cloud's name: the app's badge, in the chosen row's ring tint. */
+.move-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--ring) 14%, var(--card));
+  color: color-mix(in srgb, var(--ring) 70%, var(--text-primary));
+  font-size: var(--text-xs);
+  line-height: 18px;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+
+/* What moves, counted: one bordered group, as the rows are, three to a line. */
+.move-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin: 0;
+  padding: 12px 16px;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.move-counts li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.move-counts svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--text-secondary);
+}
+
+/* The apps that can't move: the card that waits on the person, with the apps listed in it. */
+.move-apps {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.move-app {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+}
+
+.move-app-mark {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--mark-ground);
+  color: var(--mark-ink);
+}
+
+.move-app-mark img,
+.move-app-mark svg {
+  width: 100%;
+  height: 100%;
+}
+
+.move-app-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.local-alert .move-app-name,
+.move-then .move-app-name {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.move-app-account,
+.move-app-bots {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.move-app-bots {
+  font-size: var(--text-xs);
+  line-height: 16px;
+}
+
+/* A row's own action, in the app's small outline button. */
+button.move-app-action {
+  flex: none;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-item);
+}
+
+/* Bringing the AI key: the app's checkbox beside a name and a line. */
+.move-key {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 10px;
+  align-items: start;
+  cursor: pointer;
+}
+
+.move-key input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.move-key > span {
+  display: flex;
+  flex-direction: column;
+}
+
+.move-key-name {
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.move-key-said {
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+p.move-key-none {
+  margin: 0;
+}
+
+/* Under the buttons, with the room the row's own gap gives: the first screen's footnote. */
+.move-sheet .step-footer .footnote {
+  margin-top: 12px;
+}
+
+.move-sheet .step-footer .status-line {
+  margin-top: 12px;
+}
+
+/* While the move runs, its promise keeps the gap it had before its foot was pinned. */
+.move-sheet .step-footer .footnote.move-moving-footnote {
+  margin-top: 16px;
+}
+
+.move-detail {
+  margin-top: 16px;
+}
+
+/* What the move removed: one line in the success colour's mark, and under it, when the disk shows
+   much less of it free so far, a smaller line that says so. */
+.move-freed {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: 22px;
+  color: var(--text-secondary);
+}
+
+.move-freed p {
+  margin: 0;
+}
+
+.move-freed svg {
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  flex: none;
+  color: var(--good);
+}
+
+.move-freed .move-freed-held {
+  margin-top: 4px;
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.move-freed strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* What OpenBot Cloud said about the move, calmly: the muted fill, no alarm. */
+.move-notice {
+  padding: 12px 16px;
+  border-radius: var(--r-card);
+  background: var(--muted);
+}
+
+.move-notice p {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+.move-notice p + p {
+  margin-top: 6px;
+}
+
+/* After Connect your AI: the apps to reconnect, named as the next step in the bordered group the
+   counts are drawn in, with nothing on them to press yet. */
+.move-then {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--card);
+}
+
+.move-then p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+/*
+ * The blocks under a move screen's lede, each apart from the one above it by the same 12px, and
+ * the last one's foot left to the buttons' own gap. Last, so they outrank each block's own rule.
+ */
+.move-sheet > .move-then,
+.move-sheet > .move-apps-notice,
+.move-sheet > .move-key,
+.move-sheet > .move-key-none,
+.move-sheet > .move-notice,
+.move-sheet > .local-alert {
+  margin: 12px 0 0;
+}
+
+/* Right under the lede, its own gap is the one above. */
+.move-sheet > .lede + * {
+  margin-top: 0;
+}
+
+/* A move that stopped: the reassurance first, then where it stopped. */
+.move-sheet > .move-safe {
+  margin: 0 0 16px;
 }

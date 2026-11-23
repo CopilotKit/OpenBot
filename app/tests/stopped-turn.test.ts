@@ -35,6 +35,34 @@ describe("a later run of a turn that fails", () => {
     expect(stoppedReason("Runner connection dropped")).toBe(TURN_CUT_OFF);
   });
 
+  /*
+   * FOUND ON A CLOUD 1.2.0-rc.1 DOGFOOD. A Bot's connection to its model was cut part way, and the
+   * run ended with the fetch's own words, shown in red word for word.
+   */
+  test("a run whose connection was cut says the turn was cut off, never the socket's words", () => {
+    for (const said of [
+      // Bun's fetch, exactly as the conversation showed it.
+      "ECONNRESET: The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()",
+      // Node's and undici's for the same.
+      "socket hang up",
+      "read ECONNRESET",
+      "terminated",
+      "other side closed",
+    ]) {
+      expect([said, stoppedReason(said)]).toEqual([said, TURN_CUT_OFF]);
+      expect([said, laterRunFailure(new TypeError(said))]).toEqual([
+        said,
+        TURN_CUT_OFF,
+      ]);
+    }
+    // A sentence that only mentions a connection is still passed on in its own words.
+    expect(
+      stoppedReason(
+        "The connection to Claude dropped. Ask the Bot to carry on.",
+      ),
+    ).toBe("The connection to Claude dropped. Ask the Bot to carry on.");
+  });
+
   test("passes on any other failure in its own words", () => {
     expect(laterRunFailure(new Error("The model refused the request."))).toBe(
       "The model refused the request.",

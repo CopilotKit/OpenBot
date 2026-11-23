@@ -50,6 +50,11 @@ const ACTIONS: Readonly<Record<string, string>> = {
  */
 export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "ai_connection.replaced": "Change the AI provider",
+  "ai_connection.removed": "Disconnect the AI provider",
+  "personal_ai_connection.replaced": "Connect a personal AI",
+  "personal_ai_connection.removed": "Remove a personal AI",
+  "personal_ai_connection.signed_in": "Sign in to an AI provider",
+  "service_terms.accepted": "Agree to the terms",
   "configuration.changed": "Change a setting",
   "credential.created": "Save a credential",
   "credential.rotated": "Replace a credential",
@@ -122,6 +127,8 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "computer.reset": "Reset the computer",
   "computer.browser_cleared": "Clear the browser",
   "computer.updated": "Update the computer",
+  "computer.restore_requested": "Restore the computer from a saved copy",
+  "computer.restore_finished": "Finish restoring the computer",
   "computer.suspended": "Turn off an idle computer",
   "computer.resumed": "Start a computer again",
   "computer.limit_reached": "Start a new computer",

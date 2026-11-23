@@ -125,6 +125,9 @@
   "components/manage/plugin-tool-page.tsx": {
     "palette": 2
   },
+  "components/manage/workspace-snapshots-section.tsx": {
+    "palette": 2
+  },
   "components/needs-you/board-row.tsx": {
     "palette": 4
   },
@@ -169,8 +172,8 @@
   "components/routines/routine-runs.tsx": {
     "palette": 9
   },
-  "components/settings/ai-connection.tsx": {
-    "palette": 4
+  "components/settings/ai-connection-chooser.tsx": {
+    "palette": 6
   },
   "components/setup/setup-checklist.tsx": {
     "palette": 9
@@ -197,6 +200,9 @@
     "palette": 1
   },
   "routes/_authed/_app/connections.index.tsx": {
+    "palette": 2
+  },
+  "routes/_authed/_app/reconnect.tsx": {
     "palette": 2
   },
   "routes/_authed/admin/boundaries_.$index.tsx": {

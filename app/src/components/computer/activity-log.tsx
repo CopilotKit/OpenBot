@@ -125,6 +125,7 @@ function CommandEntry({
           byYou: entry.doneByPerson === true,
           ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}),
           timedOut: entry.timedOut === true,
+          failed: entry.failed === true,
         })}
         truncated={entry.truncated === true}
       />
