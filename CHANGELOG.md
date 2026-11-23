@@ -391,6 +391,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   providers, so its row asks only for an API key: OpenBot fills in
   `https://api.trustedrouter.com/v1` and the model `anthropic/claude-sonnet-5.5`, which can be
   changed to any name the gateway lists.
+- **A Bot's answer reads as written after you switch conversations.** Coming back to a conversation
+  while its Bot was still answering could draw the answer as scraps of itself, and it stayed that
+  way. The answer now reads as OpenBot stored it.
 - **A part of the app that didn't download loads again.** After a release replaced the app's files,
   going back to a conversation could leave OpenBot Desktop's window on "Something went wrong!" with
   "Importing a module script failed." The app now loads the page again, once, to get the files
