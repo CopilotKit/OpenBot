@@ -276,6 +276,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **The model catalogue offers only what can run.** With Only allowed models on, the
   organization's default model is offered only when it is on the list; otherwise the default is
   the newest allowed model. Before, it was offered and every run on it was refused.
+- **Search invitations, teams and a team's people.** `listOrganizationInvitations`, `listTeams`
+  and `listTeamMembers` take an optional `search`, which narrows each list to the invitations
+  whose address holds it, the teams whose name holds it, or the people whose name or address holds
+  it, ignoring case. Each finds only that organization's own, and a cursor belongs to the search
+  that made it. A team's people, and its `memberCount`, leave out anybody removed from the
+  organization until they are restored.
 - The model catalogue's `exposure` and its description say an empty allowlist means every model.
 - `ManagementEnrollment` carries `agentRemovedWithChart`, true only while OpenBot is connected
   through the agent its own chart installed after the chart turned management off. Optional, and
