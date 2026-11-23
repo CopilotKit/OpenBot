@@ -307,7 +307,11 @@ fn move_now<R: tauri::Runtime>(
     let mut moved =
         moving::run(&mut local, &mut cloud, &mut here, &asked, &mut told).map_err(|failure| {
             log::warn!("[move] {}: {}", failure.kind(), failure.detail());
-            let mut problem = Problem::with(failure.said(), failure.detail().to_owned());
+            // OpenBot Cloud's own sentence is the whole of what it said: nothing to show beside it.
+            let mut problem = match &failure {
+                moving::Failure::Stopped { said } => Problem::plain(said.clone()),
+                _ => Problem::with(failure.said(), failure.detail().to_owned()),
+            };
             problem.kind = Some(failure.kind());
             problem
         })?;

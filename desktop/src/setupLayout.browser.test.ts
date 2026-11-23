@@ -158,6 +158,12 @@ function moveAnswer(command) {
   }
   progress("sign-in", "done");
   progress("export", "done");
+  // OpenBot Cloud stopped the import and said why: a conversation it won't overwrite.
+  if (move === "stopped") {
+    progress("upload", "done");
+    progress("import", "running");
+    throw { said: "\\"Field Researcher\\" has new messages on your computer, and was also carried on in OpenBot Cloud. OpenBot won't overwrite what was said in OpenBot Cloud, so the new messages can't move.", detail: null, kind: "move-stopped" };
+  }
   progress("upload", "running", 0.42);
   if (move === "midway") return new Promise(() => {});
   if (move === "failed")
@@ -3047,6 +3053,13 @@ describe.skipIf(!asked)(
       { hash: "#move-signin", heading: "Moving to OpenBot Cloud", move: true },
       { hash: "#move-midway", heading: "Moving to OpenBot Cloud", move: true },
       { hash: "#move-failed", heading: "The move didn't finish", move: true },
+      // OpenBot Cloud's own three-line sentence: a few pixels past the card, the buttons in view.
+      {
+        hash: "#move-stopped",
+        heading: "The move didn't finish",
+        move: true,
+        scrolls: true,
+      },
       { hash: "#move-done", heading: "You're on OpenBot Cloud", move: true },
       {
         hash: "#move-done-held",
