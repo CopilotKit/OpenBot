@@ -52,7 +52,13 @@ from claude_agent_sdk import (
 )
 from claude_agent_sdk.types import StreamEvent
 
-from .replay import RESULT_CHARS, cut_note, run_replayed_query, system_instructions
+from .replay import (
+    RESULT_CHARS,
+    cut_note,
+    run_replayed_query,
+    screen_answer,
+    system_instructions,
+)
 from .run_model_proxy import query_environment, refresh
 
 logger = logging.getLogger(__name__)
@@ -293,6 +299,21 @@ def too_long(error):
     > … maximum" on when that is what it was told.
     """
     return isinstance(error, ModelRefusedError) and "prompt is too long" in str(error).lower()
+
+
+def client_tool_output(content, screen=None):
+    """A client tool's answer as Claude Code's tool result content: its text, and the screen it
+    carries as an image block, so Claude sees the screen in the query that called the tool.
+
+    FOUND IN THE PC-CONTROL PROTOTYPE. The screen came back as text, and the server added it as a
+    picture message after the result. A message after a pending call reads here as the person having
+    written (`person_spoke` in `run`), so every action replaced the query with a fresh one replaying
+    the thread: each step was slow, and the Bot repeated its first look and click over and over.
+    """
+    if screen is None:
+        return [{"type": "text", "text": content}]
+    text, image = screen
+    return [{"type": "text", "text": text}, image]
 
 
 def fitted_result(content):
@@ -880,14 +901,15 @@ class OpenBotClaudeAgentAdapter(ClaudeAgentAdapter):
             # The hook can arrive before the event consumer has seen TOOL_CALL_START.
             # Both paths use the SDK ID; names/arguments cannot disambiguate parallel calls.
             content = await turn.result(tool_use_id)
-            if self._model_only:
+            screen = screen_answer(content)
+            if self._model_only and screen is None:
                 content = fitted_result(content)
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PostToolUse",
                     # At PostToolUse the CLI has removed the MCP response
                     # envelope. Replacement is tool_result.content itself.
-                    "updatedMCPToolOutput": [{"type": "text", "text": content}],
+                    "updatedMCPToolOutput": client_tool_output(content, screen),
                 }
             }
 

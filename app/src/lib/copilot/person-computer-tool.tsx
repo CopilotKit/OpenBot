@@ -85,7 +85,9 @@ type Input = z.infer<typeof parameters>;
 
 const DESCRIPTION =
   "Use the person's own computer, their Mac: see its screen and use its mouse and keyboard as they would. " +
-  "Use it only when the person asks you to do something on their computer, such as finding or opening a file, or using an app there. " +
+  "Use it only when the person asks you to do something on their computer, such as using an app there. " +
+  "For files and folders (finding, reading, renaming or moving them), use the folder tools when you are offered them: host_list_folders, host_list_files, host_read_file, host_write_file and host_run_command are much faster and surer than the screen. Use this tool for files only when the person hasn't shared the folder. " +
+  "Every action takes a few seconds, so use the keyboard where you can: in Finder, Return renames the selected item. " +
   "Every action answers with a screenshot of the screen after it. Coordinates are pixels of the latest screenshot, from its top left corner. " +
   "Start with the screenshot action. Use the keyboard where you can: cmd+space opens Spotlight, and typing a file's or an app's name there and pressing Return opens it. " +
   "The person is asked once, the first time a Bot uses their computer while OpenBot is open. If they don't allow it, don't try again unless they ask. " +
