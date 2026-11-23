@@ -170,15 +170,15 @@ describe.skipIf(!asked)("the Findings page", () => {
   test("the page lists the findings and plays the selected one", async () => {
     const page = await browser.newPage();
     await page.goto(`${server.url}/workbench/findings/`);
-    await page.waitForSelector(".fd-count");
+    await page.waitForSelector("[data-finding-count]");
     // By default the page hides the expected moves; the toggle shows them.
     const shownByDefault = await page.evaluate(
-      () => document.querySelectorAll('.fd-row [data-class="expected"]').length,
+      () => document.querySelectorAll('tr[data-class="expected"]').length,
     );
     expect(shownByDefault).toBe(0);
-    await page.click(".fd-expected input");
+    await page.click("role=checkbox[name=/^Show expected moves/]");
     await page.waitForSelector(`[data-finding-id="${finding.id}"]`);
-    const titles = await page.locator(".fd-row-title").allTextContents();
+    const titles = await page.locator("[data-finding-id]").allTextContents();
     expect(titles).toContain(finding.title);
 
     // Selecting it opens the scene at its first occurrence, with the move marked.
