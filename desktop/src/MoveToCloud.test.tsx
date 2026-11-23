@@ -233,6 +233,37 @@ test("after the update, OpenBot (Self-Contained) asks once, before showing OpenB
 });
 
 /*
+ * A Mac with two older installs of OpenBot on its disk: the question waited 15 seconds for the size
+ * of OpenBot's files. The shell answers at once now, without the size, and measures it on its own.
+ * The question shows straight away without it, and the size joins it once measured.
+ */
+test("the question shows at once without the size, and the size joins it once measured", async () => {
+  selfContainedRunning({ due: true });
+  answers.move_offer = { due: true, fromSettings: false, footprintBytes: null };
+  let measured!: (bytes: number | null) => void;
+  answers.move_footprint = new Promise((resolve) => {
+    measured = resolve;
+  });
+  const view = await launch();
+  await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+  const cloud = view.getByRole("radio", {
+    name: /^OpenBot Cloud/,
+  }) as HTMLInputElement;
+  const said = () => cloud.closest("label")?.textContent ?? "";
+  expect(said()).toContain(
+    "Your Bots, conversations, memory, skills, routines and files move to your OpenBot Cloud account.",
+  );
+  expect(said()).not.toContain("This removes about");
+  expect(called("move_footprint")).toHaveLength(1);
+  await act(async () => measured(GB));
+  await waitFor(() =>
+    expect(said()).toContain(
+      "This removes about 18.4 GB of OpenBot files from this computer.",
+    ),
+  );
+});
+
+/*
  * A company that wants OpenBot on its own cloud learns it can, on the move screen too: OpenBot for
  * Business, between OpenBot Cloud and OpenBot (Self-Contained), as the first screen draws it. It
  * books a demo and moves nothing. Before, the move screen offered only the other two.
