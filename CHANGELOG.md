@@ -370,6 +370,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `startPersonalAiSignIn` also takes an optional `loopbackPort` (1024 to 65535): for Claude, the
   server then sends the browser to `http://localhost:{loopbackPort}/callback`, where OpenBot Desktop
   listens, instead of Claude's page with a code to copy. Every other provider ignores it.
+- **Several AI connections at once.** One per provider, for the organization (admin only) and
+  for a person (own only), on the existing scopes. `listAiConnections`, `connectAiConnection`,
+  `removeAiConnection` and `makeAiConnectionDefault` under `ai-connections`, and
+  `listPersonalAiConnections`, `connectPersonalAiConnection`, `removePersonalAiConnection` and
+  `makePersonalAiConnectionDefault` under `people/{personId}/ai-connections`. Connecting a
+  provider that already has a connection replaces it and keeps its id; the first one is the
+  default; the server never moves the default by itself, so removing it leaves none until another
+  is made default (`AI_CONNECTION_NOT_READY` refuses one that can't run). `startAiSignIn`,
+  `getAiSignIn` and `finishAiSignIn` under `ai-connection-sign-ins` sign the organization in to a
+  provider the way a person's sign-in does. The single-connection operations keep their meaning
+  and describe the default connection. `ModelCatalogue` gains `connections` (each connection's own
+  models, `owner`, `source`, `ready` and `problem`), `ModelChoice` gains `connection` and
+  `stopped`, `ModelChoiceInput` gains `connection`, and a Bot's `defaultModel` input gains
+  `source`. All optional: an older client sends and reads what it did.
 - **Disconnect the organization's AI.** `deleteAiConnection`
   (`DELETE /api/v2/organizations/{organizationId}/ai-connection`), admin only, refused with
   `AI_CONNECTION_FIXED` where whoever runs OpenBot sets the provider, and recorded on the trail.

@@ -4,7 +4,7 @@
 import * as zod from "zod";
 
 /**
- * Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot's model, the provider or a gateway in front of it, read in the background. They are narrowed for the caller in two ways. The organization's: only once an administrator turns on the model allowlist and allows at least one; an empty allowlist means every model. And the caller's teams': when any team they are in, or a team above one, lists models (getTeamModels), only the models one of those lists names, within what the organization allows. The default is then one of those when any can run, and nothing is left to pick when none can. With view=all, every model listed before either narrowing, for an administrator choosing which to allow. When the listing can't be read, the catalogue holds the deployment's own model and nothing to pick.
+ * Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot's model, the provider or a gateway in front of it, read in the background. They are narrowed for the caller in two ways. The organization's: only once an administrator turns on the model allowlist and allows at least one; an empty allowlist means every model. And the caller's teams': when any team they are in, or a team above one, lists models (getTeamModels), only the models one of those lists names, within what the organization allows. The default is then one of those when any can run, and nothing is left to pick when none can. With view=all, every model listed before either narrowing, for an administrator choosing which to allow. When the listing can't be read, the catalogue holds the deployment's own model and nothing to pick. Where several AI connections are connected, connections lists each with its own models, and the fields beside it describe the default connection.
  * @summary Read the models Bots can run on
  */
 
@@ -94,11 +94,125 @@ export const GetModelCatalogueResponse = zod
       .describe(
         "Whether the listing was read. False means only the deployment's own model is known.",
       ),
+    connections: zod
+      .array(
+        zod
+          .object({
+            id: zod
+              .string()
+              .describe(
+                "The connection's id, as a pick names it (replaceModelChoice).",
+              ),
+            owner: zod
+              .string()
+              .describe(
+                "Whose connection it is. personal: the person's own, which they fix themselves. organization: the organization's, which an administrator fixes.",
+              ),
+            provider: zod
+              .enum([
+                "openai",
+                "anthropic",
+                "google",
+                "xai",
+                "unbiased",
+                "trustedrouter",
+                "openai-compatible",
+              ])
+              .describe(
+                "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+              ),
+            login: zod
+              .union([
+                zod
+                  .enum(["plan", "api-key", "endpoint", "oauth"])
+                  .describe(
+                    "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
+                  ),
+                zod.null(),
+              ])
+              .describe(
+                "How OpenBot signs in to it. Null for a member reading the organization's.",
+              ),
+            source: zod
+              .string()
+              .describe(
+                "Who serves its models, as ModelCatalogue's source says it. What a Bot's default model is matched on.",
+              ),
+            isDefault: zod
+              .boolean()
+              .describe("Whether a run with no pick uses it."),
+            ready: zod.boolean().describe("Whether a run can use it now."),
+            problem: zod
+              .union([
+                zod
+                  .object({
+                    code: zod
+                      .string()
+                      .describe(
+                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept.",
+                      ),
+                    detail: zod
+                      .string()
+                      .describe(
+                        "One sentence a person reads, saying what to do.",
+                      ),
+                  })
+                  .describe(
+                    "Why an AI connection can't run now, in OpenBot's own words.",
+                  ),
+                zod.null(),
+              ])
+              .describe("Why it can't run now. Null while ready."),
+            default: zod
+              .string()
+              .describe(
+                "The model a run on it uses when nobody picked one. Always one of models.",
+              ),
+            models: zod
+              .array(
+                zod
+                  .object({
+                    id: zod.string().describe("What a run sends upstream."),
+                    label: zod.string().describe("What a model picker shows."),
+                    vendor: zod
+                      .string()
+                      .optional()
+                      .describe(
+                        "Who makes it, as a brand id such as openai or anthropic. Absent for a gateway's own alias, which names no maker.",
+                      ),
+                    efforts: zod
+                      .array(zod.string())
+                      .optional()
+                      .describe(
+                        "How hard it can be asked to think, weakest first, such as none, minimal, low, medium, high, xhigh and max. Absent when it takes no effort, or nothing says which it takes.",
+                      ),
+                    defaultEffort: zod
+                      .string()
+                      .optional()
+                      .describe(
+                        "The effort it thinks at when none is sent, when its provider says.",
+                      ),
+                  })
+                  .describe("One model a Bot can run on."),
+              )
+              .describe(
+                "Newest first, narrowed to what an administrator allowed.",
+              ),
+            listed: zod.boolean().describe("Whether its listing was read."),
+          })
+          .describe(
+            "One AI connection's models, as a person picks from them. Never a key or an address. For a member reading the organization's connections, login is null and a problem's detail says an administrator has to fix it.",
+          ),
+      )
+      .optional()
+      .describe(
+        "Every AI connection the person's runs can use, each with its own models, the default first: their own connections where they have any, the organization's otherwise. The fields above describe the default connection. Absent from an OpenBot older than several connections; a client then offers the models above.",
+      ),
   })
   .describe("The models Bots can run on, and which one a run uses by default.");
 
 /**
- * Return the model and thinking effort a person chose for one of their conversations, each null for the default. Null too while the choice can't be used: the model is no longer offered, or the deployment moved to another provider. The choice is kept for when it can be used again. Only the person themselves may read it.
+ * Return the model and thinking effort a person chose for one of their conversations, each null for the default. Null too while the choice can't be used: the model is no longer offered, or the deployment moved to another provider. The choice is kept for when it can be used again. Where several AI connections are connected, connection names the one the model is on, and a connection that was removed is a choice that can't be used. Only the person themselves may read it.
  * @summary Read the model a person chose for a conversation
  */
 
@@ -153,13 +267,48 @@ export const GetModelChoiceResponse = zod
       .describe(
         "The model a person chose for this conversation, set aside because it hasn't been checked to work with the client this Bot's harness ships. Runs answer on the default model until it has been. Absent when the choice is in use, or set aside for another reason.",
       ),
+    connection: zod
+      .string()
+      .nullish()
+      .describe(
+        "The AI connection the chosen model is on, by id. Null for the default connection. Absent from an OpenBot older than several connections.",
+      ),
+    stopped: zod
+      .union([
+        zod
+          .object({
+            connection: zod.string().describe("The connection's id."),
+            problem: zod
+              .object({
+                code: zod
+                  .string()
+                  .describe(
+                    "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept.",
+                  ),
+                detail: zod
+                  .string()
+                  .describe("One sentence a person reads, saying what to do."),
+              })
+              .describe(
+                "Why an AI connection can't run now, in OpenBot's own words.",
+              ),
+          })
+          .describe(
+            "An AI connection a conversation's run would use, which can't run now.",
+          ),
+        zod.null(),
+      ])
+      .optional()
+      .describe(
+        "The connection the conversation's next run would use (the choice's, or the default with no choice) when it is connected but can't run now, and why. Null when it can run. A client shows this after a refused run instead of reading the refusal's words.",
+      ),
   })
   .describe(
     "The model and thinking effort a person chose for one conversation. Null model: the default model. Null effort: none is sent, so the model thinks on its own default.",
   );
 
 /**
- * Set the model and thinking effort a person's runs in one of their conversations answer on, or null either to go back to the default. The model must be one the catalogue offers (getModelCatalogue), and the effort one that model takes. Every later run in the conversation reads it, from any device. Only the person themselves may choose, and only while choosing a model is on.
+ * Set the model and thinking effort a person's runs in one of their conversations answer on, or null either to go back to the default. The model must be one the catalogue offers (getModelCatalogue), and the effort one that model takes. Every later run in the conversation reads it, from any device. Where several AI connections are connected, connection names the one the model is on, and the model must be one that connection offers; without it, the default connection. Changing the default connection never changes a choice. Only the person themselves may choose, and only while choosing a model is on.
  * @summary Choose the model for a conversation
  */
 
@@ -209,6 +358,11 @@ export const replaceModelChoiceBodyModelRegExp = new RegExp("\\S");
 export const replaceModelChoiceBodyEffortMax = 40;
 
 export const replaceModelChoiceBodyEffortRegExp = new RegExp("\\S");
+export const replaceModelChoiceBodyConnectionMax = 200;
+
+export const replaceModelChoiceBodyConnectionRegExp = new RegExp(
+  "^[A-Za-z0-9_.:-]+$",
+);
 
 export const ReplaceModelChoiceBody = zod.object({
   model: zod
@@ -235,6 +389,15 @@ export const ReplaceModelChoiceBody = zod.object({
     .describe(
       "Keep an explicitly named model as an override even when it is the deployment's default. Omit to use the default as a reset.",
     ),
+  connection: zod
+    .string()
+    .min(1)
+    .max(replaceModelChoiceBodyConnectionMax)
+    .regex(replaceModelChoiceBodyConnectionRegExp)
+    .nullish()
+    .describe(
+      "The AI connection the model is on, by id, one the catalogue lists in connections. Absent or null: the default connection.",
+    ),
 });
 
 export const ReplaceModelChoiceResponse = zod
@@ -260,13 +423,48 @@ export const ReplaceModelChoiceResponse = zod
       .describe(
         "The model a person chose for this conversation, set aside because it hasn't been checked to work with the client this Bot's harness ships. Runs answer on the default model until it has been. Absent when the choice is in use, or set aside for another reason.",
       ),
+    connection: zod
+      .string()
+      .nullish()
+      .describe(
+        "The AI connection the chosen model is on, by id. Null for the default connection. Absent from an OpenBot older than several connections.",
+      ),
+    stopped: zod
+      .union([
+        zod
+          .object({
+            connection: zod.string().describe("The connection's id."),
+            problem: zod
+              .object({
+                code: zod
+                  .string()
+                  .describe(
+                    "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept.",
+                  ),
+                detail: zod
+                  .string()
+                  .describe("One sentence a person reads, saying what to do."),
+              })
+              .describe(
+                "Why an AI connection can't run now, in OpenBot's own words.",
+              ),
+          })
+          .describe(
+            "An AI connection a conversation's run would use, which can't run now.",
+          ),
+        zod.null(),
+      ])
+      .optional()
+      .describe(
+        "The connection the conversation's next run would use (the choice's, or the default with no choice) when it is connected but can't run now, and why. Null when it can run. A client shows this after a refused run instead of reading the refusal's words.",
+      ),
   })
   .describe(
     "The model and thinking effort a person chose for one conversation. Null model: the default model. Null effort: none is sent, so the model thinks on its own default.",
   );
 
 /**
- * Return the AI provider OpenBot's Bots run on, the way OpenBot signs in to it, the model or address host where one was named, and whether a run can use it now. Never a key. Also which other connections still have a key kept, so they can be used again without pasting it. Where whoever runs OpenBot sets the provider, editable is false and the connection can't be changed here. Only an administrator of the organization may read it.
+ * Return the AI provider OpenBot's Bots run on, the way OpenBot signs in to it, the model or address host where one was named, and whether a run can use it now. Never a key. Also which other connections still have a key kept, so they can be used again without pasting it. Where whoever runs OpenBot sets the provider, editable is false and the connection can't be changed here. Where several AI connections are connected (listAiConnections), this is the default one. Only an administrator of the organization may read it.
  * @summary Read how OpenBot reaches its AI provider
  */
 
@@ -741,7 +939,7 @@ export const DeleteAiConnectionResponse = zod
   );
 
 /**
- * Return the AI connection a person set for themselves, never its key, and which AI their runs use: their own, the organization's, or none yet. On OpenBot Cloud each person brings their own AI, and it is theirs alone: it follows them into every organization they are in, no administrator can read or use it, and the organization's Bots never run on it for anybody else. Where an organization's AI is the only one (a self-hosted OpenBot, OpenBot Desktop on its own), available is false and the person's runs use the organization's. Only the person themselves may read it.
+ * Return the AI connection a person set for themselves, never its key, and which AI their runs use: their own, the organization's, or none yet. On OpenBot Cloud each person brings their own AI, and it is theirs alone: it follows them into every organization they are in, no administrator can read or use it, and the organization's Bots never run on it for anybody else. Where an organization's AI is the only one (a self-hosted OpenBot, OpenBot Desktop on its own), available is false and the person's runs use the organization's. Where the person connected several of their own (listPersonalAiConnections), connection is the default one. Only the person themselves may read it.
  * @summary Read a person's own AI connection
  */
 
@@ -1711,3 +1909,1343 @@ export const FinishPersonalAiSignInResponse = zod
       ),
   })
   .describe("Where a sign-in to an AI provider stands. Never a key.");
+
+/**
+ * Return one page of the AI connections the organization's Bots can run on, one per provider, never a key. A person picks a model from any of them for a conversation (replaceModelChoice with connection); a run with no pick uses the one that isDefault, which is the connection getAiConnection describes. Connections can exist with none of them the default, after an older app disconnected the default (deleteAiConnection): a run with no pick is then refused until one is made default, and a run whose pick names a connection that is ready still runs. signIns names the providers the server signs in to for the organization itself (startAiSignIn). Where whoever runs OpenBot sets the provider, the list holds that one connection and none can be added. Only an administrator of the organization may list them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * @summary List the organization's AI connections
+ */
+
+export const ListAiConnectionsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+});
+
+export const listAiConnectionsQueryLimitDefault = 50;
+export const listAiConnectionsQueryLimitMax = 100;
+
+export const listAiConnectionsQueryCursorMax = 4096;
+
+export const listAiConnectionsQueryCursorRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
+
+export const ListAiConnectionsQueryParams = zod.object({
+  limit: zod
+    .int()
+    .min(1)
+    .max(listAiConnectionsQueryLimitMax)
+    .default(listAiConnectionsQueryLimitDefault)
+    .describe("Most items in one page."),
+  cursor: zod
+    .string()
+    .min(1)
+    .max(listAiConnectionsQueryCursorMax)
+    .regex(listAiConnectionsQueryCursorRegExp)
+    .optional()
+    .describe(
+      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
+    ),
+});
+
+export const ListAiConnectionsResponse = zod
+  .object({
+    connections: zod
+      .array(
+        zod
+          .object({
+            id: zod
+              .string()
+              .describe(
+                "The connection's id. Opaque; clients never read anything into it.",
+              ),
+            provider: zod
+              .enum([
+                "openai",
+                "anthropic",
+                "google",
+                "xai",
+                "unbiased",
+                "trustedrouter",
+                "openai-compatible",
+              ])
+              .describe(
+                "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+              ),
+            login: zod
+              .enum(["plan", "api-key", "endpoint", "oauth"])
+              .describe(
+                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
+              ),
+            model: zod
+              .string()
+              .nullable()
+              .describe(
+                "The model named for an endpoint or a sign-in. Null for an API key or a plan.",
+              ),
+            endpointHost: zod
+              .string()
+              .nullable()
+              .describe(
+                "The host of the endpoint's address, never its path or anything that signs in. Null unless the login is endpoint.",
+              ),
+            isDefault: zod
+              .boolean()
+              .describe("Whether a run with no pick uses it."),
+            ready: zod.boolean().describe("Whether a run can use it now."),
+            problem: zod
+              .union([
+                zod
+                  .object({
+                    code: zod
+                      .string()
+                      .describe(
+                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept.",
+                      ),
+                    detail: zod
+                      .string()
+                      .describe(
+                        "One sentence a person reads, saying what to do.",
+                      ),
+                  })
+                  .describe(
+                    "Why an AI connection can't run now, in OpenBot's own words.",
+                  ),
+                zod.null(),
+              ])
+              .describe("Why it can't run now. Null while ready."),
+            connectedAt: zod.iso
+              .datetime({ offset: true })
+              .describe("When it was connected or last changed."),
+            sharedSignIn: zod
+              .union([
+                zod
+                  .object({
+                    personId: zod.string().describe("The person's id."),
+                    name: zod
+                      .string()
+                      .describe(
+                        "Their name as OpenBot shows it, or their email address where they have none.",
+                      ),
+                    ready: zod
+                      .boolean()
+                      .describe(
+                        "Whether their sign-in is still kept and can run a Bot. False once they removed it or the provider stopped renewing it.",
+                      ),
+                  })
+                  .describe(
+                    "The person whose own sign-in the organization's AI shares. Never a token.",
+                  ),
+                zod.null(),
+              ])
+              .optional()
+              .describe(
+                "Whose plan or provider sign-in it shares, for an organization's connection on OpenBot Cloud. Null otherwise.",
+              ),
+          })
+          .describe("One AI connection in a list. Never a key."),
+      )
+      .describe("Oldest first."),
+    nextCursor: zod
+      .string()
+      .nullable()
+      .describe("Where the next page starts. Null ends the list."),
+    signIns: zod
+      .array(
+        zod
+          .enum([
+            "openai",
+            "anthropic",
+            "google",
+            "xai",
+            "unbiased",
+            "trustedrouter",
+            "openai-compatible",
+          ])
+          .describe(
+            "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+          ),
+      )
+      .describe(
+        "The providers the server can sign in to itself for whoever owns this list (startAiSignIn for the organization, startPersonalAiSignIn for a person). Every provider not listed connects with a key or an address.",
+      ),
+  })
+  .describe(
+    "One page of AI connections, and the providers the server signs in to itself.",
+  );
+
+/**
+ * Connect one more AI provider the organization's Bots can run on, beside the ones already connected. OpenBot checks the connection with the provider first: a key, an address or a sign-in it can't use is refused and nothing is saved. Each provider has at most one connection: connecting a provider that already has one replaces it (a key replaced, a plan swapped for a key) and keeps its id, so conversations that picked it keep running on it. The first connection becomes the default; a later one does not (makeAiConnectionDefault). A key goes into the organization's vault and is never sent back. A plan or a provider sign-in is accepted once an administrator signed in to it for the organization (startAiSignIn). Recorded on the audit trail, never with a key. Only an administrator of the organization may connect one, and not where whoever runs OpenBot sets the provider.
+ * @summary Connect an AI provider for the organization
+ */
+
+export const ConnectAiConnectionParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+});
+
+export const connectAiConnectionHeaderIdempotencyKeyMax = 128;
+
+export const ConnectAiConnectionHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(connectAiConnectionHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const connectAiConnectionBodyApiKeyMax = 65536;
+
+export const connectAiConnectionBodyBaseUrlMax = 2048;
+
+export const connectAiConnectionBodyBaseUrlRegExp = new RegExp(
+  "^https?://[^@/?#]+([/?#].*)?$",
+);
+export const connectAiConnectionBodyModelMax = 500;
+
+export const connectAiConnectionBodyModelRegExp = new RegExp("\\S");
+
+export const ConnectAiConnectionBody = zod
+  .object({
+    provider: zod
+      .enum([
+        "openai",
+        "anthropic",
+        "google",
+        "xai",
+        "unbiased",
+        "trustedrouter",
+        "openai-compatible",
+      ])
+      .describe(
+        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+      ),
+    login: zod
+      .enum(["plan", "api-key", "endpoint", "oauth"])
+      .describe(
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
+      ),
+    apiKey: zod
+      .string()
+      .min(1)
+      .max(connectAiConnectionBodyApiKeyMax)
+      .optional()
+      .describe(
+        "The provider's key. Required for api-key unless useSavedKey; optional for an endpoint that asks for none. Encrypted into the vault before anything else, and never sent back: no answer includes it, now or later.",
+      ),
+    useSavedKey: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Use the key already kept for this provider (and, for an endpoint, this address) instead of sending one.",
+      ),
+    baseUrl: zod
+      .url()
+      .max(connectAiConnectionBodyBaseUrlMax)
+      .regex(connectAiConnectionBodyBaseUrlRegExp)
+      .optional()
+      .describe(
+        "The endpoint's address, http or https, with nothing in it that signs in. Required for endpoint.",
+      ),
+    model: zod
+      .string()
+      .min(1)
+      .max(connectAiConnectionBodyModelMax)
+      .regex(connectAiConnectionBodyModelRegExp)
+      .optional()
+      .describe(
+        "The model to run on. Required for endpoint and oauth. Trimmed.",
+      ),
+  })
+  .describe(
+    "The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased, trustedrouter and openai-compatible take endpoint. Any other pair is refused.",
+  );
+
+export const ConnectAiConnectionResponse = zod
+  .object({
+    id: zod
+      .string()
+      .describe(
+        "The connection's id. Opaque; clients never read anything into it.",
+      ),
+    provider: zod
+      .enum([
+        "openai",
+        "anthropic",
+        "google",
+        "xai",
+        "unbiased",
+        "trustedrouter",
+        "openai-compatible",
+      ])
+      .describe(
+        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+      ),
+    login: zod
+      .enum(["plan", "api-key", "endpoint", "oauth"])
+      .describe(
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
+      ),
+    model: zod
+      .string()
+      .nullable()
+      .describe(
+        "The model named for an endpoint or a sign-in. Null for an API key or a plan.",
+      ),
+    endpointHost: zod
+      .string()
+      .nullable()
+      .describe(
+        "The host of the endpoint's address, never its path or anything that signs in. Null unless the login is endpoint.",
+      ),
+    isDefault: zod.boolean().describe("Whether a run with no pick uses it."),
+    ready: zod.boolean().describe("Whether a run can use it now."),
+    problem: zod
+      .union([
+        zod
+          .object({
+            code: zod
+              .string()
+              .describe(
+                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept.",
+              ),
+            detail: zod
+              .string()
+              .describe("One sentence a person reads, saying what to do."),
+          })
+          .describe(
+            "Why an AI connection can't run now, in OpenBot's own words.",
+          ),
+        zod.null(),
+      ])
+      .describe("Why it can't run now. Null while ready."),
+    connectedAt: zod.iso
+      .datetime({ offset: true })
+      .describe("When it was connected or last changed."),
+    sharedSignIn: zod
+      .union([
+        zod
+          .object({
+            personId: zod.string().describe("The person's id."),
+            name: zod
+              .string()
+              .describe(
+                "Their name as OpenBot shows it, or their email address where they have none.",
+              ),
+            ready: zod
+              .boolean()
+              .describe(
+                "Whether their sign-in is still kept and can run a Bot. False once they removed it or the provider stopped renewing it.",
+              ),
+          })
+          .describe(
+            "The person whose own sign-in the organization's AI shares. Never a token.",
+          ),
+        zod.null(),
+      ])
+      .optional()
+      .describe(
+        "Whose plan or provider sign-in it shares, for an organization's connection on OpenBot Cloud. Null otherwise.",
+      ),
+  })
+  .describe("One AI connection in a list. Never a key.");
+
+/**
+ * Stop the organization's Bots using one AI connection, with no restart, and revoke its key or sign-in. Runs already going finish on it. Conversations that picked it keep their pick, which stops applying: their next run uses the default. The server never moves the default by itself: removing the default leaves the organization with no default until an administrator makes another one default (makeAiConnectionDefault), and a client that wants another to take over makes it default first. Recorded on the audit trail, never with a key. Only an administrator of the organization may remove one, and not where whoever runs OpenBot sets the provider.
+ * @summary Remove one of the organization's AI connections
+ */
+
+export const removeAiConnectionPathConnectionIdMax = 200;
+
+export const removeAiConnectionPathConnectionIdRegExp = new RegExp(
+  "^[A-Za-z0-9_.:-]+$",
+);
+
+export const RemoveAiConnectionParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  connectionId: zod
+    .string()
+    .min(1)
+    .max(removeAiConnectionPathConnectionIdMax)
+    .regex(removeAiConnectionPathConnectionIdRegExp)
+    .describe(
+      "The AI connection's id, as listAiConnections or listPersonalAiConnections gave it. Opaque.",
+    ),
+});
+
+export const removeAiConnectionHeaderIdempotencyKeyMax = 128;
+
+export const RemoveAiConnectionHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(removeAiConnectionHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const RemoveAiConnectionResponse = zod.void();
+
+/**
+ * Make a run with no pick use this AI connection, with no restart: getAiConnection describes it from then on, and OpenBot's own model calls (titles, routing, summaries) use it. Picks people made for their conversations don't change. A connection that can't run now (ready false) is refused. Recorded on the audit trail. Only an administrator of the organization may change it.
+ * @summary Make one of the organization's AI connections the default
+ */
+
+export const makeAiConnectionDefaultPathConnectionIdMax = 200;
+
+export const makeAiConnectionDefaultPathConnectionIdRegExp = new RegExp(
+  "^[A-Za-z0-9_.:-]+$",
+);
+
+export const MakeAiConnectionDefaultParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  connectionId: zod
+    .string()
+    .min(1)
+    .max(makeAiConnectionDefaultPathConnectionIdMax)
+    .regex(makeAiConnectionDefaultPathConnectionIdRegExp)
+    .describe(
+      "The AI connection's id, as listAiConnections or listPersonalAiConnections gave it. Opaque.",
+    ),
+});
+
+export const makeAiConnectionDefaultHeaderIdempotencyKeyMax = 128;
+
+export const MakeAiConnectionDefaultHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(makeAiConnectionDefaultHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const MakeAiConnectionDefaultResponse = zod
+  .object({
+    id: zod
+      .string()
+      .describe(
+        "The connection's id. Opaque; clients never read anything into it.",
+      ),
+    provider: zod
+      .enum([
+        "openai",
+        "anthropic",
+        "google",
+        "xai",
+        "unbiased",
+        "trustedrouter",
+        "openai-compatible",
+      ])
+      .describe(
+        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+      ),
+    login: zod
+      .enum(["plan", "api-key", "endpoint", "oauth"])
+      .describe(
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
+      ),
+    model: zod
+      .string()
+      .nullable()
+      .describe(
+        "The model named for an endpoint or a sign-in. Null for an API key or a plan.",
+      ),
+    endpointHost: zod
+      .string()
+      .nullable()
+      .describe(
+        "The host of the endpoint's address, never its path or anything that signs in. Null unless the login is endpoint.",
+      ),
+    isDefault: zod.boolean().describe("Whether a run with no pick uses it."),
+    ready: zod.boolean().describe("Whether a run can use it now."),
+    problem: zod
+      .union([
+        zod
+          .object({
+            code: zod
+              .string()
+              .describe(
+                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept.",
+              ),
+            detail: zod
+              .string()
+              .describe("One sentence a person reads, saying what to do."),
+          })
+          .describe(
+            "Why an AI connection can't run now, in OpenBot's own words.",
+          ),
+        zod.null(),
+      ])
+      .describe("Why it can't run now. Null while ready."),
+    connectedAt: zod.iso
+      .datetime({ offset: true })
+      .describe("When it was connected or last changed."),
+    sharedSignIn: zod
+      .union([
+        zod
+          .object({
+            personId: zod.string().describe("The person's id."),
+            name: zod
+              .string()
+              .describe(
+                "Their name as OpenBot shows it, or their email address where they have none.",
+              ),
+            ready: zod
+              .boolean()
+              .describe(
+                "Whether their sign-in is still kept and can run a Bot. False once they removed it or the provider stopped renewing it.",
+              ),
+          })
+          .describe(
+            "The person whose own sign-in the organization's AI shares. Never a token.",
+          ),
+        zod.null(),
+      ])
+      .optional()
+      .describe(
+        "Whose plan or provider sign-in it shares, for an organization's connection on OpenBot Cloud. Null otherwise.",
+      ),
+  })
+  .describe("One AI connection in a list. Never a key.");
+
+/**
+ * Start a sign-in to an AI provider that the server runs itself, for the organization, for a provider listAiConnections names in signIns. It works as startPersonalAiSignIn does, and what the provider hands back is kept for the organization: connect it with connectAiConnection and login plan or oauth (or useSavedKey for an Unbiased AI key). The server renews it itself. Only an administrator of the organization may sign in for it.
+ * @summary Start signing in to an AI provider for the organization
+ */
+
+export const StartAiSignInParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+});
+
+export const startAiSignInHeaderIdempotencyKeyMax = 128;
+
+export const StartAiSignInHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(startAiSignInHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const startAiSignInBodyLoopbackPortMin = 1024;
+export const startAiSignInBodyLoopbackPortMax = 65535;
+
+export const StartAiSignInBody = zod.object({
+  provider: zod
+    .enum([
+      "openai",
+      "anthropic",
+      "google",
+      "xai",
+      "unbiased",
+      "trustedrouter",
+      "openai-compatible",
+    ])
+    .describe(
+      "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+    ),
+  method: zod
+    .enum(["browser", "device"])
+    .optional()
+    .describe(
+      "How to sign in, for a provider that offers more than one way. openai: browser (the default) approves in the browser and finishes with the address ChatGPT sends the browser to; device shows a code to enter at ChatGPT instead, which works only once the person has turned on device code sign-in in ChatGPT's security settings. Every other provider has one way and ignores it.",
+    ),
+  loopbackPort: zod
+    .int()
+    .min(startAiSignInBodyLoopbackPortMin)
+    .max(startAiSignInBodyLoopbackPortMax)
+    .optional()
+    .describe(
+      "anthropic only: the port OpenBot Desktop listens on, on the person's own computer, for Claude's redirect. Claude then sends the browser to http://localhost:{loopbackPort}/callback instead of a page that shows a code, and the app sends the code and state that arrive there (code#state) with finishPersonalAiSignIn, so the person copies nothing. Absent, Claude's page shows the code to copy. Every other provider ignores it.",
+    ),
+});
+
+export const startAiSignInResponseIdMax = 4096;
+
+export const startAiSignInResponseIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+export const startAiSignInResponseIntervalMax = 600;
+
+export const StartAiSignInResponse = zod
+  .object({
+    id: zod
+      .string()
+      .max(startAiSignInResponseIdMax)
+      .regex(startAiSignInResponseIdRegExp)
+      .describe("The sign-in's id, for reading where it stands."),
+    provider: zod
+      .string()
+      .describe(
+        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+      ),
+    url: zod
+      .url()
+      .describe("The provider's page where the person approves the sign-in."),
+    userCode: zod
+      .string()
+      .nullable()
+      .describe(
+        "The code the provider's page shows, for the person to check. Null when it shows none.",
+      ),
+    expiresAt: zod.iso
+      .datetime({ offset: true })
+      .describe("When the sign-in can no longer be approved."),
+    interval: zod
+      .int()
+      .min(1)
+      .max(startAiSignInResponseIntervalMax)
+      .describe("How many seconds to wait between reads."),
+    finish: zod
+      .string()
+      .describe(
+        "How the sign-in finishes. poll: read it (getPersonalAiSignIn) every interval seconds until it is approved, failed or expired. code: once the person approves it, the provider shows them a code (Claude) or sends their browser to an address that doesn't load (ChatGPT), and they send that code or address back with finishPersonalAiSignIn.",
+      ),
+  })
+  .describe(
+    "A sign-in to an AI provider, waiting for the person to approve it in their browser.",
+  );
+
+/**
+ * Ask the provider once whether the organization's sign-in was approved, and say where it stands, as getPersonalAiSignIn does. Only an administrator of the organization may read it.
+ * @summary Read a sign-in to an AI provider for the organization
+ */
+
+export const getAiSignInPathSignInIdMax = 4096;
+
+export const getAiSignInPathSignInIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+
+export const GetAiSignInParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  signInId: zod
+    .string()
+    .min(1)
+    .max(getAiSignInPathSignInIdMax)
+    .regex(getAiSignInPathSignInIdRegExp)
+    .describe("The sign-in's id, as startPersonalAiSignIn gave it."),
+});
+
+export const getAiSignInResponseIdMax = 4096;
+
+export const getAiSignInResponseIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+export const getAiSignInResponseIntervalMax = 600;
+
+export const GetAiSignInResponse = zod
+  .object({
+    id: zod
+      .string()
+      .max(getAiSignInResponseIdMax)
+      .regex(getAiSignInResponseIdRegExp),
+    provider: zod
+      .string()
+      .describe(
+        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+      ),
+    status: zod
+      .string()
+      .describe(
+        "pending: not approved yet. approved: what the provider handed OpenBot (a key, or a sign-in the server renews) is kept for the person. failed or expired: over; start another.",
+      ),
+    detail: zod
+      .string()
+      .nullable()
+      .describe(
+        "Why it failed or expired, in OpenBot's own words. Null otherwise.",
+      ),
+    interval: zod
+      .int()
+      .min(1)
+      .max(getAiSignInResponseIntervalMax)
+      .describe(
+        "How many seconds to wait before reading it again, while it is pending.",
+      ),
+  })
+  .describe("Where a sign-in to an AI provider stands. Never a key.");
+
+/**
+ * Finish a sign-in for the organization whose finish is code, as finishPersonalAiSignIn does. Only an administrator of the organization may finish it.
+ * @summary Finish the organization's sign-in with the provider's code
+ */
+
+export const finishAiSignInPathSignInIdMax = 4096;
+
+export const finishAiSignInPathSignInIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+
+export const FinishAiSignInParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  signInId: zod
+    .string()
+    .min(1)
+    .max(finishAiSignInPathSignInIdMax)
+    .regex(finishAiSignInPathSignInIdRegExp)
+    .describe("The sign-in's id, as startPersonalAiSignIn gave it."),
+});
+
+export const finishAiSignInHeaderIdempotencyKeyMax = 128;
+
+export const FinishAiSignInHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(finishAiSignInHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const finishAiSignInBodyCodeMax = 4096;
+
+export const finishAiSignInBodyCodeRegExp = new RegExp("\\S");
+
+export const FinishAiSignInBody = zod.object({
+  code: zod
+    .string()
+    .min(1)
+    .max(finishAiSignInBodyCodeMax)
+    .regex(finishAiSignInBodyCodeRegExp)
+    .describe(
+      "What the person copied once they approved the sign-in: the code the provider's page showed (Claude), or the whole address the provider sent their browser to (ChatGPT). Trimmed. Never sent back.",
+    ),
+});
+
+export const finishAiSignInResponseIdMax = 4096;
+
+export const finishAiSignInResponseIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+export const finishAiSignInResponseIntervalMax = 600;
+
+export const FinishAiSignInResponse = zod
+  .object({
+    id: zod
+      .string()
+      .max(finishAiSignInResponseIdMax)
+      .regex(finishAiSignInResponseIdRegExp),
+    provider: zod
+      .string()
+      .describe(
+        "The AI provider OpenBot's Bots run on, as the server answers it. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given. The list can grow: a client shows a provider it doesn't know by its id. A request still names one of AiConnectionProvider.",
+      ),
+    status: zod
+      .string()
+      .describe(
+        "pending: not approved yet. approved: what the provider handed OpenBot (a key, or a sign-in the server renews) is kept for the person. failed or expired: over; start another.",
+      ),
+    detail: zod
+      .string()
+      .nullable()
+      .describe(
+        "Why it failed or expired, in OpenBot's own words. Null otherwise.",
+      ),
+    interval: zod
+      .int()
+      .min(1)
+      .max(finishAiSignInResponseIntervalMax)
+      .describe(
+        "How many seconds to wait before reading it again, while it is pending.",
+      ),
+  })
+  .describe("Where a sign-in to an AI provider stands. Never a key.");
+
+/**
+ * Return one page of the AI connections a person connected for themselves, one per provider, never a key. They are theirs alone, as getPersonalAiConnection describes, and a person's runs use them ahead of the organization's: a person with any of their own never runs on the organization's. A run with no pick uses the one that isDefault; connections can exist with none the default, as listAiConnections describes. signIns names the providers the server signs the person in to itself. Only the person themselves may list them, and only where available is true. A missing cursor starts at the first page and nextCursor null ends the list.
+ * @summary List a person's own AI connections
+ */
+
+export const listPersonalAiConnectionsPathPersonIdMax = 200;
+
+export const listPersonalAiConnectionsPathPersonIdRegExp = new RegExp("\\S");
+
+export const ListPersonalAiConnectionsParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  personId: zod
+    .string()
+    .min(1)
+    .max(listPersonalAiConnectionsPathPersonIdMax)
+    .regex(listPersonalAiConnectionsPathPersonIdRegExp)
+    .describe(
+      "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
+    ),
+});
+
+export const listPersonalAiConnectionsQueryLimitDefault = 50;
+export const listPersonalAiConnectionsQueryLimitMax = 100;
+
+export const listPersonalAiConnectionsQueryCursorMax = 4096;
+
+export const listPersonalAiConnectionsQueryCursorRegExp = new RegExp(
+  "^[A-Za-z0-9_-]+$",
+);
+
+export const ListPersonalAiConnectionsQueryParams = zod.object({
+  limit: zod
+    .int()
+    .min(1)
+    .max(listPersonalAiConnectionsQueryLimitMax)
+    .default(listPersonalAiConnectionsQueryLimitDefault)
+    .describe("Most items in one page."),
+  cursor: zod
+    .string()
+    .min(1)
+    .max(listPersonalAiConnectionsQueryCursorMax)
+    .regex(listPersonalAiConnectionsQueryCursorRegExp)
+    .optional()
+    .describe(
+      "Opaque continuation from the previous page's nextCursor, bound to the organization and the filters that made it. The server only ever issues cursors written in URL-safe base64 (letters, digits, - and _, no padding) and refuses anything else, so the pattern says so. A cursor that fits the pattern can still be refused: one this list never gave out, or one made for another organization or other filters.",
+    ),
+});
+
+export const ListPersonalAiConnectionsResponse = zod
+  .object({
+    connections: zod
+      .array(
+        zod
+          .object({
+            id: zod
+              .string()
+              .describe(
+                "The connection's id. Opaque; clients never read anything into it.",
+              ),
+            provider: zod
+              .enum([
+                "openai",
+                "anthropic",
+                "google",
+                "xai",
+                "unbiased",
+                "trustedrouter",
+                "openai-compatible",
+              ])
+              .describe(
+                "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+              ),
+            login: zod
+              .enum(["plan", "api-key", "endpoint", "oauth"])
+              .describe(
+                "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
+              ),
+            model: zod
+              .string()
+              .nullable()
+              .describe(
+                "The model named for an endpoint or a sign-in. Null for an API key or a plan.",
+              ),
+            endpointHost: zod
+              .string()
+              .nullable()
+              .describe(
+                "The host of the endpoint's address, never its path or anything that signs in. Null unless the login is endpoint.",
+              ),
+            isDefault: zod
+              .boolean()
+              .describe("Whether a run with no pick uses it."),
+            ready: zod.boolean().describe("Whether a run can use it now."),
+            problem: zod
+              .union([
+                zod
+                  .object({
+                    code: zod
+                      .string()
+                      .describe(
+                        "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept.",
+                      ),
+                    detail: zod
+                      .string()
+                      .describe(
+                        "One sentence a person reads, saying what to do.",
+                      ),
+                  })
+                  .describe(
+                    "Why an AI connection can't run now, in OpenBot's own words.",
+                  ),
+                zod.null(),
+              ])
+              .describe("Why it can't run now. Null while ready."),
+            connectedAt: zod.iso
+              .datetime({ offset: true })
+              .describe("When it was connected or last changed."),
+            sharedSignIn: zod
+              .union([
+                zod
+                  .object({
+                    personId: zod.string().describe("The person's id."),
+                    name: zod
+                      .string()
+                      .describe(
+                        "Their name as OpenBot shows it, or their email address where they have none.",
+                      ),
+                    ready: zod
+                      .boolean()
+                      .describe(
+                        "Whether their sign-in is still kept and can run a Bot. False once they removed it or the provider stopped renewing it.",
+                      ),
+                  })
+                  .describe(
+                    "The person whose own sign-in the organization's AI shares. Never a token.",
+                  ),
+                zod.null(),
+              ])
+              .optional()
+              .describe(
+                "Whose plan or provider sign-in it shares, for an organization's connection on OpenBot Cloud. Null otherwise.",
+              ),
+          })
+          .describe("One AI connection in a list. Never a key."),
+      )
+      .describe("Oldest first."),
+    nextCursor: zod
+      .string()
+      .nullable()
+      .describe("Where the next page starts. Null ends the list."),
+    signIns: zod
+      .array(
+        zod
+          .enum([
+            "openai",
+            "anthropic",
+            "google",
+            "xai",
+            "unbiased",
+            "trustedrouter",
+            "openai-compatible",
+          ])
+          .describe(
+            "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+          ),
+      )
+      .describe(
+        "The providers the server can sign in to itself for whoever owns this list (startAiSignIn for the organization, startPersonalAiSignIn for a person). Every provider not listed connects with a key or an address.",
+      ),
+  })
+  .describe(
+    "One page of AI connections, and the providers the server signs in to itself.",
+  );
+
+/**
+ * Connect one more AI provider for a person, beside the ones they already connected, as connectAiConnection does for the organization: checked with the provider first, one connection per provider, a provider already connected replaced with its id kept, and the first one the default. A plan or a provider sign-in is accepted once the person signed in to it through OpenBot (startPersonalAiSignIn). The key is kept for the person alone, never in the organization's vault, and never sent back. Recorded on the audit trail, never with a key. Only the person themselves may connect one, and only where available is true.
+ * @summary Connect an AI provider of a person's own
+ */
+
+export const connectPersonalAiConnectionPathPersonIdMax = 200;
+
+export const connectPersonalAiConnectionPathPersonIdRegExp = new RegExp("\\S");
+
+export const ConnectPersonalAiConnectionParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  personId: zod
+    .string()
+    .min(1)
+    .max(connectPersonalAiConnectionPathPersonIdMax)
+    .regex(connectPersonalAiConnectionPathPersonIdRegExp)
+    .describe(
+      "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
+    ),
+});
+
+export const connectPersonalAiConnectionHeaderIdempotencyKeyMax = 128;
+
+export const ConnectPersonalAiConnectionHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(connectPersonalAiConnectionHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const connectPersonalAiConnectionBodyApiKeyMax = 65536;
+
+export const connectPersonalAiConnectionBodyBaseUrlMax = 2048;
+
+export const connectPersonalAiConnectionBodyBaseUrlRegExp = new RegExp(
+  "^https?://[^@/?#]+([/?#].*)?$",
+);
+export const connectPersonalAiConnectionBodyModelMax = 500;
+
+export const connectPersonalAiConnectionBodyModelRegExp = new RegExp("\\S");
+
+export const ConnectPersonalAiConnectionBody = zod
+  .object({
+    provider: zod
+      .enum([
+        "openai",
+        "anthropic",
+        "google",
+        "xai",
+        "unbiased",
+        "trustedrouter",
+        "openai-compatible",
+      ])
+      .describe(
+        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+      ),
+    login: zod
+      .enum(["plan", "api-key", "endpoint", "oauth"])
+      .describe(
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
+      ),
+    apiKey: zod
+      .string()
+      .min(1)
+      .max(connectPersonalAiConnectionBodyApiKeyMax)
+      .optional()
+      .describe(
+        "The provider's key. Required for api-key unless useSavedKey; optional for an endpoint that asks for none. Encrypted into the vault before anything else, and never sent back: no answer includes it, now or later.",
+      ),
+    useSavedKey: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Use the key already kept for this provider (and, for an endpoint, this address) instead of sending one.",
+      ),
+    baseUrl: zod
+      .url()
+      .max(connectPersonalAiConnectionBodyBaseUrlMax)
+      .regex(connectPersonalAiConnectionBodyBaseUrlRegExp)
+      .optional()
+      .describe(
+        "The endpoint's address, http or https, with nothing in it that signs in. Required for endpoint.",
+      ),
+    model: zod
+      .string()
+      .min(1)
+      .max(connectPersonalAiConnectionBodyModelMax)
+      .regex(connectPersonalAiConnectionBodyModelRegExp)
+      .optional()
+      .describe(
+        "The model to run on. Required for endpoint and oauth. Trimmed.",
+      ),
+  })
+  .describe(
+    "The connection to switch to. openai and anthropic take plan or api-key; google and xai take endpoint or oauth; unbiased, trustedrouter and openai-compatible take endpoint. Any other pair is refused.",
+  );
+
+export const ConnectPersonalAiConnectionResponse = zod
+  .object({
+    id: zod
+      .string()
+      .describe(
+        "The connection's id. Opaque; clients never read anything into it.",
+      ),
+    provider: zod
+      .enum([
+        "openai",
+        "anthropic",
+        "google",
+        "xai",
+        "unbiased",
+        "trustedrouter",
+        "openai-compatible",
+      ])
+      .describe(
+        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+      ),
+    login: zod
+      .enum(["plan", "api-key", "endpoint", "oauth"])
+      .describe(
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
+      ),
+    model: zod
+      .string()
+      .nullable()
+      .describe(
+        "The model named for an endpoint or a sign-in. Null for an API key or a plan.",
+      ),
+    endpointHost: zod
+      .string()
+      .nullable()
+      .describe(
+        "The host of the endpoint's address, never its path or anything that signs in. Null unless the login is endpoint.",
+      ),
+    isDefault: zod.boolean().describe("Whether a run with no pick uses it."),
+    ready: zod.boolean().describe("Whether a run can use it now."),
+    problem: zod
+      .union([
+        zod
+          .object({
+            code: zod
+              .string()
+              .describe(
+                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept.",
+              ),
+            detail: zod
+              .string()
+              .describe("One sentence a person reads, saying what to do."),
+          })
+          .describe(
+            "Why an AI connection can't run now, in OpenBot's own words.",
+          ),
+        zod.null(),
+      ])
+      .describe("Why it can't run now. Null while ready."),
+    connectedAt: zod.iso
+      .datetime({ offset: true })
+      .describe("When it was connected or last changed."),
+    sharedSignIn: zod
+      .union([
+        zod
+          .object({
+            personId: zod.string().describe("The person's id."),
+            name: zod
+              .string()
+              .describe(
+                "Their name as OpenBot shows it, or their email address where they have none.",
+              ),
+            ready: zod
+              .boolean()
+              .describe(
+                "Whether their sign-in is still kept and can run a Bot. False once they removed it or the provider stopped renewing it.",
+              ),
+          })
+          .describe(
+            "The person whose own sign-in the organization's AI shares. Never a token.",
+          ),
+        zod.null(),
+      ])
+      .optional()
+      .describe(
+        "Whose plan or provider sign-in it shares, for an organization's connection on OpenBot Cloud. Null otherwise.",
+      ),
+  })
+  .describe("One AI connection in a list. Never a key.");
+
+/**
+ * Stop a person's runs using one of their own AI connections and revoke its key or sign-in, as removeAiConnection does for the organization: picks on it stop applying, and removing the default leaves no default until they make another one default. Removing their last one sends their runs back to the organization's AI. Recorded on the audit trail. Only the person themselves may remove one.
+ * @summary Remove one of a person's own AI connections
+ */
+
+export const removePersonalAiConnectionPathPersonIdMax = 200;
+
+export const removePersonalAiConnectionPathPersonIdRegExp = new RegExp("\\S");
+export const removePersonalAiConnectionPathConnectionIdMax = 200;
+
+export const removePersonalAiConnectionPathConnectionIdRegExp = new RegExp(
+  "^[A-Za-z0-9_.:-]+$",
+);
+
+export const RemovePersonalAiConnectionParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  personId: zod
+    .string()
+    .min(1)
+    .max(removePersonalAiConnectionPathPersonIdMax)
+    .regex(removePersonalAiConnectionPathPersonIdRegExp)
+    .describe(
+      "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
+    ),
+  connectionId: zod
+    .string()
+    .min(1)
+    .max(removePersonalAiConnectionPathConnectionIdMax)
+    .regex(removePersonalAiConnectionPathConnectionIdRegExp)
+    .describe(
+      "The AI connection's id, as listAiConnections or listPersonalAiConnections gave it. Opaque.",
+    ),
+});
+
+export const removePersonalAiConnectionHeaderIdempotencyKeyMax = 128;
+
+export const RemovePersonalAiConnectionHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(removePersonalAiConnectionHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const RemovePersonalAiConnectionResponse = zod.void();
+
+/**
+ * Make the person's runs with no pick use this connection of their own, as makeAiConnectionDefault does for the organization. A connection that can't run now is refused. Only the person themselves may change it.
+ * @summary Make one of a person's own AI connections the default
+ */
+
+export const makePersonalAiConnectionDefaultPathPersonIdMax = 200;
+
+export const makePersonalAiConnectionDefaultPathPersonIdRegExp = new RegExp(
+  "\\S",
+);
+export const makePersonalAiConnectionDefaultPathConnectionIdMax = 200;
+
+export const makePersonalAiConnectionDefaultPathConnectionIdRegExp = new RegExp(
+  "^[A-Za-z0-9_.:-]+$",
+);
+
+export const MakePersonalAiConnectionDefaultParams = zod.object({
+  organizationId: zod
+    .string()
+    .min(1)
+    .describe(
+      "The organization, by its id or its slug. One the caller is not a member of answers as one that does not exist, `default` included.",
+    ),
+  personId: zod
+    .string()
+    .min(1)
+    .max(makePersonalAiConnectionDefaultPathPersonIdMax)
+    .regex(makePersonalAiConnectionDefaultPathPersonIdRegExp)
+    .describe(
+      "The person: me for the caller, or a person's id. A person's own things (their instructions, preferences, API keys, sessions and linked accounts) answer only the person themselves, by either.",
+    ),
+  connectionId: zod
+    .string()
+    .min(1)
+    .max(makePersonalAiConnectionDefaultPathConnectionIdMax)
+    .regex(makePersonalAiConnectionDefaultPathConnectionIdRegExp)
+    .describe(
+      "The AI connection's id, as listAiConnections or listPersonalAiConnections gave it. Opaque.",
+    ),
+});
+
+export const makePersonalAiConnectionDefaultHeaderIdempotencyKeyMax = 128;
+
+export const MakePersonalAiConnectionDefaultHeader = zod.object({
+  "Idempotency-Key": zod
+    .string()
+    .min(1)
+    .max(makePersonalAiConnectionDefaultHeaderIdempotencyKeyMax)
+    .describe(
+      "Generated by the caller for each write it means to make once. Reuse the same key and the same request for 24 hours after an uncertain response; the same key with a different request is a conflict.",
+    ),
+});
+
+export const MakePersonalAiConnectionDefaultResponse = zod
+  .object({
+    id: zod
+      .string()
+      .describe(
+        "The connection's id. Opaque; clients never read anything into it.",
+      ),
+    provider: zod
+      .enum([
+        "openai",
+        "anthropic",
+        "google",
+        "xai",
+        "unbiased",
+        "trustedrouter",
+        "openai-compatible",
+      ])
+      .describe(
+        "The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. trustedrouter: TrustedRouter. openai-compatible: any server that speaks OpenAI's API, at an address given.",
+      ),
+    login: zod
+      .enum(["plan", "api-key", "endpoint", "oauth"])
+      .describe(
+        "How OpenBot signs in to the provider. plan: the person's Claude or ChatGPT plan (openai, anthropic). api-key: a key from the provider (openai, anthropic). endpoint: an address and, where it asks for one, a key (google, xai, unbiased, trustedrouter, openai-compatible). oauth: the person's Google or xAI sign-in (google, xai).",
+      ),
+    model: zod
+      .string()
+      .nullable()
+      .describe(
+        "The model named for an endpoint or a sign-in. Null for an API key or a plan.",
+      ),
+    endpointHost: zod
+      .string()
+      .nullable()
+      .describe(
+        "The host of the endpoint's address, never its path or anything that signs in. Null unless the login is endpoint.",
+      ),
+    isDefault: zod.boolean().describe("Whether a run with no pick uses it."),
+    ready: zod.boolean().describe("Whether a run can use it now."),
+    problem: zod
+      .union([
+        zod
+          .object({
+            code: zod
+              .string()
+              .describe(
+                "sign-in-ended: the provider stopped renewing the sign-in, so it has to be signed in to again. key-refused: the provider refuses its key. unreachable: its address doesn't answer. no-key: its key is no longer kept.",
+              ),
+            detail: zod
+              .string()
+              .describe("One sentence a person reads, saying what to do."),
+          })
+          .describe(
+            "Why an AI connection can't run now, in OpenBot's own words.",
+          ),
+        zod.null(),
+      ])
+      .describe("Why it can't run now. Null while ready."),
+    connectedAt: zod.iso
+      .datetime({ offset: true })
+      .describe("When it was connected or last changed."),
+    sharedSignIn: zod
+      .union([
+        zod
+          .object({
+            personId: zod.string().describe("The person's id."),
+            name: zod
+              .string()
+              .describe(
+                "Their name as OpenBot shows it, or their email address where they have none.",
+              ),
+            ready: zod
+              .boolean()
+              .describe(
+                "Whether their sign-in is still kept and can run a Bot. False once they removed it or the provider stopped renewing it.",
+              ),
+          })
+          .describe(
+            "The person whose own sign-in the organization's AI shares. Never a token.",
+          ),
+        zod.null(),
+      ])
+      .optional()
+      .describe(
+        "Whose plan or provider sign-in it shares, for an organization's connection on OpenBot Cloud. Null otherwise.",
+      ),
+  })
+  .describe("One AI connection in a list. Never a key.");

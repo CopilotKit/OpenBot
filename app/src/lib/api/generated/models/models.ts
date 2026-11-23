@@ -20,24 +20,35 @@ import type {
 import type {
   AdminOnlyResponse,
   AiConnection,
+  AiConnectionEntry,
   AiConnectionFixedResponse,
   AiConnectionInput,
+  AiConnectionNotFoundResponse,
+  AiConnectionNotReadyResponse,
+  AiConnectionPage,
   AiConnectionRefusedResponse,
   AiSignIn,
   AiSignInCodeInput,
   AiSignInInput,
   AiSignInNotFoundResponse,
   AiSignInStatus,
+  ConnectAiConnectionHeaders,
+  ConnectPersonalAiConnectionHeaders,
   ConversationNotFoundResponse,
   CredentialsUnavailableResponse,
   DeleteAiConnectionHeaders,
   DeletePersonalAiConnectionHeaders,
+  FinishAiSignInHeaders,
   FinishPersonalAiSignInHeaders,
   GetModelCatalogueParams,
   IdempotencyConflictResponse,
   InvalidAiConnectionResponse,
   InvalidModelChoiceResponse,
   InvalidRequestResponse,
+  ListAiConnectionsParams,
+  ListPersonalAiConnectionsParams,
+  MakeAiConnectionDefaultHeaders,
+  MakePersonalAiConnectionDefaultHeaders,
   ModelCatalogue,
   ModelChoice,
   ModelChoiceForbiddenResponse,
@@ -47,10 +58,13 @@ import type {
   PersonNotFoundResponse,
   PersonalAiConnection,
   PersonalAiConnectionUnavailableResponse,
+  RemoveAiConnectionHeaders,
+  RemovePersonalAiConnectionHeaders,
   ReplaceAiConnectionHeaders,
   ReplaceModelChoiceHeaders,
   ReplacePersonalAiConnectionHeaders,
   ServerErrorResponse,
+  StartAiSignInHeaders,
   StartPersonalAiSignInHeaders,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
@@ -102,7 +116,7 @@ export const getGetModelCatalogueUrl = (
 };
 
 /**
- * Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot's model, the provider or a gateway in front of it, read in the background. They are narrowed for the caller in two ways. The organization's: only once an administrator turns on the model allowlist and allows at least one; an empty allowlist means every model. And the caller's teams': when any team they are in, or a team above one, lists models (getTeamModels), only the models one of those lists names, within what the organization allows. The default is then one of those when any can run, and nothing is left to pick when none can. With view=all, every model listed before either narrowing, for an administrator choosing which to allow. When the listing can't be read, the catalogue holds the deployment's own model and nothing to pick.
+ * Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot's model, the provider or a gateway in front of it, read in the background. They are narrowed for the caller in two ways. The organization's: only once an administrator turns on the model allowlist and allows at least one; an empty allowlist means every model. And the caller's teams': when any team they are in, or a team above one, lists models (getTeamModels), only the models one of those lists names, within what the organization allows. The default is then one of those when any can run, and nothing is left to pick when none can. With view=all, every model listed before either narrowing, for an administrator choosing which to allow. When the listing can't be read, the catalogue holds the deployment's own model and nothing to pick. Where several AI connections are connected, connections lists each with its own models, and the fields beside it describe the default connection.
  * @summary Read the models Bots can run on
  */
 export const getModelCatalogue = async (
@@ -333,7 +347,7 @@ export const getGetModelChoiceUrl = (
 };
 
 /**
- * Return the model and thinking effort a person chose for one of their conversations, each null for the default. Null too while the choice can't be used: the model is no longer offered, or the deployment moved to another provider. The choice is kept for when it can be used again. Only the person themselves may read it.
+ * Return the model and thinking effort a person chose for one of their conversations, each null for the default. Null too while the choice can't be used: the model is no longer offered, or the deployment moved to another provider. The choice is kept for when it can be used again. Where several AI connections are connected, connection names the one the model is on, and a connection that was removed is a choice that can't be used. Only the person themselves may read it.
  * @summary Read the model a person chose for a conversation
  */
 export const getModelChoice = async (
@@ -560,7 +574,7 @@ export const getReplaceModelChoiceUrl = (
 };
 
 /**
- * Set the model and thinking effort a person's runs in one of their conversations answer on, or null either to go back to the default. The model must be one the catalogue offers (getModelCatalogue), and the effort one that model takes. Every later run in the conversation reads it, from any device. Only the person themselves may choose, and only while choosing a model is on.
+ * Set the model and thinking effort a person's runs in one of their conversations answer on, or null either to go back to the default. The model must be one the catalogue offers (getModelCatalogue), and the effort one that model takes. Every later run in the conversation reads it, from any device. Where several AI connections are connected, connection names the one the model is on, and the model must be one that connection offers; without it, the default connection. Changing the default connection never changes a choice. Only the person themselves may choose, and only while choosing a model is on.
  * @summary Choose the model for a conversation
  */
 export const replaceModelChoice = async (
@@ -723,7 +737,7 @@ export const getGetAiConnectionUrl = (organizationId: string) => {
 };
 
 /**
- * Return the AI provider OpenBot's Bots run on, the way OpenBot signs in to it, the model or address host where one was named, and whether a run can use it now. Never a key. Also which other connections still have a key kept, so they can be used again without pasting it. Where whoever runs OpenBot sets the provider, editable is false and the connection can't be changed here. Only an administrator of the organization may read it.
+ * Return the AI provider OpenBot's Bots run on, the way OpenBot signs in to it, the model or address host where one was named, and whether a run can use it now. Never a key. Also which other connections still have a key kept, so they can be used again without pasting it. Where whoever runs OpenBot sets the provider, editable is false and the connection can't be changed here. Where several AI connections are connected (listAiConnections), this is the default one. Only an administrator of the organization may read it.
  * @summary Read how OpenBot reaches its AI provider
  */
 export const getAiConnection = async (
@@ -1227,7 +1241,7 @@ export const getGetPersonalAiConnectionUrl = (
 };
 
 /**
- * Return the AI connection a person set for themselves, never its key, and which AI their runs use: their own, the organization's, or none yet. On OpenBot Cloud each person brings their own AI, and it is theirs alone: it follows them into every organization they are in, no administrator can read or use it, and the organization's Bots never run on it for anybody else. Where an organization's AI is the only one (a self-hosted OpenBot, OpenBot Desktop on its own), available is false and the person's runs use the organization's. Only the person themselves may read it.
+ * Return the AI connection a person set for themselves, never its key, and which AI their runs use: their own, the organization's, or none yet. On OpenBot Cloud each person brings their own AI, and it is theirs alone: it follows them into every organization they are in, no administrator can read or use it, and the organization's Bots never run on it for anybody else. Where an organization's AI is the only one (a self-hosted OpenBot, OpenBot Desktop on its own), available is false and the person's runs use the organization's. Where the person connected several of their own (listPersonalAiConnections), connection is the default one. Only the person themselves may read it.
  * @summary Read a person's own AI connection
  */
 export const getPersonalAiConnection = async (
@@ -2349,6 +2363,1975 @@ export const useFinishPersonalAiSignIn = <
 > => {
   return useMutation(
     getFinishPersonalAiSignInMutationOptions(options),
+    queryClient,
+  );
+};
+export const getListAiConnectionsUrl = (
+  organizationId: string,
+  params?: ListAiConnectionsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/ai-connections?${stringifiedParams}`
+    : `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/ai-connections`;
+};
+
+/**
+ * Return one page of the AI connections the organization's Bots can run on, one per provider, never a key. A person picks a model from any of them for a conversation (replaceModelChoice with connection); a run with no pick uses the one that isDefault, which is the connection getAiConnection describes. Connections can exist with none of them the default, after an older app disconnected the default (deleteAiConnection): a run with no pick is then refused until one is made default, and a run whose pick names a connection that is ready still runs. signIns names the providers the server signs in to for the organization itself (startAiSignIn). Where whoever runs OpenBot sets the provider, the list holds that one connection and none can be added. Only an administrator of the organization may list them. A missing cursor starts at the first page and nextCursor null ends the list.
+ * @summary List the organization's AI connections
+ */
+export const listAiConnections = async (
+  organizationId: string,
+  params?: ListAiConnectionsParams,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AiConnectionPage> => {
+  return apiRequest<AiConnectionPage>(
+    getListAiConnectionsUrl(organizationId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListAiConnectionsQueryKey = (
+  organizationId: string,
+  params?: ListAiConnectionsParams,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/ai-connections`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListAiConnectionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAiConnections>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params?: ListAiConnectionsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAiConnections>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListAiConnectionsQueryKey(organizationId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listAiConnections>>
+  > = ({ signal }) =>
+    listAiConnections(organizationId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: organizationId !== null && organizationId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAiConnections>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListAiConnectionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAiConnections>>
+>;
+export type ListAiConnectionsQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | OrganizationNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useListAiConnections<
+  TData = Awaited<ReturnType<typeof listAiConnections>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params: undefined | ListAiConnectionsParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAiConnections>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAiConnections>>,
+          TError,
+          Awaited<ReturnType<typeof listAiConnections>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListAiConnections<
+  TData = Awaited<ReturnType<typeof listAiConnections>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params?: ListAiConnectionsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAiConnections>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAiConnections>>,
+          TError,
+          Awaited<ReturnType<typeof listAiConnections>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListAiConnections<
+  TData = Awaited<ReturnType<typeof listAiConnections>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params?: ListAiConnectionsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAiConnections>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List the organization's AI connections
+ */
+
+export function useListAiConnections<
+  TData = Awaited<ReturnType<typeof listAiConnections>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  params?: ListAiConnectionsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAiConnections>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListAiConnectionsQueryOptions(
+    organizationId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getConnectAiConnectionUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/ai-connections`;
+};
+
+/**
+ * Connect one more AI provider the organization's Bots can run on, beside the ones already connected. OpenBot checks the connection with the provider first: a key, an address or a sign-in it can't use is refused and nothing is saved. Each provider has at most one connection: connecting a provider that already has one replaces it (a key replaced, a plan swapped for a key) and keeps its id, so conversations that picked it keep running on it. The first connection becomes the default; a later one does not (makeAiConnectionDefault). A key goes into the organization's vault and is never sent back. A plan or a provider sign-in is accepted once an administrator signed in to it for the organization (startAiSignIn). Recorded on the audit trail, never with a key. Only an administrator of the organization may connect one, and not where whoever runs OpenBot sets the provider.
+ * @summary Connect an AI provider for the organization
+ */
+export const connectAiConnection = async (
+  organizationId: string,
+  aiConnectionInput: AiConnectionInput,
+  headers: ConnectAiConnectionHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AiConnectionEntry> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<AiConnectionEntry>(
+    getConnectAiConnectionUrl(organizationId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(aiConnectionInput),
+    },
+  );
+};
+
+export const getConnectAiConnectionMutationKey = () =>
+  ["connectAiConnection"] as const;
+
+export const getConnectAiConnectionMutationOptions = <
+  TError =
+    | InvalidAiConnectionResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | AiConnectionFixedResponse
+    | AiConnectionRefusedResponse
+    | ServerErrorResponse
+    | CredentialsUnavailableResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof connectAiConnection>>,
+    TError,
+    ConnectAiConnectionMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof connectAiConnection>>,
+  TError,
+  ConnectAiConnectionMutationVariables,
+  TContext
+> => {
+  const mutationKey = getConnectAiConnectionMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof connectAiConnection>>,
+    ConnectAiConnectionMutationVariables
+  > = (props) => {
+    const { organizationId, data, headers } = props ?? {};
+
+    return connectAiConnection(organizationId, data, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConnectAiConnectionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof connectAiConnection>>
+>;
+export type ConnectAiConnectionMutationBody = AiConnectionInput;
+export type ConnectAiConnectionMutationError =
+  | InvalidAiConnectionResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | OrganizationNotFoundResponse
+  | AiConnectionFixedResponse
+  | AiConnectionRefusedResponse
+  | ServerErrorResponse
+  | CredentialsUnavailableResponse
+  | UnexpectedErrorResponse;
+export type ConnectAiConnectionMutationVariables = {
+  organizationId: string;
+  data: AiConnectionInput;
+  headers: ConnectAiConnectionHeaders;
+};
+
+/**
+ * @summary Connect an AI provider for the organization
+ */
+export const useConnectAiConnection = <
+  TError =
+    | InvalidAiConnectionResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | AiConnectionFixedResponse
+    | AiConnectionRefusedResponse
+    | ServerErrorResponse
+    | CredentialsUnavailableResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof connectAiConnection>>,
+      TError,
+      ConnectAiConnectionMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof connectAiConnection>>,
+  TError,
+  ConnectAiConnectionMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getConnectAiConnectionMutationOptions(options),
+    queryClient,
+  );
+};
+export const getRemoveAiConnectionUrl = (
+  organizationId: string,
+  connectionId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/ai-connections/${encodeURIComponent(String(connectionId))}`;
+};
+
+/**
+ * Stop the organization's Bots using one AI connection, with no restart, and revoke its key or sign-in. Runs already going finish on it. Conversations that picked it keep their pick, which stops applying: their next run uses the default. The server never moves the default by itself: removing the default leaves the organization with no default until an administrator makes another one default (makeAiConnectionDefault), and a client that wants another to take over makes it default first. Recorded on the audit trail, never with a key. Only an administrator of the organization may remove one, and not where whoever runs OpenBot sets the provider.
+ * @summary Remove one of the organization's AI connections
+ */
+export const removeAiConnection = async (
+  organizationId: string,
+  connectionId: string,
+  headers: RemoveAiConnectionHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<void> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<void>(
+    getRemoveAiConnectionUrl(organizationId, connectionId),
+    {
+      ...options,
+      method: "DELETE",
+      headers: { ...headers, ...getHeaders(options?.headers) },
+    },
+  );
+};
+
+export const getRemoveAiConnectionMutationKey = () =>
+  ["removeAiConnection"] as const;
+
+export const getRemoveAiConnectionMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AiConnectionNotFoundResponse
+    | AiConnectionFixedResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof removeAiConnection>>,
+    TError,
+    RemoveAiConnectionMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof removeAiConnection>>,
+  TError,
+  RemoveAiConnectionMutationVariables,
+  TContext
+> => {
+  const mutationKey = getRemoveAiConnectionMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof removeAiConnection>>,
+    RemoveAiConnectionMutationVariables
+  > = (props) => {
+    const { organizationId, connectionId, headers } = props ?? {};
+
+    return removeAiConnection(
+      organizationId,
+      connectionId,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RemoveAiConnectionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof removeAiConnection>>
+>;
+
+export type RemoveAiConnectionMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | AiConnectionNotFoundResponse
+  | AiConnectionFixedResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type RemoveAiConnectionMutationVariables = {
+  organizationId: string;
+  connectionId: string;
+  headers: RemoveAiConnectionHeaders;
+};
+
+/**
+ * @summary Remove one of the organization's AI connections
+ */
+export const useRemoveAiConnection = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AiConnectionNotFoundResponse
+    | AiConnectionFixedResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof removeAiConnection>>,
+      TError,
+      RemoveAiConnectionMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof removeAiConnection>>,
+  TError,
+  RemoveAiConnectionMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getRemoveAiConnectionMutationOptions(options),
+    queryClient,
+  );
+};
+export const getMakeAiConnectionDefaultUrl = (
+  organizationId: string,
+  connectionId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/ai-connections/${encodeURIComponent(String(connectionId))}/make-default`;
+};
+
+/**
+ * Make a run with no pick use this AI connection, with no restart: getAiConnection describes it from then on, and OpenBot's own model calls (titles, routing, summaries) use it. Picks people made for their conversations don't change. A connection that can't run now (ready false) is refused. Recorded on the audit trail. Only an administrator of the organization may change it.
+ * @summary Make one of the organization's AI connections the default
+ */
+export const makeAiConnectionDefault = async (
+  organizationId: string,
+  connectionId: string,
+  headers: MakeAiConnectionDefaultHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AiConnectionEntry> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<AiConnectionEntry>(
+    getMakeAiConnectionDefaultUrl(organizationId, connectionId),
+    {
+      ...options,
+      method: "POST",
+      headers: { ...headers, ...getHeaders(options?.headers) },
+    },
+  );
+};
+
+export const getMakeAiConnectionDefaultMutationKey = () =>
+  ["makeAiConnectionDefault"] as const;
+
+export const getMakeAiConnectionDefaultMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AiConnectionNotFoundResponse
+    | AiConnectionNotReadyResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof makeAiConnectionDefault>>,
+    TError,
+    MakeAiConnectionDefaultMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof makeAiConnectionDefault>>,
+  TError,
+  MakeAiConnectionDefaultMutationVariables,
+  TContext
+> => {
+  const mutationKey = getMakeAiConnectionDefaultMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof makeAiConnectionDefault>>,
+    MakeAiConnectionDefaultMutationVariables
+  > = (props) => {
+    const { organizationId, connectionId, headers } = props ?? {};
+
+    return makeAiConnectionDefault(
+      organizationId,
+      connectionId,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type MakeAiConnectionDefaultMutationResult = NonNullable<
+  Awaited<ReturnType<typeof makeAiConnectionDefault>>
+>;
+
+export type MakeAiConnectionDefaultMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | AiConnectionNotFoundResponse
+  | AiConnectionNotReadyResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type MakeAiConnectionDefaultMutationVariables = {
+  organizationId: string;
+  connectionId: string;
+  headers: MakeAiConnectionDefaultHeaders;
+};
+
+/**
+ * @summary Make one of the organization's AI connections the default
+ */
+export const useMakeAiConnectionDefault = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AiConnectionNotFoundResponse
+    | AiConnectionNotReadyResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof makeAiConnectionDefault>>,
+      TError,
+      MakeAiConnectionDefaultMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof makeAiConnectionDefault>>,
+  TError,
+  MakeAiConnectionDefaultMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getMakeAiConnectionDefaultMutationOptions(options),
+    queryClient,
+  );
+};
+export const getStartAiSignInUrl = (organizationId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/ai-connection-sign-ins`;
+};
+
+/**
+ * Start a sign-in to an AI provider that the server runs itself, for the organization, for a provider listAiConnections names in signIns. It works as startPersonalAiSignIn does, and what the provider hands back is kept for the organization: connect it with connectAiConnection and login plan or oauth (or useSavedKey for an Unbiased AI key). The server renews it itself. Only an administrator of the organization may sign in for it.
+ * @summary Start signing in to an AI provider for the organization
+ */
+export const startAiSignIn = async (
+  organizationId: string,
+  aiSignInInput: AiSignInInput,
+  headers: StartAiSignInHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AiSignIn> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<AiSignIn>(getStartAiSignInUrl(organizationId), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...headers,
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(aiSignInInput),
+  });
+};
+
+export const getStartAiSignInMutationKey = () => ["startAiSignIn"] as const;
+
+export const getStartAiSignInMutationOptions = <
+  TError =
+    | InvalidAiConnectionResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | AiConnectionFixedResponse
+    | AiConnectionRefusedResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startAiSignIn>>,
+    TError,
+    StartAiSignInMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof startAiSignIn>>,
+  TError,
+  StartAiSignInMutationVariables,
+  TContext
+> => {
+  const mutationKey = getStartAiSignInMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof startAiSignIn>>,
+    StartAiSignInMutationVariables
+  > = (props) => {
+    const { organizationId, data, headers } = props ?? {};
+
+    return startAiSignIn(organizationId, data, headers, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type StartAiSignInMutationResult = NonNullable<
+  Awaited<ReturnType<typeof startAiSignIn>>
+>;
+export type StartAiSignInMutationBody = AiSignInInput;
+export type StartAiSignInMutationError =
+  | InvalidAiConnectionResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | OrganizationNotFoundResponse
+  | AiConnectionFixedResponse
+  | AiConnectionRefusedResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type StartAiSignInMutationVariables = {
+  organizationId: string;
+  data: AiSignInInput;
+  headers: StartAiSignInHeaders;
+};
+
+/**
+ * @summary Start signing in to an AI provider for the organization
+ */
+export const useStartAiSignIn = <
+  TError =
+    | InvalidAiConnectionResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | OrganizationNotFoundResponse
+    | AiConnectionFixedResponse
+    | AiConnectionRefusedResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof startAiSignIn>>,
+      TError,
+      StartAiSignInMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof startAiSignIn>>,
+  TError,
+  StartAiSignInMutationVariables,
+  TContext
+> => {
+  return useMutation(getStartAiSignInMutationOptions(options), queryClient);
+};
+export const getGetAiSignInUrl = (organizationId: string, signInId: string) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/ai-connection-sign-ins/${encodeURIComponent(String(signInId))}`;
+};
+
+/**
+ * Ask the provider once whether the organization's sign-in was approved, and say where it stands, as getPersonalAiSignIn does. Only an administrator of the organization may read it.
+ * @summary Read a sign-in to an AI provider for the organization
+ */
+export const getAiSignIn = async (
+  organizationId: string,
+  signInId: string,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AiSignInStatus> => {
+  return apiRequest<AiSignInStatus>(
+    getGetAiSignInUrl(organizationId, signInId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAiSignInQueryKey = (
+  organizationId: string,
+  signInId: string,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/ai-connection-sign-ins/${signInId}`,
+  ] as const;
+};
+
+export const getGetAiSignInQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAiSignIn>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AiSignInNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  signInId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAiSignIn>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAiSignInQueryKey(organizationId, signInId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAiSignIn>>> = ({
+    signal,
+  }) => getAiSignIn(organizationId, signInId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled:
+      organizationId !== null &&
+      organizationId !== undefined &&
+      signInId !== null &&
+      signInId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAiSignIn>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetAiSignInQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAiSignIn>>
+>;
+export type GetAiSignInQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | AiSignInNotFoundResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useGetAiSignIn<
+  TData = Awaited<ReturnType<typeof getAiSignIn>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AiSignInNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  signInId: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAiSignIn>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAiSignIn>>,
+          TError,
+          Awaited<ReturnType<typeof getAiSignIn>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetAiSignIn<
+  TData = Awaited<ReturnType<typeof getAiSignIn>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AiSignInNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  signInId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAiSignIn>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAiSignIn>>,
+          TError,
+          Awaited<ReturnType<typeof getAiSignIn>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetAiSignIn<
+  TData = Awaited<ReturnType<typeof getAiSignIn>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AiSignInNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  signInId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAiSignIn>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Read a sign-in to an AI provider for the organization
+ */
+
+export function useGetAiSignIn<
+  TData = Awaited<ReturnType<typeof getAiSignIn>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AiSignInNotFoundResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  signInId: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAiSignIn>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetAiSignInQueryOptions(
+    organizationId,
+    signInId,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getFinishAiSignInUrl = (
+  organizationId: string,
+  signInId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/ai-connection-sign-ins/${encodeURIComponent(String(signInId))}/code`;
+};
+
+/**
+ * Finish a sign-in for the organization whose finish is code, as finishPersonalAiSignIn does. Only an administrator of the organization may finish it.
+ * @summary Finish the organization's sign-in with the provider's code
+ */
+export const finishAiSignIn = async (
+  organizationId: string,
+  signInId: string,
+  aiSignInCodeInput: AiSignInCodeInput,
+  headers: FinishAiSignInHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AiSignInStatus> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<AiSignInStatus>(
+    getFinishAiSignInUrl(organizationId, signInId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(aiSignInCodeInput),
+    },
+  );
+};
+
+export const getFinishAiSignInMutationKey = () => ["finishAiSignIn"] as const;
+
+export const getFinishAiSignInMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AiSignInNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof finishAiSignIn>>,
+    TError,
+    FinishAiSignInMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof finishAiSignIn>>,
+  TError,
+  FinishAiSignInMutationVariables,
+  TContext
+> => {
+  const mutationKey = getFinishAiSignInMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof finishAiSignIn>>,
+    FinishAiSignInMutationVariables
+  > = (props) => {
+    const { organizationId, signInId, data, headers } = props ?? {};
+
+    return finishAiSignIn(
+      organizationId,
+      signInId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type FinishAiSignInMutationResult = NonNullable<
+  Awaited<ReturnType<typeof finishAiSignIn>>
+>;
+export type FinishAiSignInMutationBody = AiSignInCodeInput;
+export type FinishAiSignInMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | AdminOnlyResponse
+  | AiSignInNotFoundResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type FinishAiSignInMutationVariables = {
+  organizationId: string;
+  signInId: string;
+  data: AiSignInCodeInput;
+  headers: FinishAiSignInHeaders;
+};
+
+/**
+ * @summary Finish the organization's sign-in with the provider's code
+ */
+export const useFinishAiSignIn = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | AdminOnlyResponse
+    | AiSignInNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof finishAiSignIn>>,
+      TError,
+      FinishAiSignInMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof finishAiSignIn>>,
+  TError,
+  FinishAiSignInMutationVariables,
+  TContext
+> => {
+  return useMutation(getFinishAiSignInMutationOptions(options), queryClient);
+};
+export const getListPersonalAiConnectionsUrl = (
+  organizationId: string,
+  personId: string,
+  params?: ListPersonalAiConnectionsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/ai-connections?${stringifiedParams}`
+    : `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/ai-connections`;
+};
+
+/**
+ * Return one page of the AI connections a person connected for themselves, one per provider, never a key. They are theirs alone, as getPersonalAiConnection describes, and a person's runs use them ahead of the organization's: a person with any of their own never runs on the organization's. A run with no pick uses the one that isDefault; connections can exist with none the default, as listAiConnections describes. signIns names the providers the server signs the person in to itself. Only the person themselves may list them, and only where available is true. A missing cursor starts at the first page and nextCursor null ends the list.
+ * @summary List a person's own AI connections
+ */
+export const listPersonalAiConnections = async (
+  organizationId: string,
+  personId: string,
+  params?: ListPersonalAiConnectionsParams,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AiConnectionPage> => {
+  return apiRequest<AiConnectionPage>(
+    getListPersonalAiConnectionsUrl(organizationId, personId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListPersonalAiConnectionsQueryKey = (
+  organizationId: string,
+  personId: string,
+  params?: ListPersonalAiConnectionsParams,
+) => {
+  return [
+    `/api/v2/organizations/${organizationId}/people/${personId}/ai-connections`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListPersonalAiConnectionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listPersonalAiConnections>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | PersonalAiConnectionUnavailableResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  params?: ListPersonalAiConnectionsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listPersonalAiConnections>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListPersonalAiConnectionsQueryKey(organizationId, personId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listPersonalAiConnections>>
+  > = ({ signal }) =>
+    listPersonalAiConnections(organizationId, personId, params, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled:
+      organizationId !== null &&
+      organizationId !== undefined &&
+      personId !== null &&
+      personId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listPersonalAiConnections>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListPersonalAiConnectionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listPersonalAiConnections>>
+>;
+export type ListPersonalAiConnectionsQueryError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | OwnOnlyResponse
+  | PersonNotFoundResponse
+  | PersonalAiConnectionUnavailableResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+
+export function useListPersonalAiConnections<
+  TData = Awaited<ReturnType<typeof listPersonalAiConnections>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | PersonalAiConnectionUnavailableResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  params: undefined | ListPersonalAiConnectionsParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listPersonalAiConnections>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPersonalAiConnections>>,
+          TError,
+          Awaited<ReturnType<typeof listPersonalAiConnections>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListPersonalAiConnections<
+  TData = Awaited<ReturnType<typeof listPersonalAiConnections>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | PersonalAiConnectionUnavailableResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  params?: ListPersonalAiConnectionsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listPersonalAiConnections>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPersonalAiConnections>>,
+          TError,
+          Awaited<ReturnType<typeof listPersonalAiConnections>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListPersonalAiConnections<
+  TData = Awaited<ReturnType<typeof listPersonalAiConnections>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | PersonalAiConnectionUnavailableResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  params?: ListPersonalAiConnectionsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listPersonalAiConnections>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List a person's own AI connections
+ */
+
+export function useListPersonalAiConnections<
+  TData = Awaited<ReturnType<typeof listPersonalAiConnections>>,
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | PersonalAiConnectionUnavailableResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+>(
+  organizationId: string,
+  personId: string,
+  params?: ListPersonalAiConnectionsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listPersonalAiConnections>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListPersonalAiConnectionsQueryOptions(
+    organizationId,
+    personId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getConnectPersonalAiConnectionUrl = (
+  organizationId: string,
+  personId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/ai-connections`;
+};
+
+/**
+ * Connect one more AI provider for a person, beside the ones they already connected, as connectAiConnection does for the organization: checked with the provider first, one connection per provider, a provider already connected replaced with its id kept, and the first one the default. A plan or a provider sign-in is accepted once the person signed in to it through OpenBot (startPersonalAiSignIn). The key is kept for the person alone, never in the organization's vault, and never sent back. Recorded on the audit trail, never with a key. Only the person themselves may connect one, and only where available is true.
+ * @summary Connect an AI provider of a person's own
+ */
+export const connectPersonalAiConnection = async (
+  organizationId: string,
+  personId: string,
+  aiConnectionInput: AiConnectionInput,
+  headers: ConnectPersonalAiConnectionHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AiConnectionEntry> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<AiConnectionEntry>(
+    getConnectPersonalAiConnectionUrl(organizationId, personId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(aiConnectionInput),
+    },
+  );
+};
+
+export const getConnectPersonalAiConnectionMutationKey = () =>
+  ["connectPersonalAiConnection"] as const;
+
+export const getConnectPersonalAiConnectionMutationOptions = <
+  TError =
+    | InvalidAiConnectionResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | PersonalAiConnectionUnavailableResponse
+    | AiConnectionRefusedResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof connectPersonalAiConnection>>,
+    TError,
+    ConnectPersonalAiConnectionMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof connectPersonalAiConnection>>,
+  TError,
+  ConnectPersonalAiConnectionMutationVariables,
+  TContext
+> => {
+  const mutationKey = getConnectPersonalAiConnectionMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof connectPersonalAiConnection>>,
+    ConnectPersonalAiConnectionMutationVariables
+  > = (props) => {
+    const { organizationId, personId, data, headers } = props ?? {};
+
+    return connectPersonalAiConnection(
+      organizationId,
+      personId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConnectPersonalAiConnectionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof connectPersonalAiConnection>>
+>;
+export type ConnectPersonalAiConnectionMutationBody = AiConnectionInput;
+export type ConnectPersonalAiConnectionMutationError =
+  | InvalidAiConnectionResponse
+  | UnauthenticatedResponse
+  | OwnOnlyResponse
+  | PersonNotFoundResponse
+  | PersonalAiConnectionUnavailableResponse
+  | AiConnectionRefusedResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type ConnectPersonalAiConnectionMutationVariables = {
+  organizationId: string;
+  personId: string;
+  data: AiConnectionInput;
+  headers: ConnectPersonalAiConnectionHeaders;
+};
+
+/**
+ * @summary Connect an AI provider of a person's own
+ */
+export const useConnectPersonalAiConnection = <
+  TError =
+    | InvalidAiConnectionResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | PersonNotFoundResponse
+    | PersonalAiConnectionUnavailableResponse
+    | AiConnectionRefusedResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof connectPersonalAiConnection>>,
+      TError,
+      ConnectPersonalAiConnectionMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof connectPersonalAiConnection>>,
+  TError,
+  ConnectPersonalAiConnectionMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getConnectPersonalAiConnectionMutationOptions(options),
+    queryClient,
+  );
+};
+export const getRemovePersonalAiConnectionUrl = (
+  organizationId: string,
+  personId: string,
+  connectionId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/ai-connections/${encodeURIComponent(String(connectionId))}`;
+};
+
+/**
+ * Stop a person's runs using one of their own AI connections and revoke its key or sign-in, as removeAiConnection does for the organization: picks on it stop applying, and removing the default leaves no default until they make another one default. Removing their last one sends their runs back to the organization's AI. Recorded on the audit trail. Only the person themselves may remove one.
+ * @summary Remove one of a person's own AI connections
+ */
+export const removePersonalAiConnection = async (
+  organizationId: string,
+  personId: string,
+  connectionId: string,
+  headers: RemovePersonalAiConnectionHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<void> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<void>(
+    getRemovePersonalAiConnectionUrl(organizationId, personId, connectionId),
+    {
+      ...options,
+      method: "DELETE",
+      headers: { ...headers, ...getHeaders(options?.headers) },
+    },
+  );
+};
+
+export const getRemovePersonalAiConnectionMutationKey = () =>
+  ["removePersonalAiConnection"] as const;
+
+export const getRemovePersonalAiConnectionMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | AiConnectionNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof removePersonalAiConnection>>,
+    TError,
+    RemovePersonalAiConnectionMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof removePersonalAiConnection>>,
+  TError,
+  RemovePersonalAiConnectionMutationVariables,
+  TContext
+> => {
+  const mutationKey = getRemovePersonalAiConnectionMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof removePersonalAiConnection>>,
+    RemovePersonalAiConnectionMutationVariables
+  > = (props) => {
+    const { organizationId, personId, connectionId, headers } = props ?? {};
+
+    return removePersonalAiConnection(
+      organizationId,
+      personId,
+      connectionId,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RemovePersonalAiConnectionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof removePersonalAiConnection>>
+>;
+
+export type RemovePersonalAiConnectionMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | OwnOnlyResponse
+  | AiConnectionNotFoundResponse
+  | IdempotencyConflictResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type RemovePersonalAiConnectionMutationVariables = {
+  organizationId: string;
+  personId: string;
+  connectionId: string;
+  headers: RemovePersonalAiConnectionHeaders;
+};
+
+/**
+ * @summary Remove one of a person's own AI connections
+ */
+export const useRemovePersonalAiConnection = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | AiConnectionNotFoundResponse
+    | IdempotencyConflictResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof removePersonalAiConnection>>,
+      TError,
+      RemovePersonalAiConnectionMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof removePersonalAiConnection>>,
+  TError,
+  RemovePersonalAiConnectionMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getRemovePersonalAiConnectionMutationOptions(options),
+    queryClient,
+  );
+};
+export const getMakePersonalAiConnectionDefaultUrl = (
+  organizationId: string,
+  personId: string,
+  connectionId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/people/${encodeURIComponent(String(personId))}/ai-connections/${encodeURIComponent(String(connectionId))}/make-default`;
+};
+
+/**
+ * Make the person's runs with no pick use this connection of their own, as makeAiConnectionDefault does for the organization. A connection that can't run now is refused. Only the person themselves may change it.
+ * @summary Make one of a person's own AI connections the default
+ */
+export const makePersonalAiConnectionDefault = async (
+  organizationId: string,
+  personId: string,
+  connectionId: string,
+  headers: MakePersonalAiConnectionDefaultHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<AiConnectionEntry> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<AiConnectionEntry>(
+    getMakePersonalAiConnectionDefaultUrl(
+      organizationId,
+      personId,
+      connectionId,
+    ),
+    {
+      ...options,
+      method: "POST",
+      headers: { ...headers, ...getHeaders(options?.headers) },
+    },
+  );
+};
+
+export const getMakePersonalAiConnectionDefaultMutationKey = () =>
+  ["makePersonalAiConnectionDefault"] as const;
+
+export const getMakePersonalAiConnectionDefaultMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | AiConnectionNotFoundResponse
+    | AiConnectionNotReadyResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof makePersonalAiConnectionDefault>>,
+    TError,
+    MakePersonalAiConnectionDefaultMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof makePersonalAiConnectionDefault>>,
+  TError,
+  MakePersonalAiConnectionDefaultMutationVariables,
+  TContext
+> => {
+  const mutationKey = getMakePersonalAiConnectionDefaultMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof makePersonalAiConnectionDefault>>,
+    MakePersonalAiConnectionDefaultMutationVariables
+  > = (props) => {
+    const { organizationId, personId, connectionId, headers } = props ?? {};
+
+    return makePersonalAiConnectionDefault(
+      organizationId,
+      personId,
+      connectionId,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type MakePersonalAiConnectionDefaultMutationResult = NonNullable<
+  Awaited<ReturnType<typeof makePersonalAiConnectionDefault>>
+>;
+
+export type MakePersonalAiConnectionDefaultMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | OwnOnlyResponse
+  | AiConnectionNotFoundResponse
+  | AiConnectionNotReadyResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type MakePersonalAiConnectionDefaultMutationVariables = {
+  organizationId: string;
+  personId: string;
+  connectionId: string;
+  headers: MakePersonalAiConnectionDefaultHeaders;
+};
+
+/**
+ * @summary Make one of a person's own AI connections the default
+ */
+export const useMakePersonalAiConnectionDefault = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | OwnOnlyResponse
+    | AiConnectionNotFoundResponse
+    | AiConnectionNotReadyResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof makePersonalAiConnectionDefault>>,
+      TError,
+      MakePersonalAiConnectionDefaultMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof makePersonalAiConnectionDefault>>,
+  TError,
+  MakePersonalAiConnectionDefaultMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getMakePersonalAiConnectionDefaultMutationOptions(options),
     queryClient,
   );
 };
