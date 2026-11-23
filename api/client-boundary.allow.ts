@@ -222,6 +222,12 @@ export const ALLOWED: Allowed[] = [
     why: "a hosted OpenBot's sign-in, opened as a page that leaves for OpenBot by CopilotKit's own sign-in and comes back",
   },
   {
+    file: "app/src/lib/auth/hosted.ts",
+    what: "/api/auth/hosted/sign-out",
+    rule: "sign-in-protocol",
+    why: "a hosted OpenBot's sign-out, opened as a page that leaves for OpenBot by CopilotKit's own sign-out and comes back to the sign-in screen",
+  },
+  {
     file: "app/src/lib/auth/resume.ts",
     what: "/api/plugins/arcade/verify",
     rule: "sign-in-protocol",
@@ -338,6 +344,18 @@ export const ALLOWED: Allowed[] = [
     what: "/api/v2/organizations/default/people/me/recorder-connect-codes",
     rule: "hand-built-v2",
     why: "the Recorder host's handoff, from Rust, which has no generated client",
+  },
+  {
+    file: "desktop/src-tauri/src/move_to_cloud.rs",
+    what: /^\/api\/v2\/(people\/me\/organizations|organizations\/\{\}\{path\})$/,
+    rule: "hand-built-v2",
+    why: "the move to OpenBot Cloud, from Rust, which has no generated client: the export from the OpenBot on this computer and the import into OpenBot Cloud, in the organization each answers for the person",
+  },
+  {
+    file: "desktop/src-tauri/src/move_to_cloud/tests.rs",
+    what: /^\/api\/v2\/(people\/me\/organizations|organizations\/(default|org_mine)\/((exports|imports)(\/[a-z0-9_]+)*\/?|people\/me\/ai-connection))$/,
+    rule: "hand-built-v2",
+    why: "the move's tests, against an OpenBot here and an OpenBot Cloud that answer as the API describes",
   },
   {
     file: "desktop/src-tauri/src/install_token.rs",

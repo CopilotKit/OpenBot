@@ -294,9 +294,9 @@ export function MenuSheet({
                 className={ROW}
                 disabled={signOut.isPending}
                 onClick={async () => {
-                  await signOut.mutateAsync();
+                  const { leaving } = await signOut.mutateAsync();
                   close();
-                  await navigate({ to: "/sign" });
+                  if (!leaving) await navigate({ to: "/sign" });
                 }}
                 type="button"
               >

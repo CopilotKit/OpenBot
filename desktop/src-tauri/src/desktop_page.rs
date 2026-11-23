@@ -25,6 +25,11 @@
 //! one container at a time while everything else keeps running. A key or an address never passes
 //! through here: the page sends it to the server.
 //!
+//! And a provider's sign-in redirect, caught on this computer for a sign-in OpenBot Cloud's server
+//! runs (`begin_sign_in_redirect`, `await_sign_in_redirect`, `cancel_sign_in_redirect`): the
+//! browser comes back to `localhost`, and the code goes to the page, which sends it to the server.
+//! These work while connected too: that is where they are used.
+//!
 //! And Settings' Share usage data row (`usage_data`, `set_usage_data`): the opt-out the
 //! environment variables give, as a switch kept for the next launch. Setup's last screen asks the
 //! same two (`capabilities/default.json`), so its checkbox and Settings' switch are one setting.
@@ -46,6 +51,9 @@
 //! bubble over every app, and the bubble's own page asking to open into its panel and fold back
 //! (`assistant_layout`, `assistant_expand`, `assistant_collapse`) or to bring the main window back
 //! (`assistant_open_full`). See `assistant.rs`.
+//!
+//! And Settings' Move to OpenBot Cloud (`move_to_cloud`): the setup window at the move, with
+//! OpenBot left running here (`desktop_move`).
 
 use openbot_desktop_lib::{app_update, local_eval, local_eval_state, speech, stack};
 use tauri::Manager;
@@ -56,7 +64,7 @@ pub const PLUGIN: &str = "openbot-desktop";
 pub const QUIT_SHORTCUT_PAGE: &str = include_str!("quit-shortcut.js");
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 42] = [
+pub const PERMISSIONS: [&str; 46] = [
     "openbot-desktop:allow-connection",
     "openbot-desktop:allow-sign-out",
     "openbot-desktop:allow-change-connection",
@@ -85,6 +93,9 @@ pub const PERMISSIONS: [&str; 42] = [
     "openbot-desktop:allow-begin-provider-sign-in",
     "openbot-desktop:allow-finish-provider-sign-in",
     "openbot-desktop:allow-cancel-provider-sign-in",
+    "openbot-desktop:allow-begin-sign-in-redirect",
+    "openbot-desktop:allow-await-sign-in-redirect",
+    "openbot-desktop:allow-cancel-sign-in-redirect",
     "openbot-desktop:allow-prepare-ai-connection",
     "openbot-desktop:allow-settle-ai-connection",
     "openbot-desktop:allow-usage-data",
@@ -99,6 +110,7 @@ pub const PERMISSIONS: [&str; 42] = [
     "openbot-desktop:allow-assistant-expand",
     "openbot-desktop:allow-assistant-collapse",
     "openbot-desktop:allow-assistant-open-full",
+    "openbot-desktop:allow-move-to-cloud",
 ];
 
 /**
@@ -191,6 +203,16 @@ async fn set_organization(
     organization_id: Option<String>,
 ) -> Result<(), String> {
     crate::desktop_connected::set_organization_now(&app, organization_id)
+}
+
+/// Settings' Move to OpenBot Cloud: the setup window, at the move, with OpenBot left running here
+/// (the move reads what it has). Refused where the move isn't offered (`moveToCloud` on
+/// `connection`). The page asking goes with it.
+#[tauri::command]
+async fn move_to_cloud(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || crate::desktop_move::ask_from_settings(&app))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 /// `local status`, `start` or `stop` for the stack recorded for this installation.
@@ -341,18 +363,28 @@ struct SignInAddress {
     url: String,
 }
 
-/// Start a Claude or ChatGPT plan's sign-in in the browser, while OpenBot keeps running.
+/**
+Start a Claude or ChatGPT plan's sign-in in the browser, while OpenBot keeps running.
+
+`redirect: "loopback"` sends a Claude plan's browser back to this computer, and `finish_plan_sign_in`
+then finishes it with no code. A page older than that sends no `redirect`, and gets Claude's code
+page to paste from, as it always has. The page tells which it got from the address's
+`redirect_uri`, so a newer page in an older Desktop pastes too.
+*/
 #[tauri::command]
 async fn begin_plan_sign_in(
     app: tauri::AppHandle,
     plan: openbot_desktop_lib::ai_connection::Plan,
+    redirect: Option<String>,
 ) -> Result<SignInAddress, String> {
-    let url = crate::begin_plan_sign_in_now(app, plan).await?;
+    let loopback = redirect.as_deref() == Some("loopback");
+    let url = crate::begin_plan_sign_in_now(app, plan, loopback).await?;
     Ok(SignInAddress { url })
 }
 
-/// Finish it: the Claude plan with the code the browser showed, the ChatGPT plan by waiting for the
-/// browser to come back. The token is kept on this computer and never returned.
+/// Finish it: the Claude plan once the browser comes back, or with the code Claude's page showed
+/// for a page that pastes it; the ChatGPT plan by waiting for the browser to come back. The token
+/// is kept on this computer and never returned.
 #[tauri::command]
 async fn finish_plan_sign_in(
     app: tauri::AppHandle,
@@ -408,6 +440,48 @@ async fn cancel_provider_sign_in(attempt_id: String) {
     openbot_desktop_lib::provider_oauth::cancel(&attempt_id);
 }
 
+/*
+ * A provider's redirect, caught on this computer for a sign-in OpenBot Cloud's server runs
+ * (`sign_in_redirect`). Unlike the sign-ins above, these never go through `nothing_here`: the app
+ * connected to OpenBot Cloud (`desktop_connected`) is exactly where they are used. They touch no
+ * installation, only a loopback port, and the code goes to the page that asked, once.
+ */
+
+/// Listen for `provider`'s redirect: `anthropic` on a random loopback port, `openai` on 1455.
+/// Refused with a sentence when the port is taken, and the page then falls back to the paste.
+#[tauri::command]
+async fn begin_sign_in_redirect(
+    provider: String,
+) -> Result<openbot_desktop_lib::sign_in_redirect::Begun, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::sign_in_redirect::begin(&provider)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Wait, up to 15 minutes, for the redirect whose state is `state`. The browser is told OpenBot has
+/// the sign-in, and OpenBot comes forward.
+#[tauri::command]
+async fn await_sign_in_redirect(
+    app: tauri::AppHandle,
+    attempt_id: String,
+    state: String,
+) -> Result<openbot_desktop_lib::sign_in_redirect::Redirected, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::sign_in_redirect::wait(&attempt_id, &state, || {
+            crate::bring_to_front(&app, "a sign-in came back to OpenBot");
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn cancel_sign_in_redirect(attempt_id: String) {
+    openbot_desktop_lib::sign_in_redirect::cancel(&attempt_id);
+}
+
 /// What `prepare_ai_connection` answers once the connection's engine is ready.
 #[derive(serde::Serialize)]
 struct Prepared {
@@ -427,7 +501,7 @@ async fn prepare_ai_connection(
 }
 
 /// Settle on the connection the server now has: recorded for the next start, a plan engine no
-/// longer needed stopped, and the picked Bot moved to an engine that can use it, alone.
+/// longer connected (`connected_plans`) stopped, and the picked Bot moved to an engine that can use it, alone.
 #[tauri::command]
 async fn settle_ai_connection(
     app: tauri::AppHandle,
@@ -435,6 +509,7 @@ async fn settle_ai_connection(
     login: String,
     model: Option<String>,
     endpoint_host: Option<String>,
+    connected_plans: Option<Vec<openbot_desktop_lib::ai_connection::Plan>>,
 ) -> Result<(), String> {
     crate::settle_ai_connection_now(
         app,
@@ -443,6 +518,7 @@ async fn settle_ai_connection(
             login,
             model,
             endpoint_host,
+            connected_plans,
         },
     )
     .await
@@ -570,6 +646,9 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             begin_provider_sign_in,
             finish_provider_sign_in,
             cancel_provider_sign_in,
+            begin_sign_in_redirect,
+            await_sign_in_redirect,
+            cancel_sign_in_redirect,
             prepare_ai_connection,
             settle_ai_connection,
             usage_data,
@@ -587,7 +666,8 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             assistant_layout,
             assistant_expand,
             assistant_collapse,
-            assistant_open_full
+            assistant_open_full,
+            move_to_cloud
         ])
         .build()
 }

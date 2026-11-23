@@ -26,6 +26,11 @@ export type ModelOption = {
   efforts?: string[];
   /** The effort the model uses when none is sent, when its provider says. Absent when unknown. */
   defaultEffort?: string;
+  /**
+   * The connected provider that serves it, where several are connected at once. The same id can
+   * come from two, so a pick names both. Absent from a server that connects one provider.
+   */
+  connection?: string;
 };
 
 /**
@@ -58,6 +63,15 @@ export type ModelCatalogue = {
   models: ModelOption[];
   /** Whether there is anything to pick. False hides the picker. */
   choosable: boolean;
+  /** The connection `default` comes from, where several are connected. */
+  defaultConnection?: string;
+  /** Every connected provider whose models are listed, the default first. */
+  connections?: {
+    provider: string;
+    source: string;
+    listed: boolean;
+    default: string;
+  }[];
 };
 
 /**

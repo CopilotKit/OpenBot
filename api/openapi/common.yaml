@@ -27,10 +27,13 @@ info:
 
 
     An OpenBot install holds one or more organizations, and a person may be a
-    member of several. Where an install allows more than one, everybody has
-    an organization of their own, made for them when they first sign in, and
-    joins others by invitation. Otherwise, and on an install for one person
-    with no sign-in, everybody works in the organization `default`.
+    member of several. Where an install allows more than one, people create
+    others and join them by invitation. On a self-hosted install everybody
+    who signs in is a member of `default`, the one organization they share,
+    unless the install gives everybody an organization of their own as they
+    first sign in, as OpenBot Cloud does. Otherwise, and on an install for
+    one person with no sign-in, everybody works in the organization
+    `default`.
     organizationId is an organization's id or its slug, and the caller must
     be a member of it: an organization the caller is not in answers exactly
     as one that does not exist, `default` included.
@@ -138,6 +141,7 @@ tags:
   - { name: Memory, description: "The facts a person's Bots remember about them, and the app actions those facts are read in from. Each person's are theirs alone: an administrator can't read them either." }
   - { name: Agents, description: "The agents an organization's Bots hand work to: OpenBot's own, a framework OpenBot runs, or an agent somebody runs at its own address. An administrator adds the organization's, and anybody may add a private one for their own Bots. A Bot's delegation says whether it works on one agent or hands work to several, and which." }
   - { name: CopilotKit management, description: "Connecting a self-hosted OpenBot to CopilotKit's management service, which keeps it up to date in the company's own cluster through an agent installed there. Only the administrators of the organization `default` manage it, and only on the team edition a company runs itself." }
+  - { name: Moving to OpenBot Cloud, description: "Moving what a person has in an OpenBot on their own computer to an organization on OpenBot Cloud: exporting it there as a bundle, importing the bundle on Cloud, and checking that everything arrived before anything is removed. Connections to apps never carry their sign-in, and a model key moves only when the person chooses, sealed to the import." }
 paths:
   /api/v2/organizations/{organizationId}/reactions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1reactions' }
   /api/v2/organizations/{organizationId}/bots: { $ref: './bots.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots' }
@@ -153,6 +157,8 @@ paths:
   /api/v2/organizations/{organizationId}/people/{personId}/restore-access: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1restore-access' }
   /api/v2/organizations/{organizationId}/people/{personId}/onboarding/advance: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1onboarding~1advance' }
   /api/v2/organizations/{organizationId}/people/{personId}/onboarding/complete: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1onboarding~1complete' }
+  /api/v2/organizations/{organizationId}/people/{personId}/terms: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1terms' }
+  /api/v2/organizations/{organizationId}/people/{personId}/terms/accept: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1terms~1accept' }
   /api/v2/organizations/{organizationId}/people/{personId}/instructions: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1instructions' }
   /api/v2/organizations/{organizationId}/people/{personId}/preferences: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1preferences' }
   /api/v2/organizations/{organizationId}/people/{personId}/api-keys: { $ref: './accounts.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1api-keys' }
@@ -216,6 +222,16 @@ paths:
   /api/v2/organizations/{organizationId}/model-catalogue: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-catalogue' }
   /api/v2/organizations/{organizationId}/people/{personId}/model-choices/{conversationId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1model-choices~1{conversationId}' }
   /api/v2/organizations/{organizationId}/ai-connection: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connection' }
+  /api/v2/organizations/{organizationId}/ai-connections: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connections' }
+  /api/v2/organizations/{organizationId}/ai-connections/{aiProvider}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connections~1{aiProvider}' }
+  /api/v2/organizations/{organizationId}/ai-connection-default: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connection-default' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connection: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connections: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connections' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connections/{aiProvider}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connections~1{aiProvider}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connection-default: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection-default' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection~1sign-ins' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins/{signInId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection~1sign-ins~1{signInId}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins/{signInId}/code: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection~1sign-ins~1{signInId}~1code' }
   /api/v2/organizations/{organizationId}/apps: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps' }
   /api/v2/organizations/{organizationId}/apps/{appId}: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}' }
   /api/v2/organizations/{organizationId}/apps/{appId}/refresh: { $ref: './apps.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1apps~1{appId}~1refresh' }
@@ -394,6 +410,8 @@ paths:
   /api/v2/organizations/{organizationId}/computers/update: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1update' }
   /api/v2/organizations/{organizationId}/computers/{botId}: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}' }
   /api/v2/organizations/{organizationId}/computers/{botId}/wake: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1wake' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/workspace-snapshots: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1workspace-snapshots' }
+  /api/v2/organizations/{organizationId}/computers/{botId}/restore: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1restore' }
   /api/v2/organizations/{organizationId}/computers/{botId}/screenshot: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1screenshot' }
   /api/v2/organizations/{organizationId}/computers/{botId}/page-frames/{toolCallId}: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1page-frames~1{toolCallId}' }
   /api/v2/organizations/{organizationId}/computers/{botId}/page: { $ref: './computers.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1computers~1{botId}~1page' }
@@ -490,6 +508,15 @@ paths:
   /api/v2/organizations/{organizationId}/bots/{botId}/delegation: { $ref: './agents.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1bots~1{botId}~1delegation' }
   /api/v2/organizations/{organizationId}/management: { $ref: './management.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1management' }
   /api/v2/organizations/{organizationId}/management/enrollment: { $ref: './management.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1management~1enrollment' }
+  /api/v2/organizations/{organizationId}/export-estimate: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1export-estimate' }
+  /api/v2/organizations/{organizationId}/exports: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1exports' }
+  /api/v2/organizations/{organizationId}/exports/{exportId}: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1exports~1{exportId}' }
+  /api/v2/organizations/{organizationId}/exports/{exportId}/parts/{partNumber}: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1exports~1{exportId}~1parts~1{partNumber}' }
+  /api/v2/organizations/{organizationId}/imports: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports' }
+  /api/v2/organizations/{organizationId}/imports/{importId}: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}' }
+  /api/v2/organizations/{organizationId}/imports/{importId}/parts/{partNumber}: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}~1parts~1{partNumber}' }
+  /api/v2/organizations/{organizationId}/imports/{importId}/apply: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}~1apply' }
+  /api/v2/organizations/{organizationId}/imports/{importId}/verification: { $ref: './moves.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1imports~1{importId}~1verification' }
 components:
   securitySchemes:
     webSession:
@@ -583,8 +610,8 @@ components:
             computers:write: Use the mouse and keyboard on the signed-in person's Bots' computers and browsers, act on them as a Bot, and for an administrator stop, reset and update the organization's computers.
             reactions:read: Read the reactions Bots left on the signed-in person's messages.
             audit-events:read: Read the organization's audit trail, when the signed-in person is an administrator.
-            people:read: Read the signed-in person, their standing instructions and preferences, and for an administrator everybody in the organization.
-            people:write: Change the signed-in person's name, onboarding, standing instructions and preferences, and for an administrator anybody's role and access.
+            people:read: Read the signed-in person, their standing instructions and preferences, the terms they agreed to, and for an administrator everybody in the organization.
+            people:write: Change the signed-in person's name, onboarding, standing instructions and preferences, agree to the terms for them, and for an administrator anybody's role and access.
             linked-accounts:read: Read the signed-in person's linked accounts, and which services can be linked.
             linked-accounts:write: Link and unlink the signed-in person's accounts at other services.
             identity-providers:read: Read the organization's identity providers, when the signed-in person is an administrator.
@@ -605,6 +632,8 @@ components:
             model-choices:write: Choose the model the signed-in person's conversations answer on.
             ai-connection:read: Read how OpenBot reaches its AI provider, never a key, when the signed-in person is an administrator.
             ai-connection:write: Change how OpenBot reaches its AI provider, when the signed-in person is an administrator.
+            personal-ai-connection:read: Read the signed-in person's own AI connection and which AI their runs use, never a key.
+            personal-ai-connection:write: Set, sign in to or remove the signed-in person's own AI connection.
             apps:read: Read the apps the organization has added, the directory of apps it can add, and how apps are set up here.
             apps:write: Add, change, refresh and remove apps, when the signed-in person may.
             connections:read: Read the signed-in person's connections to apps, and each app's shared account.
@@ -654,6 +683,10 @@ components:
             memories:write: Write, change and forget the signed-in person's memories, and add, change, sync and remove their memory sources.
             bot-agents:read: Read the agents the signed-in person's Bots may hand work to, and for an administrator every agent in the organization.
             bot-agents:write: Add, change and delete the signed-in person's own agents and their callback tokens, and for an administrator the organization's.
+            exports:read: Read and download the signed-in person's exports for moving to OpenBot Cloud, and what one would hold.
+            exports:write: Start and remove the signed-in person's exports for moving to OpenBot Cloud.
+            imports:read: Read the signed-in person's imports into OpenBot Cloud and check what arrived.
+            imports:write: Start an import into OpenBot Cloud as the signed-in person, upload its bundle and import it.
     apiKey:
       type: http
       scheme: bearer

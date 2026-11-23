@@ -24,6 +24,7 @@ import { ConnectionBanner } from "@/components/layout/connection-banner";
 import { OpenBotVersion } from "@/components/layout/openbot-version";
 import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { UpdateBanner } from "@/components/layout/update-banner";
+import { MovedAppsBanner } from "@/components/moves/moved-apps-notice";
 import {
   COMMAND_MENU_KEYS,
   openCommandMenu,
@@ -123,8 +124,8 @@ function RailUserMenu() {
               className="gap-2 px-2 py-1.5"
               disabled={signOut.isPending}
               onClick={async () => {
-                await signOut.mutateAsync();
-                await navigate({ to: "/sign" });
+                const { leaving } = await signOut.mutateAsync();
+                if (!leaving) await navigate({ to: "/sign" });
               }}
               variant="destructive"
             >
@@ -517,6 +518,7 @@ export function OpenDotsFrame({ children }: { children: ReactNode }) {
           place={place}
         />
         <ConnectionBanner />
+        <MovedAppsBanner />
         <UpdateBanner />
         <SelfHostBanner />
         <div className="relative flex min-h-0 flex-1">

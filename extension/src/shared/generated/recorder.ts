@@ -262,6 +262,21 @@ export const CapabilityId = {
   proactive: "proactive",
 } as const;
 
+/**
+ * The AI provider OpenBot's Bots run on. openai: OpenAI. anthropic: Anthropic. google: Google Gemini. xai: xAI. unbiased: Unbiased AI. openai-compatible: any server that speaks OpenAI's API, at an address given.
+ */
+export type AiConnectionProvider =
+  (typeof AiConnectionProvider)[keyof typeof AiConnectionProvider];
+
+export const AiConnectionProvider = {
+  openai: "openai",
+  anthropic: "anthropic",
+  google: "google",
+  xai: "xai",
+  unbiased: "unbiased",
+  "openai-compatible": "openai-compatible",
+} as const;
+
 export type ProblemCategory =
   (typeof ProblemCategory)[keyof typeof ProblemCategory];
 

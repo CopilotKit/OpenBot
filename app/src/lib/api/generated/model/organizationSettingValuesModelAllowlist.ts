@@ -7,7 +7,7 @@ export type OrganizationSettingValuesModelAllowlist = {
   /** Whether the list limits anything. Off, every model is allowed. */
   enabled: boolean;
   /**
-   * The models Bots may run on, as provider/model.
+   * The models Bots may run on, as provider/model, where provider is the connection that serves the model (openai, anthropic, google, xai, unbiased or openai-compatible). An entry written before several providers could be connected names openai or anthropic for whichever connection was in use, and is read that way.
    * @maxItems 500
    */
   models: AllowlistEntry[];

@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .adapter import OpenBotClaudeAgentAdapter
+from .replay import finish_regardless
 from .run_model_proxy import PROXY_PATH, forward
 from run_model_key import RunModelKey  # On the path run_model_proxy puts shared/ on.
 
@@ -92,5 +93,6 @@ class CancelModelRun(BaseModel):
 
 @app.post("/model/cancel")
 async def cancel_model_run(request: CancelModelRun):
-    await model_adapter.interrupt(request.threadId)
+    # Finished even if the caller stops waiting: the plan model gives up on this request after 5s.
+    await finish_regardless(model_adapter.interrupt(request.threadId))
     return {"ok": True}

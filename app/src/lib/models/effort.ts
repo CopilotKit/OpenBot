@@ -13,7 +13,36 @@ import type {
  * only where the person chose one. What is saved is the same pick with each default written as
  * null (`requestFor`), so a default follows the model and the provider rather than being pinned.
  */
-export type ModelPick = { model: string; effort: string | null };
+export type ModelPick = {
+  model: string;
+  effort: string | null;
+  /**
+   * The connected provider the model runs on, where several are connected. Absent: the default
+   * connection.
+   */
+  connection?: string;
+};
+
+/** The provider a model comes from: its own, else the catalogue's default connection. */
+export function connectionOf(
+  catalogue: ModelCatalogue | undefined,
+  model: ModelOption | undefined,
+): string | undefined {
+  return model?.connection ?? catalogue?.defaultConnection;
+}
+
+/** Whether a model is the one a pick names: the same id, on the same provider. */
+export function isPicked(
+  catalogue: ModelCatalogue | undefined,
+  model: ModelOption,
+  id: string | null | undefined,
+  connection: string | null | undefined,
+): boolean {
+  return (
+    model.id === id &&
+    (!connection || connectionOf(catalogue, model) === connection)
+  );
+}
 
 const EFFORT_LABELS: Record<string, string> = {
   none: "None",
@@ -63,14 +92,28 @@ export function switchModel(pick: ModelPick, next: ModelOption): ModelPick {
   return {
     model: next.id,
     effort: accepts(next, pick.effort) ? pick.effort : null,
+    ...(next.connection ? { connection: next.connection } : {}),
   };
 }
 
 function optionFor(
   catalogue: ModelCatalogue | undefined,
   id: string | null | undefined,
+  connection?: string | null,
 ): ModelOption | undefined {
-  return id ? catalogue?.models.find((model) => model.id === id) : undefined;
+  if (!id) return undefined;
+  const models = catalogue?.models ?? [];
+  // The default connection's own when none is named: a pick made before several were connected.
+  return (
+    models.find((model) =>
+      isPicked(
+        catalogue,
+        model,
+        id,
+        connection ?? catalogue?.defaultConnection,
+      ),
+    ) ?? (connection ? undefined : models.find((model) => model.id === id))
+  );
 }
 
 export function offeredBotDefault(
@@ -107,11 +150,16 @@ export function shownPick(
   )
     return botDefault;
   const option =
-    optionFor(catalogue, saved?.model) ??
+    optionFor(catalogue, saved?.model, saved?.connection) ??
     optionFor(catalogue, catalogue.default);
   const model = option?.id ?? catalogue.default;
   const effort = saved?.effort ?? null;
-  return { model, effort: accepts(option, effort) ? effort : null };
+  const connection = option?.connection;
+  return {
+    model,
+    effort: accepts(option, effort) ? effort : null,
+    ...(connection ? { connection } : {}),
+  };
 }
 
 /**
@@ -123,11 +171,22 @@ export function requestFor(
   catalogue: ModelCatalogue | undefined,
   botDefault?: ModelPick,
 ): ConversationModelInput {
-  const option = optionFor(catalogue, pick.model);
+  const option = optionFor(catalogue, pick.model, pick.connection);
   const effort =
     accepts(option, pick.effort) && pick.effort !== option?.defaultEffort
       ? pick.effort
       : null;
+  /*
+   * A model of a provider other than the default is named outright, with its provider: the
+   * default model and effort are the default connection's, never another's.
+   */
+  const connection = connectionOf(catalogue, option);
+  if (connection && connection !== catalogue?.defaultConnection)
+    return {
+      model: pick.model,
+      effort,
+      connection: connection as ConversationModelInput["connection"],
+    };
   if (botDefault) {
     const inheritedEffort = shownEffort(option, botDefault.effort);
     if (

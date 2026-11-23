@@ -279,6 +279,40 @@ test("a refused change comes back as a refusal the Bot can explain", async () =>
   });
 });
 
+/*
+ * A step on a computer that is still starting is asked again until it has started, as a direct call
+ * is (`callComputer`), so the Bot gets what the step did. A cold computer answered the step "still
+ * starting" after the server's wait, and the Bot was told to try again: the step's card read
+ * "Computer starting" where the command and its output should have been.
+ */
+test("a step on a computer still starting is asked again, and the Bot gets what it did", async () => {
+  const asked: string[] = [];
+  const result = await clickAgainstGate(async () => {
+    asked.push("step");
+    return asked.length === 1
+      ? Response.json({
+          outcome: "done",
+          result: {
+            ok: false,
+            starting: true,
+            notPerformed: true,
+            reason:
+              "The computer is still starting. This call was not performed. Try it again in a moment.",
+          },
+        })
+      : Response.json({
+          outcome: "done",
+          result: { ok: true, clicked: "e7" },
+        });
+  });
+  expect(asked).toEqual(["step", "step"]);
+  expect(result).toEqual({
+    ok: true,
+    clicked: "e7",
+    finishedAt: expect.any(String),
+  });
+});
+
 test("a gate that cannot be reached, or answers with no result, is still a result", async () => {
   expect(
     await clickAgainstGate(async () => {

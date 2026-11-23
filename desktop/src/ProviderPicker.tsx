@@ -116,6 +116,18 @@ const oauthExplanation: Record<string, string> = {
     "Sign in or create an Unbiased AI account in your browser and approve the code shown here. OpenBot receives an API key for Pareto and keeps it on this computer.",
 };
 
+/** Stop a plan's sign-in still waiting for the browser: Claude's, or ChatGPT's. */
+function cancelPlanSignIn(provider: string) {
+  const claude = provider === "anthropic";
+  invoke(claude ? "cancel_claude_sign_in" : "cancel_chatgpt_sign_in").catch(
+    () => {
+      console.error(
+        `OpenBot could not stop the ${claude ? "Claude" : "ChatGPT"} sign-in.`,
+      );
+    },
+  );
+}
+
 function endpointIdentity(baseUrl: string | undefined): string {
   if (!baseUrl) return "";
   try {
@@ -242,13 +254,11 @@ export function ProviderPicker({
   /*
    * The sign-in, mid-flight.
    *
-   * `url` present means the browser has been sent somewhere and a code is expected back. Kept here
-   * rather than in the Rust side's head because the screen has to show the link: an open that
-   * silently did nothing leaves somebody staring at a code box with no idea where the code comes
-   * from.
+   * `url` present means the browser has been sent somewhere and the sign-in waits for it to come
+   * back. Kept here rather than in the Rust side's head because the screen has to show the link: an
+   * open that silently did nothing leaves somebody waiting with no idea where to approve.
    */
   const [signInUrl, setSignInUrl] = useState<string | null>(null);
-  const [code, setCode] = useState("");
   const [tokens, setTokens] = useState<Record<string, string>>(
     initialChoice?.provider && initialChoice.token
       ? { [initialChoice.provider]: initialChoice.token }
@@ -276,12 +286,12 @@ export function ProviderPicker({
   const continueAfterSignIn = useRef(false);
   const oauthAttempt = useRef<string | null>(null);
   /*
-   * The run of a ChatGPT sign-in still waiting for the browser, if any.
+   * The plan sign-in still waiting for the browser, if any: its run and which plan.
    *
    * Leaving it stops it. Left running, its tab could still finish: the browser said "You're signed
    * in" while this screen had moved on and dropped the result.
    */
-  const chatGptRun = useRef<number | null>(null);
+  const planRun = useRef<{ run: number; provider: string } | null>(null);
   const [oauthCode, setOauthCode] = useState<string | null>(null);
   const [oauthSignedIn, setOauthSignedIn] = useState<string | null>(
     initialChoice?.login === "oauth" && initialChoice.saved
@@ -289,12 +299,11 @@ export function ProviderPicker({
       : null,
   );
 
-  function stopChatGptSignIn() {
-    if (chatGptRun.current === null) return;
-    chatGptRun.current = null;
-    invoke("cancel_chatgpt_sign_in").catch(() => {
-      console.error("OpenBot could not stop the ChatGPT sign-in.");
-    });
+  function stopPlanSignIn() {
+    const waiting = planRun.current;
+    if (waiting === null) return;
+    planRun.current = null;
+    cancelPlanSignIn(waiting.provider);
   }
 
   async function cancelOAuth() {
@@ -373,11 +382,10 @@ export function ProviderPicker({
   useEffect(
     () => () => {
       signInRunRef.current += 1;
-      if (chatGptRun.current !== null) {
-        chatGptRun.current = null;
-        invoke("cancel_chatgpt_sign_in").catch(() => {
-          console.error("OpenBot could not stop the ChatGPT sign-in.");
-        });
+      const waiting = planRun.current;
+      if (waiting !== null) {
+        planRun.current = null;
+        cancelPlanSignIn(waiting.provider);
       }
       const attemptId = oauthAttempt.current;
       if (attemptId) {
@@ -396,11 +404,9 @@ export function ProviderPicker({
   }, [open]);
 
   /*
-   * The two plans sign in differently, and the screen has to know which.
-   *
-   * Anthropic's CLI wants a code typed back, so that half shows a field. ChatGPT's login finishes
-   * itself when the browser redirect reaches its callback, so that half shows only a wait. Offering
-   * a code box for a flow that never produces one is how a person concludes it is broken.
+   * Both plans finish on their own: the browser comes back to this computer once the person
+   * approves, Claude's to Desktop's own listener and ChatGPT's to its login's. So the screen shows
+   * only a wait, with the link in case the browser didn't open. Nothing is typed here.
    */
   async function beginSignIn() {
     if (!row) return;
@@ -415,22 +421,22 @@ export function ProviderPicker({
     setProgress(null);
     setDownload(null);
     try {
-      const start =
-        providerId === "anthropic"
-          ? "begin_claude_sign_in"
-          : "begin_chatgpt_sign_in";
-      if (providerId !== "anthropic") chatGptRun.current = run;
-      const nextSignInUrl = await invoke<string>(start, { root: root.trim() });
+      const claude = providerId === "anthropic";
+      planRun.current = { run, provider: providerId };
+      const nextSignInUrl = await invoke<string>(
+        claude ? "begin_claude_sign_in" : "begin_chatgpt_sign_in",
+        { root: root.trim() },
+      );
       if (!stillCurrent()) return;
       setSignInUrl(nextSignInUrl);
-      // ChatGPT needs no code, so the wait starts straight away.
-      if (providerId !== "anthropic") {
-        const nextToken = await invoke<string>("finish_chatgpt_sign_in");
-        if (stillCurrent()) {
-          continueAfterSignIn.current = true;
-          setTokens((previous) => ({ ...previous, [providerId]: nextToken }));
-          setSignInUrl(null);
-        }
+      // Held, not shown. It goes on to `start_stack` the same way a typed key does.
+      const nextToken = await invoke<string>(
+        claude ? "finish_claude_sign_in" : "finish_chatgpt_sign_in",
+      );
+      if (stillCurrent()) {
+        continueAfterSignIn.current = true;
+        setTokens((previous) => ({ ...previous, [providerId]: nextToken }));
+        setSignInUrl(null);
       }
     } catch (error) {
       if (stillCurrent()) {
@@ -443,41 +449,12 @@ export function ProviderPicker({
         setSignInUrl(null);
       }
     } finally {
-      if (chatGptRun.current === run) chatGptRun.current = null;
+      if (planRun.current?.run === run) planRun.current = null;
       if (stillCurrent()) {
         setBusy(false);
         setProgress(null);
         setDownload(null);
       }
-    }
-  }
-
-  async function finishSignIn() {
-    if (!row) return;
-    const providerId = row.id;
-    const run = signInRunRef.current + 1;
-    signInRunRef.current = run;
-    const stillCurrent = () =>
-      signInRunRef.current === run && openRef.current === providerId;
-    setBusy(true);
-    setFailure(null);
-    try {
-      // Held, not shown. It goes on to `start_stack` the same way a typed key does.
-      const nextToken = await invoke<string>("finish_claude_sign_in", { code });
-      if (stillCurrent()) {
-        continueAfterSignIn.current = true;
-        setTokens((previous) => ({ ...previous, [providerId]: nextToken }));
-        setSignInUrl(null);
-        setCode("");
-      }
-    } catch (error) {
-      if (stillCurrent()) {
-        setFailure(asProblem(error));
-        // The flow is single-use, so a refused code means starting again rather than retyping.
-        setSignInUrl(null);
-      }
-    } finally {
-      if (stillCurrent()) setBusy(false);
     }
   }
 
@@ -622,13 +599,12 @@ export function ProviderPicker({
   /** Back to every provider: the chosen one's sign-in, if any, stops. */
   function chooseAnother() {
     if (oauthAttempt.current) void cancelOAuth();
-    stopChatGptSignIn();
+    stopPlanSignIn();
     signInRunRef.current += 1;
     setOpen(null);
     setFailure(null);
     onProviderChange?.();
     setSignInUrl(null);
-    setCode("");
     setBusy(false);
     setProgress(null);
     setDownload(null);
@@ -675,7 +651,7 @@ export function ProviderPicker({
               checked={open === r.id}
               onChange={() => {
                 if (oauthAttempt.current) void cancelOAuth();
-                stopChatGptSignIn();
+                stopPlanSignIn();
                 signInRunRef.current += 1;
                 setOpen(r.id);
                 // A failure belongs to the row that produced it. Left in place, a refused OpenAI
@@ -685,7 +661,6 @@ export function ProviderPicker({
                 setFailure(null);
                 onProviderChange?.();
                 setSignInUrl(null);
-                setCode("");
                 setBusy(false);
                 setProgress(null);
                 setDownload(null);
@@ -862,52 +837,27 @@ export function ProviderPicker({
             ) : signInUrl ? (
               <>
                 <p className="lede">
-                  {row.id === "anthropic"
-                    ? "Approve the request in your browser, then paste the code it shows you."
-                    : `Approve the request in your browser. ${row.name} will finish this on its own.`}
+                  Approve the request in your browser. {row.name} will finish
+                  this on its own.
                 </p>
                 {/* Shown as well as opened. On a machine with no registered
-                    browser the open does nothing and says nothing, and a code
-                    box with no link is then a dead end. */}
+                    browser the open does nothing and says nothing, and a wait
+                    with no link is then a dead end. */}
                 <p className="fallback">
                   Didn't open?{" "}
                   <a href={signInUrl} target="_blank" rel="noreferrer">
                     Open the sign-in page
                   </a>
                 </p>
-                {row.id === "anthropic" ? (
-                  <>
-                    <div className="field">
-                      <label htmlFor="code">Code from your browser</label>
-                      <input
-                        id="code"
-                        value={code}
-                        onChange={(e) => setCode(e.target.value)}
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      disabled={busy || code.trim().length === 0}
-                      onClick={finishSignIn}
-                    >
-                      {busy ? "Checking…" : "Finish signing in"}
-                    </button>
-                    {busy && <StatusLine>Checking the code…</StatusLine>}
-                  </>
-                ) : (
-                  <StatusLine>Waiting for you to approve it…</StatusLine>
-                )}
+                <StatusLine>Waiting for you to approve it…</StatusLine>
               </>
             ) : (
               <>
-                {/* Says what the flow below asks for: Claude's sign-in hands back a
-                    code to paste here, ChatGPT's finishes in the browser. */}
+                {/* Says what the flow below asks for: both plans finish in the
+                    browser, with nothing typed here. */}
                 <p className="lede">
-                  {row.id === "anthropic"
-                    ? `${row.name} opens in your browser. Approve the request there, then paste the code it shows you back here. You won't need an API key.`
-                    : `${row.name} opens in your browser. You won't type anything here or need an API key.`}
+                  {row.name} opens in your browser. You won't type anything here
+                  or need an API key.
                 </p>
                 <div className="provider-sign-in-actions">
                   <button

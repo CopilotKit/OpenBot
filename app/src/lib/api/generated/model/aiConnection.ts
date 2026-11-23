@@ -4,6 +4,7 @@
 import type { AiConnectionLogin } from "./aiConnectionLogin";
 import type { AiConnectionProvider } from "./aiConnectionProvider";
 import type { AiConnectionSaved } from "./aiConnectionSaved";
+import type { AiConnectionSharedSignIn } from "./aiConnectionSharedSignIn";
 import type { AiConnectionSource } from "./aiConnectionSource";
 
 /**
@@ -39,4 +40,6 @@ export interface AiConnection {
    * @nullable
    */
   changedAt: string | null;
+  /** Whose plan or provider sign-in the organization's AI runs on, when an administrator shared their own on OpenBot Cloud. Null for a key, an address, a sign-in held on this computer, or none. A server older than this field leaves it out. */
+  sharedSignIn?: AiConnectionSharedSignIn | null;
 }

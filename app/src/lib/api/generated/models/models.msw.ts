@@ -7,9 +7,17 @@ import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 import type {
   AiConnection,
   AiConnectionInput,
+  AiConnectionSet,
+  AiProviderConnectionInput,
+  AiSignIn,
+  AiSignInCodeInput,
+  AiSignInInput,
+  AiSignInStatus,
+  DefaultAiConnectionInput,
   ModelCatalogue,
   ModelChoice,
   ModelChoiceInput,
+  PersonalAiConnection,
 } from "../model";
 
 export const getGetModelCatalogueResponseMock = (): ModelCatalogue => ({
@@ -72,6 +80,466 @@ export const getReplaceAiConnectionResponseMock = (): AiConnection => ({
   editable: true,
   saved: [{ provider: "openai", login: "api-key", endpointHost: null }],
   changedAt: "2026-11-17T09:00:00.000Z",
+});
+
+export const getDeleteAiConnectionResponseMock = (): AiConnection => ({
+  provider: null,
+  login: null,
+  model: null,
+  endpointHost: null,
+  keySet: false,
+  ready: false,
+  source: "none",
+  editable: true,
+  saved: [{ provider: "openai", login: "api-key", endpointHost: null }],
+  changedAt: "2026-11-21T09:30:00.000Z",
+});
+
+export const getGetAiConnectionsResponseMock = (): AiConnectionSet => ({
+  default: "anthropic",
+  connections: [
+    {
+      provider: "anthropic",
+      login: "plan",
+      model: null,
+      endpointHost: null,
+      keySet: false,
+      ready: true,
+      source: "stored",
+      editable: true,
+      saved: [],
+      changedAt: "2026-11-23T09:00:00.000Z",
+    },
+    {
+      provider: "openai",
+      login: "api-key",
+      model: null,
+      endpointHost: null,
+      keySet: true,
+      ready: true,
+      source: "stored",
+      editable: true,
+      saved: [],
+      changedAt: "2026-11-23T09:05:00.000Z",
+    },
+    {
+      provider: "xai",
+      login: "oauth",
+      model: "grok-4.7",
+      endpointHost: null,
+      keySet: false,
+      ready: true,
+      source: "stored",
+      editable: true,
+      saved: [],
+      changedAt: "2026-11-23T09:10:00.000Z",
+    },
+  ],
+  editable: true,
+  saved: [],
+});
+
+export const getReplaceAiProviderConnectionResponseMock =
+  (): AiConnectionSet => ({
+    default: "anthropic",
+    connections: [
+      {
+        provider: "anthropic",
+        login: "plan",
+        model: null,
+        endpointHost: null,
+        keySet: false,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:00:00.000Z",
+      },
+      {
+        provider: "openai",
+        login: "api-key",
+        model: null,
+        endpointHost: null,
+        keySet: true,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:05:00.000Z",
+      },
+      {
+        provider: "xai",
+        login: "oauth",
+        model: "grok-4.7",
+        endpointHost: null,
+        keySet: false,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:10:00.000Z",
+      },
+    ],
+    editable: true,
+    saved: [],
+  });
+
+export const getDeleteAiProviderConnectionResponseMock =
+  (): AiConnectionSet => ({
+    default: "anthropic",
+    connections: [
+      {
+        provider: "anthropic",
+        login: "plan",
+        model: null,
+        endpointHost: null,
+        keySet: false,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:00:00.000Z",
+      },
+      {
+        provider: "openai",
+        login: "api-key",
+        model: null,
+        endpointHost: null,
+        keySet: true,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:05:00.000Z",
+      },
+      {
+        provider: "xai",
+        login: "oauth",
+        model: "grok-4.7",
+        endpointHost: null,
+        keySet: false,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:10:00.000Z",
+      },
+    ],
+    editable: true,
+    saved: [],
+  });
+
+export const getReplaceDefaultAiConnectionResponseMock =
+  (): AiConnectionSet => ({
+    default: "anthropic",
+    connections: [
+      {
+        provider: "anthropic",
+        login: "plan",
+        model: null,
+        endpointHost: null,
+        keySet: false,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:00:00.000Z",
+      },
+      {
+        provider: "openai",
+        login: "api-key",
+        model: null,
+        endpointHost: null,
+        keySet: true,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:05:00.000Z",
+      },
+      {
+        provider: "xai",
+        login: "oauth",
+        model: "grok-4.7",
+        endpointHost: null,
+        keySet: false,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:10:00.000Z",
+      },
+    ],
+    editable: true,
+    saved: [],
+  });
+
+export const getGetPersonalAiConnectionResponseMock =
+  (): PersonalAiConnection => ({
+    connection: {
+      provider: "anthropic",
+      login: "api-key",
+      model: null,
+      endpointHost: null,
+      keySet: true,
+      ready: true,
+      source: "stored",
+      editable: true,
+      saved: [],
+      changedAt: "2026-11-21T09:00:00.000Z",
+    },
+    organization: { ready: true, provider: "openai" },
+    uses: "personal",
+    required: true,
+    available: true,
+    signIns: ["openai", "anthropic", "xai", "unbiased"],
+  });
+
+export const getReplacePersonalAiConnectionResponseMock =
+  (): PersonalAiConnection => ({
+    connection: {
+      provider: "anthropic",
+      login: "api-key",
+      model: null,
+      endpointHost: null,
+      keySet: true,
+      ready: true,
+      source: "stored",
+      editable: true,
+      saved: [],
+      changedAt: "2026-11-21T09:00:00.000Z",
+    },
+    organization: { ready: true, provider: "openai" },
+    uses: "personal",
+    required: true,
+    available: true,
+    signIns: ["openai", "anthropic", "xai", "unbiased"],
+  });
+
+export const getDeletePersonalAiConnectionResponseMock =
+  (): PersonalAiConnection => ({
+    connection: {
+      provider: null,
+      login: null,
+      model: null,
+      endpointHost: null,
+      keySet: false,
+      ready: false,
+      source: "none",
+      editable: true,
+      saved: [],
+      changedAt: null,
+    },
+    organization: { ready: true, provider: "openai" },
+    uses: "organization",
+    required: true,
+    available: true,
+    signIns: ["openai", "anthropic", "xai", "unbiased"],
+  });
+
+export const getGetPersonalAiConnectionsResponseMock = (): AiConnectionSet => ({
+  default: "anthropic",
+  connections: [
+    {
+      provider: "anthropic",
+      login: "plan",
+      model: null,
+      endpointHost: null,
+      keySet: false,
+      ready: true,
+      source: "stored",
+      editable: true,
+      saved: [],
+      changedAt: "2026-11-23T09:00:00.000Z",
+    },
+    {
+      provider: "openai",
+      login: "api-key",
+      model: null,
+      endpointHost: null,
+      keySet: true,
+      ready: true,
+      source: "stored",
+      editable: true,
+      saved: [],
+      changedAt: "2026-11-23T09:05:00.000Z",
+    },
+    {
+      provider: "xai",
+      login: "oauth",
+      model: "grok-4.7",
+      endpointHost: null,
+      keySet: false,
+      ready: true,
+      source: "stored",
+      editable: true,
+      saved: [],
+      changedAt: "2026-11-23T09:10:00.000Z",
+    },
+  ],
+  editable: true,
+  saved: [],
+});
+
+export const getReplacePersonalAiProviderConnectionResponseMock =
+  (): AiConnectionSet => ({
+    default: "anthropic",
+    connections: [
+      {
+        provider: "anthropic",
+        login: "plan",
+        model: null,
+        endpointHost: null,
+        keySet: false,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:00:00.000Z",
+      },
+      {
+        provider: "openai",
+        login: "api-key",
+        model: null,
+        endpointHost: null,
+        keySet: true,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:05:00.000Z",
+      },
+      {
+        provider: "xai",
+        login: "oauth",
+        model: "grok-4.7",
+        endpointHost: null,
+        keySet: false,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:10:00.000Z",
+      },
+    ],
+    editable: true,
+    saved: [],
+  });
+
+export const getDeletePersonalAiProviderConnectionResponseMock =
+  (): AiConnectionSet => ({
+    default: "anthropic",
+    connections: [
+      {
+        provider: "anthropic",
+        login: "plan",
+        model: null,
+        endpointHost: null,
+        keySet: false,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:00:00.000Z",
+      },
+      {
+        provider: "openai",
+        login: "api-key",
+        model: null,
+        endpointHost: null,
+        keySet: true,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:05:00.000Z",
+      },
+      {
+        provider: "xai",
+        login: "oauth",
+        model: "grok-4.7",
+        endpointHost: null,
+        keySet: false,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:10:00.000Z",
+      },
+    ],
+    editable: true,
+    saved: [],
+  });
+
+export const getReplacePersonalDefaultAiConnectionResponseMock =
+  (): AiConnectionSet => ({
+    default: "anthropic",
+    connections: [
+      {
+        provider: "anthropic",
+        login: "plan",
+        model: null,
+        endpointHost: null,
+        keySet: false,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:00:00.000Z",
+      },
+      {
+        provider: "openai",
+        login: "api-key",
+        model: null,
+        endpointHost: null,
+        keySet: true,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:05:00.000Z",
+      },
+      {
+        provider: "xai",
+        login: "oauth",
+        model: "grok-4.7",
+        endpointHost: null,
+        keySet: false,
+        ready: true,
+        source: "stored",
+        editable: true,
+        saved: [],
+        changedAt: "2026-11-23T09:10:00.000Z",
+      },
+    ],
+    editable: true,
+    saved: [],
+  });
+
+export const getStartPersonalAiSignInResponseMock = (): AiSignIn => ({
+  id: "c2lnbi1pbi1leGFtcGxl",
+  provider: "unbiased",
+  url: "https://platform.unbiased.ai/activate?user_code=BCDF-GHJK",
+  userCode: "BCDF-GHJK",
+  expiresAt: "2026-11-21T09:10:00.000Z",
+  interval: 5,
+  finish: "poll",
+});
+
+export const getGetPersonalAiSignInResponseMock = (): AiSignInStatus => ({
+  id: "c2lnbi1pbi1leGFtcGxl",
+  provider: "unbiased",
+  status: "pending",
+  detail: null,
+  interval: 5,
+});
+
+export const getFinishPersonalAiSignInResponseMock = (): AiSignInStatus => ({
+  id: "Y2xhdWRlLXNpZ24taW4",
+  provider: "anthropic",
+  status: "approved",
+  detail: null,
+  interval: 5,
 });
 
 export const getGetModelCatalogueMockHandler = (
@@ -240,10 +708,548 @@ export const getReplaceAiConnectionMockHandler = (
     options,
   );
 };
+
+export const getDeleteAiConnectionMockHandler = (
+  overrideResponse?:
+    | AiConnection
+    | ((
+        info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+      ) => Promise<AiConnection> | AiConnection),
+  options?: RequestHandlerOptions,
+) => {
+  return http.delete<{ organizationId: string }>(
+    "*/api/v2/organizations/:organizationId/ai-connection",
+    async (
+      info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getDeleteAiConnectionResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getGetAiConnectionsMockHandler = (
+  overrideResponse?:
+    | AiConnectionSet
+    | ((
+        info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+      ) => Promise<AiConnectionSet> | AiConnectionSet),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string }>(
+    "*/api/v2/organizations/:organizationId/ai-connections",
+    async (
+      info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetAiConnectionsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getReplaceAiProviderConnectionMockHandler = (
+  overrideResponse?:
+    | AiConnectionSet
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; aiProvider: string },
+            AiProviderConnectionInput
+          >
+        >[0],
+      ) => Promise<AiConnectionSet> | AiConnectionSet),
+  options?: RequestHandlerOptions,
+) => {
+  return http.put<
+    { organizationId: string; aiProvider: string },
+    AiProviderConnectionInput
+  >(
+    "*/api/v2/organizations/:organizationId/ai-connections/:aiProvider",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; aiProvider: string },
+          AiProviderConnectionInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getReplaceAiProviderConnectionResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getDeleteAiProviderConnectionMockHandler = (
+  overrideResponse?:
+    | AiConnectionSet
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; aiProvider: string }>
+        >[0],
+      ) => Promise<AiConnectionSet> | AiConnectionSet),
+  options?: RequestHandlerOptions,
+) => {
+  return http.delete<{ organizationId: string; aiProvider: string }>(
+    "*/api/v2/organizations/:organizationId/ai-connections/:aiProvider",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; aiProvider: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getDeleteAiProviderConnectionResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getReplaceDefaultAiConnectionMockHandler = (
+  overrideResponse?:
+    | AiConnectionSet
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string },
+            DefaultAiConnectionInput
+          >
+        >[0],
+      ) => Promise<AiConnectionSet> | AiConnectionSet),
+  options?: RequestHandlerOptions,
+) => {
+  return http.put<{ organizationId: string }, DefaultAiConnectionInput>(
+    "*/api/v2/organizations/:organizationId/ai-connection-default",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string },
+          DefaultAiConnectionInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getReplaceDefaultAiConnectionResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getGetPersonalAiConnectionMockHandler = (
+  overrideResponse?:
+    | PersonalAiConnection
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; personId: string }>
+        >[0],
+      ) => Promise<PersonalAiConnection> | PersonalAiConnection),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string; personId: string }>(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connection",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; personId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetPersonalAiConnectionResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getReplacePersonalAiConnectionMockHandler = (
+  overrideResponse?:
+    | PersonalAiConnection
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; personId: string },
+            AiConnectionInput
+          >
+        >[0],
+      ) => Promise<PersonalAiConnection> | PersonalAiConnection),
+  options?: RequestHandlerOptions,
+) => {
+  return http.put<
+    { organizationId: string; personId: string },
+    AiConnectionInput
+  >(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connection",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; personId: string },
+          AiConnectionInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getReplacePersonalAiConnectionResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getDeletePersonalAiConnectionMockHandler = (
+  overrideResponse?:
+    | PersonalAiConnection
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; personId: string }>
+        >[0],
+      ) => Promise<PersonalAiConnection> | PersonalAiConnection),
+  options?: RequestHandlerOptions,
+) => {
+  return http.delete<{ organizationId: string; personId: string }>(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connection",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; personId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getDeletePersonalAiConnectionResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getGetPersonalAiConnectionsMockHandler = (
+  overrideResponse?:
+    | AiConnectionSet
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{ organizationId: string; personId: string }>
+        >[0],
+      ) => Promise<AiConnectionSet> | AiConnectionSet),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string; personId: string }>(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connections",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; personId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetPersonalAiConnectionsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getReplacePersonalAiProviderConnectionMockHandler = (
+  overrideResponse?:
+    | AiConnectionSet
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; personId: string; aiProvider: string },
+            AiProviderConnectionInput
+          >
+        >[0],
+      ) => Promise<AiConnectionSet> | AiConnectionSet),
+  options?: RequestHandlerOptions,
+) => {
+  return http.put<
+    { organizationId: string; personId: string; aiProvider: string },
+    AiProviderConnectionInput
+  >(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connections/:aiProvider",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; personId: string; aiProvider: string },
+          AiProviderConnectionInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getReplacePersonalAiProviderConnectionResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getDeletePersonalAiProviderConnectionMockHandler = (
+  overrideResponse?:
+    | AiConnectionSet
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{
+            organizationId: string;
+            personId: string;
+            aiProvider: string;
+          }>
+        >[0],
+      ) => Promise<AiConnectionSet> | AiConnectionSet),
+  options?: RequestHandlerOptions,
+) => {
+  return http.delete<{
+    organizationId: string;
+    personId: string;
+    aiProvider: string;
+  }>(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connections/:aiProvider",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{
+          organizationId: string;
+          personId: string;
+          aiProvider: string;
+        }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getDeletePersonalAiProviderConnectionResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getReplacePersonalDefaultAiConnectionMockHandler = (
+  overrideResponse?:
+    | AiConnectionSet
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; personId: string },
+            DefaultAiConnectionInput
+          >
+        >[0],
+      ) => Promise<AiConnectionSet> | AiConnectionSet),
+  options?: RequestHandlerOptions,
+) => {
+  return http.put<
+    { organizationId: string; personId: string },
+    DefaultAiConnectionInput
+  >(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connection-default",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; personId: string },
+          DefaultAiConnectionInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getReplacePersonalDefaultAiConnectionResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getStartPersonalAiSignInMockHandler = (
+  overrideResponse?:
+    | AiSignIn
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; personId: string },
+            AiSignInInput
+          >
+        >[0],
+      ) => Promise<AiSignIn> | AiSignIn),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{ organizationId: string; personId: string }, AiSignInInput>(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connection/sign-ins",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; personId: string },
+          AiSignInInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getStartPersonalAiSignInResponseMock(),
+        { status: 201 },
+      );
+    },
+    options,
+  );
+};
+
+export const getGetPersonalAiSignInMockHandler = (
+  overrideResponse?:
+    | AiSignInStatus
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{
+            organizationId: string;
+            personId: string;
+            signInId: string;
+          }>
+        >[0],
+      ) => Promise<AiSignInStatus> | AiSignInStatus),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{
+    organizationId: string;
+    personId: string;
+    signInId: string;
+  }>(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connection/sign-ins/:signInId",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{
+          organizationId: string;
+          personId: string;
+          signInId: string;
+        }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getGetPersonalAiSignInResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
+export const getFinishPersonalAiSignInMockHandler = (
+  overrideResponse?:
+    | AiSignInStatus
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string; personId: string; signInId: string },
+            AiSignInCodeInput
+          >
+        >[0],
+      ) => Promise<AiSignInStatus> | AiSignInStatus),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<
+    { organizationId: string; personId: string; signInId: string },
+    AiSignInCodeInput
+  >(
+    "*/api/v2/organizations/:organizationId/people/:personId/ai-connection/sign-ins/:signInId/code",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string; personId: string; signInId: string },
+          AiSignInCodeInput
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getFinishPersonalAiSignInResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
 export const getModelsMock = () => [
   getGetModelCatalogueMockHandler(),
   getGetModelChoiceMockHandler(),
   getReplaceModelChoiceMockHandler(),
   getGetAiConnectionMockHandler(),
   getReplaceAiConnectionMockHandler(),
+  getDeleteAiConnectionMockHandler(),
+  getGetAiConnectionsMockHandler(),
+  getReplaceAiProviderConnectionMockHandler(),
+  getDeleteAiProviderConnectionMockHandler(),
+  getReplaceDefaultAiConnectionMockHandler(),
+  getGetPersonalAiConnectionMockHandler(),
+  getReplacePersonalAiConnectionMockHandler(),
+  getDeletePersonalAiConnectionMockHandler(),
+  getGetPersonalAiConnectionsMockHandler(),
+  getReplacePersonalAiProviderConnectionMockHandler(),
+  getDeletePersonalAiProviderConnectionMockHandler(),
+  getReplacePersonalDefaultAiConnectionMockHandler(),
+  getStartPersonalAiSignInMockHandler(),
+  getGetPersonalAiSignInMockHandler(),
+  getFinishPersonalAiSignInMockHandler(),
 ];

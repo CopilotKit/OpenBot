@@ -26,6 +26,11 @@ export type ManagementStatus = {
   state: ManagementState;
   /** OpenBot's chart installs the agent: it connects by itself, and Disconnect needs no Helm. */
   agentInstalledByChart?: boolean;
+  /**
+   * Connected through the agent the chart installed, after management was turned off with Helm:
+   * that upgrade removed the agent with OpenBot's release, so there is no Helm release to uninstall.
+   */
+  agentRemovedWithChart?: boolean;
   /** Once connected: `on`, or `not-set-up` when upgrading needs a one-time setup first. */
   upgrades?: string;
   userCode?: string;

@@ -80,6 +80,25 @@ const ENTRY_PAGE: &str = concat!(
     "<title>OpenBot</title></head><body></body></html>"
 );
 
+/// The entry page, sending the window on to `to`, which `app_page` has passed.
+fn entry_page(to: &str) -> String {
+    ENTRY_PAGE.replace("url=/\"", &format!("url={to}\""))
+}
+
+/**
+Whether `to` is plainly a page of the app on the relay's own origin: a path from the root, of
+lowercase letters, digits, `-`, `_` and single `/`, at most 100 characters. Never `//` (another
+host), never a scheme, a query, a quote or an escape: it goes into the entry page's refresh.
+*/
+pub fn app_page(to: &str) -> bool {
+    to.len() <= 100
+        && to.starts_with('/')
+        && !to.contains("//")
+        && to
+            .bytes()
+            .all(|byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'/'))
+}
+
 /// The request header that names the organisation the person is working in. A token carries no
 /// session, and a person can belong to several, so every request says which. Set by the shell
 /// from the person's choice (`choice::Choice::organization_id`), never taken from the page.
@@ -228,6 +247,15 @@ impl Relay {
     /// to the app. It holds the secret, so it is never logged.
     pub fn entry(&self) -> String {
         format!("{}{ENTER_PATH}?key={}", self.origin(), self.secret)
+    }
+
+    /// The entry, sending the window on to the app's page `to` (such as `/connections`) in place
+    /// of its home. A `to` that isn't plainly one of the app's own pages (`app_page`) is home.
+    pub fn entry_to(&self, to: &str) -> String {
+        if to == "/" || !app_page(to) {
+            return self.entry();
+        }
+        format!("{}&to={to}", self.entry())
     }
 }
 
@@ -390,6 +418,13 @@ async fn answer(mut request: Request<Incoming>, shared: Arc<Shared>) -> Response
                 "This relay is for the OpenBot window.",
             );
         }
+        // Where the app opens: `to`, when it names one of the app's own pages, else its home.
+        let to = request
+            .uri()
+            .query()
+            .and_then(|query| query.split('&').find_map(|pair| pair.strip_prefix("to=")))
+            .filter(|to| app_page(to))
+            .unwrap_or("/");
         // A page, not a redirect: see the module's documentation.
         return Response::builder()
             .status(StatusCode::OK)
@@ -409,7 +444,7 @@ async fn answer(mut request: Request<Incoming>, shared: Arc<Shared>) -> Response
                 "default-src 'none'; frame-ancestors 'none'",
             )
             .body(
-                Full::new(Bytes::from_static(ENTRY_PAGE.as_bytes()))
+                Full::new(Bytes::from(entry_page(to)))
                     .map_err(|never| match never {})
                     .boxed(),
             )
@@ -802,7 +837,7 @@ fn on_the_relay(shared: &Shared, location: &HeaderValue) -> HeaderValue {
 #[cfg(test)]
 mod tests {
     use super::super::credentials::{in_memory, Store};
-    use super::super::fake_openbot::{raw_request, FakeOpenBot, Shape};
+    use super::super::fake_openbot::{no_browser, raw_request, FakeOpenBot, Shape};
     use super::*;
     use std::io::Read;
 
@@ -1516,7 +1551,7 @@ mod tests {
             organization_id: Some("org_kai".into()),
         };
         choice::write(&config, &left).unwrap();
-        first.sign_out().unwrap();
+        first.sign_out(no_browser).unwrap();
 
         let again = Arc::new(openbot.sign_in(store.clone()));
         let next = choice::signed_in_at(&choice::read(&config), &openbot.address());
@@ -1779,6 +1814,43 @@ mod tests {
         assert!(!page.contains("<script"));
         assert_eq!(refreshes_to(&page).as_deref(), Some("/"));
         assert_eq!(rig.openbot.seen_at(ENTER_PATH).len(), 0);
+    }
+
+    /// After the move to OpenBot Cloud, Reconnect opens the window at Cloud's Connections page:
+    /// the entry sends the window on to that page, and to nothing that isn't plainly one of the
+    /// app's own pages (another host, a scheme, a quote that would leave the refresh).
+    #[test]
+    fn the_entry_can_open_one_of_the_apps_own_pages_and_nothing_else() {
+        let rig = rig();
+        let mut window = WebKitWindow::new();
+        let arrived = window.navigate(SETUP_PAGE, &rig.relay.entry_to("/landing"));
+        assert_eq!(arrived.status, 200);
+        assert_eq!(arrived.body, "<!doctype html><title>OpenBot</title>");
+        assert_eq!(
+            arrived.url.as_str(),
+            format!("{}/landing", rig.relay.origin())
+        );
+        assert_eq!(rig.openbot.seen_at("/landing").len(), 1);
+        for to in [
+            "//evil.example/x",
+            "https://evil.example/",
+            "/a\"><script>",
+            "/a?b=c",
+            "connections",
+            "/A",
+        ] {
+            assert!(!app_page(to), "{to}");
+            assert_eq!(rig.relay.entry_to(to), rig.relay.entry(), "{to}");
+            let page = http()
+                .get(format!("{}&to={to}", rig.relay.entry()))
+                .send()
+                .unwrap()
+                .text()
+                .unwrap();
+            assert_eq!(refreshes_to(&page).as_deref(), Some("/"), "{to}");
+        }
+        assert!(app_page("/connections"));
+        assert!(app_page("/settings/computer"));
     }
 
     /// The entry address holds the run's secret, and the log's redaction covers it.

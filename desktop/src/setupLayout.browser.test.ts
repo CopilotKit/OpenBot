@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
 
 /**
  * The AI step's form holds still while the install behind it comes and goes.
@@ -109,8 +110,82 @@ const runningFails = location.hash === "#local-running-fails";
 const offered = location.search === "?offer";
 // A build that never updates itself (internal, candidate, or without the updater).
 const internal = location.search === "?internal";
+// The move to OpenBot Cloud, offered over an OpenBot (Self-Contained) found running: \`#move-choice\`
+// after an update, and the rest from Settings, at the screen each names (see \`moveAnswer\`).
+const move = location.hash.startsWith("#move-") ? location.hash.slice(6) : null;
+// \`#move-first\`: a relaunch after the update, OpenBot stopped and due an update of its own, with the
+// move due. The window asks before anything starts; the update runs until \`__fake.finishUpdate()\`.
+const moveFirst = move === "first";
+let finishUpdate;
+const updated = new Promise((resolve) => (finishUpdate = resolve));
+fake.finishUpdate = () => finishUpdate({ from: "1.1.3", to: "1.2.0", moved: true });
 // Found running by the launch is a relaunch too: an installation set up and started before.
-const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld || runningTooOld || launcherAhead;
+const relaunch = location.hash === "#start" || updateShort || backEndShort || localTooOld || runningTooOld || launcherAhead || Boolean(move);
+const MOVE_APPS = [
+  { appId: "gmail", appName: "Gmail", accountLabel: "sam@example.com", botNames: ["Inbox helper", "Standup"] },
+  { appId: "slack", appName: "Slack", accountLabel: "Northwind" },
+  { appId: "google-drive", appName: "Google Drive" },
+];
+const MORE_APPS = [
+  ...MOVE_APPS,
+  { appId: "notion", appName: "Notion" },
+  { appId: "github", appName: "GitHub", accountLabel: "sam-codes" },
+  { appId: "linear", appName: "Linear" },
+  { appId: "google-calendar", appName: "Google Calendar", accountLabel: "sam@example.com" },
+  { appId: "hubspot", appName: "HubSpot" },
+];
+const MOVE_PREVIEW = {
+  counts: [
+    { kind: "bots", count: 3 }, { kind: "skills", count: 9 }, { kind: "conversations", count: 37 },
+    { kind: "messages", count: 2814 }, { kind: "memories", count: 52 }, { kind: "routines", count: 3 },
+    { kind: "goals", count: 1 }, { kind: "check-ins", count: 2 }, { kind: "files", count: 64 },
+    { kind: "settings", count: 1 },
+  ],
+  apps: move === "confirm-many" ? MORE_APPS : MOVE_APPS,
+  footprintBytes: 20_200_000_000,
+  modelKeysAvailable: true,
+};
+function moveAnswer(command) {
+  if (command === "move_offer")
+    return { due: true, fromSettings: move !== "choice" && !moveFirst, footprintBytes: 20_200_000_000 };
+  if (command === "move_preview")
+    return move === "confirm-loading" ? new Promise(() => {}) : MOVE_PREVIEW;
+  if (command !== "move_to_cloud") return undefined;
+  const progress = (stage, state, share) => emit("move:progress", { stage, state, progress: share });
+  if (move === "signin") {
+    progress("sign-in", "running");
+    return new Promise(() => {});
+  }
+  progress("sign-in", "done");
+  progress("export", "done");
+  // OpenBot Cloud stopped the import and said why: a conversation it won't overwrite.
+  if (move === "stopped") {
+    progress("upload", "done");
+    progress("import", "running");
+    throw { said: "\\"Field Researcher\\" has new messages on your computer, and was also carried on in OpenBot Cloud. OpenBot won't overwrite what was said in OpenBot Cloud, so the new messages can't move.", detail: null, kind: "move-stopped" };
+  }
+  progress("upload", "running", 0.42);
+  if (move === "midway") return new Promise(() => {});
+  if (move === "failed")
+    throw { said: "OpenBot couldn't send your Bots to OpenBot Cloud. Check your internet connection, then try again.", kind: "move-failed" };
+  // As most real failures are: with the technical details for the log.
+  if (move === "failed-detail")
+    throw {
+      said: "OpenBot couldn't send your Bots to OpenBot Cloud. Check your internet connection, then try again.",
+      detail: "part 3 of 7: the connection was reset while sending (tried 3 times over 41s); the last try answered 502 bad-gateway with no body",
+      kind: "move-failed",
+    };
+  // \`#move-done-held\`: as on a Mac, the disk shows 4.5 of the 20.2 GB removed free so far.
+  // \`#move-done-ai\`: OpenBot Cloud still needs the person's AI, so the result leads with it.
+  return {
+    connectAi: move === "done-ai",
+    removedBytes: 20_200_000_000,
+    diskGainedBytes: move === "done-held" ? 4_500_000_000 : 20_100_000_000,
+    apps: MOVE_APPS,
+    notes: move === "done" || move === "done-held" ? ["Research runs on an ordinary computer here, because OpenBot Cloud has no isolated computers."] : [],
+    leftBehind: move === "done-left" ? ["Some of OpenBot's software is still on this computer. Restart your computer to finish removing it."] : [],
+  };
+}
 const signingIn = location.hash === "#signin";
 const installing = location.hash === "#licence-installing";
 const pausing = location.hash === "#pause-podman";
@@ -149,7 +224,11 @@ export async function invoke(command, args) {
   if (connectedProblem && command === "connection")
     return { mode: "connected", address: "https://openbot.example.com", signedIn: true };
   if (connectedProblem && command === "show_connected") throw connectedProblem;
-  if ((runningTooOld || runningFails) && command === "already_running") return true;
+  if ((runningTooOld || runningFails || (move && !moveFirst)) && command === "already_running") return true;
+  if (move) {
+    const answer = moveAnswer(command);
+    if (answer !== undefined) return answer;
+  }
   if (runningFails && command === "show_openbot")
     throw { said: "Part of OpenBot needs recovery. Try starting OpenBot once more." };
   if (localSecurity && command === "show_openbot")
@@ -190,6 +269,10 @@ export async function invoke(command, args) {
           said: "There isn't room on this computer for the update, so nothing changed.",
           shortfall: { podman: true, cpu: false, memory: false, disk: true, diskGb: "7.4", wsl: true, drive: "C:", freeOnDrive: true, updating: true, neededGb: "13" },
         };
+      if (moveFirst) {
+        emit("setup:progress", { step: "release", ok: true, running: true, detail: "Updating OpenBot. Your Bots, sign-ins and data stay as they are." });
+        return updated;
+      }
       return new Promise(() => {});
     case "providers":
       // As provider::catalogue lists them.
@@ -302,8 +385,26 @@ export async function listen(name, listener) {
 type Window = { script: string; style: string };
 
 /**
- * The window as the app builds it, with the native side scripted and the marks left out. `env` is
- * Vite's build-time values; none set is a build without a whitelabel support page or OpenBot Cloud.
+ * `marks.ts` as Vite builds it: each vendored mark in `shared/marks` inlined as a data URI, by the
+ * file's name.
+ */
+function vendoredMarks(): string {
+  const folder = new URL("../../shared/marks/", import.meta.url);
+  const marks = Object.fromEntries(
+    readdirSync(folder)
+      .filter((file) => file.endsWith(".svg"))
+      .map((file) => [
+        file.replace(/\.svg$/, ""),
+        `data:image/svg+xml;base64,${readFileSync(new URL(file, folder)).toString("base64")}`,
+      ]),
+  );
+  return `const byId = new Map(Object.entries(${JSON.stringify(marks)}));
+export function markFor(id) { return (id && byId.get(id)) ?? null; }`;
+}
+
+/**
+ * The window as the app builds it, with the native side scripted. `env` is Vite's build-time
+ * values; none set is a build without a whitelabel support page or OpenBot Cloud.
  */
 async function buildWindow(env: Record<string, string> = {}): Promise<Window> {
   const built = await Bun.build({
@@ -326,17 +427,21 @@ async function buildWindow(env: Record<string, string> = {}): Promise<Window> {
             path: "core",
             namespace: "scripted",
           }));
-          // Brand marks come from Vite's glob import, which this build has not got.
-          build.onResolve({ filter: /^\.\/Mark$/ }, () => ({
-            path: "mark",
+          /*
+           * Brand marks come from Vite's glob import, which this build has not got. The same files
+           * are inlined here instead, so the window draws every mark the app draws. Left out, the
+           * clouds OpenBot for Business runs on showed as four empty tiles.
+           */
+          build.onResolve({ filter: /^\.\/marks$/ }, () => ({
+            path: "marks",
             namespace: "scripted",
           }));
           build.onLoad({ filter: /.*/, namespace: "scripted" }, (args) => ({
             contents:
               args.path === "event"
                 ? FAKE_EVENT
-                : args.path === "mark"
-                  ? "export const Mark = () => null; export const ButtonMark = () => null; export const MarkImage = () => null;"
+                : args.path === "marks"
+                  ? vendoredMarks()
                   : FAKE_CORE,
             loader: "js",
           }));
@@ -915,7 +1020,9 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         expect(laid).toEqual({ stacked: true, marks: true, oneLine: true });
         // And connecting to a company's own OpenBot, by the link under the rows: the address and Connect.
         await page.getByRole("button", { name: "Connect to it" }).click();
-        await page.getByLabel("OpenBot address", { exact: true }).waitFor();
+        await page
+          .getByLabel("Your company's OpenBot address", { exact: true })
+          .waitFor();
         await page.waitForTimeout(400);
         expect(
           await page.evaluate(() => {
@@ -931,22 +1038,46 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
       }
     });
 
-    // A build with OpenBot Cloud on: three rows, and Cloud's sign-in fits as Install does.
-    test(`at 1000x760 (${theme}), a build with OpenBot Cloud on shows three rows without the card scrolling, and so does Cloud's sign-in`, async () => {
+    /*
+     * A build with OpenBot Cloud on: OpenBot Cloud and OpenBot for Business as the two rows, Cloud
+     * picked with its sign-in under them, and OpenBot (Self-Contained) a line at the card's foot.
+     * All of it fits, and so does Self-Contained opened, with Install, and the address.
+     */
+    test(`at 1000x760 (${theme}), a build with OpenBot Cloud on opens on Cloud's sign-in, Self-Contained a line at the foot, without the card scrolling`, async () => {
       const page = await browser.newPage({
         viewport: { width: 1000, height: 760 },
         colorScheme: theme,
       });
       const shots = process.env.OPENBOT_APP_SHOTS;
       try {
+        await routeCalendar(page);
         await open(page, "", cloudBuilt);
         await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+        await page
+          .getByRole("button", { name: "Sign in to OpenBot Cloud" })
+          .waitFor();
+        // Measured in the window's own face: a line set in the fallback, before Inter has loaded,
+        // can wrap where Inter's doesn't.
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+        });
         await page.waitForTimeout(400);
         const shape = await page.evaluate(() => {
           const card = document.querySelector("main > .sheet") as HTMLElement;
           const rows = [
             ...document.querySelectorAll("fieldset.picker.hosting > .tile"),
           ].map((row) => row.getBoundingClientRect());
+          const foot = document.querySelector(
+            ".this-computer-foot",
+          ) as HTMLElement | null;
+          const footBox = foot?.getBoundingClientRect();
+          const signIn = [...document.querySelectorAll("button")]
+            .find((button) => button.textContent === "Sign in to OpenBot Cloud")
+            ?.getBoundingClientRect();
+          const size = (element: Element | null | undefined) =>
+            element
+              ? Number.parseFloat(getComputedStyle(element).fontSize)
+              : Number.NaN;
           const business = document.querySelector(
             ".tile.with-marks",
           ) as HTMLElement;
@@ -959,14 +1090,37 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
           );
           return {
             overflow: card.scrollHeight - card.clientHeight,
-            // Three rows, one above the other, the same width.
+            // Each cloud's own mark, drawn: an empty tile is a mark that didn't load.
+            drawn: [
+              ...business.querySelectorAll<HTMLImageElement>(".cloud-mark img"),
+            ].map((image) => [
+              image.dataset.mark,
+              image.complete && image.naturalWidth > 0,
+            ]),
+            // Two rows, one above the other, the same width.
             rows:
-              rows.length === 3 &&
+              rows.length === 2 &&
               rows.every(
                 (row, at) =>
                   row.width === rows[0]?.width &&
                   (at === 0 || row.top >= (rows[at - 1]?.bottom ?? 0)),
               ),
+            // Self-Contained at the foot: the card's last element, below Cloud's sign-in, one line
+            // in smaller type than the rows' names, inside the card.
+            foot:
+              !!foot &&
+              !!footBox &&
+              !!signIn &&
+              foot.parentElement?.lastElementChild === foot &&
+              footBox.top >= signIn.bottom &&
+              footBox.bottom <= card.getBoundingClientRect().bottom &&
+              size(foot.querySelector(".this-computer-aside")) <
+                size(
+                  document.querySelector("fieldset.picker.hosting .tile-name"),
+                ) &&
+              (foot
+                .querySelector(".this-computer-aside")
+                ?.getBoundingClientRect().height ?? 99) <= 21,
             // The four clouds' marks inside OpenBot for Business's row, on one line, past its words.
             marks:
               marks.length === 4 &&
@@ -989,12 +1143,129 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         });
         const { overflow, ...laid } = shape;
         expect(overflow).toBeLessThanOrEqual(0);
-        expect(laid).toEqual({ rows: true, marks: true, oneLine: true });
-        if (shots)
+        expect(laid).toEqual({
+          drawn: [
+            ["aws", true],
+            ["azure", true],
+            ["google-cloud", true],
+            ["kubernetes", true],
+          ],
+          rows: true,
+          foot: true,
+          marks: true,
+          oneLine: true,
+        });
+        if (shots) {
           await page.screenshot({ path: `${shots}/welcome-on-${theme}.png` });
-        await page.getByText("We run it for you.").click();
+        }
+        /*
+         * OpenBot for Business picked: what it adds, then Book a demo and its calendar, taller than
+         * the window. The card scrolls, never the page, and scrolled to its end the calendar is
+         * whole inside the card, nothing cut at either edge.
+         */
+        await page.getByText("Your own cloud or on-prem. Book a demo.").click();
         await page
-          .getByRole("button", { name: "Sign in to OpenBot Cloud" })
+          .locator(
+            '.booking-calendar[data-ready] iframe[title="Booking calendar"]',
+          )
+          .waitFor();
+        await page.waitForTimeout(200);
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/welcome-on-business-${theme}.png`,
+          });
+        // Book a demo is in view as soon as Business is picked, and takes the card to the calendar.
+        const button = page.getByRole("button", {
+          name: "Book a demo",
+          exact: true,
+        });
+        const at = await button.boundingBox();
+        expect((at?.y ?? 760) + (at?.height ?? 0)).toBeLessThanOrEqual(760);
+        await button.click();
+        await page.waitForTimeout(800);
+        const jumped = await page.evaluate(() => {
+          const view = (
+            document.querySelector("main > .sheet") as HTMLElement
+          ).getBoundingClientRect();
+          const heading = document
+            .querySelector("#book-a-demo-title")
+            ?.getBoundingClientRect();
+          const frame = document
+            .querySelector('iframe[title="Booking calendar"]')
+            ?.getBoundingClientRect();
+          return {
+            heading:
+              !!heading &&
+              heading.top >= view.top &&
+              heading.top <= view.top + 40,
+            calendar: !!frame && frame.top < view.bottom - 300,
+            focused: document.activeElement?.id === "book-a-demo-title",
+          };
+        });
+        expect(jumped).toEqual({
+          heading: true,
+          calendar: true,
+          focused: true,
+        });
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/welcome-on-business-booker-${theme}.png`,
+          });
+        const booker = await page.evaluate(() => {
+          const card = document.querySelector("main > .sheet") as HTMLElement;
+          const view = card.getBoundingClientRect();
+          const element = document.querySelector(
+            'iframe[title="Booking calendar"]',
+          ) as HTMLElement;
+          // The calendar fits the card's visible area whole, scrolled to it.
+          element.scrollIntoView({ block: "center" });
+          const frame = element.getBoundingClientRect();
+          const heading = document
+            .querySelector("#book-a-demo-title")
+            ?.getBoundingClientRect();
+          const calendar =
+            frame.height >= 320 &&
+            frame.top >= view.top &&
+            frame.bottom <= view.bottom;
+          // At the card's end, Self-Contained's line is last and in view, below the calendar.
+          card.scrollTop = card.scrollHeight;
+          const foot = document
+            .querySelector(".this-computer-foot")
+            ?.getBoundingClientRect();
+          const below = element.getBoundingClientRect();
+          return {
+            page: document.documentElement.scrollHeight <= window.innerHeight,
+            cardScrolls: card.scrollHeight > card.clientHeight + 1,
+            sideways: card.scrollWidth - card.clientWidth <= 0,
+            calendar,
+            // Its heading sits above it.
+            heading: !!heading && heading.bottom <= frame.top,
+            foot:
+              !!foot &&
+              foot.top >= below.bottom &&
+              foot.top >= view.top &&
+              foot.bottom <= view.bottom,
+          };
+        });
+        expect(booker).toEqual({
+          page: true,
+          cardScrolls: true,
+          sideways: true,
+          calendar: true,
+          heading: true,
+          foot: true,
+        });
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/welcome-on-business-end-${theme}.png`,
+          });
+        // Self-Contained opened at the foot: what this computer needs and Install, still without a
+        // scrollbar.
+        await page
+          .getByRole("button", { name: "Use OpenBot (Self-Contained)" })
+          .click();
+        await page
+          .getByRole("button", { name: "Install", exact: true })
           .waitFor();
         await page.waitForTimeout(200);
         expect(
@@ -1005,7 +1276,29 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         ).toBeLessThanOrEqual(0);
         if (shots)
           await page.screenshot({
-            path: `${shots}/welcome-on-cloud-${theme}.png`,
+            path: `${shots}/welcome-on-self-contained-${theme}.png`,
+          });
+        // Connect to it: the address and Connect, still without a scrollbar.
+        await page.getByRole("button", { name: "Connect to it" }).click();
+        await page
+          .getByLabel("Your company's OpenBot address", { exact: true })
+          .waitFor();
+        // The pointer off the card, as a person's is once they type: nothing shows hovered.
+        await page.mouse.move(2, 2);
+        await page.waitForTimeout(200);
+        expect(
+          await page.evaluate(() => {
+            const card = document.querySelector("main > .sheet") as HTMLElement;
+            return {
+              overflow: card.scrollHeight - card.clientHeight <= 0,
+              // Nothing looks picked: no row, and no shaded Self-Contained.
+              chosen: document.querySelectorAll(".chosen").length,
+            };
+          }),
+        ).toEqual({ overflow: true, chosen: 0 });
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/welcome-on-connect-${theme}.png`,
           });
       } finally {
         await page.close();
@@ -1036,7 +1329,9 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         )
         .waitFor();
       expect(
-        await page.getByLabel("OpenBot address", { exact: true }).count(),
+        await page
+          .getByLabel("Your company's OpenBot address", { exact: true })
+          .count(),
       ).toBe(0);
       expect(
         await page
@@ -1071,7 +1366,9 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
       expect(shape.frame).toBe(660);
       // The way to connect is still under the rows, and leads to the address.
       await page.getByRole("button", { name: "Connect to it" }).click();
-      await page.getByLabel("OpenBot address", { exact: true }).waitFor();
+      await page
+        .getByLabel("Your company's OpenBot address", { exact: true })
+        .waitFor();
       expect(
         await page.locator('iframe[title="Booking calendar"]').count(),
       ).toBe(0);
@@ -1089,7 +1386,7 @@ async function routeCalendar(page: Page) {
   await page.route("https://calendly.com/**", (route) =>
     route.fulfill({
       contentType: "text/html",
-      body: `<!doctype html><body style="margin:0;height:660px;background:#fff"><script>
+      body: `<!doctype html><body style="margin:0;height:660px;background:#fff;font:14px sans-serif;color:#555;display:grid;place-items:center">Booking calendar (stand-in for Calendly)<script>
         parent.postMessage({ event: "calendly.page_height", payload: { height: "660px" } }, "*");
       </script></body>`,
     }),
@@ -2730,5 +3027,493 @@ describe.skipIf(!asked)(
         }
       }, 40_000);
     }
+  },
+);
+
+/*
+ * The move to OpenBot Cloud, each of its screens in the first screen's card, at the window's
+ * default size (1000x800, tauri.conf.json), that less a title bar (1000x760), and its smallest
+ * (720x560). The page never scrolls, and every one of a screen's buttons is whole in the window and
+ * in the card's view, not under anything, as the screen opens. At 1000x760 every common case fits
+ * with nothing scrolled inside the card; what is taller scrolls inside the card above its buttons.
+ *
+ * Seen on 1.2.0-rc.2: a move that failed showed its technical details, the screen ran past the
+ * card's foot, and Try again and Keep OpenBot on this computer were out of view. The person quit
+ * and reopened OpenBot to get past it. `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each,
+ * light and dark, taken before anything is asserted.
+ */
+describe.skipIf(!asked)(
+  "the move to OpenBot Cloud at the window's size",
+  () => {
+    const shots = process.env.OPENBOT_APP_SHOTS;
+    const engine = process.env.OPENBOT_APP_ENGINE ?? "chromium";
+    const SIZES = [
+      [1000, 760],
+      [1000, 800],
+      [720, 560],
+    ] as const;
+    const SCREENS: {
+      hash: string;
+      /** The test's and the screenshot's name, when one hash shows two ways. */
+      name?: string;
+      heading: string;
+      /** Pressed on the confirm screen, once what moves has loaded. */
+      move?: boolean;
+      /** Technical details opened, as the person would. */
+      openDetail?: boolean;
+      /** Scrolls inside the card at 1000x760. */
+      scrolls?: boolean;
+      /** Nothing to press: sending, past signing in, has no Cancel. */
+      noButtons?: boolean;
+    }[] = [
+      { hash: "#move-choice", heading: "Move to OpenBot Cloud?" },
+      { hash: "#move-confirm", heading: "Move to OpenBot Cloud" },
+      { hash: "#move-confirm-loading", heading: "Move to OpenBot Cloud" },
+      {
+        hash: "#move-confirm-many",
+        heading: "Move to OpenBot Cloud",
+        scrolls: true,
+      },
+      { hash: "#move-signin", heading: "Moving to OpenBot Cloud", move: true },
+      {
+        hash: "#move-midway",
+        heading: "Moving to OpenBot Cloud",
+        move: true,
+        noButtons: true,
+      },
+      { hash: "#move-failed", heading: "The move didn't finish", move: true },
+      {
+        hash: "#move-failed-detail",
+        heading: "The move didn't finish",
+        move: true,
+        scrolls: true,
+      },
+      {
+        hash: "#move-failed-detail",
+        name: "move-failed-detail-open",
+        heading: "The move didn't finish",
+        move: true,
+        openDetail: true,
+        scrolls: true,
+      },
+      // OpenBot Cloud's own three-line sentence: a few pixels past the card, the buttons in view.
+      {
+        hash: "#move-stopped",
+        heading: "The move didn't finish",
+        move: true,
+        scrolls: true,
+      },
+      { hash: "#move-done", heading: "You're on OpenBot Cloud", move: true },
+      {
+        hash: "#move-done-held",
+        heading: "You're on OpenBot Cloud",
+        move: true,
+      },
+      {
+        hash: "#move-done-left",
+        heading: "You're on OpenBot Cloud",
+        move: true,
+      },
+      { hash: "#move-done-ai", heading: "You're on OpenBot Cloud", move: true },
+    ];
+    for (const [width, height] of SIZES)
+      for (const colorScheme of ["light", "dark"] as const) {
+        for (const screen of SCREENS) {
+          const name = screen.name ?? screen.hash.slice(1);
+          test(`at ${width}x${height}, ${name} fits the window, its buttons in view (${colorScheme})`, async () => {
+            const page = await browser.newPage({
+              viewport: { width, height },
+              colorScheme,
+            });
+            try {
+              await open(page, screen.hash, cloudBuilt);
+              if (screen.move) {
+                await page.getByRole("list", { name: "What moves" }).waitFor();
+                await page
+                  .getByRole("button", { name: "Move to OpenBot Cloud" })
+                  .click();
+              }
+              await page
+                .getByRole("heading", { name: screen.heading, exact: true })
+                .waitFor();
+              if (screen.hash === "#move-confirm")
+                await page.getByRole("list", { name: "What moves" }).waitFor();
+              if (screen.openDetail) {
+                await page
+                  .getByText("Technical details", { exact: true })
+                  .click();
+                await page.waitForTimeout(100);
+                // Opened, they show: whole, in the card's view, clear of its pinned foot.
+                const shown = await page.evaluate(() => {
+                  const sheet = document.querySelector("main > .sheet");
+                  const said = document.querySelector("main details pre");
+                  const foot = document.querySelector(
+                    "main > .sheet > .step-footer",
+                  );
+                  const box = said?.getBoundingClientRect();
+                  return {
+                    top: box?.top ?? 0,
+                    bottom: box?.bottom ?? 0,
+                    ceiling: sheet?.getBoundingClientRect().top ?? 0,
+                    floor: Math.min(
+                      foot?.getBoundingClientRect().top ??
+                        Number.POSITIVE_INFINITY,
+                      sheet?.getBoundingClientRect().bottom ?? 0,
+                    ),
+                  };
+                });
+                expect(shown.bottom).toBeGreaterThan(shown.top);
+                expect(shown.top).toBeGreaterThanOrEqual(shown.ceiling);
+                // Within the pixel the card's scroll snaps to.
+                expect(shown.bottom).toBeLessThanOrEqual(shown.floor + 1);
+              }
+              // The card's entrance over, and the pointer off whatever it pressed.
+              await page.mouse.move(0, 0);
+              await page.waitForTimeout(600);
+              if (shots)
+                await page.screenshot({
+                  path: `${shots}/${name}-${width}x${height}-${colorScheme}-${engine}.png`,
+                });
+              const fit = await page.evaluate(() => {
+                const sheet = document.querySelector("main > .sheet");
+                const card = sheet?.getBoundingClientRect();
+                const style = sheet ? getComputedStyle(sheet) : null;
+                // The card's view: inside its border, and inside the window.
+                const top = Math.max(
+                  0,
+                  (card?.top ?? 0) +
+                    (Number.parseFloat(style?.borderTopWidth ?? "") || 0),
+                );
+                const bottom = Math.min(
+                  window.innerHeight,
+                  (card?.bottom ?? 0) -
+                    (Number.parseFloat(style?.borderBottomWidth ?? "") || 0),
+                );
+                // The screen's own buttons, not those in a list inside it.
+                const buttons = [
+                  ...document.querySelectorAll(
+                    "main > .sheet > .row button, main > .sheet > .step-footer button",
+                  ),
+                ];
+                return {
+                  cardScrolls: sheet
+                    ? sheet.scrollHeight > sheet.clientHeight + 1
+                    : true,
+                  pageScrolls:
+                    document.documentElement.scrollHeight >
+                      window.innerHeight ||
+                    document.documentElement.scrollWidth > window.innerWidth,
+                  buttons: buttons.length,
+                  outOfView: buttons
+                    .filter((button) => {
+                      const box = button.getBoundingClientRect();
+                      const hit = document.elementFromPoint(
+                        box.left + box.width / 2,
+                        box.top + box.height / 2,
+                      );
+                      return !(
+                        box.top >= top &&
+                        box.bottom <= bottom &&
+                        box.left >= 0 &&
+                        box.right <= window.innerWidth &&
+                        hit !== null &&
+                        button.contains(hit)
+                      );
+                    })
+                    .map((button) => button.textContent),
+                };
+              });
+              if (screen.noButtons) expect(fit.buttons).toBe(0);
+              else expect(fit.buttons).toBeGreaterThan(0);
+              expect({
+                pageScrolls: fit.pageScrolls,
+                outOfView: fit.outOfView,
+              }).toEqual({ pageScrolls: false, outOfView: [] });
+              if (height === 760)
+                expect(fit.cardScrolls).toBe(screen.scrolls === true);
+              // The result says the figure the move screens said, counted the same way.
+              const said = await page.evaluate(
+                () => document.querySelector("main")?.textContent ?? "",
+              );
+              if (screen.hash === "#move-choice")
+                expect(said).toContain(
+                  "This removes about 20.2 GB of OpenBot files from this computer.",
+                );
+              if (screen.hash === "#move-confirm")
+                expect(said).toContain(
+                  "Removes about 20.2 GB of OpenBot files.",
+                );
+              if (screen.hash.startsWith("#move-done"))
+                expect(said).toContain("20.2 GB of OpenBot files removed");
+              expect(said.includes("of that is free space on your disk")).toBe(
+                screen.hash === "#move-done-held",
+              );
+              // Still needing an AI: Connect your AI leads, and no Reconnect skips it.
+              if (screen.hash === "#move-done-ai") {
+                expect(said).toContain("Connect your AI first");
+                expect(said).toContain("Then reconnect your apps");
+                const buttons = await page.evaluate(() =>
+                  [...document.querySelectorAll("main button")].map(
+                    (button) => button.textContent,
+                  ),
+                );
+                expect(buttons).toEqual(["Connect your AI"]);
+              }
+            } finally {
+              await page.close();
+            }
+          }, 30_000);
+        }
+      }
+
+    // Keep, pressed where it shows with nothing scrolled first, leaves the move for OpenBot here.
+    for (const [width, height] of [
+      [1000, 800],
+      [720, 560],
+    ] as const)
+      test(`at ${width}x${height}, Keep on a failed move with its technical details open opens OpenBot here`, async () => {
+        const page = await browser.newPage({ viewport: { width, height } });
+        try {
+          await open(page, "#move-failed-detail", cloudBuilt);
+          await page.getByRole("list", { name: "What moves" }).waitFor();
+          await page
+            .getByRole("button", { name: "Move to OpenBot Cloud" })
+            .click();
+          await page
+            .getByRole("heading", {
+              name: "The move didn't finish",
+              exact: true,
+            })
+            .waitFor();
+          await page.getByText("Technical details", { exact: true }).click();
+          await page.evaluate(() => {
+            const sheet = document.querySelector("main > .sheet");
+            if (sheet) sheet.scrollTop = 0;
+          });
+          await page.waitForTimeout(600);
+          const keep = await page
+            .getByRole("button", { name: "Keep OpenBot on this computer" })
+            .boundingBox();
+          expect(keep).not.toBeNull();
+          if (!keep) return;
+          expect(keep.y + keep.height).toBeLessThanOrEqual(height);
+          // The mouse, not a locator's click, which would scroll the button into view first.
+          await page.mouse.click(
+            keep.x + keep.width / 2,
+            keep.y + keep.height / 2,
+          );
+          for (let i = 0; i < 50; i += 1) {
+            if ((await calls(page)).includes("show_openbot")) break;
+            await page.waitForTimeout(100);
+          }
+          const made = await calls(page);
+          expect(made).toContain("keep_self_contained");
+          expect(made).toContain("show_openbot");
+          expect(made.indexOf("show_openbot")).toBeGreaterThan(
+            made.indexOf("keep_self_contained"),
+          );
+          await page
+            .getByRole("heading", {
+              name: "The move didn't finish",
+              exact: true,
+            })
+            .waitFor({ state: "hidden" });
+        } finally {
+          await page.close();
+        }
+      }, 30_000);
+  },
+);
+
+/** The commands that start or update OpenBot or its backend on this computer. */
+const STARTS_OR_UPDATES = [
+  "wake_engine",
+  "run_local_eval",
+  "set_up_local_eval",
+  "connect_local_eval",
+  "upgrade_and_start",
+  "start_stack",
+];
+
+/** The native commands the window has asked for, in order. */
+const calls = (page: Page) =>
+  page.evaluate(
+    () =>
+      (globalThis as unknown as { __fake: { calls: string[] } }).__fake.calls,
+  );
+
+/** Every heading the window shows from now on, kept as it shows. */
+const watchHeadings = (page: Page) =>
+  page.evaluate(() => {
+    const seen: string[] = [];
+    (globalThis as unknown as { __headings: string[] }).__headings = seen;
+    const note = () => {
+      const heading = document.querySelector("main h1")?.textContent ?? "";
+      if (heading && seen[seen.length - 1] !== heading) seen.push(heading);
+    };
+    note();
+    new MutationObserver(note).observe(document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+    });
+  });
+
+const headingsSeen = (page: Page) =>
+  page.evaluate(
+    () => (globalThis as unknown as { __headings: string[] }).__headings,
+  );
+
+/*
+ * A dogfooding report on 1.2.0-rc.1: installed over OpenBot (Self-Contained) on a Mac, the window
+ * showed "Updating OpenBot (Self-Contained)" for about three minutes, and only then asked "Move to
+ * OpenBot Cloud?". OpenBot Cloud is the default, so the question comes first now, before anything
+ * starts or updates. Picking OpenBot Cloud updates and starts OpenBot under the move's own screen,
+ * which fills in what moves once it can read it; Keep runs the update as it always has. In
+ * Chromium, and with `OPENBOT_APP_ENGINE=webkit` in the engine the Mac window draws with.
+ * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of each screen.
+ */
+describe.skipIf(!asked)(
+  "the move to OpenBot Cloud, due at a relaunch that would update OpenBot",
+  () => {
+    const shots = process.env.OPENBOT_APP_SHOTS;
+    const engine = process.env.OPENBOT_APP_ENGINE ?? "chromium";
+    const shoot = async (page: Page, name: string) => {
+      await page.mouse.move(0, 0);
+      await page.waitForTimeout(500);
+      if (shots)
+        await page.screenshot({
+          path: `${shots}/move-first-${name}-${engine}.png`,
+        });
+    };
+
+    test("OpenBot Cloud: asked before any update, then no Self-Contained update screen, and the move completes", async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 760 },
+      });
+      try {
+        await open(page, "#move-first", cloudBuilt);
+        await page
+          .getByRole("heading", { name: "Move to OpenBot Cloud?", exact: true })
+          .waitFor();
+        await watchHeadings(page);
+        await shoot(page, "choice");
+        // Nothing started or updated before the question.
+        expect(
+          (await calls(page)).filter((call) =>
+            STARTS_OR_UPDATES.includes(call),
+          ),
+        ).toEqual([]);
+
+        await page.getByRole("button", { name: "Continue" }).click();
+        await page
+          .getByText(
+            "Getting your Bots ready to move. This can take a few minutes.",
+          )
+          .waitFor();
+        // OpenBot updates behind the move's screen.
+        for (let i = 0; i < 50; i += 1) {
+          if ((await calls(page)).includes("upgrade_and_start")) break;
+          await page.waitForTimeout(100);
+        }
+        expect(await calls(page)).toContain("upgrade_and_start");
+        await shoot(page, "getting-ready");
+        expect(
+          await page.evaluate(
+            () => document.querySelector("main h1")?.textContent,
+          ),
+        ).toBe("Move to OpenBot Cloud");
+
+        await page.evaluate(() =>
+          (
+            globalThis as unknown as { __fake: { finishUpdate: () => void } }
+          ).__fake.finishUpdate(),
+        );
+        await page.getByRole("list", { name: "What moves" }).waitFor();
+        await shoot(page, "confirm");
+        await page
+          .getByRole("button", { name: "Move to OpenBot Cloud" })
+          .click();
+        await page
+          .getByRole("heading", { name: "You're on OpenBot Cloud" })
+          .waitFor();
+        await shoot(page, "done");
+
+        const made = await calls(page);
+        expect(made).toContain("move_preview");
+        expect(made).toContain("move_to_cloud");
+        expect(made).not.toContain("show_openbot");
+        expect(made).not.toContain("keep_self_contained");
+        // What moves was read only once OpenBot was up.
+        expect(made.indexOf("move_preview")).toBeGreaterThan(
+          made.indexOf("upgrade_and_start"),
+        );
+        const headings = await headingsSeen(page);
+        expect(headings).not.toContain("Updating OpenBot (Self-Contained)");
+        expect(headings).not.toContain("Starting OpenBot");
+        // Only the move's own screens, from the question to the end.
+        expect(
+          headings.filter(
+            (heading) =>
+              ![
+                "Move to OpenBot Cloud?",
+                "Move to OpenBot Cloud",
+                "Moving to OpenBot Cloud",
+                "You're on OpenBot Cloud",
+              ].includes(heading),
+          ),
+        ).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    }, 40_000);
+
+    test("Keep: asked before any update, then the update runs as before and OpenBot opens", async () => {
+      const page = await browser.newPage({
+        viewport: { width: 1000, height: 760 },
+      });
+      try {
+        await open(page, "#move-first", cloudBuilt);
+        await page
+          .getByRole("heading", { name: "Move to OpenBot Cloud?", exact: true })
+          .waitFor();
+        expect(
+          (await calls(page)).filter((call) =>
+            STARTS_OR_UPDATES.includes(call),
+          ),
+        ).toEqual([]);
+        await page
+          .getByText("Everything stays on this computer, as it is now.")
+          .click();
+        await shoot(page, "keep-picked");
+        await page
+          .getByRole("button", { name: "Keep OpenBot on this computer" })
+          .click();
+        await page
+          .getByRole("heading", { name: "Updating OpenBot (Self-Contained)" })
+          .waitFor();
+        await shoot(page, "keep-updating");
+        const made = await calls(page);
+        expect(made.indexOf("keep_self_contained")).toBeGreaterThan(-1);
+        expect(made.indexOf("upgrade_and_start")).toBeGreaterThan(
+          made.indexOf("keep_self_contained"),
+        );
+
+        await page.evaluate(() =>
+          (
+            globalThis as unknown as { __fake: { finishUpdate: () => void } }
+          ).__fake.finishUpdate(),
+        );
+        for (let i = 0; i < 50; i += 1) {
+          if ((await calls(page)).includes("show_openbot")) break;
+          await page.waitForTimeout(100);
+        }
+        const after = await calls(page);
+        expect(after).toContain("show_openbot");
+        expect(after).not.toContain("move_preview");
+      } finally {
+        await page.close();
+      }
+    }, 40_000);
   },
 );

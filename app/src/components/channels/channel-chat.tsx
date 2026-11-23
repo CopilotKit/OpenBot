@@ -158,6 +158,11 @@ const CUT_OFF = new Set([
 /** What Carry on sends, as the person. */
 const CARRY_ON = "Please carry on where you stopped.";
 
+/** Whether a turn's notice offers Carry on: a turn cut off part way, or one the server asks to carry on. */
+function carriesOn(said: string): boolean {
+  return CUT_OFF.has(said) || asksToCarryOn(said);
+}
+
 /**
  * Whether the roster says a turn is running in this conversation now: one this tab started from a
  * chat it has since left, or work the server runs with no browser attached.
@@ -339,14 +344,30 @@ export function mergeStoredMessages(
   const before = new Map<string, Message[]>();
   /** The stored copy of each local message the store holds, by the local id. */
   const storedFor = new Map<string, Message>();
+  const localAt = new Map(local.map((message, at) => [message.id, at]));
+  /*
+   * AN ANCHOR ONLY COUNTS WHEN IT IS FURTHER ON THAN THE LAST ONE. The store does not always list a
+   * message where it was said: thinking the browser carries back with a later turn is listed with
+   * that turn, at the end of the thread, long after the answer it belongs to. Taken as an anchor,
+   * the first such piece pulled everything missing before it (the end of a conversation whose
+   * replay was still coming in) up to the top, under the first message: "Turn 0", then turns 53 to
+   * 63, then turn 0's answer. A message the screen holds further back than the last anchor is out of
+   * place in the store, so what is missing waits for the next anchor that is in place, or goes at
+   * the end.
+   */
+  let lastAnchor = -1;
   let pending: Message[] = [];
   for (const message of stored) {
     if (seenStored.has(message.id)) continue;
     seenStored.add(message.id);
     const held = heldAs(message);
     if (held !== undefined) {
-      if (pending.length > 0) before.set(held, pending);
-      pending = [];
+      const at = localAt.get(held) ?? -1;
+      if (at > lastAnchor) {
+        if (pending.length > 0) before.set(held, pending);
+        pending = [];
+        lastAnchor = at;
+      }
       if ((readBack || held === message.id) && !storedFor.has(held))
         storedFor.set(held, message);
     } else {
@@ -1618,8 +1639,16 @@ export function ChannelChat({
      * not handed back to be sent again: run again, it would repeat what already ran. The notice
      * under it says what went wrong. See `turnDidWork`.
      */
+    /*
+     * NOR A TURN THAT WAS CUT OFF. Its message reached the Bot, whose connection was then cut (its
+     * backend stopped answering, its model's connection dropped), and the notice under it offers
+     * Carry on, which picks the turn up with the message in front of the Bot. Found on a Cloud
+     * dogfood: a turn cut before it did anything put the words back in the box as if nothing had
+     * been sent, under a notice that said nothing of it.
+     */
     if (
       turnFailure.current !== null &&
+      !carriesOn(turnFailure.current) &&
       !turnDidWork(target.messages, existingMessageIds)
     ) {
       throw new Error(turnFailure.current);
@@ -2201,8 +2230,7 @@ export function ChannelChat({
              * front of it.
              */
             onCarryOn={
-              runError !== null &&
-              (CUT_OFF.has(runError) || asksToCarryOn(runError))
+              runError !== null && carriesOn(runError)
                 ? () => askFromComponent(CARRY_ON)
                 : undefined
             }

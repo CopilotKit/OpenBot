@@ -34,6 +34,7 @@ not touch the same lines:
 | `memory.yaml` | A person's memories and memory sources |
 | `agents.yaml` | The agents Bots hand work to (`bot-agents`), their callback tokens, and each Bot's delegation |
 | `management.yaml` | Connecting a self-hosted OpenBot to CopilotKit's management service: where it stands, starting and stopping it |
+| `moves.yaml` | Moving to OpenBot Cloud: exporting what a person has in an OpenBot on their own computer, importing it into a Cloud organization, and checking it all arrived |
 
 An area file holds its operations under `paths`, and under `components` the schemas, parameters,
 responses and examples only it uses. Inside the file, refer to them as usual

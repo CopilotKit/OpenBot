@@ -20,11 +20,14 @@ import type { Problem } from "./Problem";
 export const SELF_CONTAINED_SUMMARY =
   "Everything runs on this computer, for trying it or personal use.";
 
-/** What the second choice is: OpenBot as we run it, signed in to from here and on the web. */
-export const CLOUD_SUMMARY = "We run it for you. Sign in and start right away.";
+/** The way to OpenBot (Self-Contained) at the foot of the first screen, with OpenBot Cloud on. */
+export const SELF_CONTAINED_ASIDE = "Want everything to run on this computer?";
 
-/** OpenBot for Business: on a company's own cloud or on-prem, which books a call. */
-export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a call.";
+/** What the second choice is: OpenBot as we run it, signed in to from here and on the web. */
+export const CLOUD_SUMMARY = "Use OpenBot here. Your Bots run in our cloud.";
+
+/** OpenBot for Business: on a company's own cloud or on-prem, which books a demo. */
+export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a demo.";
 
 /**
  * Where OpenBot Cloud is off in this build (`cloudEnabled`), OpenBot for Business is one card with
@@ -93,6 +96,14 @@ export type Hosting = "this-computer" | "connect";
  * calendar (`BusinessBooker`), which scrolls in the card as any tall step does.
  *
  * OpenBot Cloud shows only in a build that turns it on (`VITE_OPENBOT_CLOUD_ENABLED`, `cloudEnabled`).
+ * There the screen steers to OpenBot Cloud and OpenBot for Business. They are the two rows, Cloud
+ * first and picked to begin with, then the link to connect to a company's own OpenBot, then what the
+ * choice shows. OpenBot (Self-Contained) is a line at the very foot of the card, below all of that:
+ * never picked to begin with, never the way back from anywhere. Opened, it shows what this computer
+ * needs and Install there, and neither row is picked. The one exception is a setup on this computer
+ * that failed: the failure is Self-Contained's to show, so it opens there. The order on screen is
+ * the order for the keyboard and a screen reader.
+ *
  * Otherwise the rows are OpenBot (Self-Contained) and OpenBot for Business as one card with its two
  * ways to run, Cloud and Self-Hosted, either of which books a call; and a saved connection to Cloud's
  * address is any other saved connection.
@@ -166,11 +177,13 @@ export function Welcome({
     ...(savedIsCloud ? { problem: saved?.problem, reopen: saved?.reopen } : {}),
     onThisComputer,
   });
-  // OpenBot Cloud or OpenBot for Business picked: shown whatever the app holds as the choice.
-  const [picked, setPicked] = useState<"cloud" | "business" | null>(
-    hosting === "connect" && savedIsCloud ? "cloud" : null,
+  // OpenBot Cloud or OpenBot for Business picked: shown whatever the app holds as the choice. With
+  // Cloud on, Cloud is picked to begin with, unless setup on this computer failed and says so.
+  const firstPick = cloudOn && !failure ? "cloud" : null;
+  const [picked, setPicked] = useState<"cloud" | "business" | null>(() =>
+    hosting === "connect" ? (savedIsCloud ? "cloud" : null) : firstPick,
   );
-  // With Cloud off, which of OpenBot for Business's two ways is picked: both book a call.
+  // With Cloud off, which of OpenBot for Business's two ways is picked: both book a demo.
   const [businessWay, setBusinessWay] = useState<BusinessChoice | null>(null);
   // Picked by the person, not opened on: Cloud's button takes the focus.
   const [pickedNow, setPickedNow] = useState(false);
@@ -202,6 +215,36 @@ export function Welcome({
     setBusinessWay(way);
     setPicked("business");
   };
+  const pickThisComputer = () => {
+    setPicked(null);
+    setBusinessWay(null);
+    if (hosting === "connect") void connecting.leave();
+  };
+  // Back from the address: the choices again, with what the screen first picks picked.
+  const back = () => {
+    if (firstPick) {
+      setPicked(firstPick);
+      setBusinessWay(null);
+    } else {
+      pickThisComputer();
+    }
+  };
+  // Under the rows and not one of them: somebody whose company already runs OpenBot connects this
+  // app to it. Gone while the address shows, since that is where it leads.
+  const connectAside = shown !== "connect" && (
+    <p className="tile-aside">
+      Already have OpenBot at work?{" "}
+      <button
+        type="button"
+        className="text-link inline-link"
+        disabled={held}
+        onClick={connectToIt}
+      >
+        Connect to it
+      </button>
+      .
+    </p>
+  );
   return (
     <div className="sheet">
       <div className="lockup">
@@ -216,26 +259,24 @@ export function Welcome({
       <h1>Set up OpenBot</h1>
       <fieldset className="picker hosting">
         <legend className="sr-only">Where OpenBot runs</legend>
-        <label className={rowClass(shown === "this-computer")}>
-          <input
-            type="radio"
-            name="hosting"
-            className="tile-input"
-            value="this-computer"
-            checked={shown === "this-computer"}
-            disabled={held}
-            onChange={() => {
-              setPicked(null);
-              setBusinessWay(null);
-              if (hosting === "connect") void connecting.leave();
-            }}
-          />
-          <HostingMark>
-            <IconDeviceLaptop stroke={1.75} />
-          </HostingMark>
-          <span className="tile-name">OpenBot (Self-Contained)</span>
-          <span className="tile-summary">{SELF_CONTAINED_SUMMARY}</span>
-        </label>
+        {!cloudOn && (
+          <label className={rowClass(shown === "this-computer")}>
+            <input
+              type="radio"
+              name="hosting"
+              className="tile-input"
+              value="this-computer"
+              checked={shown === "this-computer"}
+              disabled={held}
+              onChange={pickThisComputer}
+            />
+            <HostingMark>
+              <IconDeviceLaptop stroke={1.75} />
+            </HostingMark>
+            <span className="tile-name">OpenBot (Self-Contained)</span>
+            <span className="tile-summary">{SELF_CONTAINED_SUMMARY}</span>
+          </label>
+        )}
         {cloudOn ? (
           <>
             <label className={rowClass(shown === "cloud")}>
@@ -273,9 +314,10 @@ export function Welcome({
               <span className="tile-summary">{BUSINESS_SUMMARY}</span>
               <CloudMarks />
             </label>
+            {connectAside}
           </>
         ) : (
-          /* OpenBot for Business, its two ways in one card: both book a call. */
+          /* OpenBot for Business, its two ways in one card: both book a demo. */
           <fieldset
             className={rowClass(shown === "business", "tile-group")}
             aria-labelledby="business-name"
@@ -287,7 +329,7 @@ export function Welcome({
               OpenBot for Business
             </span>
             <span className="tile-summary">
-              For your whole team. Book a call to see it.
+              For your whole team. Book a demo to see it.
             </span>
             <div className="tile-options">
               {BUSINESS_CHOICES.map((choice) => (
@@ -324,36 +366,59 @@ export function Welcome({
             </div>
           </fieldset>
         )}
-        {/* Under the rows and not one of them: somebody whose company already runs OpenBot connects
-            this app to it. Gone while the address shows, since that is where it leads. */}
-        {shown !== "connect" && (
-          <p className="tile-aside">
-            Already have OpenBot at work?{" "}
-            <button
-              type="button"
-              className="text-link inline-link"
-              disabled={held}
-              onClick={connectToIt}
-            >
-              Connect to it
-            </button>
-            .
-          </p>
-        )}
+        {!cloudOn && connectAside}
       </fieldset>
       {shown === "connect" ? (
-        <ConnectToOpenBot connecting={connecting} />
+        <ConnectToOpenBot connecting={connecting} onBack={back} />
       ) : shown === "cloud" ? (
         <CloudSignIn connecting={signingIn} focus={pickedNow} />
       ) : shown === "business" ? (
         <BusinessBooker />
-      ) : (
+      ) : cloudOn ? null : (
         <SelfContained
           startDownloads={startDownloads}
           onInstall={onInstall}
           failure={failure}
           resumes={resumes}
         />
+      )}
+      {cloudOn && (
+        /* The foot of the card, below everything else: OpenBot, whole, on this computer. A line
+           with a link until it is opened, then what this computer needs and Install. */
+        <section
+          className="this-computer-foot"
+          aria-label="Run on this computer"
+        >
+          {shown === "this-computer" ? (
+            <>
+              <p className="this-computer-aside">
+                <span className="this-computer-name">
+                  OpenBot (Self-Contained)
+                </span>{" "}
+                {SELF_CONTAINED_SUMMARY}
+              </p>
+              <SelfContained
+                startDownloads={startDownloads}
+                onInstall={onInstall}
+                failure={failure}
+                resumes={resumes}
+              />
+            </>
+          ) : (
+            <p className="this-computer-aside">
+              {SELF_CONTAINED_ASIDE}{" "}
+              <button
+                type="button"
+                className="text-link inline-link"
+                disabled={held}
+                onClick={pickThisComputer}
+              >
+                Use OpenBot (Self-Contained)
+              </button>
+              .
+            </p>
+          )}
+        </section>
       )}
     </div>
   );

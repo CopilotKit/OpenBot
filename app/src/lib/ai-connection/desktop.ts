@@ -38,16 +38,49 @@ async function desktop<T>(
 
 export type Plan = "claude" | "chatgpt";
 
-/** Start a Claude or ChatGPT plan sign-in. The address to approve it at, in the browser. */
+/**
+ * Start a Claude or ChatGPT plan sign-in. The address to approve it at, in the browser.
+ *
+ * Claude's asks for the loopback redirect: the browser comes back to Desktop, and the sign-in
+ * finishes on its own. A Desktop older than that ignores the ask and answers Claude's code page
+ * instead, which `finishesInDesktop` tells apart.
+ */
 export function beginPlanSignIn(plan: Plan): Promise<{ url: string }> {
   return desktop(
     "begin_plan_sign_in",
-    { plan },
+    plan === "claude" ? { plan, redirect: "loopback" } : { plan },
     "Couldn't start signing in. Try again.",
   );
 }
 
-/** Finish it: Claude with the code the browser showed, ChatGPT on its own. The token stays in Desktop. */
+/**
+ * Whether a Claude plan sign-in Desktop started finishes on its own: its address sends the browser
+ * back to this computer (`redirect_uri` on localhost). Otherwise it is Claude's code page, from a
+ * Desktop older than the loopback sign-in, and the person pastes the code it shows.
+ */
+export function finishesInDesktop(url: string): boolean {
+  let redirect: string | null;
+  try {
+    redirect = new URL(url).searchParams.get("redirect_uri");
+  } catch {
+    return false;
+  }
+  if (!redirect) return false;
+  try {
+    const back = new URL(redirect);
+    return (
+      back.protocol === "http:" &&
+      (back.hostname === "localhost" || back.hostname === "127.0.0.1")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Finish it: on its own, once the browser comes back to Desktop, or for Claude from an older
+ * Desktop with the code the browser showed. The token stays in Desktop.
+ */
 export function finishPlanSignIn(plan: Plan, code?: string): Promise<void> {
   return desktop(
     "finish_plan_sign_in",
@@ -113,13 +146,16 @@ export function prepareAiConnection(
 
 /**
  * Tell Desktop the connection now in use: it records it for its next start, stops a plan engine no
- * longer needed, and moves the default Bot to one that can use it.
+ * longer needed, and moves the default Bot to one that can use it. `connectedPlans`: every plan
+ * connected now, the default's among them, whose engines keep running. Left out, every plan but
+ * the default's stops.
  */
 export function settleAiConnection(connection: {
   provider: AiConnectionProvider;
   login: AiConnectionLogin;
   model?: string | null;
   endpointHost?: string | null;
+  connectedPlans?: readonly Plan[];
 }): Promise<void> {
   return desktop(
     "settle_ai_connection",
@@ -129,6 +165,9 @@ export function settleAiConnection(connection: {
       ...(connection.model ? { model: connection.model } : {}),
       ...(connection.endpointHost
         ? { endpointHost: connection.endpointHost }
+        : {}),
+      ...(connection.connectedPlans
+        ? { connectedPlans: connection.connectedPlans }
         : {}),
     },
     "OpenBot Desktop couldn't finish the switch.",

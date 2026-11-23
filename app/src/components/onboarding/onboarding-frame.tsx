@@ -178,8 +178,12 @@ export function OnboardingFrame({
        * On a phone, a step taller than the screen scrolls under the buttons rather than being cut
        * at them: the fade above says there is more. On a desktop they sit at the bottom of the
        * pane, under the row that takes up the space between them and the sentence.
+       *
+       * The 32px above the buttons on a phone is the fade's own height. Scrolled to the end there
+       * is nothing more, so the step's last line (Welcome's carousel dots) stops above the fade
+       * rather than half hidden in it.
        */}
-      <footer className="sticky bottom-0 col-start-1 row-start-5 bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),20px)] before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-linear-to-t before:from-background before:to-transparent lg:static lg:col-start-1 lg:row-start-4 lg:bg-transparent lg:px-10 lg:pt-8 lg:pb-10 lg:before:hidden">
+      <footer className="sticky bottom-0 col-start-1 row-start-5 mt-8 bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),20px)] before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-linear-to-t before:from-background before:to-transparent lg:static lg:col-start-1 lg:row-start-4 lg:mt-0 lg:bg-transparent lg:px-10 lg:pt-8 lg:pb-10 lg:before:hidden">
         <div className="mx-auto flex w-full max-w-md flex-col gap-3 lg:mx-0 lg:max-w-none">
           {notice}
           {footnote ? (

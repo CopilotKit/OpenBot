@@ -50,6 +50,7 @@ import { useDropBrokerReturn } from "@/lib/connections/broker-return";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { useManagePaths } from "@/lib/manage-paths";
+import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
@@ -162,6 +163,11 @@ function RouteComponent() {
     navigate({ search: ({ connect: _c, ...rest }) => rest, replace: true });
   }, [connect, navigate]);
   useDropBrokerReturn();
+  /*
+   * Opened from the reconnect list (`/reconnect/<appId>`, which OpenBot Desktop's move screen opens
+   * too): back to the list once this app is connected, and a way back to it until then.
+   */
+  const returningTo = useReturnToReconnectList();
   if (key === "github" || key === "slack") {
     return <IdentityConnectionPage linked={linked} provider={key} />;
   }
@@ -174,10 +180,21 @@ function RouteComponent() {
    */
   if (personal && action === undefined)
     return <PluginPage pluginKey={key} startConnect={startConnect} />;
-  return <AppConnectionPage startConnect={startConnect} />;
+  return (
+    <AppConnectionPage
+      backToList={returningTo === key}
+      startConnect={startConnect}
+    />
+  );
 }
 
-function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
+function AppConnectionPage({
+  startConnect,
+  backToList,
+}: {
+  startConnect: boolean;
+  backToList: boolean;
+}) {
   const { key } = useParams({
     from: "/_authed/_app/connections/$key",
   });
@@ -367,10 +384,15 @@ function AppConnectionPage({ startConnect }: { startConnect: boolean }) {
     return <PageShell title="Account">{null}</PageShell>;
   }
 
-  const back = {
-    label: "Connections",
-    linkProps: { to: "/connections" as const },
-  };
+  const back = backToList
+    ? {
+        label: "Your apps to reconnect",
+        linkProps: { to: "/reconnect" as const },
+      }
+    : {
+        label: "Connections",
+        linkProps: { to: "/connections" as const },
+      };
 
   /*
    * AND A CONNECTIONS READ THAT FAILED IS SAID RATHER THAN DEFAULTED, WHICH IS WHAT THIS PAGE DID

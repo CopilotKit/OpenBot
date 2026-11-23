@@ -145,9 +145,11 @@ paths:
         Connected with the agent OpenBot's chart installed
         (agentInstalledByChart true), it retires the install at the service
         at once, which stops the agent's managed updates though it keeps
-        running, and answers 204. Connected with an agent installed with the
-        Helm command, it finishes disconnecting after that agent is
-        uninstalled with Helm:
+        running, and answers 204. The same goes for an agent the chart
+        installed before management was turned off with Helm
+        (agentRemovedWithChart true): that upgrade already removed it. Connected
+        with an agent installed as its own Helm release, it finishes
+        disconnecting after that agent is uninstalled with Helm:
         while the service still hears from the agent it answers 409, and once
         the agent hasn't reported in for more than five minutes it retires the
         install at the service, forgets the connection and answers 204, so
@@ -264,6 +266,19 @@ components:
             needs no Helm command and OpenBot connects by itself. False when
             the chart turned it off: connecting then gives helmCommand to
             install the agent by hand. Present in every state.
+        agentRemovedWithChart:
+          type: boolean
+          description: >-
+            True when OpenBot is connected through the agent its own chart
+            installed, and the chart has since turned management off
+            (`management.enabled=false`, so agentInstalledByChart is false).
+            That Helm upgrade removed the agent along with OpenBot's own
+            release, so there is no Helm release to uninstall: Disconnect
+            retires the install at the service at once. Absent when the
+            connected agent is a release of its own (installed with
+            helmCommand, or the openbot-agent release that runs upgrades),
+            which is uninstalled with Helm before Disconnect, and in every
+            other state.
         installName:
           type: string
           minLength: 1
