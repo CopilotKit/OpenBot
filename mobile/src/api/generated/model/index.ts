@@ -7,6 +7,7 @@ export * from "./addConversationMemberRequest";
 export * from "./addedConversationMember";
 export * from "./adminOnlyResponse";
 export * from "./advanceOnboardingRequest";
+export * from "./aiConnectionProvider";
 export * from "./allowlistEntry";
 export * from "./appAccessApproval";
 export * from "./appAccessRequest";

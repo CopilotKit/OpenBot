@@ -222,7 +222,13 @@ paths:
   /api/v2/organizations/{organizationId}/model-catalogue: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1model-catalogue' }
   /api/v2/organizations/{organizationId}/people/{personId}/model-choices/{conversationId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1model-choices~1{conversationId}' }
   /api/v2/organizations/{organizationId}/ai-connection: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connection' }
+  /api/v2/organizations/{organizationId}/ai-connections: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connections' }
+  /api/v2/organizations/{organizationId}/ai-connections/{aiProvider}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connections~1{aiProvider}' }
+  /api/v2/organizations/{organizationId}/ai-connection-default: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1ai-connection-default' }
   /api/v2/organizations/{organizationId}/people/{personId}/ai-connection: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connections: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connections' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connections/{aiProvider}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connections~1{aiProvider}' }
+  /api/v2/organizations/{organizationId}/people/{personId}/ai-connection-default: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection-default' }
   /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection~1sign-ins' }
   /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins/{signInId}: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection~1sign-ins~1{signInId}' }
   /api/v2/organizations/{organizationId}/people/{personId}/ai-connection/sign-ins/{signInId}/code: { $ref: './model-connections.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1people~1{personId}~1ai-connection~1sign-ins~1{signInId}~1code' }

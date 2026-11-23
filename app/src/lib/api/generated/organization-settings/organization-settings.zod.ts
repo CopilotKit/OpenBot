@@ -314,7 +314,9 @@ export const GetOrganizationSettingsResponse = zod
             ),
         )
         .max(getOrganizationSettingsResponseOneModelAllowlistModelsMax)
-        .describe("The models Bots may run on, as provider/model."),
+        .describe(
+          "The models Bots may run on, as provider/model, where provider is the connection that serves the model (openai, anthropic, google, xai, unbiased or openai-compatible). An entry written before several providers could be connected names openai or anthropic for whichever connection was in use, and is read that way.",
+        ),
     }),
     mcpAllowlist: zod.object({
       enabled: zod
@@ -489,7 +491,9 @@ export const UpdateOrganizationSettingsBody = zod
               ),
           )
           .max(updateOrganizationSettingsBodyOneModelAllowlistModelsMax)
-          .describe("The models Bots may run on, as provider/model."),
+          .describe(
+            "The models Bots may run on, as provider/model, where provider is the connection that serves the model (openai, anthropic, google, xai, unbiased or openai-compatible). An entry written before several providers could be connected names openai or anthropic for whichever connection was in use, and is read that way.",
+          ),
       })
       .optional(),
     mcpAllowlist: zod
@@ -641,7 +645,9 @@ export const UpdateOrganizationSettingsResponse = zod
             ),
         )
         .max(updateOrganizationSettingsResponseOneModelAllowlistModelsMax)
-        .describe("The models Bots may run on, as provider/model."),
+        .describe(
+          "The models Bots may run on, as provider/model, where provider is the connection that serves the model (openai, anthropic, google, xai, unbiased or openai-compatible). An entry written before several providers could be connected names openai or anthropic for whichever connection was in use, and is read that way.",
+        ),
     }),
     mcpAllowlist: zod.object({
       enabled: zod
