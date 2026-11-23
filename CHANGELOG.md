@@ -270,7 +270,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   naming a model it doesn't, 403 for anyone else). A person in teams with lists, or under a parent
   team with one, runs only a model one of those lists names, within what the organization allows; a
   team with no list sets nothing. `getModelCatalogue` is narrowed for the caller the same way, and
-  a change is recorded on the trail as `team.models_changed`.
+  a change is recorded on the trail as `team.models_changed`. A model a person or a Bot chose that
+  their teams don't allow is refused before the run (`MODEL_NOT_ALLOWED`, naming their team's
+  list), never swapped for another.
+- **The model catalogue offers only what can run.** With Only allowed models on, the
+  organization's default model is offered only when it is on the list; otherwise the default is
+  the newest allowed model. Before, it was offered and every run on it was refused.
 - The model catalogue's `exposure` and its description say an empty allowlist means every model.
 - `ManagementEnrollment` carries `agentRemovedWithChart`, true only while OpenBot is connected
   through the agent its own chart installed after the chart turned management off. Optional, and
