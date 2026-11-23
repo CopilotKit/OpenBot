@@ -6,6 +6,7 @@ import {
   withoutOutcomeLine,
   withoutUntrustedEnvelope,
 } from "@/lib/plugins/tool-result";
+import type { SettingsChange } from "./settings-change-card";
 
 /**
  * The chat cards for OpenBot settings' tools: one purpose-built card per tool, keyed by the tool's
@@ -46,6 +47,21 @@ export type SettingsToolCard = (props: SettingsToolCardProps) => ReactNode;
 
 /** The cards one slice registers, by tool name. */
 export type SettingsToolCards = Readonly<Record<string, SettingsToolCard>>;
+
+/**
+ * A tool's own body for its approval card, drawn while the change waits in place of the shared
+ * before-and-after rows. `change` is the tool's preview as the server sent it.
+ */
+export type SettingsApprovalBody = (props: {
+  tool: string;
+  args: Record<string, unknown>;
+  change: SettingsChange;
+}) => ReactNode;
+
+/** The approval bodies one slice registers, by tool name. Optional per tool. */
+export type SettingsApprovalBodies = Readonly<
+  Record<string, SettingsApprovalBody>
+>;
 
 /** The settings tool a call is for, or null when it isn't one. */
 export function settingsToolOf(name: string): string | null {

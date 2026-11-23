@@ -10,6 +10,7 @@ import {
   SettingsChangeRows,
   settingsChangeOf,
 } from "@/components/settings-tools/settings-change-card";
+import { settingsApprovalBodyFor } from "@/components/settings-tools/settings-tool-card";
 import {
   type ApprovalDecision,
   approvalInboxOptions,
@@ -115,6 +116,10 @@ export function InlineApproval({
   const change = settingsChangeOf(
     (request?.action.target as { change?: unknown } | undefined)?.change,
   );
+  // A settings tool may draw its own body for the change; the shared rows otherwise.
+  const ownBody = request
+    ? settingsApprovalBodyFor(request.action.toolRef)
+    : null;
   return (
     <>
       {/* The card leaves by folding away; what is left behind is the tool's own line. */}
@@ -157,7 +162,16 @@ export function InlineApproval({
               submitting={decision.isPending}
               title={title.charAt(0).toUpperCase() + title.slice(1)}
             >
-              {change ? (
+              {change && ownBody ? (
+                <ownBody.Body
+                  args={
+                    (request.action.args as Record<string, unknown> | null) ??
+                    {}
+                  }
+                  change={change}
+                  tool={ownBody.tool}
+                />
+              ) : change ? (
                 <div className="flex flex-col gap-2">
                   <p className="text-sm">{change.summary}</p>
                   <SettingsChangeRows change={change} state="waiting" />

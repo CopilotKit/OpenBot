@@ -78,6 +78,26 @@ test("a change is drawn row by row, before over after, with who it reaches", () 
   expect(view.getByText("Everyone in the organization")).toBeTruthy();
 });
 
+test("who a change reaches is listed by name, with what happens to each and how many more", () => {
+  const change = settingsChangeOf({
+    summary: "Make Ada an admin.",
+    affected: {
+      summary: "1 person's role changes",
+      count: 3,
+      people: [
+        { name: "Ada Lovelace", email: "ada@acme.test", effect: "gains" },
+        { name: "Mo Member", email: "mo@acme.test" },
+      ],
+    },
+  });
+  if (!change) throw new Error("not read as a change");
+  const view = render(<SettingsChangeRows change={change} state="waiting" />);
+  const ada = view.container.querySelector('[data-person="ada@acme.test"]');
+  expect(ada?.textContent).toContain("Ada Lovelace");
+  expect(ada?.textContent).toContain("Gains");
+  expect(view.getByText("And 1 more person.")).toBeTruthy();
+});
+
 test("without rows in words, the values that differ are listed by their names", () => {
   expect(
     changeRows({

@@ -37,8 +37,60 @@ export type SettingsChange = {
   before?: unknown;
   after?: unknown;
   changes?: SettingsChangeRow[];
-  affected?: string;
+  affected?: string | SettingsAffected;
 };
+
+/** How one person is affected by a change. */
+export type SettingsAffectedEffect =
+  | "gains"
+  | "loses"
+  | "changes"
+  | "joins"
+  | "leaves";
+
+/** Who a change reaches: a sentence, how many in all, and up to 12 of them by name. */
+export type SettingsAffected = {
+  summary: string;
+  count: number;
+  people: { name: string; email: string; effect?: SettingsAffectedEffect }[];
+};
+
+const EFFECT: Record<SettingsAffectedEffect, { label: string; tone: Tone }> = {
+  gains: { label: "Gains", tone: "positive" },
+  loses: { label: "Loses", tone: "negative" },
+  changes: { label: "Changes", tone: "caution" },
+  joins: { label: "Joins", tone: "positive" },
+  leaves: { label: "Leaves", tone: "negative" },
+};
+
+/** Who a change reaches, as the server sent it, or undefined. */
+function affectedOf(value: unknown): string | SettingsAffected | undefined {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return undefined;
+  const { summary, count, people } = value as Record<string, unknown>;
+  if (typeof summary !== "string") return undefined;
+  const listed = Array.isArray(people)
+    ? people.flatMap((person): SettingsAffected["people"] => {
+        if (!person || typeof person !== "object") return [];
+        const { name, email, effect } = person as Record<string, unknown>;
+        if (typeof name !== "string") return [];
+        return [
+          {
+            name,
+            email: typeof email === "string" ? email : "",
+            ...(typeof effect === "string" && effect in EFFECT
+              ? { effect: effect as SettingsAffectedEffect }
+              : {}),
+          },
+        ];
+      })
+    : [];
+  return {
+    summary,
+    count: typeof count === "number" ? count : listed.length,
+    people: listed,
+  };
+}
 
 /** Where a change is, as the badge says it. */
 export type SettingsChangeState =
@@ -75,14 +127,13 @@ export function settingsChangeOf(value: unknown): SettingsChange | null {
         ];
       })
     : undefined;
+  const affected = affectedOf(change.affected);
   return {
     summary: change.summary,
     before: change.before,
     after: change.after,
     ...(rows ? { changes: rows } : {}),
-    ...(typeof change.affected === "string"
-      ? { affected: change.affected }
-      : {}),
+    ...(affected ? { affected } : {}),
   };
 }
 
@@ -179,11 +230,54 @@ export function SettingsChangeRows({
           ))}
         </dl>
       ) : null}
-      {change.affected ? (
-        <p className="flex items-start gap-1.5 text-muted-foreground text-xs">
-          <IconUsers aria-hidden className="mt-px size-3.5 shrink-0" />
-          <span>{change.affected}</span>
-        </p>
+      {change.affected ? <Affected affected={change.affected} /> : null}
+    </div>
+  );
+}
+
+/** Who a change reaches: the sentence, then the people by name with what happens to each. */
+function Affected({ affected }: { affected: string | SettingsAffected }) {
+  const summary = typeof affected === "string" ? affected : affected.summary;
+  const people = typeof affected === "string" ? [] : affected.people;
+  const more =
+    typeof affected === "string"
+      ? 0
+      : Math.max(0, affected.count - people.length);
+  return (
+    <div className="flex flex-col gap-2" data-slot="settings-affected">
+      <p className="flex items-start gap-1.5 text-muted-foreground text-xs">
+        <IconUsers aria-hidden className="mt-px size-3.5 shrink-0" />
+        <span>{summary}</span>
+      </p>
+      {people.length > 0 ? (
+        <ul className="flex flex-col gap-1.5">
+          {people.map((person) => (
+            <li
+              className="flex items-center justify-between gap-3 text-sm"
+              data-person={person.email || person.name}
+              key={person.email || person.name}
+            >
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate">{person.name}</span>
+                {person.email ? (
+                  <span className="truncate text-muted-foreground text-xs">
+                    {person.email}
+                  </span>
+                ) : null}
+              </span>
+              {person.effect ? (
+                <Badge tone={EFFECT[person.effect].tone}>
+                  {EFFECT[person.effect].label}
+                </Badge>
+              ) : null}
+            </li>
+          ))}
+          {more > 0 ? (
+            <li className="text-muted-foreground text-xs">
+              And {more} more {more === 1 ? "person" : "people"}.
+            </li>
+          ) : null}
+        </ul>
       ) : null}
     </div>
   );
