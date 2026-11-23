@@ -266,7 +266,7 @@ export function BrowserDesk({
   return (
     <div
       ref={desk}
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-muted/40 p-3 sm:p-5"
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-muted/40 p-3 sm:p-5 kit:bg-transparent kit:sm:px-11 kit:sm:py-12"
     >
       {/* As tall as the desk, so what is under the window takes the height left; past it, the desk scrolls. */}
       <div
@@ -277,7 +277,7 @@ export function BrowserDesk({
         {heading ?? <h1 className="sr-only">Browser</h1>}
         <div
           ref={frame}
-          className="flex shrink-0 flex-col overflow-clip rounded-xl border bg-background shadow-sm"
+          className="flex shrink-0 flex-col overflow-clip rounded-xl border bg-background shadow-sm kit:rounded-card kit:border-transparent kit:bg-card kit:shadow-none"
         >
           {browserWindow}
         </div>
@@ -328,17 +328,17 @@ export function OpeningBrowser({
             </div>
             <div
               aria-hidden="true"
-              className="h-8 w-44 rounded-t-[10px] border border-border border-b-0 bg-background"
+              className="h-8 w-44 rounded-t-[10px] border border-border border-b-0 bg-background kit:bg-card"
             />
           </div>
           <div
             aria-hidden="true"
             className="flex items-center border-border border-b px-3 py-1.5"
           >
-            <div className="h-8 flex-1 rounded-full bg-muted/70" />
+            <div className="h-8 flex-1 rounded-full bg-muted/70 kit:bg-background" />
           </div>
           <div
-            className="relative w-full bg-background"
+            className="relative w-full bg-background kit:bg-card"
             style={{ aspectRatio: SCREEN_ASPECT_RATIO }}
           >
             {blocked ? (
@@ -414,7 +414,7 @@ function Screen({
   // The page sits flush under the toolbar, at the browser's own shape, as wide as the window.
   return (
     <div
-      className="relative w-full overflow-hidden bg-background"
+      className="relative w-full overflow-hidden bg-background kit:bg-card"
       style={{ aspectRatio: SCREEN_ASPECT_RATIO }}
     >
       {open ? (
@@ -476,7 +476,7 @@ function Screen({
 function StartPage({ onGo }: { onGo: (url: string) => void }) {
   const [typed, setTyped] = useState("");
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-background px-6">
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-background px-6 kit:bg-card">
       <OpenBotLogo className="size-14 drop-shadow-[0_8px_24px_rgb(120_100_220/0.35)]" />
       <form
         aria-label="Search or go to a site"

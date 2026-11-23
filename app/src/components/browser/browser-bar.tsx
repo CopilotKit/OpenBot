@@ -192,7 +192,7 @@ export function TabStrip({
               className={cn(
                 "group/tab flex h-8 w-52 min-w-24 shrink items-center gap-1 rounded-t-[10px] border border-transparent border-b-0 pl-2.5 transition-colors",
                 tab.active
-                  ? "border-border bg-background text-foreground"
+                  ? "border-border bg-background text-foreground kit:bg-card"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
               )}
             >
@@ -204,7 +204,7 @@ export function TabStrip({
                 aria-controls={panelId(ids)}
                 aria-keyshortcuts="Delete"
                 aria-selected={tab.active}
-                className="min-w-0 flex-1 truncate rounded-md py-1 pr-1 text-left text-[0.8rem] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                className="min-w-0 flex-1 truncate rounded-md py-1 pr-1 text-left text-[0.8rem] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 kit:text-xs"
                 disabled={disabled}
                 id={tabId(ids, tab.id)}
                 onClick={() => {
@@ -337,7 +337,7 @@ export function AddressBar({
     <form
       aria-label="Address bar"
       className={cn(
-        "flex items-center gap-0.5 border-border border-b bg-background px-2 py-1.5",
+        "flex items-center gap-0.5 border-border border-b bg-background px-2 py-1.5 kit:bg-card",
         className,
       )}
       onSubmit={(event) => {
@@ -391,7 +391,7 @@ export function AddressBar({
         </Button>
       ) : null}
       {/* A pill in the window's frame colour, as a desktop browser's address bar is, lit like a field while typed in. */}
-      <InputGroup className="ml-1.5 h-8 min-w-0 flex-1 rounded-full border-transparent bg-muted/70 text-sm shadow-none transition-colors has-[[data-slot=input-group-control]:focus-visible]:bg-background dark:bg-input/40">
+      <InputGroup className="ml-1.5 h-8 min-w-0 flex-1 rounded-full border-transparent bg-muted/70 text-sm shadow-none transition-colors has-[[data-slot=input-group-control]:focus-visible]:bg-background dark:bg-input/40 kit:bg-background">
         <InputGroupInput
           aria-label="Address"
           ref={input}

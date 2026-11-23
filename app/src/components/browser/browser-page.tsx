@@ -34,7 +34,7 @@ const DESCRIPTION =
 function LearnedLink() {
   return (
     <Link
-      className="text-muted-foreground text-sm underline-offset-4 hover:text-foreground hover:underline"
+      className="text-muted-foreground text-sm underline-offset-4 hover:text-foreground hover:underline kit:font-semibold kit:text-foreground"
       to="/skills"
     >
       See what your Bots learned
@@ -49,8 +49,12 @@ function LearnedLink() {
 function TeachHeading() {
   return (
     <header className="flex flex-col gap-1">
-      <h1 className="font-semibold text-2xl tracking-tight">{TITLE}</h1>
-      <p className="text-pretty text-muted-foreground text-sm">{DESCRIPTION}</p>
+      <h1 className="font-semibold text-2xl tracking-tight kit:text-xl kit:leading-heading kit:tracking-heading">
+        {TITLE}
+      </h1>
+      <p className="text-pretty text-muted-foreground text-sm kit:font-light">
+        {DESCRIPTION}
+      </p>
     </header>
   );
 }
