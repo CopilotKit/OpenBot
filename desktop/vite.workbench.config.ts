@@ -83,6 +83,29 @@ function isAppRoute(url: string): boolean {
   return !WORKBENCH_PATH.test(path);
 }
 
+// Is this request the workbench's window frame loading a page? Browsers send `Sec-Fetch-Dest` only to
+// secure origins: http://localhost is one, but http://<LAN address> is not, so a person on the office
+// network opening the workbench by its address sends no `Sec-Fetch-Dest` at all. Without the header,
+// an HTML navigation whose Referer is the workbench page, or an app page on this same host (a
+// navigation inside the app frame), is the frame.
+function isFrameNavigation(req: {
+  headers: Record<string, string | string[] | undefined>;
+}): boolean {
+  const dest = req.headers["sec-fetch-dest"];
+  if (dest !== undefined) return dest === "iframe";
+  const accept = String(req.headers.accept ?? "");
+  const referer = req.headers.referer;
+  if (!accept.includes("text/html") || typeof referer !== "string") return false;
+  let from: URL;
+  try {
+    from = new URL(referer);
+  } catch {
+    return false;
+  }
+  if (from.host !== req.headers.host) return false;
+  return from.pathname.startsWith(HOME) || isAppRoute(from.pathname);
+}
+
 // An iframe navigation to an app route gets the app's HTML from the app server, so the frame's
 // document path is the route and the frame stays same-origin. A full-page navigation inside the
 // app frame (a sign-out, for example) gets the app again.
@@ -95,7 +118,7 @@ function appFrames(): Plugin {
       server.middlewares.use(async (req, res, next) => {
         if (
           req.method !== "GET" ||
-          req.headers["sec-fetch-dest"] !== "iframe" ||
+          !isFrameNavigation(req) ||
           !isAppRoute(req.url ?? "/")
         ) {
           next();
@@ -138,7 +161,7 @@ function workbenchHome(): Plugin {
         if (
           path !== "/" ||
           (req.method !== "GET" && req.method !== "HEAD") ||
-          req.headers["sec-fetch-dest"] === "iframe"
+          isFrameNavigation(req)
         ) {
           next();
           return;
