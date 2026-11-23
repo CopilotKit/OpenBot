@@ -316,8 +316,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   organizations than the one you're working in, with a way to switch to it.
 - **Warnings and successes are drawn with the theme's colors.** What waits on a person, or may not go
   as they expect, is the new `--warning` token, and what worked is `--success`, in place of Tailwind's
-  amber and green. A skin's `--success` now colors them too. The light warning is a darker amber than
-  before, easier to read on white.
+  amber and green. A skin's `--success` now colors them too, and a theme in `brand.yaml`'s
+  `skin.stylesheet` may set `--success`, `--warning` and `--empty-pattern-color`. The light warning
+  is a darker amber than before, easier to read on white.
 - After connecting an app from a Bot's card or a Bot's page, you're back where you pressed Connect.
   The sign-in's tab closes once the app is connected, or, where the browser won't close it, goes back
   to the conversation or the Bot's page. It used to stay on the app's page under Connections.
