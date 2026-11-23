@@ -5178,16 +5178,29 @@ async fn start_stack_inner<R: tauri::Runtime>(
      */
     let requested_harness = harness.clone();
     let harness = harness::for_credential(&credential, harness);
-    let picked = harness::picked(harness.as_ref(), &root).map_err(|error| {
+    /*
+     * A deployment missing its image list is an unfinished install, said as one, so the window
+     * runs Install (which downloads only the list again) and starts. Asked before the Bot's image is
+     * read from that list: a list something outside OpenBot deleted read as "This version of
+     * OpenBot does not include the Bot you picked", the window never offered Install, and every
+     * Retry failed at once.
+     */
+    if let Some(problem) = preparation::incomplete_deployment(&root) {
+        log::warn!("[start] {}", logging::Failure::described(&problem));
+        return Err(problem);
+    }
+    let picked = harness::pick(harness.as_ref(), &root).map_err(|error| match error {
+        // A list there but not readable is the same unfinished install.
+        harness::PickError::ImageList(detail) => preparation::required(detail),
         // Two registers, because one of these refusals is about a release and the other is
         // about a pick. "OpenBot v0.0.8 does not include agent-langgraph-agui" is the
         // evidence, not the sentence: it names a published image, which is not a thing the
         // person chose or can change.
-        Problem::with(
+        harness::PickError::Refused(detail) => Problem::with(
             "This version of OpenBot does not include the Bot you picked. Go back and choose \
                  another, or update OpenBot.",
-            error,
-        )
+            detail,
+        ),
     })?;
 
     // The installation's own engine, brought up when it is stopped: here, before startup is held,
@@ -24741,6 +24754,152 @@ fn main() {
         );
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+    }
+
+    /// Start, on the fake engine, of an installed deployment with `bot` picked.
+    fn start_with_picked_bot(root: &Path, label: &str, bot: &str) -> Problem {
+        let record = temp_root(&format!("{label}-record")).join("commands.log");
+        std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
+        let _path = SerializedPath::set_only_with("docker", "dead-service");
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let problem = tauri::async_runtime::block_on(start_stack_inner(
+            app.handle().clone(),
+            root.to_path_buf(),
+            "https://intelligence.example.test".into(),
+            "wss://gateway.example.test".into(),
+            ChosenModel {
+                provider: "openai".into(),
+                login: "api-key".into(),
+                api_key: Some("synthetic-openai-key".into()),
+                base_url: None,
+                container_base_url: None,
+                model: None,
+                token: None,
+                saved: Some(false),
+            },
+            Some(harness::HarnessChoice {
+                id: bot.into(),
+                agent_url: None,
+            }),
+        ))
+        .expect_err("this Start is refused");
+        let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+        problem
+    }
+
+    /// An image list something outside OpenBot deleted is an unfinished install, so the window
+    /// runs Install (which downloads only the list again) and starts. It was read as a release
+    /// without the picked Bot: "This version of OpenBot does not include the Bot you picked", no
+    /// Install, and every Retry failed at once, until Repair put the list back.
+    #[test]
+    fn start_with_its_image_list_deleted_asks_for_install_rather_than_blaming_the_bot() {
+        if crate::test_support::isolated_process(
+            "tests::start_with_its_image_list_deleted_asks_for_install_rather_than_blaming_the_bot",
+        ) {
+            return;
+        }
+        let root = temp_root("openbot-image-list-deleted-start");
+        write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
+        std::fs::remove_file(deployment::images_path(&root)).unwrap();
+
+        let problem = start_with_picked_bot(
+            &root,
+            "openbot-image-list-deleted",
+            harness::DEFAULT_HARNESS,
+        );
+
+        assert_eq!(
+            problem.connection,
+            Some(openbot_desktop_lib::problem::Connection::Installation),
+            "the window runs Install only for an installation problem: {problem:?}"
+        );
+        assert_eq!(problem.said, preparation::REQUIRED, "{problem:?}");
+        assert!(!problem.said.contains("does not include"), "{problem:?}");
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(detail.contains("container-images.json"), "{detail}");
+        assert!(!detail.contains("does not include"), "{detail}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A list that is there and is not a list is the same unfinished install.
+    #[test]
+    fn start_with_an_unreadable_image_list_asks_for_install_rather_than_blaming_the_bot() {
+        if crate::test_support::isolated_process(
+            "tests::start_with_an_unreadable_image_list_asks_for_install_rather_than_blaming_the_bot",
+        ) {
+            return;
+        }
+        let root = temp_root("openbot-image-list-unreadable-start");
+        write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
+        std::fs::write(deployment::images_path(&root), "not a list").unwrap();
+
+        let problem = start_with_picked_bot(
+            &root,
+            "openbot-image-list-unreadable",
+            harness::DEFAULT_HARNESS,
+        );
+
+        assert_eq!(
+            problem.connection,
+            Some(openbot_desktop_lib::problem::Connection::Installation),
+            "{problem:?}"
+        );
+        assert_eq!(problem.said, preparation::REQUIRED, "{problem:?}");
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("is not readable")),
+            "{problem:?}"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A Bot the release laid out here really does not publish is still said as that, and is not
+    /// sent to Install, which could not change it.
+    #[test]
+    fn start_of_a_bot_the_release_does_not_publish_still_says_so() {
+        if crate::test_support::isolated_process(
+            "tests::start_of_a_bot_the_release_does_not_publish_still_says_so",
+        ) {
+            return;
+        }
+        let root = temp_root("openbot-bot-not-in-release-start");
+        write_installed_deployment(&root);
+        remember_local_intelligence_key(&root);
+
+        // The fixture's list names no harness image, so the default Bot is not in this release.
+        let problem = start_with_picked_bot(
+            &root,
+            "openbot-bot-not-in-release",
+            harness::DEFAULT_HARNESS,
+        );
+
+        assert_eq!(
+            problem.said,
+            "This version of OpenBot does not include the Bot you picked. Go back and choose \
+             another, or update OpenBot.",
+            "{problem:?}"
+        );
+        assert_ne!(
+            problem.connection,
+            Some(openbot_desktop_lib::problem::Connection::Installation),
+            "{problem:?}"
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.starts_with("OpenBot v0.0.8 does not include ")),
+            "{problem:?}"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// Start never waits for account attribution. A CLI that takes longer than the handshake's
