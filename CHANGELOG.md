@@ -386,9 +386,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   keeps them at the terms.
 - On Routines, the strip lights Routines, and Routines' icon brings its section back after another
   one, such as Bots, was opened there.
-- After connecting an app from a Bot's card or a Bot's page, you're back where you pressed Connect.
-  The sign-in's tab closes once the app is connected, or, where the browser won't close it, goes back
-  to the conversation or the Bot's page. It used to stay on the app's page under Connections.
+- After connecting an app from a Bot's card, a Bot's page or Browse apps, you're back where you
+  pressed Connect. The sign-in's tab closes once the app is connected, or, where the browser won't
+  close it, goes back to where Connect was pressed. It used to stay on the app's page under Connections.
 - **A Bot on a harness takes its orders from OpenBot only, not from extra fields on a run.** A run's
   sender could add fields the harness's framework obeyed. On the Claude Agent SDK harness: loading
   another saved conversation (`resume`), a model the organization never allowed (`model`,
