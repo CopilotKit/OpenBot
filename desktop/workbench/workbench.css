@@ -59,7 +59,6 @@
     /* The highlight of a layout warning over the window: strong enough for light and dark windows. */
     --wb-highlight-moved: #ff5a00;
     --wb-highlight-bad: #e5132a;
-    --wb-highlight-halo: #ffffff;
   }
 
   /*
@@ -144,8 +143,7 @@
   }
 
   /* Section title with an extending line: "App", "Layout warnings", "Keys". Sentence case. */
-  .wb-side h3,
-  .wb-under h3 {
+  .wb-side h3 {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -158,8 +156,7 @@
     white-space: nowrap;
   }
 
-  .wb-side h3::after,
-  .wb-under h3::after {
+  .wb-side h3::after {
     content: "";
     flex: 1;
     height: 1px;
@@ -340,17 +337,6 @@
     padding: 0 4px;
   }
 
-  .wb-scenes-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .wb-scenes-head h2 {
-    margin: 0;
-  }
-
   kbd {
     display: inline-block;
     min-width: 20px;
@@ -361,73 +347,6 @@
     background: var(--ck-grey-200);
     border: 1px solid var(--ck-border-control);
     border-radius: var(--ck-radius-xs);
-  }
-
-  /* Scenes: the filter, the groups that fold, and one row per scene. */
-  .wb-scenes-head {
-    margin-bottom: 8px;
-  }
-
-  .wb-side input.wb-scene-filter {
-    display: block;
-    width: 100%;
-    height: 28px;
-    margin: 0 0 4px;
-  }
-
-  .wb-side .wb-scenes h3 {
-    margin: 12px 0 2px;
-    padding: 0;
-  }
-
-  .wb-side .wb-scenes h3::after {
-    display: none;
-  }
-
-  .wb-side button.wb-group-toggle {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    width: 100%;
-    padding: 2px 4px;
-    font-size: 12px;
-    line-height: 16px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    text-align: left;
-    color: var(--ck-text-secondary);
-    background: transparent;
-    border: 0;
-    border-radius: var(--ck-radius-xs);
-    box-shadow: none;
-  }
-
-  .wb-side button.wb-group-toggle:hover {
-    color: var(--ck-text-primary);
-    background: var(--ck-white-50);
-  }
-
-  .wb-side button.wb-group-toggle[aria-disabled="true"] {
-    cursor: default;
-  }
-
-  .wb-group-toggle::after {
-    content: attr(data-count);
-    margin-left: auto;
-    font-family: var(--ck-mono);
-    font-weight: 500;
-    letter-spacing: 0;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .wb-chevron {
-    flex: none;
-    transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-
-  [aria-expanded="true"] > .wb-chevron {
-    transform: rotate(90deg);
   }
 
   /* Scene rows: 28px, one line each; a long title ends in an ellipsis. */
@@ -459,98 +378,6 @@
     background: var(--ck-selected);
   }
 
-  /* The keyboard cursor of ↑ and ↓, when it is not on the current scene. */
-  .wb-side button.wb-scene-cursor {
-    box-shadow: inset 0 0 0 1px var(--ck-border-control);
-  }
-
-  .wb-empty {
-    padding: 8px 4px;
-  }
-
-  .wb-under p {
-    margin: 0;
-    padding: 0 4px;
-    color: var(--ck-text-secondary);
-  }
-
-  .wb-warning-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-
-  .wb-under li {
-    margin: 0 0 2px;
-  }
-
-  /* A warning row: the list item pattern, as wide as the list. */
-  .wb-under button {
-    display: block;
-    width: 100%;
-    font: inherit;
-    font-size: 13px;
-    line-height: 20px;
-    color: inherit;
-    background: transparent;
-    border: 0;
-    border-radius: var(--ck-radius-xs);
-    padding: 4px 8px;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .wb-under button:hover {
-    background: color-mix(in srgb, var(--ck-selected) 60%, transparent);
-  }
-
-  /* The warning shown over the window: a tint and a leading dot in the highlight's colour. */
-  .wb-under button.wb-warning-current {
-    background: color-mix(in srgb, var(--wb-highlight-moved) 12%, transparent);
-  }
-
-  /* A row from before a seek back that the replay has not reached yet: kept, muted. */
-  .wb-under button.wb-warning-later {
-    color: var(--wb-muted);
-    opacity: 0.7;
-  }
-
-  .wb-under button.wb-warning-current::before {
-    content: "";
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    margin-right: 8px;
-    vertical-align: 1px;
-    border-radius: 50%;
-    background: var(--wb-highlight-moved);
-  }
-
-  .wb-under button[aria-pressed="true"] {
-    font-weight: 600;
-  }
-
-  /* The class a move row names, after its words. */
-  .wb-warning-class {
-    margin-left: 8px;
-    color: var(--ck-text-secondary);
-  }
-
-  /* "Show expected moves (N)": the expected moves stay hidden until you turn it on. */
-  .wb-warning-expected {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0 0 6px;
-    color: var(--ck-text-secondary);
-  }
-
-  .wb-warning-status {
-    margin-left: 8px;
-    color: var(--ck-text-secondary);
-    font-weight: 500;
-  }
-
   .wb-fold ul {
     margin: 0;
     padding-left: 16px;
@@ -565,12 +392,6 @@
     font-size: 12px;
     line-height: 1.5;
     width: 100%;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .wb-chevron {
-      transition: none;
-    }
   }
 
   /*
@@ -742,18 +563,14 @@
 
   /*
  * The highlight of a layout warning, over the window and not in the window element, so a shot of
- * the window does not show it. Each line has a white 1px halo, so it reads on light and dark windows.
+ * the window does not show it. Geometry only: WarningHighlight.tsx sets the colors from the app's
+ * tokens.
  */
   .wb-highlight {
     position: absolute;
     inset: 0;
     z-index: 5;
     pointer-events: none;
-    --wb-hl: var(--wb-highlight-bad);
-  }
-
-  .wb-highlight-moved {
-    --wb-hl: var(--wb-highlight-moved);
   }
 
   .wb-highlight-box,
@@ -763,29 +580,6 @@
     border-radius: 2px;
   }
 
-  .wb-highlight-box {
-    border: 2px solid var(--wb-hl);
-    box-shadow:
-      0 0 0 1px var(--wb-highlight-halo),
-      inset 0 0 0 1px var(--wb-highlight-halo);
-  }
-
-  .wb-highlight-ghost {
-    border: 2px dashed var(--wb-hl);
-    background: color-mix(in srgb, var(--wb-hl) 8%, transparent);
-    box-shadow: 0 0 0 1px var(--wb-highlight-halo);
-  }
-
-  /* What is cut off, or what is past the edge of the window. */
-  .wb-highlight-shade {
-    background: repeating-linear-gradient(
-      45deg,
-      color-mix(in srgb, var(--wb-hl) 55%, transparent) 0 4px,
-      color-mix(in srgb, var(--wb-hl) 20%, transparent) 4px 8px
-    );
-    outline: 1px solid var(--wb-highlight-halo);
-  }
-
   .wb-highlight-arrow {
     position: absolute;
     left: 0;
@@ -793,33 +587,9 @@
     overflow: visible;
   }
 
-  .wb-highlight-arrow line {
-    stroke: var(--wb-hl);
-    stroke-width: 2;
-    stroke-linecap: round;
-  }
-
-  .wb-highlight-arrow polygon {
-    fill: var(--wb-hl);
-  }
-
-  .wb-highlight-arrow .wb-highlight-halo {
-    stroke: var(--wb-highlight-halo);
-    stroke-width: 4;
-    stroke-linejoin: round;
-    fill: var(--wb-highlight-halo);
-  }
-
   .wb-highlight-label {
     position: absolute;
     transform: translateY(calc(-100% - 6px));
-    padding: 2px 6px;
-    border-radius: var(--ck-radius-xs);
-    background: var(--wb-hl);
-    color: #ffffff;
-    box-shadow: 0 0 0 1px var(--wb-highlight-halo);
-    font: 600 12px / 16px var(--ck-sans);
-    white-space: nowrap;
   }
 
   .wb-highlight-label-below {

@@ -1,6 +1,12 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  within,
+} from "@testing-library/react";
 import { createRef } from "react";
 import {
   COLLAPSED_PREF,
@@ -57,7 +63,8 @@ test("the current scene has aria-current", () => {
     <SceneList scenes={scenes} current="i2" onPick={() => {}} />,
   );
   expect(getByText("Install two").getAttribute("aria-current")).toBe("true");
-  expect(getByText("Install two").className).toContain("wb-scene-current");
+  expect(getByText("Install two").hasAttribute("data-current")).toBe(true);
+  expect(getByText("Install one").hasAttribute("data-current")).toBe(false);
   expect(getByText("Install one").getAttribute("aria-current")).toBeNull();
 });
 
@@ -70,12 +77,21 @@ test("a click calls onPick with the id", () => {
   expect(onPick).toHaveBeenCalledWith("c1");
 });
 
+/** The scene rows of a group: the buttons in its open part, not its heading. */
+function rowsOf(group: HTMLElement): string[] {
+  return Array.from(
+    group.querySelectorAll<HTMLElement>("[data-slot=collapsible-content]"),
+  ).flatMap((rows) =>
+    within(rows)
+      .getAllByRole("button")
+      .map((b) => b.textContent ?? ""),
+  );
+}
+
 function headingsWith(container: HTMLElement) {
   return Array.from(container.querySelectorAll("section")).map((section) => ({
     group: section.querySelector("h3")?.textContent,
-    items: Array.from(section.querySelectorAll("button.wb-scene")).map(
-      (b) => b.textContent,
-    ),
+    items: rowsOf(section),
   }));
 }
 
@@ -128,9 +144,7 @@ function edit(el: HTMLElement, value: string) {
 }
 
 function rowTitles(container: HTMLElement) {
-  return Array.from(container.querySelectorAll("button.wb-scene")).map(
-    (b) => b.textContent,
-  );
+  return rowsOf(container);
 }
 
 test("the filter matches the title, the id and the group", () => {
@@ -179,7 +193,7 @@ test("the handle moves the cursor and picks; the current scene is not picked aga
   act(() => handle.current?.move(1));
   // The end of the list stops the cursor.
   act(() => handle.current?.move(1));
-  expect(view.container.querySelector(".wb-scene-cursor")?.textContent).toBe(
+  expect(view.container.querySelector("[data-cursor]")?.textContent).toBe(
     "Cloud one",
   );
   expect(handle.current?.pickCursor()).toBe(true);
@@ -256,4 +270,55 @@ test("after the filter is cleared, the cursor is on the current scene again", ()
   edit(filter, "");
   expect(filter.getAttribute("aria-activedescendant")).toBe("wb-scene-i1");
   expect(handle.current?.pickCursor()).toBe(false);
+});
+
+test("a group's heading shows its count, and its name stays the button's name", () => {
+  const view = render(
+    <SceneList scenes={scenes} current="i1" onPick={() => {}} />,
+  );
+  const install = view.getByRole("button", { name: "Install" });
+  expect(install.getAttribute("data-count")).toBe("2");
+  edit(view.getByLabelText("Filter scenes"), "two");
+  expect(
+    view.getByRole("button", { name: "Install" }).getAttribute("data-count"),
+  ).toBe("1/2");
+});
+
+test("the clear button empties the filter and puts the focus back in it", () => {
+  const view = render(
+    <SceneList scenes={scenes} current="i1" onPick={() => {}} />,
+  );
+  expect(view.queryByRole("button", { name: "Clear the filter" })).toBeNull();
+  const filter = view.getByLabelText("Filter scenes") as HTMLInputElement;
+  edit(filter, "cloud");
+  fireEvent.click(view.getByRole("button", { name: "Clear the filter" }));
+  expect(filter.value).toBe("");
+  expect(document.activeElement).toBe(filter);
+  expect(rowTitles(view.container)).toEqual([
+    "Install one",
+    "Install two",
+    "Cloud one",
+  ]);
+});
+
+test("the list is drawn with the app's components", () => {
+  const view = render(
+    <SceneList scenes={scenes} current="i1" onPick={() => {}} />,
+  );
+  const filter = view.getByLabelText("Filter scenes");
+  expect(filter.closest("[data-slot=input-group]")).not.toBeNull();
+  expect(
+    view.getByText("Collapse all").closest("[data-slot=button]"),
+  ).not.toBeNull();
+  expect(
+    view.getByRole("button", { name: "Connected" }).getAttribute("data-slot"),
+  ).toBe("collapsible-trigger");
+  const row = view.getByText("Install one");
+  expect(row.getAttribute("data-slot")).toBe("item");
+  expect(row.tagName).toBe("BUTTON");
+  // The current scene has the app's muted fill; the others have none until hovered.
+  expect(row.classList.contains("bg-muted")).toBe(true);
+  expect(view.getByText("Install two").classList.contains("bg-muted")).toBe(
+    false,
+  );
 });

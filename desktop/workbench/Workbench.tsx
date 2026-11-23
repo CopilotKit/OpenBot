@@ -1385,8 +1385,8 @@ export function WorkbenchLoaded({
           return;
         case " ": {
           // A scene row is a button, but Space on it plays: a click on it again would start the scene over.
-          const row = (target as HTMLElement | null)?.classList?.contains(
-            "wb-scene",
+          const row = (target as HTMLElement | null)?.matches?.(
+            "[data-scene], .wb-scene",
           );
           if (pressable(target) && !row) return;
           event.preventDefault();
