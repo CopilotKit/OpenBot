@@ -205,7 +205,7 @@ export function SettingsChangeRows({
               <dd className="flex flex-col gap-1 text-sm">
                 <span
                   className={cn(
-                    "break-words text-muted-foreground",
+                    "whitespace-pre-line break-words text-muted-foreground",
                     row.before !== null && "line-through decoration-1",
                   )}
                   data-value="before"
@@ -218,7 +218,7 @@ export function SettingsChangeRows({
                 />
                 <span
                   className={cn(
-                    "break-words font-medium",
+                    "whitespace-pre-line break-words font-medium",
                     proposed && "text-foreground/80",
                   )}
                   data-value="after"
@@ -311,6 +311,8 @@ export function SettingsChangeCard({
   children?: ReactNode;
 }) {
   const badge = STATE[state];
+  // Nothing under the header yet (a change still running): the header is the whole card.
+  const body = Boolean(reason || change || children || link);
   return (
     <figure
       aria-busy={state === "running"}
@@ -318,7 +320,12 @@ export function SettingsChangeCard({
       data-settings-card
       data-state={state}
     >
-      <figcaption className="flex items-start gap-3 border-border border-b px-4 py-3">
+      <figcaption
+        className={cn(
+          "flex items-start gap-3 px-4 py-3",
+          body && "border-border border-b",
+        )}
+      >
         <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background">
           <Icon aria-hidden className="size-4 text-muted-foreground" />
         </div>
@@ -332,31 +339,33 @@ export function SettingsChangeCard({
           ) : null}
         </div>
       </figcaption>
-      <div className="flex flex-col gap-3 px-4 py-3">
-        {reason ? (
-          <p
-            className={cn(
-              "text-sm",
-              state === "failed" || state === "refused"
-                ? "text-foreground"
-                : "text-muted-foreground",
-            )}
-            role={state === "failed" ? "alert" : "status"}
-          >
-            {reason}
-          </p>
-        ) : null}
-        {change ? <SettingsChangeRows change={change} state={state} /> : null}
-        {children}
-        {link ? (
-          <Link
-            className="self-start text-sm underline underline-offset-2 hover:text-foreground/80"
-            to={link.to as never}
-          >
-            {link.label}
-          </Link>
-        ) : null}
-      </div>
+      {body ? (
+        <div className="flex flex-col gap-3 px-4 py-3">
+          {reason ? (
+            <p
+              className={cn(
+                "text-sm",
+                state === "failed" || state === "refused"
+                  ? "text-foreground"
+                  : "text-muted-foreground",
+              )}
+              role={state === "failed" ? "alert" : "status"}
+            >
+              {reason}
+            </p>
+          ) : null}
+          {change ? <SettingsChangeRows change={change} state={state} /> : null}
+          {children}
+          {link ? (
+            <Link
+              className="self-start text-sm underline underline-offset-2 hover:text-foreground/80"
+              to={link.to as never}
+            >
+              {link.label}
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
     </figure>
   );
 }
