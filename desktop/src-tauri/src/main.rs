@@ -9,6 +9,7 @@ mod desktop_connection;
 mod desktop_host_access;
 mod desktop_move;
 mod desktop_page;
+mod desktop_reload;
 mod desktop_stall;
 mod desktop_status;
 mod desktop_telemetry;
@@ -8932,6 +8933,75 @@ mod app_page_tests {
         assert!(desktop_page::QUIT_SHORTCUT_PAGE.contains("\"plugin:openbot-desktop|quit\""));
     }
 
+    /**
+    Found in dogfooding: the app had no reload, and Command-R did nothing. View → Reload, with
+    Command-R, loads OpenBot's page again: on this computer (OpenBot (Self-Contained)) and through
+    the relay (OpenBot Cloud). Never the setup screens, which a reload would throw back mid-install,
+    and never another page the window shows. The page keeps itself when a field holds what the person
+    typed (`reload-page.js`, tested in `reloadPage.test.ts`).
+    */
+    #[test]
+    fn view_reload_reloads_openbots_page_and_never_setup() {
+        use desktop_reload::Reloaded;
+        let (app, window) = app();
+        let setup = if cfg!(windows) {
+            "http://tauri.localhost/"
+        } else {
+            "tauri://localhost/"
+        };
+        *app.state::<Shell>().setup_url.lock().unwrap() = Some(setup.into());
+        let on = |url: &str| {
+            window.navigate(url.parse().unwrap()).unwrap();
+            let reloaded = desktop_reload::reload(app.handle());
+            assert_eq!(
+                window.url().unwrap().as_str(),
+                url,
+                "Reload never moves the window"
+            );
+            reloaded
+        };
+
+        // Mid-setup: left as it is.
+        assert_eq!(on(setup), Reloaded::NotOpenBot);
+        // A page on another loopback port: left as it is.
+        assert_eq!(on("http://127.0.0.1:3011/"), Reloaded::NotOpenBot);
+        // OpenBot (Self-Contained), the OpenBot this computer runs.
+        trust_owned_app(app.handle(), "http://127.0.0.1:3010");
+        assert_eq!(on("http://127.0.0.1:3010/channel/c1"), Reloaded::Asked);
+        // OpenBot Cloud, through the relay.
+        desktop_connected::showing_for_test(app.handle(), "http://127.0.0.1:4410");
+        assert_eq!(on("http://127.0.0.1:4410/"), Reloaded::Asked);
+
+        // The page is told what Reload asks, as it loads (read as text: the real webview and
+        // AppKit's menus can't be built here).
+        let main = include_str!("main.rs");
+        let at = |pieces: &[&str]| main.find(&pieces.concat()).unwrap();
+        let page_load = &main[at(&[".on_page_load(", "|window, payload| {"])..];
+        let page_load = &page_load[..page_load.find("\n        })").unwrap()];
+        assert!(page_load.contains("let _ = window.eval(desktop_reload::PAGE);"));
+        assert!(desktop_reload::PAGE.contains("window.__openbotReload = "));
+        // In the View menu, first, with Command-R, and chosen there it reloads.
+        let menus = &main[at(&["\nfn install", "_menus"])..];
+        let view = &menus[menus.find("\"View\",").expect("a View menu")..];
+        let first = &view[view.find("&MenuItem::with_id(").unwrap()..];
+        let first = &first[..first.find(")?").unwrap()];
+        assert!(
+            first.contains("desktop_reload::MENU_ID")
+                && first.contains("desktop_reload::MENU_LABEL")
+                && first.contains("Some(desktop_reload::MENU_ACCELERATOR)"),
+            "{first}"
+        );
+        assert_eq!(desktop_reload::MENU_LABEL, "Reload");
+        assert_eq!(desktop_reload::MENU_ACCELERATOR, "CmdOrCtrl+R");
+        assert!(main.contains(
+            &[
+                "        desktop_reload::MENU_ID => {\n",
+                "            desktop_reload::reload(app);"
+            ]
+            .concat()
+        ));
+    }
+
     /// "The text is too small and you can't zoom in." The window now zooms as a browser does: the
     /// View menu on macOS and Linux, and the page's own shortcut (`zoom-shortcut.js`) for what no
     /// menu carries, every key on Windows and Command and + on macOS, which the setup screens and
@@ -13354,6 +13424,9 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         "quit" => {
             app.exit(0);
         }
+        desktop_reload::MENU_ID => {
+            desktop_reload::reload(app);
+        }
         other => {
             if let Some(step) = zoom::Step::of_menu(other) {
                 zoom_windows(app, step);
@@ -13891,13 +13964,22 @@ fn install_menus<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
      *
      * The page zooms as a browser's does, in the order and with the keys a Mac's View menu has
      * them. Items of our own, not the predefined zoom items: those ask the first responder, and a
-     * web view has no zoom of its own to answer them. See `zoom`.
+     * web view has no zoom of its own to answer them. See `zoom`. Reload first, as a browser's View
+     * menu has it: OpenBot's page loaded again, never the setup screens (`desktop_reload`).
      */
     let view = Submenu::with_items(
         app,
         "View",
         true,
         &[
+            &MenuItem::with_id(
+                app,
+                desktop_reload::MENU_ID,
+                desktop_reload::MENU_LABEL,
+                true,
+                Some(desktop_reload::MENU_ACCELERATOR),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(
                 app,
                 zoom::MENU_ACTUAL_SIZE,
@@ -14506,6 +14588,8 @@ fn main() {
                     window.app_handle(),
                     payload.url(),
                 )));
+                // What View → Reload would lose, and the reload (`desktop_reload`).
+                let _ = window.eval(desktop_reload::PAGE);
             }
             // Ctrl+Q quits, as the tray says. Windows only: no menu there carries the shortcut.
             if cfg!(target_os = "windows") && page != WindowPage::Other {

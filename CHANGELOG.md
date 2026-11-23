@@ -326,6 +326,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `nodeName`, which started the run past the model, so a call left in the thread ran with the
   arguments it carried. On the ADK and Strands harnesses: `injectA2UITool`, which added a tool and
   could take a granted one away. Each harness now ignores them.
+- **OpenBot Desktop has Reload.** View → Reload, or Command-R on a Mac (Ctrl+R on Linux), loads
+  OpenBot's page again, on OpenBot (Self-Contained) and on OpenBot Cloud. It never reloads the setup
+  screens, and while a field holds something you typed, it leaves the page as it is.
 - **A Bot's command is no longer refused as "not saved", and the Bot gets what it printed.** Every
   command a Bot runs is checked against its conversation first, and that check read only the saved
   copy, which can trail the conversation on screen by several seconds on a busy day. Every command
