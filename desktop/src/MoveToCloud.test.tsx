@@ -264,6 +264,30 @@ test("the question shows at once without the size, and the size joins it once me
 });
 
 /*
+ * FOUND IN A MAC UPGRADE CHECK of 1.2: the choice and the next screen said two sizes for what the
+ * move removes. Offered over the OpenBot running here, nothing starts or updates between them, so
+ * the next screen says the figure the choice said, however its own measure rounds.
+ */
+test("offered over OpenBot running, the next screen says the size the choice said", async () => {
+  selfContainedRunning({ due: true });
+  answers.move_preview = { ...PREVIEW, footprintBytes: GB + 120_000_000 };
+  const view = await launch();
+  await view.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+  const cloud = view.getByRole("radio", { name: /^OpenBot Cloud/ });
+  expect(cloud.closest("label")?.textContent).toContain(
+    "This removes about 18.4 GB of OpenBot files from this computer.",
+  );
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await view.findByText("3 Bots");
+  expect(
+    view.getByText(
+      /Removes about 18\.4 GB of OpenBot files\. Nothing is removed/,
+    ),
+  ).toBeTruthy();
+  expect(document.body.textContent).not.toContain("18.5 GB");
+});
+
+/*
  * A company that wants OpenBot on its own cloud learns it can, on the move screen too: OpenBot for
  * Business, between OpenBot Cloud and OpenBot (Self-Contained), as the first screen draws it. It
  * books a demo and moves nothing. Before, the move screen offered only the other two.
