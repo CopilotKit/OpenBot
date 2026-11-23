@@ -69,7 +69,9 @@ test("a screen that fails to draw shows OpenBot hit a problem, with Reload and t
     expect(reported()).toContainEqual(
       expect.objectContaining({
         kind: "screen failed to draw",
-        message: expect.stringContaining("Objects are not valid as a React child"),
+        message: expect.stringContaining(
+          "Objects are not valid as a React child",
+        ),
       }),
     ),
   );
@@ -93,7 +95,9 @@ test("uncaught errors and unhandled rejections go to the log, once each", async 
   };
   rejection.reason = { said: "OpenBot couldn't reach its server." };
   window.dispatchEvent(rejection);
-  const ours = reported().filter((call) => call.kind !== "screen failed to draw");
+  const ours = reported().filter(
+    (call) => call.kind !== "screen failed to draw",
+  );
   expect(ours).toEqual([
     expect.objectContaining({
       kind: "uncaught error",
