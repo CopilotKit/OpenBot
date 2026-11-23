@@ -446,9 +446,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **TrustedRouter as an AI connection, and the AI provider in answers can gain values.**
   `PUT /api/v2/organizations/{organizationId}/ai-connection` (`replaceAiConnection`) takes
   `provider: trustedrouter` with `login: endpoint`, an address and a key, like `unbiased`. In
-  answers, `provider` is now declared open (`x-extensible-enum`, `AiConnectionProviderAnswer`), so
-  a script that reads it should show a provider it doesn't know by its id rather than fail. A
-  request still names one of the closed `AiConnectionProvider` list.
+  answers, the provider is now declared open (`x-extensible-enum`, `AiConnectionProviderAnswer`):
+  the organization's and a person's AI connection, a person's `signIns`, and a sign-in. A script
+  that reads one should show a provider it doesn't know by its id rather than fail. A request still
+  names one of the closed `AiConnectionProvider` list.
 - New optional fields: `organizationId` on a conversation event and on a Recorder connection, and
   `hostedSignIn` on `deployment`, true where people sign in through OpenBot by CopilotKit's own
   sign-in, starting at `/api/auth/hosted/sign-in`.

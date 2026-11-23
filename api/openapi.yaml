@@ -27004,7 +27004,7 @@ components:
         provider:
           description: The organization's provider. Null while it has none.
           oneOf:
-            - $ref: '#/components/schemas/AiConnectionProvider'
+            - $ref: '#/components/schemas/AiConnectionProviderAnswer'
             - type: 'null'
     PersonalAiConnection:
       type: object
@@ -27038,7 +27038,7 @@ components:
           type: array
           description: 'The providers the server can sign the person in to itself (startPersonalAiSignIn): a ChatGPT plan (openai), a Claude plan (anthropic), Google and xAI sign-ins, and Unbiased AI, each where this server is set up for it. Each still connects with a key or an address too, and every provider not listed connects only that way.'
           items:
-            $ref: '#/components/schemas/AiConnectionProvider'
+            $ref: '#/components/schemas/AiConnectionProviderAnswer'
     AiSignInInput:
       type: object
       additionalProperties: false
@@ -27076,7 +27076,7 @@ components:
           pattern: ^[A-Za-z0-9_-]+$
           description: The sign-in's id, for reading where it stands.
         provider:
-          $ref: '#/components/schemas/AiConnectionProvider'
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
         url:
           type: string
           format: uri
@@ -27116,7 +27116,7 @@ components:
           maxLength: 4096
           pattern: ^[A-Za-z0-9_-]+$
         provider:
-          $ref: '#/components/schemas/AiConnectionProvider'
+          $ref: '#/components/schemas/AiConnectionProviderAnswer'
         status:
           type: string
           x-extensible-enum:

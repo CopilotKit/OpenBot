@@ -100,6 +100,7 @@ import type {
   AiConnectionInput,
   AiConnectionLogin,
   AiConnectionProvider,
+  AiConnectionProviderAnswer,
   AiSignIn,
   AiSignInInputMethod,
 } from "@/lib/api/generated/model";
@@ -144,11 +145,11 @@ export type ChooserMode =
        * for them and can use now, which they can share without signing in again.
        */
       share?: {
-        signIns: readonly AiConnectionProvider[];
+        signIns: readonly AiConnectionProviderAnswer[];
         mine: AiConnection | null;
       };
     }
-  | { kind: "personal"; signIns: readonly AiConnectionProvider[] };
+  | { kind: "personal"; signIns: readonly AiConnectionProviderAnswer[] };
 
 export type ChooserSurface = "dialog" | "card";
 

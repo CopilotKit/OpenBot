@@ -143,7 +143,7 @@ export function loginsHere(
  */
 export function personalLogins(
   provider: AiProvider,
-  signIns: readonly AiConnectionProvider[],
+  signIns: readonly AiConnectionProviderAnswer[],
 ): AiConnectionLogin[] {
   const signIn = signIns.includes(provider.id)
     ? provider.logins.find((login) => login === "plan" || login === "oauth")
@@ -170,7 +170,7 @@ const SHAREABLE: readonly AiConnectionProvider[] = [
  */
 export function sharedLogins(
   provider: AiProvider,
-  signIns: readonly AiConnectionProvider[],
+  signIns: readonly AiConnectionProviderAnswer[],
 ): AiConnectionLogin[] {
   return SHAREABLE.includes(provider.id)
     ? personalLogins(provider, signIns)
