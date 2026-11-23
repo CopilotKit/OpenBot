@@ -37,7 +37,8 @@ import { BUSINESS_SUMMARY, CloudMarks, HostingMark } from "./Welcome";
 
 /**
  * Whether this window offers the move to OpenBot Cloud, as the shell answers `move_offer`. `due`:
- * OpenBot is set up and runs on this computer, and the person has never answered. `fromSettings`:
+ * OpenBot is set up and runs on this computer, and the person has never answered, or kept OpenBot
+ * here after a move that failed and the app has updated since (once). `fromSettings`:
  * Settings' "Move to OpenBot Cloud" sent the window here, answered once. `footprintBytes`: what
  * OpenBot's own files take on this computer now, which the move removes, or null when it couldn't
  * be measured. The finished move's `removedBytes` counts the same files the same way.
@@ -304,7 +305,8 @@ type Screen =
  * offered once after an update, or opened from Settings.
  *
  * 1. The choice: OpenBot Cloud, recommended and picked to begin with, or keep everything here. With
- *    the space the move frees. Keep is recorded and never asked again (`onKeep`). Between them,
+ *    the space the move frees. Keep is recorded and not asked again at launch, except once after the
+ *    next update when it followed a failed move (`onKeep`). Between them,
  *    OpenBot for Business as the first screen draws it, which books a demo (`BusinessBooker`) and
  *    moves nothing: while it is picked there is no Continue and no Keep.
  * 2. What moves, from the OpenBot running here (`move_preview`), and the app connections that can't

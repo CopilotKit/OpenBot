@@ -5031,6 +5031,77 @@ describe("the move to OpenBot Cloud, due at a launch that would update OpenBot",
       view.queryByRole("heading", { name: "Move to OpenBot Cloud" }),
     ).toBeNull();
   });
+
+  /*
+   * FOUND ON 1.2.0-rc.2: the move failed its last check, the person kept OpenBot here, and the next
+   * release never asked again. The shell keeps a Keep that followed a failed move, and says the move
+   * is due at the first launch of another release (main.rs,
+   * `a_keep_after_a_failed_move_is_offered_again_after_an_update`). The window asks it then as it
+   * asked the first time, before anything starts.
+   */
+  test("a Keep after a failed move: the launch after the update asks again", async () => {
+    // One release: the move fails its check, and the person keeps OpenBot here.
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-again",
+      localStatus("ready", "valid"),
+    );
+    withOlderDeployment({ from: "v0.3.0", to: "v0.3.1", moved: true });
+    const preview = withMoveDue();
+    const due = invokeHandler;
+    invokeHandler = async (command, args) => {
+      if (command === "move_to_cloud")
+        throw {
+          said: "Some of your things didn't arrive in OpenBot Cloud, so OpenBot stays on this computer. Try again.",
+          detail: "OpenBot Cloud's check didn't match; messages: 1331 of 1369",
+          kind: "move-mismatch",
+        };
+      return due(command, args);
+    };
+    const first = await renderApp();
+    await first.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    await userEvent.click(first.getByRole("button", { name: "Continue" }));
+    await act(async () =>
+      preview.resolve({
+        counts: [{ kind: "bots", count: 3 }],
+        apps: [],
+        footprintBytes: 20_200_000_000,
+        modelKeysAvailable: false,
+      }),
+    );
+    await first.findByText("3 Bots");
+    await userEvent.click(
+      first.getByRole("button", { name: "Move to OpenBot Cloud" }),
+    );
+    await first.findByRole("heading", { name: "Not everything arrived" });
+    await userEvent.click(
+      first.getByRole("button", { name: "Keep OpenBot on this computer" }),
+    );
+    await waitFor(() =>
+      expect(
+        invokeCalls.some((call) => call.command === "keep_self_contained"),
+      ).toBe(true),
+    );
+    const commands = invokeCalls.map((call) => call.command);
+    expect(commands.indexOf("move_to_cloud")).toBeLessThan(
+      commands.indexOf("keep_self_contained"),
+    );
+    first.unmount();
+    invokeCalls = [];
+
+    // The next release's first launch: the shell says the move is due again.
+    setupConnectedLocalStack(
+      "/tmp/local-eval-move-again",
+      localStatus("ready", "valid"),
+    );
+    withOlderDeployment(() => new Promise(() => {}));
+    withMoveDue();
+    const next = await renderApp();
+    await next.findByRole("heading", { name: "Move to OpenBot Cloud?" });
+    expect(startsOrUpdates()).toEqual([]);
+    expect(
+      invokeCalls.some((call) => call.command === "keep_self_contained"),
+    ).toBe(false);
+  });
 });
 
 /*

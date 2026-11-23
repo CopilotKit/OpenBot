@@ -27735,6 +27735,124 @@ fn main() {
         assert!(ended.is_err());
         assert_eq!(window.url().unwrap().as_str(), setup);
     }
+
+    /// OpenBot Desktop at `release`, launched on the OpenBot installed at `root`, its answers in
+    /// `config`: a later launch of the same computer is another app over the same folders.
+    fn launched_at(
+        root: &Path,
+        config: &Path,
+        release: &str,
+    ) -> tauri::App<tauri::test::MockRuntime> {
+        use openbot_desktop_lib::connected::credentials;
+        let shell = Shell::default();
+        remember_selected_root(&shell, root);
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        context.package_info_mut().version = release.parse().unwrap();
+        let app = tauri::test::mock_builder()
+            .manage(shell)
+            .build(context)
+            .unwrap();
+        desktop_connected::use_for_test(
+            app.handle(),
+            config.to_path_buf(),
+            credentials::Store::of(keyring_core::mock::Store::new().unwrap()),
+        );
+        app
+    }
+
+    /// Whether the setup window, asking as it does at launch in a build that offers OpenBot Cloud,
+    /// is told the move is due.
+    fn move_due(app: &tauri::App<tauri::test::MockRuntime>) -> bool {
+        let offer = tauri::async_runtime::block_on(desktop_move::move_offer(
+            app.handle().clone(),
+            Some(true),
+        ));
+        serde_json::to_value(offer).unwrap()["due"] == serde_json::json!(true)
+    }
+
+    fn keep(app: &tauri::App<tauri::test::MockRuntime>) {
+        tauri::async_runtime::block_on(desktop_move::keep_self_contained(app.handle().clone()))
+            .unwrap();
+    }
+
+    /// A move that ended with a problem of `kind`, as `move_to_cloud` ends.
+    fn move_ended(app: &tauri::App<tauri::test::MockRuntime>, kind: &'static str) {
+        let mut problem = Problem::with("The move didn't finish.", "for the log".to_owned());
+        problem.kind = Some(kind);
+        desktop_move::note_outcome(app.handle(), &Err(problem));
+    }
+
+    /*
+    FOUND ON 1.2.0-rc.2: the person's move failed its last check five times ("messages: 1331 of
+    1369"). They quit, the move was offered again at the next launch, and they chose Keep to get back
+    to work. 1.2.0-rc.3 fixed the move and said "offer: due false": Keep was on record, so it never
+    offered the move again, and they couldn't find it. A Keep that followed a failed move is offered
+    again at the first launch after an update, once. A plain Keep is not, a finished move never is,
+    and Settings offers the move as it did.
+    */
+    #[test]
+    fn a_keep_after_a_failed_move_is_offered_again_after_an_update() {
+        let base = temp_root("move-offer-again");
+        let root = base.join("OpenBot");
+        write_installed_deployment(&root);
+        let own = upgrade::own();
+        deployment::record(&root, &own.version, own.pinned).unwrap();
+
+        // rc.2: offered, the move fails its check, then Keep.
+        let config = base.join("after-failure");
+        let rc2 = launched_at(&root, &config, "1.2.0-rc.2");
+        assert!(move_due(&rc2), "offered at first");
+        move_ended(&rc2, "move-mismatch");
+        assert!(move_due(&rc2), "a failed move is no answer");
+        keep(&rc2);
+        assert!(!move_due(&rc2), "not again in the same release");
+        assert!(desktop_move::offered_in_settings(rc2.handle()));
+        drop(rc2);
+        // rc.3, after the update: offered again.
+        let rc3 = launched_at(&root, &config, "1.2.0-rc.3");
+        assert!(move_due(&rc3), "offered again after the update");
+        assert!(move_due(&rc3), "until it is answered");
+        // Keep again: it sticks, in the next release too.
+        keep(&rc3);
+        assert!(!move_due(&rc3));
+        drop(rc3);
+        let released = launched_at(&root, &config, "1.2.0");
+        assert!(!move_due(&released), "offered again once, not every update");
+        assert!(desktop_move::offered_in_settings(released.handle()));
+        drop(released);
+
+        // A plain Keep, or one after a sign-in that didn't finish: never offered again at launch.
+        for (name, ended) in [("plain", None), ("sign-in", Some("sign-in"))] {
+            let config = base.join(name);
+            let rc2 = launched_at(&root, &config, "1.2.0-rc.2");
+            if let Some(kind) = ended {
+                move_ended(&rc2, kind);
+            }
+            keep(&rc2);
+            drop(rc2);
+            let rc3 = launched_at(&root, &config, "1.2.0-rc.3");
+            assert!(
+                !move_due(&rc3),
+                "{name}: a Keep with no failed move before it sticks"
+            );
+            assert!(desktop_move::offered_in_settings(rc3.handle()));
+        }
+
+        // A finished move, after failed ones: never offered again, at launch or in Settings.
+        let config = base.join("moved");
+        let rc2 = launched_at(&root, &config, "1.2.0-rc.2");
+        move_ended(&rc2, "move-mismatch");
+        keep(&rc2);
+        move_ended(&rc2, "move-failed");
+        openbot_desktop_lib::move_to_cloud::record_moved(&config).unwrap();
+        drop(rc2);
+        let rc3 = launched_at(&root, &config, "1.2.0-rc.3");
+        assert!(!move_due(&rc3), "a finished move is never offered again");
+        assert!(!desktop_move::offered_in_settings(rc3.handle()));
+        drop(rc3);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
 
 /**
