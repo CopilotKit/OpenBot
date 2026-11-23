@@ -146,9 +146,9 @@ export function HelpRequestCard({
     >
       <ItemMedia variant="icon">
         {ended.done ? (
-          <IconCircleCheck className="text-emerald-600 dark:text-emerald-400" />
+          <IconCircleCheck className="text-success" />
         ) : (
-          <IconAlertTriangle className="text-amber-600 dark:text-amber-400" />
+          <IconAlertTriangle className="text-warning" />
         )}
       </ItemMedia>
       <ItemContent>

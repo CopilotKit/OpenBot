@@ -61,7 +61,7 @@ export function ComputerTerminal({ computerId }: { computerId: string }) {
         ) : null}
       </div>
       <div
-        className={`flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 ${driving ? "bg-amber-500/10" : ""}`}
+        className={`flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 ${driving ? "bg-warning/10" : ""}`}
       >
         {driving ? (
           <span className="text-sm">

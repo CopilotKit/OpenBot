@@ -49,15 +49,15 @@ function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
   if (lastRun.status === "skipped") {
     return {
       text: `Skipped ${when}`,
-      className: "text-amber-600 dark:text-amber-500",
-      dot: "bg-amber-500",
+      className: "text-warning",
+      dot: "bg-warning",
     };
   }
   if (lastRun.status === "succeeded") {
     return {
       text: `Ran ${when}`,
       className: "text-muted-foreground",
-      dot: "bg-emerald-500",
+      dot: "bg-success",
     };
   }
   // An outcome this DTO doesn't recognise degrades to a neutral label rather than an invented
@@ -117,7 +117,7 @@ const RUN_STATUS: Record<
     dot: "animate-pulse bg-muted-foreground",
     className: "",
   },
-  succeeded: { text: "Succeeded", dot: "bg-emerald-500", className: "" },
+  succeeded: { text: "Succeeded", dot: "bg-success", className: "" },
   failed: {
     text: "Failed",
     dot: "bg-destructive",
@@ -125,8 +125,8 @@ const RUN_STATUS: Record<
   },
   skipped: {
     text: "Skipped",
-    dot: "bg-amber-500",
-    className: "text-amber-600 dark:text-amber-500",
+    dot: "bg-warning",
+    className: "text-warning",
   },
   waiting: { text: "Waiting for you", dot: "bg-sky-500", className: "" },
 };

@@ -745,11 +745,7 @@ export function StepStatus({
   if (step.refused)
     return <span className="shrink-0 text-destructive">Blocked</span>;
   if (step.failed)
-    return (
-      <span className="shrink-0 text-amber-600 dark:text-amber-500">
-        Didn't work
-      </span>
-    );
+    return <span className="shrink-0 text-warning">Didn't work</span>;
   return null;
 }
 

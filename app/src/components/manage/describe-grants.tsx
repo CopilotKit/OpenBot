@@ -184,7 +184,7 @@ function ActionRows<T extends ChangedAction>({
   );
 }
 
-const TURNS_OFF = "text-amber-600 dark:text-amber-500";
+const TURNS_OFF = "text-warning";
 const TURNS_ON = "text-foreground";
 
 /**

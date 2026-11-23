@@ -1,0 +1,203 @@
+# App guidelines
+
+What we have agreed about OpenBot's apps: the phone app (`mobile/`), and the web app and OpenBot
+Desktop (`app/`, `desktop/`). Read the part for the app you work on before you plan a screen or a
+feature for it.
+
+These are product guidelines: what each app is for, what it is built with, and what it leaves out.
+[Don't break the API or the database](api-and-migrations.md) holds the hard rules, and they come
+first.
+
+## Every app
+
+### One color scheme, used sparingly
+
+Every app draws with the same colors, and with few of them. This is strict: a change that breaks
+one of the rules below is not merged.
+
+The scheme is the set of tokens in [`tokens/src/scheme.ts`](../tokens/src/scheme.ts), each with a
+light and a dark value and what it means: `background`, `foreground`, `card`, `popover`, `primary`,
+`secondary`, `muted`, `accent`, `destructive`, `success`, `warning`, `border`, `input` and `ring`,
+and the chart and sidebar sets.
+
+- **Only the tokens.** No color value in a screen or a component: no hex, no `rgb()`, no `oklch()`.
+  No class from Tailwind's palette either (`bg-blue-500`, `text-amber-600`). Write `bg-background`,
+  `text-muted-foreground`, `border-border`. A tint is the token with an opacity: `bg-warning/10`.
+- **Mostly neutral.** A screen is background, cards, text, muted text and borders. Nothing is
+  colored to decorate it or to make it stand out.
+- **A color means one thing.** `destructive` is for what deletes or what failed. `success` is for
+  what worked, or is working. `warning` is for what needs the person: something waits on them, or
+  may not go as they expect. `ring` is for focus. If none of those is what you mean, the answer is
+  no color.
+- **The token has the dark value.** Write the class once. No `dark:` override of a color.
+- **Light and dark, both.** A token carries both values, so a screen drawn with tokens has both.
+  Check both before you ask for a review.
+- **A new color is a change to the scheme.** If a screen needs a color the scheme doesn't have,
+  agree it first. Then it becomes a token in `tokens/src/scheme.ts`, with a light and a dark value
+  and what it means, for every app. It is never added in one app only.
+- **A color is never renamed or removed.** A customer's theme sets the scheme's colors by name, so a
+  name the scheme drops leaves their theme doing nothing. Change its value instead.
+
+### Where the scheme lives
+
+[`tokens/`](../tokens) (`@openbot/tokens`) is the one source. Every app that can't import it keeps a
+copy, and the copies are written, never edited:
+
+| Copy | Written as |
+| --- | --- |
+| `app/src/theme.css` (the web app, and the Recorder's pages, which import it) | CSS custom properties, light in `:root` and dark in `.dark` |
+| `desktop/src/styles.css`, `desktop/src-tauri/src/connected/sign_in.rs` (OpenBot Desktop's setup window and sign-in page) | CSS custom properties, the tokens each uses |
+| `desktop/src-tauri/src/first_paint.rs` (the window's color before the page draws) | RGB |
+| `mobile/src/scheme.ts` (the phone app) | Hex, since React Native draws no `oklch()` |
+
+To change a color: change it in `tokens/src/scheme.ts`, run `bun run tokens:generate`, and commit
+the scheme with every copy it rewrites. A copy inside a hand-written file sits between two marker
+comments (`tokens/src/scheme.ts, light: …` and `end of tokens/src/scheme.ts`); the generator writes
+only between them. A new copy is added to `tokens/src/targets.ts`.
+
+The tests that hold it, and what makes each fail. Fix the change, never the test:
+
+| Test | Fails when |
+| --- | --- |
+| [`tokens/tests/generated.test.ts`](../tokens/tests/generated.test.ts) | A copy isn't what the scheme writes: edited by hand, or the scheme changed without running the generator. |
+| [`app/tests/color-scheme.test.ts`](../app/tests/color-scheme.test.ts) | The web app has an amber or green class anywhere, or another palette class in a file that didn't already have one. |
+| [`app/tests/design-tokens.test.ts`](../app/tests/design-tokens.test.ts) | The surfaces stop going darkest to lightest, a menu's highlight matches its surface, or `theme.css` declares a token beyond the scheme's. |
+
+Two places don't keep these rules yet. Don't add to either:
+
+- A few web app files still draw with Tailwind's palette: decorative tones in onboarding, a
+  sidebar badge, a call button. The test lists them, and the list only gets shorter. Move a file's
+  colors to tokens and take it off the list.
+- The phone app's `src/colors.ts` takes its colors from the scheme but one: a blue for a tappable
+  word. The file goes as the screens move to the stack below.
+
+## The phone app
+
+### It is not a clone of the desktop app
+
+The phone app doesn't have to do everything the web app and OpenBot Desktop do. A screen on the
+desktop is not a reason to build the same screen on the phone.
+
+### For launch: the core Bot experience
+
+For launch, the phone app focuses on three things:
+
+- Bot screens
+- Conversations
+- Routines
+
+Before you start work on the phone app, check that it is part of one of the three. If it isn't, it
+is not launch work: raise it before you build it.
+
+### A Bot's computer is a tool call
+
+For now the phone app has no Computer screen. When a Bot uses its computer, the conversation shows
+it as a tool call. The Computer screen `mobile/` has today is not part of launch.
+
+### The stack
+
+The phone app's stack is what `mobile/` has today, plus the styling and components of
+[Better-T-Stack's native Uniwind template](https://www.better-t-stack.dev/new?fe-w=none&fe-n=native-uniwind&rt=none&be=none&api=none&db=none&orm=none&au=none&add=none).
+That template has no backend, no API layer, no database and no sign-in of its own, because ours
+stay.
+
+What `mobile/` has today, which stays:
+
+| Part | What we use |
+| --- | --- |
+| App | Expo with React Native and React 19, in TypeScript's strict mode. One app for iOS and Android. |
+| Screens | Expo Router: a file under `mobile/app/` is a screen. |
+| The API | A client generated from `api/openapi.yaml` by Orval, in `src/api/generated`. Never edited by hand: see [mobile/AGENTS.md](../mobile/AGENTS.md). |
+| Sign-in | Better Auth's Expo client. The session is kept in `expo-secure-store`. |
+| Notifications | `expo-notifications`. |
+| Builds | EAS. In development it runs as a development client (`expo-dev-client`), not in Expo Go. |
+| Packages | npm, with `mobile/package-lock.json`. The rest of the repository uses Bun. |
+
+What the template adds:
+
+| Part | What we use |
+| --- | --- |
+| Styling | [Uniwind](https://uniwind.dev): Tailwind CSS 4 classes on React Native components, written in `className`, as in the web app. |
+| The theme | `mobile/global.css`: the one stylesheet. It imports Tailwind, Uniwind and HeroUI Native's styles, and the color scheme, written into it from `tokens/`. |
+| Components | [HeroUI Native](https://github.com/heroui-inc/heroui-native): buttons, fields, sheets, dialogs and the rest, built on Uniwind. |
+| Under them | `react-native-reanimated`, `react-native-gesture-handler`, `react-native-keyboard-controller` and `react-native-svg`, which HeroUI Native's components need. |
+
+How we use it:
+
+- **Expo's SDK first, on its own.** `mobile/` is on Expo SDK 55 and the template on 58. Move
+  `mobile/` to the template's SDK in a change of its own, before any Uniwind work, so a problem
+  from the upgrade is never mistaken for one from the restyle. Keep to the newest SDK from then on.
+- **Add the template's parts to `mobile/`.** Don't generate a new app from it. Its drawer, tabs and
+  sample screens are not ours.
+- **Install with `npx expo install`,** so each package gets the version that fits our Expo SDK.
+- **Read the docs for the SDK we're on.** Expo renames and moves APIs between SDKs. Check the
+  version in `mobile/package.json` and read that version's docs before you use an Expo or React
+  Native API from memory.
+- **Style with `className`.** No `StyleSheet.create`, and no style object for something a class can
+  say.
+- **`src/ui.tsx` and `src/colors.ts` are the old way.** They are the hand-written styles the
+  screens use today. A screen moved to Uniwind stops using them, and they are deleted when the last
+  screen has moved.
+
+### What draws what
+
+The platform draws everything around a screen. HeroUI Native draws what is inside it.
+
+| What | Drawn by |
+| --- | --- |
+| Stacks, headers, titles, back buttons | Expo Router's native `Stack`, set in the route's layout or the screen's options. |
+| Tabs | Expo Router's native tabs. |
+| Header and toolbar buttons, header menus, search in the header | The native `Stack` toolbar and search bar. |
+| Sheets and modals | Expo Router's native presentations (`formSheet`, `modal`). |
+| Pickers, switches, sliders, system menus | `@expo/ui`, so they look and behave as the platform's own. |
+| Buttons, fields, cards, chips, alerts, and the rest of a screen's content | HeroUI Native. |
+| Long lists: conversations, messages, runs | A virtualized list (`FlatList`, or one built for chat). Never a `ScrollView` with a `map` inside. |
+
+- **Native chrome stays native.** Don't draw a header, a tab bar or a sheet yourself, even when
+  HeroUI Native could make one that looks the same. The native one gets each platform's look for
+  free, including iOS's glass material and Android's Material behavior, and keeps it as the
+  platforms change.
+- **Don't imitate glass.** No blur, gradient or translucent card to look like the system's
+  material. It comes from the native components or not at all.
+- **The lightest screen that works.** Use HeroUI Native's components, but only as many as the
+  screen needs. A screen can be text and one button. Add a card, a chip or an alert only when it
+  groups something, shows a state, or can be acted on.
+- **Use a component before you build one.** First one `mobile/` already has, then HeroUI
+  Native's. Build your own only when neither fits, and build it from the same tokens.
+- **Check what you can't typecheck.** Before you ask for a review of a screen, look at it on iOS
+  and on Android, in light and in dark, and with the keyboard open if it has a field. Say in the
+  pull request which of those you looked at.
+
+### The color scheme on the phone
+
+The rules under [One color scheme, used sparingly](#one-color-scheme-used-sparingly) hold here too.
+
+HeroUI Native has its own names for the tokens, and two of them mean something else than the web
+app's token of the same name. When Uniwind goes in, `mobile/global.css` takes the scheme under
+HeroUI Native's names, for light and for dark, written by `bun run tokens:generate`: add it to
+`tokens/src/targets.ts` with this mapping, rather than writing the values by hand. Until then the
+screens read `src/scheme.ts`. No other file in `mobile/` has a color value in it, but
+`src/colors.ts`'s one blue.
+
+| HeroUI Native token | Takes the scheme's |
+| --- | --- |
+| `background`, `foreground` | `background`, `foreground` |
+| `surface` | `card` |
+| `overlay` | `popover` |
+| `default` | `secondary` |
+| `muted` (a text color here) | `muted-foreground` |
+| `accent` (the main action here) | `primary` |
+| `danger` | `destructive` |
+| `success` | `success` |
+| `warning` | `warning` |
+| `border` | `border` |
+| `focus` | `ring` |
+
+## The web app and OpenBot Desktop
+
+Beyond the color scheme above, no product guidelines yet. How a screen is laid out, worded, and
+reads and writes its data is already written down, in the skills under `.claude/skills/`:
+
+- `openbot-screen-layout`: the default layout of a screen.
+- `openbot-copy`: the words and the voice of anything a person reads.
+- `openbot-data-access`: how the browser app reads and writes server data.

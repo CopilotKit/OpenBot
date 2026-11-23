@@ -299,12 +299,12 @@ export function StoppedIcon({
   return stopped.empty || stopped.kept || stopped.retrying ? (
     <IconAlertTriangle
       aria-hidden="true"
-      className={cn("text-amber-600 dark:text-amber-400", className)}
+      className={cn("text-warning", className)}
     />
   ) : (
     <IconCircleCheck
       aria-hidden="true"
-      className={cn("text-emerald-600 dark:text-emerald-400", className)}
+      className={cn("text-success", className)}
     />
   );
 }

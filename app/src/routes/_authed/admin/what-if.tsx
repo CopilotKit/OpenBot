@@ -173,10 +173,7 @@ function WhatIfPage() {
             {askProblem}
           </p>
         ) : unclear ? (
-          <p
-            className="text-amber-700 text-sm dark:text-amber-500"
-            data-what-if-unclear
-          >
+          <p className="text-warning text-sm" data-what-if-unclear>
             {unclear}
           </p>
         ) : null}

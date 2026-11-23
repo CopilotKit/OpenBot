@@ -714,7 +714,7 @@ function AppConnectionPage({
                       <Button size="sm" type="button" variant="outline">
                         <span
                           aria-hidden="true"
-                          className="size-1.5 rounded-full bg-emerald-500"
+                          className="size-1.5 rounded-full bg-success"
                         />
                         Connected
                         <IconChevronDown />
