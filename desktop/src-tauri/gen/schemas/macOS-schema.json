@@ -3051,6 +3051,18 @@
           "markdownDescription": "Enables the open_logs command without any pre-configured scope."
         },
         {
+          "description": "Enables the person_computer command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-person-computer",
+          "markdownDescription": "Enables the person_computer command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the person_computer_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-person-computer-stop",
+          "markdownDescription": "Enables the person_computer_stop command without any pre-configured scope."
+        },
+        {
           "description": "Enables the prepare_ai_connection command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-prepare-ai-connection",
@@ -3253,6 +3265,18 @@
           "type": "string",
           "const": "openbot-desktop:deny-open-logs",
           "markdownDescription": "Denies the open_logs command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the person_computer command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-person-computer",
+          "markdownDescription": "Denies the person_computer command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the person_computer_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-person-computer-stop",
+          "markdownDescription": "Denies the person_computer_stop command without any pre-configured scope."
         },
         {
           "description": "Denies the prepare_ai_connection command without any pre-configured scope.",

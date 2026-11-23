@@ -3223,6 +3223,7 @@ dependencies = [
  "base64 0.22.1",
  "block2",
  "bytes",
+ "core-graphics",
  "dirs",
  "ed25519-dalek",
  "flate2",

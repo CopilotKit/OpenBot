@@ -16,6 +16,7 @@ mod intelligence_bridge;
 mod key_menu;
 mod notice;
 mod outside_links;
+mod person_computer;
 mod zoom;
 
 #[cfg(test)]

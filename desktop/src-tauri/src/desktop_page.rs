@@ -37,6 +37,10 @@
 //! this computer, or at an address the app is connected to (`desktop_connected`). While it is
 //! connected, `status` answers the app's own facts only, and what is about an OpenBot on this
 //! computer (`restart`, `stop`, `intelligence`, `ai_connection`, `change_ai_connection`) is refused.
+//!
+//! And a Bot using this computer (`person_computer`, `person_computer_stop`): the main screen, the
+//! mouse and the keyboard, for a conversation whose person allowed it in this app's own dialog. A
+//! prototype, on macOS only. See `person_computer.rs`.
 
 use openbot_desktop_lib::{app_update, local_eval, local_eval_state, speech, stack};
 use tauri::Manager;
@@ -47,7 +51,7 @@ pub const PLUGIN: &str = "openbot-desktop";
 pub const QUIT_SHORTCUT_PAGE: &str = include_str!("quit-shortcut.js");
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 34] = [
+pub const PERMISSIONS: [&str; 36] = [
     "openbot-desktop:allow-connection",
     "openbot-desktop:allow-sign-out",
     "openbot-desktop:allow-change-connection",
@@ -82,6 +86,8 @@ pub const PERMISSIONS: [&str; 34] = [
     "openbot-desktop:allow-set-usage-data",
     "openbot-desktop:allow-quit",
     "openbot-desktop:allow-zoom",
+    "openbot-desktop:allow-person-computer",
+    "openbot-desktop:allow-person-computer-stop",
 ];
 
 /**
@@ -463,6 +469,26 @@ async fn zoom(app: tauri::AppHandle, step: crate::zoom::Step) {
     crate::zoom_windows(&app, step);
 }
 
+/**
+A Bot's action on this computer, for the conversation it was asked in, answered with the screen
+after it. The first action of a conversation asks the person in this app's own dialog. See
+`person_computer.rs`.
+*/
+#[tauri::command]
+async fn person_computer(
+    app: tauri::AppHandle,
+    action: crate::person_computer::Action,
+    conversation: crate::person_computer::Conversation,
+) -> Result<crate::person_computer::Screen, String> {
+    crate::person_computer::perform(app, action, conversation).await
+}
+
+/// Stop every Bot using this computer: each conversation asks again before its next action.
+#[tauri::command]
+async fn person_computer_stop() {
+    crate::person_computer::stop();
+}
+
 pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new(PLUGIN)
         .invoke_handler(tauri::generate_handler![
@@ -499,7 +525,9 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             connection,
             sign_out,
             change_connection,
-            set_organization
+            set_organization,
+            person_computer,
+            person_computer_stop
         ])
         .build()
 }

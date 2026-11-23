@@ -93,6 +93,10 @@ fn main() {
                     "sign_out",
                     "change_connection",
                     "set_organization",
+                    // A Bot using this computer's screen, mouse and keyboard, for a conversation
+                    // whose person allowed it. See `src/person_computer.rs`.
+                    "person_computer",
+                    "person_computer_stop",
                 ]),
             ),
     )
