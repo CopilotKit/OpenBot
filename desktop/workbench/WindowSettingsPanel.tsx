@@ -1,4 +1,15 @@
 import { useId, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field, FieldLabel, FieldTitle } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   APP_SIDEBARS,
   APP_SKINS,
@@ -62,6 +73,83 @@ function toRole(value: string): AppWindowSettings["role"] {
     : null;
 }
 
+/** A row: the name on the left, the control on the right. */
+const ROW = "grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-2 px-1";
+const ROW_LABEL = "text-xs font-normal text-muted-foreground";
+
+type Option = { value: string; label: string };
+
+/** One row with a label and a Select. The trigger shows the label of the value. */
+function SelectRow(props: {
+  label: string;
+  value: string;
+  options: readonly Option[];
+  onValue(value: string): void;
+}) {
+  const id = useId();
+  const shown = props.options.find((o) => o.value === props.value)?.label;
+  return (
+    <Field orientation="horizontal" className={ROW}>
+      <FieldLabel htmlFor={id} className={ROW_LABEL}>
+        {props.label}
+      </FieldLabel>
+      <Select
+        value={props.value}
+        onValueChange={(value) => props.onValue(String(value))}
+      >
+        <SelectTrigger id={id} size="sm" className="w-full">
+          <SelectValue>{shown}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {props.options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+const HOSTS: readonly Option[] = [
+  { value: "desktop", label: "OpenBot Desktop" },
+  { value: "browser", label: "Browser" },
+];
+
+const ROLES: readonly Option[] = [
+  { value: SCENE_ROLE, label: "As the scene says" },
+  { value: "member", label: "Member" },
+  { value: "admin", label: "Admin" },
+  { value: "owner", label: "Owner" },
+];
+
+const MOTIONS: readonly Option[] = [
+  { value: "still", label: "Still" },
+  { value: "real", label: "Real" },
+];
+
+const SKINS: readonly Option[] = [
+  { value: SCENE_ROLE, label: "As the scene says" },
+  ...APP_SKINS.map((skin) => ({ value: skin, label: SKIN_LABELS[skin] })),
+];
+
+const SIDEBARS: readonly Option[] = [
+  { value: SCENE_ROLE, label: "As the scene says" },
+  { value: "open", label: "Open" },
+  { value: "closed", label: "Closed" },
+];
+
+const OSES: readonly Option[] = [
+  { value: "mac", label: "Mac" },
+  { value: "windows", label: "Windows" },
+];
+
+const THEMES: readonly Option[] = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+];
+
 function AppFields(props: {
   app: AppWindowSettings;
   onAppChange?(patch: Partial<AppWindowSettings>): void;
@@ -70,82 +158,50 @@ function AppFields(props: {
   return (
     <>
       <h3>App</h3>
-      <label className="wb-prop">
-        <span>Host</span>
-        <select
-          value={app.host}
-          onChange={(event) =>
-            props.onAppChange?.({
-              host: event.target.value === "browser" ? "browser" : "desktop",
-            })
-          }
-        >
-          <option value="desktop">OpenBot Desktop</option>
-          <option value="browser">Browser</option>
-        </select>
-      </label>
-      <label className="wb-prop">
-        <span>Signed in as</span>
-        <select
-          value={app.role ?? SCENE_ROLE}
-          onChange={(event) =>
-            props.onAppChange?.({ role: toRole(event.target.value) })
-          }
-        >
-          <option value={SCENE_ROLE}>As the scene says</option>
-          <option value="member">Member</option>
-          <option value="admin">Admin</option>
-          <option value="owner">Owner</option>
-        </select>
-      </label>
-      <label className="wb-prop">
-        <span>Motion</span>
-        <select
-          value={app.motion}
-          onChange={(event) =>
-            props.onAppChange?.({
-              motion: event.target.value === "real" ? "real" : "still",
-            })
-          }
-        >
-          <option value="still">Still</option>
-          <option value="real">Real</option>
-        </select>
-      </label>
-      <label className="wb-prop">
-        <span>Skin</span>
-        <select
-          value={app.skin ?? SCENE_ROLE}
-          onChange={(event) =>
-            props.onAppChange?.({
-              skin: APP_SKINS.find((s) => s === event.target.value) ?? null,
-            })
-          }
-        >
-          <option value={SCENE_ROLE}>As the scene says</option>
-          {APP_SKINS.map((skin) => (
-            <option key={skin} value={skin}>
-              {SKIN_LABELS[skin]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="wb-prop">
-        <span>Sidebar</span>
-        <select
-          value={app.sidebar ?? SCENE_ROLE}
-          onChange={(event) =>
-            props.onAppChange?.({
-              sidebar:
-                APP_SIDEBARS.find((s) => s === event.target.value) ?? null,
-            })
-          }
-        >
-          <option value={SCENE_ROLE}>As the scene says</option>
-          <option value="open">Open</option>
-          <option value="closed">Closed</option>
-        </select>
-      </label>
+      <SelectRow
+        label="Host"
+        value={app.host}
+        options={HOSTS}
+        onValue={(value) =>
+          props.onAppChange?.({
+            host: value === "browser" ? "browser" : "desktop",
+          })
+        }
+      />
+      <SelectRow
+        label="Signed in as"
+        value={app.role ?? SCENE_ROLE}
+        options={ROLES}
+        onValue={(value) => props.onAppChange?.({ role: toRole(value) })}
+      />
+      <SelectRow
+        label="Motion"
+        value={app.motion}
+        options={MOTIONS}
+        onValue={(value) =>
+          props.onAppChange?.({ motion: value === "real" ? "real" : "still" })
+        }
+      />
+      <SelectRow
+        label="Skin"
+        value={app.skin ?? SCENE_ROLE}
+        options={SKINS}
+        onValue={(value) =>
+          props.onAppChange?.({
+            skin: APP_SKINS.find((s) => s === value) ?? null,
+          })
+        }
+      />
+      <SelectRow
+        label="Sidebar"
+        value={app.sidebar ?? SCENE_ROLE}
+        options={SIDEBARS}
+        onValue={(value) =>
+          props.onAppChange?.({
+            sidebar: APP_SIDEBARS.find((s) => s === value) ?? null,
+          })
+        }
+      />
     </>
   );
 }
@@ -160,14 +216,16 @@ function SizeInput(props: {
   min: number;
   max?: number;
   step?: number;
+  className?: string;
   value: number;
   onNumber(value: number): void;
 }) {
   const [text, setText] = useState<string | null>(null);
   return (
-    <input
+    <Input
       id={props.id}
       type="number"
+      className={props.className}
       aria-label={props.id ? undefined : props.label}
       min={props.min}
       max={props.max}
@@ -195,32 +253,36 @@ export function WindowSettingsPanel(props: WindowSettingsPanelProps) {
   const { value, fit } = props;
   const ids = useId();
   const zoomId = `${ids}-zoom`;
+  const activeId = `${ids}-active`;
   const gridId = `${ids}-grid`;
   const fitOn = fit?.on === true;
   const shownZoom =
     fitOn && fit ? Math.round(fit.zoom * 100) / 100 : value.zoom;
   return (
-    <section className="wb-window-panel">
+    <section>
       <h2>Window</h2>
-      <div className="wb-presets">
-        <button
-          type="button"
+      <div className="flex flex-wrap gap-2 px-1">
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => props.onChange({ width: 1000, height: 800 })}
         >
           1000 × 800
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => props.onChange({ width: 720, height: 560 })}
         >
           720 × 560
-        </button>
+        </Button>
       </div>
-      <div className="wb-prop">
-        <span>Size</span>
-        <div className="wb-size">
+      <Field orientation="horizontal" className={ROW}>
+        <FieldTitle className={ROW_LABEL}>Size</FieldTitle>
+        <div className="flex min-w-0 items-center gap-1 text-muted-foreground">
           <SizeInput
             label="Width"
+            className="h-7 min-w-0 flex-1 px-2"
             min={MIN_WIDTH}
             value={value.width}
             onNumber={(width) => props.onChange({ width })}
@@ -228,20 +290,24 @@ export function WindowSettingsPanel(props: WindowSettingsPanelProps) {
           <span aria-hidden="true">×</span>
           <SizeInput
             label="Height"
+            className="h-7 min-w-0 flex-1 px-2"
             min={MIN_HEIGHT}
             value={value.height}
             onNumber={(height) => props.onChange({ height })}
           />
         </div>
-      </div>
-      <div className="wb-prop">
-        <label htmlFor={zoomId}>Zoom</label>
-        <div className="wb-inline">
+      </Field>
+      <Field orientation="horizontal" className={ROW}>
+        <FieldLabel htmlFor={zoomId} className={ROW_LABEL}>
+          Zoom
+        </FieldLabel>
+        <div className="flex min-w-0 items-center gap-2">
           <SizeInput
             // A new fit value shows at once; a typed value stays while the field has the focus.
             key={fitOn ? `fit-${shownZoom}` : "zoom"}
             label="Zoom"
             id={zoomId}
+            className="h-7 w-24 px-2"
             min={0.5}
             max={2}
             step={0.1}
@@ -249,75 +315,70 @@ export function WindowSettingsPanel(props: WindowSettingsPanelProps) {
             onNumber={(zoom) => props.onChange({ zoom })}
           />
           {props.onFit && fit && (
-            <button
-              type="button"
+            <Button
+              variant="outline"
+              size="sm"
               aria-pressed={fitOn}
+              // Pressed looks like the outline button's open state.
+              className="aria-pressed:bg-muted aria-pressed:text-foreground"
               title="Zoom the window to fit the space"
               onClick={() => props.onFit?.(!fitOn)}
             >
               {fitOn ? `Fit (${Math.round(fit.zoom * 100)}%)` : "Fit"}
-            </button>
+            </Button>
           )}
         </div>
-      </div>
-      <label className="wb-prop">
-        <span>OS</span>
-        <select
-          value={value.os}
-          onChange={(event) =>
-            props.onChange({
-              os: event.target.value === "windows" ? "windows" : "mac",
-            })
-          }
-        >
-          <option value="mac">Mac</option>
-          <option value="windows">Windows</option>
-        </select>
-      </label>
-      <label className="wb-prop">
-        <span>Theme</span>
-        <select
-          value={value.theme}
-          onChange={(event) =>
-            props.onChange({
-              theme: event.target.value === "dark" ? "dark" : "light",
-            })
-          }
-        >
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-        </select>
-      </label>
-      <label className="wb-prop">
-        <span>Active</span>
-        <input
-          type="checkbox"
+      </Field>
+      <SelectRow
+        label="OS"
+        value={value.os}
+        options={OSES}
+        onValue={(os) =>
+          props.onChange({ os: os === "windows" ? "windows" : "mac" })
+        }
+      />
+      <SelectRow
+        label="Theme"
+        value={value.theme}
+        options={THEMES}
+        onValue={(theme) =>
+          props.onChange({ theme: theme === "dark" ? "dark" : "light" })
+        }
+      />
+      <Field orientation="horizontal" className={ROW}>
+        <FieldLabel htmlFor={activeId} className={ROW_LABEL}>
+          Active
+        </FieldLabel>
+        <Checkbox
+          id={activeId}
           checked={value.active}
-          onChange={(event) => props.onChange({ active: event.target.checked })}
+          onCheckedChange={(active) => props.onChange({ active })}
         />
-      </label>
-      <div className="wb-prop">
-        <label htmlFor={gridId}>Grid</label>
-        <div className="wb-inline">
-          <input
+      </Field>
+      <Field orientation="horizontal" className={ROW}>
+        <FieldLabel htmlFor={gridId} className={ROW_LABEL}>
+          Grid
+        </FieldLabel>
+        <div className="flex min-w-0 items-center gap-2">
+          <Checkbox
             id={gridId}
-            type="checkbox"
             checked={value.grid}
-            onChange={(event) => props.onChange({ grid: event.target.checked })}
+            onCheckedChange={(grid) => props.onChange({ grid })}
           />
-          <input
+          <Input
             type="color"
             aria-label="Grid color"
             title="Grid color"
+            className="h-7 w-10 p-0.5"
             value={props.gridColor}
             onChange={(event) => props.onGridColor(event.target.value)}
           />
         </div>
-      </div>
-      <div className="wb-presets">
-        <button type="button" onClick={props.onCopyLink}>
+      </Field>
+      <div className="flex flex-wrap gap-2 px-1">
+        <Button variant="outline" size="sm" onClick={props.onCopyLink}>
           Copy link
-        </button>
+        </Button>
       </div>
       {props.app && (
         <AppFields app={props.app} onAppChange={props.onAppChange} />

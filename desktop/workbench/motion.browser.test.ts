@@ -229,7 +229,9 @@ describe.skipIf(!asked)("the workbench's motion", () => {
     });
     try {
       await openScene(page, "install-mac");
-      await page.getByLabel("Pause at each action").check();
+      await page
+        .getByRole("checkbox", { name: "Pause at each action" })
+        .check();
       await page.getByRole("button", { name: "Play" }).click();
       await page.waitForSelector(".wb-action-next .wb-action-box");
       // Fit is on by default: the window is zoomed. One frame for the marker to settle.
@@ -326,7 +328,9 @@ describe.skipIf(!asked)("the workbench's motion", () => {
       });
       try {
         await openScene(page, "install-mac");
-        await page.getByLabel("Pause at each action").check();
+        await page
+          .getByRole("checkbox", { name: "Pause at each action" })
+          .check();
         await page.getByRole("button", { name: "Play" }).click();
         await page.waitForFunction(() =>
           /Install/.test(

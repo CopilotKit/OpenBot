@@ -327,11 +327,6 @@
     width: 100%;
   }
 
-  .wb-prop > input[type="checkbox"] {
-    justify-self: start;
-  }
-
-  .wb-size,
   .wb-inline {
     display: flex;
     align-items: center;
@@ -339,25 +334,9 @@
     min-width: 0;
   }
 
-  .wb-size {
-    gap: 4px;
-    color: var(--ck-text-secondary);
-  }
-
-  .wb-size input,
   .wb-inline select {
     flex: 1;
     width: 0;
-  }
-
-  .wb-inline input[type="number"] {
-    flex: none;
-    width: 64px;
-  }
-
-  .wb-side .wb-prop .wb-inline button {
-    flex: none;
-    padding: 3px 8px;
   }
 
   .wb-presets {
