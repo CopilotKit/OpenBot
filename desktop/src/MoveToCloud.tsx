@@ -17,6 +17,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   type ReactNode,
+  type SyntheticEvent,
   useCallback,
   useEffect,
   useRef,
@@ -451,19 +452,24 @@ export function MoveToCloud({
           Keep OpenBot open while it moves. This can take a few minutes.
         </p>
         <SetupProgress steps={stageRows(stages)} label="Move progress" />
-        {signingIn && (
-          <div className="row">
-            <button
-              type="button"
-              className="quiet"
-              disabled={cancelling}
-              onClick={cancel}
-            >
-              Cancel
-            </button>
-          </div>
-        )}
-        <p className="footnote">{NOTHING_REMOVED_UNTIL_CHECKED}</p>
+        {/* Pinned, so Cancel shows in the smallest window while the rows scroll above it. */}
+        <StepFooter>
+          {signingIn && (
+            <div className="row">
+              <button
+                type="button"
+                className="quiet"
+                disabled={cancelling}
+                onClick={cancel}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+          <p className="footnote move-moving-footnote">
+            {NOTHING_REMOVED_UNTIL_CHECKED}
+          </p>
+        </StepFooter>
       </Sheet>
     );
   }
@@ -491,28 +497,52 @@ export function MoveToCloud({
         </div>
         <SetupProgress steps={stageRows(stages)} label="Move progress" />
         {problem.detail && (
-          <details className="detail-of move-detail">
+          <details className="detail-of move-detail" onToggle={showOpened}>
             <summary>Technical details</summary>
             <pre>{problem.detail}</pre>
           </details>
         )}
-        <div className="row">
-          <button type="button" disabled={keeping} onClick={() => void move()}>
-            Try again
-          </button>
-          <button
-            type="button"
-            className="quiet"
-            disabled={keeping}
-            onClick={() => void keep()}
-          >
-            Keep OpenBot on this computer
-          </button>
-        </div>
+        {/*
+         * Pinned, so Try again and Keep always show: on 1.2.0-rc.2 the technical details pushed
+         * them past the card's foot at the window's default size, and Keep was never seen.
+         */}
+        <StepFooter>
+          <div className="row">
+            <button
+              type="button"
+              disabled={keeping}
+              onClick={() => void move()}
+            >
+              Try again
+            </button>
+            <button
+              type="button"
+              className="quiet"
+              disabled={keeping}
+              onClick={() => void keep()}
+            >
+              Keep OpenBot on this computer
+            </button>
+          </div>
+        </StepFooter>
       </Sheet>
     );
   }
   return <Done moved={screen.moved} />;
+}
+
+/**
+ * Technical details, opened: the card scrolls them clear of the pinned foot, so opening them shows
+ * them rather than opening them out of sight under the buttons.
+ */
+function showOpened(event: SyntheticEvent<HTMLDetailsElement>) {
+  const details = event.currentTarget;
+  const card = details.parentElement;
+  const foot = card?.querySelector(":scope > .step-footer");
+  if (!details.open || !card || !foot) return;
+  const hidden =
+    details.getBoundingClientRect().bottom - foot.getBoundingClientRect().top;
+  if (hidden > 0) card.scrollTop += Math.ceil(hidden);
 }
 
 /** The card every move screen is drawn in, under OpenBot's mark, as the first screen is. */
