@@ -13,8 +13,11 @@ export type Reading = {
   off: { x: number; y: number };
 };
 
-export const INSPECTOR_COLOR = "#ff3d81";
-const COLOR = INSPECTOR_COLOR;
+/** The inspector's colors and font, from the app's tokens; the places are inline styles. */
+const LABEL =
+  "absolute whitespace-nowrap rounded-xs bg-ring px-1 font-mono text-xs text-primary-foreground";
+const LINE = "absolute bg-ring";
+const GAP = "absolute bg-ring/20";
 
 function round(value: number) {
   return Math.round(value * 10) / 10;
@@ -88,20 +91,6 @@ export function Measurement({ reading }: { reading: Reading }) {
   const { box, gaps: g, off } = reading;
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
-  const label: React.CSSProperties = {
-    position: "absolute",
-    background: COLOR,
-    color: "#fff",
-    font: "10px/1.4 ui-monospace, monospace",
-    padding: "0 4px",
-    borderRadius: 2,
-    whiteSpace: "nowrap",
-  };
-  const line = (style: React.CSSProperties): React.CSSProperties => ({
-    position: "absolute",
-    background: COLOR,
-    ...style,
-  });
 
   return (
     <div
@@ -115,17 +104,18 @@ export function Measurement({ reading }: { reading: Reading }) {
       }}
     >
       <div
+        className="absolute border border-ring"
         style={{
-          position: "absolute",
           left: box.x,
           top: box.y,
           width: box.width,
           height: box.height,
-          outline: `1px solid ${COLOR}`,
-          outlineOffset: -1,
         }}
       />
-      <div style={{ ...label, left: box.x, top: box.y + box.height + 2 }}>
+      <div
+        className={LABEL}
+        style={{ left: box.x, top: box.y + box.height + 2 }}
+      >
         {round(box.width)} × {round(box.height)}
         {(off.x !== 0 || off.y !== 0) &&
           ` · Off grid ${round(off.x)}, ${round(off.y)}`}
@@ -133,14 +123,22 @@ export function Measurement({ reading }: { reading: Reading }) {
       {g.top !== null && (
         <>
           <div
-            style={line({
-              left: cx,
+            className={GAP}
+            style={{
+              left: box.x,
               top: box.y - g.top,
-              width: 1,
+              width: box.width,
               height: g.top,
-            })}
+            }}
           />
-          <div style={{ ...label, left: cx + 3, top: box.y - g.top / 2 - 7 }}>
+          <div
+            className={LINE}
+            style={{ left: cx, top: box.y - g.top, width: 1, height: g.top }}
+          />
+          <div
+            className={LABEL}
+            style={{ left: cx + 3, top: box.y - g.top / 2 - 8 }}
+          >
             {round(g.top)}
           </div>
         </>
@@ -148,18 +146,28 @@ export function Measurement({ reading }: { reading: Reading }) {
       {g.bottom !== null && (
         <>
           <div
-            style={line({
+            className={GAP}
+            style={{
+              left: box.x,
+              top: box.y + box.height,
+              width: box.width,
+              height: g.bottom,
+            }}
+          />
+          <div
+            className={LINE}
+            style={{
               left: cx,
               top: box.y + box.height,
               width: 1,
               height: g.bottom,
-            })}
+            }}
           />
           <div
+            className={LABEL}
             style={{
-              ...label,
               left: cx + 3,
-              top: box.y + box.height + g.bottom / 2 - 7,
+              top: box.y + box.height + g.bottom / 2 - 8,
             }}
           >
             {round(g.bottom)}
@@ -169,14 +177,22 @@ export function Measurement({ reading }: { reading: Reading }) {
       {g.left !== null && (
         <>
           <div
-            style={line({
+            className={GAP}
+            style={{
               left: box.x - g.left,
-              top: cy,
+              top: box.y,
               width: g.left,
-              height: 1,
-            })}
+              height: box.height,
+            }}
           />
-          <div style={{ ...label, left: box.x - g.left / 2 - 8, top: cy + 3 }}>
+          <div
+            className={LINE}
+            style={{ left: box.x - g.left, top: cy, width: g.left, height: 1 }}
+          />
+          <div
+            className={LABEL}
+            style={{ left: box.x - g.left / 2 - 8, top: cy + 3 }}
+          >
             {round(g.left)}
           </div>
         </>
@@ -184,16 +200,26 @@ export function Measurement({ reading }: { reading: Reading }) {
       {g.right !== null && (
         <>
           <div
-            style={line({
+            className={GAP}
+            style={{
+              left: box.x + box.width,
+              top: box.y,
+              width: g.right,
+              height: box.height,
+            }}
+          />
+          <div
+            className={LINE}
+            style={{
               left: box.x + box.width,
               top: cy,
               width: g.right,
               height: 1,
-            })}
+            }}
           />
           <div
+            className={LABEL}
             style={{
-              ...label,
               left: box.x + box.width + g.right / 2 - 8,
               top: cy + 3,
             }}

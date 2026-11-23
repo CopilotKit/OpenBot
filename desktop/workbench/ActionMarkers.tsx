@@ -149,26 +149,59 @@ export function labelFitsInside(
   return lines * 17 + 4 <= box.height;
 }
 
+/** The marker's colors and font, from the app's tokens (geometry in windowFrame.css). */
+const LABEL = "wb-action-label rounded-sm font-mono text-xs font-semibold";
+const LABEL_SHOWN = `${LABEL} bg-primary text-primary-foreground`;
+/** The ghost's label is quieter, so the new screen's text under it still shows. */
+const LABEL_GHOST = `${LABEL} border border-primary/60 bg-background/80 text-foreground`;
+
 function Mark({ mark, next }: { mark: ActionMark; next: boolean }) {
   const ghost = !next && mark.ghostSince != null;
-  const className = `wb-action${next ? " wb-action-next" : ""}${ghost ? " wb-action-ghost" : ""}`;
+  const state = next ? "next" : ghost ? "ghost" : "shown";
+  const className = ghost ? "wb-action wb-action-ghost" : "wb-action";
   if (!mark.box)
     return (
-      <div className={className} style={{ left: 8, top: 8 }}>
-        <span className="wb-action-label">{`${mark.label} (not found)`}</span>
+      <div
+        className={className}
+        data-action-mark={state}
+        style={{ left: 8, top: 8 }}
+      >
+        <span
+          className={LABEL_SHOWN}
+          data-action-part="label"
+        >{`${mark.label} (not found)`}</span>
       </div>
     );
   const { x, y, width, height } = mark.box;
   return (
-    <div className={className} style={{ left: x, top: y, width, height }}>
-      <span className="wb-action-box" />
-      {!next && !ghost && <span className="wb-action-ring" />}
+    <div
+      className={className}
+      data-action-mark={state}
+      style={{ left: x, top: y, width, height }}
+    >
       <span
         className={
-          ghost && labelFitsInside(mark.label, mark.box)
-            ? "wb-action-label wb-action-label-inside"
-            : "wb-action-label"
+          ghost
+            ? "wb-action-box border-dashed border-primary/60"
+            : "wb-action-box border-primary"
         }
+        data-action-part="box"
+      />
+      {!next && !ghost && (
+        <span
+          className="wb-action-ring border-primary"
+          data-action-part="ring"
+        />
+      )}
+      <span
+        className={
+          ghost
+            ? labelFitsInside(mark.label, mark.box)
+              ? `${LABEL_GHOST} wb-action-label-inside`
+              : LABEL_GHOST
+            : LABEL_SHOWN
+        }
+        data-action-part="label"
       >
         {next ? `Next: ${mark.label}` : mark.label}
       </span>

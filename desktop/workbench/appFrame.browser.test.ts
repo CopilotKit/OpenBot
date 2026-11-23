@@ -343,7 +343,7 @@ describe.skipIf(!asked)("the app frame in the workbench page", () => {
       const browserBar = await page.evaluate(
         () =>
           document.querySelector(
-            "[data-workbench-window] .wb-window-bar-browser",
+            "[data-workbench-window] [data-window-bar=browser]",
           ) !== null,
       );
       expect(browserBar).toBe(true);

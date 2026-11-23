@@ -107,7 +107,9 @@ async function showExpectedMoves(page: Page): Promise<void> {
 
 function markerInWindow(page: Page) {
   return page.evaluate(() => {
-    const box = document.querySelector(".wb-action-next .wb-action-box");
+    const box = document.querySelector(
+      "[data-action-mark=next] [data-action-part=box]",
+    );
     const frame = document.querySelector("[data-workbench-window] iframe");
     if (!box || !frame) return null;
     const b = box.getBoundingClientRect();
@@ -229,7 +231,9 @@ describe.skipIf(!asked)("the workbench's motion", () => {
         .getByRole("checkbox", { name: "Pause at each action" })
         .check();
       await page.getByRole("button", { name: "Play" }).click();
-      await page.waitForSelector(".wb-action-next .wb-action-box");
+      await page.waitForSelector(
+        "[data-action-mark=next] [data-action-part=box]",
+      );
       // Fit is on by default: the window is zoomed. One frame for the marker to settle.
       await page.waitForTimeout(100);
       const before = await markerInWindow(page);
@@ -332,8 +336,9 @@ describe.skipIf(!asked)("the workbench's motion", () => {
         await page.getByRole("button", { name: "Play" }).click();
         await page.waitForFunction(() =>
           /Install/.test(
-            document.querySelector(".wb-action-next .wb-action-label")
-              ?.textContent ?? "",
+            document.querySelector(
+              "[data-action-mark=next] [data-action-part=label]",
+            )?.textContent ?? "",
           ),
         );
         // Each animation frame from the click on: is the Install marker (or its ghost) drawn.
@@ -347,7 +352,9 @@ describe.skipIf(!asked)("the workbench's motion", () => {
           (window as unknown as { __seen: typeof seen }).__seen = seen;
           const tick = () => {
             const mark = [
-              ...document.querySelectorAll(".wb-action:not(.wb-action-next)"),
+              ...document.querySelectorAll(
+                "[data-action-mark]:not([data-action-mark=next])",
+              ),
             ].find((m) => /Install/.test(m.textContent ?? ""));
             const opacity = mark
               ? Number.parseFloat(getComputedStyle(mark).opacity)
@@ -355,7 +362,7 @@ describe.skipIf(!asked)("the workbench's motion", () => {
             seen.push({
               t: performance.now(),
               shown: opacity > 0,
-              ghost: !!mark?.classList.contains("wb-action-ghost"),
+              ghost: mark?.getAttribute("data-action-mark") === "ghost",
               opacity,
             });
             if (seen.length < 600) requestAnimationFrame(tick);

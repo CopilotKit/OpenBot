@@ -21,7 +21,8 @@ export type WindowFrameProps = {
   theme: "light" | "dark";
   zoom: number;
   grid: boolean;
-  gridColor: string;
+  /** The grid's color, picked in the Window panel; without one it takes the app's ring token. */
+  gridColor?: string;
   /** Who hosts the page: OpenBot Desktop (default) or a browser. */
   host?: "desktop" | "browser";
   /** The path the browser bar shows, for host "browser". Default "/". */
@@ -36,6 +37,11 @@ export type WindowFrameProps = {
   onFrame?(iframe: HTMLIFrameElement | null): void;
 };
 
+/*
+ * macOS's own colors for the close, minimise and zoom buttons, and for all three in a window that
+ * is not active. No app token means them, so they are the one color exception of the guard
+ * (OS_COLORS in appUi.test.ts). The rest of the frame takes the app's neutral tokens.
+ */
 const LIGHTS = ["#ff5f57", "#febc2e", "#28c840"];
 const INACTIVE_LIGHT = "#8e8e93";
 
@@ -45,13 +51,17 @@ const INACTIVE_LIGHT = "#8e8e93";
  */
 function MacBar({ active }: { active: boolean }) {
   return (
-    <div className="wb-window-bar wb-window-bar-mac" aria-hidden="true">
+    <div
+      className="wb-window-bar wb-window-bar-mac"
+      data-window-bar="mac"
+      aria-hidden="true"
+    >
       {macButtonCircles().map((circle, index) => (
         <span
           // The three lights never change order.
           // biome-ignore lint/suspicious/noArrayIndexKey: fixed list
           key={index}
-          className="wb-window-light"
+          className="wb-window-light ring-[0.5px] ring-foreground/20 ring-inset"
           data-window-button={["close", "minimise", "zoom"][index]}
           style={{
             left: circle.x,
@@ -69,14 +79,15 @@ function MacBar({ active }: { active: boolean }) {
 function WindowsBar({ active }: { active: boolean }) {
   return (
     <div
-      className={`wb-window-bar wb-window-bar-windows${active ? "" : " wb-window-bar-inactive"}`}
+      className={`wb-window-bar wb-window-bar-windows bg-muted font-sans text-xs ${active ? "text-foreground" : "text-muted-foreground"}`}
+      data-window-bar="windows"
       aria-hidden="true"
     >
       <span className="wb-window-title">OpenBot</span>
       <span className="wb-window-controls">
-        <span className="wb-window-control">&#x2013;</span>
-        <span className="wb-window-control">&#x25A1;</span>
-        <span className="wb-window-control">&#x2715;</span>
+        <span className="wb-window-control text-sm">&#x2013;</span>
+        <span className="wb-window-control text-sm">&#x25A1;</span>
+        <span className="wb-window-control text-sm">&#x2715;</span>
       </span>
     </div>
   );
@@ -86,13 +97,20 @@ const BROWSER_ORIGIN = "http://localhost:3010";
 
 function BrowserBar({ address }: { address: string }) {
   return (
-    <div className="wb-window-bar wb-window-bar-browser" aria-hidden="true">
+    <div
+      className="wb-window-bar wb-window-bar-browser border-b border-border bg-muted font-sans text-xs text-muted-foreground"
+      data-window-bar="browser"
+      aria-hidden="true"
+    >
       <span className="wb-browser-dots">
-        <span className="wb-browser-dot" />
-        <span className="wb-browser-dot" />
-        <span className="wb-browser-dot" />
+        <span className="wb-browser-dot bg-muted-foreground/40" />
+        <span className="wb-browser-dot bg-muted-foreground/40" />
+        <span className="wb-browser-dot bg-muted-foreground/40" />
       </span>
-      <span className="wb-browser-address">{`${BROWSER_ORIGIN}${address}`}</span>
+      <span
+        className="wb-browser-address bg-background text-foreground"
+        data-browser-address
+      >{`${BROWSER_ORIGIN}${address}`}</span>
     </div>
   );
 }
@@ -138,12 +156,16 @@ export function WindowFrame({
   return (
     <div
       data-workbench-window
-      className={`wb-window wb-window-${os}`}
+      className={`wb-window wb-window-${os} bg-background shadow-2xl ring-1 ring-foreground/20`}
       style={{ zoom }}
     >
       {browser && <BrowserBar address={address ?? "/"} />}
       {!browser && os === "windows" && <WindowsBar active={active} />}
-      <div className="wb-window-content" style={{ width, height }}>
+      <div
+        className="wb-window-content"
+        data-window-content
+        style={{ width, height }}
+      >
         <iframe
           data-workbench-frame
           key={frameKey}

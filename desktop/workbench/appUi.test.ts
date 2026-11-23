@@ -14,14 +14,10 @@ const PENDING: readonly string[] = [
   "ApiAnswersPanel.tsx",
   "appPanels.css",
   "CommandsPanel.tsx",
-  "CommentLayer.tsx",
   "EventsPanel.tsx",
   "ImportLogPanel.tsx",
-  "Inspector.tsx",
   "RequestLog.tsx",
   "StreamPanel.tsx",
-  "windowFrame.css",
-  "Workbench.tsx",
   "workbench.css",
 ];
 
@@ -35,6 +31,13 @@ const OS_COLORS: readonly string[] = [
   "#28c840",
   "#8e8e93",
 ];
+
+/*
+ * The grid's first color (DEFAULT_GRID_COLOR in Workbench.tsx). It is a value of the person's grid
+ * color picker, not a look of the page: the color input needs a hex value, and no app token is one.
+ * GridOverlay draws with the app's ring token only when no color is given.
+ */
+const PICKER_COLORS: readonly string[] = ["#ff00ff"];
 
 const DIR = import.meta.dir;
 const RAW_CONTROL = /<(button|select|input|textarea|details)[\s>]/;
@@ -63,7 +66,11 @@ function problem(path: string): string | null {
   if (/\.tsx?$/.test(name)) {
     const colors = [...text.matchAll(COLOR_LITERAL)]
       .map((match) => match[0])
-      .filter((color) => !OS_COLORS.includes(color.toLowerCase()));
+      .filter(
+        (color) =>
+          !OS_COLORS.includes(color.toLowerCase()) &&
+          !PICKER_COLORS.includes(color.toLowerCase()),
+      );
     return colors.length > 0 ? `sets its own color ${colors[0]}` : null;
   }
   if (name.endsWith(".css")) {

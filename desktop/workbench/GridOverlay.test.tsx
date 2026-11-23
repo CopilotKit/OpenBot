@@ -33,3 +33,15 @@ test.each([1, 2])(
     expect(major?.getAttribute("width")).toBe(String(8 * zoom));
   },
 );
+
+test("with no picked color the lines take the app's ring token", () => {
+  const { container } = render(
+    <GridOverlay width={100} height={50} zoom={1} />,
+  );
+  const paths = Array.from(container.querySelectorAll("path"));
+  expect(paths.map((path) => path.getAttribute("class"))).toEqual([
+    "stroke-ring/15",
+    "stroke-ring/30",
+  ]);
+  expect(paths.every((path) => !path.hasAttribute("stroke"))).toBe(true);
+});

@@ -633,6 +633,7 @@ OPENBOT_APP_BROWSER=1 bun test workbench/motion.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/findings.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/stateSteps.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/appUi.browser.test.ts
+OPENBOT_APP_BROWSER=1 bun test workbench/popups.browser.test.ts
 ```
 
 - `appFrame.browser.test.ts` checks the app frame: it boots, the bridge and the fake API answer, and Vite does not load it two times. It also checks that a seek ends when the frame loads again.
@@ -642,10 +643,11 @@ OPENBOT_APP_BROWSER=1 bun test workbench/appUi.browser.test.ts
 - `motion.browser.test.ts` checks that the paused "Next:" marker stays on its element after Fit and a splitter drag, that the Install marker (or its ghost) shows for at least 400 ms after the click, and that a warning hover that seeks back keeps a still of the window over the replay that looks like the window did (less than 2% of its pixels differ).
 
 - `appUi.browser.test.ts` checks that the workbench page loads with the app's light and dark theme and with one copy of React.
+- `popups.browser.test.ts` checks that a popup of the page (a list, a box) over the window shows above the window. The inspector does not measure it, and in Comment mode a click in it does not start a comment.
 - `stateSteps.browser.test.ts` opens each state scene and checks that the window shows the setup step that the state names.
 - `findings.browser.test.ts` runs the check on one scene, then opens the Findings page. It checks that the page lists the findings, that a finding opens its scene at its time with the warning marked, and that the next time works.
 
-You can also run all twelve files in one `bun test` command, as CI does. Each file gets the workbench server in its `beforeAll` hook and gives it back with `stop()` in its `afterAll` hook. The hooks have their own time limits, because bun gives a hook only 5 seconds. `bun test` does not send the process `exit` event, so a file that does not call `stop()` leaves the server running.
+You can also run all thirteen files in one `bun test` command, as CI does. Each file gets the workbench server in its `beforeAll` hook and gives it back with `stop()` in its `afterAll` hook. The hooks have their own time limits, because bun gives a hook only 5 seconds. `bun test` does not send the process `exit` event, so a file that does not call `stop()` leaves the server running.
 
 `desktop/workbench/shippedBuild.test.ts` runs a full build. It takes up to three minutes. To run the full build check of the app, run this in the repository root:
 
@@ -659,7 +661,7 @@ The CI job "app (real browser, desktop setup window)" runs the workbench checks.
 
 1. It runs `bun run generate:app-config`.
 2. It runs the full build check of the app with `OPENBOT_APP_BUILD_GUARD=1`, on the runner. It runs before the steps in the image: those run as root, and after them the build cannot write its config into `app/node_modules/.vite-temp`.
-3. It runs the twelve browser tests in the Playwright image.
+3. It runs the thirteen browser tests in the Playwright image.
 4. It runs `bun run workbench:check` in the Playwright image.
 5. It keeps `workbench-shots/check/findings.json` as the artifact `workbench-findings`.
 

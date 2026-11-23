@@ -8,8 +8,15 @@ import {
   test,
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
-import { CommentLayer, popoverPlace } from "./CommentLayer";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  within,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { CommentLayer } from "./CommentLayer";
 import type { Box } from "./geometry";
 import { DEFAULT_WINDOW } from "./urlState";
 
@@ -171,24 +178,21 @@ test("Escape and Cancel close the box", async () => {
   expect(view.queryByRole("dialog")).toBeNull();
 });
 
-test("the box stays inside the window", () => {
-  const bounds = { width: 1000, height: 800 };
-  const size = { width: 288, height: 180 };
-  // Room on the right.
-  expect(
-    popoverPlace({ x: 10, y: 10, width: 50, height: 20 }, size, bounds),
-  ).toEqual({ x: 68, y: 10 });
-  // No room on the right: on the left.
-  expect(
-    popoverPlace({ x: 900, y: 700, width: 80, height: 20 }, size, bounds),
-  ).toEqual({ x: 604, y: 612 });
-  // As wide as the window: under it, or over it near the bottom.
-  expect(
-    popoverPlace({ x: 0, y: 0, width: 1000, height: 40 }, size, bounds),
-  ).toEqual({ x: 8, y: 48 });
-  expect(
-    popoverPlace({ x: 0, y: 700, width: 1000, height: 90 }, size, bounds),
-  ).toEqual({ x: 8, y: 512 });
+test("the box is a popup on the page, anchored to the outline of the pick", async () => {
+  const view = show();
+  const doc = frame.contentDocument as Document;
+  const pill = doc.querySelector(".pill") as Element;
+  pointer("pointerdown", pill, 20, 50);
+  pointer("pointerup", pill, 20, 50);
+  const box = await view.findByRole("dialog", { name: "Comment" });
+  // A portal on the page's body, so it shows above the window and the overlays.
+  expect(box.closest("[data-workbench-comment]")).toBeNull();
+  const outline = view.container.querySelector<HTMLElement>(
+    "[data-workbench-comment-selected]",
+  );
+  expect(outline?.style.left).toBe("16px");
+  expect(outline?.style.top).toBe("48px");
+  expect(outline?.getAttribute("aria-expanded")).toBe("true");
 });
 
 test("Ask for an impeccable command copies a scoped impeccable prompt, without words too", async () => {
@@ -200,7 +204,18 @@ test("Ask for an impeccable command copies a scoped impeccable prompt, without w
   await view.findByRole("dialog", { name: "Comment" });
   const copy = view.getByRole("button", { name: "Copy as prompt" });
   expect(copy.hasAttribute("disabled")).toBe(true);
-  edit(view.getByLabelText("Ask for"), "typeset");
+  const person = userEvent.setup({ document });
+  await person.click(view.getByRole("combobox", { name: "Ask for" }));
+  await person.click(
+    await within(document.body).findByRole("option", {
+      name: "Typeset (impeccable)",
+    }),
+  );
+  // user-event puts its own clipboard on navigator: put the test's back.
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText },
+    configurable: true,
+  });
   // An impeccable prompt needs no words: the button works at once.
   expect(view.getByLabelText("Anything to add? (optional)")).not.toBeNull();
   expect(copy.hasAttribute("disabled")).toBe(false);

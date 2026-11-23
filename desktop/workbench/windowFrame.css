@@ -1,15 +1,15 @@
 /*
- * In Tailwind's base layer (app/workbench/page.css declares the layers), so the app's components,
- * whose classes are utilities, always win over these rules. These rules go away as the panels move
- * to the app's components (desktop/workbench/README.md, "The rule").
+ * The window's frame and the tools over it: geometry only (position, size, z-order, motion). Their
+ * colors, fonts and shadows come from the app's tokens through Tailwind classes in WindowFrame.tsx
+ * and ActionMarkers.tsx. In Tailwind's base layer (app/workbench/page.css declares the layers), so
+ * those classes, which are utilities, always win over these rules.
+ *
+ * The app's popups (Select, Popover, Tooltip) are portals on the page's body at z-index 50. Every
+ * z-index here stays under that, so a popup shows above the window and its tools.
  */
 @layer base {
   .wb-window {
     display: inline-block;
-    background: #fff;
-    box-shadow:
-      0 0 0 1px rgb(0 0 0 / 0.2),
-      0 16px 48px rgb(0 0 0 / 0.35);
   }
 
   .wb-window-mac {
@@ -35,9 +35,6 @@
     align-items: center;
     box-sizing: border-box;
     user-select: none;
-    font:
-      12px / 1 system-ui,
-      sans-serif;
   }
 
   /* Over the page, as macOS draws them; each light's place comes from titleBar.ts. */
@@ -46,7 +43,6 @@
     inset: 0 0 auto 0;
     height: 0;
     z-index: 1;
-    background: transparent;
     pointer-events: none;
   }
 
@@ -54,19 +50,12 @@
     position: absolute;
     box-sizing: border-box;
     border-radius: 50%;
-    box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.18);
     pointer-events: auto;
   }
 
   .wb-window-bar-windows {
     height: 32px;
     justify-content: space-between;
-    background: #f3f3f3;
-    color: #1f1f1f;
-  }
-
-  .wb-window-bar-windows.wb-window-bar-inactive {
-    color: #8a8a8a;
   }
 
   .wb-window-title {
@@ -84,16 +73,12 @@
     justify-content: center;
     width: 46px;
     height: 100%;
-    font-size: 14px;
   }
 
   .wb-window-bar-browser {
     height: 36px;
     gap: 12px;
     padding: 0 12px;
-    background: #ececec;
-    color: #3c3c3c;
-    border-bottom: 1px solid #d4d4d4;
   }
 
   .wb-browser-dots {
@@ -106,7 +91,6 @@
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    background: #b8b8b8;
   }
 
   .wb-browser-address {
@@ -114,9 +98,109 @@
     min-width: 0;
     padding: 5px 10px;
     border-radius: 6px;
-    background: #fff;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+
+  /* The action markers (ActionMarkers.tsx), next to the window and not in it. */
+  .wb-actions {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+  }
+
+  .wb-action {
+    position: absolute;
+  }
+
+  .wb-action-box {
+    position: absolute;
+    inset: -3px;
+    border-width: 2px;
+    border-radius: 6px;
+  }
+
+  .wb-action-ring {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 24px;
+    height: 24px;
+    margin: -12px 0 0 -12px;
+    border-width: 3px;
+    border-radius: 50%;
+    animation: wb-action-pulse 0.6s ease-out 2;
+    opacity: 0;
+  }
+
+  @keyframes wb-action-pulse {
+    from {
+      transform: scale(0.4);
+      opacity: 1;
+    }
+    to {
+      transform: scale(2.4);
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wb-action-ring {
+      animation: none;
+      opacity: 1;
+    }
+  }
+
+  /*
+   * A marker whose element left: the same outline, dashed, and the same label, at the element's
+   * last place for GHOST_MS (500 ms, ActionMarkers.tsx). It holds full opacity for 70 % of that
+   * time, so the label can be read, and fades in the last 150 ms. With reduced motion it shows
+   * still for that time, then goes.
+   */
+  .wb-action-ghost {
+    animation: wb-action-ghost 500ms linear forwards;
+  }
+
+  @keyframes wb-action-ghost {
+    0%,
+    70% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wb-action-ghost {
+      animation: none;
+    }
+  }
+
+  .wb-action-label {
+    position: absolute;
+    left: -3px;
+    bottom: calc(100% + 6px);
+    padding: 2px 6px;
+    white-space: nowrap;
+  }
+
+  .wb-action-ghost .wb-action-label {
+    padding: 1px 5px;
+  }
+
+  /* When it fits, the ghost's label sits inside the ghost's empty box, not over the screen above it. */
+  .wb-action-ghost .wb-action-label-inside {
+    left: 50%;
+    top: 50%;
+    bottom: auto;
+    box-sizing: border-box;
+    width: max-content;
+    max-width: 100%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    white-space: normal;
   }
 }

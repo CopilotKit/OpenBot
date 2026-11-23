@@ -1,4 +1,19 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   ASK_CHOICES,
   ASK_LABELS,
@@ -54,9 +69,6 @@ type Start = { x: number; y: number; target: Element | null };
 
 /** A move of more than this many pixels with the button down draws an area. */
 const DRAG_PX = 4;
-const POPOVER_WIDTH = 288;
-const MARGIN = 8;
-const SELECTED = "#3d7dff";
 const COPIED_MS = 2000;
 
 /** Events that must not reach the window while Comment mode is on. */
@@ -81,34 +93,11 @@ function areaOf(a: { x: number; y: number }, b: { x: number; y: number }): Box {
   };
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(value, max));
-}
-
-/** Next to the box: right, else left, else under, else over; always inside the window. */
-export function popoverPlace(
-  box: Box,
-  size: { width: number; height: number },
-  bounds: { width: number; height: number },
-): { x: number; y: number } {
-  const { width, height } = size;
-  let x: number;
-  let y = box.y;
-  if (box.x + box.width + MARGIN + width + MARGIN <= bounds.width) {
-    x = box.x + box.width + MARGIN;
-  } else if (box.x - MARGIN - width >= MARGIN) {
-    x = box.x - MARGIN - width;
-  } else {
-    x = box.x;
-    y =
-      box.y + box.height + MARGIN + height + MARGIN <= bounds.height
-        ? box.y + box.height + MARGIN
-        : box.y - MARGIN - height;
-  }
-  return {
-    x: clamp(x, MARGIN, Math.max(MARGIN, bounds.width - width - MARGIN)),
-    y: clamp(y, MARGIN, Math.max(MARGIN, bounds.height - height - MARGIN)),
-  };
+/** What the "Ask for" list shows for each choice. */
+function askLabel(choice: AskFor): string {
+  return choice === "change"
+    ? ASK_LABELS[choice]
+    : `${ASK_LABELS[choice]} (impeccable)`;
 }
 
 function describeTarget(target: CommentTarget): string {
@@ -119,8 +108,10 @@ function describeTarget(target: CommentTarget): string {
 
 /**
  * Comment mode over the window: the element under the pointer has an outline, a click picks it,
- * and a drag picks an area. A box next to the pick takes the comment and copies a prompt for a
- * coding agent. Clicks do not reach the window while this layer shows.
+ * and a drag picks an area. A box next to the pick (the app's Popover, anchored to the pick's
+ * outline) takes the comment and copies a prompt for a coding agent. Clicks do not reach the window
+ * while this layer shows. The box and its list are portals on the page's body, so they show above
+ * the window and the overlays, and a click in them never reaches the window.
  */
 export function CommentLayer({
   frame,
@@ -139,10 +130,9 @@ export function CommentLayer({
   const [selection, setSelection] = useState<Selection | null>(null);
   const [comment, setComment] = useState("");
   const [status, setStatus] = useState<string | null>(null);
-  const [popoverHeight, setPopoverHeight] = useState(180);
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
-  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const anchorId = useId();
   const textRef = useRef<HTMLTextAreaElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -279,26 +269,6 @@ export function CommentLayer({
     };
   }, [frame, gridStep]);
 
-  // Escape in the workbench page cancels too.
-  useEffect(() => {
-    if (!selection) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") cancelRef.current();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selection]);
-
-  useEffect(() => {
-    if (selection) textRef.current?.focus();
-  }, [selection]);
-
-  useLayoutEffect(() => {
-    if (!selection) return;
-    const height = popoverRef.current?.offsetHeight;
-    if (height && height !== popoverHeight) setPopoverHeight(height);
-  });
-
   useEffect(
     () => () => {
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -332,15 +302,6 @@ export function CommentLayer({
     timerRef.current = setTimeout(() => setStatus(null), COPIED_MS);
   };
 
-  const bounds = { width: settings.width, height: settings.height };
-  const place = selection
-    ? popoverPlace(
-        selection.box,
-        { width: POPOVER_WIDTH, height: popoverHeight },
-        bounds,
-      )
-    : null;
-
   return (
     <div
       data-workbench-comment
@@ -348,8 +309,8 @@ export function CommentLayer({
         position: "absolute",
         left: 0,
         top: 0,
-        width: bounds.width,
-        height: bounds.height,
+        width: settings.width,
+        height: settings.height,
         pointerEvents: "none",
       }}
     >
@@ -358,163 +319,127 @@ export function CommentLayer({
         <div
           data-workbench-comment-drag
           aria-hidden="true"
+          className="border border-dashed border-ring bg-ring/10"
           style={{
             position: "absolute",
             left: drag.x,
             top: drag.y,
             width: drag.width,
             height: drag.height,
-            border: `1px dashed ${SELECTED}`,
-            background: "rgb(61 125 255 / 0.12)",
           }}
         />
       )}
-      {selection && (
-        <div
-          data-workbench-comment-selected
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            left: selection.box.x,
-            top: selection.box.y,
-            width: selection.box.width,
-            height: selection.box.height,
-            outline: `2px ${selection.target.kind === "area" ? "dashed" : "solid"} ${SELECTED}`,
-            outlineOffset: 0,
-            background:
+      <Popover
+        open={selection !== null}
+        triggerId={anchorId}
+        onOpenChange={(open) => {
+          if (!open) cancel();
+        }}
+      >
+        {selection && (
+          // The pick's outline is the box's anchor. It takes no pointer (the layer has none), so
+          // it never opens or closes the box itself.
+          <PopoverTrigger
+            id={anchorId}
+            nativeButton={false}
+            render={<div />}
+            tabIndex={-1}
+            data-workbench-comment-selected
+            aria-hidden="true"
+            className={
               selection.target.kind === "area"
-                ? "rgb(61 125 255 / 0.08)"
-                : undefined,
-          }}
-        />
-      )}
-      {selection && place && (
-        <div
-          ref={popoverRef}
-          data-workbench-comment-popover
-          role="dialog"
-          aria-label="Comment"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.stopPropagation();
-              cancel();
-            } else if (
-              event.key === "Enter" &&
-              (event.metaKey || event.ctrlKey)
-            ) {
-              event.preventDefault();
-              void copy();
+                ? "outline-2 outline-ring outline-dashed bg-ring/10"
+                : "outline-2 outline-ring outline-solid"
             }
-          }}
-          style={{
-            position: "absolute",
-            left: place.x,
-            top: place.y,
-            width: POPOVER_WIDTH,
-            boxSizing: "border-box",
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            padding: 12,
-            pointerEvents: "auto",
-            background: "var(--wb-panel, #fff)",
-            color: "var(--wb-text, #1c1c1e)",
-            border: "1px solid var(--wb-border, #d4d4d8)",
-            borderRadius: 8,
-            boxShadow: "0 8px 24px rgb(0 0 0 / 0.3)",
-            font: "13px/1.4 var(--ck-sans, system-ui, sans-serif)",
-          }}
-        >
-          <div
             style={{
-              color: "var(--wb-muted, #6b6b70)",
-              fontSize: 12,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              position: "absolute",
+              left: selection.box.x,
+              top: selection.box.y,
+              width: selection.box.width,
+              height: selection.box.height,
+            }}
+          />
+        )}
+        {selection && (
+          <PopoverContent
+            data-workbench-comment-popover
+            aria-label="Comment"
+            side="right"
+            align="start"
+            sideOffset={8}
+            initialFocus={textRef}
+            finalFocus={false}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                void copy();
+              }
             }}
           >
-            {describeTarget(selection.target)}
-          </div>
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-            }}
-          >
-            Ask for
-            <select
-              value={ask}
-              onChange={(event) => {
-                const next = event.target.value;
-                if (!isAskFor(next)) return;
-                setAsk(next);
-                writePref(ASK_PREF, next);
-              }}
-              style={{ ...fieldStyle, flex: 1, minWidth: 0 }}
-            >
-              {ASK_CHOICES.map((choice) => (
-                <option key={choice} value={choice}>
-                  {choice === "change"
-                    ? ASK_LABELS[choice]
-                    : `${ASK_LABELS[choice]} (impeccable)`}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {ask === "change"
-              ? "What do you want to change?"
-              : "Anything to add? (optional)"}
-            <textarea
-              ref={textRef}
-              value={comment}
-              rows={4}
-              onChange={(event) => setComment(event.target.value)}
-              style={{ ...fieldStyle, padding: 8, resize: "vertical" }}
-            />
-          </label>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button
-              type="button"
-              disabled={ask === "change" && comment.trim() === ""}
-              onClick={() => void copy()}
-              style={buttonStyle}
-            >
-              Copy as prompt
-            </button>
-            <button type="button" onClick={cancel} style={buttonStyle}>
-              Cancel
-            </button>
-            {status && (
-              <span role="status" style={{ fontSize: 12 }}>
-                {status}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
+            <div className="truncate text-xs text-muted-foreground">
+              {describeTarget(selection.target)}
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor={`${anchorId}-ask`}>Ask for</Label>
+              <Select
+                value={ask}
+                onValueChange={(next) => {
+                  if (!isAskFor(String(next))) return;
+                  setAsk(next as AskFor);
+                  writePref(ASK_PREF, next);
+                }}
+              >
+                <SelectTrigger
+                  id={`${anchorId}-ask`}
+                  size="sm"
+                  aria-label="Ask for"
+                  className="min-w-0 flex-1"
+                >
+                  <SelectValue>{askLabel(ask)}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {ASK_CHOICES.map((choice) => (
+                    <SelectItem key={choice} value={choice}>
+                      {askLabel(choice)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor={`${anchorId}-text`}>
+                {ask === "change"
+                  ? "What do you want to change?"
+                  : "Anything to add? (optional)"}
+              </Label>
+              <Textarea
+                id={`${anchorId}-text`}
+                ref={textRef}
+                value={comment}
+                rows={4}
+                onChange={(event) => setComment(event.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                disabled={ask === "change" && comment.trim() === ""}
+                onClick={() => void copy()}
+              >
+                Copy as prompt
+              </Button>
+              <Button variant="outline" size="sm" onClick={cancel}>
+                Cancel
+              </Button>
+              {status && (
+                <span role="status" className="text-xs text-muted-foreground">
+                  {status}
+                </span>
+              )}
+            </div>
+          </PopoverContent>
+        )}
+      </Popover>
     </div>
   );
 }
-
-const fieldStyle: React.CSSProperties = {
-  font: "inherit",
-  color: "inherit",
-  background: "var(--wb-panel, #fff)",
-  border: "1px solid var(--wb-border, #d4d4d8)",
-  borderRadius: 4,
-  padding: "4px 8px",
-};
-
-const buttonStyle: React.CSSProperties = {
-  font: "inherit",
-  color: "inherit",
-  background: "var(--wb-panel, #fff)",
-  border: "1px solid var(--wb-border, #d4d4d8)",
-  borderRadius: 4,
-  padding: "4px 8px",
-  cursor: "pointer",
-};
