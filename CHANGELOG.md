@@ -325,11 +325,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   arguments it carried. On the ADK and Strands harnesses: `injectA2UITool`, which added a tool and
   could take a granted one away. Each harness now ignores them.
 - **A Bot's command is no longer refused as "not saved", and the Bot gets what it printed.** Every
-  command a Bot runs is checked against the saved conversation first, and the saved copy can trail
-  the conversation on screen by several seconds on a busy day. A command checked too soon was
-  refused with "That unanswered tool call is not saved in this conversation": its card said Didn't
-  run, and the Bot answered without the output. The check now waits up to 20 seconds for the copy to
-  catch up, and says in the server's log (`computer-step-call-saved-late`) when it had to.
+  command a Bot runs is checked against its conversation first, and that check read only the saved
+  copy, which can trail the conversation on screen by several seconds on a busy day. Every command
+  checked too soon was refused with "That unanswered tool call is not saved in this conversation":
+  its card said Didn't run, and the Bot told its person it had no command access. The server now
+  keeps each command as the Bot's run streams it, so the check passes at once, on any server, however
+  far the saved copy trails. A command the stream doesn't hold as sent is still checked against the
+  saved copy, for up to 20 seconds, and the server's log says when it waited
+  (`computer-step-call-saved-late`). One that still can't be confirmed tells the Bot that nothing was
+  done and that it can try again, rather than reading as a computer it can't reach.
 - A command, a click or any other change a Bot makes on a computer that is still starting waits for
   it, up to three minutes, as the Bot's other computer calls already did. Its card used to say the
   computer was starting, and the Bot was told to try again.
