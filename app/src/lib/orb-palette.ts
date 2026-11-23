@@ -15,8 +15,7 @@ const BG = "var(--background)";
 
 /**
  * Eight palettes, all inside the CopilotKit family: mint, violet, periwinkle, sky, orange, red,
- * lilac and teal. The order is part of the contract: a Bot's color is its index here, so
- * reordering or inserting would recolor every Bot.
+ * lilac and teal. Keep the order stable because a Bot's seed is mapped to an index here.
  */
 export const ORB_PALETTES: readonly OrbColors[] = [
   { bg: BG, c1: "#23d5a2", c2: "#1fbf92", c3: "#7480f1", c4: "#85ecce" },
@@ -28,6 +27,14 @@ export const ORB_PALETTES: readonly OrbColors[] = [
   { bg: BG, c1: "#bec2ff", c2: "#9aa3ff", c3: "#7480f1", c4: "#b3a6f5" },
   { bg: BG, c1: "#8dc1f1", c2: "#23d5a2", c3: "#189370", c4: "#85ecce" },
 ];
+
+// The original palette indices for Personal Assistant and General Assistant.
+const STARTER_PALETTE_INDICES = [0, 6];
+const OTHER_PALETTES = ORB_PALETTES.filter(
+  (_, index) => !STARTER_PALETTE_INDICES.includes(index),
+);
+const GENERATED_BOT_SEED =
+  /^agent_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const FNV_OFFSET = 0x811c9dc5;
 const FNV_PRIME = 0x01000193;
@@ -45,5 +52,15 @@ export function orbPalette(seed: string): OrbColors {
     hash ^= seed.charCodeAt(i);
     hash = Math.imul(hash, FNV_PRIME);
   }
-  return ORB_PALETTES[(hash >>> 0) % ORB_PALETTES.length];
+  const unsignedHash = hash >>> 0;
+  const index = unsignedHash % ORB_PALETTES.length;
+  if (
+    STARTER_PALETTE_INDICES.includes(index) &&
+    GENERATED_BOT_SEED.test(seed)
+  ) {
+    // The first choice collided with a starter. Use the rest of the hash to pick another palette.
+    const remainder = Math.floor(unsignedHash / ORB_PALETTES.length);
+    return OTHER_PALETTES[remainder % OTHER_PALETTES.length];
+  }
+  return ORB_PALETTES[index];
 }
