@@ -395,6 +395,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   providers, so its row asks only for an API key: OpenBot fills in
   `https://api.trustedrouter.com/v1` and the model `anthropic/claude-sonnet-5.5`, which can be
   changed to any name the gateway lists.
+- A long name in Organization settings' Members, or a long address in its Invitations, is cut short
+  in its own column instead of running under the row's Role and Remove buttons. On a phone, those
+  buttons sit on a line under the name.
 - **A Bot's answer reads as written after you switch conversations.** Coming back to a conversation
   while its Bot was still answering could draw the answer as scraps of itself, and it stayed that
   way. The answer now reads as OpenBot stored it.
