@@ -5518,6 +5518,15 @@ async fn start_stack_inner<R: tauri::Runtime>(
         // an earlier release's, they ran with that `up`: `migrate` is the dependency Compose
         // completes before it starts `server`, once, and a failed one fails the `up`.
         report_plain(&app, "services", true, "OpenBot's services are running.");
+        // The plans connected beside the default one: their engines, which `up` doesn't raise.
+        for (plan, problem) in
+            openbot_desktop_lib::ai_connection::start_connected_plans(&found, &root)
+        {
+            log::warn!(
+                "[ai-connection] the {plan:?} plan's engine didn't start: {}",
+                problem.detail.as_deref().unwrap_or(&problem.said)
+            );
+        }
 
         // `compose up` succeeds once it has asked for everything. A service that then exits is not its
         // problem, and both Bots exit immediately without a model key. Reported and made fatal here;

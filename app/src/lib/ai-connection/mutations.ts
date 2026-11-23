@@ -3,6 +3,7 @@ import type {
   AiConnection,
   AiConnectionInput,
   AiConnectionProvider,
+  AiConnectionSet,
   AiSignIn,
   AiSignInInputMethod,
   AiSignInStatus,
@@ -14,6 +15,7 @@ import {
   deletePersonalAiConnection,
   finishPersonalAiSignIn,
   getAiConnection,
+  getAiConnections,
   getPersonalAiSignIn,
   replaceAiConnection,
   replaceAiProviderConnection,
@@ -24,7 +26,7 @@ import {
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { desktopKeys } from "@/lib/desktop/queries";
 import { modelKeys } from "@/lib/models/queries";
-import { prepareAiConnection, settleAiConnection } from "./desktop";
+import { type Plan, prepareAiConnection, settleAiConnection } from "./desktop";
 import { aiConnectionKeys } from "./queries";
 
 const FALLBACK = "Couldn't change the AI connection. Try again.";
@@ -66,20 +68,35 @@ export async function connectAi({
   additional,
 }: ConnectVariables): Promise<Connected> {
   if (additional) {
-    onPhase?.("checking");
-    const { provider, ...rest } = input;
-    const set = await replaceAiProviderConnection(
-      organizationId(),
-      provider,
-      rest,
-      { "Idempotency-Key": idempotencyKey() },
-      { fallback: FALLBACK },
-    );
-    const connection =
-      set.connections.find((each) => each.provider === provider) ??
-      set.connections[0];
-    if (!connection) throw new Error(FALLBACK);
-    return { connection, desktopProblem: null };
+    try {
+      // A plan's engine starts first, as for the default: the server asks it before it saves.
+      if (desktop && input.login === "plan") {
+        onPhase?.("starting");
+        await prepareAiConnection(input.provider, input.login);
+      }
+      onPhase?.("checking");
+      const { provider, ...rest } = input;
+      const set = await replaceAiProviderConnection(
+        organizationId(),
+        provider,
+        rest,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: FALLBACK },
+      );
+      const connection =
+        set.connections.find((each) => each.provider === provider) ??
+        set.connections[0];
+      if (!connection) throw new Error(FALLBACK);
+      let desktopProblem: string | null = null;
+      if (desktop) {
+        onPhase?.("finishing");
+        desktopProblem = await settleDesktopOn(set);
+      }
+      return { connection, desktopProblem };
+    } catch (error) {
+      if (desktop) await settleBack();
+      throw error;
+    }
   }
   try {
     if (desktop && input.login === "plan") {
@@ -102,6 +119,7 @@ export async function connectAi({
           login: connection.login,
           model: connection.model,
           endpointHost: connection.endpointHost,
+          connectedPlans: await connectedPlansNow(),
         });
       } catch (error) {
         desktopProblem =
@@ -117,6 +135,52 @@ export async function connectAi({
   }
 }
 
+/** The plan a connection is, where it is one: its engine runs in Desktop. */
+function planOf(connection: AiConnection): Plan | null {
+  if (connection.login !== "plan") return null;
+  if (connection.provider === "anthropic") return "claude";
+  if (connection.provider === "openai") return "chatgpt";
+  return null;
+}
+
+/** Every plan connected, from the server's set. Undefined where it has no set to read. */
+async function connectedPlansNow(
+  set?: AiConnectionSet,
+): Promise<Plan[] | undefined> {
+  try {
+    const now = set ?? (await getAiConnections(organizationId()));
+    return now.connections.flatMap((each) => {
+      const plan = planOf(each);
+      return plan ? [plan] : [];
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Desktop on the server's set: its default recorded for the next start, and the engine of every
+ * plan still connected kept running. Desktop's sentence when it couldn't, or null.
+ */
+async function settleDesktopOn(set: AiConnectionSet): Promise<string | null> {
+  const current = set.connections.find((each) => each.provider === set.default);
+  if (!current?.provider || !current.login) return null;
+  try {
+    await settleAiConnection({
+      provider: current.provider,
+      login: current.login,
+      model: current.model,
+      endpointHost: current.endpointHost,
+      connectedPlans: await connectedPlansNow(set),
+    });
+    return null;
+  } catch (error) {
+    return error instanceof Error
+      ? error.message
+      : "OpenBot Desktop couldn't finish the switch.";
+  }
+}
+
 /** Desktop back on the connection the server still uses. Best effort: the refusal is the news. */
 async function settleBack() {
   try {
@@ -127,6 +191,7 @@ async function settleBack() {
         login: current.login,
         model: current.model,
         endpointHost: current.endpointHost,
+        connectedPlans: await connectedPlansNow(),
       });
   } catch {
     // Nothing to put back, or Desktop can't say: the person reads the refusal either way.
@@ -145,30 +210,48 @@ export function connectAiMutationOptions(queryClient: QueryClient) {
   });
 }
 
-/** Disconnect one provider, leaving the others connected. */
-export function disconnectAiProviderMutationOptions(queryClient: QueryClient) {
+/**
+ * Disconnect one provider, leaving the others connected. In Desktop (`desktop`), Desktop then
+ * settles on the default the server now has, which stops a removed plan's engine.
+ */
+export function disconnectAiProviderMutationOptions(
+  queryClient: QueryClient,
+  desktop = false,
+) {
   return mutationOptions({
-    mutationFn: (provider: AiConnectionProvider) =>
-      deleteAiProviderConnection(
+    mutationFn: async (provider: AiConnectionProvider) => {
+      const set = await deleteAiProviderConnection(
         organizationId(),
         provider,
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Couldn't disconnect it. Try again." },
-      ),
+      );
+      if (desktop) await settleDesktopOn(set);
+      return set;
+    },
     onSuccess: () => invalidateAiConnection(queryClient),
   });
 }
 
-/** Make a connected provider the default for new conversations. */
-export function makeDefaultAiProviderMutationOptions(queryClient: QueryClient) {
+/**
+ * Make a connected provider the default for new conversations. In Desktop (`desktop`), Desktop
+ * records the new default for its next start and moves its default Bot to it.
+ */
+export function makeDefaultAiProviderMutationOptions(
+  queryClient: QueryClient,
+  desktop = false,
+) {
   return mutationOptions({
-    mutationFn: (provider: AiConnectionProvider) =>
-      replaceDefaultAiConnection(
+    mutationFn: async (provider: AiConnectionProvider) => {
+      const set = await replaceDefaultAiConnection(
         organizationId(),
         { provider },
         { "Idempotency-Key": idempotencyKey() },
         { fallback: "Couldn't make it the default. Try again." },
-      ),
+      );
+      if (desktop) await settleDesktopOn(set);
+      return set;
+    },
     onSuccess: () => invalidateAiConnection(queryClient),
   });
 }

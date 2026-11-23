@@ -484,7 +484,7 @@ async fn prepare_ai_connection(
 }
 
 /// Settle on the connection the server now has: recorded for the next start, a plan engine no
-/// longer needed stopped, and the picked Bot moved to an engine that can use it, alone.
+/// longer connected (`connected_plans`) stopped, and the picked Bot moved to an engine that can use it, alone.
 #[tauri::command]
 async fn settle_ai_connection(
     app: tauri::AppHandle,
@@ -492,6 +492,7 @@ async fn settle_ai_connection(
     login: String,
     model: Option<String>,
     endpoint_host: Option<String>,
+    connected_plans: Option<Vec<openbot_desktop_lib::ai_connection::Plan>>,
 ) -> Result<(), String> {
     crate::settle_ai_connection_now(
         app,
@@ -500,6 +501,7 @@ async fn settle_ai_connection(
             login,
             model,
             endpoint_host,
+            connected_plans,
         },
     )
     .await

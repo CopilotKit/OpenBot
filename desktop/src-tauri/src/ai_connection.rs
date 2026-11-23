@@ -47,6 +47,8 @@ pub const SETTLED_FILE: &str = ".openbot-ai-settled.json";
 pub const PICKED_HARNESS_FILE: &str = ".openbot/picked-harness.json";
 /// The server's model gateway, by name on the Bots' network, as `OPENBOT_TOOL_URL` names it.
 const GATEWAY: &str = "http://server:3001/api/model-provider";
+/// The plans connected beside the default one, whose engines run too ([`connected_plans`]).
+pub const CONNECTED_PLANS_FILE: &str = ".openbot-ai-plans.json";
 /// The Claude plan's token, in the credential store.
 const CLAUDE_PLAN_TOKEN: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 
@@ -74,7 +76,7 @@ pub fn gateway_settings() -> BTreeMap<String, String> {
 }
 
 /// A plan, and the engine of its own it runs on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Plan {
     #[serde(rename = "claude")]
     Claude,
@@ -427,6 +429,19 @@ pub fn prepare(engine: &Address, root: &Path, provider: &str, login: &str) -> Re
     let Some(plan) = Plan::of(intent) else {
         return Ok(());
     };
+    start_plan(engine, root, plan)?;
+    // Connected now, as the default or beside it: its engine starts with OpenBot from here on,
+    // until a settle says it no longer is.
+    let mut plans = connected_plans(root);
+    if !plans.contains(&plan) {
+        plans.push(plan);
+        record_connected_plans(root, &plans)?;
+    }
+    Ok(())
+}
+
+/// Start one plan's engine alone with its token, refused when it was never signed in to here.
+fn start_plan(engine: &Address, root: &Path, plan: Plan) -> Result<(), Problem> {
     let mut secrets = engine_secrets(root)?;
     match plan {
         Plan::Claude => {
@@ -452,7 +467,74 @@ pub fn prepare(engine: &Address, root: &Path, provider: &str, login: &str) -> Re
             Problem::with("OpenBot couldn't save its settings.", error.to_string())
         })?;
     }
-    crate::stack::start_alone(engine, root, plan.alone(), &secrets)
+    let name = match plan {
+        Plan::Claude => "Claude",
+        Plan::ChatGpt => "ChatGPT",
+    };
+    /*
+     * Install and Start download the default's plan engine only, so a plan connected later (beside
+     * the default, or as a new default) may have no image here yet: `up` never pulls.
+     */
+    if let Some(image) = images.get(plan.image_variable()) {
+        if !crate::preparation::image_present(engine, image).unwrap_or(false) {
+            log::info!("[ai-connection] downloading the {name} plan's engine");
+            crate::pull_metrics::pull_image(engine, image, |_| {}, |_| {}).map_err(|problem| {
+                Problem::with(
+                    format!("OpenBot couldn't download what your {name} plan needs. Try again."),
+                    problem.detail.unwrap_or(problem.said),
+                )
+            })?;
+        }
+    }
+    crate::stack::start_alone(engine, root, plan.alone(), &secrets).map_err(|problem| {
+        Problem::with(
+            format!("OpenBot couldn't start your {name} plan. Try again."),
+            problem.detail.unwrap_or(problem.said),
+        )
+    })
+}
+
+/**
+The plans connected now, as the default or beside it (several AI providers at once): each runs its
+own engine, so a conversation that picks it runs there. Missing or unreadable reads as none.
+*/
+pub fn connected_plans(root: &Path) -> Vec<Plan> {
+    std::fs::read(root.join(CONNECTED_PLANS_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Vec<Plan>>(&bytes).ok())
+        .unwrap_or_default()
+}
+
+fn record_connected_plans(root: &Path, plans: &[Plan]) -> Result<(), Problem> {
+    let failed = |detail: String| {
+        Problem::with(
+            "OpenBot couldn't record the connected AI providers.",
+            detail,
+        )
+    };
+    let bytes = serde_json::to_vec(plans).map_err(|error| failed(error.to_string()))?;
+    crate::env::write_private_file(&root.join(CONNECTED_PLANS_FILE), &bytes)
+        .map_err(|error| failed(error.to_string()))
+}
+
+/**
+After Start: the engine of every plan connected beside the default one, which Start itself does not
+raise ([`crate::stack::plan_engine`] is the default's alone). Best effort: each that can't start is
+said in the log, and the server reports that provider as not ready until it does.
+*/
+pub fn start_connected_plans(engine: &Address, root: &Path) -> Vec<(Plan, Problem)> {
+    let default = crate::saved_intent::SavedIntent::read(root)
+        .model
+        .and_then(Plan::of);
+    connected_plans(root)
+        .into_iter()
+        .filter(|plan| Some(*plan) != default)
+        .filter_map(|plan| {
+            start_plan(engine, root, plan)
+                .err()
+                .map(|problem| (plan, problem))
+        })
+        .collect()
 }
 
 /// What the page settles on: the connection now in use, as the page names it.
@@ -465,6 +547,10 @@ pub struct Change {
     pub model: Option<String>,
     #[serde(default)]
     pub endpoint_host: Option<String>,
+    /// Every plan connected now, the default's among them. Their engines keep running. None from
+    /// an app that knows one connection only: every plan but the default's stops, as it always did.
+    #[serde(default)]
+    pub connected_plans: Option<Vec<Plan>>,
 }
 
 /// What `settle` did to the engines, for the log and for tests.
@@ -578,8 +664,13 @@ pub fn settle(engine: &Address, root: &Path, change: &Change) -> Result<Settleme
         .map_err(|error| Problem::with("OpenBot couldn't save its settings.", error.to_string()))?;
     write_picked_harness_file(root, &settings)?;
 
+    let kept = change.connected_plans.clone().unwrap_or_default();
+    record_connected_plans(root, &kept)?;
     let mut settlement = Settlement::default();
-    for other in Plan::ALL.into_iter().filter(|other| Some(*other) != plan) {
+    for other in Plan::ALL
+        .into_iter()
+        .filter(|other| Some(*other) != plan && !kept.contains(other))
+    {
         crate::stack::remove_alone(engine, root, other.alone())?;
         settlement.stopped.push(other.alone().service);
     }
@@ -1204,6 +1295,7 @@ mod tests {
             login: "api-key".into(),
             model: None,
             endpoint_host: None,
+            connected_plans: None,
         };
         let settled = settle(&stack.engine, &stack.root, &to_key).unwrap();
         assert!(
@@ -1220,6 +1312,7 @@ mod tests {
             login: "api-key".into(),
             model: None,
             endpoint_host: None,
+            connected_plans: None,
         };
         let settled = settle(&stack.engine, &stack.root, &to_openai).unwrap();
         assert!(settled.restarted_harness, "{settled:?}");

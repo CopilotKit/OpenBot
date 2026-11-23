@@ -59,8 +59,10 @@ export function AiProviderRows({
         <div key={connection.provider ?? "none"}>
           <ProviderRow
             connection={connection}
-            isDefault={connection.provider === set.default}
             inDesktop={inDesktop}
+            isDefault={connection.provider === set.default}
+            // Desktop always runs on one: the last provider is changed, never removed.
+            removable={!inDesktop || set.connections.length > 1}
             organizationWide={organizationWide}
           />
           <Separator />
@@ -79,11 +81,13 @@ function ProviderRow({
   connection,
   isDefault,
   inDesktop,
+  removable,
   organizationWide,
 }: {
   connection: AiConnection;
   isDefault: boolean;
   inDesktop: boolean;
+  removable: boolean;
   organizationWide: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -135,6 +139,7 @@ function ProviderRow({
           key={opened}
           onClose={() => setOpen(false)}
           organizationWide={organizationWide}
+          removable={removable}
         />
       </Dialog>
     </>
@@ -151,20 +156,22 @@ function ProviderDialog({
   isDefault,
   inDesktop,
   organizationWide,
+  removable,
   onClose,
 }: {
   connection: AiConnection;
   isDefault: boolean;
   inDesktop: boolean;
   organizationWide: boolean;
+  removable: boolean;
   onClose: () => void;
 }) {
   const [step, setStep] = useState<Step>({ at: "current" });
   const disconnect = useMutation(
-    disconnectAiProviderMutationOptions(queryClient),
+    disconnectAiProviderMutationOptions(queryClient, inDesktop),
   );
   const makeDefault = useMutation(
-    makeDefaultAiProviderMutationOptions(queryClient),
+    makeDefaultAiProviderMutationOptions(queryClient, inDesktop),
   );
   const described = describeConnection(
     connection,
@@ -211,11 +218,13 @@ function ProviderDialog({
       </DialogHeader>
       <DialogBody className="mt-4 flex flex-col gap-3 text-sm">
         {described ? <Details details={described.details} /> : null}
-        <p className="text-muted-foreground">
-          {isDefault
-            ? "Remove it and the next provider you connected becomes the default."
-            : "Remove it and conversations that picked it go back to the default."}
-        </p>
+        {removable ? (
+          <p className="text-muted-foreground">
+            {isDefault
+              ? "Remove it and the next provider you connected becomes the default."
+              : "Remove it and conversations that picked it go back to the default."}
+          </p>
+        ) : null}
         {failure ? (
           <p className="text-destructive" role="alert">
             {failure.message}
@@ -223,20 +232,24 @@ function ProviderDialog({
         ) : null}
       </DialogBody>
       <DialogFooter className="mt-4">
-        <Button
-          className="mr-auto"
-          disabled={busy}
-          onClick={() =>
-            connection.provider &&
-            disconnect.mutate(connection.provider, {
-              onSuccess: () => onClose(),
-            })
-          }
-          size="sm"
-          variant="destructive"
-        >
-          {disconnect.isPending ? "Removing…" : "Remove"}
-        </Button>
+        {removable ? (
+          <Button
+            className="mr-auto"
+            disabled={busy}
+            onClick={() =>
+              connection.provider &&
+              disconnect.mutate(connection.provider, {
+                onSuccess: () => onClose(),
+              })
+            }
+            size="sm"
+            variant="destructive"
+          >
+            {disconnect.isPending ? "Removing…" : "Remove"}
+          </Button>
+        ) : (
+          <span className="mr-auto" />
+        )}
         <Button onClick={onClose} size="sm" variant="ghost">
           Cancel
         </Button>
