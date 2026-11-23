@@ -1,6 +1,8 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import {
+  type AssistantLayout,
   type DesktopAppUpdateCheck,
+  type DesktopCompactView,
   type DesktopUsageData,
   desktopKeys,
   invokeDesktop,
@@ -17,6 +19,51 @@ export function setUsageDataMutationOptions(queryClient: QueryClient) {
       invokeDesktop("set_usage_data", { share }),
     onSuccess: (usageData) =>
       queryClient.setQueryData(desktopKeys.usageData, usageData),
+  });
+}
+
+/**
+ * Turn compact view on or off, at once. On, the desktop app hides this window and shows the bubble;
+ * off, the bubble goes and this window comes back. It answers with the setting as it now stands.
+ */
+export function setCompactViewMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (on: boolean): Promise<DesktopCompactView> =>
+      invokeDesktop("set_compact_view", { on }),
+    onSuccess: (compactView) =>
+      queryClient.setQueryData(desktopKeys.compactView, compactView),
+  });
+}
+
+/** Open compact view's bubble into its panel. The desktop app answers with the window's new shape. */
+export function expandAssistantMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (): Promise<AssistantLayout> =>
+      invokeDesktop("assistant_expand"),
+    onSuccess: (layout) =>
+      queryClient.setQueryData(desktopKeys.assistantLayout, layout),
+  });
+}
+
+/** Fold compact view's panel back into its bubble. */
+export function collapseAssistantMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (): Promise<AssistantLayout> =>
+      invokeDesktop("assistant_collapse"),
+    onSuccess: (layout) =>
+      queryClient.setQueryData(desktopKeys.assistantLayout, layout),
+  });
+}
+
+/**
+ * Bring the full window forward from compact view's panel, at `path` when it is one of OpenBot's
+ * pages. The panel folds into its bubble, and the desktop app tells the page so
+ * (`useAssistantLayout`).
+ */
+export function openFullWindowMutationOptions() {
+  return mutationOptions({
+    mutationFn: (path: string | null): Promise<void> =>
+      invokeDesktop("assistant_open_full", { path }),
   });
 }
 

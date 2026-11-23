@@ -97,6 +97,13 @@ fn main() {
                     // whose person allowed it. See `src/person_computer.rs`.
                     "person_computer",
                     "person_computer_stop",
+                    // Compact view: Settings' switch, and the bubble's own page. See `src/assistant.rs`.
+                    "compact_view",
+                    "set_compact_view",
+                    "assistant_layout",
+                    "assistant_expand",
+                    "assistant_collapse",
+                    "assistant_open_full",
                 ]),
             ),
     )

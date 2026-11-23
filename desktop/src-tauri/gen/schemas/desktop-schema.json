@@ -2961,6 +2961,30 @@
           "markdownDescription": "Enables the appearance command without any pre-configured scope."
         },
         {
+          "description": "Enables the assistant_collapse command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-assistant-collapse",
+          "markdownDescription": "Enables the assistant_collapse command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the assistant_expand command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-assistant-expand",
+          "markdownDescription": "Enables the assistant_expand command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the assistant_layout command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-assistant-layout",
+          "markdownDescription": "Enables the assistant_layout command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the assistant_open_full command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-assistant-open-full",
+          "markdownDescription": "Enables the assistant_open_full command without any pre-configured scope."
+        },
+        {
           "description": "Enables the begin_plan_sign_in command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:allow-begin-plan-sign-in",
@@ -3001,6 +3025,12 @@
           "type": "string",
           "const": "openbot-desktop:allow-check-update",
           "markdownDescription": "Enables the check_update command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the compact_view command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-compact-view",
+          "markdownDescription": "Enables the compact_view command without any pre-configured scope."
         },
         {
           "description": "Enables the connection command without any pre-configured scope.",
@@ -3079,6 +3109,12 @@
           "type": "string",
           "const": "openbot-desktop:allow-restart",
           "markdownDescription": "Enables the restart command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_compact_view command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:allow-set-compact-view",
+          "markdownDescription": "Enables the set_compact_view command without any pre-configured scope."
         },
         {
           "description": "Enables the set_organization command without any pre-configured scope.",
@@ -3177,6 +3213,30 @@
           "markdownDescription": "Denies the appearance command without any pre-configured scope."
         },
         {
+          "description": "Denies the assistant_collapse command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-assistant-collapse",
+          "markdownDescription": "Denies the assistant_collapse command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the assistant_expand command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-assistant-expand",
+          "markdownDescription": "Denies the assistant_expand command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the assistant_layout command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-assistant-layout",
+          "markdownDescription": "Denies the assistant_layout command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the assistant_open_full command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-assistant-open-full",
+          "markdownDescription": "Denies the assistant_open_full command without any pre-configured scope."
+        },
+        {
           "description": "Denies the begin_plan_sign_in command without any pre-configured scope.",
           "type": "string",
           "const": "openbot-desktop:deny-begin-plan-sign-in",
@@ -3217,6 +3277,12 @@
           "type": "string",
           "const": "openbot-desktop:deny-check-update",
           "markdownDescription": "Denies the check_update command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the compact_view command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-compact-view",
+          "markdownDescription": "Denies the compact_view command without any pre-configured scope."
         },
         {
           "description": "Denies the connection command without any pre-configured scope.",
@@ -3295,6 +3361,12 @@
           "type": "string",
           "const": "openbot-desktop:deny-restart",
           "markdownDescription": "Denies the restart command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_compact_view command without any pre-configured scope.",
+          "type": "string",
+          "const": "openbot-desktop:deny-set-compact-view",
+          "markdownDescription": "Denies the set_compact_view command without any pre-configured scope."
         },
         {
           "description": "Denies the set_organization command without any pre-configured scope.",

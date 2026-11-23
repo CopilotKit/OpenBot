@@ -41,6 +41,11 @@
 //! And a Bot using this computer (`person_computer`, `person_computer_stop`): the main screen, the
 //! mouse and the keyboard, once the person allowed Bots to in this app's own dialog, for this session
 //! of OpenBot. A prototype, on macOS only. See `person_computer.rs`.
+//!
+//! And compact view (`compact_view`, `set_compact_view`): Settings' switch between the window and a
+//! bubble over every app, and the bubble's own page asking to open into its panel and fold back
+//! (`assistant_layout`, `assistant_expand`, `assistant_collapse`) or to bring the main window back
+//! (`assistant_open_full`). See `assistant.rs`.
 
 use openbot_desktop_lib::{app_update, local_eval, local_eval_state, speech, stack};
 use tauri::Manager;
@@ -51,7 +56,7 @@ pub const PLUGIN: &str = "openbot-desktop";
 pub const QUIT_SHORTCUT_PAGE: &str = include_str!("quit-shortcut.js");
 
 /// The permissions a page needs for every command here.
-pub const PERMISSIONS: [&str; 36] = [
+pub const PERMISSIONS: [&str; 42] = [
     "openbot-desktop:allow-connection",
     "openbot-desktop:allow-sign-out",
     "openbot-desktop:allow-change-connection",
@@ -88,6 +93,12 @@ pub const PERMISSIONS: [&str; 36] = [
     "openbot-desktop:allow-zoom",
     "openbot-desktop:allow-person-computer",
     "openbot-desktop:allow-person-computer-stop",
+    "openbot-desktop:allow-compact-view",
+    "openbot-desktop:allow-set-compact-view",
+    "openbot-desktop:allow-assistant-layout",
+    "openbot-desktop:allow-assistant-expand",
+    "openbot-desktop:allow-assistant-collapse",
+    "openbot-desktop:allow-assistant-open-full",
 ];
 
 /**
@@ -476,16 +487,60 @@ session of OpenBot asks the person in this app's own dialog. See `person_compute
 #[tauri::command]
 async fn person_computer(
     app: tauri::AppHandle,
+    window: tauri::Window,
     action: crate::person_computer::Action,
     conversation: crate::person_computer::Conversation,
 ) -> Result<crate::person_computer::Screen, String> {
-    crate::person_computer::perform(app, action, conversation).await
+    // The question is asked over the window whose page asked: the main window, or compact view's panel.
+    let asking = window.label().to_owned();
+    crate::person_computer::perform(app, action, conversation, asking).await
 }
 
 /// Take back the person's answer: the next action of any Bot asks again.
 #[tauri::command]
 async fn person_computer_stop() {
     crate::person_computer::stop();
+}
+
+/// Settings' Compact view: whether it is on, and whether this computer can have it.
+#[tauri::command]
+async fn compact_view(app: tauri::AppHandle) -> crate::assistant::CompactView {
+    crate::assistant::compact_view(&app)
+}
+
+/// Settings' Compact view, switched, at once: on, the bubble shows and the main window hides; off,
+/// the bubble goes and the main window comes back. Kept for the next launch.
+#[tauri::command]
+async fn set_compact_view(
+    app: tauri::AppHandle,
+    on: bool,
+) -> Result<crate::assistant::CompactView, String> {
+    crate::assistant::switch(&app, on)
+}
+
+/// The bubble's page: whether it draws the bubble or the panel.
+#[tauri::command]
+async fn assistant_layout(app: tauri::AppHandle) -> crate::assistant::Layout {
+    crate::assistant::layout(&app)
+}
+
+/// The bubble, clicked: it opens into the panel.
+#[tauri::command]
+async fn assistant_expand(app: tauri::AppHandle) -> Result<crate::assistant::Layout, String> {
+    crate::assistant::expand(&app)
+}
+
+/// The panel folds back into the bubble.
+#[tauri::command]
+async fn assistant_collapse(app: tauri::AppHandle) -> Result<crate::assistant::Layout, String> {
+    crate::assistant::collapse(&app)
+}
+
+/// The panel's Open full window: the main window in front, at `path` when it names one of
+/// OpenBot's pages (the conversation the panel shows).
+#[tauri::command]
+async fn assistant_open_full(app: tauri::AppHandle, path: Option<String>) {
+    crate::assistant::open_full(&app, path);
 }
 
 pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
@@ -526,7 +581,13 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             change_connection,
             set_organization,
             person_computer,
-            person_computer_stop
+            person_computer_stop,
+            compact_view,
+            set_compact_view,
+            assistant_layout,
+            assistant_expand,
+            assistant_collapse,
+            assistant_open_full
         ])
         .build()
 }

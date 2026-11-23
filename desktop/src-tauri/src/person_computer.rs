@@ -4,9 +4,13 @@ person lets it. A prototype, on macOS only.
 
 OpenBot's own page asks for each action (`desktop_page::person_computer`), never the server. The
 Bot's tool is a tool of that page (`person_computer` in the app), so it works only while the
-conversation is open in this window. The first action asks the person, in this app's own dialog,
-whether Bots may use this computer (`allow`). The answer holds for this session of OpenBot, in every
-conversation, until Stop (`stop`) or until OpenBot quits.
+conversation is open in this window, or in compact view's panel (`assistant`). The first action asks
+the person, in this app's own dialog, whether Bots may use this computer (`allow`). The answer holds
+for this session of OpenBot, in every conversation, until Stop (`stop`) or until OpenBot quits.
+
+Compact view's bubble floats over every app. It is left out of every screenshot, and from an
+action's first event to its screenshot it lets the mouse through to the app beneath
+(`assistant::step_aside`).
 
 Every action answers with the screen after it, so the model sees what it did. The screen is the
 main display, scaled down to fit 1280 by 800, and the model's coordinates are the screenshot's
@@ -141,16 +145,18 @@ pub fn stop() {
     ALLOWED.store(false, Ordering::SeqCst);
 }
 
-/// Take one action for the Bot of a conversation, and answer with the screen after it.
+/// Take one action for the Bot of a conversation, and answer with the screen after it. `asking` is
+/// the label of the window whose page asked, where the person's question goes (`allow`).
 pub async fn perform(
     app: tauri::AppHandle,
     action: Action,
     conversation: Conversation,
+    asking: String,
 ) -> Result<Screen, String> {
     if conversation.id.trim().is_empty() {
         return Err(NO_CONVERSATION.into());
     }
-    on_this_computer(app, action, conversation).await
+    on_this_computer(app, action, conversation, asking).await
 }
 
 #[cfg(target_os = "macos")]
@@ -158,11 +164,14 @@ async fn on_this_computer(
     app: tauri::AppHandle,
     action: Action,
     conversation: Conversation,
+    asking: String,
 ) -> Result<Screen, String> {
     // Off the async workers: the dialog waits for the person, and an action sleeps between events.
-    tauri::async_runtime::spawn_blocking(move || macos::perform(&app, &action, &conversation))
-        .await
-        .map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        macos::perform(&app, &action, &conversation, &asking)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -170,6 +179,7 @@ async fn on_this_computer(
     _app: tauri::AppHandle,
     _action: Action,
     _conversation: Conversation,
+    _asking: String,
 ) -> Result<Screen, String> {
     Err(ONLY_MAC.into())
 }
@@ -193,11 +203,13 @@ fn bot_label(name: &str) -> String {
 
 /**
 Ask the person once per session of OpenBot, in this app's own dialog, before a Bot's first action.
-The answer holds in every conversation. The main window comes forward first, so the question is
-asked where the person is looking.
+The answer holds in every conversation. The window whose page asked comes forward first, so the
+question is asked where the person is looking: the main window, or compact view's panel. Asked from
+the bubble, which is too small to hold it, the question shows on its own
+(`assistant::asking_window`).
 */
 #[cfg(target_os = "macos")]
-fn allow(app: &tauri::AppHandle, conversation: &Conversation) -> Result<(), String> {
+fn allow(app: &tauri::AppHandle, conversation: &Conversation, asking: &str) -> Result<(), String> {
     use tauri::Manager as _;
     use tauri_plugin_dialog::{DialogExt as _, MessageDialogButtons, MessageDialogKind};
 
@@ -212,12 +224,17 @@ fn allow(app: &tauri::AppHandle, conversation: &Conversation) -> Result<(), Stri
         return Ok(());
     }
     let bot = bot_label(&conversation.bot);
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| WINDOW_CLOSED.to_string())?;
-    let _ = window.show();
-    crate::focus(&window, "a Bot asks to use this computer");
-    let allowed_now = app
+    let parent = if asking == crate::assistant::LABEL {
+        crate::assistant::asking_window(app)
+    } else {
+        let window = app
+            .get_webview_window("main")
+            .ok_or_else(|| WINDOW_CLOSED.to_string())?;
+        let _ = window.show();
+        crate::focus(&window, "a Bot asks to use this computer");
+        Some(window)
+    };
+    let dialog = app
         .dialog()
         .message(format!(
             "{bot} asked to use your Mac. Until you quit OpenBot, your Bots can see your screen \
@@ -229,9 +246,11 @@ fn allow(app: &tauri::AppHandle, conversation: &Conversation) -> Result<(), Stri
         .buttons(MessageDialogButtons::OkCancelCustom(
             "Allow".into(),
             "Don't allow".into(),
-        ))
-        .parent(&window)
-        .blocking_show();
+        ));
+    let allowed_now = match &parent {
+        Some(window) => dialog.parent(window).blocking_show(),
+        None => dialog.blocking_show(),
+    };
     if !allowed_now {
         return Err(DECLINED.into());
     }
@@ -412,11 +431,15 @@ mod macos {
         app: &tauri::AppHandle,
         action: &Action,
         conversation: &Conversation,
+        asking: &str,
     ) -> Result<Screen, String> {
         // The person's answer first, so the system's own prompts come after OpenBot's question.
-        allow(app, conversation)?;
+        allow(app, conversation, asking)?;
         // Then every permission any action needs, before this one does anything.
         permitted()?;
+        // From here to the screenshot, compact view's bubble lets the mouse through to the app
+        // beneath it. Dropped on every way out of this function, an error's too.
+        let _aside = crate::assistant::step_aside(app);
         let looks_only = matches!(action, Action::Screenshot | Action::Wait { .. });
         let display = CGDisplay::main().bounds();
         let fit = Fit::new(display.size.width, display.size.height);

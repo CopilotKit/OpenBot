@@ -67,6 +67,17 @@
   padding-top: 40px;
 }
 
+/*
+ * Compact view's window in OpenBot Desktop (`/assistant`): the window is transparent and the size of
+ * the bubble or of the panel, so the page draws no ground of its own and the person's screen shows
+ * around the orb and the panel's rounded corners. `index.html` marks the page before its first paint.
+ */
+:root[data-assistant],
+:root[data-assistant] body {
+  background: transparent;
+  overflow: hidden;
+}
+
 /* While the sidebar's edge is dragged, it follows the pointer rather than easing after it. */
 [data-slot="sidebar-wrapper"][data-resizing] [data-slot="sidebar-container"],
 [data-slot="sidebar-wrapper"][data-resizing] [data-slot="sidebar-gap"] {
