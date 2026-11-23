@@ -310,6 +310,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - After connecting an app from a Bot's card or a Bot's page, you're back where you pressed Connect.
   The sign-in's tab closes once the app is connected, or, where the browser won't close it, goes back
   to the conversation or the Bot's page. It used to stay on the app's page under Connections.
+- **A Bot on a harness takes its orders from OpenBot only, not from extra fields on a run.** A run's
+  sender could add fields the harness's framework obeyed. On the Claude Agent SDK harness: loading
+  another saved conversation (`resume`), a model the organization never allowed (`model`,
+  `fallback_model`), beta features, and turn and budget limits. On the LangGraph harness:
+  `nodeName`, which started the run past the model, so a call left in the thread ran with the
+  arguments it carried. On the ADK and Strands harnesses: `injectA2UITool`, which added a tool and
+  could take a granted one away. Each harness now ignores them.
 - **A Bot's command is no longer refused as "not saved", and the Bot gets what it printed.** Every
   command a Bot runs is checked against the saved conversation first, and the saved copy can trail
   the conversation on screen by several seconds on a busy day. A command checked too soon was
