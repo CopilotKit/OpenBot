@@ -200,6 +200,45 @@ channels:
         $ref: "#/components/messages/ScreenKey"
       screenText:
         $ref: "#/components/messages/ScreenText"
+  windowsComputerLink:
+    address: /api/v2/organizations/{organizationId}/windows-computer/link
+    title: A Windows computer's link to OpenBot
+    description: >-
+      Experimental. The one connection a Windows computer keeps open to
+      OpenBot, opened BY the Windows computer, so OpenBot never reaches into
+      its network: OpenBot's program on it dials out with the credential it
+      got for an enrollment code (exchangeWindowsComputerEnrollmentCode),
+      and dials again whenever the link drops. organizationId is `default`
+      or the computer's own organization. Everything OpenBot asks of the
+      computer travels on it: OpenBot sends a request, the computer answers
+      it by its id; OpenBot opens a stream (the live screen), and both sides
+      send on it until either closes it. A newer link from the same computer
+      replaces the older, which is told so and closed. A link from a
+      disconnected computer is refused before it opens.
+    servers:
+      - $ref: "#/servers/openbot"
+    parameters:
+      organizationId:
+        $ref: "#/components/parameters/organizationId"
+    bindings:
+      ws:
+        method: GET
+        bindingVersion: 0.1.0
+    messages:
+      linkHello:
+        $ref: "#/components/messages/LinkHello"
+      linkRequest:
+        $ref: "#/components/messages/LinkRequest"
+      linkResponse:
+        $ref: "#/components/messages/LinkResponse"
+      linkOpen:
+        $ref: "#/components/messages/LinkOpen"
+      linkData:
+        $ref: "#/components/messages/LinkData"
+      linkClose:
+        $ref: "#/components/messages/LinkClose"
+      linkBye:
+        $ref: "#/components/messages/LinkBye"
   botTerminal:
     address: /api/v2/organizations/{organizationId}/computers/{botId}/terminal
     title: A Bot's terminal
@@ -562,6 +601,33 @@ operations:
       - $ref: "#/channels/windowsComputerScreen/messages/screenWheel"
       - $ref: "#/channels/windowsComputerScreen/messages/screenKey"
       - $ref: "#/channels/windowsComputerScreen/messages/screenText"
+  sendWindowsComputerLink:
+    action: send
+    title: Ask a Windows computer
+    summary: Requests to the Windows computer, streams opened on it, what goes on them, and why the link ends.
+    security:
+      - $ref: "#/components/securitySchemes/windowsComputerCredential"
+    channel:
+      $ref: "#/channels/windowsComputerLink"
+    messages:
+      - $ref: "#/channels/windowsComputerLink/messages/linkRequest"
+      - $ref: "#/channels/windowsComputerLink/messages/linkOpen"
+      - $ref: "#/channels/windowsComputerLink/messages/linkData"
+      - $ref: "#/channels/windowsComputerLink/messages/linkClose"
+      - $ref: "#/channels/windowsComputerLink/messages/linkBye"
+  receiveWindowsComputerLink:
+    action: receive
+    title: Hear from a Windows computer
+    summary: The computer's hello, its answers, and what it sends on a stream.
+    security:
+      - $ref: "#/components/securitySchemes/windowsComputerCredential"
+    channel:
+      $ref: "#/channels/windowsComputerLink"
+    messages:
+      - $ref: "#/channels/windowsComputerLink/messages/linkHello"
+      - $ref: "#/channels/windowsComputerLink/messages/linkResponse"
+      - $ref: "#/channels/windowsComputerLink/messages/linkData"
+      - $ref: "#/channels/windowsComputerLink/messages/linkClose"
   sendBotTerminal:
     action: send
     title: Show a Bot's terminal
@@ -715,6 +781,17 @@ components:
         __Secure-better-auth.session_token. A single-user install signs its
         one person in without a cookie. A request from another site is
         refused before the socket opens.
+    windowsComputerCredential:
+      type: http
+      scheme: bearer
+      bearerFormat: OpenBot Windows computer credential
+      description: >-
+        A Windows computer's own credential, made when it exchanged an
+        enrollment code (exchangeWindowsComputerEnrollmentCode), sent as
+        Authorization: Bearer on the request that opens its link. OpenBot
+        accepts it nowhere else. It ends when the computer is disconnected,
+        including by another Windows computer being connected for the same
+        person.
     apiKey:
       type: http
       scheme: bearer
@@ -1015,6 +1092,48 @@ components:
       summary: The Bot's audio or words, or what the service heard and did.
       payload:
         $ref: "#/components/schemas/VoiceEvent"
+    LinkHello:
+      name: linkHello
+      title: Hello
+      summary: The Windows computer's first message on a new link.
+      payload:
+        $ref: "#/components/schemas/LinkHello"
+    LinkRequest:
+      name: linkRequest
+      title: Request
+      summary: Something OpenBot asks of the Windows computer, answered by its id.
+      payload:
+        $ref: "#/components/schemas/LinkRequest"
+    LinkResponse:
+      name: linkResponse
+      title: Response
+      summary: The Windows computer's answer to a request.
+      payload:
+        $ref: "#/components/schemas/LinkResponse"
+    LinkOpen:
+      name: linkOpen
+      title: Open a stream
+      summary: OpenBot opens a stream on the Windows computer, such as its live screen.
+      payload:
+        $ref: "#/components/schemas/LinkOpen"
+    LinkData:
+      name: linkData
+      title: Stream data
+      summary: One message on an open stream, either way.
+      payload:
+        $ref: "#/components/schemas/LinkData"
+    LinkClose:
+      name: linkClose
+      title: Close a stream
+      summary: Either side ends a stream.
+      payload:
+        $ref: "#/components/schemas/LinkClose"
+    LinkBye:
+      name: linkBye
+      title: Bye
+      summary: OpenBot ends the link, and why, just before closing it.
+      payload:
+        $ref: "#/components/schemas/LinkBye"
   schemas:
     ConversationActivity:
       type: object
@@ -1763,3 +1882,147 @@ components:
         type:
           type: string
           description: The event's name, such as session.update or response.output_audio.delta.
+    LinkHello:
+      type: object
+      required:
+        - type
+        - version
+        - contract
+      properties:
+        type:
+          type: string
+          const: hello
+        version:
+          type: string
+          description: The version of OpenBot's program on the Windows computer.
+        contract:
+          type: integer
+          minimum: 1
+          description: The version of the requests it understands.
+    LinkRequest:
+      type: object
+      required:
+        - type
+        - id
+        - method
+        - path
+      properties:
+        type:
+          type: string
+          const: request
+        id:
+          type: string
+          description: Unique on this link. The response carries it back.
+        method:
+          type: string
+          enum:
+            - GET
+            - POST
+            - PUT
+        path:
+          type: string
+          description: What is asked, with its query, such as /desktop/snapshot.
+        seat:
+          $ref: "#/components/schemas/LinkSeat"
+        body:
+          description: The request's JSON body, when it has one.
+    LinkResponse:
+      type: object
+      required:
+        - type
+        - id
+        - status
+      properties:
+        type:
+          type: string
+          const: response
+        id:
+          type: string
+        status:
+          type: integer
+          minimum: 100
+          maximum: 599
+          description: As an HTTP status.
+        body:
+          description: The answer's JSON body, when it has one.
+    LinkOpen:
+      type: object
+      required:
+        - type
+        - stream
+        - path
+      properties:
+        type:
+          type: string
+          const: open
+        stream:
+          type: string
+          description: Unique on this link, chosen by OpenBot.
+        path:
+          type: string
+          description: The stream to open, such as /desktop/screen.
+        seat:
+          $ref: "#/components/schemas/LinkSeat"
+    LinkData:
+      type: object
+      required:
+        - type
+        - stream
+        - data
+      properties:
+        type:
+          type: string
+          const: data
+        stream:
+          type: string
+        data:
+          type: string
+          description: One text message of the stream, as it is.
+    LinkClose:
+      type: object
+      required:
+        - type
+        - stream
+      properties:
+        type:
+          type: string
+          const: close
+        stream:
+          type: string
+        code:
+          type: integer
+          description: A WebSocket close code, when there is one to give.
+        reason:
+          type: string
+          maxLength: 120
+    LinkBye:
+      type: object
+      required:
+        - type
+        - reason
+      properties:
+        type:
+          type: string
+          const: bye
+        reason:
+          type: string
+          x-extensible-enum:
+            - replaced
+            - disconnected
+            - shutting_down
+          description: >-
+            replaced: a newer link from the same computer took over.
+            disconnected: the computer was disconnected from OpenBot, so its
+            credential no longer works. shutting_down: OpenBot is stopping;
+            dial again.
+    LinkSeat:
+      type: object
+      description: Who a request or a stream is for, the person and their Bot, so the computer can refuse any other.
+      required:
+        - personId
+        - botId
+      properties:
+        personId:
+          type: string
+        botId:
+          type: string

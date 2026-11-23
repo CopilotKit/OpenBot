@@ -18,18 +18,27 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  CreateWindowsComputerEnrollmentCodeHeaders,
+  ExchangeWindowsComputerEnrollmentCodeHeaders,
   ForbiddenResponse,
   InvalidRequestResponse,
+  InvalidWindowsComputerEnrollmentCodeResponse,
+  OrganizationNotFoundResponse,
+  PayloadTooLargeResponse,
   ReleaseWindowsComputerControlHeaders,
   ServerErrorResponse,
   StartWindowsComputerRecordingHeaders,
   StopWindowsComputerRecordingHeaders,
   TakeWindowsComputerControlHeaders,
+  TooManyWindowsComputerEnrollmentCodesResponse,
   UnauthenticatedResponse,
   UnexpectedErrorResponse,
   WindowsComputer,
   WindowsComputerConflictResponse,
+  WindowsComputerConnectionGrant,
   WindowsComputerControl,
+  WindowsComputerEnrollmentCode,
+  WindowsComputerEnrollmentExchange,
   WindowsComputerNotFoundResponse,
   WindowsComputerRecording,
   WindowsComputerRecordingStart,
@@ -888,6 +897,312 @@ export const useStopWindowsComputerRecording = <
 > => {
   return useMutation(
     getStopWindowsComputerRecordingMutationOptions(options),
+    queryClient,
+  );
+};
+export const getCreateWindowsComputerEnrollmentCodeUrl = (
+  organizationId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/windows-computer/enrollment-codes`;
+};
+
+/**
+ * Make a one-time code that connects a Windows computer to the caller: OpenBot's program on that computer exchanges it (exchangeWindowsComputerEnrollmentCode) and from then on connects to OpenBot by itself, so OpenBot never has to reach into the computer's network. The code is in this answer and never again, works once and expires in fifteen minutes. Because it is a credential the answer is not kept: a retry with the same Idempotency-Key is refused as a conflict rather than answered with the code again, so make a new code with a new key. Only the person the Windows computer is set up for may make one, and only so many at once.
+ * @summary Make a code that connects a Windows computer
+ */
+export const createWindowsComputerEnrollmentCode = async (
+  organizationId: string,
+  headers: CreateWindowsComputerEnrollmentCodeHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<WindowsComputerEnrollmentCode> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<WindowsComputerEnrollmentCode>(
+    getCreateWindowsComputerEnrollmentCodeUrl(organizationId),
+    {
+      ...options,
+      method: "POST",
+      headers: { ...headers, ...getHeaders(options?.headers) },
+    },
+  );
+};
+
+export const getCreateWindowsComputerEnrollmentCodeMutationKey = () =>
+  ["createWindowsComputerEnrollmentCode"] as const;
+
+export const getCreateWindowsComputerEnrollmentCodeMutationOptions = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | WindowsComputerNotFoundResponse
+    | WindowsComputerConflictResponse
+    | TooManyWindowsComputerEnrollmentCodesResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createWindowsComputerEnrollmentCode>>,
+    TError,
+    CreateWindowsComputerEnrollmentCodeMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createWindowsComputerEnrollmentCode>>,
+  TError,
+  CreateWindowsComputerEnrollmentCodeMutationVariables,
+  TContext
+> => {
+  const mutationKey = getCreateWindowsComputerEnrollmentCodeMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createWindowsComputerEnrollmentCode>>,
+    CreateWindowsComputerEnrollmentCodeMutationVariables
+  > = (props) => {
+    const { organizationId, headers } = props ?? {};
+
+    return createWindowsComputerEnrollmentCode(
+      organizationId,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateWindowsComputerEnrollmentCodeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createWindowsComputerEnrollmentCode>>
+>;
+
+export type CreateWindowsComputerEnrollmentCodeMutationError =
+  | InvalidRequestResponse
+  | UnauthenticatedResponse
+  | ForbiddenResponse
+  | WindowsComputerNotFoundResponse
+  | WindowsComputerConflictResponse
+  | TooManyWindowsComputerEnrollmentCodesResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type CreateWindowsComputerEnrollmentCodeMutationVariables = {
+  organizationId: string;
+  headers: CreateWindowsComputerEnrollmentCodeHeaders;
+};
+
+/**
+ * @summary Make a code that connects a Windows computer
+ */
+export const useCreateWindowsComputerEnrollmentCode = <
+  TError =
+    | InvalidRequestResponse
+    | UnauthenticatedResponse
+    | ForbiddenResponse
+    | WindowsComputerNotFoundResponse
+    | WindowsComputerConflictResponse
+    | TooManyWindowsComputerEnrollmentCodesResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof createWindowsComputerEnrollmentCode>>,
+      TError,
+      CreateWindowsComputerEnrollmentCodeMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof createWindowsComputerEnrollmentCode>>,
+  TError,
+  CreateWindowsComputerEnrollmentCodeMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getCreateWindowsComputerEnrollmentCodeMutationOptions(options),
+    queryClient,
+  );
+};
+export const getExchangeWindowsComputerEnrollmentCodeUrl = (
+  organizationId: string,
+) => {
+  return `/api/v2/organizations/${encodeURIComponent(String(organizationId))}/windows-computer/connections`;
+};
+
+/**
+ * Exchange an enrollment code (createWindowsComputerEnrollmentCode) for the Windows computer's own credential, shown this once, which it opens its link to OpenBot with from now on (the windowsComputerLink socket). Nobody is signed in here: the code in the body is the credential and works once. organizationId is `default` or the code's own organization, and either way the Windows computer is connected in the organization the code was made in. A Windows computer connected before, for the same person, is disconnected: a person has one. Every refusal is written to the audit trail. The answer is never kept, because it holds the credential.
+ * @summary Connect a Windows computer with a code
+ */
+export const exchangeWindowsComputerEnrollmentCode = async (
+  organizationId: string,
+  windowsComputerEnrollmentExchange: WindowsComputerEnrollmentExchange,
+  headers: ExchangeWindowsComputerEnrollmentCodeHeaders,
+  options?: Parameters<typeof apiRequest>[1],
+): Promise<WindowsComputerConnectionGrant> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return apiRequest<WindowsComputerConnectionGrant>(
+    getExchangeWindowsComputerEnrollmentCodeUrl(organizationId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(windowsComputerEnrollmentExchange),
+    },
+  );
+};
+
+export const getExchangeWindowsComputerEnrollmentCodeMutationKey = () =>
+  ["exchangeWindowsComputerEnrollmentCode"] as const;
+
+export const getExchangeWindowsComputerEnrollmentCodeMutationOptions = <
+  TError =
+    | InvalidWindowsComputerEnrollmentCodeResponse
+    | OrganizationNotFoundResponse
+    | PayloadTooLargeResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof exchangeWindowsComputerEnrollmentCode>>,
+    TError,
+    ExchangeWindowsComputerEnrollmentCodeMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof apiRequest>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof exchangeWindowsComputerEnrollmentCode>>,
+  TError,
+  ExchangeWindowsComputerEnrollmentCodeMutationVariables,
+  TContext
+> => {
+  const mutationKey = getExchangeWindowsComputerEnrollmentCodeMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof exchangeWindowsComputerEnrollmentCode>>,
+    ExchangeWindowsComputerEnrollmentCodeMutationVariables
+  > = (props) => {
+    const { organizationId, data, headers } = props ?? {};
+
+    return exchangeWindowsComputerEnrollmentCode(
+      organizationId,
+      data,
+      headers,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ExchangeWindowsComputerEnrollmentCodeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof exchangeWindowsComputerEnrollmentCode>>
+>;
+export type ExchangeWindowsComputerEnrollmentCodeMutationBody =
+  WindowsComputerEnrollmentExchange;
+export type ExchangeWindowsComputerEnrollmentCodeMutationError =
+  | InvalidWindowsComputerEnrollmentCodeResponse
+  | OrganizationNotFoundResponse
+  | PayloadTooLargeResponse
+  | ServerErrorResponse
+  | UnexpectedErrorResponse;
+export type ExchangeWindowsComputerEnrollmentCodeMutationVariables = {
+  organizationId: string;
+  data: WindowsComputerEnrollmentExchange;
+  headers: ExchangeWindowsComputerEnrollmentCodeHeaders;
+};
+
+/**
+ * @summary Connect a Windows computer with a code
+ */
+export const useExchangeWindowsComputerEnrollmentCode = <
+  TError =
+    | InvalidWindowsComputerEnrollmentCodeResponse
+    | OrganizationNotFoundResponse
+    | PayloadTooLargeResponse
+    | ServerErrorResponse
+    | UnexpectedErrorResponse,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof exchangeWindowsComputerEnrollmentCode>>,
+      TError,
+      ExchangeWindowsComputerEnrollmentCodeMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof apiRequest>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof exchangeWindowsComputerEnrollmentCode>>,
+  TError,
+  ExchangeWindowsComputerEnrollmentCodeMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getExchangeWindowsComputerEnrollmentCodeMutationOptions(options),
     queryClient,
   );
 };

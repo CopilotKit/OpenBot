@@ -6,7 +6,10 @@ import type { HttpResponseResolver, RequestHandlerOptions } from "msw";
 
 import type {
   WindowsComputer,
+  WindowsComputerConnectionGrant,
   WindowsComputerControl,
+  WindowsComputerEnrollmentCode,
+  WindowsComputerEnrollmentExchange,
   WindowsComputerRecording,
   WindowsComputerRecordingStart,
   WindowsComputerRecordingStop,
@@ -69,6 +72,19 @@ export const getStopWindowsComputerRecordingResponseMock =
     outcome: "succeeded",
     events: { received: 27, sent: 27, pending: 0, rejected: 0 },
     gaps: 1,
+  });
+
+export const getCreateWindowsComputerEnrollmentCodeResponseMock =
+  (): WindowsComputerEnrollmentCode => ({
+    code: "obwe_3q2-7wEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE0",
+    expiresAt: "2026-11-23T10:15:00.000Z",
+  });
+
+export const getExchangeWindowsComputerEnrollmentCodeResponseMock =
+  (): WindowsComputerConnectionGrant => ({
+    credential: "obwc_Zk1-EXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEX0",
+    computerId: "6f1d2c3b-4a5e-4f60-8b7a-9c0d1e2f3a4b",
+    organizationId: "default",
   });
 
 export const getGetWindowsComputerMockHandler = (
@@ -220,10 +236,81 @@ export const getStopWindowsComputerRecordingMockHandler = (
     options,
   );
 };
+
+export const getCreateWindowsComputerEnrollmentCodeMockHandler = (
+  overrideResponse?:
+    | WindowsComputerEnrollmentCode
+    | ((
+        info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+      ) =>
+        | Promise<WindowsComputerEnrollmentCode>
+        | WindowsComputerEnrollmentCode),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<{ organizationId: string }>(
+    "*/api/v2/organizations/:organizationId/windows-computer/enrollment-codes",
+    async (
+      info: Parameters<HttpResponseResolver<{ organizationId: string }>>[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getCreateWindowsComputerEnrollmentCodeResponseMock(),
+        { status: 201 },
+      );
+    },
+    options,
+  );
+};
+
+export const getExchangeWindowsComputerEnrollmentCodeMockHandler = (
+  overrideResponse?:
+    | WindowsComputerConnectionGrant
+    | ((
+        info: Parameters<
+          HttpResponseResolver<
+            { organizationId: string },
+            WindowsComputerEnrollmentExchange
+          >
+        >[0],
+      ) =>
+        | Promise<WindowsComputerConnectionGrant>
+        | WindowsComputerConnectionGrant),
+  options?: RequestHandlerOptions,
+) => {
+  return http.post<
+    { organizationId: string },
+    WindowsComputerEnrollmentExchange
+  >(
+    "*/api/v2/organizations/:organizationId/windows-computer/connections",
+    async (
+      info: Parameters<
+        HttpResponseResolver<
+          { organizationId: string },
+          WindowsComputerEnrollmentExchange
+        >
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getExchangeWindowsComputerEnrollmentCodeResponseMock(),
+        { status: 201 },
+      );
+    },
+    options,
+  );
+};
 export const getWindowsComputerMock = () => [
   getGetWindowsComputerMockHandler(),
   getTakeWindowsComputerControlMockHandler(),
   getReleaseWindowsComputerControlMockHandler(),
   getStartWindowsComputerRecordingMockHandler(),
   getStopWindowsComputerRecordingMockHandler(),
+  getCreateWindowsComputerEnrollmentCodeMockHandler(),
+  getExchangeWindowsComputerEnrollmentCodeMockHandler(),
 ];
