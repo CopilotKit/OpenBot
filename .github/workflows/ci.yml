@@ -416,6 +416,15 @@ jobs:
             --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
             "$PLAYWRIGHT_IMAGE" \
             bun test app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx app/tests/move-to-cloud-settings.test.tsx
+      # Connect your AI's sign-in code, copied with one press and read back from WebKit's clipboard.
+      # Only that test: the rest of the file runs in Chromium in the job above.
+      - run: |
+          docker run --rm --ipc=host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --volume "$(command -v bun):/usr/local/bin/bun:ro" \
+            --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=webkit \
+            "$PLAYWRIGHT_IMAGE" \
+            bun test app/tests/connect-your-ai.test.tsx -t "copies with one press"
 
   # The desktop setup window's, for the same reason as the list above: the AI step's form holding
   # still while the install behind it comes and goes. It bundles the window from the desktop's own
