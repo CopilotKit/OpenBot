@@ -384,6 +384,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   mirror, and waits longer after each failed answer (up to 30 minutes), so an organization whose
   entitlement never becomes ready is no longer asked every minute on every replica.
 
+### Agent Plugins
+
+- **Skills → Install a plugin installs a plugin in the Agent Plugins 1.0.0 format.** Pick the
+  plugin's folder and OpenBot lists everything in it before anything is written. Each skill becomes
+  one of your skills, and each remote MCP server is added the way Connections → Add server adds
+  one, under the same MCP allowlist and HTTPS rules. A skill whose command you already use is left
+  out rather than replaced. So are a server that runs a program on the computer (stdio), one on the
+  older SSE transport and one that needs fixed headers, each with the reason. A plugin laid out for
+  Claude Code or Codex (`.claude-plugin/plugin.json` or `.codex-plugin/plugin.json`, with
+  `.mcp.json`) is read too. Installing puts nothing on a Bot. No migration. See
+  [docs/agent-plugins.md](docs/agent-plugins.md).
+
 ## 1.1.3
 
 **Before upgrading.**

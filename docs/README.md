@@ -21,6 +21,7 @@ Start with [How OpenBot works](how-openbot-works.md): what a Bot has, and where 
   - [Google Drive](plugins/google-drive.md)
   - [Notion](plugins/notion.md)
   - [MCP servers added by URL](plugins/mcp-by-url.md)
+- [Installing Agent Plugins](agent-plugins.md): a plugin folder's skills and MCP servers, installed from Skills, and what is left out.
 - [Deployment](deployment.md): the container, what is in the image, minimum sizes, and the platform notes.
 - Kubernetes: the two Helm charts published with each release, `openbot-bundle` (OpenBot and Intelligence together, on one PostgreSQL server) and `openbot` (OpenBot alone, pointed at an Intelligence that already runs). Each chart's guide (`helm show readme`) covers what a cluster needs before it and the values that differ per cloud. From the release after v1.1.2, both connect a team install to CopilotKit's management service by default; see [CopilotKit management on Kubernetes](managed-upgrades.md).
 - [Releasing](releasing.md): how a release is proposed, reviewed and published.

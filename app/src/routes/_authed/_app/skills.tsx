@@ -15,6 +15,8 @@ const skillsSearchSchema = z.object({
   new: z.boolean().optional(),
   /** The slug being edited. Absent means nothing is. */
   edit: z.string().optional(),
+  /** Installing a plugin (Agent Plugins), in the same panel. */
+  install: z.boolean().optional(),
 });
 
 export const Route = createFileRoute("/_authed/_app/skills")({
@@ -23,6 +25,12 @@ export const Route = createFileRoute("/_authed/_app/skills")({
 });
 
 function SkillsRoute() {
-  const { new: creating, edit } = Route.useSearch();
-  return <SkillsSettingsPage creating={creating === true} editing={edit} />;
+  const { new: creating, edit, install } = Route.useSearch();
+  return (
+    <SkillsSettingsPage
+      creating={creating === true}
+      editing={edit}
+      installing={install === true}
+    />
+  );
 }

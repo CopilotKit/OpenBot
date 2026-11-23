@@ -4,6 +4,7 @@ import {
   IconChevronRight,
   IconDots,
   IconPlus,
+  IconPuzzle,
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -48,6 +49,7 @@ import { removeSkillMutationOptions } from "@/lib/skills/mutations";
 import { type Skill, skillListQueryOptions } from "@/lib/skills/queries";
 import { queryClient } from "@/query-client";
 import { EditSkill } from "./edit-skill";
+import { InstallPlugin } from "./install-plugin";
 import { NewSkill } from "./new-skill";
 
 /**
@@ -68,10 +70,13 @@ import { NewSkill } from "./new-skill";
 export function SkillsSettingsPage({
   creating,
   editing,
+  installing = false,
 }: {
   creating: boolean;
   /** The slug being edited, or undefined. */
   editing?: string;
+  /** Installing a plugin in the panel. */
+  installing?: boolean;
 }) {
   const navigate = useNavigate();
   const paths = useManagePaths();
@@ -90,7 +95,8 @@ export function SkillsSettingsPage({
 
   // Creating wins if both are somehow set: it is the more recent intent.
   const showCreate = creating;
-  const showEdit = !showCreate && editing !== undefined;
+  const showInstall = !showCreate && installing;
+  const showEdit = !showCreate && !showInstall && editing !== undefined;
   const loaded = !skillList.isPending && !me.isPending;
   /** Both reads answered, so `written` is the whole truth and an empty list means none. */
   const writtenKnown = skillList.data !== undefined && me.data !== undefined;
@@ -202,12 +208,16 @@ export function SkillsSettingsPage({
       detail={
         showCreate ? (
           <NewSkill />
+        ) : showInstall ? (
+          <InstallPlugin
+            onDone={() => navigate({ to: "/skills", search: {} })}
+          />
         ) : editing ? (
           <EditSkill slug={editing} />
         ) : null
       }
       onClose={() => navigate({ to: "/skills", search: {} })}
-      open={showCreate || showEdit}
+      open={showCreate || showInstall || showEdit}
     >
       <PageShell
         className="@container"
@@ -227,23 +237,35 @@ export function SkillsSettingsPage({
 
         <LearningSharing
           action={
-            <Button
-              render={(props) =>
-                // The personal edition's skills each have a switch per Bot, so a new one is written
-                // on the page that leads to those switches. Elsewhere a person's own skill is
-                // written in the panel beside the list.
-                personal ? (
-                  <Link {...props} {...paths.newSkill()} />
-                ) : (
-                  <Link {...props} search={{ new: true }} to="/skills" />
-                )
-              }
-              size="sm"
-              variant="ghost"
-            >
-              <IconPlus />
-              New skill
-            </Button>
+            <div className="flex gap-1">
+              <Button
+                render={(props) => (
+                  <Link {...props} search={{ install: true }} to="/skills" />
+                )}
+                size="sm"
+                variant="ghost"
+              >
+                <IconPuzzle />
+                Install a plugin
+              </Button>
+              <Button
+                render={(props) =>
+                  // The personal edition's skills each have a switch per Bot, so a new one is written
+                  // on the page that leads to those switches. Elsewhere a person's own skill is
+                  // written in the panel beside the list.
+                  personal ? (
+                    <Link {...props} {...paths.newSkill()} />
+                  ) : (
+                    <Link {...props} search={{ new: true }} to="/skills" />
+                  )
+                }
+                size="sm"
+                variant="ghost"
+              >
+                <IconPlus />
+                New skill
+              </Button>
+            </div>
           }
           written={written}
           writtenKnown={writtenKnown}
