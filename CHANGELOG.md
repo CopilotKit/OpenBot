@@ -375,6 +375,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   amber and green. A skin's `--success` now colors them too, and a theme in `brand.yaml`'s
   `skin.stylesheet` may set `--success`, `--warning` and `--empty-pattern-color`. The light warning
   is a darker amber than before, easier to read on white.
+- **No more Agents pages.** A person has Bots and picks their model. `/agents` goes to the Bots (it
+  went home), and `/bots/<id>/agents` to the Bot's page. A Bot that runs inside OpenBot has no
+  Connection section on Setup and no "Built in"; only a Bot connected at an address shows its Agent
+  URL. Connecting your own AG-UI agent stays in New Bot, under Bring your own agent. A model picked
+  for a Bot that chooses its own now says the Bot picks its own model, so it doesn't use the one
+  you picked.
+- A Bot you make no longer has the same avatar colors as the General Assistant or the Personal
+  Assistant. One whose colors matched theirs gets other colors.
 - **TrustedRouter is an AI provider.** It is listed between Unbiased AI and the custom endpoint
   wherever an AI is chosen: OpenBot Desktop's setup window and Settings; Connect your AI; Settings,
   Your AI; and Admin, Providers. TrustedRouter is an OpenAI-compatible gateway in front of many
@@ -597,11 +605,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   back to Detailed, in this browser. Message list emphasis applies to Detailed only.
 - **A Bots panel.** Every Bot, ordered by its latest conversation. The top three open with their
   five latest conversations, and Show more lists the next five.
-- **No more Agents pages.** A person has Bots and picks their model. Nothing else says what runs a
-  Bot. The Agents page and a Bot's Agents page are gone: `/agents` goes to the Bots, and
-  `/bots/<id>/agents` to the Bot's page. A Bot that runs inside OpenBot has no Connection section
-  on Setup and no "Built in". Only a Bot connected at an address shows its Agent URL. Connecting
-  your own AG-UI agent stays in New Bot, under Bring your own agent.
+- **Agents are hidden for now.** The Agents page is out of the menu and `/agents` goes home. A
+  Bot's page has no Agents row, and `/bots/<id>/agents` goes to the Bot's page.
 - **The sidebar drags narrower, and never takes more than two-fifths of the window.** Its edge
   stopped at 220px; a panel now drags down to 180px (228px beside the strip), where every heading
   still reads whole. Zooming in used to leave the sidebar its full width, so it could take more than
