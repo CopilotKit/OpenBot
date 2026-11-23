@@ -12572,6 +12572,14 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
         Err(std::sync::TryLockError::WouldBlock) => None,
         Err(std::sync::TryLockError::Poisoned(error)) => panic!("{error}"),
     };
+    // The move to OpenBot Cloud is at work on setup's screens, and is about to remove the OpenBot
+    // here: the window comes forward as it is, and the move decides where it goes when it ends
+    // (`setup_again_after_move`).
+    let moving = desktop_move::moving(app);
+    if moving {
+        log::info!("[window] a move to OpenBot Cloud is running; the window stays where it is");
+    }
+    let startup = startup.filter(|_| !moving);
     // Restore has the same deployment ownership requirement as the setup page's passive probe.
     // A successful app-port response alone may belong to another installation or application.
     // The page the window belongs on, and the address it loads it at: for the owned app, through its
@@ -12607,6 +12615,30 @@ fn restore_window_on<R: tauri::Runtime>(app: &tauri::AppHandle<R>, ports: &openb
     let _ = window.show();
     let _ = window.unminimize();
     focus(&window, "OpenBot is showing");
+}
+
+/**
+A move to OpenBot Cloud ended, moved or not. Its screens are setup's, so the window should still be
+on setup. If anything took it elsewhere meanwhile, it goes back to setup, which opens the OpenBot now
+chosen: OpenBot Cloud after a move, whose own gate asks for its terms before anything else, and the
+OpenBot here after a move that didn't happen. Never left on an app the move just removed.
+*/
+fn setup_again_after_move<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if window.url().is_ok_and(|url| on_setup_page(app, &url)) {
+        return;
+    }
+    log::info!("[move] the window left setup during the move; it goes back to setup");
+    let navigated = setup_destination(app).and_then(|setup| {
+        window
+            .navigate(setup)
+            .map_err(|error| format!("could not go back to setup: {error}"))
+    });
+    if let Err(error) = navigated {
+        log::warn!("[move] {error}");
+    }
 }
 
 fn schedule_second_instance_restore<T, F>(
@@ -27609,6 +27641,99 @@ fn main() {
                 .as_str(),
             format!("http://127.0.0.1:{}/", f.ports.app)
         );
+    }
+
+    /*
+    FOUND MOVING TO OPENBOT CLOUD: the person signed in to OpenBot Cloud in the browser and came back
+    to the window with a Dock click while the move was still running. The click sent the window to
+    the OpenBot on this computer, which was up, in place of the move's screens; the move then removed
+    it, and "hello world" sent from its home got no answer ("Load failed").
+    */
+    #[test]
+    fn a_dock_click_during_a_move_leaves_the_window_on_the_move() {
+        let f = RestoreFixture::new();
+        let setup = "tauri://localhost/";
+        let app = f.app(&f.owned, setup);
+        let window = app.get_webview_window("main").unwrap();
+        window.navigate(setup.parse().unwrap()).unwrap();
+        window.hide().unwrap();
+        desktop_move::set_moving_for_test(app.handle(), true);
+
+        restore_window_on(app.handle(), &f.ports);
+
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            setup,
+            "a restore during the move must not replace its screens with the OpenBot it removes"
+        );
+        assert!(
+            window.is_visible().unwrap(),
+            "the window still comes forward"
+        );
+
+        // Once the move is over, a restore decides again, as it always has.
+        desktop_move::set_moving_for_test(app.handle(), false);
+        restore_window_on(app.handle(), &f.ports);
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            format!("http://127.0.0.1:{}/", f.ports.app)
+        );
+    }
+
+    /*
+    The safety net under the above: a move that ends with the window somewhere other than setup
+    (here the OpenBot on this computer, as the Dock click left it) sends it back to setup, which opens
+    the OpenBot now chosen. After a move that is OpenBot Cloud, whose gate asks for its terms first.
+    The move here ends at once: the app is already connected to an OpenBot elsewhere.
+    */
+    #[test]
+    fn a_move_that_ends_sends_the_window_back_to_setup() {
+        use openbot_desktop_lib::connected::{choice, credentials};
+        let f = RestoreFixture::new();
+        let setup = "tauri://localhost/";
+        let app = f.app(&f.owned, setup);
+        let config = f.base.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        desktop_connected::use_for_test(
+            app.handle(),
+            config.clone(),
+            credentials::Store::of(keyring_core::mock::Store::new().unwrap()),
+        );
+        choice::write(
+            &config,
+            &choice::Choice {
+                mode: choice::Mode::Connected,
+                address: Some("https://cloud.openbot.example".into()),
+                organization_id: None,
+            },
+        )
+        .unwrap();
+        let window = app.get_webview_window("main").unwrap();
+        let local = format!("http://127.0.0.1:{}/", f.ports.app);
+        window.navigate(local.parse().unwrap()).unwrap();
+
+        let ended = tauri::async_runtime::block_on(desktop_move::move_to_cloud(
+            app.handle().clone(),
+            "https://cloud.openbot.example".into(),
+            None,
+        ));
+
+        assert!(ended.is_err(), "the move ends without moving: {ended:?}");
+        assert!(!desktop_move::moving(app.handle()));
+        assert_eq!(
+            window.url().unwrap().as_str(),
+            setup,
+            "a move that ends must not leave the window on the OpenBot it was moving from"
+        );
+
+        // On setup already, as a move's own screens are, the window stays where it is.
+        let ended = tauri::async_runtime::block_on(desktop_move::move_to_cloud(
+            app.handle().clone(),
+            "https://cloud.openbot.example".into(),
+            None,
+        ));
+        assert!(ended.is_err());
+        assert_eq!(window.url().unwrap().as_str(), setup);
     }
 }
 
