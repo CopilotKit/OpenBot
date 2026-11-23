@@ -344,8 +344,10 @@ The app listens to no Tauri events, so an app scene has no Events panel.
 Under the window, the workbench lists layout warnings as the clock moves. The list is in a fixed order: by time, then by the name of the element. A warning is one of these:
 
 - **moved**: an element moved more than 2 px between two checks. The warning names the cause, for example a command or a request. If most of the page moved by the same amount, one warning says "The whole page".
-- **cut off**: the content of an element is clipped.
-- **outside the window**: an element goes past the edge of the window.
+- **cut off**: a box with hidden overflow (the element or a box around it) hides more than 2 px of the element's text. Text cut on purpose does not count: an ellipsis (`text-overflow: ellipsis`, as Tailwind's `truncate`) or a line clamp, on the element or on the box that cuts it. Text that is larger than its box but shows (overflow visible), and text in a box that scrolls, do not count either.
+- **outside the window**: an element goes past the edge of the window, and no scroll brings it into view. An element in a box that scrolls, or past the bottom or the right of a page that scrolls itself, is not outside; an element fixed to the window (`position: fixed`) still is.
+
+Each move gets a class by the same rules as the findings (see [Which moves are findings](#which-moves-are-findings)), and its row names it. The list shows shift under hand, jitter, cut off and outside. The expected moves (after an input, a new screen, a load, a late load shift) are behind **Show expected moves (N)**, as on the Findings page. The heading counts the rows shown without the expected moves.
 
 The workbench checks after each native call and event. In an app scene, it also checks after each request, stream event and socket message. Elements that are hidden from view, such as labels for screen readers only, do not get warnings.
 

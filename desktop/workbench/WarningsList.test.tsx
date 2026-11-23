@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { type Movement, warningMark } from "./findings";
 import type { Warning } from "./layoutWatch";
 import { formatTime } from "./RunControls";
 import {
@@ -356,4 +357,72 @@ test("a new run shows its own rows at once, also with the pointer in the list", 
   );
   expect(view.container.textContent).toContain("B is cut off");
   expect(view.container.textContent).not.toContain("A is cut off");
+});
+
+const moved = (at: number, label: string): Warning => ({
+  kind: "moved",
+  at,
+  label,
+  dx: 0,
+  dy: 156,
+  cause: "click",
+  from: BOX,
+  to: { ...BOX, y: 156 },
+});
+
+test("with the classes of the moves, the expected moves hide behind a toggle", async () => {
+  const expectedMove = moved(37_000, 'p "Done"');
+  const jitter = moved(40_000, 'button "Continue"');
+  const cut = clipped(1_000, 'p "Long"');
+  const movements = new Map<string, Movement>([
+    [
+      warningMark(expectedMove),
+      { class: "expected", rule: "after-action", why: "after the click" },
+    ],
+    [
+      warningMark(jitter),
+      { class: "jitter", rule: "jitter", why: "back and forth" },
+    ],
+  ]);
+  const onHover = mock((_w: Warning) => {});
+  const { getAllByRole, getByRole, getByText, queryByText } = render(
+    <WarningsList
+      warnings={[expectedMove, jitter, cut]}
+      movements={movements}
+      onSeek={() => {}}
+      onHover={onHover}
+      hoverDelay={20}
+    />,
+  );
+  getByText("Layout warnings (2)");
+  const rows = () => getAllByRole("button").map((b) => b.textContent ?? "");
+  expect(rows()).toEqual([
+    `${warningText(cut)}`,
+    `${warningText(jitter)}Jitter`,
+  ]);
+  expect(queryByText(/156px at 0:37/)).toBeNull();
+
+  const toggle = getByRole("checkbox", { name: "Show expected moves (1)" });
+  fireEvent.click(toggle);
+  expect(rows()).toEqual([
+    `${warningText(cut)}`,
+    `${warningText(expectedMove)}Expected: after an input`,
+    `${warningText(jitter)}Jitter`,
+  ]);
+  // The hover still shows the row's warning, also for an expected move.
+  const row = getAllByRole("button")[1] as HTMLElement;
+  fireEvent.mouseMove(row, { clientX: 5, clientY: 5 });
+  await wait(30);
+  expect(onHover).toHaveBeenCalledWith(expectedMove);
+});
+
+test("with no expected moves there is no toggle", () => {
+  const { queryByRole } = render(
+    <WarningsList
+      warnings={[clipped(1_000, "A")]}
+      movements={new Map()}
+      onSeek={() => {}}
+    />,
+  );
+  expect(queryByRole("checkbox")).toBeNull();
 });

@@ -7,6 +7,7 @@ import {
   findingId,
   findingKey,
   findingPrompt,
+  isExpected,
   type Movement,
   matchWarning,
   moveWords,
@@ -19,6 +20,7 @@ import {
   parseMark,
   type SceneRef,
   sortFindings,
+  splitWarnings,
   userActions,
   warningMark,
 } from "./findings";
@@ -444,6 +446,38 @@ describe("movement classes", () => {
     expect(c?.rule).toBe("screen-change");
     expect(c?.class).toBe("expected");
     expect(c?.why).toContain('from "Install" to "Finishing setup"');
+  });
+
+  test("splitWarnings hides the expected moves and keeps jitter, cut off and outside", () => {
+    const load = move(0, 'heading "Appearance"', 481);
+    const jitters = [1_000, 2_000, 3_000].map((at, i) =>
+      move(at, 'button "Continue"', i % 2 === 0 ? 30 : -30),
+    );
+    const cut: Warning = {
+      kind: "clipped",
+      at: 500,
+      label: 'p "Long"',
+      box: BOX,
+      scrollWidth: 40,
+      scrollHeight: 10,
+    };
+    const out: Warning = {
+      kind: "outside",
+      at: 500,
+      label: 'p "Below"',
+      overBy: 36,
+      box: BOX,
+    };
+    const all = [load, ...jitters, cut, out];
+    const classes = classifyMoves(all, [], [screen(0)]);
+    const { shown, expected } = splitWarnings(all, classes);
+    expect(expected).toEqual([load]);
+    expect(shown).toEqual([...jitters, cut, out]);
+    // A move with no class (not classified yet) shows.
+    expect(splitWarnings([load], new Map()).shown).toEqual([load]);
+    expect(isExpected(classOf(classes, load))).toBe(true);
+    expect(isExpected(classOf(classes, jitters[0] as Warning))).toBe(false);
+    expect(isExpected(null)).toBe(false);
   });
 
   test("moves while a screen loads are expected, and so is a late load shift", () => {

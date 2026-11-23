@@ -28,6 +28,7 @@ import {
   filterFindings,
   findingFiles,
   findingPrompt,
+  isExpected,
   isLayoutKind,
   KIND_LABELS,
   NO_FILTER,
@@ -219,7 +220,7 @@ export function FindingsPage() {
   const all = loaded?.data.findings ?? [];
   const files = useMemo(() => findingFiles(all), [all]);
   const expectedCount = useMemo(
-    () => all.filter((f) => f.movement?.class === "expected").length,
+    () => all.filter((f) => isExpected(f.movement)).length,
     [all],
   );
   const shown = useMemo(

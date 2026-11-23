@@ -333,6 +333,123 @@ function scrolls(value: string) {
   return value === "auto" || value === "scroll";
 }
 
+/** Text cut off by this many px or less is not reported: a rounding, not text a person misses. */
+export const CLIP_TOLERANCE_PX = 2;
+
+/** True when an element cuts its own text on purpose: an ellipsis, or a clamp to a number of lines. */
+export function truncatesOnPurpose(style: CSSStyleDeclaration): boolean {
+  if (style.textOverflow === "ellipsis") return true;
+  return ["-webkit-line-clamp", "line-clamp"].some((name) => {
+    const clamp = style.getPropertyValue(name).trim();
+    return clamp !== "" && clamp !== "none";
+  });
+}
+
+/** The box an element shows its content in: inside the border, without the scroll bars. */
+function contentClip(element: Element): Box {
+  const rect = element.getBoundingClientRect();
+  const html = element as HTMLElement;
+  return {
+    x: rect.x + (html.clientLeft || 0),
+    y: rect.y + (html.clientTop || 0),
+    width: html.clientWidth,
+    height: html.clientHeight,
+  };
+}
+
+function intersect(a: Box, b: Box): Box {
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  return {
+    x,
+    y,
+    width: Math.max(0, Math.min(a.x + a.width, b.x + b.width) - x),
+    height: Math.max(0, Math.min(a.y + a.height, b.y + b.height) - y),
+  };
+}
+
+/**
+ * How many px of the text the clip box hides: the most any line of the text goes past a side of
+ * the box. 0 when every line is inside it.
+ */
+export function hiddenPx(textRects: readonly Box[], clip: Box): number {
+  let most = 0;
+  for (const r of textRects) {
+    if (r.width === 0 || r.height === 0) continue;
+    most = Math.max(
+      most,
+      clip.x - r.x,
+      clip.y - r.y,
+      r.x + r.width - (clip.x + clip.width),
+      r.y + r.height - (clip.y + clip.height),
+    );
+  }
+  return most;
+}
+
+/** The boxes of the lines of an element's own text (its text nodes, not its children's). */
+function ownTextRects(element: Element): Box[] {
+  const doc = element.ownerDocument;
+  const rects: Box[] = [];
+  for (const node of Array.from(element.childNodes)) {
+    if (node.nodeType !== 3 || !collapse(node.textContent)) continue;
+    const range = doc.createRange();
+    range.selectNodeContents(node);
+    for (const r of Array.from(range.getClientRects()))
+      rects.push({ x: r.x, y: r.y, width: r.width, height: r.height });
+  }
+  return rects;
+}
+
+/**
+ * How many px of an element's own text a person cannot see, or 0. Text cut on purpose (an
+ * ellipsis or a line clamp, on the element or on the box that cuts it) does not count, nor text
+ * that overflows where nothing cuts it (overflow visible), nor text in a box that scrolls.
+ */
+function cutOffBy(element: Element, view: Window): number {
+  const style = view.getComputedStyle(element);
+  if (truncatesOnPurpose(style)) return 0;
+  let clip: Box | null = null;
+  for (let at: Element | null = element; at; at = at.parentElement) {
+    if (at === element.ownerDocument.documentElement) break;
+    const s = at === element ? style : view.getComputedStyle(at);
+    if (at !== element && truncatesOnPurpose(s) && overflowHidden(s)) return 0;
+    if (scrolls(s.overflowX) || scrolls(s.overflowY)) {
+      // A person scrolls to the rest of the text. Only what cut it before the scroller counts.
+      break;
+    }
+    if (overflowHidden(s)) {
+      const box = contentClip(at);
+      clip = clip ? intersect(clip, box) : box;
+    }
+  }
+  if (!clip) return 0;
+  return hiddenPx(ownTextRects(element), clip);
+}
+
+/** True when an element moves with the page's own scroll (it is not fixed to the window). */
+function movesWithPage(element: Element, view: Window): boolean {
+  for (let at: Element | null = element; at; at = at.parentElement) {
+    if (view.getComputedStyle(at).position === "fixed") return false;
+  }
+  return true;
+}
+
+/** The axes the page itself scrolls on (the window's own scroll bar, not an element's). */
+function pageScrolls(root: Document, view: Window): { x: boolean; y: boolean } {
+  const scroller = root.scrollingElement ?? root.documentElement;
+  if (!scroller) return { x: false, y: false };
+  const styles = [root.documentElement, root.body]
+    .filter((e): e is HTMLElement => e !== null)
+    .map((e) => view.getComputedStyle(e));
+  const open = (axis: "overflowX" | "overflowY") =>
+    styles.every((s) => s[axis] !== "hidden" && s[axis] !== "clip");
+  return {
+    x: scroller.scrollWidth > scroller.clientWidth + 1 && open("overflowX"),
+    y: scroller.scrollHeight > scroller.clientHeight + 1 && open("overflowY"),
+  };
+}
+
 export function clippedAndOutside(
   root: Document,
   at: number,
@@ -341,6 +458,7 @@ export function clippedAndOutside(
   const view = root.defaultView;
   if (!view) return [];
   const warnings: Warning[] = [];
+  const page = pageScrolls(root, view);
   for (const { element, label, box } of visibleElements(root)) {
     const style = view.getComputedStyle(element);
     if (ownText(element) && element.clientWidth > 0) {
@@ -349,7 +467,7 @@ export function clippedAndOutside(
           !scrolls(style.overflowX || style.overflow)) ||
         (element.scrollHeight > element.clientHeight + 1 &&
           !scrolls(style.overflowY || style.overflow));
-      if (overflowing)
+      if (overflowing && cutOffBy(element, view) > CLIP_TOLERANCE_PX)
         warnings.push({
           kind: "clipped",
           at,
@@ -369,12 +487,14 @@ export function clippedAndOutside(
       }
     }
     if (inScroller) continue;
+    // The page's own scroll brings an element past the right or the bottom edge into view.
+    const withPage = (page.x || page.y) && movesWithPage(element, view);
     const overBy = Math.round(
       Math.max(
-        box.x + box.width - viewport.width,
-        box.y + box.height - viewport.height,
-        -box.x,
-        -box.y,
+        withPage && page.x ? 0 : box.x + box.width - viewport.width,
+        withPage && page.y ? 0 : box.y + box.height - viewport.height,
+        withPage && page.x ? 0 : -box.x,
+        withPage && page.y ? 0 : -box.y,
       ),
     );
     if (overBy > 0) warnings.push({ kind: "outside", at, label, overBy, box });

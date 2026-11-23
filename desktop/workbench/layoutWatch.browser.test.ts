@@ -175,6 +175,68 @@ describe.skipIf(!asked)("the workbench's layout watch", () => {
     }
   }, 30_000);
 
+  test("only text a box really hides counts as cut off", async () => {
+    if (!browser) throw new Error("No browser.");
+    const page = await browser.newPage({
+      viewport: { width: 800, height: 600 },
+    });
+    try {
+      await openScene(page, "state-first-run");
+      // A string, so the import runs in the page as written.
+      const labels = await page.evaluate<string[]>(`(async () => {
+        const body = document.createElement("body");
+        body.innerHTML = [
+          // Cut off: a box with hidden overflow hides the end of the line.
+          '<div style="width: 100px; white-space: nowrap; overflow: hidden">Cut off by the box around it</div>',
+          // An ellipsis on purpose (Tailwind's truncate).
+          '<span style="display: block; width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">An ellipsis on purpose here</span>',
+          // An ellipsis on the box that cuts the text.
+          '<div style="width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis"><span>An ellipsis on the parent</span></div>',
+          // Clamped to two lines.
+          '<p style="width: 100px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden">Clamped to two lines of text, the rest is gone on purpose</p>',
+          // A 28 px line in a 25 px button with overflow visible: nothing is hidden.
+          '<button role="tab" style="height: 25px; line-height: 28px; padding: 0; border: 0">Overflows but shows</button>',
+        ].join("");
+        document.body.replaceWith(body);
+        const { clippedAndOutside } = await import("/workbench/layoutWatch.ts");
+        return clippedAndOutside(document, 0, { width: innerWidth, height: innerHeight })
+          .filter((warning) => warning.kind === "clipped")
+          .map((warning) => warning.label);
+      })()`);
+      expect(labels).toEqual(['div "Cut off by the box around it"']);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test("an element below the window is not outside when the page scrolls to it", async () => {
+    if (!browser) throw new Error("No browser.");
+    const page = await browser.newPage({
+      viewport: { width: 800, height: 600 },
+    });
+    try {
+      await openScene(page, "state-first-run");
+      const labels = await page.evaluate<string[]>(`(async () => {
+        const body = document.createElement("body");
+        body.innerHTML = [
+          '<p style="margin-top: 900px">Below the fold</p>',
+          '<p style="position: fixed; top: 620px">Fixed below the window</p>',
+        ].join("");
+        document.documentElement.style.overflow = "visible";
+        document.body.replaceWith(body);
+        body.style.overflow = "visible";
+        body.style.height = "auto";
+        const { clippedAndOutside } = await import("/workbench/layoutWatch.ts");
+        return clippedAndOutside(document, 0, { width: innerWidth, height: innerHeight })
+          .filter((warning) => warning.kind === "outside")
+          .map((warning) => warning.label);
+      })()`);
+      expect(labels).toEqual(['p "Fixed below the window"']);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
   test("install-mac played to its end gives a list of warnings", async () => {
     if (!browser) throw new Error("No browser.");
     const page = await browser.newPage({
@@ -221,6 +283,11 @@ describe.skipIf(!asked)("the workbench's layout watch", () => {
       // The warning has where the row was and where it went.
       expect(warning.to.y - warning.from.y).toBe(warning.dy);
 
+      // The row's moves come after an input: expected, so behind the toggle.
+      await page
+        .mainFrame()
+        .getByRole("checkbox", { name: "Show expected moves" })
+        .click();
       // The first move of the row is earlier than the end: the hover seeks back.
       await page
         .mainFrame()

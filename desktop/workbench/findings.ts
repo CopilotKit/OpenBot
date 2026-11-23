@@ -369,7 +369,7 @@ export function filterFindings(
   const words = filter.text.trim().toLowerCase();
   return findings.filter((f) => {
     if (filter.kind !== "all" && f.kind !== filter.kind) return false;
-    if (!filter.showExpected && f.movement?.class === "expected") return false;
+    if (!filter.showExpected && isExpected(f.movement)) return false;
     if (
       filter.window !== "all" &&
       !f.occurrences.some((o) => o.scene.kind === filter.window)
@@ -678,6 +678,33 @@ export function classifyMoves(
     });
   }
   return result;
+}
+
+/**
+ * True for a move the rules call expected (after an input, a new screen, a load, a late load
+ * shift). The Findings page and the workbench page's warnings hide these by default; every other
+ * warning (shift under hand, jitter, cut off, outside, a move with no class) shows.
+ */
+export function isExpected(movement: Movement | null | undefined): boolean {
+  return movement?.class === "expected";
+}
+
+/**
+ * The warnings of one run in two lists, by the same rules as the findings (classifyMoves):
+ * `shown` (shift under hand, jitter, cut off, outside) and `expected` (the expected moves).
+ * `movements` holds the class of each move by its mark, also for the workbench page's rows.
+ */
+export function splitWarnings<W extends Warning>(
+  warnings: readonly W[],
+  movements: ReadonlyMap<string, Movement>,
+): { shown: W[]; expected: W[] } {
+  const shown: W[] = [];
+  const expected: W[] = [];
+  for (const warning of warnings) {
+    if (isExpected(movements.get(warningMark(warning)))) expected.push(warning);
+    else shown.push(warning);
+  }
+  return { shown, expected };
 }
 
 /** True when the moves change direction at least once (on the axis that moves most). */

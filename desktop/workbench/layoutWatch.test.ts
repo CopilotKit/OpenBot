@@ -6,6 +6,7 @@ import {
   compare,
   elementKey,
   focusOf,
+  hiddenPx,
   isVisuallyHidden,
   type Snapshot,
   screenOf,
@@ -301,17 +302,58 @@ test("text for screen readers only has no key for moves and no cut-off or outsid
   });
 });
 
+/**
+ * happy-dom has no layout. Each element gets its box from `data-box`, the lines of its own text
+ * from `data-text` ("x y w h", one line), and a client and scroll size from `data-size`
+ * ("clientW clientH scrollW scrollH").
+ */
+function withText(run: () => void) {
+  const real = Range.prototype.getClientRects;
+  Range.prototype.getClientRects = function (this: Range) {
+    const owner = this.startContainer.parentElement;
+    const text = owner?.getAttribute("data-text");
+    if (!text) return [] as unknown as DOMRectList;
+    const [x = 0, y = 0, width = 0, height = 0] = text.split(" ").map(Number);
+    return [{ x, y, width, height }] as unknown as DOMRectList;
+  };
+  try {
+    withBoxes(() => {
+      for (const element of Array.from(
+        document.querySelectorAll("[data-size]"),
+      )) {
+        const [cw = 0, ch = 0, sw = 0, sh = 0] = (
+          element.getAttribute("data-size") ?? ""
+        )
+          .split(" ")
+          .map(Number);
+        Object.defineProperty(element, "clientWidth", { value: cw });
+        Object.defineProperty(element, "clientHeight", { value: ch });
+        Object.defineProperty(element, "scrollWidth", { value: sw });
+        Object.defineProperty(element, "scrollHeight", { value: sh });
+      }
+      run();
+    });
+  } finally {
+    Range.prototype.getClientRects = real;
+  }
+}
+
+const clippedIn = (html: string) => {
+  mount(html);
+  let kinds: string[] = [];
+  withText(() => {
+    kinds = clippedAndOutside(document, 9, { width: 800, height: 600 })
+      .filter((w) => w.kind === "clipped")
+      .map((w) => w.label);
+  });
+  return kinds;
+};
+
 test("a cut-off warning has the box and the full size of the content", () => {
-  withBoxes(() => {
-    const body = mount(
-      '<p data-box="10 20 100 16" style="white-space: nowrap; overflow: hidden">A long line</p>',
-    );
-    const p = body.querySelector("p") as HTMLElement;
-    // happy-dom has no layout: give the paragraph a client and a scroll size.
-    Object.defineProperty(p, "clientWidth", { value: 100 });
-    Object.defineProperty(p, "clientHeight", { value: 16 });
-    Object.defineProperty(p, "scrollWidth", { value: 160 });
-    Object.defineProperty(p, "scrollHeight", { value: 16 });
+  mount(
+    '<p data-box="10 20 100 16" data-size="100 16 160 16" data-text="10 20 160 16" style="white-space: nowrap; overflow: hidden">A long line</p>',
+  );
+  withText(() => {
     expect(clippedAndOutside(document, 9, { width: 800, height: 600 })).toEqual(
       [
         {
@@ -324,6 +366,125 @@ test("a cut-off warning has the box and the full size of the content", () => {
         },
       ],
     );
+  });
+});
+
+test("text with an ellipsis on purpose is not cut off", () => {
+  expect(
+    clippedIn(
+      '<span data-box="0 0 100 16" data-size="100 16 234 16" data-text="0 0 234 16" style="overflow: hidden; white-space: nowrap; text-overflow: ellipsis">Help with everyday work using clear answers.</span>',
+    ),
+  ).toEqual([]);
+});
+
+test("an ellipsis on the box that cuts the text is on purpose too", () => {
+  expect(
+    clippedIn(`
+      <div data-box="0 0 100 16" data-size="100 16 180 16" style="overflow: hidden; white-space: nowrap; text-overflow: ellipsis">
+        <span data-box="0 0 180 16" data-size="180 16 180 17" data-text="0 0 180 17">What is on my plate today?</span>
+      </div>`),
+  ).toEqual([]);
+});
+
+test("text clamped to a number of lines is not cut off", () => {
+  expect(
+    clippedIn(
+      '<p data-box="0 0 100 32" data-size="100 32 100 64" data-text="0 0 100 64" style="overflow: hidden; -webkit-line-clamp: 2; line-clamp: 2; display: -webkit-box">A long paragraph</p>',
+    ),
+  ).toEqual([]);
+});
+
+test("text that overflows where nothing cuts it is not cut off", () => {
+  // The tab case: a 28 px text box in a 25 px trigger with overflow visible.
+  expect(
+    clippedIn(
+      '<button role="tab" data-box="0 0 120 25" data-size="120 25 120 28" data-text="10 -1 100 28">Use an API key</button>',
+    ),
+  ).toEqual([]);
+});
+
+test("text that a box with hidden overflow cuts by more than 2 px is cut off", () => {
+  expect(
+    clippedIn(`
+      <div data-box="0 0 100 20" data-size="100 20 100 20" style="overflow: hidden">
+        <p data-box="0 0 100 20" data-size="100 20 140 20" data-text="0 0 140 20" style="white-space: nowrap">A long line of text</p>
+      </div>`),
+  ).toEqual(['p "A long line of text"']);
+});
+
+test("text cut by 2 px or less is not cut off", () => {
+  expect(
+    clippedIn(
+      '<p data-box="0 0 100 20" data-size="100 20 102 22" data-text="0 0 102 22" style="overflow: hidden">Nearly fits</p>',
+    ),
+  ).toEqual([]);
+});
+
+test("text whose lines are all inside the cutting box is not cut off", () => {
+  // The scroll size is larger (padding, a child), but every line of the text shows.
+  expect(
+    clippedIn(
+      '<p data-box="0 0 100 20" data-size="100 20 130 20" data-text="4 2 80 16" style="overflow: hidden">Short</p>',
+    ),
+  ).toEqual([]);
+});
+
+test("text in a box that scrolls is not cut off", () => {
+  expect(
+    clippedIn(`
+      <div data-box="0 0 100 20" style="overflow: hidden">
+        <div data-box="0 0 100 20" style="overflow-x: auto">
+          <p data-box="0 0 100 20" data-size="100 20 300 20" data-text="0 0 300 20" style="white-space: nowrap">Scroll to read all</p>
+        </div>
+      </div>`),
+  ).toEqual([]);
+});
+
+test("hiddenPx is how far the text goes past a side of the box", () => {
+  const clip = { x: 0, y: 0, width: 100, height: 20 };
+  expect(hiddenPx([{ x: 0, y: 0, width: 100, height: 20 }], clip)).toBe(0);
+  expect(hiddenPx([{ x: 0, y: 0, width: 134, height: 20 }], clip)).toBe(34);
+  expect(hiddenPx([{ x: -5, y: 0, width: 50, height: 20 }], clip)).toBe(5);
+  expect(hiddenPx([{ x: 0, y: 18, width: 50, height: 10 }], clip)).toBe(8);
+  expect(hiddenPx([], clip)).toBe(0);
+});
+
+test("an element below the window is not outside when the page scrolls to it", () => {
+  mount(
+    '<main data-box="0 0 800 1200"><p data-box="0 1100 400 20">Ask in plain words.</p><footer style="position: fixed" data-box="0 620 400 40"><button data-box="0 620 400 40">Get started</button></footer></main>',
+  );
+  const scroller = document.documentElement;
+  Object.defineProperty(scroller, "scrollHeight", {
+    value: 1200,
+    configurable: true,
+  });
+  Object.defineProperty(scroller, "clientHeight", {
+    value: 600,
+    configurable: true,
+  });
+  try {
+    withBoxes(() => {
+      const labels = clippedAndOutside(document, 0, {
+        width: 800,
+        height: 600,
+      }).map((w) => `${w.kind} ${w.label}`);
+      // The fixed footer does not scroll with the page, so it is still outside.
+      expect(labels).toEqual(['outside button "Get started"']);
+    });
+  } finally {
+    delete (scroller as unknown as Record<string, unknown>).scrollHeight;
+    delete (scroller as unknown as Record<string, unknown>).clientHeight;
+  }
+});
+
+test("an element below the window is outside when the page does not scroll", () => {
+  mount('<p data-box="0 1100 400 20">Ask in plain words.</p>');
+  withBoxes(() => {
+    expect(
+      clippedAndOutside(document, 0, { width: 800, height: 600 }).map(
+        (w) => `${w.kind} ${w.label}`,
+      ),
+    ).toEqual(['outside p "Ask in plain words."']);
   });
 });
 

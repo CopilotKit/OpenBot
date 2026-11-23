@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -41,7 +42,14 @@ import { type FrameConfig, frameUrl } from "./frameConfig";
 import { appSceneAfter, desktopSceneFor, HANDBACK_WORDS } from "./handover";
 import { ImportLogPanel } from "./ImportLogPanel";
 import "./appPanels.css";
-import { type Mark, matchWarning, parseMark } from "./findings";
+import {
+  classifyMoves,
+  type Mark,
+  type Movement,
+  matchWarning,
+  parseMark,
+  userActions,
+} from "./findings";
 import { KeysHelp } from "./KeysHelp";
 import { describeElements, type ScreenMark, type Warning } from "./layoutWatch";
 import { pickArea } from "./pickElement";
@@ -1706,6 +1714,25 @@ export function WorkbenchLoaded({
   /** The rows the run found up to now; frozen with the rows while a hover jumps. */
   const foundWarningsRef = useRef(warnings);
   if (!highlight?.jumping) foundWarningsRef.current = warnings;
+  /**
+   * The class of each move of the run, by the findings' rules (classifyMoves), so the list hides
+   * the expected moves as the Findings page does. A class stays for the run: a row kept from
+   * before a seek back keeps the class it had; a row the run finds again gets its class anew.
+   */
+  const movementsRef = useRef<{ run: string; map: Map<string, Movement> }>({
+    run: runKey,
+    map: new Map(),
+  });
+  if (movementsRef.current.run !== runKey)
+    movementsRef.current = { run: runKey, map: new Map() };
+  const sceneRun = scene?.run;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each check sets checkedAt, and the screens grow in the same check
+  const freshMovements = useMemo(
+    () => classifyMoves(warnings, userActions(sceneRun ?? []), layoutScreens()),
+    [warnings, checkedAt, sceneRun, layoutScreens],
+  );
+  for (const [mark, movement] of freshMovements)
+    movementsRef.current.map.set(mark, movement);
 
   const pageStyle = {
     "--wb-left": `${leftWidth}px`,
@@ -1941,6 +1968,7 @@ export function WorkbenchLoaded({
             warnings={shownWarningsRef.current.warnings}
             found={foundWarningsRef.current}
             run={runKey}
+            movements={movementsRef.current.map}
             seekingTo={highlight?.jumping ? highlight.warning.at : null}
             onSeek={(ms) => {
               void seek(ms);

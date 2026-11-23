@@ -803,6 +803,21 @@ kbd {
   font-weight: 600;
 }
 
+/* The class a move row names, after its words. */
+.wb-warning-class {
+  margin-left: 8px;
+  color: var(--ck-text-secondary);
+}
+
+/* "Show expected moves (N)": the expected moves stay hidden until you turn it on. */
+.wb-warning-expected {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  color: var(--ck-text-secondary);
+}
+
 .wb-warning-status {
   margin-left: 8px;
   color: var(--ck-text-secondary);

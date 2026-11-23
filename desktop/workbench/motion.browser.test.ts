@@ -95,6 +95,20 @@ async function openScene(page: Page, scene: string, at = 0): Promise<void> {
  * the frame's scale. The element does not move in the window when the page zooms or the stage
  * changes, so this must stay the same.
  */
+/**
+ * Turns on "Show expected moves" under the window, so the list has every row: install-mac's moves
+ * are all expected (after an input, while a screen loads), and these tests are about the rows.
+ */
+async function showExpectedMoves(page: Page): Promise<void> {
+  await page.waitForSelector(".wb-warning-expected input");
+  await page.evaluate(() => {
+    const box = document.querySelector<HTMLInputElement>(
+      ".wb-warning-expected input",
+    );
+    if (box && !box.checked) box.click();
+  });
+}
+
 function markerInWindow(page: Page) {
   return page.evaluate(() => {
     const box = document.querySelector(".wb-action-next .wb-action-box");
@@ -277,6 +291,7 @@ describe.skipIf(!asked)("the workbench's motion", () => {
         );
       const at = (key: string) => Number(key.split("|")[1]);
       await page.evaluate(() => window.__workbenchPage?.seek(240_000));
+      await showExpectedMoves(page);
       await page.waitForTimeout(300);
       const atEnd = await rows();
       const endFound = await warnings();
@@ -398,6 +413,8 @@ describe.skipIf(!asked)("the workbench's motion", () => {
         await openScene(page, "install-mac");
         // At the run's end: a dark window under the "OpenBot opens here" card, with its title bar.
         await page.evaluate(() => window.__workbenchPage?.seek(240_000));
+        await showExpectedMoves(page);
+        await showExpectedMoves(page);
         await page.waitForSelector(".wb-warning-list button");
         // The part of the window on screen: the stage clips it, and the warnings panel under the
         // stage (where the hovered row changes) is not the window.
@@ -532,6 +549,8 @@ describe.skipIf(!asked)("the workbench's motion", () => {
         await openScene(page, "install-mac");
         // To the end of the run, so its warnings are found; a warning hover then seeks back.
         await page.evaluate(() => window.__workbenchPage?.seek(240_000));
+        await showExpectedMoves(page);
+        await showExpectedMoves(page);
         await page.waitForSelector(".wb-warning-list button");
         const rows = await page.evaluate(
           () =>
@@ -650,6 +669,8 @@ describe.skipIf(!asked)("the workbench's motion", () => {
           ),
         );
         await page.evaluate(() => window.__workbenchPage?.seek(240_000));
+        await showExpectedMoves(page);
+        await showExpectedMoves(page);
         await page.waitForSelector(".wb-warning-list button");
         await page.waitForTimeout(300);
         const rowCount = await page.evaluate(

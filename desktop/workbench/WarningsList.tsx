@@ -1,4 +1,11 @@
 import { type MouseEvent, useEffect, useRef, useState } from "react";
+import {
+  CLASS_LABELS,
+  type Movement,
+  RULE_LABELS,
+  splitWarnings,
+  warningMark,
+} from "./findings";
 import type { Warning } from "./layoutWatch";
 import { formatTime } from "./RunControls";
 
@@ -77,7 +84,20 @@ export type WarningsListProps = {
    * shows; a new run (a new scene, for example) shows its own rows at once.
    */
   run?: string;
+  /**
+   * The class of each move by its mark (`classifyMoves`, as the findings use). Given: the expected
+   * moves hide behind "Show expected moves", and each move row names its class. Not given: every
+   * row shows.
+   */
+  movements?: ReadonlyMap<string, Movement>;
 };
+
+/** The class a move row names: the class of a bug, or the rule of an expected move. */
+function movementTag(movement: Movement): string {
+  return movement.class === "expected"
+    ? `${CLASS_LABELS.expected}: ${RULE_LABELS[movement.rule].toLowerCase()}`
+    : CLASS_LABELS[movement.class];
+}
 
 /** A fixed order, so a seek that finds the warnings again does not move a row under the pointer: by time, then by label. */
 export function sortWarnings(warnings: readonly Warning[]): Warning[] {
@@ -100,7 +120,9 @@ export function WarningsList({
   seekingTo = null,
   found,
   run,
+  movements,
 }: WarningsListProps) {
+  const [showExpected, setShowExpected] = useState(false);
   /**
    * While the pointer is in the list, the rows stay the same: a seek back that drops a row or
    * finds a new one would move the row under the pointer. A row the run does not have now shows
@@ -161,7 +183,13 @@ export function WarningsList({
     timerRef.current = { key, handle };
   };
 
-  const sorted = sortWarnings(shown);
+  const split = movements
+    ? splitWarnings(shown, movements)
+    : { shown: [...shown], expected: [] };
+  const listed = showExpected
+    ? [...split.shown, ...split.expected]
+    : split.shown;
+  const sorted = sortWarnings(listed);
   /** The same warning can show twice; the second one gets "#2" on its key. */
   const seen = new Map<string, number>();
   const rows = sorted.map((warning) => {
@@ -185,13 +213,23 @@ export function WarningsList({
       }}
     >
       <h3>
-        {`Layout warnings (${shown.length})`}
+        {`Layout warnings (${split.shown.length})`}
         {seekingTo !== null && (
           <span className="wb-warning-status" role="status">
             {`Seeking to ${formatTime(seekingTo)}…`}
           </span>
         )}
       </h3>
+      {split.expected.length > 0 && (
+        <label className="wb-warning-expected">
+          <input
+            type="checkbox"
+            checked={showExpected}
+            onChange={(event) => setShowExpected(event.target.checked)}
+          />
+          {`Show expected moves (${split.expected.length})`}
+        </label>
+      )}
       {rows.length === 0 ? (
         <p>No layout warnings.</p>
       ) : (
@@ -229,6 +267,13 @@ export function WarningsList({
                   }}
                 >
                   {warningText(warning)}
+                  {movements?.has(warningMark(warning)) && (
+                    <span className="wb-warning-class">
+                      {movementTag(
+                        movements.get(warningMark(warning)) as Movement,
+                      )}
+                    </span>
+                  )}
                   {current?.jumping && (
                     <span className="wb-warning-status" role="status">
                       Jumping…
