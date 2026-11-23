@@ -17,7 +17,7 @@ import { useFrontendTool } from "./approval-tools";
  * OpenBot Desktop runs on. A prototype.
  *
  * A tool of this page, never of the server. Desktop takes each action (`person_computer` in its
- * page plugin), and the first action of a conversation asks the person in Desktop's own dialog.
+ * page plugin), and the first action of a session asks the person in Desktop's own dialog.
  * So it is offered only in OpenBot Desktop's window on a Mac, and only while the conversation's run
  * is handled here. Every answer carries the screen after the action, which the backend puts in
  * front of the model as a picture.
@@ -88,7 +88,7 @@ const DESCRIPTION =
   "Use it only when the person asks you to do something on their computer, such as finding or opening a file, or using an app there. " +
   "Every action answers with a screenshot of the screen after it. Coordinates are pixels of the latest screenshot, from its top left corner. " +
   "Start with the screenshot action. Use the keyboard where you can: cmd+space opens Spotlight, and typing a file's or an app's name there and pressing Return opens it. " +
-  "The person is asked once per conversation whether you may use their computer. If they don't allow it, don't try again unless they ask. " +
+  "The person is asked once, the first time a Bot uses their computer while OpenBot is open. If they don't allow it, don't try again unless they ask. " +
   "Never type a password: ask the person to type it themselves.";
 
 /** The action Desktop takes for the model's input, or what the input is missing. */
@@ -264,18 +264,6 @@ export function PersonComputerTool() {
         return { ok: false, reason: "The person stopped this." };
       const asked = desktopAction(input);
       if ("missing" in asked) return { ok: false, reason: asked.missing };
-      /*
-       * Stop pressed while the Bot is using the computer takes its answer back too: the next action,
-       * in any conversation, asks the person again.
-       */
-      signal?.addEventListener(
-        "abort",
-        () =>
-          void shell
-            .invoke("plugin:openbot-desktop|person_computer_stop")
-            .catch(() => {}),
-        { once: true },
-      );
       const botId = botOfAgent(agent);
       // The name the person knows the Bot by, for Desktop's question. Desktop says "This Bot" without it.
       const bot = botId

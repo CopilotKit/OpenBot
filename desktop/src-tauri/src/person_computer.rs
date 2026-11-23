@@ -4,9 +4,9 @@ person lets it. A prototype, on macOS only.
 
 OpenBot's own page asks for each action (`desktop_page::person_computer`), never the server. The
 Bot's tool is a tool of that page (`person_computer` in the app), so it works only while the
-conversation is open in this window. The first action of a conversation asks the person, in this
-app's own dialog, whether the Bot may use this computer in it (`allow`). The answer holds until Stop
-(`stop`) or until OpenBot quits.
+conversation is open in this window. The first action asks the person, in this app's own dialog,
+whether Bots may use this computer (`allow`). The answer holds for this session of OpenBot, in every
+conversation, until Stop (`stop`) or until OpenBot quits.
 
 Every action answers with the screen after it, so the model sees what it did. The screen is the
 main display, scaled down to fit 1280 by 800, and the model's coordinates are the screenshot's
@@ -20,6 +20,8 @@ events, each for this app.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
 use std::sync::Mutex;
 
 /// The largest screenshot the model gets. The display is scaled down to fit, keeping its shape.
@@ -34,7 +36,7 @@ const ONLY_MAC: &str = "Using the person's computer works only in OpenBot on a M
 const NO_CONVERSATION: &str = "Using the person's computer works only in a conversation.";
 #[cfg(target_os = "macos")]
 const DECLINED: &str =
-    "The person didn't allow using their computer in this conversation. Don't try again unless they ask.";
+    "The person didn't allow Bots to use their computer. Don't try again unless they ask.";
 #[cfg(target_os = "macos")]
 const WINDOW_CLOSED: &str = "The OpenBot window is closed, so the person can't be asked.";
 
@@ -110,8 +112,7 @@ pub enum Direction {
     Right,
 }
 
-/// The conversation an action is asked in, and the name of the Bot asking. The person allows a
-/// Bot once per conversation.
+/// The conversation an action is asked in, and the name of the Bot asking, which the question names.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Conversation {
     pub id: String,
@@ -128,19 +129,16 @@ pub struct Screen {
     pub height: u32,
 }
 
-/// The conversations whose person allowed a Bot to use this computer, until Stop or quit.
-static ALLOWED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Whether the person allowed Bots to use this computer in this session, until Stop or quit.
+static ALLOWED: AtomicBool = AtomicBool::new(false);
 
 /// One question at a time: an action asked while the person is answering waits for that answer.
 #[cfg(target_os = "macos")]
 static ASKING: Mutex<()> = Mutex::new(());
 
-/// Forget every conversation's answer: each asks again before its next action.
+/// Take the person's answer back: the next action asks again.
 pub fn stop() {
-    ALLOWED
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clear();
+    ALLOWED.store(false, Ordering::SeqCst);
 }
 
 /// Take one action for the Bot of a conversation, and answer with the screen after it.
@@ -194,29 +192,23 @@ fn bot_label(name: &str) -> String {
 }
 
 /**
-Ask the person once per conversation, in this app's own dialog, before a Bot's first action there.
-The main window comes forward first, so the question is asked where the person is looking.
+Ask the person once per session of OpenBot, in this app's own dialog, before a Bot's first action.
+The answer holds in every conversation. The main window comes forward first, so the question is
+asked where the person is looking.
 */
 #[cfg(target_os = "macos")]
 fn allow(app: &tauri::AppHandle, conversation: &Conversation) -> Result<(), String> {
     use tauri::Manager as _;
     use tauri_plugin_dialog::{DialogExt as _, MessageDialogButtons, MessageDialogKind};
 
-    let allowed = |id: &str| {
-        ALLOWED
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .iter()
-            .any(|held| held == id)
-    };
-    if allowed(&conversation.id) {
+    if ALLOWED.load(Ordering::SeqCst) {
         return Ok(());
     }
     let _asking = ASKING
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     // Answered while this action waited its turn.
-    if allowed(&conversation.id) {
+    if ALLOWED.load(Ordering::SeqCst) {
         return Ok(());
     }
     let bot = bot_label(&conversation.bot);
@@ -228,11 +220,11 @@ fn allow(app: &tauri::AppHandle, conversation: &Conversation) -> Result<(), Stri
     let allowed_now = app
         .dialog()
         .message(format!(
-            "{bot} will see your screen and use your mouse and keyboard in this conversation. \
-             It can do anything you can do on this Mac, so stay nearby. \
-             Stop it any time in the conversation."
+            "{bot} asked to use your Mac. Until you quit OpenBot, your Bots can see your screen \
+             and use your mouse and keyboard when you ask them to. They can do anything you can \
+             do on this Mac, so stay nearby."
         ))
-        .title(format!("Let {bot} use this Mac?"))
+        .title("Let Bots use this Mac?")
         .kind(MessageDialogKind::Warning)
         .buttons(MessageDialogButtons::OkCancelCustom(
             "Allow".into(),
@@ -243,10 +235,7 @@ fn allow(app: &tauri::AppHandle, conversation: &Conversation) -> Result<(), Stri
     if !allowed_now {
         return Err(DECLINED.into());
     }
-    ALLOWED
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .push(conversation.id.clone());
+    ALLOWED.store(true, Ordering::SeqCst);
     Ok(())
 }
 
@@ -750,10 +739,10 @@ mod tests {
     }
 
     #[test]
-    fn stop_forgets_every_conversation() {
-        ALLOWED.lock().unwrap().push("a conversation".into());
+    fn stop_takes_the_answer_back() {
+        ALLOWED.store(true, Ordering::SeqCst);
         stop();
-        assert!(ALLOWED.lock().unwrap().is_empty());
+        assert!(!ALLOWED.load(Ordering::SeqCst));
     }
 
     #[cfg(target_os = "macos")]

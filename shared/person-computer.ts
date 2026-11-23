@@ -4,7 +4,7 @@
  *
  * The tool is OpenBot's own page's (app/src/lib/copilot/person-computer-tool.tsx), offered only in
  * OpenBot Desktop's window on a Mac. Desktop takes each action, and asks the person once per
- * conversation before the first (desktop/src-tauri/src/person_computer.rs). Every answer carries the
+ * session of OpenBot before the first (desktop/src-tauri/src/person_computer.rs). Every answer carries the
  * screen after the action. The backend puts the newest few in front of the model as pictures, and
  * leaves the picture's text out of what the model reads.
  */

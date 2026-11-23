@@ -39,8 +39,8 @@
 //! computer (`restart`, `stop`, `intelligence`, `ai_connection`, `change_ai_connection`) is refused.
 //!
 //! And a Bot using this computer (`person_computer`, `person_computer_stop`): the main screen, the
-//! mouse and the keyboard, for a conversation whose person allowed it in this app's own dialog. A
-//! prototype, on macOS only. See `person_computer.rs`.
+//! mouse and the keyboard, once the person allowed Bots to in this app's own dialog, for this session
+//! of OpenBot. A prototype, on macOS only. See `person_computer.rs`.
 
 use openbot_desktop_lib::{app_update, local_eval, local_eval_state, speech, stack};
 use tauri::Manager;
@@ -470,9 +470,8 @@ async fn zoom(app: tauri::AppHandle, step: crate::zoom::Step) {
 }
 
 /**
-A Bot's action on this computer, for the conversation it was asked in, answered with the screen
-after it. The first action of a conversation asks the person in this app's own dialog. See
-`person_computer.rs`.
+A Bot's action on this computer, answered with the screen after it. The first action of this
+session of OpenBot asks the person in this app's own dialog. See `person_computer.rs`.
 */
 #[tauri::command]
 async fn person_computer(
@@ -483,7 +482,7 @@ async fn person_computer(
     crate::person_computer::perform(app, action, conversation).await
 }
 
-/// Stop every Bot using this computer: each conversation asks again before its next action.
+/// Take back the person's answer: the next action of any Bot asks again.
 #[tauri::command]
 async fn person_computer_stop() {
     crate::person_computer::stop();
