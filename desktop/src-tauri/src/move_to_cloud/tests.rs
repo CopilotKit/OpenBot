@@ -141,7 +141,7 @@ fn a_keep_after_a_failed_move_is_offered_again_once_after_an_update() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 
-    // Kept in the same release again after another failed move: still offered once after it.
+    // Kept again in the same release, before any update: still offered once after it.
     let dir = crate::test_support::temp_root("move-kept-twice");
     record_failed_move(&dir).unwrap();
     record_kept(&dir, "1.2.0-rc.3").unwrap();

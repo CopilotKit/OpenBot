@@ -109,7 +109,7 @@ pub fn record_failed_move(config_dir: &Path) -> std::io::Result<()> {
 - After a failed move: offered again once, at the first launch of another release.
 - Answering that offer again with Keep: final, like a Keep with no failed move before it. A move
   that failed again meanwhile doesn't bring another offer.
-- Chosen again in the same release after another failed move: still offered again once.
+- Chosen again in the same release, before any update: still offered again once.
 */
 pub fn record_kept(config_dir: &Path, release: &str) -> std::io::Result<Recorded> {
     let before = on_record(config_dir);
