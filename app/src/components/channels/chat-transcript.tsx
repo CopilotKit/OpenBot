@@ -50,6 +50,10 @@ import {
   TurnInFlightContext,
 } from "@/components/gallery/streaming";
 import { AddCardButton } from "@/components/plan/add-card-button";
+import {
+  SettingsToolCall,
+  settingsToolCardFor,
+} from "@/components/settings-tools/settings-tool-card";
 import { reportsUnderTheirCards } from "@/components/tasks/report-under-card";
 import { SteerLanded } from "@/components/tasks/task-steer";
 import {
@@ -1583,12 +1587,17 @@ const ToolCallBody = memo(function ToolCallBody({
           <InlineApproval
             toolCallId={toolCallId}
             fallback={
-              <ServerToolLine
-                args={args}
-                name={name}
-                place={{ toolCallId, latest }}
-                result={result}
-              />
+              // OpenBot settings' tools draw their own cards (components/settings-tools).
+              settingsToolCardFor(name) ? (
+                <SettingsToolCall args={args} name={name} result={result} />
+              ) : (
+                <ServerToolLine
+                  args={args}
+                  name={name}
+                  place={{ toolCallId, latest }}
+                  result={result}
+                />
+              )
             }
           />
         )}

@@ -33,6 +33,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { PendingApprovals } from "@/components/approvals/inline-approval";
+import { settingsToolCardFor } from "@/components/settings-tools/settings-tool-card";
 import { codingLook, foreignCodingCall } from "@/lib/copilot/coding-calls";
 import {
   type FolderNames,
@@ -190,6 +191,8 @@ function foldable(item: ToolItem, isDrawn: (name: string) => boolean): boolean {
    * card would land inside a group and then jump out of it.
    */
   if (name === SHOW_APP_ACCESS_TOOL) return false;
+  // An OpenBot settings tool with a card of its own is drawn as that card, never inside a fold.
+  if (settingsToolCardFor(name)) return false;
   return !asksThePerson(item.result);
 }
 
