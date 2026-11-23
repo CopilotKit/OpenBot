@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import {
   WindowSettingsPanel,
   type WindowSettingsPanelProps,
@@ -28,6 +29,26 @@ function props(): WindowSettingsPanelProps {
   };
 }
 
+/** Opens the select with that name and picks the option with that name. */
+async function pick(
+  view: ReturnType<typeof render>,
+  select: string,
+  option: string,
+) {
+  const person = userEvent.setup({ document });
+  await person.click(view.getByRole("combobox", { name: select }));
+  await person.click(
+    await within(document.body).findByRole("option", { name: option }),
+  );
+}
+
+/** The words a select shows now. */
+function shown(view: ReturnType<typeof render>, select: string) {
+  return view
+    .getByRole("combobox", { name: select })
+    .querySelector('[data-slot="select-value"]')?.textContent;
+}
+
 function change(element: HTMLElement, value: string) {
   fireEvent.focusIn(element);
   fireEvent.change(element, { target: { value } });
@@ -41,10 +62,11 @@ test("720 × 560 sends both sizes", () => {
   expect(p.onChange).toHaveBeenCalledWith({ width: 720, height: 560 });
 });
 
-test("OS Windows sends only os", () => {
+test("OS Windows sends only os", async () => {
   const p = props();
   const view = render(<WindowSettingsPanel {...p} />);
-  change(view.getByLabelText("OS"), "windows");
+  expect(shown(view, "OS")).toBe("Mac");
+  await pick(view, "OS", "Windows");
   expect(p.onChange).toHaveBeenCalledWith({ os: "windows" });
 });
 
@@ -72,10 +94,27 @@ test("Zoom outside 0.5 to 2 sends nothing, inside sends zoom", () => {
   expect(p.onChange).toHaveBeenCalledWith({ zoom: 1.5 });
 });
 
+test("Theme Dark sends only theme", async () => {
+  const p = props();
+  const view = render(<WindowSettingsPanel {...p} />);
+  expect(shown(view, "Theme")).toBe("Light");
+  await pick(view, "Theme", "Dark");
+  expect(p.onChange).toHaveBeenCalledWith({ theme: "dark" });
+});
+
+test("Active checkbox sends only active", () => {
+  const p = props();
+  const view = render(<WindowSettingsPanel {...p} />);
+  const active = view.getByRole("checkbox", { name: "Active" });
+  expect(active.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(active);
+  expect(p.onChange).toHaveBeenCalledWith({ active: false });
+});
+
 test("Grid checkbox sends only grid", () => {
   const p = props();
   const view = render(<WindowSettingsPanel {...p} />);
-  fireEvent.click(view.getByLabelText("Grid"));
+  fireEvent.click(view.getByRole("checkbox", { name: "Grid" }));
   expect(p.onChange).toHaveBeenCalledWith({ grid: true });
 });
 
@@ -96,7 +135,7 @@ test("Grid color calls onGridColor", () => {
 test("without app there is no App section", () => {
   const view = render(<WindowSettingsPanel {...props()} />);
   expect(view.container.querySelector("h3")).toBeNull();
-  expect(view.queryByLabelText("Host")).toBeNull();
+  expect(view.queryByRole("combobox", { name: "Host" })).toBeNull();
 });
 
 function appProps() {
@@ -119,37 +158,38 @@ test("with app the App section shows its selects", () => {
   const { p } = appProps();
   const view = render(<WindowSettingsPanel {...p} />);
   expect(view.container.querySelector("h3")?.textContent).toBe("App");
-  expect((view.getByLabelText("Host") as HTMLSelectElement).value).toBe(
-    "desktop",
-  );
+  expect(shown(view, "Host")).toBe("OpenBot Desktop");
   // Signed in as, Skin and Sidebar each start at "As the scene says".
-  expect(view.getAllByText("As the scene says")).toHaveLength(3);
-  expect((view.getByLabelText("Motion") as HTMLSelectElement).value).toBe(
-    "still",
-  );
+  expect(shown(view, "Signed in as")).toBe("As the scene says");
+  expect(shown(view, "Skin")).toBe("As the scene says");
+  expect(shown(view, "Sidebar")).toBe("As the scene says");
+  expect(shown(view, "Motion")).toBe("Still");
 });
 
-test("Host sends only host", () => {
+test("Host sends only host", async () => {
   const { p, onAppChange } = appProps();
   const view = render(<WindowSettingsPanel {...p} />);
-  change(view.getByLabelText("Host"), "browser");
+  await pick(view, "Host", "Browser");
   expect(onAppChange).toHaveBeenCalledWith({ host: "browser" });
   expect(p.onChange).not.toHaveBeenCalled();
 });
 
-test("Signed in as sends the role, and As the scene says sends null", () => {
+test("Signed in as sends the role, and As the scene says sends null", async () => {
   const { p, onAppChange } = appProps();
   const view = render(<WindowSettingsPanel {...p} />);
-  change(view.getByLabelText("Signed in as"), "admin");
+  await pick(view, "Signed in as", "Admin");
   expect(onAppChange).toHaveBeenLastCalledWith({ role: "admin" });
-  change(view.getByLabelText("Signed in as"), "scene");
+  view.rerender(
+    <WindowSettingsPanel {...p} app={{ ...p.app!, role: "admin" }} />,
+  );
+  await pick(view, "Signed in as", "As the scene says");
   expect(onAppChange).toHaveBeenLastCalledWith({ role: null });
 });
 
-test("Motion sends only motion", () => {
+test("Motion sends only motion", async () => {
   const { p, onAppChange } = appProps();
   const view = render(<WindowSettingsPanel {...p} />);
-  change(view.getByLabelText("Motion"), "real");
+  await pick(view, "Motion", "Real");
   expect(onAppChange).toHaveBeenCalledWith({ motion: "real" });
 });
 
@@ -157,7 +197,9 @@ test("every control has a visible label", () => {
   const { p } = appProps();
   const view = render(<WindowSettingsPanel {...p} />);
   const names = Array.from(
-    view.container.querySelectorAll(".wb-prop > span, .wb-prop > label"),
+    view.container.querySelectorAll(
+      '[data-slot="field"] > [data-slot="field-label"]',
+    ),
   ).map((el) => el.textContent);
   expect(names).toEqual([
     "Size",
@@ -204,20 +246,50 @@ test("with Fit off the Zoom field shows the zoom you set", () => {
   expect(onFit).toHaveBeenCalledWith(true);
 });
 
-test("Skin sends the skin, and As the scene says sends null", () => {
+test("Skin sends the skin, and As the scene says sends null", async () => {
   const { p, onAppChange } = appProps();
   const view = render(<WindowSettingsPanel {...p} />);
-  change(view.getByLabelText("Skin"), "opendots");
+  await pick(view, "Skin", "OpenDots");
   expect(onAppChange).toHaveBeenLastCalledWith({ skin: "opendots" });
-  change(view.getByLabelText("Skin"), "scene");
+  view.rerender(
+    <WindowSettingsPanel {...p} app={{ ...p.app!, skin: "opendots" }} />,
+  );
+  await pick(view, "Skin", "As the scene says");
   expect(onAppChange).toHaveBeenLastCalledWith({ skin: null });
 });
 
-test("Sidebar sends open or closed, and As the scene says sends null", () => {
+test("Sidebar sends open or closed, and As the scene says sends null", async () => {
   const { p, onAppChange } = appProps();
   const view = render(<WindowSettingsPanel {...p} />);
-  change(view.getByLabelText("Sidebar"), "closed");
+  await pick(view, "Sidebar", "Closed");
   expect(onAppChange).toHaveBeenLastCalledWith({ sidebar: "closed" });
-  change(view.getByLabelText("Sidebar"), "scene");
+  view.rerender(
+    <WindowSettingsPanel {...p} app={{ ...p.app!, sidebar: "closed" }} />,
+  );
+  await pick(view, "Sidebar", "As the scene says");
   expect(onAppChange).toHaveBeenLastCalledWith({ sidebar: null });
+});
+
+test("the Skin and Signed in as options are the same words as before", async () => {
+  const { p } = appProps();
+  const view = render(<WindowSettingsPanel {...p} />);
+  const person = userEvent.setup({ document });
+  await person.click(view.getByRole("combobox", { name: "Skin" }));
+  const skins = await within(document.body).findAllByRole("option");
+  expect(skins.map((o) => o.textContent)).toEqual([
+    "As the scene says",
+    "OpenBot",
+    "OpenDuet",
+    "OpenDots",
+    "OpenFuse",
+  ]);
+  await person.keyboard("{Escape}");
+  await person.click(view.getByRole("combobox", { name: "Signed in as" }));
+  const roles = await within(document.body).findAllByRole("option");
+  expect(roles.map((o) => o.textContent)).toEqual([
+    "As the scene says",
+    "Member",
+    "Admin",
+    "Owner",
+  ]);
 });

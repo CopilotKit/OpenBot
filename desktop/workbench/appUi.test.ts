@@ -23,7 +23,6 @@ const PENDING: readonly string[] = [
   "StreamPanel.tsx",
   "WarningsList.tsx",
   "windowFrame.css",
-  "WindowSettingsPanel.tsx",
   "Workbench.tsx",
   "workbench.css",
 ];
