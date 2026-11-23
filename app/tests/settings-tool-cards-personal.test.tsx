@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Browser, BrowserType, Page } from "playwright-core";
 import { compile } from "tailwindcss";
@@ -33,13 +33,41 @@ const engines = (process.env.OPENBOT_APP_ENGINES ?? "chromium")
 const APP = join(import.meta.dir, "..");
 const ORIGIN = "http://openbot.test";
 
-async function bundle(): Promise<string> {
+/** The vendored marks as data URIs, as Vite's `import.meta.glob` hands them to `@/lib/marks`. */
+function marksModule(): string {
+  const dir = join(APP, "..", "shared", "marks");
+  const marks = Object.fromEntries(
+    readdirSync(dir)
+      .filter((file) => file.endsWith(".svg"))
+      .map((file) => [
+        file.replace(".svg", ""),
+        `data:image/svg+xml;base64,${readFileSync(join(dir, file)).toString("base64")}`,
+      ]),
+  );
+  return `const marks = ${JSON.stringify(marks)}; export const markFor = (id) => (id && marks[id]) || null;`;
+}
+
+async function bundle(fixture: string): Promise<string> {
   const built = await Bun.build({
-    entrypoints: [
-      join(import.meta.dir, "settings-tool-cards-personal.fixture.tsx"),
-    ],
+    entrypoints: [join(import.meta.dir, fixture)],
     target: "browser",
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
+    // A Bot's Setup page draws the marks of what runs it, which Vite loads by glob.
+    plugins: [
+      {
+        name: "marks",
+        setup(build) {
+          build.onResolve({ filter: /^@\/lib\/marks$/ }, () => ({
+            path: "marks",
+            namespace: "marks",
+          }));
+          build.onLoad({ filter: /.*/, namespace: "marks" }, () => ({
+            contents: marksModule(),
+            loader: "js",
+          }));
+        },
+      },
+    ],
   });
   if (!built.success) throw new AggregateError(built.logs, "bundle failed");
   const script = built.outputs.find((output) => output.kind === "entry-point");
@@ -90,11 +118,19 @@ async function stylesheet(classes: string[]): Promise<string> {
 }
 
 const browsers = new Map<string, Browser>();
-let script: string;
+/** The cards in every state, and each card beside the screen it changes. */
+const scripts = new Map<"cards" | "screens", string>();
 
 beforeAll(async () => {
   if (!asked) return;
-  script = await bundle();
+  scripts.set(
+    "cards",
+    await bundle("settings-tool-cards-personal.fixture.tsx"),
+  );
+  scripts.set(
+    "screens",
+    await bundle("settings-tool-cards-personal-screens.fixture.tsx"),
+  );
   const playwright = await import("playwright-core");
   for (const engine of engines) {
     const type: BrowserType = playwright[engine];
@@ -113,7 +149,9 @@ async function open(
   engine: string,
   theme: "light" | "dark",
   window: { width: number; height: number },
+  which: "cards" | "screens" = "cards",
 ): Promise<Page> {
+  const script = scripts.get(which) ?? "";
   const browser = browsers.get(engine);
   if (!browser) throw new Error(`no ${engine}`);
   const page = await browser.newPage({
@@ -138,8 +176,19 @@ async function open(
   });
   await page.goto(`${ORIGIN}/`);
   await page
-    .locator('[data-part="bot-running"] [data-settings-card]')
+    .locator(
+      which === "cards"
+        ? '[data-part="bot-running"] [data-settings-card]'
+        : '[data-pair="bot"] [data-side="screen"] [data-slot="item"]',
+    )
+    .first()
     .waitFor({ timeout: 15_000 });
+  // The screens' reads answer, and their rows draw what they answered.
+  if (which === "screens")
+    await page
+      .getByText("Keep answers short and lead with the decision.")
+      .last()
+      .waitFor({ timeout: 15_000 });
   const classes = await page.evaluate(() =>
     [...document.querySelectorAll("[class]")].flatMap((element) => [
       ...element.classList,
@@ -321,6 +370,133 @@ describe.skipIf(!asked)("the personal settings cards", () => {
               title: "Ledger",
               asked: ["Visibility"],
             });
+          } finally {
+            await page.close();
+          }
+        }, 90_000);
+});
+
+type Pair = {
+  /** Each row of the card: its label and what it says now. */
+  rows: { label: string; now: string }[];
+  /** The screen's words, and its switches and choices by name. */
+  screen: string;
+  switches: Record<string, boolean>;
+  side: boolean;
+};
+
+function pairs(page: Page): Promise<Record<string, Pair>> {
+  return page.evaluate(() => {
+    const words = (node: Element | null | undefined) =>
+      (node?.textContent ?? "").replace(/\s+/g, " ").trim();
+    const out: Record<string, Pair> = {};
+    for (const pair of document.querySelectorAll("[data-pair]")) {
+      const card = pair.querySelector('[data-side="card"]');
+      const screen = pair.querySelector('[data-side="screen"]');
+      const cardBox = card?.getBoundingClientRect();
+      const screenBox = screen?.getBoundingClientRect();
+      out[pair.getAttribute("data-pair") ?? ""] = {
+        rows: [...(card?.querySelectorAll("[data-setting]") ?? [])].map(
+          (row) => ({
+            label: row.getAttribute("data-setting") ?? "",
+            now: words(row.querySelector('[data-value="after"]')),
+          }),
+        ),
+        screen: words(screen),
+        switches: Object.fromEntries(
+          [...(screen?.querySelectorAll('[role="switch"]') ?? [])].map(
+            (control) => [
+              control.getAttribute("aria-label") ??
+                words(
+                  document.getElementById(
+                    control.getAttribute("aria-labelledby") ?? "",
+                  ),
+                ),
+              control.getAttribute("aria-checked") === "true",
+            ],
+          ),
+        ),
+        // Beside each other on a laptop, one over the other on a phone.
+        side:
+          cardBox !== undefined &&
+          screenBox !== undefined &&
+          Math.abs(cardBox.top - screenBox.top) < 4 &&
+          cardBox.right <= screenBox.left,
+      };
+    }
+    return out;
+  }) as Promise<Record<string, Pair>>;
+}
+
+describe.skipIf(!asked)("each card beside the screen it changes", () => {
+  for (const engine of engines)
+    for (const theme of ["light", "dark"] as const)
+      for (const window of [
+        { width: 1440, height: 900 },
+        { width: 390, height: 844 },
+      ])
+        test(`names each setting as its screen does, and the screen shows what the card says, in ${engine}, ${theme}, ${window.width}px`, async () => {
+          const page = await open(engine, theme, window, "screens");
+          try {
+            if (shots) {
+              mkdirSync(shots, { recursive: true });
+              await page.screenshot({
+                path: join(
+                  shots,
+                  `settings-cards-beside-screens-${engine}-${theme}-${window.width}.png`,
+                ),
+                fullPage: true,
+              });
+            }
+            expect(
+              await page.evaluate(
+                () => document.documentElement.scrollWidth > innerWidth,
+              ),
+            ).toBe(false);
+            const drawn = await pairs(page);
+            expect(Object.keys(drawn)).toEqual([
+              "general",
+              "notifications",
+              "approvals",
+              "bot",
+            ]);
+            for (const pair of Object.values(drawn)) {
+              expect(pair.side).toBe(window.width >= 1024);
+              // Every row the card draws is titled as its screen titles it.
+              for (const row of pair.rows)
+                for (const part of row.label.split(": "))
+                  expect(pair.screen).toContain(part);
+            }
+
+            const general = drawn.general;
+            for (const now of [
+              "David McKay",
+              "Keep answers short and lead with the decision.",
+              "OpenDuet",
+            ])
+              expect(general?.screen).toContain(now);
+            expect(general?.rows.map((row) => row.now)).toEqual([
+              "David McKay",
+              "Reply in British English. Keep answers short and lead with the decision.",
+              "OpenDuet",
+              "On",
+            ]);
+            expect(general?.switches["Check-ins for all your Bots"]).toBe(true);
+
+            const notifications = drawn.notifications;
+            expect(notifications?.rows).toEqual([
+              { label: "Where updates go: Progress", now: "Slack" },
+            ]);
+            expect(notifications?.switches["Progress by Slack"]).toBe(true);
+            expect(notifications?.switches["Progress by Push"]).toBe(false);
+
+            const approvals = drawn.approvals;
+            expect(approvals?.switches["Auto-review"]).toBe(true);
+            expect(approvals?.screen).toContain("Never");
+
+            const bot = drawn.bot;
+            for (const row of bot?.rows ?? [])
+              expect(bot?.screen).toContain(row.now);
           } finally {
             await page.close();
           }
