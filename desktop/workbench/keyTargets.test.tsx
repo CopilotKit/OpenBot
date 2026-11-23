@@ -13,7 +13,8 @@ import {
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
-import { isTextField, pressable, usesArrows } from "./keyTargets";
+import { isSceneRow, isTextField, pressable, usesArrows } from "./keyTargets";
+import { SceneList } from "./SceneList";
 
 /*
  * The page's keys (Space, ".", "/", the arrows, C) must not fire while the focus is in a control
@@ -80,4 +81,24 @@ test("a plain element is none of them", () => {
   expect(isTextField(plain)).toBe(false);
   expect(usesArrows(plain)).toBe(false);
   expect(pressable(plain)).toBe(false);
+});
+
+test("a scene row is a scene row for Space; the group heading and Expand all are not", () => {
+  const view = render(
+    <SceneList
+      scenes={[
+        { id: "a", title: "Scene A", group: "Install" },
+        { id: "b", title: "Scene B", group: "Install" },
+      ]}
+      current="a"
+      onPick={() => {}}
+      groups={["Install"]}
+    />,
+  );
+  const row = view.getByText("Scene B");
+  expect(pressable(row)).toBe(true);
+  expect(isSceneRow(row)).toBe(true);
+  expect(isSceneRow(view.getByRole("button", { name: "Install" }))).toBe(false);
+  expect(isSceneRow(view.getByText(/^(Collapse|Expand) all$/))).toBe(false);
+  expect(isSceneRow(null)).toBe(false);
 });

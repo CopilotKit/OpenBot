@@ -61,7 +61,7 @@ import {
   parseMark,
   userActions,
 } from "./findings";
-import { isTextField, pressable, usesArrows } from "./keyTargets";
+import { isSceneRow, isTextField, pressable, usesArrows } from "./keyTargets";
 import { KeysHelp } from "./KeysHelp";
 import { describeElements, type ScreenMark, type Warning } from "./layoutWatch";
 import { pickArea } from "./pickElement";
@@ -1385,10 +1385,7 @@ export function WorkbenchLoaded({
           return;
         case " ": {
           // A scene row is a button, but Space on it plays: a click on it again would start the scene over.
-          const row = (target as HTMLElement | null)?.matches?.(
-            "[data-scene], .wb-scene",
-          );
-          if (pressable(target) && !row) return;
+          if (pressable(target) && !isSceneRow(target)) return;
           event.preventDefault();
           if (keys.playing) keys.pause();
           else keys.play();

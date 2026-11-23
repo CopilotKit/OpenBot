@@ -76,3 +76,13 @@ export function pressable(target: EventTarget | null): boolean {
     PRESS_ROLES.includes(el.getAttribute("role") ?? "")
   );
 }
+
+/**
+ * True for a scene row of the scene list (`data-scene`), or a row of an imported log (`.wb-scene`).
+ * A row is a button, but Space there plays: a click on it again would start the scene over.
+ */
+export function isSceneRow(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (el?.nodeType !== 1) return false;
+  return el.matches("[data-scene], .wb-scene");
+}
