@@ -255,6 +255,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - When an admin asks a Bot for an app it can't use yet, the Bot names the step the admin's own app
   card offers (Give it to, Turn on and give it to, Set it up, or Connect the shared account). It
   used to tell them to ask an administrator, even when they were the organization's only one.
+- **Only an owner removes another owner.** An admin could remove a co-owner, though they couldn't
+  change one's role. That is now refused with "Only an owner of this organization can remove
+  another owner." The last owner still can't be removed. In Organization settings, Members offers
+  Remove on an owner's row only to an owner.
+- **On a hosted OpenBot, a role changed under People stays changed.** The switch now reaches the
+  sign-in of OpenBot by CopilotKit first, so the next sign-in no longer puts the old role back. If
+  that change is refused, nothing changes here. When the last owner is demoted or removed there,
+  ownership passes to the admin here who joined first. With no admin here to take it, a demoted
+  last owner stays owner, and an organization left with no owner makes the next admin the sign-in
+  confirms its owner.
 
 ### API
 
