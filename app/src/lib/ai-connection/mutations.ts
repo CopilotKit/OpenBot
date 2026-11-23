@@ -386,7 +386,12 @@ async function makeDefault(
       { fallback },
     );
   try {
-    if (desktop && entry.login === "plan")
+    // A plan is only ever OpenAI's or Anthropic's; an answer can name a provider this app doesn't know.
+    if (
+      desktop &&
+      entry.login === "plan" &&
+      (entry.provider === "openai" || entry.provider === "anthropic")
+    )
       await prepareAiConnection(entry.provider, entry.login);
     const made = await makeAiConnectionDefault(
       organizationId(),

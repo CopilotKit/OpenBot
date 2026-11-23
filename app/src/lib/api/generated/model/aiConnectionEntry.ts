@@ -3,7 +3,7 @@
  */
 import type { AiConnectionLogin } from "./aiConnectionLogin";
 import type { AiConnectionProblem } from "./aiConnectionProblem";
-import type { AiConnectionProvider } from "./aiConnectionProvider";
+import type { AiConnectionProviderAnswer } from "./aiConnectionProviderAnswer";
 import type { AiConnectionSharedSignIn } from "./aiConnectionSharedSignIn";
 
 /**
@@ -12,7 +12,7 @@ import type { AiConnectionSharedSignIn } from "./aiConnectionSharedSignIn";
 export interface AiConnectionEntry {
   /** The connection's id. Opaque; clients never read anything into it. Unique within its list only: a person's own connection and the organization's may share an id, so a client says whose it means. */
   id: string;
-  provider: AiConnectionProvider;
+  provider: AiConnectionProviderAnswer;
   login: AiConnectionLogin;
   /**
    * The model named for an endpoint or a sign-in. Null for an API key or a plan.

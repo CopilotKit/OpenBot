@@ -1,7 +1,7 @@
 import type {
   AiConnection,
   AiConnectionLogin,
-  AiConnectionProvider,
+  AiConnectionProviderAnswer,
 } from "@/lib/api/generated/model";
 import { providerById, signInWords } from "./providers";
 
@@ -17,7 +17,7 @@ export type DescribedConnection = Pick<
  * (a member reading the organization's connections), the provider's name.
  */
 export function connectionName(connection: {
-  provider: AiConnectionProvider;
+  provider: AiConnectionProviderAnswer;
   login: AiConnectionLogin | null;
   endpointHost?: string | null;
 }): string {

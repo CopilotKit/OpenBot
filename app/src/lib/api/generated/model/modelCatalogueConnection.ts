@@ -3,7 +3,7 @@
  */
 import type { AiConnectionLogin } from "./aiConnectionLogin";
 import type { AiConnectionProblem } from "./aiConnectionProblem";
-import type { AiConnectionProvider } from "./aiConnectionProvider";
+import type { AiConnectionProviderAnswer } from "./aiConnectionProviderAnswer";
 import type { ModelOption } from "./modelOption";
 
 /**
@@ -14,7 +14,7 @@ export interface ModelCatalogueConnection {
   id: string;
   /** Whose connection it is. personal: the person's own, which they fix themselves. organization: the organization's, which an administrator fixes. */
   owner: string;
-  provider: AiConnectionProvider;
+  provider: AiConnectionProviderAnswer;
   /** How OpenBot signs in to it. Null for a member reading the organization's. */
   login: AiConnectionLogin | null;
   /** Who serves its models, as ModelCatalogue's source says it. What a Bot's default model is matched on. */
