@@ -49,20 +49,6 @@ class RunTools:
 # The reasoning efforts the server sends, in its own spelling. Anything else is not an effort.
 RUN_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
 
-# Server-only props, read here and never passed to the integration, so none of them can reach
-# graph state, a checkpoint or a snapshot.
-OPENBOT_PROPS = {
-    "openbotRun",
-    "openbotDeploymentTools",
-    "openbotModel",
-    "openbotSendOnce",
-    "openbot_run",
-    "openbot_deployment_tools",
-    "openbot_model",
-    "openbot_send_once",
-}
-
-
 def run_model(props) -> tuple[str, str]:
     """The `(model, effort)` the server chose for this run, or empty strings.
 
@@ -384,11 +370,12 @@ class ToolAwareAgent(WholeThreadAgent):
         token = _current.set(context)
         ended = False
         try:
-            clean_props = {
-                key: value for key, value in props.items() if key not in OPENBOT_PROPS
-            }
+            # None of the props goes on. The server's are read above; the rest are whatever the
+            # browser sent, and the integration takes some as orders: `nodeName` starts the graph
+            # past the model, running a call left in the thread with the arguments it carries, and
+            # `command` resumes the graph instead of starting it from the thread.
             async with aclosing(
-                super().run(input.model_copy(update={"forwarded_props": clean_props}))
+                super().run(input.model_copy(update={"forwarded_props": {}}))
             ) as stream:
                 async for event in stream:
                     if event.type == EventType.RUN_ERROR and context.connection.get(
