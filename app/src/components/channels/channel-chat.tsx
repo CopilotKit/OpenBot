@@ -285,11 +285,19 @@ export function channelHistoryNotice({
  * following shared anchor, append the missing tail: the store cannot place it among local-only rows.
  * Return the original array when nothing was added so refreshes can wait for the store to catch up.
  *
- * ONE KIND OF LOCAL CONTENT GIVES WAY: a Bot's words that the store holds more of. A reply this tab
- * never streamed (a turn the server carried on) is known here only from a read, and a read taken
- * while the platform was still catching up holds it half written. Kept as it was, "...shared with"
- * stayed the reply until the conversation was opened again. Only a reply the stored copy carries on
- * from is replaced, so a read can lengthen what is on screen and never cut it short or change it.
+ * ONE KIND OF LOCAL CONTENT GIVES WAY: a Bot's words, when the store holds them otherwise than the
+ * screen. A reply this tab never streamed (a turn the server carried on) is known here only from a
+ * read, and a read taken while the platform was still catching up holds it half written. Kept as it
+ * was, "...shared with" stayed the reply until the conversation was opened again.
+ *
+ * AND A REPLY THE SCREEN HOLDS IN PIECES IS THE STORE'S. Coming back to a conversation while its Bot
+ * was answering, the join replayed what the gateway had stored of the reply so far, and the gateway
+ * stores a batch of pieces out of order: it sent some of them and then dropped every later piece
+ * numbered below the highest it had sent. The reply drew as every other fragment of itself ("ight
+ * from GitHub. The Impeccable** ... a margin rule and Caslonthly-report vis") and stayed that way,
+ * because the store's whole copy did not start with it. So the store's copy wins whenever the two
+ * differ, except where the store's is the start of the screen's: that is a store a beat behind a
+ * reply this tab is still writing, and the screen's copy is never cut short.
  *
  * READING BACK A BROKEN RUN (`readBack`), MORE OF IT, NOT ONLY MORE AFTER IT. A run whose live stream
  * broke kept some pieces of its reply and not others ("ows httpbin's JSON echo of the second other
@@ -308,8 +316,8 @@ export function mergeStoredMessages(
    * Reading back a run whose live stream broke (`broken-stream.ts`): the store's copy of what that
    * stream drew is the whole of it. Only then does a longer stored reply win when the screen's is not
    * its beginning, and a stored message with more of a step's calls take the place of the one drawn.
-   * Otherwise the screen's copy stands: a store a beat behind holds an older version of a message
-   * this tab is still writing.
+   * Otherwise a stored reply that is the start of the screen's leaves the screen's copy standing: a
+   * store a beat behind holds an older version of a message this tab is still writing.
    */
   { readBack = false }: { readBack?: boolean } = {},
 ): Message[] {
@@ -382,8 +390,10 @@ export function mergeStoredMessages(
     const content =
       typeof message.content === "string" &&
       typeof later.content === "string" &&
-      later.content.length > message.content.length &&
-      (readBack || later.content.startsWith(message.content))
+      later.content !== message.content &&
+      (readBack
+        ? later.content.length > message.content.length
+        : !message.content.startsWith(later.content))
         ? later.content
         : undefined;
     const toolCalls = readBack
