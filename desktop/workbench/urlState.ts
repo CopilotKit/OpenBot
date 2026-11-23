@@ -1,8 +1,12 @@
 import type { Answer } from "../src/fakeNative/control";
 import {
+  APP_SIDEBARS,
+  APP_SKINS,
   type ApiAnswer,
   type ApiRoute,
   type AppHost,
+  type AppSidebar,
+  type AppSkin,
   isApiRoute,
   type Motion,
   parseApiAnswer,
@@ -37,12 +41,18 @@ export type AppSettings = {
   host: AppHost | null;
   role: Role | null;
   motion: Motion;
+  /** The skin, or null for the scene's. */
+  skin: AppSkin | null;
+  /** The sidebar open or closed at the start, or null for the scene's. */
+  sidebar: AppSidebar | null;
 };
 
 export const DEFAULT_APP: AppSettings = {
   host: null,
   role: null,
   motion: "still",
+  skin: null,
+  sidebar: null,
 };
 
 const HOSTS: readonly AppHost[] = ["desktop", "browser"];
@@ -85,6 +95,8 @@ export function encodeState(state: WorkbenchState): string {
   if (app.host !== null) params.set("host", app.host);
   if (app.role !== null) params.set("role", app.role);
   if (app.motion === "real") params.set("motion", app.motion);
+  if (app.skin !== null) params.set("skin", app.skin);
+  if (app.sidebar !== null) params.set("sidebar", app.sidebar);
   return params.toString();
 }
 
@@ -307,6 +319,25 @@ export function decodeState(
     else
       notices.push(
         `The motion "${motion}" is not valid. The workbench uses "${DEFAULT_APP.motion}".`,
+      );
+  }
+
+  const skin = params.get("skin");
+  if (skin !== null) {
+    const found = APP_SKINS.find((s) => s === skin);
+    if (found) app.skin = found;
+    else
+      notices.push(
+        `The skin "${skin}" is not valid. The workbench uses the scene's skin.`,
+      );
+  }
+  const sidebar = params.get("sidebar");
+  if (sidebar !== null) {
+    const found = APP_SIDEBARS.find((s) => s === sidebar);
+    if (found) app.sidebar = found;
+    else
+      notices.push(
+        `The sidebar "${sidebar}" is not valid. The workbench uses the scene's sidebar.`,
       );
   }
 

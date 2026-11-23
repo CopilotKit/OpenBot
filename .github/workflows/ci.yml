@@ -464,7 +464,7 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 \
             "$PLAYWRIGHT_IMAGE" \
-            bun test src/setupLayout.browser.test.ts workbench/determinism.browser.test.ts workbench/layoutWatch.browser.test.ts workbench/shot.browser.test.ts workbench/appFrame.browser.test.ts workbench/appDeterminism.browser.test.ts workbench/appShot.browser.test.ts workbench/critique.browser.test.ts workbench/motion.browser.test.ts workbench/findings.browser.test.ts
+            bun test src/setupLayout.browser.test.ts workbench/determinism.browser.test.ts workbench/layoutWatch.browser.test.ts workbench/shot.browser.test.ts workbench/appFrame.browser.test.ts workbench/appDeterminism.browser.test.ts workbench/appShot.browser.test.ts workbench/critique.browser.test.ts workbench/motion.browser.test.ts workbench/findings.browser.test.ts workbench/stateSteps.browser.test.ts
       # The workbench's run check: every scene's run walked to its end, failing on a step that has
       # nothing to click or type into, or a run that stalls. It walks the app scenes too, and fails
       # on an app request that has no answer or an error in the app.

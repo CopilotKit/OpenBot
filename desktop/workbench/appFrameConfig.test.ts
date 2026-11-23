@@ -31,13 +31,29 @@ test("it takes the scene's host unless the state names one", () => {
   expect(appFrameConfig(state(), scene).host).toBe("desktop");
   expect(
     appFrameConfig(
-      state({ app: { host: null, role: null, motion: "still" } }),
+      state({
+        app: {
+          host: null,
+          role: null,
+          motion: "still",
+          skin: null,
+          sidebar: null,
+        },
+      }),
       scene,
     ).host,
   ).toBe("desktop");
   expect(
     appFrameConfig(
-      state({ app: { host: "browser", role: null, motion: "still" } }),
+      state({
+        app: {
+          host: "browser",
+          role: null,
+          motion: "still",
+          skin: null,
+          sidebar: null,
+        },
+      }),
       scene,
     ).host,
   ).toBe("browser");
@@ -48,7 +64,15 @@ test("motion is still and role is null by default", () => {
   expect(config.motion).toBe("still");
   expect(config.role).toBeNull();
   const set = appFrameConfig(
-    state({ app: { host: null, role: "admin", motion: "real" } }),
+    state({
+      app: {
+        host: null,
+        role: "admin",
+        motion: "real",
+        skin: null,
+        sidebar: null,
+      },
+    }),
     scene,
   );
   expect(set.motion).toBe("real");

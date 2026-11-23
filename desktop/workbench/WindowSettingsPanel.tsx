@@ -1,4 +1,10 @@
 import { useId, useState } from "react";
+import {
+  APP_SIDEBARS,
+  APP_SKINS,
+  type AppSidebar,
+  type AppSkin,
+} from "./appContract";
 import { MIN_WINDOW } from "./urlState";
 
 export type WindowSettingsValue = {
@@ -11,11 +17,23 @@ export type WindowSettingsValue = {
   grid: boolean;
 };
 
-/** The app frame's settings: who hosts it, who is signed in, and the motion. */
+/** The app frame's settings: who hosts it, who is signed in, the motion, the skin and the sidebar. */
 export type AppWindowSettings = {
   host: "desktop" | "browser";
   role: "member" | "admin" | "owner" | null;
   motion: "still" | "real";
+  /** null: as the scene says. */
+  skin: AppSkin | null;
+  /** null: as the scene says. */
+  sidebar: AppSidebar | null;
+};
+
+/** The words for each skin in the Skin select. */
+const SKIN_LABELS: Record<AppSkin, string> = {
+  openbot: "OpenBot",
+  openduet: "OpenDuet",
+  opendots: "OpenDots",
+  openfuse: "OpenFuse",
 };
 
 export type WindowSettingsPanelProps = {
@@ -92,6 +110,40 @@ function AppFields(props: {
         >
           <option value="still">Still</option>
           <option value="real">Real</option>
+        </select>
+      </label>
+      <label className="wb-prop">
+        <span>Skin</span>
+        <select
+          value={app.skin ?? SCENE_ROLE}
+          onChange={(event) =>
+            props.onAppChange?.({
+              skin: APP_SKINS.find((s) => s === event.target.value) ?? null,
+            })
+          }
+        >
+          <option value={SCENE_ROLE}>As the scene says</option>
+          {APP_SKINS.map((skin) => (
+            <option key={skin} value={skin}>
+              {SKIN_LABELS[skin]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="wb-prop">
+        <span>Sidebar</span>
+        <select
+          value={app.sidebar ?? SCENE_ROLE}
+          onChange={(event) =>
+            props.onAppChange?.({
+              sidebar:
+                APP_SIDEBARS.find((s) => s === event.target.value) ?? null,
+            })
+          }
+        >
+          <option value={SCENE_ROLE}>As the scene says</option>
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
         </select>
       </label>
     </>

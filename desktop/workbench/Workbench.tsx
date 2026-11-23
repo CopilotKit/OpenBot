@@ -796,7 +796,7 @@ export function WorkbenchLoaded({
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
   const host = appConfig?.host ?? "desktop";
-  const frameKey = `${state.scene}|${state.window.os}|${JSON.stringify(config?.env ?? {})}|${remountCount}|${kind}|${host}|${appConfig?.role ?? ""}|${appConfig?.motion ?? ""}`;
+  const frameKey = `${state.scene}|${state.window.os}|${JSON.stringify(config?.env ?? {})}|${remountCount}|${kind}|${host}|${appConfig?.role ?? ""}|${appConfig?.motion ?? ""}|${appConfig?.skin ?? ""}|${appConfig?.sidebar ?? ""}`;
 
   const writeAt = useCallback(
     (ms: number) => update((prev) => ({ ...prev, at: toSeconds(ms) })),
@@ -1565,7 +1565,7 @@ export function WorkbenchLoaded({
       at: 0,
       answers: {},
       api: {},
-      // The host and the motion stay; the role is the scene's again.
+      // The host, the motion, the skin and the sidebar stay; the role is the scene's again.
       app: prev.app ? { ...prev.app, role: null } : prev.app,
       window: { ...prev.window, os: scene?.start.os ?? prev.window.os },
     }));
@@ -1598,7 +1598,7 @@ export function WorkbenchLoaded({
     if (appFrame) appFrame.api = apply(appFrame.api);
   };
 
-  /** A new host, role or motion remounts the window (the frame key has them). */
+  /** A new host, role, motion, skin or sidebar remounts the window (the frame key has them). */
   const changeApp = (patch: Partial<AppWindowSettings>) => {
     update((prev) => {
       return { ...prev, app: { ...(prev.app ?? DEFAULT_APP), ...patch } };
@@ -2061,6 +2061,9 @@ export function WorkbenchLoaded({
                   host: appConfig.host,
                   role: appConfig.role,
                   motion: appConfig.motion,
+                  // The link's choice, so "As the scene says" stays selected when the scene sets one.
+                  skin: state.app?.skin ?? null,
+                  sidebar: state.app?.sidebar ?? null,
                 }
               : undefined
           }

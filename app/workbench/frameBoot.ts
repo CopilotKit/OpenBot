@@ -26,6 +26,7 @@ import { navigateIn, startAppRun } from "./appRunner";
 import { pageFallback } from "./pageDefaults";
 import { APP_SCENES } from "./scenes";
 import { sessionApi } from "./session";
+import { skinApi } from "./skins";
 import { installFakeSockets } from "./socket";
 
 declare global {
@@ -204,6 +205,7 @@ function boot(): void {
   for (const answers of [
     sessionApi(scene.start.session, config.role),
     scene.start.api ?? {},
+    skinApi(config.skin),
     config.api,
   ]) {
     for (const [route, answer] of Object.entries(answers)) {

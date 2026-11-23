@@ -9,6 +9,17 @@ You can play a run, stop at any second and measure the layout. The goal is to fi
 
 The workbench is for development only. It never goes into a shipped build.
 
+## The rule
+
+The workbench uses the app's own components, types, state and values. It never keeps a copy of them. Fakes are allowed only at the boundaries (see [The boundaries and their fakes](#the-boundaries-and-their-fakes)).
+
+So when the app changes, the workbench changes with it, or it fails to build. Nobody has to keep a second copy up to date. This applies to:
+
+- **What the window shows.** A scene loads the real app. It never draws a screen of its own.
+- **Where the app is.** A scene gets to a state through the app's own state. Each desktop state names the setup step it shows with App's own type, `SetupStep`, and `stateSteps.browser.test.ts` checks that the window really shows that step.
+- **Types and values.** Scene data uses `satisfies` with the app's own types. A list, a key or a route that the app has comes in by import, never typed out again. If the workbench cannot import it, move it to `shared/` and import it from there in both places. `noCopies.test.ts` fails when the workbench spells out one of these values.
+- **The workbench's own panels.** These use the app's UI components (`app/src/components/ui`) and do not draw their own. This part is not done yet: the panels still have their own components and CSS.
+
 ## Start the workbench
 
 1. Run `cd desktop && bun run workbench`.
@@ -102,7 +113,7 @@ The desktop scenes come from three files in `scenes/`:
 
 - `install.ts` has the seven install runs.
 - `windows.ts` has six runs for the Status, Update, Move to Cloud and Shutting down windows.
-- `states.ts` has one still scene for each state in `src/fakeNative/states.ts`.
+- `states.ts` has one still scene for each state in `src/fakeNative/states.ts`. Each state names the setup step it shows (`step`, a `SetupStep` from `src/telemetry.ts`), or `null` when the window shows no setup step. When App's flow changes, `stateSteps.browser.test.ts` names each state that no longer shows its step.
 
 A **run** is a scene that plays over time. A scene with a run shows these controls:
 
@@ -250,8 +261,14 @@ Each setting has its name on the left. For an app scene, the panel also has an *
 - **Host**: OpenBot Desktop or Browser. With Browser, the frame shows a browser bar with the route that the app shows now. When the app goes to another route, for example after a redirect, the bar shows the new route.
 - **Signed in as**: As the scene says, Member, Admin or Owner.
 - **Motion**: Still or Real.
+- **Skin**: As the scene says, OpenBot, OpenDuet, OpenDots or OpenFuse. The workbench puts the skin in the frame's storage (`openbot-skin`, read before the first paint) and answers the person's preferences with it, since the account's skin wins over the stored one.
+- **Sidebar**: As the scene says, Open or Closed. It goes in the frame's storage (`openbot-sidebar`: `expanded` or `collapsed`), where OpenBot's own sidebar reads it. OpenDots keeps its sidebar in React state only, so this setting does not reach it; its closed scenes press "Collapse sidebar" instead (see below). OpenDuet and OpenFuse have no sidebar.
 
-A change to the host, the role or the motion loads the window again. When you pick another scene, the host and the motion stay, and the role goes back to the scene's role.
+A change to the host, the role, the motion, the skin or the sidebar loads the window again. When you pick another scene, the host, the motion, the skin and the sidebar stay, and the role goes back to the scene's role. The link keeps the skin and the sidebar (`skin`, `sidebar`), and the CLIs take `--skin` and `--sidebar`.
+
+### Skin scenes
+
+A layout can be right in one skin and wrong in another, or right with the sidebar open and wrong with it closed: the window's buttons then sit over another part of the page. So the group **App: Skins** has the main Bot page (`app-home-bots`) and Settings → Connections (`app-settings-connections`) in every skin (`app/workbench/skins.ts`): OpenBot and OpenDots with the sidebar open and closed (`<id>-<skin>-sidebar-<open|closed>`), OpenDuet and OpenFuse once each (`<id>-<skin>`). `workbench:check` walks all of them, so the [Spacing](#spacing) check sees each layout. A scene can set `start.skin` and `start.sidebar` itself too.
 
 When you move the pointer over the window, the inspector shows the box of the element, the gaps to its neighbors and the distance from the 4 px grid.
 
@@ -412,7 +429,8 @@ Agents use `workbench:shot` to get a picture and a report of a frame. You do not
 cd desktop
 bun run workbench:shot <scene> [--at <seconds>] [--grid] [--size <w>x<h>] \
   [--os mac|windows] [--theme light|dark] [--host desktop|browser] \
-  [--role member|admin|owner] [--out <dir>] [--all] [--check] [--include-imported]
+  [--role member|admin|owner] [--skin openbot|openduet|opendots|openfuse] [--sidebar open|closed]
+  [--out <dir>] [--all] [--check] [--include-imported]
 ```
 
 | Flag | Meaning |
@@ -424,6 +442,8 @@ bun run workbench:shot <scene> [--at <seconds>] [--grid] [--size <w>x<h>] \
 | `--os`, `--theme` | The OS frame and the theme |
 | `--host` | For an app scene: OpenBot Desktop or a browser |
 | `--role` | For an app scene: the role of the signed-in person |
+| `--skin` | For an app scene: the skin (see [Window settings](#window-settings)) |
+| `--sidebar` | For an app scene: the sidebar open or closed at the start |
 | `--out` | The output folder. The default is `workbench-shots/` (not tracked by git) |
 | `--all` | Shoot every scene at each run step and at its end |
 | `--check` | Fail on problems in the runs (see below) |
@@ -555,6 +575,7 @@ Every step has `at`, the time in seconds from the start of the scene. One step d
 Rules for new scenes:
 
 - Type each payload with `satisfies`, so the compiler checks it against the window's own types.
+- Import a value from the app. Do not type it out again (see [The rule](#the-rule)).
 - Do not put personal data in a scene. Use made-up names and keys.
 - Match the words and the timing of the real native side. `scenes/install.ts` names the Rust functions it copies.
 - A command that a run does not answer gets the answer of the first-run state.
@@ -610,6 +631,7 @@ OPENBOT_APP_BROWSER=1 bun test workbench/appShot.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/critique.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/motion.browser.test.ts
 OPENBOT_APP_BROWSER=1 bun test workbench/findings.browser.test.ts
+OPENBOT_APP_BROWSER=1 bun test workbench/stateSteps.browser.test.ts
 ```
 
 - `appFrame.browser.test.ts` checks the app frame: it boots, the bridge and the fake API answer, and Vite does not load it two times. It also checks that a seek ends when the frame loads again.
@@ -618,9 +640,10 @@ OPENBOT_APP_BROWSER=1 bun test workbench/findings.browser.test.ts
 - `critique.browser.test.ts` runs `workbench:critique` and checks the folder it writes: `frame.png`, `frame.json` and `prompt.md`.
 - `motion.browser.test.ts` checks that the paused "Next:" marker stays on its element after Fit and a splitter drag, that the Install marker (or its ghost) shows for at least 400 ms after the click, and that a warning hover that seeks back keeps a still of the window over the replay that looks like the window did (less than 2% of its pixels differ).
 
+- `stateSteps.browser.test.ts` opens each state scene and checks that the window shows the setup step that the state names.
 - `findings.browser.test.ts` runs the check on one scene, then opens the Findings page. It checks that the page lists the findings, that a finding opens its scene at its time with the warning marked, and that the next time works.
 
-You can also run all ten files in one `bun test` command, as CI does. Each file gets the workbench server in its `beforeAll` hook and gives it back with `stop()` in its `afterAll` hook. The hooks have their own time limits, because bun gives a hook only 5 seconds. `bun test` does not send the process `exit` event, so a file that does not call `stop()` leaves the server running.
+You can also run all eleven files in one `bun test` command, as CI does. Each file gets the workbench server in its `beforeAll` hook and gives it back with `stop()` in its `afterAll` hook. The hooks have their own time limits, because bun gives a hook only 5 seconds. `bun test` does not send the process `exit` event, so a file that does not call `stop()` leaves the server running.
 
 `desktop/workbench/shippedBuild.test.ts` runs a full build. It takes up to three minutes. To run the full build check of the app, run this in the repository root:
 
@@ -634,7 +657,7 @@ The CI job "app (real browser, desktop setup window)" runs the workbench checks.
 
 1. It runs `bun run generate:app-config`.
 2. It runs the full build check of the app with `OPENBOT_APP_BUILD_GUARD=1`, on the runner. It runs before the steps in the image: those run as root, and after them the build cannot write its config into `app/node_modules/.vite-temp`.
-3. It runs the ten browser tests in the Playwright image.
+3. It runs the eleven browser tests in the Playwright image.
 4. It runs `bun run workbench:check` in the Playwright image.
 5. It keeps `workbench-shots/check/findings.json` as the artifact `workbench-findings`.
 

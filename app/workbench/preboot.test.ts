@@ -38,6 +38,8 @@ function config(overrides: Partial<AppFrameConfig> = {}): AppFrameConfig {
     os: "mac",
     theme: "dark",
     motion: "still",
+    skin: null,
+    sidebar: null,
     role: "owner",
     api: {},
     answers: {},

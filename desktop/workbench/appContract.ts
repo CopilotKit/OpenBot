@@ -1,8 +1,13 @@
 /*
  * The contract between the workbench page and the app frame: the types and the checks that both
- * the desktop package and the app package type-check. It imports only types, so it adds no code
- * to either program.
+ * the desktop package and the app package type-check. Apart from types, it imports only the
+ * app's own constants from shared/, so the workbench never keeps a copy of them.
  */
+import {
+  SIDEBAR_STORAGE_KEY,
+  SKIN_STORAGE_KEY,
+} from "../../shared/app-storage-keys";
+import { SKIN_IDS, type SkinId } from "../../shared/user-preferences";
 import type { Answer } from "../src/fakeNative/control";
 import type { Os } from "./frameConfig";
 
@@ -11,6 +16,21 @@ export type AppHost = "desktop" | "browser";
 
 /** "still" stops animations so that each frame is the same; "real" lets them play. */
 export type Motion = "still" | "real";
+
+/** Every skin OpenBot ships: the app's own list (`SKIN_IDS`), never a copy of it. */
+export const APP_SKINS = SKIN_IDS;
+export type AppSkin = SkinId;
+
+/** Whether the app's sidebar starts open or closed. */
+export const APP_SIDEBARS = ["open", "closed"] as const;
+export type AppSidebar = (typeof APP_SIDEBARS)[number];
+
+/** The browser keys the app reads its skin and its sidebar from before the first paint. */
+export { SIDEBAR_STORAGE_KEY, SKIN_STORAGE_KEY };
+
+/** The person's preferences route: the account's skin wins over the stored one (SkinAccountSync). */
+export const PREFERENCES_ROUTE =
+  "GET /api/v2/organizations/:organizationId/people/:personId/preferences";
 
 export type Role = "member" | "admin" | "owner";
 
@@ -126,13 +146,15 @@ export type AppSceneGroup =
   | "App: Home"
   | "App: Settings"
   | "App: Conversation"
-  | "App: Account";
+  | "App: Account"
+  | "App: Skins";
 
 export const APP_SCENE_GROUPS: readonly AppSceneGroup[] = [
   "App: Home",
   "App: Settings",
   "App: Conversation",
   "App: Account",
+  "App: Skins",
 ];
 
 type FailProblemOf = Extract<Answer, { mode: "fail" }>["problem"];
@@ -161,6 +183,10 @@ export type AppSceneStart = {
   storage?: Record<string, string>;
   /** The agent ids that the runtime's info lists. Default: the ids of the generated Bots list. */
   agents?: readonly string[];
+  /** The person's skin. Not set: the default skin (`openbot`). */
+  skin?: AppSkin;
+  /** Whether the sidebar starts open or closed. Not set: open, as the app starts it. */
+  sidebar?: AppSidebar;
 };
 
 export type AppScene = {
@@ -180,6 +206,10 @@ export type AppFrameConfig = {
   theme: "light" | "dark";
   motion: Motion;
   role: Role | null;
+  /** The skin the frame shows: the link's, else the scene's, else null (the default skin). */
+  skin: AppSkin | null;
+  /** The sidebar at the start: the link's, else the scene's, else null (as the app starts it). */
+  sidebar: AppSidebar | null;
   api: Partial<Record<ApiRoute, ApiAnswer>>;
   answers: Record<string, Answer>;
   storage: Record<string, string>;

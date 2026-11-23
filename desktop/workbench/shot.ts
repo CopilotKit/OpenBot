@@ -2,6 +2,7 @@
 //
 //   bun run workbench:shot <scene> [--at <seconds>] [--grid] [--size <w>x<h>]
 //     [--os mac|windows] [--theme light|dark] [--host desktop|browser] [--role member|admin|owner]
+//     [--skin openbot|openduet|opendots|openfuse] [--sidebar open|closed]
 //     [--out <dir>] [--all] [--check] [--include-imported]
 //
 // `--all --check` walks only the committed scenes. Scenes imported from troubleshooting logs are

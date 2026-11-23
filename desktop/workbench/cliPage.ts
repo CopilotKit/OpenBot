@@ -2,7 +2,13 @@
 // (critique.ts). The Playwright types they use, the flags they both read, and the steps that drive
 // the workbench page: open a scene, seek, wait one frame, read the page's report.
 import { resolve } from "node:path";
-import type { ApiRecord, AppHost, Role } from "./appContract";
+import {
+  APP_SIDEBARS,
+  APP_SKINS,
+  type ApiRecord,
+  type AppHost,
+  type Role,
+} from "./appContract";
 import {
   type AppSettings,
   DEFAULT_APP,
@@ -73,10 +79,11 @@ export type FrameArgs = {
 
 /** The usage text of the flags that parseFrameArgs reads (after the scene). */
 export const FRAME_FLAGS_USAGE =
-  "[--at <seconds>] [--size <w>x<h>] [--os mac|windows] [--theme light|dark] [--host desktop|browser] [--role member|admin|owner] [--out <dir>]";
+  "[--at <seconds>] [--size <w>x<h>] [--os mac|windows] [--theme light|dark] [--host desktop|browser] [--role member|admin|owner] [--skin openbot|openduet|opendots|openfuse] [--sidebar open|closed] [--out <dir>]";
 
 /**
- * Reads the scene and the shared flags: --at, --size, --os, --theme, --host, --role and --out.
+ * Reads the scene and the shared flags: --at, --size, --os, --theme, --host, --role, --skin,
+ * --sidebar and --out.
  * `own` reads the CLI's own flags: it gets the flag and a way to read its value, and gives false
  * for a flag it does not know. A bad flag or value ends the CLI with `usage`.
  */
@@ -137,6 +144,20 @@ export function parseFrameArgs(
         const role = ROLES.find((r) => r === v);
         if (!role) fail(usage);
         app.role = role;
+        break;
+      }
+      case "--skin": {
+        const v = value();
+        const skin = APP_SKINS.find((s) => s === v);
+        if (!skin) fail(usage);
+        app.skin = skin;
+        break;
+      }
+      case "--sidebar": {
+        const v = value();
+        const sidebar = APP_SIDEBARS.find((s) => s === v);
+        if (!sidebar) fail(usage);
+        app.sidebar = sidebar;
         break;
       }
       case "--out":

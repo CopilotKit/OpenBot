@@ -121,7 +121,13 @@ describe("urlState", () => {
         "POST /api/v2/things": { mode: "fail", status: 500 },
         "ALL /api/*": { mode: "offline" },
       },
-      app: { host: "browser", role: "admin", motion: "real" },
+      app: {
+        host: "browser",
+        role: "admin",
+        motion: "real",
+        skin: "opendots",
+        sidebar: "closed",
+      },
     };
     const out = decodeState(`?${encodeState(full)}`, scenes, commands);
     expect(out.notices).toEqual([]);
@@ -130,7 +136,7 @@ describe("urlState", () => {
 
   test("default app settings and no api add no params", () => {
     const query = new URLSearchParams(encodeState(state));
-    for (const key of ["api", "host", "role", "motion"]) {
+    for (const key of ["api", "host", "role", "motion", "skin", "sidebar"]) {
       expect(query.has(key)).toBe(false);
     }
     const noFields: WorkbenchState = { ...state };

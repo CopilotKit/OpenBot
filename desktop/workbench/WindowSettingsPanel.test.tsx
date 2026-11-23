@@ -103,20 +103,27 @@ function appProps() {
   const onAppChange = mock();
   const p: WindowSettingsPanelProps = {
     ...props(),
-    app: { host: "desktop", role: null, motion: "still" },
+    app: {
+      host: "desktop",
+      role: null,
+      motion: "still",
+      skin: null,
+      sidebar: null,
+    },
     onAppChange,
   };
   return { p, onAppChange };
 }
 
-test("with app the App section shows the three selects", () => {
+test("with app the App section shows its selects", () => {
   const { p } = appProps();
   const view = render(<WindowSettingsPanel {...p} />);
   expect(view.container.querySelector("h3")?.textContent).toBe("App");
   expect((view.getByLabelText("Host") as HTMLSelectElement).value).toBe(
     "desktop",
   );
-  expect(view.getByText("As the scene says")).not.toBeNull();
+  // Signed in as, Skin and Sidebar each start at "As the scene says".
+  expect(view.getAllByText("As the scene says")).toHaveLength(3);
   expect((view.getByLabelText("Motion") as HTMLSelectElement).value).toBe(
     "still",
   );
@@ -162,6 +169,8 @@ test("every control has a visible label", () => {
     "Host",
     "Signed in as",
     "Motion",
+    "Skin",
+    "Sidebar",
   ]);
 });
 
@@ -193,4 +202,22 @@ test("with Fit off the Zoom field shows the zoom you set", () => {
   expect((view.getByLabelText("Zoom") as HTMLInputElement).value).toBe("1");
   fireEvent.click(view.getByText("Fit"));
   expect(onFit).toHaveBeenCalledWith(true);
+});
+
+test("Skin sends the skin, and As the scene says sends null", () => {
+  const { p, onAppChange } = appProps();
+  const view = render(<WindowSettingsPanel {...p} />);
+  change(view.getByLabelText("Skin"), "opendots");
+  expect(onAppChange).toHaveBeenLastCalledWith({ skin: "opendots" });
+  change(view.getByLabelText("Skin"), "scene");
+  expect(onAppChange).toHaveBeenLastCalledWith({ skin: null });
+});
+
+test("Sidebar sends open or closed, and As the scene says sends null", () => {
+  const { p, onAppChange } = appProps();
+  const view = render(<WindowSettingsPanel {...p} />);
+  change(view.getByLabelText("Sidebar"), "closed");
+  expect(onAppChange).toHaveBeenLastCalledWith({ sidebar: "closed" });
+  change(view.getByLabelText("Sidebar"), "scene");
+  expect(onAppChange).toHaveBeenLastCalledWith({ sidebar: null });
 });
