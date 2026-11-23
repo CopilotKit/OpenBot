@@ -14,6 +14,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   DescribeRule,
+  DRAFTED_RULE,
   type WrittenRule,
 } from "@/components/boundaries/describe-rule";
 import { RulePreview } from "@/components/boundaries/rule-preview";
@@ -210,10 +211,47 @@ function NewRulePage() {
     { key: "custom", value: "custom" },
   ];
 
+  /*
+   * The CEL field. A described rule is drafted into it, so on that path it sits right under the
+   * description, where it reads as what the words became.
+   */
+  const ruleField = (
+    <Field>
+      <FieldLabel htmlFor="rule-expression">Rule</FieldLabel>
+      <FieldDescription>
+        {written
+          ? DRAFTED_RULE
+          : "Written in CEL. OpenBot checks the rule before it's added, so a typo can't stop every action."}
+      </FieldDescription>
+      <Textarea
+        autoCapitalize="off"
+        autoCorrect="off"
+        className="min-h-20 font-mono text-xs"
+        id="rule-expression"
+        onChange={(event) => setRule(event.target.value)}
+        placeholder='tool.name == "computer_click" && contains(element.name, "delete")'
+        spellCheck={false}
+        value={rule}
+      />
+      {duplicate ? (
+        <p className="text-destructive text-sm">
+          This rule is already in place.
+        </p>
+      ) : null}
+      {chosen && chosen !== "custom" && chosen !== "describe" ? (
+        <p className="text-amber-600 text-sm dark:text-amber-500">
+          {chosen.cost}
+        </p>
+      ) : null}
+      {written ? <RuleReading rule={rule} written={written} /> : null}
+      <RuleReference />
+    </Field>
+  );
+
   return (
     <PageShell
       backButton={BACK}
-      description="Define an action that no Bot may take. This boundary applies to every Bot’s next action."
+      description="Define an action that no Bot may take. This boundary applies to every Bot’s next action. It is checked exactly as written, the same way every time. No model decides."
       title="Add rule"
     >
       <PageSection title="Start from">
@@ -258,7 +296,7 @@ function NewRulePage() {
                           ? "Already one of your rules."
                           : template.description
                         : describe
-                          ? "Say what no Bot may do, and your model writes the rule."
+                          ? "Say what no Bot may do, and your model drafts the rule."
                           : "Describe the action yourself, in CEL."}
                     </ItemDescription>
                   </ItemContent>
@@ -313,7 +351,10 @@ function NewRulePage() {
             >
               <FieldGroup>
                 {chosen === "describe" ? (
-                  <DescribeRule onWritten={takeWritten} />
+                  <>
+                    <DescribeRule onWritten={takeWritten} />
+                    {ruleField}
+                  </>
                 ) : null}
                 <Field>
                   <FieldLabel htmlFor="rule-name">Name</FieldLabel>
@@ -339,37 +380,7 @@ function NewRulePage() {
                     value={description}
                   />
                 </Field>
-                <Field>
-                  <FieldLabel htmlFor="rule-expression">Rule</FieldLabel>
-                  <FieldDescription>
-                    Written in CEL. OpenBot checks the rule before it's added,
-                    so a typo can't stop every action.
-                  </FieldDescription>
-                  <Textarea
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    className="min-h-20 font-mono text-xs"
-                    id="rule-expression"
-                    onChange={(event) => setRule(event.target.value)}
-                    placeholder='tool.name == "computer_click" && contains(element.name, "delete")'
-                    spellCheck={false}
-                    value={rule}
-                  />
-                  {duplicate ? (
-                    <p className="text-destructive text-sm">
-                      This rule is already in place.
-                    </p>
-                  ) : null}
-                  {chosen !== "custom" && chosen !== "describe" ? (
-                    <p className="text-amber-600 text-sm dark:text-amber-500">
-                      {chosen.cost}
-                    </p>
-                  ) : null}
-                  {written ? (
-                    <RuleReading rule={rule} written={written} />
-                  ) : null}
-                  <RuleReference />
-                </Field>
+                {chosen === "describe" ? null : ruleField}
                 {trimmed && candidate && !duplicate ? (
                   <RulePreview preview={preview} />
                 ) : null}

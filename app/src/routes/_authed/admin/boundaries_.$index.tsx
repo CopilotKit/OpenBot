@@ -8,6 +8,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   DescribeRule,
+  DRAFTED_RULE,
   type WrittenRule,
 } from "@/components/boundaries/describe-rule";
 import { DryRunChanges } from "@/components/boundaries/dry-run-changes";
@@ -27,7 +28,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import {
   ruleLabel,
@@ -122,7 +128,7 @@ function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
       ) : null}
 
       <PageSection
-        description="Written in CEL. It is checked before every action a Bot takes."
+        description="Written in CEL. It is checked exactly as written before every action a Bot takes, the same way every time. No model decides."
         title="Rule"
       >
         <RuleEditor policy={policy} rule={rule} />
@@ -298,6 +304,9 @@ function RuleEditor({ policy, rule }: { policy: ActionPolicy; rule: string }) {
           <DescribeRule onWritten={takeWritten} />
           <Field>
             <FieldLabel htmlFor="rule-expression">Rule</FieldLabel>
+            {written ? (
+              <FieldDescription>{DRAFTED_RULE}</FieldDescription>
+            ) : null}
             <Textarea
               autoCapitalize="off"
               autoCorrect="off"

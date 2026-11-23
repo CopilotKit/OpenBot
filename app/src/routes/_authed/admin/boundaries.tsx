@@ -33,7 +33,7 @@ export const Route = createFileRoute("/_authed/admin/boundaries")({
 });
 
 const DESCRIPTION =
-  "Define actions that Bots must never take. OpenBot checks these rules before a Bot acts on its computer or in a connected app.";
+  "Define actions that Bots must never take. OpenBot checks these rules before a Bot acts on its computer or in a connected app. Each rule is checked exactly as written, the same way every time. No model decides.";
 
 /**
  * The deployment's boundaries, read as a list of things Bots may never do.
