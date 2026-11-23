@@ -146,12 +146,13 @@ const MOVE_PREVIEW = {
     { kind: "settings", count: 1 },
   ],
   apps: move === "confirm-many" ? MORE_APPS : MOVE_APPS,
-  footprintBytes: 20_200_000_000,
+  // \`#move-first\` is measured again once its update has added the new release's files.
+  footprintBytes: moveFirst ? 26_600_000_000 : 20_200_000_000,
   modelKeysAvailable: true,
 };
 function moveAnswer(command) {
   if (command === "move_offer")
-    return { due: true, fromSettings: move !== "choice" && !moveFirst, footprintBytes: 20_200_000_000 };
+    return { due: true, fromSettings: move !== "choice" && !moveFirst, footprintBytes: moveFirst ? 23_100_000_000 : 20_200_000_000 };
   if (command === "move_preview")
     return move === "confirm-loading" ? new Promise(() => {}) : MOVE_PREVIEW;
   if (command !== "move_to_cloud") return undefined;
@@ -3784,6 +3785,61 @@ describe.skipIf(!asked)(
         await page.close();
       }
     }, 40_000);
+
+    /*
+     * FOUND IN A MAC UPGRADE CHECK of 1.2: the choice said the move removes about 23.1 GB and the
+     * next screen 26.6 GB, measured after the update added the new release's files. The choice says
+     * no figure while the update is still to come, and the next screen says the updated one only.
+     */
+    for (const colorScheme of ["light", "dark"] as const)
+      test(`one size for what the move removes, from the updated OpenBot (${colorScheme})`, async () => {
+        const page = await browser.newPage({
+          viewport: { width: 1000, height: 760 },
+          colorScheme,
+        });
+        const sized = async (name: string) => {
+          await page.mouse.move(0, 0);
+          await page.waitForTimeout(500);
+          if (shots)
+            await page.screenshot({
+              path: `${shots}/move-first-size-${name}-${colorScheme}-${engine}.png`,
+            });
+          return page.evaluate(() => document.body.innerText);
+        };
+        try {
+          await open(page, "#move-first", cloudBuilt);
+          await page
+            .getByRole("heading", {
+              name: "Move to OpenBot Cloud?",
+              exact: true,
+            })
+            .waitFor();
+          const choice = await sized("choice");
+          await page.getByRole("button", { name: "Continue" }).click();
+          await page
+            .getByText(
+              "Getting your Bots ready to move. This can take a few minutes.",
+            )
+            .waitFor();
+          const ready = await sized("getting-ready");
+          await page.evaluate(() =>
+            (
+              globalThis as unknown as {
+                __fake: { finishUpdate: () => void };
+              }
+            ).__fake.finishUpdate(),
+          );
+          await page.getByRole("list", { name: "What moves" }).waitFor();
+          const confirm = await sized("confirm");
+          expect(choice).toContain("move to your OpenBot Cloud account.");
+          expect(choice).not.toContain("GB");
+          expect(ready).not.toContain("GB");
+          expect(confirm).toContain("Removes about 26.6 GB of OpenBot files.");
+          expect(confirm).not.toContain("23.1 GB");
+        } finally {
+          await page.close();
+        }
+      }, 40_000);
 
     test("Keep: asked before any update, then the update runs as before and OpenBot opens", async () => {
       const page = await browser.newPage({

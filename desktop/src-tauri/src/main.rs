@@ -1048,26 +1048,31 @@ shows the file, as the menu's Get Troubleshooting Logs… does.
 */
 fn setup_page_stuck(app: &tauri::AppHandle) {
     let handle = app.clone();
-    show_prompt(
-        app,
-        app_update::Prompt {
-            title: SETUP_STUCK_TITLE.to_owned(),
-            message: SETUP_STUCK_MESSAGE.to_owned(),
-            buttons: Some(("Restart", "Get logs")),
-        },
-        move |restart| {
-            if restart {
-                log::info!("[ui] restarting OpenBot from the stuck window's alert");
-                restart_into_update(&handle);
-            }
-            log::info!("[ui] getting the troubleshooting logs from the stuck window's alert");
-            save_troubleshooting_logs_from_menu(handle);
-        },
-    );
+    show_prompt(app, setup_stuck_prompt(), move |restart| {
+        if restart {
+            log::info!("[ui] restarting OpenBot from the stuck window's alert");
+            restart_into_update(&handle);
+        }
+        log::info!("[ui] getting the troubleshooting logs from the stuck window's alert");
+        save_troubleshooting_logs_from_menu(handle);
+    });
+}
+
+/**
+The stuck window's alert. Its words hold for both ways a page gets stuck: a blank page, and one
+frozen on its last screen, which still shows that screen. Before, it said "it still isn't showing
+anything", which is false of a frozen page.
+*/
+pub(crate) fn setup_stuck_prompt() -> app_update::Prompt {
+    app_update::Prompt {
+        title: SETUP_STUCK_TITLE.to_owned(),
+        message: SETUP_STUCK_MESSAGE.to_owned(),
+        buttons: Some(("Restart", "Get logs")),
+    }
 }
 
 const SETUP_STUCK_TITLE: &str = "OpenBot's window isn't responding";
-const SETUP_STUCK_MESSAGE: &str = "OpenBot tried reloading it, and it still isn't showing anything. Restart OpenBot to try again. Get logs saves what happened to a file you can share.";
+const SETUP_STUCK_MESSAGE: &str = "OpenBot tried reloading it, and it still isn't updating. Restart OpenBot to try again. Get logs saves what happened to a file you can share.";
 
 /// The running step last written to the log, so a step that says the same thing on every poll
 /// (an engine that is still starting) is one entry rather than one a second.

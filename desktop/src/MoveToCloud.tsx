@@ -387,10 +387,21 @@ export function MoveToCloud({
    * own (`move_footprint`): on a Mac with two older installs on its disk, measuring it first held
    * the question back 15 seconds. Until it arrives, or if it never does, the screens say the move
    * without it.
+   *
+   * One figure for what the move removes, the same on both screens. Offered before the OpenBot here
+   * started (`here`), its start for the move updates it first and adds the new release's files: a
+   * Mac said 23.1 GB on the choice and 26.6 GB on the next screen. So then the choice says no
+   * figure, and the next screen says the one measured from the OpenBot that moves (`move_preview`).
+   * Offered over it running, the next screen keeps the figure the choice said, and a size measured
+   * after the person left the choice is not taken.
    */
-  const [footprintBytes, setFootprintBytes] = useState(offer.footprintBytes);
+  const [sizedOnChoice] = useState(() => !here && !offer.fromSettings);
+  const [footprintBytes, setFootprintBytes] = useState(
+    sizedOnChoice ? offer.footprintBytes : null,
+  );
+  const onChoice = screen.at === "choice";
   useEffect(() => {
-    if (offer.footprintBytes != null) return;
+    if (!sizedOnChoice || !onChoice || offer.footprintBytes != null) return;
     let current = true;
     invoke<number | null>("move_footprint")
       .then((bytes) => {
@@ -402,7 +413,7 @@ export function MoveToCloud({
     return () => {
       current = false;
     };
-  }, [offer.footprintBytes]);
+  }, [sizedOnChoice, onChoice, offer.footprintBytes]);
   const keep = async () => {
     setKeeping(true);
     try {
@@ -496,7 +507,7 @@ export function MoveToCloud({
         preview={preview}
         problem={here?.at === "failed" ? here.problem : previewProblem}
         gettingReady={here?.at === "starting" || here?.at === "stopped"}
-        footprintBytes={preview?.footprintBytes ?? footprintBytes}
+        footprintBytes={footprintBytes ?? preview?.footprintBytes ?? null}
         includeKeys={includeKeys}
         onIncludeKeys={setIncludeKeys}
         keeping={keeping}
