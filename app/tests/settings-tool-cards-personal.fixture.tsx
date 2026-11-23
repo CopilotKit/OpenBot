@@ -179,21 +179,20 @@ const CALLS: {
 function Page() {
   return (
     <main className="min-h-screen bg-background p-4 text-foreground">
-      <div
+      <section
         aria-label="Conversation"
         className="mx-auto flex w-full max-w-3xl flex-col gap-4"
-        role="region"
       >
         {CALLS.map((call) => (
-          <section data-part={call.part} key={call.part}>
+          <div data-part={call.part} key={call.part}>
             <SettingsToolCall
               args={JSON.stringify(call.args)}
               name={`mcp__openbot-settings__${call.tool}`}
               {...(call.result === undefined ? {} : { result: call.result })}
             />
-          </section>
+          </div>
         ))}
-      </div>
+      </section>
     </main>
   );
 }
