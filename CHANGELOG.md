@@ -509,8 +509,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   back to Detailed, in this browser. Message list emphasis applies to Detailed only.
 - **A Bots panel.** Every Bot, ordered by its latest conversation. The top three open with their
   five latest conversations, and Show more lists the next five.
-- **Agents are hidden for now.** The Agents page is out of the menu and `/agents` goes home. A
-  Bot's page has no Agents row, and `/bots/<id>/agents` goes to the Bot's page.
+- **No more Agents pages.** A person has Bots and picks their model. Nothing else says what runs a
+  Bot. The Agents page and a Bot's Agents page are gone: `/agents` goes to the Bots, and
+  `/bots/<id>/agents` to the Bot's page. A Bot that runs inside OpenBot has no Connection section
+  on Setup and no "Built in". Only a Bot connected at an address shows its Agent URL. Connecting
+  your own AG-UI agent stays in New Bot, under Bring your own agent.
 - **The sidebar drags narrower, and never takes more than two-fifths of the window.** Its edge
   stopped at 220px; a panel now drags down to 180px (228px beside the strip), where every heading
   still reads whole. Zooming in used to leave the sidebar its full width, so it could take more than

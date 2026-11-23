@@ -14,17 +14,16 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, within } from "@testing-library/react";
+import { cleanup, render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SetupSections } from "@/components/bot-profile/setup";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { DEPLOYMENT_PATH, deploymentResponse } from "./admin-settings-api";
 
 /**
- * A Bot's Setup says what runs it. A Bot made from New Bot runs inside OpenBot on the LangGraph
- * (TypeScript) engine, and the Bot API names that as its framework; its Connection says so, under
- * "Built in", so a person can see which engine answers. A Bot that runs on OpenBot's own agent, as
- * every Bot made before does, shows "Built in" alone.
+ * What runs a Bot is not the person's concern: a Bot that runs inside OpenBot has no Connection
+ * section on its Setup, whichever engine OpenBot runs it on. Only a Bot connected to an agent at an
+ * address has one (bot-setup-agent-url.test.tsx).
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -87,31 +86,13 @@ function draw(screen: ReactNode) {
   );
 }
 
-async function connection(bot: AgentProfile) {
-  const view = draw(<SetupSections agent={bot} />);
-  const heading = await view.findByRole("heading", { name: "Connection" });
-  const section = heading.closest("section") ?? heading.parentElement;
-  if (!section) throw new Error("no Connection section");
-  return within(section as HTMLElement);
-}
-
-test("a Bot on the LangGraph (TypeScript) engine names it under Built in", async () => {
-  const section = await connection({
-    ...BOT,
-    framework: "LangGraph (TypeScript)",
-  });
-  expect(section.getByText("Built in")).toBeTruthy();
-  expect(section.getByText("Runs on")).toBeTruthy();
-  expect(
-    section.getByText("LangGraph (TypeScript)", { exact: true }),
-  ).toBeTruthy();
-});
-
-test("a Bot on OpenBot's own agent shows Built in alone", async () => {
-  for (const framework of ["OpenBot", undefined]) {
-    const section = await connection({ ...BOT, framework });
-    expect(section.getByText("Built in")).toBeTruthy();
-    expect(section.queryByText("Runs on")).toBeNull();
+test("a Bot that runs inside OpenBot has no Connection section, whichever engine runs it", async () => {
+  for (const framework of ["LangGraph (TypeScript)", "OpenBot", undefined]) {
+    const view = draw(<SetupSections agent={{ ...BOT, framework }} />);
+    expect(await view.findByRole("button", { name: /^Name/ })).toBeTruthy();
+    expect(view.queryByRole("heading", { name: "Connection" })).toBeNull();
+    expect(view.queryByText("Built in")).toBeNull();
+    expect(view.queryByText("Runs on")).toBeNull();
     cleanup();
   }
 });

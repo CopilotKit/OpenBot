@@ -1139,8 +1139,8 @@ export function ChannelChat({
    * model, so only it gets a picker; a Bot on its own framework picks its own model.
    */
   /*
-   * Not a Bot that hands work to agents either: its own model is set on its Agents page, and each
-   * agent keeps its own.
+   * Not a Bot that hands work out either (while that is offered at all): it answers on its own
+   * model.
    */
   const picksModel = useBotTakesModelChoice(botProfile);
   const models = useQuery({
