@@ -95,10 +95,15 @@ static ACTIVE: OnceLock<Mutex<Option<Arc<Flow>>>> = OnceLock::new();
 fn active() -> &'static Mutex<Option<Arc<Flow>>> {
     ACTIVE.get_or_init(|| Mutex::new(None))
 }
-fn random() -> String {
+/// 32 random bytes as text: a PKCE verifier, a `state`.
+pub(crate) fn random() -> String {
     let mut bytes = [0; 32];
     rand::rng().fill_bytes(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
+}
+/// The S256 challenge for a PKCE verifier (RFC 7636 §4.2).
+pub(crate) fn pkce_challenge(verifier: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 fn configured(name: &str) -> Option<String> {
     let embedded = match name {
@@ -185,7 +190,7 @@ pub fn begin(root: &Path, provider: &str) -> Result<Authorization, String> {
             );
             let verifier = random();
             let state = random();
-            let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+            let challenge = pkce_challenge(&verifier);
             let mut url =
                 reqwest::Url::parse("https://accounts.google.com/o/oauth2/v2/auth").unwrap();
             url.query_pairs_mut().extend_pairs([
@@ -1563,6 +1568,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "the other writer is the server's own lock, which runs in the OpenBot server image"]
     fn credential_lock_excludes_bun_in_both_directions_and_recovers_after_kill() {
         use std::process::Stdio;
         let root = crate::test_support::temp_root("provider-oauth-cross-writer");
@@ -1610,6 +1616,7 @@ mod tests {
     /// PowerShell starts 20 seconds late and Bun still takes the lock and gives it back.
     #[cfg(windows)]
     #[test]
+    #[ignore = "the other writer is the server's own lock, which runs in the OpenBot server image"]
     fn credential_lock_waits_for_a_windows_powershell_that_starts_slowly() {
         use std::process::Stdio;
         let root = crate::test_support::temp_root("provider-oauth-slow-powershell");

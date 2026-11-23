@@ -106,7 +106,7 @@ export function LabelSelect<T extends string>({
 const TEAM_BEHAVIOUR_LABELS = Object.fromEntries(
   Object.entries(BEHAVIOUR_LABELS).map(([key, label]) => [
     key,
-    `${label} (team rule)`,
+    `${label} (organization rule)`,
   ]),
 ) as Record<RuleBehaviour, string>;
 

@@ -59,7 +59,7 @@ export function AccessRequestsSection({ app }: { app?: string }) {
     return (
       <PageSection title="Requests">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load access requests. Reload the page.
+          Couldn't load access requests. Try again in a moment.
         </p>
       </PageSection>
     );

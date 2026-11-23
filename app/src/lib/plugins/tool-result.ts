@@ -69,6 +69,19 @@ export function withoutUntrustedEnvelope(text: string): string {
 }
 
 /**
+ * The openings of the line the server puts in front of an app's answer, saying what the call did
+ * for the model ("Ran: the app made this change. It answered: sheetId 12, title "Summary"."). The
+ * person sees the step's own state and the app's answer, so the line is left out of what is drawn,
+ * as the untrusted-content notice is. Declared at both ends like {@link REFUSAL_MARKER}.
+ */
+const OUTCOME_LINE = /^(?:Ran|Partly ran|Already done): [^\n]*\n/;
+
+/** An app's answer without the outcome line the server wrote in front of it for the model. */
+export function withoutOutcomeLine(text: string): string {
+  return text.replace(OUTCOME_LINE, "");
+}
+
+/**
  * A tool result, as something worth looking at.
  *
  * MCP says a text part, and vendors fill it with anything from plain markdown to a JSON envelope
@@ -76,7 +89,9 @@ export function withoutUntrustedEnvelope(text: string): string {
  * the markdown it was hiding, and anything else is fenced as JSON. Nothing is discarded.
  */
 export function forDisplay(text: string): string {
-  const trimmed = withoutUntrustedEnvelope(asText(text)).trim();
+  const trimmed = withoutUntrustedEnvelope(
+    withoutOutcomeLine(asText(text)),
+  ).trim();
   if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return trimmed;
 
   let parsed: unknown;
@@ -186,6 +201,31 @@ export function browserCallFailed(result: string | undefined): boolean {
   );
 }
 
+/**
+ * How a call's answer begins when its run was cut off before the result was recorded: the server
+ * restarted, or the run crashed, with the step under way. The rest of that answer tells the Bot how
+ * to carry on safely, and is for the Bot.
+ */
+const CUT_OFF_ANSWER =
+  "Outcome unknown: this call was started, and the run was cut off before its result was recorded";
+
+/** What a cut-off step says, opened. Its Bot was told, and carried on. */
+export const CUT_OFF_SENTENCE =
+  "This step was interrupted before its result came back. The Bot carried on from here.";
+
+/**
+ * Whether a call was cut off with its outcome unknown. Not a failure, since nothing is known to
+ * have gone wrong, and not still running: the step reads as interrupted.
+ */
+export function cutOffStep(result: string | undefined): boolean {
+  if (result === undefined) return false;
+  const answer = asText(result);
+  return (flaggedFailure(answer) ?? answer)
+    .trimStart()
+    .replace(/^Error: /, "")
+    .startsWith(CUT_OFF_ANSWER);
+}
+
 /** What a step says, opened, when its Bot asked for a tool it doesn't have. */
 export const UNOFFERED_TOOL_SENTENCE =
   "This Bot asked for a tool it doesn't have, so it carried on without it.";
@@ -220,9 +260,16 @@ export function unofferedTool(result: string | undefined): boolean {
  */
 export function toolResultFailed(result: string | undefined): boolean {
   if (result === undefined) return false;
-  const answer = asText(result);
+  /*
+   * BEHIND THE RUNTIME'S "Error: " TOO. A failed app call is handed to the model as an error rather
+   * than a result, so the model is told it failed (Anthropic's `is_error`), and the runtime then
+   * puts the same words in the conversation with `Error: ` in front of them.
+   */
+  const answer = asText(result).replace(/^Error: /, "");
   return (
     answer.startsWith("The vendor reported an error:") ||
-    answer.startsWith("That tool could not be called")
+    answer.startsWith("That tool could not be called") ||
+    // A folder action on the person's computer that broke there, rather than being declined.
+    answer.startsWith("That host operation could not be completed")
   );
 }

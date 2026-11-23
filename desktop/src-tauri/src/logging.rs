@@ -472,6 +472,12 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
             r"(?i)\b(?P<name>set-cookie|cookie)(?P<sep>\s*[:=]\s*)[^\r\n]+",
             "${name}${sep}[redacted]",
         ),
+        // The secret the window carries to the relay for an OpenBot that runs elsewhere
+        // (`connected::relay`), wherever it is written without the word Cookie in front.
+        rule(
+            r"(?i)\b(?P<name>openbot-relay=)[^\s;,\x22']+",
+            "${name}[redacted]",
+        ),
         // `Authorization: Bearer <token>`, `Basic <base64>`.
         rule(r"(?i)\b(?P<scheme>bearer)\s+[^\s\x22',;]+", "${scheme} [redacted]"),
         rule(r"\b(?P<scheme>Basic)\s+[A-Za-z0-9+/]{12,}={0,2}", "${scheme} [redacted]"),
@@ -514,6 +520,8 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
                 r"|ya29\.[0-9A-Za-z_\-]+",
                 r"|npm_[A-Za-z0-9]{36}",
                 r"|hf_[A-Za-z0-9]{30,}",
+                // OpenBot's own: an app's access token (`oba_`) and refresh token (`obr_`).
+                r"|ob[ar]_[A-Za-z0-9_\-]{8,}",
                 r"|eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*",
                 r")",
             ),

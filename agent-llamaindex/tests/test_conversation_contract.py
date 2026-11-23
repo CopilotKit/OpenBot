@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from harness_contract import (
     anthropic_environment,
+    check_gateway_keys,
     conversation,
     fake_provider,
     missing_from,
@@ -45,6 +46,26 @@ def _run(monkeypatch, environment, body):
     ], response.text
     assert bodies, "the model was never called"
     return bodies[-1]
+
+
+@pytest.mark.parametrize("wire", ['openai', 'anthropic'])
+def test_a_run_calls_the_gateway_with_its_own_key(monkeypatch, wire):
+    """The run's own gateway token, in its organization; the environment's without one.
+
+    See `shared/run_model_key.py`.
+    """
+
+    def app_for(environment):
+        monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+        monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+        monkeypatch.setenv("MANAGED_AGENT_TOKEN", TOKEN)
+        for key, value in environment.items():
+            monkeypatch.setenv(key, value)
+        from src import main
+
+        return importlib.reload(main).app
+
+    check_gateway_keys(app_for, wire, path="/run", token=TOKEN)
 
 
 @pytest.mark.parametrize("environment", [openai_environment, anthropic_environment])

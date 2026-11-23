@@ -68,12 +68,23 @@ export type Progress = {
   /** The step waits on the person, not on work: no spinner, and its status says so. */
   waiting?: boolean;
   /**
+   * The step hasn't started and comes later in a list shown whole from the start (the move to
+   * OpenBot Cloud): an empty mark, its name in the quieter ink, and no status.
+   */
+  pending?: boolean;
+  /**
    * The step holds until there is room on the disk (`early_downloads::wait_for_room`): no spinner
    * and no time running on, and its status says "Paused".
    */
   paused?: boolean;
   /** A paused step looks again now: its Try again, under what its detail says to do first. */
   onTryAgain?: () => void;
+  /**
+   * The step ended without doing what it set out to, and nothing it left stops what comes next: its
+   * status says this ("Not updated") in the plain badge, with a dash for its mark. Never a ✗ or
+   * Failed, which read as the whole Start failing while it carried on (Windows K).
+   */
+  note?: string;
   /**
    * What its download's parts are doing once every byte is in, said with the part: "Unpacking
    * OpenBot" reads "Unpacking OpenBot (3 of 5)." Without it the row says its detail.
@@ -328,9 +339,27 @@ function SetupProgressRow({
   step: Progress;
   showElapsed: boolean;
 }) {
+  if (step.pending)
+    return (
+      <li className="step pending" aria-label={label(step.step)}>
+        <span className="mark pending" aria-hidden="true" />
+        <span className="step-label">{label(step.step)}</span>
+      </li>
+    );
+  return <StartedRow step={step} showElapsed={showElapsed} />;
+}
+
+function StartedRow({
+  step,
+  showElapsed,
+}: {
+  step: Progress;
+  showElapsed: boolean;
+}) {
   const waiting = step.waiting ?? false;
   const paused = !waiting && (step.paused ?? false);
   const running = !waiting && !paused && (step.running ?? false);
+  const note = !waiting && !paused && !running ? step.note : undefined;
   const elapsed = useElapsed(running && showElapsed, step.startedAt);
   const downloads = running ? step.downloads : undefined;
   const where = useDownloadWhere(
@@ -350,19 +379,23 @@ function SetupProgressRow({
         : "Paused"
       : running
         ? (at ?? "In progress")
-        : step.ok
-          ? "Complete"
-          : "Failed";
+        : note
+          ? note
+          : step.ok
+            ? "Complete"
+            : "Failed";
   return (
     <li className="step" aria-label={label(step.step)}>
       <span
-        className={`mark ${waiting || paused ? "waiting" : running ? "active" : step.ok ? "good" : "bad"}`}
+        className={`mark ${waiting || paused ? "waiting" : running ? "active" : note ? "note" : step.ok ? "good" : "bad"}`}
         aria-hidden="true"
       >
         {waiting || paused ? (
           <span className="step-waiting" />
         ) : running ? (
           <span className="step-spinner" />
+        ) : note ? (
+          "–"
         ) : step.ok ? (
           "✓"
         ) : (
@@ -371,7 +404,7 @@ function SetupProgressRow({
       </span>
       <span className="step-label">{label(step.step)}</span>
       <span
-        className={`step-status${running || waiting || paused ? "" : step.ok ? " good" : " bad"}`}
+        className={`step-status${running || waiting || paused || note ? "" : step.ok ? " good" : " bad"}`}
       >
         {status}
         {running && showElapsed && (
@@ -891,6 +924,8 @@ function label(step: string): string {
       return "Stopping OpenBot";
     case "stop-intelligence":
       return "Stopping OpenBot's services";
+    case "stop-engine":
+      return "Stopping the software OpenBot runs on";
     case "start-your-podman":
       return "Starting your Podman again";
     default:

@@ -12,8 +12,9 @@ import {
 import {
   accountModePreview,
   setAccountModeMutationOptions,
-} from "@/lib/plugins/mutations";
-import { describeApproval } from "@/lib/plugins/shared-use";
+} from "@/lib/apps/mutations";
+import { approvalNamesTeam, describeApproval } from "@/lib/plugins/shared-use";
+import { teamListQueryOptions } from "@/lib/teams/queries";
 
 /**
  * The one moment an administrator decides between people's own accounts and one shared account.
@@ -50,6 +51,13 @@ export function AccountModeDialog({
     queryFn: () => accountModePreview(serverId, target),
     enabled: open,
   });
+  // A Bot's approval keeps a team's id; its name comes from the organization's teams, read once.
+  const teams = useQuery({
+    ...teamListQueryOptions(),
+    enabled:
+      open &&
+      (preview.data?.bots ?? []).some((bot) => approvalNamesTeam(bot.exposure)),
+  }).data?.teams;
   const change = useMutation({
     ...setAccountModeMutationOptions(queryClient),
     onSuccess: () => onOpenChange(false),
@@ -89,7 +97,7 @@ export function AccountModeDialog({
                     <span className="font-medium">
                       {names[bot.botId] ?? bot.botId}
                     </span>
-                    : {describeApproval(bot.exposure)}
+                    : {describeApproval(bot.exposure, teams)}
                   </li>
                 ))}
               </ul>

@@ -6,6 +6,13 @@ import { ManageSection } from "@/components/bot-profile/manage";
 import type { AgentProfile } from "@/lib/agents/queries";
 import type { ResetPlan } from "@/lib/bot-lifecycle/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import {
+  botOperationPath,
+  botResponse,
+  resetResponse,
+  type SentRequest,
+  sentRequest,
+} from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -49,16 +56,30 @@ const BOT: AgentProfile = {
   mine: true,
 };
 
-const requests: string[] = [];
+const requests: SentRequest[] = [];
 function serving() {
   requests.length = 0;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    requests.push(`${init?.method ?? "GET"} ${String(input)}`);
-    if (String(input).endsWith("/duplicate")) {
-      return Response.json({ agent: { ...BOT, id: "expenses-copy" } });
+    const sent = sentRequest(input, init);
+    requests.push(sent);
+    if (sent.path === botOperationPath(BOT.id, "duplicate")) {
+      return botResponse({ ...BOT, id: "expenses-copy" }, 201);
     }
-    return Response.json({ agent: BOT });
+    return botResponse(BOT);
   }) as unknown as typeof fetch;
+}
+
+/** The one write a press sent: a POST to the operation's address, with a key of its own. */
+function expectOneWrite(path: string) {
+  const writes = requests.filter((request) => request.method !== "GET");
+  expect(writes).toEqual([
+    {
+      method: "POST",
+      path,
+      key: expect.stringMatching(/^[0-9a-f]{32}$/),
+      body: undefined,
+    },
+  ]);
 }
 
 function draw(
@@ -105,6 +126,7 @@ test("hiding a Bot takes the person back to the roster", async () => {
   const view = draw(BOT, { onHidden });
   fireEvent.click(view.getByRole("switch", { name: "Hidden" }));
   await waitFor(() => expect(onHidden).toHaveBeenCalledTimes(1));
+  expectOneWrite(botOperationPath("expenses", "hide"));
 });
 
 test("unhiding a hidden Bot keeps the person on its page", async () => {
@@ -113,11 +135,27 @@ test("unhiding a hidden Bot keeps the person on its page", async () => {
   const view = draw({ ...BOT, hidden: true }, { onHidden });
   fireEvent.click(view.getByRole("switch", { name: "Hidden" }));
   await waitFor(() =>
-    expect(requests.some((request) => request.startsWith("POST"))).toBe(true),
+    expect(requests.some((request) => request.method === "POST")).toBe(true),
   );
   // Let the mutation settle before asserting nothing navigated.
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(onHidden).not.toHaveBeenCalled();
+  expectOneWrite(botOperationPath("expenses", "unhide"));
+});
+
+test("pinning and unpinning a Bot are the API's pin and unpin", async () => {
+  serving();
+  const view = draw(BOT);
+  fireEvent.click(view.getByRole("switch", { name: "Pinned" }));
+  await waitFor(() => expect(requests).toHaveLength(1));
+  expectOneWrite(botOperationPath("expenses", "pin"));
+  cleanup();
+
+  serving();
+  const pinned = draw({ ...BOT, pinned: true });
+  fireEvent.click(pinned.getByRole("switch", { name: "Pinned" }));
+  await waitFor(() => expect(requests).toHaveLength(1));
+  expectOneWrite(botOperationPath("expenses", "unpin"));
 });
 
 test("duplicating opens the copy", async () => {
@@ -128,6 +166,7 @@ test("duplicating opens the copy", async () => {
   await waitFor(() =>
     expect(onDuplicated).toHaveBeenCalledWith("expenses-copy"),
   );
+  expectOneWrite(botOperationPath("expenses", "duplicate"));
 });
 
 test("a Bot an admin assigned to you reads as pinned and cannot be hidden or unpinned", () => {
@@ -164,23 +203,60 @@ test("rows that open a dialog show a chevron, and Duplicate, which acts at once,
   expect(chevron(/^Duplicate/)).toBeNull();
 });
 
-/** A reset plan with a conversation to delete, so the notice lists something. */
-function servingResetPlan() {
-  const plan: ResetPlan = {
-    conversations: 1,
-    sharedConversationsKept: 0,
-    memorySources: 0,
-    memories: 0,
-    routines: 0,
-    responsibilities: 0,
-    followUps: 0,
-    formedMemories: 0,
-    backgroundResearch: 0,
-    standingApprovals: 0,
-  };
-  global.fetch = (async () =>
-    Response.json({ plan })) as unknown as typeof fetch;
+/**
+ * A reset with a conversation to delete, so the notice lists something. Counting and resetting are
+ * the same operation, told apart by `validateOnly`, and each answers the same counts.
+ */
+function servingResetPlan(plan: Partial<ResetPlan> = { conversations: 1 }) {
+  requests.length = 0;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const sent = sentRequest(input, init);
+    requests.push(sent);
+    const { validateOnly } = sent.body as { validateOnly: boolean };
+    return resetResponse(plan, validateOnly);
+  }) as unknown as typeof fetch;
 }
+
+test("Reset counts what it would delete, then deletes it when asked", async () => {
+  servingResetPlan({
+    conversations: 2,
+    routines: 1,
+    sharedConversationsKept: 1,
+  });
+  const view = draw(BOT, {}, "team");
+  fireEvent.click(view.getByRole("button", { name: /^Reset/ }));
+  expect(await view.findByText("2 conversations")).toBeTruthy();
+  expect(view.getByText("1 routine")).toBeTruthy();
+  expect(
+    view.getByText(/1 conversation is shared with other people or Bots/),
+  ).toBeTruthy();
+  const path = botOperationPath("expenses", "reset");
+  // Counting deleted nothing: it was the reset, asked only to count.
+  expect(requests).toEqual([
+    {
+      method: "POST",
+      path,
+      key: expect.stringMatching(/^[0-9a-f]{32}$/),
+      body: { validateOnly: true },
+    },
+  ]);
+
+  fireEvent.click(view.getByRole("button", { name: "Delete and reset" }));
+  expect(
+    await view.findByText("Done. Expenses starts fresh with you."),
+  ).toBeTruthy();
+  const reset = requests.find(
+    (request) =>
+      (request.body as { validateOnly: boolean }).validateOnly === false,
+  );
+  expect(reset).toEqual({
+    method: "POST",
+    path,
+    key: expect.stringMatching(/^[0-9a-f]{32}$/),
+    body: { validateOnly: false },
+  });
+  expect(reset?.key).not.toBe(requests[0]?.key);
+});
 
 /*
  * The personal edition has no memory (see `offersMemory`), so Reset promises none: neither the row

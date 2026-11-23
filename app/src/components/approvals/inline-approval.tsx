@@ -3,14 +3,20 @@ import { approvalPhrase } from "@openbot/shared/tool-name";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useState } from "react";
+import { ShareText, shareOf } from "@/components/approvals/share-details";
 import { DecisionCard } from "@/components/decisions/decision-card";
 import type { Tone } from "@/components/gallery/frame";
+import {
+  SettingsChangeRows,
+  settingsChangeOf,
+} from "@/components/settings-tools/settings-change-card";
+import { settingsApprovalBodyFor } from "@/components/settings-tools/settings-tool-card";
 import {
   type ApprovalDecision,
   approvalInboxOptions,
   decideApproval,
 } from "@/lib/approvals";
-import { noteWatched } from "@/lib/computers/activity";
+import { noteAnswered } from "@/lib/computers/activity";
 import { EASE_OUT } from "@/lib/motion";
 
 /**
@@ -80,7 +86,7 @@ export function InlineApproval({
     onSuccess: (_, choice) => {
       setAnswered(choice);
       // Answered here, so the step's entry in Activity says when, even on a page opened after it was asked.
-      if (toolCallId) noteWatched(toolCallId);
+      if (toolCallId) noteAnswered(toolCallId);
       return cache.invalidateQueries({ queryKey: ["approvals"] });
     },
   });
@@ -104,6 +110,16 @@ export function InlineApproval({
         ];
   // In the words the step and Activity use for the same action: "Save a file todo.txt in share".
   const title = request ? approvalPhrase(request.action) : "";
+  // A share shows who reads it and what it would send, so the person sees what leaves the conversation.
+  const share = request ? shareOf(request.action) : null;
+  // A change to OpenBot's settings shows its before, after and who it reaches while it waits.
+  const change = settingsChangeOf(
+    (request?.action.target as { change?: unknown } | undefined)?.change,
+  );
+  // A settings tool may draw its own body for the change; the shared rows otherwise.
+  const ownBody = request
+    ? settingsApprovalBodyFor(request.action.toolRef)
+    : null;
   return (
     <>
       {/* The card leaves by folding away; what is left behind is the tool's own line. */}
@@ -130,6 +146,7 @@ export function InlineApproval({
               }
               caption={
                 request.action.policy?.reason ??
+                share?.caption ??
                 (handOff ? "This one is yours to do." : undefined)
               }
               error={decision.error?.message ?? null}
@@ -144,11 +161,47 @@ export function InlineApproval({
               }))}
               submitting={decision.isPending}
               title={title.charAt(0).toUpperCase() + title.slice(1)}
-            />
+            >
+              {change && ownBody ? (
+                <ownBody.Body
+                  args={
+                    (request.action.args as Record<string, unknown> | null) ??
+                    {}
+                  }
+                  change={change}
+                  tool={ownBody.tool}
+                />
+              ) : change ? (
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm">{change.summary}</p>
+                  <SettingsChangeRows change={change} state="waiting" />
+                </div>
+              ) : share?.text || share?.files.length ? (
+                <ShareText files={share.files} text={share.text} />
+              ) : null}
+            </DecisionCard>
           </motion.section>
         ) : null}
       </AnimatePresence>
       {pending ? null : fallback}
+      {/*
+        The conversation could not be carried on after this was decided, so the step above never got
+        its result and would say "Send message…" for good. What came of it is said here, from the
+        request itself, which is the one place that still knows.
+      */}
+      {request?.left ? (
+        <p
+          className={
+            request.left.done
+              ? "mt-1 text-muted-foreground text-sm"
+              : "mt-1 text-destructive text-sm"
+          }
+          data-testid="approval-left"
+          role={request.left.done ? "status" : "alert"}
+        >
+          {request.left.message}
+        </p>
+      ) : null}
     </>
   );
 }
@@ -189,9 +242,13 @@ export function PendingApprovals({
   toolCallIds: readonly string[];
 }) {
   const inbox = useQuery(approvalInboxOptions());
+  /*
+   * And one whose conversation could not be carried on after it was decided (`left`): what came of
+   * it is said beside the group too, since the folded line ("Used Slack") says nothing of it.
+   */
   const waiting = new Set(
     (inbox.data?.requests ?? [])
-      .filter((request) => request.status === "pending")
+      .filter((request) => request.status === "pending" || request.left)
       .flatMap((request) =>
         request.action.toolCallId ? [request.action.toolCallId] : [],
       ),

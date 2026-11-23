@@ -111,7 +111,7 @@ export function CheckInOfferCard({
   if (allowed !== true || !agentId || !settings.data) return null;
   const watching = settings.data.find(
     (setting) =>
-      setting.agentId === agentId &&
+      setting.botId === agentId &&
       setting.enabled &&
       (link
         ? setting.sourceLink === link
@@ -201,8 +201,8 @@ export function CheckInOfferCard({
           onClick={() =>
             channelId &&
             create.mutate({
-              agentId,
-              channelId,
+              botId: agentId,
+              conversationId: channelId,
               subject,
               focus: focus ?? "",
               ...(link && /^https?:\/\//.test(link)

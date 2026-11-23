@@ -1,6 +1,6 @@
 import type { IdentityProviders, LinkedAccount } from "@/lib/identity/queries";
-import { schemeNeedsKey } from "@/lib/plugins/enablement-notes";
-import { brokeredProvenance } from "@/lib/plugins/provider-vocabulary";
+import { directorySlug } from "@/lib/apps/queries";
+import { appNeedsKey } from "@/lib/plugins/enablement-notes";
 import type { CatalogueItem, PluginServer } from "@/lib/plugins/queries";
 
 /**
@@ -50,19 +50,14 @@ export type ConnectionRow = {
 };
 
 /**
- * Whether a server is a broker's GitHub app, whichever broker enabled it: the app GitHub's own page
- * links to instead of listing it twice.
- *
- * A brokered row's id is its broker's prefix and the app's slug, and the prefix is the provenance it
- * was minted under (`composio-github`, `arcade-github`), so this asks the row and names no vendor.
+ * Whether an app is the directory's GitHub app, whichever service the directory comes from: the app
+ * GitHub's own page links to instead of listing it twice. Asked of the directory entry the app was
+ * added from, so it names no service.
  */
 export function isBrokeredGithub(
-  server: Pick<PluginServer, "id" | "provenance">,
+  server: Pick<PluginServer, "directoryEntryId">,
 ): boolean {
-  return (
-    brokeredProvenance(server.provenance) &&
-    server.id === `${server.provenance}-github`
-  );
+  return directorySlug(server.directoryEntryId) === "github";
 }
 
 export const IDENTITY_SUMMARIES = {
@@ -157,7 +152,7 @@ export function connectionRows(input: {
           // Connect button. A key app not yet connected says it needs a key, so nobody who
           // expected a sign-in is surprised when the page asks for one.
           summary:
-            !input.connected.has(server.id) && schemeNeedsKey(server.authScheme)
+            !input.connected.has(server.id) && appNeedsKey(server)
               ? `Needs a key from ${server.title}`
               : server.summary,
           state: input.connected.has(server.id) ? "connected" : "available",
@@ -169,7 +164,7 @@ export function connectionRows(input: {
       (server): ConnectionRow => ({
         key: server.id,
         title: server.title,
-        summary: "Your organisation's account. Bots act as the team here.",
+        summary: "Your organization's shared account. Bots act as it here.",
         state: "team",
         mark: { kind: "logo", logo: server.logo },
       }),
@@ -264,7 +259,7 @@ function byUrlRow(
   server: PluginServer,
   connected: ReadonlySet<string>,
 ): ConnectionRow {
-  const host = hostOf(server.url);
+  const host = hostOf(server.address ?? "");
   const base = {
     key: server.id,
     title: server.title,

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { brokeredAccountsListedOn } from "@/lib/plugins/listed";
-import type { PluginServer } from "@/lib/plugins/queries";
+import { appBody, type TodayServer } from "./apps-api";
 
 /**
  * Which brokered apps the Connected accounts page lists, decided without drawing anything.
@@ -20,9 +20,9 @@ import type { PluginServer } from "@/lib/plugins/queries";
  * `composio-picker.test.tsx`, which exports its own rule as a function for this same reason.
  */
 
-/** A minimal but complete `PluginServer`, overridable per case. */
-function server(overrides: Partial<PluginServer> & { id: string }) {
-  return {
+/** A minimal but complete app, described as `GET /api/plugins` listed it, overridable per case. */
+function server(overrides: Partial<TodayServer> & { id: string }) {
+  return appBody({
     title: "App",
     summary: "",
     vendor: "Composio",
@@ -31,7 +31,7 @@ function server(overrides: Partial<PluginServer> & { id: string }) {
     authScheme: "API_KEY",
     tools: [],
     ...overrides,
-  } as PluginServer;
+  });
 }
 
 test("a brokered app somebody connects is listed", () => {

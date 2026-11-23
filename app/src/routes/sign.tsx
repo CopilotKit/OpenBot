@@ -3,6 +3,10 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
+import {
+  CLOUD_SIGN_IN_TITLE,
+  CloudSignIn,
+} from "@/components/auth/cloud-sign-in";
 import { ProviderLogo } from "@/components/auth/provider-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,11 +18,13 @@ import {
 } from "@/lib/auth/client";
 import { resumeUrlFor, verifierPathFor } from "@/lib/auth/resume";
 import { appConfig } from "@/lib/generated/application-config";
+import { inNoOrganization } from "@/lib/organizations/in-no-organization";
 import { searchTextEntry } from "@/lib/search-text";
+import { cn } from "@/lib/utils";
 import {
   type AuthProviderId,
   authProvidersQueryOptions,
-  currentUserQueryOptions,
+  signedInUser,
 } from "../lib/auth/queries";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
@@ -44,9 +50,11 @@ export const Route = createFileRoute("/sign")({
   validateSearch: (search: Record<string, unknown>): { flow_id?: string } =>
     searchTextEntry("flow_id", search.flow_id),
   beforeLoad: async ({ context, search }) => {
-    const user = await context.queryClient.ensureQueryData(
-      currentUserQueryOptions(),
-    );
+    // Somebody signed in to no organization signs in like anybody: signing in again is how they come back once added.
+    const user = await signedInUser(context.queryClient).catch((error) => {
+      if (inNoOrganization(error)) return null;
+      throw error;
+    });
     if (user) {
       /*
        * Signed in already, so the handle has nowhere to be lost between here and the verifier.
@@ -81,6 +89,8 @@ function SignScreen() {
   const [error, setError] = useState<string | null>(null);
   const { data: options } = useQuery(authProvidersQueryOptions());
   const providers = options?.providers ?? [];
+  // OpenBot Cloud: its own screen (`CloudSignIn`), and none of the ways in below.
+  const hosted = options?.hosted === true;
   const [email, setEmail] = useState("");
 
   /**
@@ -196,76 +206,89 @@ function SignScreen() {
           transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
           variants={{ hidden, shown }}
         >
-          Sign in to {appConfig.brand.productName}
+          {hosted
+            ? CLOUD_SIGN_IN_TITLE
+            : `Sign in to ${appConfig.brand.productName}`}
         </motion.h1>
         <motion.div
-          className="mt-8 w-full"
+          className={cn("w-full", hosted ? "mt-3" : "mt-8")}
           transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
           variants={{ hidden, shown }}
         >
-          {options?.ssoRequired ? (
-            <p className="mb-3 text-center text-sm text-muted-foreground">
-              Your organization requires you to sign in with your company
-              account.
-            </p>
-          ) : null}
-          {providers.length > 0 && !options?.ssoRequired ? (
-            providerButtons
-          ) : options?.sso || options?.ssoRequired ? null : (
-            <p className="text-center text-sm text-muted-foreground">
-              Sign-in isn't set up yet. An admin has to set it up first.
-            </p>
-          )}
           {/*
-           * The way in for a company that runs its own identity provider.
-           *
-           * Below the buttons, because a deployment with both has more people arriving through the
-           * buttons: the registered providers are for the companies whose IdP was added by hand.
+           * OpenBot Cloud (`hostedSignIn`, true only where organizations come from OpenBot Cloud's
+           * own sign-in) has a screen of its own: sign in, or OpenBot for Business. Every other
+           * OpenBot keeps the ways in it was set up with, below.
            */}
-          {options?.sso ? (
-            <form className="mt-3" onSubmit={handleDomainSignIn}>
-              {providers.length > 0 ? (
-                <div className="mb-3 flex items-center gap-3">
-                  <Separator className="flex-1" />
-                  <span className="text-muted-foreground text-xs">or</span>
-                  <Separator className="flex-1" />
-                </div>
+          {hosted ? (
+            <CloudSignIn flowId={flowId} />
+          ) : (
+            <>
+              {options?.ssoRequired ? (
+                <p className="mb-3 text-center text-sm text-muted-foreground">
+                  Your organization requires you to sign in with your company
+                  account.
+                </p>
               ) : null}
-              <Input
-                autoComplete="email"
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="you@company.com"
-                required
-                type="email"
-                value={email}
-              />
-              <Button
-                className="mt-2 h-10 w-full tracking-tight"
-                disabled={opening !== null || email.trim().length === 0}
-                size="lg"
-                type="submit"
-                variant="outline"
-              >
-                {opening === "sso"
-                  ? "Opening…"
-                  : "Continue with your company account"}
-              </Button>
-            </form>
-          ) : null}
-          {/* The administrators' audited break-glass while SSO is required; everybody else is refused. */}
-          {options?.ssoRequired && providers.length > 0 ? (
-            <details className="mt-4 text-sm">
-              <summary className="cursor-pointer text-center text-muted-foreground">
-                Admin sign-in
-              </summary>
-              <div className="mt-3">{providerButtons}</div>
-            </details>
-          ) : null}
-          {error ? (
-            <p className="mt-3 text-sm text-destructive" role="alert">
-              {error}
-            </p>
-          ) : null}
+              {providers.length > 0 && !options?.ssoRequired ? (
+                providerButtons
+              ) : options?.sso || options?.ssoRequired ? null : (
+                <p className="text-center text-sm text-muted-foreground">
+                  Sign-in isn't set up yet. An admin has to set it up first.
+                </p>
+              )}
+              {/*
+               * The way in for a company that runs its own identity provider.
+               *
+               * Below the buttons, because a deployment with both has more people arriving through the
+               * buttons: the registered providers are for the companies whose IdP was added by hand.
+               */}
+              {options?.sso ? (
+                <form className="mt-3" onSubmit={handleDomainSignIn}>
+                  {providers.length > 0 ? (
+                    <div className="mb-3 flex items-center gap-3">
+                      <Separator className="flex-1" />
+                      <span className="text-muted-foreground text-xs">or</span>
+                      <Separator className="flex-1" />
+                    </div>
+                  ) : null}
+                  <Input
+                    autoComplete="email"
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="you@company.com"
+                    required
+                    type="email"
+                    value={email}
+                  />
+                  <Button
+                    className="mt-2 h-10 w-full tracking-tight"
+                    disabled={opening !== null || email.trim().length === 0}
+                    size="lg"
+                    type="submit"
+                    variant="outline"
+                  >
+                    {opening === "sso"
+                      ? "Opening…"
+                      : "Continue with your company account"}
+                  </Button>
+                </form>
+              ) : null}
+              {/* The administrators' audited break-glass while SSO is required; everybody else is refused. */}
+              {options?.ssoRequired && providers.length > 0 ? (
+                <details className="mt-4 text-sm">
+                  <summary className="cursor-pointer text-center text-muted-foreground">
+                    Admin sign-in
+                  </summary>
+                  <div className="mt-3">{providerButtons}</div>
+                </details>
+              ) : null}
+              {error ? (
+                <p className="mt-3 text-sm text-destructive" role="alert">
+                  {error}
+                </p>
+              ) : null}
+            </>
+          )}
         </motion.div>
       </motion.div>
     </div>

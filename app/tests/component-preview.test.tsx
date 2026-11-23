@@ -17,7 +17,11 @@ import {
 } from "@/components/component-preview";
 import { GALLERY as TABLES } from "@/components/gallery/table";
 import * as gallery from "@/lib/copilot/gallery-registry";
-import type { SandboxedRecord } from "@/lib/sandboxed/queries";
+import {
+  PLAYGROUND_KIND,
+  type PlaygroundRecord,
+} from "@/lib/components/queries";
+import { COMPONENTS_PATH, componentsResponse } from "./components-api";
 import { settleReactWork } from "./settle-react-work";
 
 beforeAll(() => {
@@ -44,11 +48,35 @@ beforeEach(() => {
   renderer.mockClear();
   renderer.mockImplementation(() => <div data-testid="sandbox-renderer" />);
   fetcher.mockClear();
-  fetcher.mockResolvedValue(Response.json({ components: [PUBLISHED] }));
+  fetcher.mockResolvedValue(
+    componentsResponse([
+      {
+        name: PUBLISHED.name,
+        title: PUBLISHED.title,
+        kind: PLAYGROUND_KIND,
+        draftDescription: PUBLISHED.draftDescription,
+        hasUnpublishedChanges: PUBLISHED.hasUnpublishedChanges,
+        draftSource: {
+          html: PUBLISHED.draftHtml,
+          css: PUBLISHED.draftCss,
+          jsFunctions: PUBLISHED.draftJsFunctions,
+          argumentSchema: PUBLISHED.draftArgumentSchema,
+          sampleArguments: PUBLISHED.sampleArguments,
+        },
+        source: {
+          html: PUBLISHED.publishedHtml ?? "",
+          css: PUBLISHED.publishedCss ?? "",
+          jsFunctions: PUBLISHED.publishedJsFunctions ?? "",
+          argumentSchema: PUBLISHED.publishedArgumentSchema ?? {},
+          revision: PUBLISHED.revision,
+        },
+      },
+    ]),
+  );
   compiled.mockReturnValue(undefined);
 });
 
-const PUBLISHED: SandboxedRecord = {
+const PUBLISHED: PlaygroundRecord = {
   name: "custom_preview_test",
   title: "Preview test",
   draftDescription: "An administrator-authored component",
@@ -68,7 +96,6 @@ const PUBLISHED: SandboxedRecord = {
   revision: 2,
   published: true,
   publishedAt: "2026-09-12T00:00:00Z",
-  authoredBy: null,
   hasUnpublishedChanges: true,
 };
 
@@ -80,12 +107,14 @@ test("admin previews asynchronously loaded published source with saved samples i
   try {
     const view = render(
       <QueryClientProvider client={queryClient}>
-        <AdminComponentPreview kind="sandboxed" name={PUBLISHED.name} />
+        <AdminComponentPreview kind={PLAYGROUND_KIND} name={PUBLISHED.name} />
       </QueryClientProvider>,
     );
     expect(view.queryByTestId("sandbox-renderer")).toBeNull();
     const sandbox = await view.findByTestId("sandbox-renderer");
-    expect(fetcher.mock.calls[0]?.[0]).toBe("/api/sandboxed");
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      `${COMPONENTS_PATH}?limit=100&kind=${PLAYGROUND_KIND}`,
+    );
     expect(renderer.mock.calls.at(-1)?.[0]).toMatchObject({
       activityType: "open-generative-ui",
       agent: null,
@@ -112,7 +141,7 @@ test("admin previews asynchronously loaded published source with saved samples i
 test("unpublished or never-published source does not reach the renderer", () => {
   const view = render(
     <ComponentPreview
-      kind="sandboxed"
+      kind={PLAYGROUND_KIND}
       name={PUBLISHED.name}
       sandboxed={{ ...PUBLISHED, published: false }}
     />,
@@ -122,7 +151,7 @@ test("unpublished or never-published source does not reach the renderer", () => 
   ).toBeTruthy();
   view.rerender(
     <ComponentPreview
-      kind="sandboxed"
+      kind={PLAYGROUND_KIND}
       name={PUBLISHED.name}
       sandboxed={{ ...PUBLISHED, publishedHtml: null }}
     />,
@@ -132,7 +161,7 @@ test("unpublished or never-published source does not reach the renderer", () => 
 
 test("read-only galleries identify playground components without fetching administrator drafts", () => {
   const view = render(
-    <ComponentPreview kind="sandboxed" name={PUBLISHED.name} />,
+    <ComponentPreview kind={PLAYGROUND_KIND} name={PUBLISHED.name} />,
   );
   expect(view.getByText("Published in the playground.")).toBeTruthy();
   expect(view.queryByText("This build cannot draw this.")).toBeNull();
@@ -140,7 +169,7 @@ test("read-only galleries identify playground components without fetching admini
   expect(renderer).not.toHaveBeenCalled();
 });
 
-test("compiled previews retain their real component and do not fetch sandboxed source", () => {
+test("compiled previews retain their real component and do not fetch Playground source", () => {
   compiled.mockReturnValue(TABLES[0]);
   const queryClient = new QueryClient();
   try {

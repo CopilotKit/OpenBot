@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { CLIENT_HEADER } from "@openbot/shared/client-version";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -11,9 +12,16 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ConnectAppCard } from "@/components/channels/connect-app-card";
+import { CLIENT_NAME } from "@/lib/client";
 import { carryOnMessage } from "@/lib/copilot/carry-on";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { settleReactWork } from "./settle-react-work";
+import {
+  connectionPage,
+  connectionsCall,
+  connectionsProblem,
+  startResponse,
+} from "./connections-api";
 
 /**
  * The card a Bot's refusal turns into when the app it needed is one this person can connect.
@@ -57,7 +65,7 @@ function mounted(
   options: {
     connections?: Row[];
     /**
-     * What `POST /connect` answers: a page to visit, a form to fill in, or an account the vendor
+     * What connectApp answers: a page to visit, a form to fill in, or an account the vendor
      * already held, which the route records on the press and lists from then on.
      */
     answers?: "url" | "fields" | "failure" | "connected";
@@ -73,11 +81,18 @@ function mounted(
   const sentTo: string[] = [];
   let closed = 0;
   let claimed = 0;
+  /** Whether the person has closed the consent tab, which is what the card's wait watches for. */
+  let tabGone = false;
+  /** Each request to the verifier, with how it was asked. */
+  const verifierCalls: RequestInit[] = [];
   window.open = ((url?: string) => {
     claimed += 1;
     if (url) sentTo.push(url);
     if (!popupsAllowed) return null;
     const tab = {
+      get closed() {
+        return tabGone;
+      },
       opener: {} as unknown,
       location: {
         replace: (next: string) => {
@@ -100,25 +115,42 @@ function mounted(
         status,
         headers: { "content-type": "application/json" },
       });
-    if (url.includes("/api/plugins/connections"))
-      return json({
-        connections: recorded
+    if (url === "/api/plugins/arcade/verify") {
+      verifierCalls.push(init ?? {});
+      // The verifier always answers with somewhere to go, which a manual redirect does not follow.
+      return new Response(null, { status: 303, headers: { location: "/" } });
+    }
+    const call = connectionsCall(url, init);
+    // A person's own connections. A Shared app's one account is never among them.
+    if (call?.operation === "list")
+      return connectionPage(
+        (recorded
           ? [...connections, { serverId: "srv_notion", holder: "person" }]
-          : connections,
-        redirectUri: null,
-      });
-    if (url.includes("/connect") && init?.method === "POST") {
+          : connections
+        ).filter((row) => row.holder !== "deployment"),
+      );
+    if (call?.operation === "connect") {
       if (answers === "failure")
-        return json({ error: "That account could not be connected." }, 502);
+        return connectionsProblem(502, "That account could not be connected.");
       // What a key-entry app answers: a form to fill in, and no page to visit.
       if (answers === "fields")
-        return json({ fields: [{ name: "api_key", type: "string" }] });
+        return startResponse({
+          fields: [
+            {
+              name: "api_key",
+              label: "API key",
+              help: "",
+              required: true,
+              secret: true,
+            },
+          ],
+        });
       // What the route answers once it has recorded an account the vendor already held.
       if (answers === "connected") {
         recorded = true;
-        return json({ connected: true });
+        return startResponse({ connected: true });
       }
-      return json({ authorizationUrl: "https://notion.test/consent" });
+      return startResponse({ authorizationUrl: "https://notion.test/consent" });
     }
     return json({});
   }) as unknown as typeof fetch;
@@ -171,6 +203,10 @@ function mounted(
     sentTo,
     tabsClosed: () => closed,
     tabsClaimed: () => claimed,
+    closeTab: () => {
+      tabGone = true;
+    },
+    verifierCalls,
   };
 }
 
@@ -328,4 +364,65 @@ test("once connected in front of the person, the conversation carries on by itse
   expect(card.view.getByText("Notion is connected.")).toBeTruthy();
   await settleReactWork();
   expect(asked).toHaveLength(1);
+});
+
+/*
+ * OPENBOT DESKTOP'S WINDOW SENDS THE CONSENT TO THE PERSON'S BROWSER, which the OpenBot on this
+ * computer does not admit as its person. Where each action is authorized on its own, the server holds
+ * what that browser brought back for the window to finish at the verifier. The card must not move the
+ * conversation to do it, so the window asks in the background once the person is back, and then reads
+ * the connections again. In a browser the consent comes back to the verifier itself.
+ */
+
+/** Close the consent tab and come back to this one, until the card has stopped waiting. */
+async function comeBack(card: ReturnType<typeof mounted>) {
+  await waitFor(() =>
+    expect(card.view.getByText(/Finish in the tab that opened/)).toBeTruthy(),
+  );
+  card.closeTab();
+  await waitFor(
+    () => {
+      window.dispatchEvent(new Event("focus"));
+      expect(card.view.queryByText(/Finish in the tab that opened/)).toBeNull();
+    },
+    { timeout: 3_000 },
+  );
+  await settleReactWork();
+}
+
+test("in OpenBot Desktop, coming back finishes a held consent in the background, once, and stays put", async () => {
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+    invoke: async () => null,
+    transformCallback: () => 0,
+  };
+  try {
+    const card = mounted();
+    const before = window.location.href;
+    await waitFor(() => card.view.getByRole("button", { name: /^Connect$/ }));
+    press(card);
+
+    await comeBack(card);
+
+    expect(card.verifierCalls).toEqual([
+      {
+        credentials: "same-origin",
+        redirect: "manual",
+        // Naming this app, as every request to OpenBot does.
+        headers: { [CLIENT_HEADER]: CLIENT_NAME },
+      },
+    ]);
+    expect(window.location.href).toBe(before);
+  } finally {
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  }
+});
+
+test("in a browser, coming back asks the verifier nothing", async () => {
+  const card = mounted();
+  await waitFor(() => card.view.getByRole("button", { name: /^Connect$/ }));
+  press(card);
+
+  await comeBack(card);
+
+  expect(card.verifierCalls).toEqual([]);
 });

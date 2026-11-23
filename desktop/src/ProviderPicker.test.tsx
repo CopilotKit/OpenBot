@@ -1,6 +1,6 @@
+import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   act,
@@ -79,9 +79,19 @@ const unbiased = {
   keyLink: "Get an Unbiased AI API key",
 };
 
+/** A gateway in front of many providers, with an API key and no sign-in. */
+const trustedRouter = {
+  id: "trustedrouter",
+  name: "TrustedRouter",
+  baseUrl: "https://api.trustedrouter.com/v1",
+  model: "anthropic/claude-sonnet-5.5",
+  keyUrl: "https://trustedrouter.com/console/api-keys",
+  keyLink: "Get a TrustedRouter API key",
+};
+
 const allProviders: Provider[] = [
   ...providers,
-  ...[...cloudProviders, unbiased].map(
+  ...[...cloudProviders, unbiased, trustedRouter].map(
     (provider): Provider => ({
       id: provider.id,
       name: provider.name,
@@ -108,8 +118,17 @@ mock.module("@tauri-apps/api/core", () => ({
   },
 }));
 
+// The window's event listeners, by event, so a test can say what the native side reports.
+const listeners = new Map<string, (event: { payload: unknown }) => void>();
+
 mock.module("@tauri-apps/api/event", () => ({
-  listen: async () => () => {},
+  listen: async (
+    name: string,
+    handler: (event: { payload: unknown }) => void,
+  ) => {
+    listeners.set(name, handler);
+    return () => listeners.delete(name);
+  },
 }));
 
 mock.module("./Mark", () => ({
@@ -323,6 +342,72 @@ test("a finished sign-in shows its tick for a second, and choosing another row t
   expect(view.queryByText(/✓/)).toBeNull();
 });
 
+/*
+ * A first sign-in to a ChatGPT plan downloads that plan's image, which runs the login and which
+ * Install leaves to the plan. The native side reports the download on the `images` row as Install
+ * does, and the model screen shows it as Install shows a download, its size and all, until the
+ * sign-in's link is ready.
+ */
+test("a plan sign-in that downloads its image shows the download as Install does", async () => {
+  const begun = deferred<string>();
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    if (command === "begin_chatgpt_sign_in") return begun.promise;
+    if (command === "finish_chatgpt_sign_in") return deferred<string>().promise;
+    if (command === "cancel_chatgpt_sign_in") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker(() => {});
+  await pick(view, /OpenAI/);
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in with OpenAI" }),
+  );
+  await waitFor(() =>
+    expect(
+      invokeCalls.some((call) => call.command === "begin_chatgpt_sign_in"),
+    ).toBe(true),
+  );
+  await act(async () => {
+    listeners.get("setup:progress")?.({
+      payload: {
+        step: "images",
+        ok: true,
+        running: true,
+        detail: "Downloading OpenBot.",
+        downloads: {
+          bytes: 120_000_000,
+          size: 480_000_000,
+          done: 0,
+          total: 1,
+          bytesPerSecond: 20_000_000,
+        },
+      },
+    });
+  });
+  const shown = await view.findByRole("list", { name: "Sign-in download" });
+  expect(shown.textContent).toContain("Downloading OpenBot.");
+  expect(shown.querySelector(".step-spinner")).not.toBeNull();
+  expect(
+    shown.querySelector("progress[aria-label='Download progress']"),
+  ).not.toBeNull();
+  // Downloaded: the screen goes back to saying what the sign-in is doing.
+  await act(async () => {
+    listeners.get("setup:progress")?.({
+      payload: {
+        step: "images",
+        ok: true,
+        running: false,
+        detail: "OpenBot is downloaded.",
+      },
+    });
+  });
+  expect(view.queryByRole("list", { name: "Sign-in download" })).toBeNull();
+  expect(view.getByRole("status").textContent).toBe("OpenBot is downloaded.");
+  await act(async () => {
+    begun.resolve("https://auth.openai.test");
+  });
+});
+
 test("a pending plan sign-in completion is ignored after switching provider rows", async () => {
   const chatgpt = deferred<string>();
   const choices: unknown[] = [];
@@ -435,22 +520,24 @@ test("a ChatGPT sign-in that finished is not cancelled when the screen moves on"
   ).toBe(false);
 });
 
+/*
+ * Claude's plan sign-in used to hand back a code to paste here. It now comes back to Desktop on
+ * its own, as ChatGPT's does: no code box, and the link stays shown while it waits.
+ */
 test.each([
   {
     name: "Anthropic",
     signIn: "claude",
-    says: "Anthropic opens in your browser. Approve the request there, then paste the code it shows you back here. You won't need an API key.",
-    asksForCode: true,
+    says: "Anthropic opens in your browser. You won't type anything here or need an API key.",
   },
   {
     name: "OpenAI",
     signIn: "chatgpt",
     says: "OpenAI opens in your browser. You won't type anything here or need an API key.",
-    asksForCode: false,
   },
 ])(
-  "$name's plan sign-in says beforehand whether it will ask for a code",
-  async ({ name, signIn, says, asksForCode }) => {
+  "$name's plan sign-in finishes on its own, with no code to paste",
+  async ({ name, signIn, says }) => {
     const finished = deferred<string>();
     invokeHandler = async (command) => {
       if (command === "providers") return providers;
@@ -470,11 +557,43 @@ test.each([
       view.getByRole("button", { name: `Sign in with ${name}` }),
     );
     await view.findByText("Open the sign-in page");
-    expect(Boolean(view.queryByLabelText("Code from your browser"))).toBe(
-      asksForCode,
+    expect(view.queryByLabelText("Code from your browser")).toBeNull();
+    expect(view.getByRole("status").textContent).toBe(
+      "Waiting for you to approve it…",
     );
+    // The browser comes back: signed in, with nothing typed.
+    await act(async () => finished.resolve(`synthetic-${signIn}-plan-token`));
+    await view.findByText(new RegExp(`Signed in to ${name}`));
+    expect(
+      invokeCalls.find((call) => call.command === `finish_${signIn}_sign_in`)
+        ?.args,
+    ).toBeUndefined();
   },
 );
+
+test("leaving a Claude plan sign-in that waits for the browser stops it", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    if (command === "begin_claude_sign_in") return "https://sign-in.example";
+    if (command === "finish_claude_sign_in") return deferred<string>().promise;
+    if (command === "cancel_claude_sign_in") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+  const view = await renderPicker();
+  await pick(view, /Anthropic/);
+  await userEvent.click(
+    view.getByRole("button", { name: "Sign in with Anthropic" }),
+  );
+  await view.findByText("Open the sign-in page");
+  await userEvent.click(
+    view.getByRole("button", { name: "Choose a different provider" }),
+  );
+  await waitFor(() =>
+    expect(
+      invokeCalls.some((call) => call.command === "cancel_claude_sign_in"),
+    ).toBe(true),
+  );
+});
 
 test("a saved provider-scoped plan session enables continue without exposing a token", async () => {
   const choices: unknown[] = [];
@@ -545,15 +664,6 @@ for (const provider of providers) {
         await userEvent.click(
           view.getByRole("button", { name: `Sign in with ${provider.name}` }),
         );
-        if (provider.id === "anthropic") {
-          await userEvent.type(
-            await view.findByLabelText("Code from your browser"),
-            "synthetic-code",
-          );
-          await userEvent.click(
-            view.getByRole("button", { name: "Finish signing in" }),
-          );
-        }
       }
       await view.findByText(
         new RegExp(
@@ -1144,7 +1254,7 @@ for (const provider of cloudProviders) {
   });
 }
 
-for (const provider of [...cloudProviders, unbiased]) {
+for (const provider of [...cloudProviders, unbiased, trustedRouter]) {
   test(`${provider.name} opens its API key page externally without sending entered credentials`, async () => {
     invokeHandler = async (command) => {
       if (command === "providers") return allProviders;

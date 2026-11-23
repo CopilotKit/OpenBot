@@ -11,6 +11,7 @@ import {
   SHOW_APP_ACCESS_TOOL,
 } from "@openbot/shared/connect-prompt";
 import { answeredBy } from "@openbot/shared/handoff-markers";
+import { readBrief, readTaskReport } from "@openbot/shared/orchestration";
 import { SUBAGENT_TOOL } from "@openbot/shared/subagent";
 import {
   answersTheModel,
@@ -21,16 +22,18 @@ import {
 import { SEARCH_TOOLS, toolsFound } from "@openbot/shared/tool-search";
 import {
   IconAlertTriangle,
+  IconArrowsMaximize,
   IconBox,
   IconChevronDown,
   IconClock,
-  IconFile,
-  IconX,
+  IconDownload,
+  IconPhoto,
 } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { QueryClientContext, useQuery } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import {
   createContext,
+  Fragment,
   memo,
   useCallback,
   useContext,
@@ -40,20 +43,36 @@ import {
   useRef,
   useState,
 } from "react";
-import { Streamdown } from "streamdown";
 import { InlineApproval } from "@/components/approvals/inline-approval";
+import { AddModelKeyLink } from "@/components/channels/add-model-key-link";
 import {
   ArgumentsArrivingContext,
   TurnInFlightContext,
 } from "@/components/gallery/streaming";
-import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { AddCardButton } from "@/components/plan/add-card-button";
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  SettingsToolCall,
+  settingsToolCardFor,
+} from "@/components/settings-tools/settings-tool-card";
+import { reportsUnderTheirCards } from "@/components/tasks/report-under-card";
+import { SteerLanded } from "@/components/tasks/task-steer";
+import {
+  MessageReactions,
+  SentFromBot,
+  TaskReport,
+} from "@/components/tasks/task-thread";
+import {
+  publishThreadWork,
+  threadWorkOf,
+} from "@/components/tasks/thread-work";
+import { foldTurnWork, NO_TURN_WORK } from "@/components/tasks/turn-work";
+import {
+  isTaskThread,
+  useWaitingToolCalls,
+  WorkedFor,
+} from "@/components/tasks/worked-for";
+import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Button } from "@/components/ui/button";
 import {
   MessageContent,
   MessageFooter,
@@ -70,9 +89,14 @@ import {
 } from "@/components/ui/message-scroller";
 import { Skeleton } from "@/components/ui/skeleton";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { attachmentUrl } from "@/lib/channels/attachments";
+import {
+  attachmentAddress,
+  attachmentUrl,
+  LARGEST_PICTURE_DRAWN_INLINE,
+} from "@/lib/channels/attachments";
 import { readResponsibilityTurn } from "@/lib/channels/responsibility-turn";
 import { readFiring } from "@/lib/channels/routine-firing";
+import { fileSize, kindLabel } from "@/lib/computers/sent-file";
 import type { CardPlace } from "@/lib/copilot/carry-on";
 import { foreignCodingCall } from "@/lib/copilot/coding-calls";
 import { ToolPlaceContext } from "@/lib/copilot/tool-place";
@@ -86,9 +110,10 @@ import {
   folderStepSubject,
 } from "@/lib/folders/folder-steps";
 import {
+  BotMarkdown,
   markdownComponents,
   markdownPlugins,
-  replyRemarkPlugins,
+  replyRemarkPluginsFor,
 } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import {
@@ -98,6 +123,8 @@ import {
 } from "@/lib/plugins/research-results";
 import {
   asText,
+  CUT_OFF_SENTENCE,
+  cutOffStep,
   forDisplay,
   refusalOf,
   toolResultFailed,
@@ -105,10 +132,22 @@ import {
   unofferedTool,
 } from "@/lib/plugins/tool-result";
 import { useResultVisibility } from "@/lib/product-telemetry";
+import {
+  NO_SLACK_NAMES,
+  type SlackNames,
+  slackNamesIn,
+} from "@/lib/slack/mentions";
 import { readTeamBotConsent } from "@/lib/team-bots";
 import { cn } from "@/lib/utils";
 import { VOICE_CHAT_ACTIVITY, type VoiceChatEntry } from "@/lib/voice/archive";
 import { AppAccessCard } from "./app-access-card";
+import {
+  AttachmentLightbox,
+  LightboxPicture,
+  unavailableSentence,
+  useDocumentIsGone,
+  useFileFacts,
+} from "./attachment-view";
 import { ChannelAvatar } from "./avatar";
 import { isBrowserStep } from "./browser-activity";
 import {
@@ -118,6 +157,7 @@ import {
 } from "./chat-messages";
 import { splitChatOrigin } from "./chat-origin";
 import type { QueuedMessage } from "./composer";
+import { FileTypeIcon } from "./file-icon";
 import { FollowScroll, RESUME_PX, useFollowIntent } from "./follow-intent";
 import { LateRenderersContext, LateRenderersWatch } from "./late-renderers";
 import { usePacedReveal } from "./paced-reveal";
@@ -166,6 +206,8 @@ type ChatTranscriptProps = {
   queued?: readonly QueuedMessage[];
   /** Take one back before it runs. Without it a queued line is shown but cannot be undone. */
   onRemoveQueued?: (id: string) => void;
+  /** Stop the turn and send this one next. Without it a queued line waits for the turn to end. */
+  onSendQueuedNow?: (id: string) => void;
   /** History has been asked for and has not arrived. Drawn only when there is nothing else to draw. */
   restoring?: boolean;
   /**
@@ -176,6 +218,11 @@ type ChatTranscriptProps = {
    * be told, and only the thing that ended the turn knows which one happened.
    */
   stopped?: string;
+  /**
+   * Carry on with a turn that was cut off part way, drawn as a button beside `stopped`. Absent for
+   * a turn that ended for a reason carrying on would not fix (a refusal, a Bot no longer shared).
+   */
+  onCarryOn?: () => void;
   /**
    * Work this conversation is waiting on that is not this tab's run: a Bot it asked, a routine.
    * Drawn in the same slot as `Thinking`, under the last thing said, because that is where the
@@ -310,15 +357,35 @@ function Thinking() {
  * and the conversation is sent back to the model on the next turn, so the Bot would then read its
  * own obituary as something it had written.
  */
-function Stopped({ reason }: { reason: string }) {
+function Stopped({
+  reason,
+  onCarryOn,
+}: {
+  reason: string;
+  /** A turn cut off part way can be carried on from here. See `onCarryOn` on the transcript. */
+  onCarryOn?: () => void;
+}) {
   return (
-    <p
-      className="text-destructive text-sm"
+    <div
+      className="flex flex-col items-start gap-2"
       data-testid="transcript-stopped"
-      role="alert"
     >
-      {reason}
-    </p>
+      <p className="text-destructive text-sm" role="alert">
+        {reason}
+      </p>
+      {onCarryOn ? (
+        <Button onClick={onCarryOn} size="sm" variant="outline">
+          Carry on
+        </Button>
+      ) : (
+        <>
+          {/* A run refused because the organization needs a card is answered where it was refused. */}
+          <AddCardButton />
+          {/* And one with no model key, for an admin who can add it. */}
+          <AddModelKeyLink reason={reason} />
+        </>
+      )}
+    </div>
   );
 }
 
@@ -380,6 +447,10 @@ function parkedTiles(attachments: readonly Attachment[]): SentAttachment[] {
       url: source.value,
       ...(attachment.filename ? { filename: attachment.filename } : {}),
       modality: attachmentModality(attachment.type, mimeType),
+      ...(typeof attachment.size === "number"
+        ? { sizeBytes: attachment.size }
+        : {}),
+      ...(mimeType ? { mimeType } : {}),
     };
   });
 }
@@ -414,12 +485,17 @@ function describeParked(
  */
 function Queued({
   attachments,
+  next,
   text,
   onRemove,
+  onSendNow,
 }: {
   attachments: readonly Attachment[];
+  /** Send now was pressed: the turn is stopping, and this goes the moment it ends. */
+  next: boolean;
   text: string;
   onRemove?: (() => void) | undefined;
+  onSendNow?: (() => void) | undefined;
 }) {
   /*
    * THE FILES COME WITH IT, and until they did they were on NO SURFACE IN THE APP AT ALL. Parking
@@ -454,7 +530,23 @@ function Queued({
            * `status` rather than `alert`, matching the thinking line: a person who has just chosen
            * to queue something is not being interrupted by the news that it is queued.
            */}
-          <span role="status">Queued</span>
+          <span role="status">{next ? "Up next" : "Queued"}</span>
+          {/*
+           * SEND NOW, BESIDE REMOVE AND DRAWN THE SAME WAY: the two things a person can do with a
+           * message that is waiting. Named after the sentence it sends, as Remove is, so three of
+           * them in a row are told apart by a screen reader. Gone once pressed, while the turn
+           * stops: the status says what happens next.
+           */}
+          {onSendNow && !next ? (
+            <button
+              aria-label={`Send queued message now: ${describeParked(text, files)}`}
+              className="ml-2 underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              onClick={onSendNow}
+              type="button"
+            >
+              Send now
+            </button>
+          ) : null}
           {onRemove ? (
             <button
               /*
@@ -784,14 +876,20 @@ function ResponsibilityFiring({
 const TranscriptMessage = memo(function TranscriptMessage({
   commandLabels = "",
   role,
+  slackNames = NO_SLACK_NAMES,
   streaming = false,
   settled = true,
   text,
   threadId,
   messageId,
+  underItsCard = false,
 }: {
   commandLabels?: string;
   role: "user" | "assistant";
+  /** A task's result drawn directly under that task's card. See `reportsUnderTheirCards`. */
+  underItsCard?: boolean;
+  /** The people and channels this conversation's Slack steps named, for mentions in the reply. */
+  slackNames?: SlackNames;
   threadId?: string;
   messageId: string;
   /* This is the Bot's reply still being written: the last row of a turn in flight. */
@@ -817,6 +915,22 @@ const TranscriptMessage = memo(function TranscriptMessage({
     !isUser && settled && revealed.trim().length > 0,
   );
   const firing = isUser ? readFiring(text) : null;
+  /*
+   * A task thread's first message is the Bot's brief, not something the person typed: drawn as sent
+   * from the Bot, without the words that frame it for the model. See `frameBrief`.
+   */
+  const brief = isUser ? readBrief(text) : null;
+  if (brief !== null) {
+    return (
+      <MessageRow align="end">
+        <MessageContent>
+          <Arriving>
+            <SentFromBot brief={brief} threadId={threadId} />
+          </Arriving>
+        </MessageContent>
+      </MessageRow>
+    );
+  }
   if (firing !== null) {
     return (
       <MessageRow align="start">
@@ -839,6 +953,12 @@ const TranscriptMessage = memo(function TranscriptMessage({
    * Bot saying something new. The id is what says whose it is; see `answerMessageId`.
    */
   const answerer = isUser ? null : answeredBy(messageId);
+  const report = isUser ? null : readTaskReport(messageId);
+  /*
+   * What the person told a task in its own thread, written here so the Bot knows of it. The person
+   * reads it on the line under the task's card, once, so the transcript draws no message for it.
+   */
+  if (report?.kind === "steer") return <SteerLanded taskId={report.taskId} />;
 
   return (
     <MessageRow
@@ -863,7 +983,9 @@ const TranscriptMessage = memo(function TranscriptMessage({
             variant={isUser ? "muted" : "ghost"}
             className={isUser ? undefined : "w-full"}
           >
-            <BubbleContent className={isUser ? undefined : "w-full"}>
+            <BubbleContent
+              className={cn("text-[1rem]/[1.5]", !isUser && "w-full")}
+            >
               {isUser ? (
                 // A person's own message is shown exactly as they typed it. Rendering it as markdown
                 // would silently reformat what they said, and an asterisk in a sentence is not
@@ -905,18 +1027,43 @@ const TranscriptMessage = memo(function TranscriptMessage({
                  * closes them for the duration.
                  */
                 <div ref={resultRef}>
-                  <Streamdown
-                    components={markdownComponents}
-                    mode={mode}
-                    plugins={markdownPlugins}
-                    remarkPlugins={replyRemarkPlugins}
-                  >
-                    {revealed}
-                  </Streamdown>
+                  {report ? (
+                    /*
+                     * A task the Bot handed out, saying how it went: its words, framed with the
+                     * task they are about and the way into its thread. See `taskReportMessageId`.
+                     */
+                    <TaskReport
+                      kind={report.kind}
+                      taskId={report.taskId}
+                      underCard={underItsCard}
+                      words={text}
+                    >
+                      <BotMarkdown
+                        components={markdownComponents}
+                        mode={mode}
+                        plugins={markdownPlugins}
+                        remarkPlugins={replyRemarkPluginsFor(slackNames)}
+                      >
+                        {revealed}
+                      </BotMarkdown>
+                    </TaskReport>
+                  ) : (
+                    <BotMarkdown
+                      components={markdownComponents}
+                      mode={mode}
+                      plugins={markdownPlugins}
+                      remarkPlugins={replyRemarkPluginsFor(slackNames)}
+                    >
+                      {revealed}
+                    </BotMarkdown>
+                  )}
                 </div>
               )}
             </BubbleContent>
           </Bubble>
+          {isUser && threadId ? (
+            <MessageReactions messageId={messageId} threadId={threadId} />
+          ) : null}
         </Arriving>
       </MessageContent>
     </MessageRow>
@@ -1065,136 +1212,6 @@ function AttachmentTiles({
  * supposed to be here isn't." It borrows the LOOK and not the urgency: see the missing tile below
  * for why the same absence is a note here and an alert there.
  */
-/**
- * The probes currently outstanding, so that two tiles asking the same question ask it once.
- *
- * ONE TURN CAN CARRY THE SAME FILE TWICE — `toVisibleChatItems` keys tiles on the PART index
- * precisely so that it can — and a message parked mid-turn draws its files a second time beside the
- * sent row while the queue holds it. Each of those tiles mounts its own effect, and each one used
- * to send its own request for an answer that is the same by construction.
- *
- * WHAT THAT SHARING IS WORTH, CORRECTED. This comment used to say a duplicate probe was "a
- * duplicate megabyte read, not a duplicate status line", because at the time a HEAD reached a
- * handler whose single statement selected `attachments.bytes`. It does not any more: the route
- * grew a branch that answers a HEAD from `name, mimeType, sizeBytes` and never touches the bytes.
- * A duplicate probe is now exactly the duplicate status line this once said it was not.
- *
- * IT STILL EARNS ITS KEEP, FOR A REASON THAT DOES NOT DEPEND ON THE OLD COST. Nothing else in the
- * stack will coalesce these: the route serves `private, no-cache`, so the browser's HTTP cache is
- * required to revalidate every probe rather than answer one from the other, and two tiles for one
- * file are two components with two effects and no knowledge of each other. Without this map the
- * same question goes over the wire once per tile, every time the transcript mounts. It is a dozen
- * lines to ask it once, and cheap-per-answer is not the same as free-per-answer.
- *
- * IN FLIGHT ONLY, AND DELIBERATELY NOT A CACHE OF THE ANSWERS — and THIS is the half the old cost
- * model was never holding up. Holding onto "this file is still there" across remounts is exactly
- * the lie this hook exists to stop: a file deleted while the reader has the app open would go on
- * drawing as an intact card for as long as the tab lived, which is the "worse of the two lies" the
- * comment below names. That was the argument then and it is the whole argument now. Holding onto
- * "this file is GONE" is sound, deletion being terminal, but it buys nothing worth the branch.
- */
-const probesInFlight = new Map<string, Promise<boolean>>();
-
-/**
- * Asks the route whether this file is missing, and answers the SAME question only once at a time.
- *
- * Resolves true for 404 and false for every other answer; a fetch that never arrives rejects, and
- * the caller declines to draw a conclusion from it.
- */
-function probeDocument(url: string): Promise<boolean> {
-  const existing = probesInFlight.get(url);
-  if (existing) return existing;
-
-  const probe = fetch(url, { method: "HEAD", credentials: "include" })
-    .then((response) => response.status === 404)
-    .finally(() => {
-      // Cleared however it settled, so the next mount asks again rather than inheriting an answer
-      // that has had time to stop being true.
-      probesInFlight.delete(url);
-    });
-
-  probesInFlight.set(url, probe);
-  return probe;
-}
-
-/**
- * Whether the row behind a document has been deleted, asked of the server that serves it.
- *
- * A DOCUMENT HAS NO OTHER WAY TO FIND OUT. The picture beside it learns its file is gone by
- * fetching it: the `<img>` requests the url, the route answers 404, and `onError` fires. A document
- * tile is a filename and a label — it requests nothing, so no event about the file can ever reach
- * it — and `failedToLoad` was the only thing feeding the absent branch. A deleted document
- * therefore kept drawing as an intact card naming a file the server was answering 404 for, which
- * is the worse of the two lies: a broken picture at least looks broken.
- *
- * `HEAD` because the question is whether the row exists and the status line is the whole answer, so
- * the reader is not made to download a PDF to learn it is still there. AND IT IS NOW CHEAP ON THE
- * SERVER TOO, WHICH IT ONCE WAS NOT AND WHICH THIS COMMENT WENT ON ASSERTING AFTER IT STOPPED BEING
- * TRUE. The old paragraph was right about the mechanism — Hono does answer a HEAD by dispatching
- * the GET handler in full and dropping the body at the last step — and it concluded that the server
- * therefore still read the whole file out of Postgres, and that a route which could answer "is it
- * there" without the bytes "is not this file's to write". Somebody wrote it. The attachment route
- * now branches on the method INSIDE the handler Hono actually dispatches, selects `sizeBytes`
- * instead of `bytes`, and sets `Content-Length` by hand; the access join, the statuses and the
- * revalidation are the GET's exactly, so a probe still learns nothing a fetch would not tell you.
- *
- * That is recorded here rather than quietly deleted because this file spent two review rounds being
- * read as evidence that the cheap probe did not exist. A comment describing a path as broken, about
- * a path that works, costs more than no comment at all.
- *
- * A REQUEST THAT NEVER ARRIVED IS NOT A DELETED FILE, so a rejected fetch — offline, a dropped
- * connection, a proxy in the way — leaves the card alone rather than accusing the server of having
- * lost somebody's file.
- *
- * AND NEITHER IS A REQUEST THE SERVER REFUSED, which is the same rule and was the bug. This asked
- * `!response.ok`, which is every status outside 200-299, when exactly one of them means what the
- * tile then says. The route collapses "no such row", "channel deleted" and "not a channel of
- * yours" into 404 precisely so that probing ids learns nothing — that is the one status that means
- * "there is no file here for you". Everything else is a fact about the request:
- *
- *   - 401 is a session that expired while the channel sat open, and it turned EVERY document tile
- *     in the transcript into a red card asserting, in each file's own name, that somebody's files
- *     had been deleted. Nothing had been; they need to sign in again.
- *   - 500 is a bad moment on the server, and it stuck: the deps below are stable, so nothing asks
- *     again and the accusation stands until the component remounts.
- *   - 304 is the strongest proof of PRESENCE this route can give — the row was found AND the
- *     membership join passed — and `Response.ok` is false for it.
- *
- * That is the same lie this hook exists to stop, pointing the other way, and it is the louder one:
- * drawn in the destructive vocabulary, naming the file. So absence is claimed on 404 alone, which
- * also puts a document back in step with the picture beside it — an `<img>` handed a 401 shows a
- * broken image, not a sentence swearing the file was deleted.
- */
-function useDocumentIsGone(url: string, ask: boolean): boolean {
-  const [gone, setGone] = useState(false);
-
-  useEffect(() => {
-    if (!ask) {
-      return;
-    }
-    // A tile reused at the same position for a different file starts the question over rather than
-    // inheriting the previous file's answer.
-    setGone(false);
-
-    let cancelled = false;
-    void probeDocument(url)
-      .then((missing) => {
-        if (!cancelled && missing) {
-          setGone(true);
-        }
-      })
-      .catch(() => {
-        // Deliberately nothing: see above. Not knowing is not the same as knowing it is gone.
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [ask, url]);
-
-  return gone;
-}
-
 function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
   const [failedToLoad, setFailedToLoad] = useState(false);
   const { filename, modality, url } = attachment;
@@ -1209,14 +1226,23 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
    * transcript drew, announcing to whoever owns it that this person opened this channel.
    */
   const servable = url.startsWith(ATTACHMENT_URL_PREFIX);
+  // Where the bytes are read from: the API's address for the attachment the message names.
+  const address = servable ? attachmentAddress(url) : url;
   /*
    * ONLY OURS IS EVER ASKED ABOUT, and that is the same rule as the line above rather than a second
    * one: a probe is a request like any other, so asking a third party whether a file is still there
    * announces the reader exactly as fetching it would. An off-site url is already unavailable
    * without anybody being asked.
    */
-  const gone = useDocumentIsGone(url, servable && modality === "document");
-  const unavailable = failedToLoad || gone || !servable;
+  const gone = useDocumentIsGone(address, servable && modality === "document");
+  /*
+   * A PICTURE THAT WOULD NOT DRAW IS ASKED ABOUT, NOT DECLARED GONE. Its own load failing says this
+   * browser could not draw it; only the server can say the file is gone. A picture up to 100MB can
+   * be intact and still not draw on a phone, and this tile used to say, in the file's own name, that
+   * it was unavailable. Now a 404 says that, and anything else draws the file tile below.
+   */
+  const facts = useFileFacts(address, servable && failedToLoad);
+  const unavailable = facts?.missing === true || gone || !servable;
 
   /*
    * ABSENCE IS DECIDED BEFORE MODALITY IS, and that ordering is the whole point of this block
@@ -1249,195 +1275,172 @@ function SentAttachmentTile({ attachment }: { attachment: SentAttachment }) {
     );
   }
 
+  /*
+   * A DOCUMENT SAYS WHAT IT IS, WHEN THE MESSAGE CARRIES THE TYPE THE SERVER FOUND: its own icon and
+   * its kind and size ("Excel workbook · 14 KB"), the same words a Bot's file card uses, and a
+   * Download for the file itself. A message that carries no type (one sent before types were) draws
+   * as it always did, a file icon and "Attachment".
+   */
   if (modality === "document") {
+    const name = filename ?? "Untitled file";
+    const kind = attachment.mimeType
+      ? kindLabel(attachment.mimeType, name)
+      : undefined;
     return (
       <div className="flex h-32 w-44 flex-col justify-between rounded-xl border border-border bg-muted/40 p-3">
-        <IconFile className="size-6 text-muted-foreground" />
+        <div className="flex items-start justify-between gap-2">
+          <FileTypeIcon
+            className="size-6 text-muted-foreground"
+            mimeType={attachment.mimeType}
+          />
+          <Button
+            aria-label={`Download ${name}`}
+            nativeButton={false}
+            render={<a download={name} href={address} />}
+            size="icon-sm"
+            variant="outline"
+          >
+            <IconDownload />
+          </Button>
+        </div>
         <div className="min-w-0">
           {/* `title` because the tile is fixed-width and a long name is cut, not wrapped. */}
           <p className="truncate font-medium text-sm" title={filename}>
-            {filename ?? "Untitled file"}
+            {name}
           </p>
-          <p className="text-muted-foreground text-xs">Attachment</p>
+          {/*
+           * Two lines at most, never cut: "PowerPoint presentation · 29 KB" is wider than the tile,
+           * and an ellipsis took the size off. See {@link kindAndSize} for where it may wrap.
+           */}
+          <p className="line-clamp-2 text-muted-foreground text-xs">
+            {kind === undefined
+              ? "Attachment"
+              : kindAndSize(kind, attachment.sizeBytes)}
+          </p>
         </div>
       </div>
     );
   }
 
+  if (failedToLoad) {
+    return (
+      <PictureFileTile address={address} facts={facts} filename={filename} />
+    );
+  }
+
+  /*
+   * A PICTURE OVER 8MB IS SHOWN AS ITS FILE, NOT DOWNLOADED FOR A THUMBNAIL. A thumbnail is drawn
+   * from the whole file, pictures go up to 100MB, and every reader would pay that on first paint
+   * while the download held up the conversation's other requests. Its name, kind and size are on the
+   * message, so nothing is fetched until somebody opens it. A message from before sizes were sent
+   * carries none, and every picture sent then was 8MB at most, so it draws as it always did.
+   */
+  if (
+    attachment.sizeBytes !== undefined &&
+    attachment.sizeBytes > LARGEST_PICTURE_DRAWN_INLINE
+  ) {
+    return (
+      <PictureFileTile
+        address={address}
+        facts={{
+          sizeBytes: attachment.sizeBytes,
+          ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+        }}
+        filename={filename}
+        openable
+      />
+    );
+  }
+
   return (
-    <AttachmentLightbox filename={filename} url={url}>
+    <AttachmentLightbox filename={filename} url={address}>
       <img
         alt={filename ? `Attachment: ${filename}` : "Attachment"}
         className="size-32 rounded-xl object-cover"
         onError={() => setFailedToLoad(true)}
-        src={url}
+        src={address}
       />
     </AttachmentLightbox>
   );
 }
 
 /**
- * What an absent file is called, in one place, because two surfaces now say it.
- *
- * The tile said it and the lightbox behind the tile said nothing at all. Sharing the wording rather
- * than writing it twice is what keeps them from drifting into two different accounts of the same
- * absence — the tile naming the file and the dialog saying something vaguer, or worse, later.
- *
- * A file with no name still gets a sentence rather than a blank: the reader clicked on something,
- * and "this attachment" is the honest way to refer to a thing whose name we never had.
+ * A file's kind and size for a narrow tile ("PowerPoint presentation · 29 KB"), joined so a line can
+ * break only between the kind's words: the kind's last word, the dot and the size stay together, and
+ * a long kind wraps to "PowerPoint" over "presentation · 29 KB" instead of losing the size.
  */
-function unavailableSentence(filename?: string): string {
-  return filename
-    ? `${filename} is unavailable.`
-    : "This attachment is unavailable.";
+function kindAndSize(kind: string, sizeBytes: number | undefined): string {
+  if (sizeBytes === undefined) return kind;
+  const words = kind.split(" ");
+  const last = words.pop() ?? "";
+  const tail = [last, "·", ...fileSize(sizeBytes).split(" ")].join("\u00a0");
+  return [...words, tail].join(" ");
 }
 
 /**
- * The full-size picture inside the lightbox, and what it draws when the file will not load.
+ * A picture this browser could not draw, as the file it is: the same card a document gets, with
+ * the kind and size the server gave and a Download for the file itself.
  *
- * IT NEEDED A FAILURE STATE AND HAD NONE. The tile in front of it has had one from the start — an
- * `onError` swapping the broken-image box for a sentence, with a comment above it about why the
- * browser's own placeholder "says nothing to the reader" — and this `<img>`, the one drawn at full
- * size against a dark backdrop with the reader's whole attention on it, had no `onError` at all. A
- * file deleted between the tile painting and the reader clicking it opened a dialog containing
- * exactly the placeholder the tile path exists to avoid.
- *
- * THE TILE CANNOT COVER THIS ONE. Its own `<img>` has already loaded by the time there is anything
- * to click, and a loaded image does not fire `error` again because the file behind it went away; the
- * request that finds out is this one. Nor can the probe beside it: `useDocumentIsGone` deliberately
- * never asks about a picture, because a picture's own load is supposed to be the answer — and this
- * is the load it meant.
- *
- * IT STAYS OPEN AND SAYS SO, rather than closing itself. The reader opened this deliberately, and a
- * dialog that vanishes on its own leaves them looking at the transcript with no idea what happened
- * and their focus wherever the close put it. The sentence in place answers the question they
- * actually asked. Escape and the close button still work, and the state resets when the popup
- * unmounts, so reopening genuinely tries again rather than remembering a failure.
- *
- * ITS OWN COMPONENT, AND EXPORTED, SO THE FAILURE CAN BE TESTED AT ALL: Base UI portals this popup
- * and under happy-dom the portal never mounts — checked, and recorded in the test named "a thumbnail
- * is a crop" — so there is no way to reach this `<img>` through the trigger. Same reason
- * `sameAttachmentRow` is exported: the behaviour is worth pinning and the thing it lives inside
- * cannot be mounted here.
+ * Drawn from the moment the picture fails, before the server has answered, with "Image" until the
+ * answer brings the kind and size: a blank or a broken box is never shown in between.
  */
-export function LightboxPicture({
+function PictureFileTile({
+  address,
+  facts,
   filename,
-  url,
+  openable = false,
 }: {
+  address: string;
+  facts: { sizeBytes?: number; mimeType?: string } | undefined;
   filename?: string;
-  url: string;
+  /** An Open beside the Download, for a picture that can be drawn but is too large to draw here. */
+  openable?: boolean;
 }) {
-  const [failedToLoad, setFailedToLoad] = useState(false);
-
-  if (failedToLoad) {
-    return (
-      /*
-       * `note` rather than `alert`, for the reason the tile's own missing card gives at length: an
-       * assertive live region cuts across whatever a screen reader is saying, and this is an answer
-       * to something the reader just did rather than an emergency. Light-on-dark because it is
-       * drawn against the lightbox's own backdrop, where `text-destructive` is unreadable.
-       */
-      <div
-        className="flex flex-col items-center gap-3 p-8 text-center text-white"
-        role="note"
-      >
-        <IconAlertTriangle className="size-8" />
-        <p className="text-sm">{unavailableSentence(filename)}</p>
+  const name = filename ?? "Untitled file";
+  const kind = facts?.mimeType ? kindLabel(facts.mimeType, name) : "Image";
+  return (
+    <div className="flex h-32 w-44 flex-col justify-between rounded-xl border border-border bg-muted/40 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <IconPhoto aria-hidden className="size-6 text-muted-foreground" />
+        <div className="flex gap-1">
+          {openable ? (
+            <AttachmentLightbox
+              filename={name}
+              trigger={
+                <Button
+                  aria-label={`Open ${name}`}
+                  size="icon-sm"
+                  variant="outline"
+                />
+              }
+              url={address}
+            >
+              <IconArrowsMaximize />
+            </AttachmentLightbox>
+          ) : null}
+          <Button
+            aria-label={`Download ${name}`}
+            nativeButton={false}
+            render={<a download={name} href={address} />}
+            size="icon-sm"
+            variant="outline"
+          >
+            <IconDownload />
+          </Button>
+        </div>
       </div>
-    );
-  }
-
-  return (
-    <img
-      alt={filename ?? "Attachment"}
-      className="max-h-[88svh] max-w-[92vw] rounded-lg object-contain"
-      onError={() => setFailedToLoad(true)}
-      src={url}
-    />
-  );
-}
-
-/**
- * The square, opened.
- *
- * The tile is a crop — that is the price of a tidy row — so there has to be a way to see the whole
- * picture, and it used to be `target="_blank"`. A new tab is a worse answer than it looks: it drops
- * the reader out of the conversation they were reading, the browser shows the raw file against its
- * own chrome with no way back but the back button, and on a phone it is a context switch away from
- * the channel entirely. A dialog closes on Escape and puts them back exactly where they were.
- *
- * Built on the app's `Dialog` so focus trapping, scroll locking and Escape behave the way they do
- * everywhere else, but with its card stripped off: `max-w-none border-0 bg-transparent p-0
- * shadow-none` leaves the picture as the only lit thing against a dark backdrop.
- *
- * THE CLOSE BUTTON IS FIXED TO THE VIEWPORT, not to the popup, which is why `showCloseButton` is
- * off and this draws its own. Pinned to the popup it would sit on the picture — invisible over a
- * pale one, and moving with every image's shape.
- */
-function AttachmentLightbox({
-  children,
-  filename,
-  url,
-}: {
-  children: React.ReactNode;
-  filename?: string;
-  url: string;
-}) {
-  const label = filename ?? "Attachment";
-  /*
-   * Controlled only so that clicking the dark space around the picture closes it, the way every
-   * lightbox a reader has used does. The popup covers the viewport (see below), so it — not the
-   * backdrop underneath — is what receives that click, and Base UI's own dismiss never fires.
-   */
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Dialog onOpenChange={setOpen} open={open}>
-      <DialogTrigger
-        // A button, not a link: it opens something on this page, and a middle-click offering a new
-        // tab to a raw image file is not the promise this makes. `block` so the tile is not sitting
-        // on a text baseline with a stray gap under it.
-        className="block cursor-zoom-in overflow-hidden rounded-xl"
-        render={<button aria-label={`Open ${label}`} type="button" />}
-      >
-        {children}
-      </DialogTrigger>
-      <DialogContent
-        /*
-         * THE CARD IS STRIPPED OFF AND THE POPUP IS MADE FULL-SCREEN, and the second half is not
-         * cosmetic. `DialogContent` centres itself with `-translate-x-1/2 -translate-y-1/2`, and a
-         * transform on an ancestor is what `position: fixed` resolves against — so a close button
-         * "fixed to the viewport" inside it landed 72px down and 30px in from the corner instead of
-         * at it. Measured, not guessed. A popup that already IS the viewport has no transform, and
-         * `absolute` in it means the corner it looks like it means.
-         *
-         * Centring by flex rather than by width also lets the picture keep its own shape: as a
-         * stretched flex child it was drawn 1012px wide for a 644px image, letterboxed inside a box
-         * far bigger than itself.
-         */
-        className="inset-0 top-0 left-0 h-full max-h-none w-full max-w-none translate-x-0 translate-y-0 items-center justify-center rounded-none border-0 bg-transparent p-0 shadow-none"
-        onClick={(event) => {
-          if (event.target === event.currentTarget) setOpen(false);
-        }}
-        overlayClassName="bg-black/80 supports-backdrop-filter:backdrop-blur-sm"
-        showCloseButton={false}
-      >
-        {/* Named for a screen reader; the picture carries the same name in its alt text. */}
-        <DialogTitle className="sr-only">{label}</DialogTitle>
-        <LightboxPicture filename={filename} url={url} />
-        <DialogClose
-          render={
-            <button
-              aria-label="Close"
-              className="absolute top-4 right-4 grid size-9 place-items-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
-              type="button"
-            />
-          }
-        >
-          <IconX className="size-5" />
-        </DialogClose>
-      </DialogContent>
-    </Dialog>
+      <div className="min-w-0">
+        {/* `title` because the tile is fixed-width and a long name is cut, not wrapped. */}
+        <p className="truncate font-medium text-sm" title={name}>
+          {name}
+        </p>
+        <p className="truncate text-muted-foreground text-xs">
+          {facts?.sizeBytes === undefined
+            ? kind
+            : `${kind} · ${fileSize(facts.sizeBytes)}`}
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -1584,12 +1587,17 @@ const ToolCallBody = memo(function ToolCallBody({
           <InlineApproval
             toolCallId={toolCallId}
             fallback={
-              <ServerToolLine
-                args={args}
-                name={name}
-                place={{ toolCallId, latest }}
-                result={result}
-              />
+              // OpenBot settings' tools draw their own cards (components/settings-tools).
+              settingsToolCardFor(name) ? (
+                <SettingsToolCall args={args} name={name} result={result} />
+              ) : (
+                <ServerToolLine
+                  args={args}
+                  name={name}
+                  place={{ toolCallId, latest }}
+                  result={result}
+                />
+              )
             }
           />
         )}
@@ -1701,8 +1709,9 @@ export function ServerToolLine({
   place?: CardPlace;
 }) {
   const running = result === undefined;
-  const named = readToolName(name, running);
-  const { label } = named;
+  // Cut off with its outcome unknown: named as it is while under way, since nobody knows it was done.
+  const interrupted = cutOffStep(result);
+  const named = readToolName(name, running || interrupted);
   const folders = useContext(FolderNamesContext);
   // The file a file step read or saved, as a computer's own file steps name it; a step on a folder
   // on the person's computer names the folder too ("todo.txt in share").
@@ -1723,7 +1732,18 @@ export function ServerToolLine({
   const refused = reason !== undefined;
   // Asked for a tool it was never offered: it didn't work, and what the runtime said was for the model.
   const unoffered = unofferedTool(result);
-  const failed = !refused && (unoffered || toolResultFailed(result));
+  const failed =
+    !refused && !interrupted && (unoffered || toolResultFailed(result));
+  const role = researchRoleOfCall(name);
+  /*
+   * A search with its results in reads as done. A research step is named for what it does ("Search
+   * the web"), which on a line of its own, finished, read as a search still going on; folded with
+   * other steps it has always read "Searched the web".
+   */
+  const label =
+    role === "search" && !running && !interrupted && !refused && !failed
+      ? "Searched the web"
+      : named.label;
   /*
    * The marker is for this component, not for the reader. Left in, a refusal reads "Blocked" in the
    * label and then "Refused." again in the first two words of the body, which is the same fact three
@@ -1764,24 +1784,28 @@ export function ServerToolLine({
   const shown =
     name === SHOW_APP_ACCESS_TOOL || folderRefusal !== undefined
       ? undefined
-      : unoffered
-        ? UNOFFERED_TOOL_SENTENCE
-        : refused && body
-          ? outcomeForPerson(body)
-          : answersTheModel(name)
-            ? // Written for the model. A tool search opens to the tools it found, in words.
-              name === SEARCH_TOOLS
-              ? foundToolsInWords(answer)
-              : undefined
-            : // A folder step's answer for the model (JSON, grant ids) is said in words or left out.
-              folderStepBody(name, body);
+      : interrupted
+        ? // What the Bot was told is for the Bot. The person is told what happened.
+          CUT_OFF_SENTENCE
+        : unoffered
+          ? UNOFFERED_TOOL_SENTENCE
+          : refused && body
+            ? outcomeForPerson(body)
+            : answersTheModel(name)
+              ? // Written for the model. A tool search opens to the tools it found, in words.
+                name === SEARCH_TOOLS
+                ? foundToolsInWords(answer)
+                : undefined
+              : // A folder step's answer for the model (JSON, grant ids) is said in words or left out.
+                folderStepBody(name, body);
   /*
    * A web search or a page read opens to the pages it found, not to the provider's JSON. The list
    * bounds itself (a few results, each cut to a few lines), so the line does not scroll around it.
    */
-  const role = researchRoleOfCall(name);
   const sources =
-    role && shown && !refused && !failed ? readResearchSources(shown) : null;
+    role && shown && !refused && !failed && !interrupted
+      ? readResearchSources(shown)
+      : null;
   if (role && sources)
     return (
       <ToolLine
@@ -1806,12 +1830,13 @@ export function ServerToolLine({
       label={label}
       refused={refused}
       failed={failed}
+      interrupted={interrupted}
       running={running}
     >
       {shown ? (
-        <Streamdown components={markdownComponents} plugins={markdownPlugins}>
+        <BotMarkdown components={markdownComponents} plugins={markdownPlugins}>
           {forDisplay(shown)}
-        </Streamdown>
+        </BotMarkdown>
       ) : null}
     </ToolLine>
   );
@@ -1833,8 +1858,11 @@ function foundToolsInWords(answer: string | undefined): string | undefined {
     .join("\n");
 }
 
-/* Moved beside the turns it also decides; re-exported for the callers that read it from here. */
-export { isPersonSentMessage };
+/*
+ * Moved beside the turns it also decides; re-exported for the callers that read it from here. And
+ * the lightbox's picture, now in attachment-view.tsx, where the transcript's tests import it from.
+ */
+export { isPersonSentMessage, LightboxPicture };
 
 /**
  * WHERE THE CONVERSATION HAS GOT TO, for an app card that may carry its task on once the app is
@@ -2039,9 +2067,11 @@ export function ChatTranscript({
   intro,
   messages,
   onRemoveQueued,
+  onSendQueuedNow,
   queued = EMPTY_QUEUE,
   restoring = false,
   stopped,
+  onCarryOn,
   working,
 }: ChatTranscriptProps) {
   const isDrawn = useDrawnTool();
@@ -2069,6 +2099,24 @@ export function ChatTranscript({
   );
   const items = groupToolSteps(visible, isDrawn, rowIdsRef.current);
   /*
+   * In a task's thread, each turn's steps and the lines said on the way fold into one "Worked for"
+   * row (`foldTurnWork`). Worked out on every render, as `items` is.
+   */
+  const queryClient = useContext(QueryClientContext);
+  const taskThread = isTaskThread(threadId, items, queryClient);
+  // What waits on the person's approval stays out of the fold, its card with it.
+  const waiting = useWaitingToolCalls(queryClient);
+  const folds = taskThread ? foldTurnWork(items, busy, waiting) : NO_TURN_WORK;
+  // What the task read and made, for its Details pane beside the thread (`thread-work.ts`).
+  useEffect(() => {
+    if (taskThread && threadId)
+      publishThreadWork(threadId, threadWorkOf(visible));
+  });
+  const taskWork = {
+    folds,
+    lastAskId: [...folds.at.values()].at(-1)?.askId,
+  };
+  /*
    * The folders this conversation's "Check your folders" steps named, for its other folder steps.
    * The same map while the names are the same: a new one on every render is a new context value,
    * and every finished tool row under it drew again while a reply streamed.
@@ -2087,6 +2135,26 @@ export function ChatTranscript({
   if (namedKey !== foldersRef.current.key)
     foldersRef.current = { key: namedKey, names: named };
   const folders = foldersRef.current.names;
+
+  /*
+   * The people and channels this conversation's Slack steps named, so a reply that quotes Slack's
+   * `<@U…>` shows "@Alex Clarke". Kept the same map while the names are the same, as the folders are,
+   * so a finished message is not drawn again.
+   */
+  const slackRef = useRef<{ key: string; names: SlackNames }>({
+    key: "",
+    names: NO_SLACK_NAMES,
+  });
+  const slackNamed = slackNamesIn(
+    visible.filter(
+      (item): item is Extract<typeof item, { kind: "tool" }> =>
+        item.kind === "tool",
+    ),
+  );
+  const slackKey = JSON.stringify([...slackNamed]);
+  if (slackKey !== slackRef.current.key)
+    slackRef.current = { key: slackKey, names: slackNamed };
+  const slackNames = slackRef.current.names;
 
   /*
    * ONLY WHILE THERE IS NOTHING ELSE TO LOOK AT. Once a reply starts streaming, or a tool line
@@ -2166,6 +2234,8 @@ export function ChatTranscript({
 
   /* One rule for both kinds of row — see `anchorRowIds`, which is where it is written down. */
   const anchorRows = anchorRowIds(items);
+  /* The tasks' results drawn directly under their own card, which says which task each is about. */
+  const underTheirCards = reportsUnderTheirCards(items);
 
   /*
    * Decided once, from the rows present when the scroller mounts, and forgotten while restoring so
@@ -2381,8 +2451,12 @@ export function ChatTranscript({
             <Queued
               attachments={message.attachments}
               key={message.id}
+              next={message.next === true}
               onRemove={
                 onRemoveQueued ? () => onRemoveQueued(message.id) : undefined
+              }
+              onSendNow={
+                onSendQueuedNow ? () => onSendQueuedNow(message.id) : undefined
               }
               text={message.text}
             />
@@ -2396,64 +2470,89 @@ export function ChatTranscript({
    * One row, wherever it is drawn. `index` is the row's place in `items`, not in the slice being
    * drawn, so "the last row" and "latest" mean the same with or without older pages above.
    */
-  const renderRow = (item: TranscriptItem, index: number) =>
+  /*
+   * What one row draws, without the scroller's wrapper: drawn on its own below, and inside a task
+   * turn's "Worked for" row when it folds there (`foldTurnWork`).
+   */
+  const rowContent = (item: TranscriptItem, index: number) =>
     item.kind === "tools" || item.kind === "tool" ? (
-      <MessageScrollerItem
-        key={item.id}
-        messageId={item.id}
-        {...openingProps(item.id)}
-      >
-        <ToolRow
-          active={busy && index === items.length - 1}
-          id={item.id}
-          inFlight={busy && index >= turnStart}
-          latest={index >= latestIndex}
-          spokeAfter={lastBotWords > index}
-          steps={item.kind === "tools" ? item.steps : [item]}
-        />
-      </MessageScrollerItem>
+      <ToolRow
+        active={busy && index === items.length - 1}
+        id={item.id}
+        inFlight={busy && index >= turnStart}
+        latest={index >= latestIndex}
+        spokeAfter={lastBotWords > index}
+        steps={item.kind === "tools" ? item.steps : [item]}
+      />
     ) : item.kind === "activity" ? (
-      <MessageScrollerItem
-        key={item.id}
-        messageId={item.id}
-        {...openingProps(item.id)}
-      >
-        <TranscriptActivity message={item.message} />
-      </MessageScrollerItem>
+      <TranscriptActivity message={item.message} />
     ) : item.kind === "text" ? (
-      <MessageScrollerItem
-        key={item.id}
+      <TranscriptMessage
+        threadId={threadId}
         messageId={item.id}
-        scrollAnchor={anchorRows.has(item.id)}
-        {...openingProps(item.id)}
-      >
-        <TranscriptMessage
-          threadId={threadId}
-          messageId={item.id}
-          settled={!busy || index < turnStart}
-          commandLabels={commandLabels}
-          role={item.role}
-          streaming={
-            busy && item.role === "assistant" && index === items.length - 1
-          }
-          text={item.text}
-        />
-      </MessageScrollerItem>
+        settled={!busy || index < turnStart}
+        commandLabels={commandLabels}
+        role={item.role}
+        slackNames={slackNames}
+        underItsCard={underTheirCards.has(item.id)}
+        streaming={
+          busy && item.role === "assistant" && index === items.length - 1
+        }
+        text={item.text}
+      />
     ) : item.kind === "attachments" ? (
-      <MessageScrollerItem
-        key={item.id}
-        messageId={item.id}
-        scrollAnchor={anchorRows.has(item.id)}
-        {...openingProps(item.id)}
-      >
-        <TranscriptAttachments attachments={item.attachments} />
-      </MessageScrollerItem>
+      <TranscriptAttachments attachments={item.attachments} />
     ) : (
       // Every member of the union is handled above. `assertNever` types `item` as
       // `never` here, so a future addition to `VisibleChatItem` fails to typecheck at
       // this call instead of silently falling into this branch and rendering nothing.
       assertNever(item)
     );
+
+  /*
+   * One row, wherever it is drawn. `index` is the row's place in `items`, not in the slice being
+   * drawn, so "the last row" and "latest" mean the same with or without older pages above. In a
+   * task's thread a turn's work is one row, drawn where its first step is; the rest of it is drawn
+   * inside that row.
+   */
+  const renderRow = (item: TranscriptItem, index: number) => {
+    const work = taskWork.folds.at.get(item.id);
+    if (work)
+      return (
+        <MessageScrollerItem
+          key={work.id}
+          messageId={work.id}
+          {...openingProps(item.id)}
+        >
+          <WorkedFor
+            last={work.askId === taskWork.lastAskId}
+            threadId={threadId}
+            work={work}
+          >
+            {work.rows.map((row) => (
+              <Fragment key={row.item.id}>
+                {rowContent(row.item, row.index)}
+              </Fragment>
+            ))}
+          </WorkedFor>
+        </MessageScrollerItem>
+      );
+    if (taskWork.folds.inside.has(item.id)) return null;
+    return (
+      <MessageScrollerItem
+        key={item.id}
+        messageId={item.id}
+        scrollAnchor={
+          item.kind === "text" || item.kind === "attachments"
+            ? anchorRows.has(item.id)
+            : undefined
+        }
+        {...openingProps(item.id)}
+      >
+        {rowContent(item, index)}
+      </MessageScrollerItem>
+    );
+  };
 
   return (
     <ArrivalsLive>
@@ -2563,7 +2662,7 @@ export function ChatTranscript({
                   </ArrivalsLiveContext.Provider>
                   <div className="contents [&>*]:order-1">
                     {stopped ? (
-                      <Stopped reason={stopped} />
+                      <Stopped onCarryOn={onCarryOn} reason={stopped} />
                     ) : waitingOnTheModel ? (
                       <Thinking />
                     ) : null}
@@ -2572,9 +2671,15 @@ export function ChatTranscript({
                       <Queued
                         attachments={message.attachments}
                         key={message.id}
+                        next={message.next === true}
                         onRemove={
                           onRemoveQueued
                             ? () => onRemoveQueued(message.id)
+                            : undefined
+                        }
+                        onSendNow={
+                          onSendQueuedNow
+                            ? () => onSendQueuedNow(message.id)
                             : undefined
                         }
                         text={message.text}

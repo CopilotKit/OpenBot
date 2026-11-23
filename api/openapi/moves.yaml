@@ -1,0 +1,1353 @@
+# Moving to OpenBot Cloud: exporting what a person has in an OpenBot on their own computer, and
+# importing it into an organization on OpenBot Cloud.
+#
+# One area of OpenBot's REST API. `bun run api:bundle` joins every area with common.yaml into
+# api/openapi.yaml, the file every client and check reads. See api/README.md.
+#
+# The move, as OpenBot Desktop runs it:
+#   1. Cloud: createImport. The answer carries recipientKey, the public key model keys are sealed to.
+#   2. Here: getExportEstimate, to show what moves and how much space the move frees.
+#   3. Here: createExport (with recipientKey when the person chose to bring their model keys), then
+#      getExport until it is ready. The answer lists the bundle's parts, their sizes and digests,
+#      and the counts of everything in it.
+#   4. Desktop: downloadExportPart for each part (resumable with Range), and on Cloud
+#      uploadImportPart for each (a part already received is skipped).
+#   5. Cloud: applyImport, then getImport until it is imported.
+#   6. Cloud: getImportVerification. Desktop removes nothing here until it says matches.
+paths:
+  /api/v2/organizations/{organizationId}/export-estimate:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    get:
+      tags: [Moving to OpenBot Cloud]
+      operationId: getExportEstimate
+      summary: Read what moving to OpenBot Cloud would take
+      description: >-
+        Count what an export would hold, without making one: the caller's
+        Bots, their skills, conversations and messages, memories, routines,
+        goals and check-ins, files and settings, and, when the caller is an
+        administrator, the organization's own skills. Also says roughly how
+        big the bundle will be, how much space this OpenBot holds for it on
+        disk (what the move frees once the local OpenBot is removed), which
+        apps the person will need to connect again on OpenBot Cloud, and
+        whether a model key could come along. Served only by an OpenBot that
+        runs on the person's own computer; elsewhere it answers 404 with the
+        code MOVE_UNAVAILABLE.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [exports:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: What an export would hold.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportEstimate'
+              examples:
+                example:
+                  $ref: '#/components/examples/ExportEstimateExample'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/MoveUnavailable'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/exports:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags: [Moving to OpenBot Cloud]
+      operationId: createExport
+      summary: Start exporting what the caller has here
+      description: >-
+        Start writing a bundle of everything the caller has in this
+        organization, to move it to OpenBot Cloud: their Bots (settings,
+        instructions and skills), conversations with every message,
+        memories, routines, goals and check-ins, files, standing
+        instructions and preferences, and, when the caller is an
+        administrator, the organization's own skills. Connections to apps
+        travel as their app and account name only: no token or password ever
+        leaves, and each one is listed in reconnect so the person connects
+        it again on Cloud. A model key travels only when includeModelKeys is
+        true, and then only sealed to recipientKey, the key the import on
+        Cloud gave (createImport), so the bundle never holds it readable.
+
+
+        The bundle is written in the background; read getExport until status
+        is ready. It is cut into parts of at most 32 MiB, each with its size
+        and SHA-256, so a dropped download resumes where it stopped. One
+        export is kept for each person: starting another removes the one
+        before. An export is removed 7 days after it was made, or with
+        deleteExport. Served only by an OpenBot that runs on the person's own
+        computer; elsewhere it answers 404 with the code MOVE_UNAVAILABLE.
+      security:
+        - webSession: []
+        - appOAuth: [exports:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportInput'
+            examples:
+              withModelKeys:
+                $ref: '#/components/examples/ExportInputExample'
+      responses:
+        '202':
+          description: The export has started.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Export'
+              examples:
+                preparing:
+                  $ref: '#/components/examples/ExportPreparingExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/MoveUnavailable'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '429':
+          $ref: '#/components/responses/TooManyMoves'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/exports/{exportId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ExportId'
+    get:
+      tags: [Moving to OpenBot Cloud]
+      operationId: getExport
+      summary: Read an export
+      description: >-
+        Return where the caller's export stands. Once ready it lists the
+        bundle's parts with their sizes and SHA-256, its total size, and the
+        count of everything in it by kind, which are the counts
+        getImportVerification is compared with. Only the person who made it
+        reads it; anybody else is answered 404.
+      security:
+        - webSession: []
+        - appOAuth: [exports:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The export.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Export'
+              examples:
+                preparing:
+                  $ref: '#/components/examples/ExportPreparingExample'
+                ready:
+                  $ref: '#/components/examples/ExportReadyExample'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/ExportNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    delete:
+      tags: [Moving to OpenBot Cloud]
+      operationId: deleteExport
+      summary: Remove an export
+      description: >-
+        Remove the caller's export and its bundle from disk. Nothing it was
+        made from changes. One already gone answers 204 too.
+      security:
+        - webSession: []
+        - appOAuth: [exports:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: The export is gone.
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/MoveUnavailable'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/exports/{exportId}/parts/{partNumber}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ExportId'
+      - $ref: '#/components/parameters/PartNumber'
+    get:
+      tags: [Moving to OpenBot Cloud]
+      operationId: downloadExportPart
+      summary: Download one part of an export's bundle
+      description: >-
+        Return one part of a ready export's bundle, as bytes to hand to
+        uploadImportPart unchanged. A Range header of one byte range (bytes=N-
+        or bytes=N-M) answers 206 with that range, so a dropped download
+        resumes where it stopped. The SHA-256 of the whole part is in the
+        export's parts and in the ETag. Only the person who made the export
+        downloads it.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [exports:read]
+        - apiKey: []
+      parameters:
+        - name: Range
+          in: header
+          required: false
+          description: One byte range of the part, as RFC 9110 writes it.
+          schema:
+            type: string
+            pattern: ^bytes=[0-9]+-[0-9]*$
+            maxLength: 64
+      responses:
+        '200':
+          description: The whole part.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            ETag:
+              $ref: '#/components/headers/PartETag'
+            Accept-Ranges:
+              $ref: '#/components/headers/AcceptRanges'
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: The range asked for.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+            ETag:
+              $ref: '#/components/headers/PartETag'
+            Content-Range:
+              description: Which bytes of the part this is, and the part's size.
+              schema:
+                type: string
+              example: bytes 1048576-33554431/33554432
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/ExportNotFound'
+        '409':
+          $ref: '#/components/responses/ExportNotReady'
+        '416':
+          $ref: '#/components/responses/RangeNotSatisfiable'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/imports:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+    post:
+      tags: [Moving to OpenBot Cloud]
+      operationId: createImport
+      summary: Start importing a bundle into this organization
+      description: >-
+        Start an import of what the caller is moving from an OpenBot on their
+        own computer into this organization, the caller's own organization by
+        default. Everything imported belongs to the caller, in this
+        organization only. The answer carries recipientKey, a public key made
+        for this import alone: pass it to createExport, and a model key in the
+        bundle is sealed to it, readable only by this import. The answer also
+        says how big a bundle and a part may be. Then upload the export's
+        parts with uploadImportPart and apply them with applyImport.
+
+
+        Importing is safe to repeat: an import of the same OpenBot into the
+        same organization (an export made again, or a new import after a
+        dropped one) adds only what isn't here yet and duplicates nothing.
+        Served only by OpenBot Cloud; elsewhere it answers 404 with the code
+        MOVE_UNAVAILABLE. A person starts at most 10 imports a day.
+      security:
+        - webSession: []
+        - appOAuth: [imports:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportInput'
+      responses:
+        '201':
+          description: The import, waiting for its bundle.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Import'
+              examples:
+                waiting:
+                  $ref: '#/components/examples/ImportWaitingExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/MoveUnavailable'
+        '409':
+          $ref: './common.yaml#/components/responses/IdempotencyConflict'
+        '429':
+          $ref: '#/components/responses/TooManyMoves'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+    get:
+      tags: [Moving to OpenBot Cloud]
+      operationId: listImports
+      summary: List the caller's imports into this organization
+      description: >-
+        List the imports the caller started in this organization, newest
+        first, so an app that lost track of one after a drop finds it again.
+        Only the caller's own. Served only by OpenBot Cloud.
+      security:
+        - webSession: []
+        - appOAuth: [imports:read]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/Limit'
+        - $ref: './common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of imports.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportPage'
+              examples:
+                page:
+                  $ref: '#/components/examples/ImportPageExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/MoveUnavailable'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/imports/{importId}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ImportId'
+    get:
+      tags: [Moving to OpenBot Cloud]
+      operationId: getImport
+      summary: Read an import
+      description: >-
+        Return where the caller's import stands: which parts have arrived,
+        how far applying them has got by kind, and once imported, the
+        summary: what was imported, what was imported differently or left
+        out on OpenBot Cloud and why (notes), and which apps to connect
+        again (reconnect). Only the person who started it reads it.
+      security:
+        - webSession: []
+        - appOAuth: [imports:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The import.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Import'
+              examples:
+                waiting:
+                  $ref: '#/components/examples/ImportWaitingExample'
+                imported:
+                  $ref: '#/components/examples/ImportImportedExample'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/ImportNotFound'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/imports/{importId}/parts/{partNumber}:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ImportId'
+      - $ref: '#/components/parameters/PartNumber'
+    put:
+      tags: [Moving to OpenBot Cloud]
+      operationId: uploadImportPart
+      summary: Upload one part of the bundle
+      description: >-
+        Upload one part of the export's bundle, exactly as downloadExportPart
+        gave it. Part 1 carries the bundle's manifest, so it is uploaded
+        first; after it the parts go in any order, and the import's
+        expectedParts says how many there are and the SHA-256 of each. A part
+        whose bytes don't match the manifest is refused (IMPORT_PART_MISMATCH)
+        and can be uploaded again. Uploading a part that already arrived
+        changes nothing and answers 200 again, so after a drop an app sends
+        whatever receivedParts doesn't list. A part is at most 32 MiB, and a
+        bundle at most maxBundleBytes. At most 120 parts a minute for each
+        person.
+      security:
+        - webSession: []
+        - appOAuth: [imports:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: The part arrived (or had already arrived).
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Import'
+              examples:
+                receiving:
+                  $ref: '#/components/examples/ImportReceivingExample'
+        '400':
+          $ref: './common.yaml#/components/responses/InvalidRequest'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/ImportNotFound'
+        '409':
+          $ref: '#/components/responses/ImportConflict'
+        '413':
+          $ref: './common.yaml#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/ImportBundleRefused'
+        '429':
+          $ref: '#/components/responses/TooManyMoves'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/imports/{importId}/apply:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ImportId'
+    post:
+      tags: [Moving to OpenBot Cloud]
+      operationId: applyImport
+      summary: Import the uploaded bundle
+      description: >-
+        Once every part has arrived, import the bundle into this organization
+        in the background: every id is given a new one here, everything is
+        owned by the caller, and nothing reaches another organization. Every
+        file is stored where a file uploaded here is, in this organization's
+        own place in OpenBot's file store, and the uploaded parts are removed
+        once the import is done. Read
+        getImport until status is imported or failed. Applying again while it
+        runs, or after it finished, changes nothing and answers where it
+        stands; applying a failed import tries again from where it stopped,
+        and nothing already imported is imported twice. A missing part
+        answers 409 with IMPORT_INCOMPLETE.
+
+
+        What OpenBot Cloud doesn't have comes in differently, and the summary
+        says so in notes: a Bot that ran on its own isolated computer comes
+        in as an ordinary Bot; a feature that needs the Business plan, in an
+        organization that isn't on it, is left out. A model key in the bundle
+        becomes the caller's own AI connection, unless they have one here
+        already, which is kept.
+      security:
+        - webSession: []
+        - appOAuth: [imports:write]
+        - apiKey: []
+      parameters:
+        - $ref: './common.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Importing, or where the import stands.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Import'
+              examples:
+                importing:
+                  $ref: '#/components/examples/ImportImportingExample'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/ImportNotFound'
+        '409':
+          $ref: '#/components/responses/ImportConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+  /api/v2/organizations/{organizationId}/imports/{importId}/verification:
+    parameters:
+      - $ref: './common.yaml#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/ImportId'
+    get:
+      tags: [Moving to OpenBot Cloud]
+      operationId: getImportVerification
+      summary: Check that everything arrived
+      description: >-
+        Count, by kind, what from this import's OpenBot is in this
+        organization now, read from what is stored here rather than from the
+        import's own tally, beside what the bundle held. matches is true only
+        when every kind is all here, apart from what the notes say OpenBot
+        Cloud left out on purpose. OpenBot Desktop removes nothing on the
+        person's computer until it does. Also lists the apps to connect again.
+      x-openbot-singleton: true
+      security:
+        - webSession: []
+        - appOAuth: [imports:read]
+        - apiKey: []
+      responses:
+        '200':
+          description: The counts.
+          headers:
+            Cache-Control:
+              $ref: './common.yaml#/components/headers/PrivateNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportVerification'
+              examples:
+                matches:
+                  $ref: '#/components/examples/ImportVerificationExample'
+        '401':
+          $ref: './common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/ImportNotFound'
+        '409':
+          $ref: '#/components/responses/ImportConflict'
+        '500':
+          $ref: './common.yaml#/components/responses/ServerError'
+        default:
+          $ref: './common.yaml#/components/responses/UnexpectedError'
+components:
+  parameters:
+    ExportId:
+      name: exportId
+      in: path
+      required: true
+      description: The export's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: ^[A-Za-z0-9_-]+$
+      example: exp_7d1f2c3b8a4e4b5f
+    ImportId:
+      name: importId
+      in: path
+      required: true
+      description: The import's id.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: ^[A-Za-z0-9_-]+$
+      example: imp_0e1f2a3b4c5d6f1d
+    PartNumber:
+      name: partNumber
+      in: path
+      required: true
+      description: Which part of the bundle, counted from 1.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 10000
+      example: 1
+  headers:
+    PartETag:
+      description: The part's SHA-256 in hex, quoted.
+      schema:
+        type: string
+      example: '"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"'
+    AcceptRanges:
+      description: A part can be downloaded a byte range at a time.
+      schema:
+        type: string
+        const: bytes
+  schemas:
+    MoveKind:
+      type: string
+      x-extensible-enum:
+        - bots
+        - skills
+        - conversations
+        - messages
+        - memories
+        - routines
+        - goals
+        - check-ins
+        - files
+        - settings
+        - model-keys
+      description: >-
+        A kind of thing that moves. bots: Bots with their settings and
+        instructions. skills: skills, a Bot's and the person's (and the
+        organization's, for an administrator). conversations and messages:
+        every conversation and every message in it. memories: what the
+        person's Bots remember about them. routines, goals and check-ins:
+        with their schedules. files: files sent in conversations and kept on
+        a Bot's computer. settings: the person's standing instructions and
+        preferences. model-keys: a model key, only when the person chose to
+        bring it. A later OpenBot may add a kind; count one you don't know
+        like any other.
+    MoveCount:
+      type: object
+      required: [kind, count]
+      properties:
+        kind:
+          $ref: '#/components/schemas/MoveKind'
+        count:
+          type: integer
+          minimum: 0
+        bytes:
+          type: integer
+          minimum: 0
+          description: For files, how many bytes they hold together.
+    ReconnectApp:
+      type: object
+      description: >-
+        A connection to an app that doesn't move, because its sign-in stays
+        on the person's computer: the person connects it again on OpenBot
+        Cloud. Never carries a token, a password or a key.
+      required: [appId, appName]
+      properties:
+        appId:
+          type: string
+          minLength: 1
+          description: The app's id in the app directory, such as gmail or slack.
+        appName:
+          type: string
+          minLength: 1
+          description: The app's name as a person reads it.
+        accountLabel:
+          type: string
+          minLength: 1
+          description: Which account it was connected as, such as an email address or a workspace name, when known.
+        iconUrl:
+          type: string
+          format: uri
+          description: The app's icon, when the directory has one.
+        botNames:
+          type: array
+          description: The Bots that used it, so the person knows which to check.
+          items:
+            type: string
+    MoveNote:
+      type: object
+      description: >-
+        Something that moved differently, or not at all, and why, in a
+        sentence a person reads.
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          x-extensible-enum:
+            - isolated-bot-made-ordinary
+            - business-plan-feature-left-out
+            - model-key-kept-existing
+            - model-key-not-brought
+            - item-skipped
+          description: >-
+            isolated-bot-made-ordinary: OpenBot Cloud has no isolated
+            computers, so a Bot that had one runs on an ordinary one.
+            business-plan-feature-left-out: the feature needs the Business
+            plan and this organization isn't on it. model-key-kept-existing:
+            the person already had an AI connection here, which was kept.
+            model-key-not-brought: the person chose not to bring a model key.
+            item-skipped: one item couldn't be imported; message says which
+            and why. A later OpenBot may add a code; show the message.
+        kind:
+          $ref: '#/components/schemas/MoveKind'
+        count:
+          type: integer
+          minimum: 1
+          description: How many items the note is about.
+        message:
+          type: string
+          minLength: 1
+        items:
+          type: array
+          description: The names of the items, such as the Bots, when there are a few.
+          items:
+            type: string
+    ExportEstimate:
+      type: object
+      required: [counts, estimatedBytes, storedBytes, reconnect, modelKeysAvailable]
+      properties:
+        counts:
+          type: array
+          items:
+            $ref: '#/components/schemas/MoveCount'
+        estimatedBytes:
+          type: integer
+          minimum: 0
+          description: Roughly how big the bundle will be, in bytes.
+        storedBytes:
+          type: integer
+          minimum: 0
+          description: >-
+            How much this OpenBot keeps on disk for the person (its database
+            and files), which removing it frees. OpenBot Desktop adds what the
+            engine itself takes.
+        reconnect:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReconnectApp'
+        modelKeysAvailable:
+          type: boolean
+          description: True when there is a model key the person could choose to bring.
+    ExportInput:
+      type: object
+      additionalProperties: false
+      properties:
+        includeModelKeys:
+          type: boolean
+          default: false
+          description: >-
+            Bring the person's model key, sealed to recipientKey. Without
+            recipientKey this is refused.
+        recipientKey:
+          $ref: '#/components/schemas/MoveRecipientKey'
+    MoveRecipientKey:
+      type: object
+      description: >-
+        A public key as a JSON Web Key (RFC 7517): RSA, 4096 bits, for
+        RSA-OAEP-256. A model key is sealed to it as a JWE (RFC 7516,
+        RSA-OAEP-256 with A256GCM), so only the import that made it reads
+        it.
+      additionalProperties: false
+      required: [kty, n, e, alg, kid]
+      properties:
+        kty:
+          type: string
+          const: RSA
+        n:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        e:
+          type: string
+          minLength: 1
+          maxLength: 16
+        alg:
+          type: string
+          const: RSA-OAEP-256
+        kid:
+          type: string
+          minLength: 1
+          maxLength: 128
+    BundlePart:
+      type: object
+      required: [number, bytes, sha256]
+      properties:
+        number:
+          type: integer
+          minimum: 1
+        bytes:
+          type: integer
+          minimum: 1
+        sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+    Export:
+      type: object
+      required: [id, status, createdAt, expiresAt, includesModelKeys]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        status:
+          type: string
+          x-extensible-enum: [preparing, ready, failed]
+          description: >-
+            preparing: the bundle is being written. ready: every part can be
+            downloaded. failed: it stopped; error says why, and starting
+            another export tries again. A later OpenBot may add a status;
+            read one you don't know as preparing.
+        formatVersion:
+          type: integer
+          minimum: 1
+          description: The bundle's format, once ready. This OpenBot writes 1.
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the bundle is removed.
+        totalBytes:
+          type: integer
+          minimum: 0
+          description: The bundle's size, once ready.
+        parts:
+          type: array
+          description: The bundle's parts in order, once ready.
+          items:
+            $ref: '#/components/schemas/BundlePart'
+        counts:
+          type: array
+          description: Everything in the bundle by kind, once ready.
+          items:
+            $ref: '#/components/schemas/MoveCount'
+        reconnect:
+          type: array
+          description: The apps to connect again on OpenBot Cloud.
+          items:
+            $ref: '#/components/schemas/ReconnectApp'
+        includesModelKeys:
+          type: boolean
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: How far writing the bundle has got, while preparing.
+        error:
+          type: string
+          minLength: 1
+          description: What went wrong, when failed, in a sentence a person reads.
+    ImportInput:
+      type: object
+      additionalProperties: false
+      properties:
+        sourceName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: A name for where the bundle comes from, such as the computer's name, shown in the list of imports.
+    Import:
+      type: object
+      required: [id, status, createdAt, recipientKey, maxBundleBytes, maxPartBytes, receivedParts]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        status:
+          type: string
+          x-extensible-enum: [waiting-for-bundle, receiving, ready, importing, imported, failed]
+          description: >-
+            waiting-for-bundle: no part has arrived. receiving: part 1 has
+            arrived and others are still to come. ready: every part arrived;
+            apply it. importing: being imported. imported: done; read the
+            summary, then verify. failed: it stopped; error says why, and
+            applying again goes on from there. A later OpenBot may add a
+            status; read one you don't know as importing.
+        sourceName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        recipientKey:
+          $ref: '#/components/schemas/MoveRecipientKey'
+        maxBundleBytes:
+          type: integer
+          minimum: 1
+        maxPartBytes:
+          type: integer
+          minimum: 1
+        expectedParts:
+          type: array
+          description: The bundle's parts, from its manifest, once part 1 arrived.
+          items:
+            $ref: '#/components/schemas/BundlePart'
+        receivedParts:
+          type: array
+          description: The numbers of the parts that arrived.
+          items:
+            type: integer
+            minimum: 1
+        expected:
+          type: array
+          description: Everything the bundle holds by kind, from its manifest, once part 1 arrived.
+          items:
+            $ref: '#/components/schemas/MoveCount'
+        imported:
+          type: array
+          description: >-
+            What has been imported so far by kind, while importing and once
+            imported. Items a repeated import found already here count as
+            imported.
+          items:
+            $ref: '#/components/schemas/MoveCount'
+        notes:
+          type: array
+          items:
+            $ref: '#/components/schemas/MoveNote'
+        reconnect:
+          type: array
+          description: The apps to connect again here, once part 1 arrived.
+          items:
+            $ref: '#/components/schemas/ReconnectApp'
+        error:
+          type: string
+          minLength: 1
+          description: What went wrong, when failed, in a sentence a person reads.
+    ImportPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Import'
+        nextCursor:
+          type: [string, 'null']
+    ImportVerificationKind:
+      type: object
+      required: [kind, expected, found, leftOut]
+      properties:
+        kind:
+          $ref: '#/components/schemas/MoveKind'
+        expected:
+          type: integer
+          minimum: 0
+          description: How many the bundle held.
+        found:
+          type: integer
+          minimum: 0
+          description: How many from this OpenBot are in this organization now.
+        leftOut:
+          type: integer
+          minimum: 0
+          description: How many OpenBot Cloud left out on purpose, as the notes say.
+        expectedBytes:
+          type: integer
+          minimum: 0
+          description: For files, how many bytes the bundle held.
+        foundBytes:
+          type: integer
+          minimum: 0
+          description: >-
+            For files, how many bytes are in this organization's file store
+            now, read from the store itself.
+    ImportVerification:
+      type: object
+      required: [importId, matches, kinds, notes, reconnect]
+      properties:
+        importId:
+          type: string
+          minLength: 1
+        matches:
+          type: boolean
+          description: >-
+            True when, for every kind, found plus leftOut is expected, and for
+            files foundBytes is expectedBytes.
+        kinds:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportVerificationKind'
+        notes:
+          type: array
+          items:
+            $ref: '#/components/schemas/MoveNote'
+        reconnect:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReconnectApp'
+  responses:
+    MoveUnavailable:
+      description: >-
+        Moving isn't served here: exports only by an OpenBot on the person's
+        own computer, imports only by OpenBot Cloud.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: https://open.bot/errors/move-unavailable
+                title: Moving isn't available here.
+                status: 404
+                detail: Importing is available only on OpenBot Cloud.
+                code: MOVE_UNAVAILABLE
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ExportNotFound:
+      description: The export doesn't exist, has been removed, or isn't the caller's.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notFound:
+              value:
+                type: https://open.bot/errors/export-not-found
+                title: Export not found.
+                status: 404
+                detail: That export isn't here any more. Start the move again.
+                code: EXPORT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ExportNotReady:
+      description: The export is still being written, or failed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            preparing:
+              value:
+                type: https://open.bot/errors/export-not-ready
+                title: The export isn't ready.
+                status: 409
+                detail: The export is still being prepared. Try again when it's ready.
+                code: EXPORT_NOT_READY
+                category: conflict
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    RangeNotSatisfiable:
+      description: The Range asked for lies outside the part.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            outside:
+              value:
+                type: https://open.bot/errors/range-not-satisfiable
+                title: That range isn't in the part.
+                status: 416
+                detail: The part is 33554432 bytes long.
+                code: RANGE_NOT_SATISFIABLE
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ImportNotFound:
+      description: The import doesn't exist, or isn't the caller's.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            notFound:
+              value:
+                type: https://open.bot/errors/import-not-found
+                title: Import not found.
+                status: 404
+                detail: That import isn't here. Start the move again.
+                code: IMPORT_NOT_FOUND
+                category: not_found
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    ImportConflict:
+      description: >-
+        The import can't do that in its state: a part doesn't match the
+        manifest (IMPORT_PART_MISMATCH), part 1 hasn't arrived
+        (IMPORT_MANIFEST_MISSING), a part is missing (IMPORT_INCOMPLETE), the
+        import hasn't finished (IMPORT_NOT_FINISHED), or the Idempotency-Key
+        was used for a different request.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            incomplete:
+              value:
+                type: https://open.bot/errors/import-incomplete
+                title: Some parts haven't arrived.
+                status: 409
+                detail: Parts 3 and 4 haven't arrived yet. Upload them, then import.
+                code: IMPORT_INCOMPLETE
+                category: conflict
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+            mismatch:
+              value:
+                type: https://open.bot/errors/import-part-mismatch
+                title: That part doesn't match the bundle.
+                status: 409
+                detail: Part 2 arrived damaged. Download it again and upload it.
+                code: IMPORT_PART_MISMATCH
+                category: conflict
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+    ImportBundleRefused:
+      description: >-
+        Part 1 isn't a bundle this OpenBot reads: not a bundle at all, a
+        format newer than it reads (IMPORT_FORMAT_UNSUPPORTED), larger than
+        maxBundleBytes, or a model key sealed to another import's key.
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            newer:
+              value:
+                type: https://open.bot/errors/import-format-unsupported
+                title: This bundle is newer than OpenBot Cloud reads.
+                status: 422
+                detail: This bundle was made by a newer OpenBot. Try again once OpenBot Cloud is updated.
+                code: IMPORT_FORMAT_UNSUPPORTED
+                category: validation
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+    TooManyMoves:
+      description: Too many exports, imports or parts at once for one person.
+      headers:
+        Retry-After:
+          description: Seconds to wait.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            tooMany:
+              value:
+                type: https://open.bot/errors/rate-limited
+                title: Too many requests.
+                status: 429
+                detail: That's a lot of uploads at once. Wait a minute, then go on.
+                code: RATE_LIMITED
+                category: rate_limit
+                retryable: true
+                requestId: req_example
+                traceId: trace_example
+  examples:
+    ExportEstimateExample:
+      value:
+        counts:
+          - { kind: bots, count: 4 }
+          - { kind: skills, count: 9 }
+          - { kind: conversations, count: 37 }
+          - { kind: messages, count: 2814 }
+          - { kind: memories, count: 52 }
+          - { kind: routines, count: 3 }
+          - { kind: goals, count: 1 }
+          - { kind: check-ins, count: 2 }
+          - { kind: files, count: 64 }
+          - { kind: settings, count: 1 }
+        estimatedBytes: 187432960
+        storedBytes: 1288490188
+        reconnect:
+          - { appId: gmail, appName: Gmail, accountLabel: sam@example.com, botNames: [Inbox helper] }
+          - { appId: slack, appName: Slack, accountLabel: Example workspace, botNames: [Inbox helper, Standup] }
+        modelKeysAvailable: true
+    ExportInputExample:
+      value:
+        includeModelKeys: true
+        recipientKey:
+          kty: RSA
+          alg: RSA-OAEP-256
+          kid: imp_0e1f2a3b4c5d6f1d
+          e: AQAB
+          n: 0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw
+    ExportPreparingExample:
+      value:
+        id: exp_7d1f2c3b8a4e4b5f
+        status: preparing
+        createdAt: '2026-11-21T10:00:00Z'
+        expiresAt: '2026-11-28T10:00:00Z'
+        includesModelKeys: true
+        progress: 0.4
+    ExportReadyExample:
+      value:
+        id: exp_7d1f2c3b8a4e4b5f
+        status: ready
+        formatVersion: 1
+        createdAt: '2026-11-21T10:00:00Z'
+        expiresAt: '2026-11-28T10:00:00Z'
+        totalBytes: 41943040
+        parts:
+          - { number: 1, bytes: 33554432, sha256: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08 }
+          - { number: 2, bytes: 8388608, sha256: 60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752 }
+        counts:
+          - { kind: bots, count: 4 }
+          - { kind: conversations, count: 37 }
+          - { kind: messages, count: 2814 }
+          - { kind: model-keys, count: 1 }
+        reconnect:
+          - { appId: gmail, appName: Gmail, accountLabel: sam@example.com }
+        includesModelKeys: true
+    ImportWaitingExample:
+      value:
+        id: imp_0e1f2a3b4c5d6f1d
+        status: waiting-for-bundle
+        sourceName: Sam's MacBook
+        createdAt: '2026-11-21T10:00:00Z'
+        recipientKey:
+          kty: RSA
+          alg: RSA-OAEP-256
+          kid: imp_0e1f2a3b4c5d6f1d
+          e: AQAB
+          n: 0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw
+        maxBundleBytes: 10737418240
+        maxPartBytes: 33554432
+        receivedParts: []
+    ImportReceivingExample:
+      value:
+        id: imp_0e1f2a3b4c5d6f1d
+        status: receiving
+        createdAt: '2026-11-21T10:00:00Z'
+        recipientKey:
+          kty: RSA
+          alg: RSA-OAEP-256
+          kid: imp_0e1f2a3b4c5d6f1d
+          e: AQAB
+          n: 0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw
+        maxBundleBytes: 10737418240
+        maxPartBytes: 33554432
+        expectedParts:
+          - { number: 1, bytes: 2048, sha256: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08 }
+          - { number: 2, bytes: 8388608, sha256: 60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752 }
+        receivedParts: [1]
+        expected:
+          - { kind: bots, count: 4 }
+          - { kind: conversations, count: 37 }
+          - { kind: messages, count: 2814 }
+        reconnect:
+          - { appId: gmail, appName: Gmail, accountLabel: sam@example.com }
+    ImportImportingExample:
+      value:
+        id: imp_0e1f2a3b4c5d6f1d
+        status: importing
+        createdAt: '2026-11-21T10:00:00Z'
+        recipientKey:
+          kty: RSA
+          alg: RSA-OAEP-256
+          kid: imp_0e1f2a3b4c5d6f1d
+          e: AQAB
+          n: 0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw
+        maxBundleBytes: 10737418240
+        maxPartBytes: 33554432
+        receivedParts: [1, 2]
+        expected:
+          - { kind: bots, count: 4 }
+          - { kind: conversations, count: 37 }
+        imported:
+          - { kind: bots, count: 4 }
+          - { kind: conversations, count: 12 }
+    ImportPageExample:
+      value:
+        items:
+          - id: imp_0e1f2a3b4c5d6f1d
+            status: waiting-for-bundle
+            sourceName: Sam's MacBook
+            createdAt: '2026-11-21T10:00:00Z'
+            recipientKey:
+              kty: RSA
+              alg: RSA-OAEP-256
+              kid: imp_0e1f2a3b4c5d6f1d
+              e: AQAB
+              n: 0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw
+            maxBundleBytes: 10737418240
+            maxPartBytes: 33554432
+            receivedParts: []
+        nextCursor: null
+    ImportImportedExample:
+      value:
+        id: imp_0e1f2a3b4c5d6f1d
+        status: imported
+        createdAt: '2026-11-21T10:00:00Z'
+        finishedAt: '2026-11-21T10:03:12Z'
+        recipientKey:
+          kty: RSA
+          alg: RSA-OAEP-256
+          kid: imp_0e1f2a3b4c5d6f1d
+          e: AQAB
+          n: 0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw
+        maxBundleBytes: 10737418240
+        maxPartBytes: 33554432
+        expectedParts:
+          - { number: 1, bytes: 33554432, sha256: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08 }
+          - { number: 2, bytes: 8388608, sha256: 60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752 }
+        receivedParts: [1, 2]
+        expected:
+          - { kind: bots, count: 4 }
+          - { kind: conversations, count: 37 }
+          - { kind: messages, count: 2814 }
+        imported:
+          - { kind: bots, count: 4 }
+          - { kind: conversations, count: 37 }
+          - { kind: messages, count: 2814 }
+        notes:
+          - code: isolated-bot-made-ordinary
+            kind: bots
+            count: 1
+            message: Research runs on an ordinary computer here, because OpenBot Cloud has no isolated computers.
+            items: [Research]
+        reconnect:
+          - { appId: gmail, appName: Gmail, accountLabel: sam@example.com }
+    ImportVerificationExample:
+      value:
+        importId: imp_0e1f2a3b4c5d6f1d
+        matches: true
+        kinds:
+          - { kind: bots, expected: 4, found: 4, leftOut: 0 }
+          - { kind: conversations, expected: 37, found: 37, leftOut: 0 }
+          - { kind: messages, expected: 2814, found: 2814, leftOut: 0 }
+          - { kind: files, expected: 64, found: 64, leftOut: 0, expectedBytes: 152043520, foundBytes: 152043520 }
+        notes: []
+        reconnect:
+          - { appId: gmail, appName: Gmail, accountLabel: sam@example.com }

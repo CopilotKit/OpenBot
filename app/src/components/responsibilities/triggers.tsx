@@ -8,7 +8,7 @@ import {
   IconPlus,
   IconWebhook,
 } from "@tabler/icons-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { Fragment, useId, useState } from "react";
 import { PageRows, PageSection } from "@/components/layout/page-shell";
 import { SharedAppNotice } from "@/components/plugins/shared-app-notice";
@@ -57,9 +57,9 @@ import {
   type TriggerConfig,
   type TriggerKind,
   type TriggerRecord,
-  triggersQueryOptions,
 } from "@/lib/responsibilities";
 import { queryClient } from "@/query-client";
+import { useGoalTriggers } from "./use-goal-reads";
 
 export const KIND_LABEL: Record<TriggerKind, string> = {
   webhook: "Webhook",
@@ -141,8 +141,10 @@ function Copyable({ children }: { children: string }) {
 
 function describeFilter(config: TriggerConfig) {
   if (config.kind === "slack") {
-    const where = config.channels.length
-      ? `in ${config.channels.join(", ")}`
+    const channels = config.channels ?? [];
+    const reactions = config.reactions ?? [];
+    const where = channels.length
+      ? `in ${channels.join(", ")}`
       : "in every channel the Bot is in";
     const what =
       config.mode === "mention"
@@ -150,22 +152,19 @@ function describeFilter(config: TriggerConfig) {
         : config.mode === "message"
           ? "on any message"
           : config.mode === "phrase"
-            ? `on messages containing ${config.phrases.map((phrase) => `"${phrase}"`).join(" or ")}`
-            : `on reactions${config.reactions.length ? ` :${config.reactions.join(": :")}:` : ""}`;
+            ? `on messages containing ${(config.phrases ?? []).map((phrase) => `"${phrase}"`).join(" or ")}`
+            : `on reactions${reactions.length ? ` :${reactions.join(": :")}:` : ""}`;
     return `${what} ${where} (workspace ${config.teamId})`;
   }
+  const eventTypes = config.filter?.eventTypes ?? [];
+  const field = config.filter?.field;
   const parts = [
-    config.filter.eventTypes.length
-      ? `events ${config.filter.eventTypes.join(", ")}`
-      : "every event",
+    eventTypes.length ? `events ${eventTypes.join(", ")}` : "every event",
   ];
-  if (config.filter.field)
-    parts.push(
-      `where ${config.filter.field.path} = ${config.filter.field.equals}`,
-    );
+  if (field) parts.push(`where ${field.path} = ${field.equals}`);
   if (config.kind === "github" && config.repository)
     parts.push(`from ${config.repository}`);
-  if (config.kind === "email" && config.allowedSenders.length)
+  if (config.kind === "email" && config.allowedSenders?.length)
     parts.push(`from ${config.allowedSenders.join(", ")} (authenticated)`);
   return parts.join(" ");
 }
@@ -175,8 +174,18 @@ function describeFilter(config: TriggerConfig) {
  * add one. A fresh key is held here, keyed by trigger, so it survives
  * the list refetching after the write that produced it.
  */
+/**
+ * Why a goal's triggers won't start it, while it is paused or completed. Nothing for a state a newer
+ * server sends that this app doesn't know.
+ */
+export function triggersNote(status: string): string | null {
+  return status === "paused" || status === "completed"
+    ? `This goal is ${status}. Its triggers won't start it.`
+    : null;
+}
+
 export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
-  const triggers = useQuery(triggersQueryOptions(goal.id));
+  const triggers = useGoalTriggers(goal.id);
   const [adding, setAdding] = useState(false);
   const [freshSecret, setFreshSecret] = useState<{
     id: string;
@@ -197,9 +206,9 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
       }
       title="Triggers"
     >
-      {goal.status !== "active" && (
+      {triggersNote(goal.status) && (
         <p className="mt-1 text-muted-foreground text-sm">
-          This goal is {goal.status}. Its triggers won't start it.
+          {triggersNote(goal.status)}
         </p>
       )}
       {triggers.error && (
@@ -234,7 +243,7 @@ export function Triggers({ goal }: { goal: ResponsibilityRecord }) {
       {adding ? (
         <NewTriggerDialog
           goalId={goal.id}
-          botId={goal.agentId}
+          botId={goal.botId}
           onClose={() => setAdding(false)}
           onCreated={(created) => {
             setAdding(false);
@@ -383,9 +392,7 @@ function TriggerRow({
                 size="sm"
                 variant="outline"
                 disabled={reveal.isPending}
-                onClick={() =>
-                  reveal.mutate(trigger.id, { onSuccess: setSecret })
-                }
+                onClick={() => reveal.mutate(trigger, { onSuccess: setSecret })}
               >
                 Show key
               </Button>

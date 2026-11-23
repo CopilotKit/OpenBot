@@ -1,4 +1,9 @@
-import { type BotTask, liveStatus, type TaskStatus } from "./queries";
+import {
+  type BotTask,
+  type KnownTaskStatus,
+  liveStatus,
+  type TaskStatus,
+} from "./queries";
 
 /*
  * The order a person's tasks are listed in, worked out here, away from the screens, so the Bots page,
@@ -7,13 +12,19 @@ import { type BotTask, liveStatus, type TaskStatus } from "./queries";
  */
 
 /** Top to bottom: what to read, what to answer, what to retry, what is running, what is done. */
-export const TASK_ORDER: readonly TaskStatus[] = [
+export const TASK_ORDER: readonly KnownTaskStatus[] = [
   "ready_for_review",
   "needs_input",
   "failed",
   "working",
   "resolved",
 ];
+
+/** A status's place in `TASK_ORDER`. One a newer server sends that this app doesn't know comes last. */
+function rank(status: TaskStatus): number {
+  const at = (TASK_ORDER as readonly string[]).indexOf(status);
+  return at === -1 ? TASK_ORDER.length : at;
+}
 
 /** How long a task the person marked done stays listed. */
 export const RESOLVED_FOR_MS = 7 * 24 * 60 * 60 * 1000;
@@ -28,6 +39,59 @@ export function waitsOnYou(status: TaskStatus): boolean {
     status === "needs_input" ||
     status === "failed"
   );
+}
+
+/**
+ * Whether a task is one a Bot delegated that has finished. Its result was already said in the
+ * conversation that asked for it, and its Bot's Activity page lists it under Done, so it waits on
+ * nobody: it is not counted, and no list of what needs the person shows it (`onTheBoard`).
+ */
+export function finishedDelegation({ task, status }: ListedTask): boolean {
+  return task.origin === "delegated" && status === "ready_for_review";
+}
+
+/**
+ * Whether the Needs you board lists a task: every task not marked done, less a delegated one that has
+ * finished. Whatever lists the Bot's tasks under the board (OpenFuse's Activity) lists the rest, so
+ * a task is always on one or the other.
+ */
+export function onTheBoard(listed: ListedTask): boolean {
+  return listed.status !== "resolved" && !finishedDelegation(listed);
+}
+
+/**
+ * Whether a listed task is one thing waiting on the person, by the rule the Bots badge counts by
+ * (the server's task counts): something to read, answer or try again, less a delegated task that is
+ * done (`finishedDelegation`). Every count of what waits on the person counts tasks by this, so the
+ * numbers agree wherever they are shown.
+ */
+export function countsAsWaiting(listed: ListedTask): boolean {
+  return waitsOnYou(listed.status) && !finishedDelegation(listed);
+}
+
+/** Where a question or an action waits: its conversation, its thread, or both. */
+export type WaitingWhere = {
+  channelId?: string | undefined;
+  threadId?: string | undefined;
+};
+
+/**
+ * Whether what waits somewhere waits inside one of these tasks' own conversations. It is then that
+ * task waiting on the person, listed and counted once, as the task, the way the Bots badge counts
+ * it. Every list that shows questions and actions beside tasks leaves these out by this one rule.
+ */
+export function heldByTaskOf(
+  listed: readonly ListedTask[],
+): (where: WaitingWhere) => boolean {
+  const channels = new Set<string>();
+  const threads = new Set<string>();
+  for (const { task } of listed) {
+    channels.add(task.channelId);
+    if (task.threadId) threads.add(task.threadId);
+  }
+  return ({ channelId, threadId }) =>
+    (channelId !== undefined && channels.has(channelId)) ||
+    (threadId !== undefined && threads.has(threadId));
 }
 
 const time = (iso: string | null) => {
@@ -57,7 +121,7 @@ export function orderTasks(
     )
     .sort(
       (a, b) =>
-        TASK_ORDER.indexOf(a.status) - TASK_ORDER.indexOf(b.status) ||
+        rank(a.status) - rank(b.status) ||
         time(b.task.updatedAt) - time(a.task.updatedAt),
     );
 }

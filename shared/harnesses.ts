@@ -48,12 +48,12 @@ export type Harness = {
   /** The file stem under `shared/marks/`, or null where no maintained set has one. */
   mark: string | null;
   /**
-   * Whether the web create API can actually make this row work.
+   * Whether the web create API can actually make this row work. A row it can't would make a Bot
+   * that appears, accepts a grant, and answers nothing, so the dialog leaves it out.
    *
-   * False for Mastra alone: the server reaches it as `remote_mastra` through the `@ag-ui/mastra`
-   * bridge and needs a roster id to say which agent it means, and the create endpoint can send
-   * neither. Offered in the dialog it would make a Bot that appears, accepts a grant, and answers
-   * nothing.
+   * True for every row today. Mastra was the last to arrive: the server reaches it through the
+   * `@ag-ui/mastra` bridge, and a create that names it is now proved against Mastra's own API and
+   * saved as a Mastra Bot. See {@link reachedThroughMastra}.
    */
   webCreate: boolean;
 };
@@ -95,6 +95,18 @@ export const WEB_HARNESSES: readonly Harness[] = HARNESSES.filter(
   (harness) => harness.webCreate,
 ).sort((a, b) => webRank(a) - webRank(b));
 
+/**
+ * Whether OpenBot reaches an agent on this framework through Mastra's own API, by harness id.
+ *
+ * Every other framework serves an AG-UI route, and an address for one is tried with a real AG-UI run
+ * before it is saved. A Mastra server has no such route, so that run can only fail against it. The
+ * create names the framework instead, and the server proves the address by asking the Mastra server
+ * which agents it runs. It connects to a server that runs one.
+ */
+export function reachedThroughMastra(id: string | null | undefined): boolean {
+  return id === "mastra";
+}
+
 /** The sentence to draw on a web surface: the override where there is one, else the installer's. */
 export function summaryFor(harness: Harness): string {
   return harness.webSummary ?? harness.summary;
@@ -117,10 +129,14 @@ export const EARLIER_HARNESS_NAMES: Readonly<
  * picked: what it is, what runs it, and that any other agent can be brought along, with the article
  * the name reads with ("an AWS Strands agent"). Atai's wording and punctuation, November 10. Shown
  * only: the starter is still stored, and told to the Bot, as "Everyday life. Powered by <name>.".
+ *
+ * The subtitle is itself in parentheses, so a name with its own ("LangGraph (TypeScript)") reads
+ * without them ("a LangGraph TypeScript agent") rather than nesting one pair inside the other.
  */
 export function starterSubtitle(name: string): string {
-  const article = /^[AEIOU]/.test(name) ? "an" : "a";
-  return `Everyday life agent. (powered by ${article} ${name} agent; you can bring your own agent from any stack.)`;
+  const plain = name.replace(/\s*\(([^()]*)\)/g, " $1").trim();
+  const article = /^[AEIOU]/.test(plain) ? "an" : "a";
+  return `Everyday life agent. (powered by ${article} ${plain} agent; you can bring your own agent from any stack.)`;
 }
 
 /** Every name a harness the installer can run has had, with the harness it belongs to now. */
@@ -167,6 +183,16 @@ export function withCurrentFrameworkNames(title: string): string {
  * framework it is told it runs on.
  */
 export const OPENBOT_HARNESS_NAME = "OpenBot";
+
+/**
+ * The engine a new Bot that runs inside OpenBot is made on, by harness id: OpenBot's own LangGraph
+ * agent in TypeScript (`agent-langgraph-ts`).
+ *
+ * The New Bot sheet sends it with a Bot that has no address, and the server records it on that Bot.
+ * The server still decides what each run uses: a Claude plan keeps the Claude Agent SDK engine, and
+ * a deployment whose administrator switched the default back runs its Bots on the built-in agent.
+ */
+export const DEFAULT_BOT_ENGINE = "langgraph-ts";
 
 /**
  * A framework a person may declare for an agent they run themselves, by id: any named harness, never

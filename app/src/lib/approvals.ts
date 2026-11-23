@@ -3,8 +3,54 @@ import {
   type QueryClient,
   queryOptions,
 } from "@tanstack/react-query";
+import {
+  createApprovalRule as createOrganizationRule,
+  deleteApprovalRule as deleteOrganizationRule,
+  getApprovalSettings,
+  listApprovalRules,
+  updateApprovalSettings,
+  updateApprovalRule as updateOrganizationRule,
+} from "@/lib/api/generated/approval-rules/approval-rules";
+import {
+  createPersonApprovalRule,
+  decideApproval as decideApprovalRequest,
+  deleteConversationGrant,
+  deletePersonApprovalRule,
+  dismissQuestion,
+  getApprovalMode,
+  getApprovalPreferences,
+  listApprovals,
+  listConversationGrants,
+  listPersonApprovalRules,
+  listQuestions,
+  respondToQuestion,
+  updateApprovalPreferences,
+  updatePersonApprovalRule,
+} from "@/lib/api/generated/approvals/approvals";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
-import { client } from "@/lib/client";
+
+/** The person asking: every approval, question, preference and rule here is their own. */
+const ME = "me";
+/** A key for one write, so a retry of it is recognised as the same write. */
+const once = () => ({ "Idempotency-Key": idempotencyKey() });
+
+/** Every page of a list, for a screen that shows all of it. */
+async function everyPage<T>(
+  read: (cursor: string | undefined) => Promise<{
+    items: T[];
+    nextCursor: string | null;
+  }>,
+): Promise<T[]> {
+  const items: T[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await read(cursor);
+    items.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return items;
+}
 export type ApprovalDecision =
   | "allow_once"
   | "allow_conversation"
@@ -65,6 +111,13 @@ export type ApprovalInboxData = {
     createdAt: string;
     /** When the person (or a rule) decided it; null while it waits. */
     decidedAt?: string | null;
+    /** What the person answered; null while it waits. */
+    decision?: ApprovalDecision | null;
+    /**
+     * Set when the conversation could not be carried on after this was decided: whether the action
+     * was done, the sentence that says so, and the answer the Bot never received.
+     */
+    left?: { done: boolean; message: string; answer: string };
     action: {
       botId: string;
       toolRef: string;
@@ -72,8 +125,8 @@ export type ApprovalInboxData = {
       scope: string;
       threadId: string;
       toolCallId?: string;
-      args: unknown;
-      target: unknown;
+      args?: unknown;
+      target?: unknown;
       /** Which of the person's accounts at the app, where they hold several. */
       account?: string;
       policy?: {
@@ -119,14 +172,112 @@ export type ApprovalInboxData = {
     createdAt: string;
   }[];
 };
+/**
+ * The answers the Bot never received, by the call each belongs to: actions decided whose
+ * conversation could not be carried on (`left`). Sent with the next message in place of "no result
+ * came back", so the Bot knows a post it asked for went out and does not make it again.
+ */
+export function leftAnswers(
+  inbox: ApprovalInboxData | undefined,
+): ReadonlyMap<string, string> {
+  const answers = new Map<string, string>();
+  for (const request of inbox?.requests ?? [])
+    if (request.left && request.action.toolCallId)
+      answers.set(request.action.toolCallId, request.left.answer);
+  return answers;
+}
+
 export const approvalInboxOptions = () =>
   queryOptions({
     queryKey: ["approvals"],
-    queryFn: async (): Promise<ApprovalInboxData> => {
-      const response = await client("/api/approvals", {
+    /*
+     * One inbox for the screens, read from the API's separate resources: what waits on the person,
+     * what they set for themselves, and what the organization set for everybody. Each list is read
+     * to its last page.
+     */
+    queryFn: async ({ signal }): Promise<ApprovalInboxData> => {
+      const options = {
+        signal,
         fallback: "Your approvals could not be loaded.",
+      };
+      const page = (cursor: string | undefined) => ({
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
       });
-      return response.json();
+      const [
+        requests,
+        questions,
+        preferences,
+        rules,
+        conversationGrants,
+        team,
+        teamRules,
+      ] = await Promise.all([
+        everyPage(async (cursor) => {
+          const answer = await listApprovals(
+            organizationId(),
+            ME,
+            page(cursor),
+            options,
+          );
+          return { items: answer.approvals, nextCursor: answer.nextCursor };
+        }),
+        everyPage(async (cursor) => {
+          const answer = await listQuestions(
+            organizationId(),
+            ME,
+            page(cursor),
+            options,
+          );
+          return { items: answer.questions, nextCursor: answer.nextCursor };
+        }),
+        getApprovalPreferences(organizationId(), ME, options),
+        everyPage(async (cursor) => {
+          const answer = await listPersonApprovalRules(
+            organizationId(),
+            ME,
+            page(cursor),
+            options,
+          );
+          return { items: answer.approvalRules, nextCursor: answer.nextCursor };
+        }),
+        everyPage(async (cursor) => {
+          const answer = await listConversationGrants(
+            organizationId(),
+            ME,
+            page(cursor),
+            options,
+          );
+          return {
+            items: answer.conversationGrants,
+            nextCursor: answer.nextCursor,
+          };
+        }),
+        getApprovalSettings(organizationId(), options),
+        everyPage(async (cursor) => {
+          const answer = await listApprovalRules(
+            organizationId(),
+            page(cursor),
+            options,
+          );
+          return { items: answer.approvalRules, nextCursor: answer.nextCursor };
+        }),
+      ]);
+      return {
+        enabled: preferences.enabled,
+        requests,
+        rules,
+        teamRules,
+        conversationGrants,
+        preferences: {
+          enabled: preferences.enabled,
+          autoReview: preferences.autoReview,
+          hostCommands: preferences.hostCommands,
+        },
+        team,
+        hostCommands: preferences.effectiveHostCommands,
+        questions,
+      };
     },
     refetchInterval: 10_000,
   });
@@ -178,28 +329,25 @@ export const approvalThreadKeys = {
 export const threadAsksEveryStepQueryOptions = (threadId: string) =>
   queryOptions({
     queryKey: approvalThreadKeys.detail(threadId),
-    queryFn: (): Promise<boolean> =>
-      client(
-        `/api/approvals/threads/${encodeURIComponent(threadId)}`,
-        "asksEveryStep",
-        { fallback: "This conversation's approvals could not be checked." },
-      ),
+    queryFn: async ({ signal }): Promise<boolean> =>
+      (
+        await getApprovalMode(organizationId(), ME, threadId, {
+          signal,
+          fallback: "This conversation's approvals could not be checked.",
+        })
+      ).asksEveryStep,
     staleTime: Number.POSITIVE_INFINITY,
   });
 export const decideApproval = (id: string, decision: ApprovalDecision) =>
-  client(`/api/approvals/${encodeURIComponent(id)}/decision`, {
-    method: "POST",
-    body: { decision },
+  decideApprovalRequest(organizationId(), ME, id, { decision }, once(), {
     fallback: "Your decision could not be saved.",
   });
 export const revokeConversationGrant = (id: string) =>
-  client(`/api/approvals/conversation-grants/${encodeURIComponent(id)}`, {
-    method: "DELETE",
+  deleteConversationGrant(organizationId(), ME, id, once(), {
     fallback: "Couldn't turn that off. Try again.",
   });
 export const revokeApprovalRule = (id: string) =>
-  client(`/api/approvals/rules/${encodeURIComponent(id)}`, {
-    method: "DELETE",
+  deletePersonApprovalRule(organizationId(), ME, id, once(), {
     fallback: "The permission could not be revoked.",
   });
 export const setApprovalEnabled = (enabled: boolean) =>
@@ -209,15 +357,11 @@ export const setApprovalPreferences = (input: {
   autoReview?: boolean;
   hostCommands?: HostCommandPolicy;
 }) =>
-  client("/api/approvals/preferences", {
-    method: "PATCH",
-    body: input,
+  updateApprovalPreferences(organizationId(), ME, input, once(), {
     fallback: "Your approval preference could not be saved.",
   });
 export const createApprovalRule = (input: ApprovalRuleInput) =>
-  client("/api/approvals/rules", {
-    method: "POST",
-    body: input,
+  createPersonApprovalRule(organizationId(), ME, input, once(), {
     fallback: "The rule could not be saved.",
   });
 export const setTeamApprovalSettings = (input: {
@@ -226,21 +370,16 @@ export const setTeamApprovalSettings = (input: {
   hostCommandsCap?: HostCommandPolicy;
   actionKinds?: Partial<Record<ActionKind, ActionKindPolicy>>;
 }) =>
-  client("/api/approvals/team", {
-    method: "PATCH",
-    body: input,
-    fallback: "The team setting could not be saved.",
+  updateApprovalSettings(organizationId(), input, once(), {
+    fallback: "The organization setting could not be saved.",
   });
 export const createTeamApprovalRule = (input: ApprovalRuleInput) =>
-  client("/api/approvals/team/rules", {
-    method: "POST",
-    body: input,
-    fallback: "The team rule could not be saved.",
+  createOrganizationRule(organizationId(), input, once(), {
+    fallback: "The organization rule could not be saved.",
   });
 export const revokeTeamApprovalRule = (id: string) =>
-  client(`/api/approvals/team/rules/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    fallback: "The team rule could not be removed.",
+  deleteOrganizationRule(organizationId(), id, once(), {
+    fallback: "The organization rule could not be removed.",
   });
 /**
  * Answer a question a Bot asked. Given in the open conversation (`inConversation`), it may be that
@@ -252,37 +391,33 @@ export const answerPersonQuestion = async (
   response: string,
   inConversation = false,
 ) =>
-  (await client<boolean | undefined>(
-    `/api/approvals/questions/${encodeURIComponent(id)}/respond`,
-    "continueHere",
-    {
-      method: "POST",
-      body: inConversation ? { response, inConversation } : { response },
-      fallback: "Your answer could not be saved.",
-    },
-  )) === true;
+  (
+    await respondToQuestion(
+      organizationId(),
+      ME,
+      id,
+      inConversation ? { response, inConversation } : { response },
+      once(),
+      { fallback: "Your answer could not be saved." },
+    )
+  ).continueHere === true;
 export const dismissPersonQuestion = (id: string) =>
-  client(`/api/approvals/questions/${encodeURIComponent(id)}/dismiss`, {
-    method: "POST",
+  dismissQuestion(organizationId(), ME, id, once(), {
     fallback: "Couldn't dismiss that question.",
   });
 export const updateApprovalRule = (
   id: string,
   input: Partial<ApprovalRuleInput>,
 ) =>
-  client(`/api/approvals/rules/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: input,
+  updatePersonApprovalRule(organizationId(), ME, id, input, once(), {
     fallback: "The rule could not be changed.",
   });
 export const updateTeamApprovalRule = (
   id: string,
   input: Partial<ApprovalRuleInput>,
 ) =>
-  client(`/api/approvals/team/rules/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: input,
-    fallback: "The team rule could not be changed.",
+  updateOrganizationRule(organizationId(), id, input, once(), {
+    fallback: "The organization rule could not be changed.",
   });
 
 /** The inbox's key, which every approval write invalidates: requests, rules and settings alike. */
@@ -351,7 +486,16 @@ export const decideApprovalMutationOptions = (queryClient: QueryClient) =>
   mutationOptions({
     mutationFn: ({ id, choice }: { id: string; choice: ApprovalDecision }) =>
       decideApproval(id, choice),
-    onSuccess: settle(queryClient),
+    /*
+     * The badge that counted it is read again at once, as for an answered question: left to its
+     * poll, it kept the old count for seconds beside a board that already showed the new one.
+     */
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: botLifecycleKeys.attention,
+      });
+      return settle(queryClient)();
+    },
   });
 /** Answer a question a Bot asked mid-run; the run resumes with the answer. */
 export const answerPersonQuestionMutationOptions = (queryClient: QueryClient) =>

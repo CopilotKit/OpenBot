@@ -36,6 +36,16 @@ export function Mark({ id, name }: { id: string | null; name: string }) {
 }
 
 /**
+ * A brand's mark on its own, named for a screen reader by `name`, for a row that lists brands
+ * rather than naming one: the clouds OpenBot for Business runs on. Nothing where there is no mark.
+ */
+export function MarkImage({ id, name }: { id: string; name: string }) {
+  const uri = markFor(id);
+  if (!uri) return null;
+  return <img src={uri} alt={name} title={name} data-mark={id} />;
+}
+
+/**
  * A provider's mark at the start of its "Sign in with" button, as the web app's sign-in page sets
  * Google's, Microsoft's and Okta's on theirs.
  *

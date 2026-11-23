@@ -38,7 +38,16 @@ export function CopilotKitSignInWait({
   onPage?: () => void;
   onCancel: () => void;
 }) {
-  const [page, setPage] = useState<CopilotKitSignInPage | null>(null);
+  /*
+   * Kept with the sign-in that printed it. A Try again is a new sign-in with a new code: the code
+   * before it has timed out or been stopped, and approving it says it expired. So only this
+   * sign-in's own page is shown, and an earlier sign-in's answer that lands late is dropped.
+   */
+  const [shown, setShown] = useState<{
+    attempt: string;
+    page: CopilotKitSignInPage;
+  } | null>(null);
+  const page = shown?.attempt === attempt ? shown.page : null;
   const onPageNow = useRef(onPage);
   onPageNow.current = onPage;
 
@@ -50,7 +59,7 @@ export function CopilotKitSignInWait({
         .then(
           (found) => {
             if (current && found) {
-              setPage(found);
+              setShown({ attempt, page: found });
               onPageNow.current?.();
             }
           },

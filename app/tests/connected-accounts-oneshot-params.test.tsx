@@ -12,6 +12,7 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import { identityKeys } from "@/lib/identity/queries";
 import { pluginKeys } from "@/lib/plugins/queries";
 import { Route } from "@/routes/_authed/_app/connections.index";
+import { seedAppReads } from "./apps-api";
 
 /**
  * EVERY ONE-SHOT PARAMETER THIS SCREEN CONSUMES IS DROPPED FROM THE URL, NOT JUST `?linked=`.
@@ -47,7 +48,7 @@ function renderScreen(search: string) {
     defaultOptions: { queries: { retry: false } },
   });
   // Seeded rather than fetched: this screen's data is not what is under test here.
-  queryClient.setQueryData(pluginKeys.page(), { servers: [], catalogue: [] });
+  seedAppReads(queryClient, {});
   queryClient.setQueryData(pluginKeys.connections(), { connections: [] });
   queryClient.setQueryData(identityKeys.links(), []);
   queryClient.setQueryData(identityKeys.providers(), {

@@ -22,6 +22,7 @@ const OFF_SCREEN = new Set([
   "computer_read_file",
   "computer_write_file",
   "computer_list_files",
+  "computer_send_file",
 ]);
 
 /** The view a computer tool works in, or nothing for a tool that is not the computer's or shows neither. */

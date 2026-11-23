@@ -1,9 +1,20 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { replaceBoundaries } from "@/lib/api/generated/boundaries/boundaries";
+import {
+  resetComputer,
+  restoreComputer,
+  stopComputer,
+  updateComputer,
+} from "@/lib/api/generated/computers/computers";
+import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { client } from "@/lib/client";
 import { clearActivity } from "./activity";
-import { type ActionPolicy, computerKeys } from "./queries";
+import {
+  type ActionPolicy,
+  type ComputerRestoreRun,
+  computerKeys,
+} from "./queries";
 
 /**
  * Stopping frees the container; resetting also deletes the browser profiles on it; updating moves
@@ -77,15 +88,20 @@ export function setComputerStateMutationOptions(queryClient: QueryClient) {
       botId?: string;
       action: ComputerAction;
     }) => {
-      await client("/api/computers/fleet", {
-        method: "POST",
-        body: {
-          action: variables.action,
+      const act = {
+        stop: stopComputer,
+        reset: resetComputer,
+        update: updateComputer,
+      }[variables.action];
+      await act(
+        organizationId(),
+        {
           computer: variables.computer,
           ...(variables.botId ? { botId: variables.botId } : {}),
         },
-        fallback: `The computer could not be ${PAST[variables.action]}.`,
-      });
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: `The computer could not be ${PAST[variables.action]}.` },
+      );
     },
     /** A reset deletes the profile those commands ran on; a stop keeps it, so only reset forgets. */
     onSuccess: async (_result, variables) => {
@@ -95,6 +111,45 @@ export function setComputerStateMutationOptions(queryClient: QueryClient) {
       return invalidateComputers(queryClient);
     },
   });
+}
+
+/**
+ * Restore the computer this Bot runs on from one of its saved copies.
+ *
+ * Only when a person asks, and only the copy they chose. The server answers at once with the restore
+ * running; the copies' read then follows it until it ends. `computer` names another person's
+ * computer, which only an admin may do; absent, it is the caller's own.
+ */
+export function restoreComputerMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (variables: {
+      botId: string;
+      snapshotId: string;
+      computer?: string;
+    }): Promise<ComputerRestoreRun> =>
+      restoreComputer(
+        organizationId(),
+        variables.botId,
+        {
+          snapshotId: variables.snapshotId,
+          ...(variables.computer ? { computer: variables.computer } : {}),
+        },
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "Couldn't restore this computer. Try again in a moment." },
+      ),
+    onSuccess: () => invalidateComputers(queryClient),
+  });
+}
+
+/**
+ * A restore ended: the computer was stopped and started again, so what the screens know about it
+ * (whether it runs, since when) is out of date.
+ */
+export function restoreSettled(queryClient: QueryClient, botId: string) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: computerKeys.status(botId) }),
+    queryClient.invalidateQueries({ queryKey: computerKeys.fleet() }),
+  ]);
 }
 
 /**
@@ -115,11 +170,12 @@ export function saveActionPolicyMutationOptions(queryClient: QueryClient) {
     mutationFn: (
       next: ActionPolicy & { authoring?: PolicyAuthoring },
     ): Promise<ActionPolicy> =>
-      client("/api/computers/policy", "policy", {
-        method: "PUT",
-        body: next,
-        fallback: "The boundary could not be saved.",
-      }),
+      replaceBoundaries(
+        organizationId(),
+        next,
+        { "Idempotency-Key": idempotencyKey() },
+        { fallback: "The boundary could not be saved." },
+      ),
     onSuccess: () => invalidateComputers(queryClient),
   });
 }

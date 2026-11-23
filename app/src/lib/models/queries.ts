@@ -1,5 +1,10 @@
 import { queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import type { ModelChoice, ModelChoiceInput } from "@/lib/api/generated/model";
+import {
+  getModelCatalogue,
+  getModelChoice,
+} from "@/lib/api/generated/models/models";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * The models a person may pick for a built-in Bot's run. See server/src/model-catalogue.ts.
@@ -73,10 +78,9 @@ export type AvailableModels = {
  * One person's pick for one conversation, as the server holds it. A null model is the default
  * model; a null effort is the model's own default, so none is sent.
  */
-export type ConversationModel = {
-  model: string | null;
-  effort: string | null;
-};
+export type ConversationModel = ModelChoice;
+
+export type ConversationModelInput = ModelChoiceInput;
 
 export const modelKeys = {
   all: ["models"] as const,
@@ -89,10 +93,12 @@ export const modelKeys = {
 export function modelCatalogueQueryOptions() {
   return queryOptions({
     queryKey: modelKeys.catalogue,
-    queryFn: async (): Promise<ModelCatalogue> =>
-      (
-        await client("/api/models", { fallback: "Couldn't load models" })
-      ).json(),
+    queryFn: async ({ signal }): Promise<ModelCatalogue> =>
+      getModelCatalogue(
+        organizationId(),
+        { view: "offered" },
+        { signal, fallback: "Couldn't load models" },
+      ),
     // The server keeps the provider's listing for ten minutes; asking more often learns nothing.
     staleTime: 5 * 60_000,
   });
@@ -102,12 +108,12 @@ export function modelCatalogueQueryOptions() {
 export function availableModelsQueryOptions() {
   return queryOptions({
     queryKey: modelKeys.available,
-    queryFn: async (): Promise<AvailableModels> =>
-      (
-        await client("/api/models/available", {
-          fallback: "Couldn't load the models",
-        })
-      ).json(),
+    queryFn: async ({ signal }): Promise<AvailableModels> =>
+      getModelCatalogue(
+        organizationId(),
+        { view: "all" },
+        { signal, fallback: "Couldn't load the models" },
+      ),
     staleTime: 5 * 60_000,
   });
 }
@@ -120,11 +126,10 @@ export function availableModelsQueryOptions() {
 export function conversationModelQueryOptions(channelId: string) {
   return queryOptions({
     queryKey: modelKeys.conversation(channelId),
-    queryFn: async (): Promise<ConversationModel> =>
-      (
-        await client(`/api/channels/${encodeURIComponent(channelId)}/model`, {
-          fallback: "Couldn't load this conversation's model",
-        })
-      ).json(),
+    queryFn: async ({ signal }): Promise<ConversationModel> =>
+      getModelChoice(organizationId(), "me", channelId, {
+        signal,
+        fallback: "Couldn't load this conversation's model",
+      }),
   });
 }

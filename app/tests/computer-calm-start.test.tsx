@@ -2,15 +2,26 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+} from "@tanstack/react-router";
+import {
   act,
   cleanup,
   fireEvent,
   render,
   waitFor,
+  within,
 } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { ToolLine } from "@/components/channels/tool-line";
 import { ComputerView } from "@/components/computer/computer-view";
+import type { Problem } from "@/lib/api/generated/model";
+import { authKeys } from "@/lib/auth/queries";
 
 test("a call turned away by a computer still starting reads as not done yet, not as a failure", () => {
   const view = render(
@@ -250,6 +261,260 @@ test("a computer that is off, watched from the side panel, says it starts when t
   expect(view.queryByText(/can't show the screen/i)).toBeNull();
 });
 
+/** A server that keeps a computer off until it is asked to start it, and counts the asking. */
+function serveComputerThatStartsWhenAsked() {
+  const asked = { times: 0 };
+  const state = () => (asked.times > 0 ? "starting" : "absent");
+  globalThis.fetch = (async (input, init) => {
+    const path = String(input);
+    if (path.endsWith("/wake") && init?.method === "POST") {
+      asked.times += 1;
+      return Response.json({ botId: "sales", state: "starting" });
+    }
+    if (path.endsWith("/status"))
+      return Response.json({ botId: "sales", state: state() });
+    if (path.endsWith("/screenshot"))
+      return Response.json({ ready: false, state: state() });
+    if (path.endsWith("/control")) return Response.json(control);
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+  return asked;
+}
+
+test("opening the screen beside a conversation starts a computer that is off, once", async () => {
+  const asked = serveComputerThatStartsWhenAsked();
+
+  const view = renderWithQueries(
+    <ComputerView active computerId="sales" intervalMs={10} name="Sales" />,
+  );
+
+  expect(
+    await view.findByText(
+      "Starting Sales's computer. The first start takes about a minute.",
+    ),
+  ).toBeDefined();
+  // Many more polls: it was asked for once, and is never called off while it comes up.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  });
+  expect(asked.times).toBe(1);
+  expect(view.queryByText(/is off/)).toBeNull();
+});
+
+test("a card in a turn does not start a computer that is off: the Bot's action does", async () => {
+  const asked = serveComputerThatStartsWhenAsked();
+
+  const view = renderWithQueries(
+    <ComputerView
+      active
+      computerId="sales"
+      intervalMs={10}
+      name="Sales"
+      toolCallId="call-1"
+    />,
+  );
+
+  await view.findByText(/^Starting Sales's computer/);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  });
+  expect(asked.times).toBe(0);
+});
+
+test("a server with no way to start a computer leaves the screen as it was: off, never starting, no problem", async () => {
+  let asked = 0;
+  const errors: unknown[] = [];
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  console.error = (...args: unknown[]) => void errors.push(args);
+  console.warn = (...args: unknown[]) => void errors.push(args);
+  globalThis.fetch = (async (input) => {
+    const path = String(input);
+    if (path.endsWith("/wake")) {
+      asked += 1;
+      // Slow enough that whatever the screen says while it waits is seen.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return Response.json({ error: "Not found." }, { status: 404 });
+    }
+    if (path.endsWith("/status"))
+      return Response.json({ botId: "sales", state: "absent" });
+    if (path.endsWith("/screenshot"))
+      return Response.json({ ready: false, state: "absent" });
+    if (path.endsWith("/control")) return Response.json(control);
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const view = renderWithQueries(
+      <ComputerView active computerId="sales" intervalMs={10} name="Sales" />,
+    );
+    const off = "Sales's computer is off. It starts when the Bot next uses it.";
+    await view.findByText(off);
+    // While the call is out, once it is refused, and for many polls after: off, and nothing else.
+    for (let pass = 0; pass < 30; pass++) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      expect(view.getByText(off)).toBeDefined();
+      expect(view.queryByText(/^Starting/)).toBeNull();
+      expect(view.queryByText(/can't show the screen/i)).toBeNull();
+    }
+    expect(asked).toBe(1);
+    expect(errors).toEqual([]);
+  } finally {
+    console.error = originalError;
+    console.warn = originalWarn;
+  }
+});
+
+test("a computer the organization has no room for says why it stays off, calmly, instead of that it starts when the Bot uses it", async () => {
+  const atLimit =
+    "This organization already has 1 computer, the most OpenBot allows it. Ask an admin to make room.";
+  let asked = 0;
+  globalThis.fetch = (async (input, init) => {
+    const path = String(input);
+    if (path.endsWith("/wake") && init?.method === "POST") {
+      asked += 1;
+      const refusal: Problem = {
+        type: "https://open.bot/errors/test",
+        title: atLimit,
+        status: 429,
+        detail: atLimit,
+        code: "COMPUTER_LIMIT_REACHED",
+        category: "rate_limit",
+        retryable: false,
+        requestId: "req_test",
+        traceId: "trace_test",
+      };
+      return new Response(JSON.stringify(refusal), {
+        status: 429,
+        headers: { "content-type": "application/problem+json" },
+      });
+    }
+    if (path.endsWith("/status"))
+      return Response.json({ botId: "sales", state: "absent" });
+    if (path.endsWith("/screenshot"))
+      return Response.json({ ready: false, state: "absent" });
+    if (path.endsWith("/control")) return Response.json(control);
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+
+  const view = renderWithQueries(
+    <ComputerView active computerId="sales" intervalMs={10} name="Sales" />,
+  );
+
+  const sentence = await view.findByText(atLimit);
+  const blocked = sentence.closest("[data-slot=computer-blocked]");
+  expect(blocked?.textContent).toContain("Can't start Sales's computer");
+  // It won't start when the Bot next uses it either, so that is not said; nor is it a problem in red.
+  expect(view.queryByText(/is off/)).toBeNull();
+  expect(view.queryByText(/can't show the screen/i)).toBeNull();
+  expect(view.queryByRole("alert")).toBeNull();
+  // Many polls later it is still said, and the start was asked for once.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  });
+  expect(view.getByText(atLimit)).toBeDefined();
+  expect(asked).toBe(1);
+  // A computer that can't start has no screen to take: no Take control on it, here or full size, and nothing to
+  // record (the end-to-end run offered both).
+  expect(view.queryByRole("button", { name: "Take control" })).toBeNull();
+  fireEvent.click(
+    view.getByRole("button", { name: "Open the Bot's screen full size" }),
+  );
+  const full = await view.findByRole("dialog");
+  expect(within(full).getAllByText(atLimit).length).toBeGreaterThan(0);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  });
+  expect(within(full).queryByRole("button", { name: "Take control" })).toBe(
+    null,
+  );
+  expect(within(full).queryByRole("button", { name: /Record/ })).toBeNull();
+  expect(within(full).queryByText(/Record a task/)).toBeNull();
+  expect(within(full).queryByText(/Couldn't load the Bot's browser/)).toBe(
+    null,
+  );
+});
+
+test("beside a conversation, a computer at the limit shows the whole sentence and, to an admin, a link to Computers that opens it, with no control bar over them", async () => {
+  // The end-to-end run: "General Assistant has control · Take control" sat over the blocked state, cutting its
+  // sentence and covering the admin's Open Computers, which could not be clicked.
+  const atLimit =
+    "This organization already has 1 computer, the most OpenBot allows it. Ask an admin to make room.";
+  globalThis.fetch = (async (input, init) => {
+    const path = String(input);
+    if (path.endsWith("/wake") && init?.method === "POST") {
+      const refusal: Problem = {
+        type: "https://open.bot/errors/test",
+        title: atLimit,
+        status: 429,
+        detail: atLimit,
+        code: "COMPUTER_LIMIT_REACHED",
+        category: "rate_limit",
+        retryable: false,
+        requestId: "req_test",
+        traceId: "trace_test",
+      };
+      return new Response(JSON.stringify(refusal), {
+        status: 429,
+        headers: { "content-type": "application/problem+json" },
+      });
+    }
+    if (path.endsWith("/status"))
+      return Response.json({ botId: "sales", state: "absent" });
+    if (path.endsWith("/screenshot"))
+      return Response.json({ ready: false, state: "absent" });
+    if (path.endsWith("/control")) return Response.json(control);
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
+    },
+  });
+  client.setQueryData(authKeys.currentUser(), {
+    id: "dana",
+    email: "dana@example.com",
+    role: "admin",
+    onboarding: null,
+  });
+  const root = createRootRoute({ component: Outlet });
+  const conversation = createRoute({
+    getParentRoute: () => root,
+    path: "/",
+    component: () => (
+      <ComputerView active computerId="sales" intervalMs={10} name="Sales" />
+    ),
+  });
+  const computers = createRoute({
+    getParentRoute: () => root,
+    path: "/admin/computers",
+    component: () => <p>Computers page</p>,
+  });
+  const router = createRouter({
+    routeTree: root.addChildren([conversation, computers]),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+
+  const link = await view.findByRole("link", { name: "Open Computers" });
+  // The whole sentence, and no bar over it offering to take a computer that can't start.
+  expect(view.getByText(atLimit)).toBeDefined();
+  expect(view.getByText("Can't start Sales's computer")).toBeDefined();
+  expect(view.queryByRole("button", { name: "Take control" })).toBeNull();
+  expect(view.queryByText(/has control/)).toBeNull();
+  // A link of its own, not inside the tile's button, and it goes there.
+  expect(link.closest("button")).toBeNull();
+  fireEvent.click(link);
+  expect(await view.findByText("Computers page")).toBeDefined();
+});
+
 test("a live stream that drops shows a quiet badge, not the Retry panel", async () => {
   HTMLCanvasElement.prototype.getContext = (() => ({
     drawImage: () => undefined,
@@ -309,10 +574,17 @@ test("a computer that was off and then fails is not called off for ever", async 
   expect(view.queryByText(/is off/)).toBeNull();
 });
 
-test("a computer that goes to sleep stops showing its last frame", async () => {
+test("a computer that goes to sleep stops showing its last frame, and is not started again", async () => {
   let shots = 0;
+  let asked = 0;
   serve({
-    "/status": () => Response.json({ botId: "sales", state: "absent" }),
+    "/wake": () => {
+      asked += 1;
+      return Response.json({ botId: "sales", state: "starting" });
+    },
+    // Up while its first frame is taken, as a computer that can be photographed is.
+    "/status": () =>
+      Response.json({ botId: "sales", state: shots < 2 ? "ready" : "absent" }),
     "/screenshot": () =>
       shots++ === 0
         ? frame()
@@ -332,4 +604,9 @@ test("a computer that goes to sleep stops showing its last frame", async () => {
     ).toBeDefined();
     expect(view.queryByAltText("What the Bot is looking at")).toBeNull();
   });
+  // Nobody opened anything: the screen was already open when the computer went off.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  });
+  expect(asked).toBe(0);
 });

@@ -10,7 +10,7 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { type UseMutationOptions, useMutation } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -34,6 +34,7 @@ import {
   startBrowserRecordingMutationOptions,
   stopBrowserRecordingMutationOptions,
 } from "@/lib/browser/mutations";
+import { elapsed, useSecondsSince } from "@/lib/elapsed";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import type { NarrationChoice } from "./narration-choice";
@@ -44,29 +45,8 @@ export function narrationLanguage(): string {
   return (typeof navigator !== "undefined" && navigator.language) || "en-US";
 }
 
-/** Seconds since `startedAt`, ticking once a second while there is one. */
-export function useSecondsSince(startedAt: number | undefined) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (startedAt === undefined) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [startedAt]);
-  if (startedAt === undefined) return 0;
-  // The Recorder's clock is the browser's machine's, which can run a moment ahead of this one.
-  return Math.max(0, Math.floor((now - startedAt) / 1000));
-}
-
-/** 0:42, 12:05, 1:02:09. */
-export function elapsed(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const rest = String(seconds % 60).padStart(2, "0");
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}`
-    : `${minutes}:${rest}`;
-}
+// How long a recording has run, with the clock every other screen counts with.
+export { elapsed, useSecondsSince };
 
 export const actionCount = (actions: number) =>
   `${actions} ${actions === 1 ? "action" : "actions"}`;

@@ -31,6 +31,15 @@ describe("settings sidebar", () => {
     expect(groups).toEqual([...groups].sort((a, b) => a - b));
   });
 
+  test("API keys is the person's own, last of You, in both editions", () => {
+    const you = SETTINGS_SIDEBAR_ITEMS.filter((item) => item.group === "you");
+    const apiKeys = you[you.length - 1];
+
+    expect(apiKeys?.title).toBe("API keys");
+    expect(apiKeys?.linkOptions).toEqual({ to: "/settings/api-keys" });
+    expect(apiKeys?.personalOnly).toBeUndefined();
+  });
+
   test("Routines, Memory, Skills and Learning are not in Settings: the first three are in the main menu", () => {
     const titles = SETTINGS_SIDEBAR_ITEMS.map((item) => item.title);
     for (const moved of ["Routines", "Memory", "Skills", "Learning"])

@@ -1631,6 +1631,21 @@ fn main() {
                 ["ctr", "images", "ls", "-q"] => {}
                 ["uname", "-m"] => out(b"aarch64\n"),
                 ["ctr", "content", "fetch-object", "--hosts-dir", _, reference] => {
+                    // The first `together` lookups each wait until all of them have begun: that many
+                    // are running at once. One that waits out its patience instead says so in `alone`.
+                    let together: usize = String::from_utf8(read("together")).unwrap().trim().parse().unwrap();
+                    let claim = |n: usize| std::fs::OpenOptions::new().write(true).create_new(true).open(dir.join(format!("lookup-{n}"))).is_ok();
+                    let slot = (1..).find(|n| claim(*n)).unwrap();
+                    if slot <= together {
+                        let last = dir.join(format!("lookup-{together}"));
+                        let patience = std::time::Instant::now() + std::time::Duration::from_secs(30);
+                        while !last.exists() && std::time::Instant::now() < patience {
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                        }
+                        if !last.exists() {
+                            std::fs::write(dir.join("alone"), format!("lookup {slot} of {together}\n")).unwrap();
+                        }
+                    }
                     if reference.ends_with(&String::from_utf8(read("manifest-digest")).unwrap().trim().to_owned()) {
                         out(&read("manifest"));
                     } else {
@@ -1651,7 +1666,10 @@ fn main() {
     arrived. Before saying anything, the release's 16 images were looked up one after another,
     about 34 calls into the node at a second and a half each. Here each call takes a second: one
     after another that is over 36 seconds before the first figure, and at `LOOKUPS_AT_ONCE` about
-    eleven. The first figure is the whole release's size, with what the captured ingests hold.
+    eleven. What makes it seconds is that the lookups run together, so that is what this proves:
+    the first lookups wait for each other in the engine, which they can only all do if they run at
+    once, however fast or slow the computer. The first figure is the whole release's size, with
+    what the captured ingests hold.
     */
     #[test]
     fn a_first_setups_download_is_shown_within_seconds_of_its_node_appearing() {
@@ -1685,16 +1703,19 @@ fn main() {
                 .map(|n| format!("docker.io/example/fixed-{n}@{index_digest}"))
                 .collect(),
         };
+        // The release's five tagged images are its first lookups, and all five run at once.
+        let together = images.tagged.len();
+        std::fs::write(root.join("together"), together.to_string()).unwrap();
         let engine = || crate::quiet::command(&engine_binary);
         let limits = Limits {
             stall: Duration::from_secs(60),
             image: Duration::from_secs(60),
             poll: Duration::from_millis(100),
-            call: Duration::from_secs(30),
+            call: Duration::from_secs(60),
         };
-        let started = Instant::now();
-        let give_up = started + Duration::from_secs(25);
-        let mut first: Option<(Duration, Download)> = None;
+        // Only so a follow that never shows anything ends; nothing here is timed.
+        let give_up = Instant::now() + Duration::from_secs(300);
+        let mut first: Option<Download> = None;
         let shown = std::sync::atomic::AtomicBool::new(false);
         follow_new_stack(
             &engine,
@@ -1703,16 +1724,16 @@ fn main() {
             limits,
             &|| shown.load(std::sync::atomic::Ordering::SeqCst) || Instant::now() >= give_up,
             &mut |download| {
-                first.get_or_insert((started.elapsed(), download));
+                first.get_or_insert(download);
                 shown.store(true, std::sync::atomic::Ordering::SeqCst);
             },
         );
+        let alone = std::fs::read_to_string(root.join("alone")).ok();
+        let met = root.join(format!("lookup-{together}")).exists();
         let _ = std::fs::remove_dir_all(&root);
-        let (after, download) = first.expect("a figure was shown");
-        assert!(
-            after < Duration::from_secs(20),
-            "first figure after {after:?}"
-        );
+        let download = first.expect("a figure was shown");
+        assert_eq!(alone, None, "a lookup ran without the others");
+        assert!(met, "fewer than {together} lookups began");
         // The image's config and twelve layers, once however many images share them.
         let manifest: Value = serde_json::from_slice(
             &std::fs::read(format!("{fixtures}app-api-0.16.0-rc.9-linux-arm64.raw")).unwrap(),

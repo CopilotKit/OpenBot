@@ -19,12 +19,15 @@ import userEvent from "@testing-library/user-event";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { TeamFeaturesDialog } from "@/components/edition/team-features-dialog";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
+import { NewOrganizationDialog } from "@/components/organizations/new-organization-dialog";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { agentKeys } from "@/lib/agents/queries";
 import { authKeys } from "@/lib/auth/queries";
 import { botLifecycleKeys } from "@/lib/bot-lifecycle/queries";
 import { type ChannelSummary, channelKeys } from "@/lib/channels/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
+import { organizationKeys } from "@/lib/organizations/queries";
+import { SectionProvider } from "@/lib/sections";
 import { userPreferencesQueryOptions } from "@/lib/settings/message-list";
 import { settleReactWork } from "./settle-react-work";
 
@@ -99,7 +102,11 @@ function conversation(id: string, summary: string): ChannelSummary {
   };
 }
 
-function renderNarrowApp(start = "/channel/models") {
+function renderNarrowApp(
+  start = "/channel/models",
+  /** A team's OpenBot, for somebody in two organizations who may create another. */
+  { severalOrganizations = false } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
@@ -111,6 +118,34 @@ function renderNarrowApp(start = "/channel/models") {
     localEvaluation: true,
     edition: "personal",
   });
+  if (severalOrganizations) {
+    queryClient.setQueryData(deploymentKeys.capabilities(), {
+      generativeUi: true,
+      selfHostBanner: false,
+      localEvaluation: false,
+      edition: "team",
+    });
+    queryClient.setQueryData(organizationKeys.mine(), {
+      organizations: [
+        {
+          id: "default",
+          slug: "default",
+          name: "Acme",
+          role: "admin",
+          active: true,
+        },
+        {
+          id: "research",
+          slug: "research",
+          name: "Acme Research",
+          role: "member",
+          active: false,
+        },
+      ],
+      canCreate: true,
+      currentId: "default",
+    });
+  }
   queryClient.setQueryData(authKeys.currentUser(), {
     id: "dana",
     name: "Dana Fresh",
@@ -121,6 +156,7 @@ function renderNarrowApp(start = "/channel/models") {
   queryClient.setQueryData(userPreferencesQueryOptions("dana").queryKey, {
     messageListEmphasis: "thread",
     selfHostBannerDismissed: true,
+    dismissedNotices: [],
     narration: null,
     skin: "openbot",
     proactive: "on",
@@ -149,12 +185,15 @@ function renderNarrowApp(start = "/channel/models") {
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => (
-        <SidebarProvider>
-          <AppSidebar />
-          {/* The page's own Show sidebar button, which is how a narrow window opens the sheet. */}
-          <SidebarToggle />
-          <TeamFeaturesDialog />
-        </SidebarProvider>
+        <SectionProvider>
+          <SidebarProvider>
+            <AppSidebar />
+            {/* The page's own Show sidebar button, which is how a narrow window opens the sheet. */}
+            <SidebarToggle />
+            <TeamFeaturesDialog />
+            <NewOrganizationDialog />
+          </SidebarProvider>
+        </SectionProvider>
       ),
     }),
     history: createMemoryHistory({ initialEntries: [start] }),
@@ -196,7 +235,6 @@ test.each([
     /AI Model and Agent Framework/,
     "/channel/models",
   ],
-  ["Bots", "link", /^Bots/, "/bots"],
   ["Connections", "link", /^Connections/, "/connections"],
   // A link drawn as a button: it still goes somewhere.
   ["New conversation", "button", /^New conversation$/, "/channel/new"],
@@ -210,6 +248,17 @@ test.each([
     expect(app.router.state.location.pathname).toBe(path);
   },
 );
+
+test("picking Bots in the narrow sheet shows the Bots panel there and leaves the sheet open", async () => {
+  const app = renderNarrowApp();
+  const sheet = await app.openSheet();
+  await app.user.click(within(sheet).getByRole("button", { name: /^Bots/ }));
+  expect(
+    await within(sheet).findByRole("heading", { level: 2, name: "Bots" }),
+  ).toBeTruthy();
+  expect(app.view.getByRole("dialog", { name: "Sidebar" })).toBeTruthy();
+  expect(app.router.state.location.pathname).toBe("/channel/models");
+});
 
 test("Settings in the account menu closes the sheet and opens Settings", async () => {
   const app = renderNarrowApp();
@@ -239,6 +288,32 @@ test("OpenBot for Business in the account menu closes the sheet and opens its di
   );
   await app.sheetCloses();
   await app.view.findByRole("dialog", { name: "OpenBot for Business" });
+  expect(app.router.state.location.pathname).toBe("/channel/models");
+});
+
+test("New organization in the account menu closes the sheet and opens its dialog", async () => {
+  const app = renderNarrowApp("/channel/models", {
+    severalOrganizations: true,
+  });
+  const sheet = await app.openSheet();
+  // The organization being worked in is under the person's name, cut short if it has to be.
+  const account = within(sheet).getByRole("button", { name: /Dana Fresh/ });
+  expect(account.textContent).toContain("Acme");
+  await app.user.click(account);
+  const menu = await app.view.findByRole("menu");
+  expect(
+    within(menu)
+      .getAllByRole("menuitemradio")
+      .map((choice) => choice.textContent),
+  ).toEqual(["Acme", "Acme Research"]);
+  await app.user.click(
+    within(menu).getByRole("menuitem", { name: "New organization" }),
+  );
+  await app.sheetCloses();
+  const dialog = await app.view.findByRole("dialog", {
+    name: "New organization",
+  });
+  expect(within(dialog).getByLabelText("Name")).toBeTruthy();
   expect(app.router.state.location.pathname).toBe("/channel/models");
 });
 

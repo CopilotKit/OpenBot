@@ -14,12 +14,13 @@ export const Route = createFileRoute("/_authed/admin/providers")({
 });
 
 /**
- * Admin, Providers: what serves the models built-in Bots run on, which models people may pick, and
- * what Bots ran on. Named for the provider rather than the model so a second provider has a place
- * to go.
+ * Admin, Providers: the AI provider Bots run on, which an admin changes or disconnects here, which
+ * models people may pick, and what Bots ran on. Named for the provider rather than the model so a
+ * second provider has a place to go.
  *
  * One person on their own machine is offered every model the credential lists, so there is nothing
- * to allow and no allowlist is shown. A team picks among the models an admin allows here.
+ * to allow and no allowlist is shown. A team picks from every listed model too, until an admin
+ * narrows it here.
  */
 export function ProvidersPage() {
   const available = useQuery(availableModelsQueryOptions());
@@ -28,8 +29,8 @@ export function ProvidersPage() {
     <PageShell
       description={
         team
-          ? "See which provider serves your Bots' models, and choose which models people may pick. All changes appear in Activity."
-          : "See which provider serves your Bots' models and what they ran on."
+          ? "Choose the AI provider your Bots run on and which models people may pick. All changes appear in Activity."
+          : "Choose the AI provider your Bots run on, and see what they ran on."
       }
       title="Providers"
     >

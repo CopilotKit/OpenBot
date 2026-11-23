@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { connectionRows } from "@/lib/connections/rows";
 import type { LinkedAccount } from "@/lib/identity/queries";
-import type { CatalogueItem, PluginServer } from "@/lib/plugins/queries";
+import type { CatalogueItem } from "@/lib/plugins/queries";
+import { appBody, type TodayServer } from "./apps-api";
 
 /**
  * The one list on Connections: apps, apps on the organisation's account, and the GitHub and Slack
@@ -15,14 +16,12 @@ const drive = {
   auth: "user-oauth",
 } as CatalogueItem;
 
-const app = (id: string, title: string, provenance = "composio") =>
-  ({
-    id,
-    title,
-    summary: "",
-    logo: null,
-    provenance,
-  }) as unknown as PluginServer;
+const app = (
+  id: string,
+  title: string,
+  provenance = "composio",
+  more: Partial<TodayServer> = {},
+) => appBody({ id, title, summary: "", logo: null, provenance, ...more });
 
 const link = (
   provider: "github" | "slack",
@@ -69,7 +68,7 @@ test("a link this deployment cannot make is not offered", () => {
 
 test("a server added by its address is its own tile, named by where it lives", () => {
   const server = (id: string, signIn: boolean, url: string) =>
-    ({ ...app(id, id, "custom"), url, signIn }) as PluginServer;
+    app(id, id, "custom", { url, signIn });
   const rows = connectionRows({
     ...none,
     byUrl: [
@@ -156,7 +155,7 @@ test("and the same for Arcade's GitHub app, which is the same vendor through the
  */
 test("a key app nobody has connected says it needs a key; a sign-in app does not", () => {
   const keyed = (id: string, title: string, authScheme: string) =>
-    ({ ...app(id, title), authScheme }) as PluginServer;
+    app(id, title, "composio", { authScheme });
   const rows = connectionRows({
     ...none,
     brokered: [

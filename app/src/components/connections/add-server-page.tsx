@@ -13,19 +13,20 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { desktopShell } from "@/lib/desktop/shell";
+import {
+  type AddServerByUrlOutcome,
+  addServerByUrlMutationOptions,
+} from "@/lib/apps/mutations";
 import { setEnterpriseSettingMutationOptions } from "@/lib/enterprise/mutations";
 import { enterpriseOverviewQueryOptions } from "@/lib/enterprise/queries";
 import {
   type AddServerFormValues,
   addServerFormSchema,
 } from "@/lib/plugins/form";
-import {
-  type AddServerByUrlOutcome,
-  addServerByUrlMutationOptions,
-  connectAccountMutationOptions,
-} from "@/lib/plugins/mutations";
+import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import { queryClient } from "@/query-client";
 
 type Refusal = Extract<AddServerByUrlOutcome, { added: false }>;
@@ -48,8 +49,13 @@ export function AddServerPage() {
   const me = useQuery(currentUserQueryOptions()).data;
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
-  /* A key is used by every Bot that uses the server, so only an admin gives one. Personal: the one person. */
-  const mayGiveKey = personal || me?.role === "admin";
+  /*
+   * A server is added for everyone in the organization, so only an admin adds one, with its key if
+   * it needs one. Personal: the one person. Read as allowed until the role is known, so the form
+   * doesn't flash away for an admin; the server refuses anybody else whatever is drawn.
+   */
+  const mayGiveKey = personal || isOrganizationAdmin(me?.role);
+  const mayAdd = mayGiveKey || me === undefined;
   const add = useMutation(addServerByUrlMutationOptions(queryClient));
   const connect = useMutation(connectAccountMutationOptions("settings"));
   const approve = useMutation(setEnterpriseSettingMutationOptions(queryClient));
@@ -129,6 +135,18 @@ export function AddServerPage() {
   }
 
   const busy = add.isPending || connect.isPending || approve.isPending;
+
+  if (!mayAdd)
+    return (
+      <PageShell backButton={back} title="Add server">
+        <PageCard>
+          <p className="text-sm" data-testid="add-server-admin-only">
+            Only an admin can add a server, because it's added for everyone in
+            the organization. Ask an admin to add it.
+          </p>
+        </PageCard>
+      </PageShell>
+    );
 
   return (
     <PageShell
@@ -313,7 +331,7 @@ function RefusalNotice({
       <p className="break-words text-destructive text-sm" role="alert">
         {sentence}
       </p>
-      {refusal.code === "not-approved" && refusal.canApprove ? (
+      {refusal.code === "not-approved" && mayGiveKey ? (
         <Button
           disabled={busy}
           onClick={onApprove}

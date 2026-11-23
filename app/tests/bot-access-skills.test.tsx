@@ -10,11 +10,20 @@ import {
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { AppsSections, SkillsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
+import { meResponse } from "./accounts-api";
+import {
+  botAppsPath,
+  botAppsResponse,
+  botGrantsPath,
+  botGrantsResponse,
+} from "./bot-grants-api";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
+import { SKILLS_PATH, skillsResponse } from "./skills-api";
 
 /**
- * A Bot's Skills and access page. A person may put their own skill on a Bot they own, and only
- * that, so the switches are their own skills on their own Bot.
+ * A Bot's Skills and access page. A person may put a skill on a Bot they own when it is their own or
+ * granted to a team they are in, and only then, so the switches are those skills on their own Bot.
  */
 
 beforeAll(() => GlobalRegistrator.register());
@@ -80,35 +89,56 @@ const grants: string[] = [];
 function serving(options: { held?: string[]; givesOnListing?: boolean } = {}) {
   grants.length = 0;
   const held = new Set(options.held ?? ["mine-on"]);
+  // `usable` is the server's answer for this person: their own, or granted to a team they are in.
   const all = [
-    { slug: "mine-on", owner: "me", title: "mine-on" },
-    { slug: "mine-off", owner: "me", title: "mine-off" },
-    { slug: "theirs", owner: "other", title: "theirs" },
+    { slug: "mine-on", owner: "me", title: "mine-on", usable: true },
+    { slug: "mine-off", owner: "me", title: "mine-off", usable: true },
+    { slug: "theirs", owner: "other", title: "theirs", usable: false },
     // A skill whose title is not its slug, as every skill a person writes has.
-    { slug: "tide-report", owner: "me", title: "Tide report" },
+    { slug: "tide-report", owner: "me", title: "Tide report", usable: true },
+    // The organization's skill an admin granted to a team this person is in.
+    { slug: "quote-writer", owner: null, title: "Quote writer", usable: true },
+    // The organization's skill granted to no team: only an admin puts it on a Bot.
+    { slug: "everyone", owner: null, title: "Everyone's", usable: false },
   ];
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.includes("/api/plugins/grants")) {
-      grants.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
-      return Response.json({ ok: true });
-    }
-    if (url.includes("/api/plugins/for/") && url.endsWith("/apps")) {
-      return Response.json({ apps: [] });
-    }
-    if (url.includes("/api/plugins/for/")) {
-      if (options.givesOnListing) for (const { slug } of all) held.add(slug);
+    const method = init?.method ?? "GET";
+    if (url.startsWith(`${botGrantsPath(BOT.id)}/`) && method !== "GET") {
+      grants.push(`${method} ${url} ${init?.body ?? ""}`);
       return Response.json({
-        tools: [],
+        id: "skill:x",
+        kind: "skill",
+        ref: "x",
+        action: null,
+        skill: null,
+      });
+    }
+    if (url.startsWith(botAppsPath(BOT.id))) return botAppsResponse([]);
+    if (url.startsWith(botGrantsPath(BOT.id))) {
+      if (options.givesOnListing) for (const { slug } of all) held.add(slug);
+      return botGrantsResponse({
         skills: all
           .filter(({ slug }) => held.has(slug))
           .map(({ slug, title }) => ({
             slug,
             title,
             summary: `${slug} summary`,
-            instructions: "",
           })),
       });
+    }
+    if (new URL(url, "http://127.0.0.1").pathname === SKILLS_PATH) {
+      return skillsResponse(
+        all.map(({ slug, owner, title, usable }) => ({
+          slug,
+          title,
+          summary: `${slug} summary`,
+          instructions: "",
+          ownerUserId: owner,
+          grantedTo: held.has(slug) ? ["expenses"] : [],
+          usableOnYourBots: usable,
+        })),
+      );
     }
     if (url.endsWith("/api/plugins")) {
       return Response.json({
@@ -131,8 +161,9 @@ function serving(options: { held?: string[]; givesOnListing?: boolean } = {}) {
         },
       });
     }
-    if (url.includes("/api/agents")) return Response.json({ agents: [] });
-    return Response.json({
+    const bots = answerBotsList(url, init, { visible: [] });
+    if (bots) return bots;
+    return meResponse({
       user: { id: "me", role: "user", email: "me@example.test", name: "Me" },
     });
   }) as unknown as typeof fetch;
@@ -171,6 +202,18 @@ test("your own skills each have a switch that reflects whether this Bot carries 
   expect(view.queryByRole("switch", { name: "theirs" })).toBeNull();
 });
 
+test("a skill an admin gave your team has a switch, and the organization's other skills don't", async () => {
+  serving();
+  const view = draw(BOT);
+  const quote = await view.findByRole("switch", { name: "Quote writer" });
+  expect(quote.getAttribute("aria-checked")).toBe("false");
+  expect(view.queryByRole("switch", { name: "Everyone's" })).toBeNull();
+  fireEvent.click(quote);
+  await waitFor(() => expect(grants).toHaveLength(1));
+  expect(grants[0]).toContain("PUT");
+  expect(grants[0]).toContain("quote-writer");
+});
+
 /*
  * FOUND ON WINDOWS (0.3.4 release candidates): Your skills listed "/tide-report" above What it can
  * use's "Tide report", one skill under two names. Both say its title; the section says to type /.
@@ -204,7 +247,7 @@ test("switching a skill on grants it to this Bot", async () => {
   const view = draw(BOT);
   fireEvent.click(await view.findByRole("switch", { name: "mine-off" }));
   await waitFor(() => expect(grants).toHaveLength(1));
-  expect(grants[0]).toContain("POST");
+  expect(grants[0]).toContain("PUT");
   expect(grants[0]).toContain("mine-off");
   expect(grants[0]).toContain("expenses");
 });
@@ -221,12 +264,12 @@ test("your skills failing to load says so, not that you have none", async () => 
   serving();
   const served = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
-    String(input).endsWith("/api/plugins")
+    new URL(String(input), "http://127.0.0.1").pathname === SKILLS_PATH
       ? new Response(null, { status: 500 })
       : served(input, init)) as unknown as typeof fetch;
   const view = draw(BOT);
   expect(
-    await view.findByText("Couldn't load your skills. Reload the page."),
+    await view.findByText("Couldn't load your skills. Try again in a moment."),
   ).toBeTruthy();
   expect(view.queryByText(/No skills yet/)).toBeNull();
 });
@@ -235,12 +278,12 @@ test("this Bot's own skills failing to load says so, rather than drawing every s
   serving();
   const served = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
-    String(input).endsWith("/api/plugins/for/expenses")
+    String(input).startsWith(botGrantsPath("expenses"))
       ? new Response(null, { status: 500 })
       : served(input, init)) as unknown as typeof fetch;
   const view = draw(BOT);
   expect(
-    await view.findByText("Couldn't load your skills. Reload the page."),
+    await view.findByText("Couldn't load your skills. Try again in a moment."),
   ).toBeTruthy();
   expect(view.queryByRole("switch", { name: "mine-on" })).toBeNull();
 });

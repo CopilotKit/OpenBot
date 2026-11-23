@@ -62,7 +62,7 @@ export function NewCredentialPage() {
       description={
         paths.edition === "personal"
           ? "Save a key to your vault. You won’t be able to view it after saving it."
-          : `Save a credential for ${paths.deploymentName}. You won’t be able to view the secret after saving it.`
+          : "Save a credential for this organization. You won’t be able to view the secret after saving it."
       }
       title={paths.edition === "personal" ? "Add key" : "Add credential"}
     >
@@ -108,10 +108,16 @@ function CredentialForm({ modelKey }: { modelKey: ModelKeyName | null }) {
           ? {
               kind: "model",
               provider: value.provider,
-              plaintext: value.plaintext,
+              secret: value.plaintext,
               metadata: {},
             }
-          : { ...value, metadata: {} },
+          : {
+              kind: "connector",
+              provider: value.provider,
+              keyId: value.keyId,
+              secret: value.plaintext,
+              metadata: {},
+            },
       );
       await navigate(paths.credentials());
     },

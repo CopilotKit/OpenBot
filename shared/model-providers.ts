@@ -25,8 +25,8 @@
  * provider be registered here without pretending every harness can answer for it. The `bots`
  * section records what a Bot runs by default, not what it is able to drive.
  *
- * Its own module for the reason `model-key.ts` had to be one: `agent-bot` and `agent-langgraph`
- * call `serve()` at module scope, so importing a pure function from an entry point binds a port.
+ * Its own module for the reason `model-key.ts` had to be one: a Bot's entry point calls `serve()` at
+ * module scope, so importing a pure function from an entry point binds a port.
  */
 
 import specJson from "./model-providers.json";
@@ -233,7 +233,7 @@ export type BotSettings = {
  * somebody else.
  *
  * `pinnedProvider` is for a Bot that drives exactly one provider's API and answers to no other
- * name — `agent-bot` speaks chat completions by hand and has never read `BOT_PROVIDER`. Pinning
+ * name — `agent-antigravity` drives Google's API alone and does not read `BOT_PROVIDER`. Pinning
  * keeps that Bot's behavior what it was while its model still comes from the file.
  *
  * A provider nobody has heard of is kept as typed, not rewritten to OpenAI, so the Bot's own
@@ -278,12 +278,17 @@ export function botSettings(
 /**
  * Whether this model has to be driven through the Responses API.
  *
- * Two kinds of OpenAI model, as OpenAI's own API answered on 2026-10-28:
+ * Two kinds of OpenAI model, as OpenAI's own API answered on 2026-10-28 and 2026-11-17:
  *
  * - `gpt-5.6-*` and every `gpt-6*` reject function tools on `/v1/chat/completions` ("To use
  *   function tools, use /v1/responses or set reasoning_effort to 'none'"), and `none` is itself
  *   refused by some of them (`gpt-6-astra`, `gpt-6.1-sol`), so the Responses API is the one way all
  *   of them take tools.
+ * - `gpt-5.4*` and `gpt-5.5*` (`-mini`, `-nano` and the dated snapshots too) reject the same the
+ *   moment a run carries a reasoning effort: "Function tools with reasoning_effort are not supported
+ *   for gpt-5.5 in /v1/chat/completions." Without one they take tools there, and on the Responses
+ *   API they take tools with or without one, so the Responses API is the one way that always works.
+ *   `gpt-5`, `gpt-5.1` and `gpt-5.2` take tools and an effort on either API.
  * - The `-pro` models (`gpt-5-pro`, `gpt-5.5-pro`, `o3-pro`) and `gpt-5.3-codex` are not served on
  *   `/v1/chat/completions` at all.
  *
@@ -294,12 +299,12 @@ export function botSettings(
  * A name a gateway publishes under its own namespace is the same model: LiteLLM and OpenRouter call
  * `gpt-5.6-terra` `openai/gpt-5.6-terra`, so only what follows the last slash is read.
  *
- * Named for the fact rather than for either consequence, because `agent-bot` uses it to refuse a
- * model and `agent-langgraph` uses it to select a flag, and neither name fits both.
+ * Named for the fact rather than for either consequence: one Bot may use it to refuse a model and
+ * another to select a flag, and neither name fits both.
  */
 export function requiresResponsesApi(model: string): boolean {
   const name = model.trim().split("/").at(-1) ?? "";
-  return /^gpt-5\.[6-9]|^gpt-[6-9]|^(?:gpt-[\d.]+|o\d+)-pro\b|^gpt-[\d.]+-codex\b/.test(
+  return /^gpt-5\.[4-9]|^gpt-[6-9]|^(?:gpt-[\d.]+|o\d+)-pro\b|^gpt-[\d.]+-codex\b/.test(
     name,
   );
 }

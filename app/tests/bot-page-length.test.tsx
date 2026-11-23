@@ -16,6 +16,13 @@ import {
 } from "@/components/bot-profile/activity";
 import { SuggestionsInbox } from "@/components/suggestions/proactive-panel";
 import type { ActivityItem, BotActivity } from "@/lib/bot-lifecycle/queries";
+import { activityResponse, botOperationPath } from "./bots-api";
+import { taskOf } from "./conversations-api";
+import {
+  CHECK_IN_ITEMS_PATH,
+  ORGANIZATION_PATH,
+  pathOf,
+} from "./schedules-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -101,20 +108,23 @@ test("a goal that runs only when asked is counted as on demand, never as schedul
   expect(page.getByText("Watch OpenBot releases")).toBeTruthy();
   cleanup();
 
-  // The Activity page doesn't list them a second time: one row goes to the Bot's Routines.
+  // The Activity page lists both under Recurring, which ends on a row to the Bot's Routines.
   const sections = glance(data, BotActivitySections);
   const routines = (await sections.findByText("Routines")).closest("a");
   expect(routines?.getAttribute("href")).toBe("/bots/scout/routines");
   expect(routines?.textContent).toContain("1 scheduled · 1 on demand");
   expect(sections.queryByRole("heading", { name: "On demand" })).toBeNull();
-  expect(sections.queryByText("Watch OpenBot releases")).toBeNull();
-  expect(sections.queryByText("Check releases 1")).toBeNull();
+  const recurring = sections
+    .getByRole("heading", { name: "Recurring" })
+    .closest("section") as HTMLElement;
+  expect(recurring.textContent).toContain("Watch OpenBot releases");
+  expect(recurring.textContent).toContain("Check releases 1");
 });
 
 /*
  * The Bot's own follow-ups, a queued run of a goal and a delegated task waiting its turn are lined
  * up too, and the Routines page does not list them. They stay under Scheduled, a follow-up with its
- * Cancel, and the row to Routines counts only the routines.
+ * Cancel. The routine and the goal are under Recurring, and the row to Routines counts only them.
  */
 test("Scheduled keeps the follow-ups and queued runs Routines doesn't list, with their Cancel", async () => {
   const [routine] = items(1, "Check releases");
@@ -156,9 +166,13 @@ test("Scheduled keeps the follow-ups and queued runs Routines doesn't list, with
   const view = glance(data, BotActivitySections);
   const fetchActivity = global.fetch;
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).endsWith("/follow-ups/cancel")) {
-      cancelled.push(String(init?.body));
-      return Response.json({ ok: true });
+    // The API's cancelFollowUp: the follow-up is named in the address, and nothing is sent.
+    const followUp = new RegExp(
+      `^${ORGANIZATION_PATH}/bots/[^/]+/follow-ups/([^/]+)/cancel$`,
+    ).exec(pathOf(input));
+    if (followUp && init?.method === "POST") {
+      cancelled.push(decodeURIComponent(followUp[1] ?? ""));
+      return Response.json({ cancelled: true });
     }
     return fetchActivity(input, init);
   }) as typeof fetch;
@@ -168,10 +182,17 @@ test("Scheduled keeps the follow-ups and queued runs Routines doesn't list, with
     .getByText("Chase the invoice reply")
     .closest("[data-slot=item]") as HTMLElement;
   expect(followUpRow).toBeTruthy();
-  expect(view.getByText("Run of Watch OpenBot releases")).toBeTruthy();
-  // The routine and the goal are on the Routines page, so not here.
-  expect(view.queryByText("Check releases 1")).toBeNull();
-  expect(view.queryByText("Watch OpenBot releases")).toBeNull();
+  const scheduled = view
+    .getByRole("heading", { name: "Scheduled" })
+    .closest("section") as HTMLElement;
+  expect(scheduled.textContent).toContain("Run of Watch OpenBot releases");
+  // The routine and the goal recur, so they are not under Scheduled.
+  expect(scheduled.textContent).not.toContain("Check releases 1");
+  const recurring = view
+    .getByRole("heading", { name: "Recurring" })
+    .closest("section") as HTMLElement;
+  expect(recurring.textContent).toContain("Check releases 1");
+  expect(recurring.textContent).toContain("Watch OpenBot releases");
   const routines = view.getByText("Routines").closest("a");
   expect(routines?.textContent).toContain("2 scheduled");
   expect(routines?.textContent).not.toContain("4 scheduled");
@@ -179,16 +200,17 @@ test("Scheduled keeps the follow-ups and queued runs Routines doesn't list, with
   const cancel = followUpRow.querySelector("button") as HTMLButtonElement;
   expect(cancel.textContent).toBe("Cancel");
   fireEvent.click(cancel);
-  await waitFor(() => expect(cancelled).toEqual(['{"id":"wake-up:42"}']));
+  await waitFor(() => expect(cancelled).toEqual(["wake-up:42"]));
 });
 
 test("the newest three suggestions show, and the rest open in place", async () => {
   global.fetch = (async (input: RequestInfo | URL) => {
-    if (String(input) === "/api/proactive/suggestions")
+    if (pathOf(input) === CHECK_IN_ITEMS_PATH)
       return Response.json({
-        suggestions: Array.from({ length: 5 }, (_, index) => ({
+        nextCursor: null,
+        checkInItems: Array.from({ length: 5 }, (_, index) => ({
           id: `s${index}`,
-          agentId: "scout",
+          botId: "scout",
           title: `Suggestion ${index + 1}`,
           detail: "",
           sourceApp: null,
@@ -216,16 +238,20 @@ test("the newest three suggestions show, and the rest open in place", async () =
 });
 
 function glance(
-  data: BotActivity,
+  data: Partial<BotActivity>,
   Component: typeof BotActivityGlance = BotActivityGlance,
+  tasks: readonly unknown[] = [],
 ) {
   global.fetch = (async (input: RequestInfo | URL) =>
-    String(input).endsWith("/activity")
-      ? Response.json({ activity: data })
-      : Response.json(
-          { error: "unexpected" },
-          { status: 404 },
-        )) as typeof fetch;
+    String(input) === botOperationPath("scout", "activity")
+      ? activityResponse(data)
+      : // The person's tasks, which the Activity page lists beside the Bot's activity.
+        pathOf(input) === `${ORGANIZATION_PATH}/tasks`
+        ? Response.json({ tasks, nextCursor: null })
+        : Response.json(
+            { error: "unexpected" },
+            { status: 404 },
+          )) as typeof fetch;
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => <Component agentId="scout" />,
@@ -280,6 +306,57 @@ test("with nothing running or scheduled, there is no Activity section, and For y
   expect(titles).toEqual(["Activity"]);
   expect(section.container.querySelector("[data-slot=item]")).toBeNull();
   expect(section.queryByRole("heading", { name: "Activity" })).toBeNull();
+});
+
+/** One of the Bot's delegated tasks, as the API answers it. */
+const botTask = (id: string, status: string, title: string) =>
+  taskOf({
+    id,
+    agentId: "scout",
+    channelId: `channel_${id}`,
+    threadId: `thread_${id}`,
+    title,
+    why: null,
+    origin: "delegated",
+    suggestionId: null,
+    sourceApp: null,
+    sourceLink: null,
+    originChannelId: "channel_main",
+    status,
+    failure: null,
+    failedAt: null,
+    next: null,
+    resolvedAt: null,
+    createdAt: "2026-10-09T10:00:00Z",
+    updatedAt: "2026-10-09T10:00:00Z",
+  });
+
+/*
+ * FOUND LIVE: the Bot page's Activity row said "No tasks, routines or goals yet" while the Activity
+ * page it opens listed a finished task under Done. The row counted only the Bot's own activity and
+ * not its tasks, which the Activity page lists beside it. It reads what the Activity page reads.
+ */
+test("the Activity row counts the Bot's tasks as the Activity page lists them", async () => {
+  const idle = { inProgress: [], scheduled: [], completed: [] };
+  const finished = glance(idle, BotActivityRow, [
+    botTask("d", "ready_for_review", "Find Fremont Troll's origins"),
+  ]);
+  expect(
+    await finished.findByText("Nothing running or scheduled"),
+  ).toBeTruthy();
+  expect(finished.queryByText("No tasks, routines or goals yet")).toBeNull();
+  cleanup();
+
+  const working = glance(idle, BotActivityRow, [
+    botTask("w", "working", "Plan the offsite"),
+    botTask("q", "needs_input", "Order the seeds"),
+  ]);
+  expect(await working.findByText("2 in progress")).toBeTruthy();
+  cleanup();
+
+  // And with nothing at all, it still says so.
+  const none = glance(idle, BotActivityRow);
+  expect(await none.findByText("No tasks, routines or goals yet")).toBeTruthy();
 });
 
 test("a long title is cut to one line with an ellipsis, and the whole of it shows on hover", async () => {

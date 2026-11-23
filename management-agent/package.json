@@ -1,0 +1,23 @@
+{
+  "name": "@openbot/management-agent",
+  "license": "MIT",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "bun build src/main.ts --target bun --outfile dist/agent.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@peculiar/x509": "3.1.0",
+    "canonicalize": "5.1.0",
+    "reflect-metadata": "0.2.2",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.3",
+    "jose": "6.2.10",
+    "typescript": "^5.9.3"
+  }
+}

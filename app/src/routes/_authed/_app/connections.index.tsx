@@ -23,6 +23,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { RowMark } from "@/components/layout/row-mark";
+import { MovedAppsNotice } from "@/components/moves/moved-apps-notice";
 import { AppInitial, PluginLogo } from "@/components/plugins/plugin-logo";
 import { providerIcon } from "@/components/settings/linked-accounts";
 import {
@@ -44,6 +45,13 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import {
+  appSetupQueryOptions,
+  appsQueryOptions,
+  catalogueQueryOptions,
+} from "@/lib/apps/queries";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { useConnectApp } from "@/lib/connections/connect-app";
 import {
   type ConnectionRow,
@@ -57,18 +65,20 @@ import {
 } from "@/lib/identity/queries";
 import { keyedLookup } from "@/lib/lookup";
 import { useManagePaths } from "@/lib/manage-paths";
+import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
 import {
   addedByUrlListedOn,
   brokeredAccountsListedOn,
   serversListedFor,
   sharedAccountsListedOn,
 } from "@/lib/plugins/listed";
-import { moreAppsRow } from "@/lib/plugins/provider-vocabulary";
+import {
+  directoryProvider,
+  moreAppsRow,
+} from "@/lib/plugins/provider-vocabulary";
 import {
   connectionsQueryOptions,
   personalConnections,
-  pluginsPageQueryOptions,
-  pluginsProvider,
 } from "@/lib/plugins/queries";
 import { searchTextEntry } from "@/lib/search-text";
 
@@ -294,8 +304,20 @@ function RouteComponent() {
       replace: true,
     });
   }, [outcome, authorized, linked, navigate]);
+  /*
+   * A browser's sign-in can come back here (`?connected=<key>`): an app opened from the reconnect
+   * list goes back to the list once it is connected. `?connected=failed` connects nothing, so the
+   * person stays here with the failure said, and the notice below is the way back to the list.
+   */
+  useReturnToReconnectList();
   const [search, setSearch] = React.useState("");
-  const plugins = useQuery(pluginsPageQueryOptions());
+  const apps = useQuery(appsQueryOptions());
+  const catalogue = useQuery(catalogueQueryOptions());
+  const setup = useQuery(appSetupQueryOptions());
+  /* The three reads the apps on this page come from, waited for and failed together. */
+  const appReads = [apps, catalogue, setup];
+  const appsError = appReads.find((read) => read.error)?.error ?? null;
+  const appsFetching = appReads.some((read) => read.isFetching);
   const connections = useQuery(connectionsQueryOptions());
 
   /*
@@ -307,7 +329,7 @@ function RouteComponent() {
       (row) => row.serverId,
     ),
   );
-  const added = new Set((plugins.data?.servers ?? []).map((s) => s.id));
+  const added = new Set((apps.data ?? []).map((s) => s.id));
 
   /*
    * Only vendors reached as a person, and only ones an administrator has enabled.
@@ -316,7 +338,7 @@ function RouteComponent() {
    * so listing it here would offer a choice you do not have. And a vendor nobody has enabled cannot
    * be connected at all, because there is no OAuth client to consent against.
    */
-  const yours = (plugins.data?.catalogue ?? []).filter(
+  const yours = (catalogue.data ?? []).filter(
     (entry) => entry.auth === "user-oauth" && added.has(entry.key),
   );
 
@@ -330,18 +352,25 @@ function RouteComponent() {
    * EXCEPT THE ONES THAT NEED NO ACCOUNT, WHICH IS THE SAME RULE THE `user-oauth` FILTER ABOVE IS.
    * That one keeps out a vendor with a shared token because it "has nothing for you to decide"; a
    * Composio `NO_AUTH` app has exactly as little, one layer further in. There is no account to make:
-   * `/servers/:id/connect` refuses to create one and the call gate lets it through with no row, so
+   * connectApp refuses to create one and the call gate lets it through with no row, so
    * a row for it here can never turn green. What an admin enabling Hacker News put on every
    * person's page was a permanently grey "Not connected" that reads as an unfinished task, opening
    * a page that says the app needs no account and draws no button — the list and the page it opens
    * contradicting each other, with the list the more believable of the two.
    *
-   * ASKED OF THE RECORDED SCHEME, which this read already carries and the detail route already
-   * consumes. Anything that is not the vendor's `NO_AUTH` is an app somebody connects, an
-   * unrecorded scheme included: a row whose column was never written is far likelier to be a key or
-   * consent app, and dropping it here would hide a connection somebody does have.
+   * ASKED OF THE APP'S `connectsWith`, which this read already carries and the detail route already
+   * consumes. Anything that is not `nothing` is an app somebody connects, one OpenBot couldn't read
+   * included: such an app is far likelier to take a key or a sign-in, and dropping it here would
+   * hide a connection somebody does have.
    */
-  const listed = plugins.data ? serversListedFor(plugins.data) : [];
+  const listed =
+    apps.data && setup.data
+      ? serversListedFor({
+          servers: apps.data,
+          directoryAvailable: setup.data.directoryAvailable,
+          directoryProvider: directoryProvider(setup.data),
+        })
+      : [];
   /*
    * THE PERSONAL EDITION LISTS EVERY APP HERE, added or not, because the one person is the one who
    * adds it: a tile's press adds the app and connects it in one go (`useConnectApp`).
@@ -350,13 +379,20 @@ function RouteComponent() {
   /** Undefined until it answers, and on a failed read: neither edition's guidance is assumed. */
   const edition = capabilities.data?.edition;
   const personal = edition === "personal";
+  /*
+   * A server added by its address is added for everyone in the organization, so only an admin adds
+   * one (the personal edition's one person is its admin). Nobody else is offered a button the server
+   * would refuse.
+   */
+  const role = useQuery(currentUserQueryOptions()).data?.role;
+  const mayAddServer = personal || isOrganizationAdmin(role);
   const connectApp = useConnectApp();
   const paths = useManagePaths();
   // The broker's directory of more apps, as one more tile, where a broker is set up.
-  const provider = pluginsProvider(plugins.data);
+  const provider = directoryProvider(setup.data);
   const moreApps = moreAppsRow(
     provider,
-    plugins.data?.composioConfigured ?? false,
+    setup.data?.directoryAvailable ?? false,
     paths.edition,
   );
   const browse = personal && moreApps.linked ? moreApps : null;
@@ -367,7 +403,7 @@ function RouteComponent() {
   const query = search.trim().toLocaleLowerCase();
   const rows = personal
     ? personalConnectionRows({
-        catalogue: plugins.data?.catalogue ?? [],
+        catalogue: catalogue.data ?? [],
         added,
         brokered: brokeredAccountsListedOn(listed),
         byUrl: addedByUrlListedOn(listed),
@@ -399,7 +435,7 @@ function RouteComponent() {
    * links read costs the GitHub and Slack rows and says so, not the whole page.
    */
   const loading =
-    plugins.isPending ||
+    appReads.some((read) => read.isPending) ||
     connections.isPending ||
     links.isPending ||
     providers.isPending ||
@@ -411,7 +447,7 @@ function RouteComponent() {
    */
   const showingApps =
     !loading &&
-    !plugins.error &&
+    !appsError &&
     !connections.error &&
     rows.length > 0 &&
     matching.length > 0;
@@ -423,14 +459,16 @@ function RouteComponent() {
        * because it takes a name, an address and sometimes a key (the layout skill's Procedure 5).
        */
       action={
-        <Button
-          render={(props) => <Link {...props} to="/connections/new" />}
-          size="sm"
-          variant="outline"
-        >
-          <IconPlus />
-          Add server
-        </Button>
+        mayAddServer ? (
+          <Button
+            render={(props) => <Link {...props} to="/connections/new" />}
+            size="sm"
+            variant="outline"
+          >
+            <IconPlus />
+            Add server
+          </Button>
+        ) : undefined
       }
       className="@container"
       description={
@@ -476,6 +514,8 @@ function RouteComponent() {
           {connectApp.error}
         </p>
       ) : null}
+      {/* What a move to OpenBot Cloud left to connect again, and the way to the list of it. */}
+      <MovedAppsNotice />
       {/*
        * The first section has no heading of its own: in the team edition it is the page's one list,
        * and "Your connections" under "Connections" said the same thing twice. It holds the search,
@@ -484,14 +524,14 @@ function RouteComponent() {
        */}
       <PageSection>
         {/*
-         * BOTH APP READS DECIDE THIS. A `/api/plugins` that succeeded beside a
-         * `/api/plugins/connections` that failed would leave the `connected` set empty and every row
+         * BOTH APP READS DECIDE THIS. Apps that loaded (listApps, the catalogue, getAppSetup) beside a
+         * listConnections that failed would leave the `connected` set empty and every row
          * asserting "Connect" over accounts somebody already has, so either failure is one sentence:
          * nothing is listed rather than a list that may be wrong.
          */}
         {loading ? (
           <ConnectionsLoading />
-        ) : plugins.error || connections.error ? (
+        ) : appsError || connections.error ? (
           /*
            * A failed read is not missing setup, so Retry comes first. Only the team edition has an
            * admin to ask; a personal owner is pointed at Setup, which is theirs.
@@ -506,17 +546,16 @@ function RouteComponent() {
             </p>
             <div className="flex gap-2">
               <Button
-                disabled={plugins.isFetching || connections.isFetching}
+                disabled={appsFetching || connections.isFetching}
                 onClick={() => {
-                  if (plugins.error) void plugins.refetch();
+                  for (const read of appReads)
+                    if (read.error) void read.refetch();
                   if (connections.error) void connections.refetch();
                 }}
                 size="sm"
                 variant="outline"
               >
-                {plugins.isFetching || connections.isFetching
-                  ? "Retrying…"
-                  : "Retry"}
+                {appsFetching || connections.isFetching ? "Retrying…" : "Retry"}
               </Button>
               {edition === "personal" ? (
                 <Button
@@ -575,8 +614,8 @@ function RouteComponent() {
         )}
         {links.error || providers.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load GitHub and Slack, so they aren't listed. Reload the
-            page.
+            Couldn't load GitHub and Slack, so they aren't listed. Try again in
+            a moment.
           </p>
         ) : null}
       </PageSection>
@@ -801,7 +840,9 @@ function ConnectionStateLabel({
     );
   }
   if (state === "team") {
-    return <span className="text-xs text-muted-foreground">Team account</span>;
+    return (
+      <span className="text-xs text-muted-foreground">Shared account</span>
+    );
   }
   const pill = (
     <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">

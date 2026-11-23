@@ -19,13 +19,16 @@ import {
   directoryDescriptions,
   moreAppsRow,
 } from "@/lib/plugins/provider-vocabulary";
+import { type PluginConnection, pluginKeys } from "@/lib/plugins/queries";
 import {
-  type PluginConnection,
-  type PluginServer,
-  type PluginsPage,
-  pluginKeys,
-} from "@/lib/plugins/queries";
+  type AppsFixture,
+  answerAppsApi,
+  seedAppReads,
+  type TodayCatalogueItem,
+  type TodayServer,
+} from "./apps-api";
 import { settleReactWork } from "./settle-react-work";
+import { connectionPage, MY_CONNECTIONS_PATH } from "./connections-api";
 
 /*
  * An app's page in the personal edition is read by the one person running OpenBot on their own
@@ -43,17 +46,18 @@ afterAll(async () => {
 });
 
 /** What the server answers for the page being drawn, should anything ask again. */
-let served: { page: PluginsPage; connections: PluginConnection[] } | null =
+let served: { page: AppsFixture; connections: PluginConnection[] } | null =
   null;
 
 const originalFetch = global.fetch;
 beforeAll(() => {
   global.fetch = Object.assign(
-    async (input: RequestInfo | URL) => {
+    async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input).split("?")[0] ?? "";
-      if (served && path === "/api/plugins") return Response.json(served.page);
-      if (served && path === "/api/plugins/connections")
-        return Response.json({ connections: served.connections });
+      const apps = served && answerAppsApi(input, init, served.page);
+      if (apps) return apps;
+      if (served && path === MY_CONNECTIONS_PATH)
+        return connectionPage(served.connections);
       return Response.json({ error: "not served" }, { status: 404 });
     },
     { preconnect: originalFetch.preconnect },
@@ -66,7 +70,7 @@ afterAll(() => {
 const TEAM_WORDS =
   /each person|deployment|admin|token to paste|whoever|that person|everybody/i;
 
-function brokered(authScheme: string): PluginServer {
+function brokered(authScheme: string): TodayServer {
   return {
     authScheme,
     id: "gmail",
@@ -87,10 +91,10 @@ function brokered(authScheme: string): PluginServer {
     ownerGrantsChosen: null,
     tools: [],
     withdrawn: [],
-  } as unknown as PluginServer;
+  };
 }
 
-const notion = {
+const notion: TodayServer = {
   ...brokered("OAUTH2"),
   id: "notion",
   title: "Notion",
@@ -99,10 +103,10 @@ const notion = {
   authScheme: null,
   hasCredential: true,
   dynamicClient: true,
-} as unknown as PluginServer;
+};
 
 /** Notion's catalogue entry, which is what says it is reached as you through an OAuth client. */
-const notionEntry = {
+const notionEntry: TodayCatalogueItem = {
   key: "notion",
   title: "Notion",
   vendor: "Notion",
@@ -123,10 +127,10 @@ const connectedGmail = {
 
 function draw(input: {
   edition: "team" | "personal";
-  server: PluginServer;
+  server: TodayServer;
   configured?: boolean;
   connections?: PluginConnection[];
-  catalogue?: unknown[];
+  catalogue?: TodayCatalogueItem[];
 }) {
   const client = new QueryClient({
     defaultOptions: {
@@ -143,16 +147,15 @@ function draw(input: {
     page: {
       catalogue: input.catalogue ?? [],
       servers: [input.server],
-      skills: [],
       botsMayCallBack: true,
       redirectUri: "https://openbot.example/callback",
       composioConfigured: input.configured ?? true,
       authorizesPerAction: false,
       provider: "composio",
-    } as unknown as PluginsPage,
+    },
     connections: input.connections ?? [],
   };
-  client.setQueryData(pluginKeys.page(), served.page);
+  seedAppReads(client, served.page);
   client.setQueryData(pluginKeys.connections(), {
     connections: served.connections,
   });

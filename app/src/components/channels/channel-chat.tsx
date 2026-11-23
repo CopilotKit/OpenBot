@@ -1,4 +1,4 @@
-import type { Message } from "@ag-ui/core";
+import { EventType, type Message } from "@ag-ui/core";
 import {
   type Attachment,
   CopilotChatConfigurationProvider,
@@ -28,6 +28,7 @@ import { ChannelWorkRows } from "@/components/channels/channel-work";
 import { attachmentModality } from "@/components/channels/chat-messages";
 import { toAgentOptions } from "@/components/channels/composer";
 import { ModelPicker } from "@/components/channels/composer/model-picker";
+import { StillWorkingError } from "@/components/channels/composer/queue";
 import { ConversationIntro } from "@/components/channels/conversation-intro";
 import { ConversationView } from "@/components/channels/conversation-view";
 import { ProgressRow } from "@/components/channels/progress-row";
@@ -44,7 +45,9 @@ import {
   answerPersonQuestionMutationOptions,
   approvalInboxOptions,
   carryingOnAfterApproval,
+  leftAnswers,
 } from "@/lib/approvals";
+import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
 import { attachmentUrl } from "@/lib/channels/attachments";
 import {
   recordChannelActivityMutationOptions,
@@ -56,6 +59,8 @@ import {
   channelKeys,
 } from "@/lib/channels/queries";
 import { runReply } from "@/lib/channels/run-reply";
+import { onBotSaidOffTheList } from "@/lib/channels/said-off-the-list";
+import { turnDidWork } from "@/lib/channels/turn-did-work";
 import {
   onRunStartedAway,
   onTurnFinishedAway,
@@ -66,6 +71,7 @@ import {
   turnsLeftRunning,
   turnsNoLongerAway,
 } from "@/lib/channels/turns-finished-away";
+import { publishedPlaygroundQueryOptions } from "@/lib/components/queries";
 import { useConversationActivity } from "@/lib/computers/activity";
 import { channelAgentId, useActiveBot } from "@/lib/copilot/active-bot";
 import {
@@ -77,20 +83,39 @@ import { isBrokenStream, STREAM_BROKE } from "@/lib/copilot/broken-stream";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import {
+  askRunLiveness,
+  quietRunPeriod,
+  RUN_ENDED_UNHEARD,
+  RUN_UNREACHABLE,
+  watchQuietRun,
+} from "@/lib/copilot/quiet-run";
+import {
   repairUnansweredToolCalls,
   unansweredToolCalls,
   withStoredAnswers,
 } from "@/lib/copilot/repair-history";
 import { releaseServerOwnedInterrupts } from "@/lib/copilot/server-owned-interrupts";
-import { followLastRun, stoppedReason } from "@/lib/copilot/stopped-turn";
+import {
+  asksToCarryOn,
+  failedRunReason,
+  followLastRun,
+  laterRunFailure,
+  requestNotMade,
+  stoppedReason,
+  TURN_CUT_OFF,
+} from "@/lib/copilot/stopped-turn";
 import {
   readThreadMessages,
   withCurrentA2uiVersions,
 } from "@/lib/copilot/thread-messages";
+import { useAttachmentLimits } from "@/lib/deployment/queries";
+import {
+  useConnectionLost,
+  useReconnected,
+} from "@/lib/desktop/connection-lost";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useConversationModel } from "@/lib/models/run-model";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
-import { publishedSandboxedQueryOptions } from "@/lib/sandboxed/queries";
 import {
   askChannelAgent,
   messageText,
@@ -115,6 +140,28 @@ import { newId } from "../../lib/new-id";
  * next message sent.
  */
 const JOIN_DEADLINE_MS = 1500;
+
+/**
+ * How long the runtime is given to say whether a turn the roster reports can still be heard, before
+ * the join is ended. Shorter than a quiet run's ask: the conversation shows nothing while it waits.
+ */
+const JOIN_LIVENESS_MS = 5_000;
+
+/** The notices of a turn cut off part way, which Carry on can pick up. */
+const CUT_OFF = new Set([
+  TURN_CUT_OFF,
+  RUN_ENDED_UNHEARD,
+  RUN_UNREACHABLE,
+  STREAM_BROKE,
+]);
+
+/** What Carry on sends, as the person. */
+const CARRY_ON = "Please carry on where you stopped.";
+
+/** Whether a turn's notice offers Carry on: a turn cut off part way, or one the server asks to carry on. */
+function carriesOn(said: string): boolean {
+  return CUT_OFF.has(said) || asksToCarryOn(said);
+}
 
 /**
  * Whether the roster says a turn is running in this conversation now: one this tab started from a
@@ -297,14 +344,30 @@ export function mergeStoredMessages(
   const before = new Map<string, Message[]>();
   /** The stored copy of each local message the store holds, by the local id. */
   const storedFor = new Map<string, Message>();
+  const localAt = new Map(local.map((message, at) => [message.id, at]));
+  /*
+   * AN ANCHOR ONLY COUNTS WHEN IT IS FURTHER ON THAN THE LAST ONE. The store does not always list a
+   * message where it was said: thinking the browser carries back with a later turn is listed with
+   * that turn, at the end of the thread, long after the answer it belongs to. Taken as an anchor,
+   * the first such piece pulled everything missing before it (the end of a conversation whose
+   * replay was still coming in) up to the top, under the first message: "Turn 0", then turns 53 to
+   * 63, then turn 0's answer. A message the screen holds further back than the last anchor is out of
+   * place in the store, so what is missing waits for the next anchor that is in place, or goes at
+   * the end.
+   */
+  let lastAnchor = -1;
   let pending: Message[] = [];
   for (const message of stored) {
     if (seenStored.has(message.id)) continue;
     seenStored.add(message.id);
     const held = heldAs(message);
     if (held !== undefined) {
-      if (pending.length > 0) before.set(held, pending);
-      pending = [];
+      const at = localAt.get(held) ?? -1;
+      if (at > lastAnchor) {
+        if (pending.length > 0) before.set(held, pending);
+        pending = [];
+        lastAnchor = at;
+      }
       if ((readBack || held === message.id) && !storedFor.has(held))
         storedFor.set(held, message);
     } else {
@@ -446,10 +509,27 @@ function toAttachmentPart(attachment: Attachment) {
   const { source } = attachment;
   const mimeType =
     source.type === "url" && source.mimeType ? source.mimeType : undefined;
+  /*
+   * The type the server found and the file's size go with the part, so a transcript decides how to
+   * show a picture without fetching it: one over `LARGEST_PICTURE_DRAWN_INLINE` is drawn as its
+   * file, where a thumbnail would download all of it (up to 100MB) for every reader.
+   */
+  const size =
+    typeof attachment.size === "number" && Number.isFinite(attachment.size)
+      ? attachment.size
+      : undefined;
   return {
     type: attachmentModality(attachment.type, mimeType),
-    source: { type: "url" as const, value: attachmentUrl(attachmentId) },
-    metadata: filename ? { attachmentId, filename } : { attachmentId },
+    source: {
+      type: "url" as const,
+      value: attachmentUrl(attachmentId),
+      ...(mimeType ? { mimeType } : {}),
+    },
+    metadata: {
+      attachmentId,
+      ...(filename ? { filename } : {}),
+      ...(size !== undefined ? { sizeBytes: size } : {}),
+    },
   };
 }
 
@@ -488,7 +568,7 @@ function describeAttachments(attachments: readonly Attachment[]): string {
 function authoredComponents(): ReadonlySet<string> {
   return new Set(
     (
-      queryClient.getQueryData(publishedSandboxedQueryOptions().queryKey) ?? []
+      queryClient.getQueryData(publishedPlaygroundQueryOptions().queryKey) ?? []
     ).map((component) => component.name),
   );
 }
@@ -618,6 +698,15 @@ export function ChannelChat({
    */
   const [restoring, setRestoring] = useState(seed === null);
   /**
+   * The join is replaying the thread's history, and has not found a turn still going in it.
+   *
+   * `connectAgent` holds `agent.isRunning` true for the whole replay whether or not anything is
+   * running, so a Stop drawn from it showed for as long as a conversation took to load, with no run
+   * for it to reach. Cleared when the join turns out to carry the Bot's answer (`onAnswering`), which
+   * is a run Stop does reach, and when the join is over.
+   */
+  const [replaying, setReplaying] = useState(false);
+  /**
    * How many stored turns this app could not read.
    *
    * Held rather than derived, because the transcript is the running agent's once history is handed
@@ -643,16 +732,41 @@ export function ChannelChat({
     if (isReady) openReadyGate.current();
   }, [isReady]);
 
+  /**
+   * WHEN OPENBOT ANSWERS AGAIN, A CONVERSATION THAT HAD NO ANSWER FILLS IN BY ITSELF. Inside OpenBot
+   * Desktop connected to an OpenBot somewhere else, a conversation opened while that OpenBot did not
+   * answer has nothing to show: its join and the read of its history both came back from the relay.
+   * It used to stay that way until the person opened another conversation and came back. Now, when
+   * the connection line clears, a conversation whose join or read had no answer asks again: with an
+   * empty transcript it joins its thread again (`joins` reruns the join below), which also brings the
+   * runtime's connection back; with a transcript, it reads the stored history again and merges it,
+   * so a replay is never laid over messages already on screen.
+   */
+  const [joins, setJoins] = useState(0);
+  const unanswered = useRef(false);
+  const connection = useConnectionLost();
+  useReconnected(() => {
+    if (!unanswered.current) return;
+    unanswered.current = false;
+    if (agentRef.current.messages.length === 0) setJoins((count) => count + 1);
+    else pullHistoryRef.current?.();
+  });
+
   // Join the gateway socket, restore durable history, then release the first-message gate.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `joins` is the join asked for again when OpenBot answers again.
   useEffect(() => {
     if (!isReady) return;
     let current = true;
     const version = ++historyReadVersion.current;
     // Before the connect: it is handed the subscribers the agent has when it starts.
     const lastRun = followLastRun(agent);
+    setReplaying(true);
 
     void (async () => {
-      let joined: "connected" | "deadline" = "deadline";
+      let joined: "connected" | "deadline" | "gave up" = "deadline";
+      // How a kept join's turn was found to have ended, and how to stop watching it.
+      let keptEnded: "over" | "unreachable" | null = null;
+      let stopKept = () => {};
       try {
         // Bounded, and finished when it returns; `join-thread.ts` has why that matters.
         joined = await joinWithin({
@@ -671,8 +785,50 @@ export function ChannelChat({
            * once the thread's run is over, so a roster that is late to clear cannot hold it open.
            */
           answering: () => lastRun.running() || rosterSaysWorking(channel.id),
+          /*
+           * A turn the replay has carried is being heard. One only the roster knows of is checked
+           * with the server, which is asked the way a quiet run is: when it cannot answer, nothing
+           * is coming down this join, and keeping it kept the conversation shut for good.
+           */
+          reachable: async () =>
+            lastRun.running() ||
+            (await askRunLiveness(channel.id, {
+              answerMs: JOIN_LIVENESS_MS,
+            })) !== "unreachable",
           onAnswering: () => {
-            if (current) setRestoring(false);
+            if (current) {
+              setRestoring(false);
+              setReplaying(false);
+            }
+          },
+          /*
+           * A turn kept for is watched as a turn sent from here is: gone quiet, the server is asked
+           * whether the conversation still has a run, and a run that is over, or a server that can't
+           * say, ends the join with a notice. See `keptUntil`.
+           */
+          keptUntil: () => {
+            const quiet = watchQuietRun({
+              ask: () => askRunLiveness(channel.id),
+              quietMs: quietRunPeriod.ms,
+            });
+            const hearing = agent.subscribe({
+              onEvent: ({ event }) => {
+                if (
+                  event.type === EventType.RUN_FINISHED ||
+                  event.type === EventType.RUN_ERROR
+                )
+                  quiet.rest();
+                else quiet.heard();
+              },
+            });
+            stopKept = () => {
+              quiet.stop();
+              hearing.unsubscribe();
+            };
+            return quiet.over.then((outcome) => {
+              keptEnded = outcome;
+              hearing.unsubscribe();
+            });
           },
         });
       } catch {
@@ -681,9 +837,17 @@ export function ChannelChat({
          * typed afterwards waits on that gate, so a throw here would silence the conversation
          * rather than degrade it. History is restored below either way.
          */
+        unanswered.current = true;
       } finally {
+        stopKept();
         lastRun.stop();
+        if (current) setReplaying(false);
         openJoined.current();
+      }
+      // The turn the join was kept for had ended without a word reaching here: say so.
+      if (keptEnded !== null && current && turnsRef.current === 0) {
+        setRestoring(false);
+        setRunError(keptEnded === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE);
       }
       /*
        * The last run failed, so say so again, as the turn did when it failed. Only from a replay
@@ -695,6 +859,15 @@ export function ChannelChat({
         setRunError((shown) => shown ?? failed);
       }
 
+      /*
+       * A READ THAT FAILED ON OPENING IS ASKED AGAIN BEFORE IT IS ANNOUNCED. Its deadline is short so
+       * the message waiting behind it is not held up, and a read that was only slow (a link busy
+       * with a large picture going up or coming down) used to say "Couldn't load earlier messages"
+       * about a conversation that had lost nothing. So a failed read here releases the gate as
+       * before and hands over to the refresh below, which tries again the same way it does for a
+       * Bot's turn and says the history is unavailable only when every try has failed.
+       */
+      let askAgain = false;
       try {
         const stored = await readThreadMessages(
           channel.threadId,
@@ -718,11 +891,14 @@ export function ChannelChat({
          * it that nothing accounts for. Set even when nothing was restored: a thread whose every turn
          * is unreadable is exactly the case where silence would read as "this conversation is empty".
          */
-        if (isCurrent) {
+        if (isCurrent && stored.availability === "unavailable") {
+          askAgain = true;
+          // Still an unanswered read for the reconnect to ask again about, whatever the retries do.
+          unanswered.current = true;
+        } else if (isCurrent) {
           setUnreadable(stored.unreadable);
-          setHistoryAvailability(stored.availability);
-          // A gateway snapshot may be partial; neither it nor a later send proves this read succeeded.
-          setHistoryReadFailed(stored.availability === "unavailable");
+          setHistoryAvailability("ready");
+          setHistoryReadFailed(false);
         }
       } finally {
         // Cleared on failure too: placeholders over an empty transcript promise messages that are
@@ -731,6 +907,7 @@ export function ChannelChat({
         // Release even on join/restore failure; the gate orders messages, not withholds them.
         openJoinGate.current();
       }
+      if (askAgain && current) pullHistoryRef.current?.();
     })();
 
     return () => {
@@ -743,6 +920,7 @@ export function ChannelChat({
     channel.id,
     channel.threadId,
     runtimeAgentId,
+    joins,
   ]);
 
   /*
@@ -764,6 +942,16 @@ export function ChannelChat({
    */
   /* The read below, for a turn that ends without the roster saying so: see `carryingOn`. */
   const pullHistoryRef = useRef<(() => void) | null>(null);
+  /*
+   * NOT WHILE THIS TAB'S OWN TURN IS GOING. A Bot's line said here from elsewhere can land while a
+   * turn of this tab's is still reaching it: a task the Bot handed off finishes and its result is
+   * said the moment the turn lets go of the conversation, before the turn's last events are here.
+   * Merged in then, the line was gone again when the turn ended, because a run ends by handing back
+   * the thread as it saw it (ag-ui-langgraph sends that snapshot on every run), and the conversation
+   * showed the task's card as Done with no result under it until it was opened again. So that read
+   * waits for the turn to be over, and the turn's end asks for it (`say`).
+   */
+  const readAfterTurn = useRef(false);
   useEffect(() => {
     const authoredActivity = (): ChannelActivitySignature | null => {
       const cache = queryClient.getQueryData<{
@@ -810,6 +998,13 @@ export function ChannelChat({
         // Nor while a run of a turn going on in a chat that closed is joined: see `rejoining`.
         await rejoining.current;
         if (!isCurrent()) return;
+        // Nor while this tab's own turn is going: read when it ends. See `readAfterTurn`.
+        const ownTurnGoing = () => {
+          if (turnsRef.current === 0) return false;
+          readAfterTurn.current = true;
+          return true;
+        };
+        if (ownTurnGoing()) return;
         let sawReady = false;
         for (const delayMs of [0, 750, 1500]) {
           if (delayMs > 0) {
@@ -821,12 +1016,15 @@ export function ChannelChat({
             runtimeAgentId,
           );
           if (!isCurrent()) return;
+          // A turn of this tab's began while the read was out: it is read again once that ends.
+          if (ownTurnGoing()) return;
           if (stored.availability === "unavailable") {
             // Only an exhausted refresh with no successful read is a failure to announce. Keep the
             // last known ready notice when the store already answered this refresh cycle.
             if (delayMs === 1500 && !sawReady) {
               setHistoryAvailability("unavailable");
               setHistoryReadFailed(true);
+              unanswered.current = true;
             }
             continue;
           }
@@ -860,6 +1058,17 @@ export function ChannelChat({
      * streamed here, so it is read: see `turns-finished-away.ts`.
      */
     const offFinishedAway = onTurnFinishedAway(channel.id, pull);
+    /*
+     * A Bot's line in this conversation that the list has no row to carry: a task's thread, kept
+     * out of the list. Read as a listed conversation's is, and not when it is this tab's own
+     * report coming back. See `said-off-the-list.ts`.
+     */
+    const offSaidOffTheList = onBotSaidOffTheList(channel.id, (line) => {
+      if (sameActivity(line, lastSeen)) return;
+      lastSeen = line;
+      if (sameActivity(selfReportedBotActivity.current, line)) return;
+      pull();
+    });
     pullHistoryRef.current = pull;
     void (async () => {
       await joinGatePromise;
@@ -875,6 +1084,7 @@ export function ChannelChat({
       cancelled = true;
       unsubscribe();
       offFinishedAway();
+      offSaidOffTheList();
       pullHistoryRef.current = null;
     };
   }, [
@@ -923,17 +1133,23 @@ export function ChannelChat({
   useConversationActivity(runtimeAgentId, agent.messages);
 
   const skillCommands = useSkillCommands(runtimeAgentId);
+  const attachmentLimits = useAttachmentLimits();
   /*
    * The model this conversation's Bot answers on. Only a Bot that runs inside OpenBot uses OpenBot's
    * model, so only it gets a picker; a Bot on its own framework picks its own model.
    */
+  /*
+   * Not a Bot that hands work out either (while that is offered at all): it answers on its own
+   * model.
+   */
+  const picksModel = useBotTakesModelChoice(botProfile);
   const models = useQuery({
     ...modelCatalogueQueryOptions(),
-    enabled: botProfile?.runsOnOpenBotModel === true,
+    enabled: picksModel,
   });
   const runModel = useConversationModel(
     channel.id,
-    botProfile?.runsOnOpenBotModel ? models.data : undefined,
+    picksModel ? models.data : undefined,
   );
   /*
    * History is the snapshot, the stored thread AND the voice archive. The transcript shows none of
@@ -951,14 +1167,17 @@ export function ChannelChat({
     voicePending: voiceArchive.pending,
     voiceWaitedOut,
   });
-  const historyNotice = channelHistoryNotice({
-    restoring: historyLoading,
-    messageCount: agent.messages.length,
-    lastMessageAt: channel.lastMessageAt,
-    historyAvailability,
-    historyReadFailed,
-    unreadable,
-  });
+  // While the connection line shows, it says why the history is missing; this does not repeat it.
+  const historyNotice = connection.lost
+    ? null
+    : channelHistoryNotice({
+        restoring: historyLoading,
+        messageCount: agent.messages.length,
+        lastMessageAt: channel.lastMessageAt,
+        historyAvailability,
+        historyReadFailed,
+        unreadable,
+      });
 
   const awaitingReply = useRef(false);
   /**
@@ -993,6 +1212,8 @@ export function ChannelChat({
   const turnFailure = useRef<string | null>(null);
   /** A run of the turn going here failed because its stream reached this browser out of shape. */
   const streamBroke = useRef(false);
+  /** The person stopped the turn going here (Stop, or Send now): a run it aborted is not a failure. */
+  const stoppedHere = useRef(false);
   const assistantMessagesBeforeRun = useRef<Set<string>>(new Set());
   /** The reply this turn last told the roster about, so a later run of the turn says only what's new. */
   const reportedReply = useRef<string | null>(null);
@@ -1215,6 +1436,7 @@ export function ChannelChat({
 
     setRunError(null);
     turnFailure.current = null;
+    stoppedHere.current = false;
     reportedReply.current = null;
     assistantMessagesBeforeRun.current = new Set(
       target.messages
@@ -1253,7 +1475,11 @@ export function ChannelChat({
     report(trimmed || describeAttachments(attachments), null);
 
     // Providers reject later turns if prior tool calls have no result; repair before sending.
-    const repaired = repairUnansweredToolCalls(target.messages);
+    const repaired = repairUnansweredToolCalls(
+      target.messages,
+      undefined,
+      leftAnswers(queryClient.getQueryData(approvalInboxOptions().queryKey)),
+    );
     if (repaired !== target.messages) {
       target.setMessages(repaired as typeof target.messages);
     }
@@ -1289,9 +1515,75 @@ export function ChannelChat({
        * says so under the turn rather than looping.
        */
       for (let carriedOn = false; ; carriedOn = true) {
-        await withVoiceContext(copilotkit, target.agentId, voiceHistory, () =>
-          whileObserved(target, () => copilotkit.runAgent({ agent: target })),
+        /*
+         * A RUN THAT GOES QUIET IS ASKED ABOUT, and ended here only on the runtime's answer: no run
+         * going, or no answer (`quiet-run.ts`). Its events reach this browser by a service that can
+         * stall, and a run the server gave up then looked like one still thinking: "Running" and
+         * Stop, for good. A browser step taken between this turn's runs is quiet of its own, so the
+         * watch covers one run at a time.
+         */
+        const quiet = watchQuietRun({
+          ask: () => askRunLiveness(channel.id),
+          quietMs: quietRunPeriod.ms,
+        });
+        const hearing = target.subscribe({
+          /*
+           * The browser starting the turn's next run (with a step's result) ends the rest, before a
+           * word of it arrives. Found on WebKit with the server killed right after the next run was
+           * sent: nothing of it ever came, the watch was still resting from the run before, and the
+           * server saying it had no run going read as the step still being taken. "Thinking" for good.
+           */
+          onRunInitialized: () => quiet.heard(),
+          onEvent: ({ event }) => {
+            // Between the server's runs the turn is this browser's (a step it takes, a card the
+            // person answers), and quiet there is not a run gone missing.
+            if (
+              event.type === EventType.RUN_FINISHED ||
+              event.type === EventType.RUN_ERROR
+            )
+              quiet.rest();
+            else quiet.heard();
+          },
+        });
+        const run = withVoiceContext(
+          copilotkit,
+          target.agentId,
+          voiceHistory,
+          () =>
+            whileObserved(target, () => copilotkit.runAgent({ agent: target })),
         );
+        const ended = await Promise.race([
+          run.then(() => "ran" as const),
+          quiet.over,
+        ]).finally(() => {
+          quiet.stop();
+          hearing.unsubscribe();
+        });
+        if (ended !== "ran") {
+          // The run is let go of here; whatever it does later is not this turn's any more.
+          run.catch(() => undefined);
+          /*
+           * And a step the browser is still taking is stopped with it. Left running, a save whose
+           * request came back after the server did started the turn's next run under a notice that
+           * said the turn was over. What it says now is this turn's last word, so nothing after it
+           * is reported as a failure of its own.
+           */
+          stoppedHere.current = true;
+          try {
+            copilotkit.stopAgent({ agent: target });
+          } catch {
+            // Nothing left to stop.
+          }
+          void target.detachActiveRun().catch(() => undefined);
+          awaitingReply.current = false;
+          // What the thread holds is what was saved: read back when the runtime can be asked.
+          if (ended === "over") {
+            const whole = await readBackFromThread(target, existingMessageIds);
+            if (whole) reportReadBack(target);
+          }
+          setRunError(ended === "over" ? RUN_ENDED_UNHEARD : RUN_UNREACHABLE);
+          break;
+        }
         if (!streamBroke.current || turnFailure.current !== null) break;
         streamBroke.current = false;
         awaitingReply.current = false;
@@ -1342,7 +1634,23 @@ export function ChannelChat({
      * is the retry, the same way a failed composer send has always put its words back while the
      * transcript kept the turn.
      */
-    if (turnFailure.current !== null) {
+    /*
+     * EXCEPT A TURN THAT HAD ALREADY DONE SOMETHING. Its message was sent and acted on, so it is
+     * not handed back to be sent again: run again, it would repeat what already ran. The notice
+     * under it says what went wrong. See `turnDidWork`.
+     */
+    /*
+     * NOR A TURN THAT WAS CUT OFF. Its message reached the Bot, whose connection was then cut (its
+     * backend stopped answering, its model's connection dropped), and the notice under it offers
+     * Carry on, which picks the turn up with the message in front of the Bot. Found on a Cloud
+     * dogfood: a turn cut before it did anything put the words back in the box as if nothing had
+     * been sent, under a notice that said nothing of it.
+     */
+    if (
+      turnFailure.current !== null &&
+      !carriesOn(turnFailure.current) &&
+      !turnDidWork(target.messages, existingMessageIds)
+    ) {
       throw new Error(turnFailure.current);
     }
     return target.messages
@@ -1381,9 +1689,8 @@ export function ChannelChat({
       agentRef.current.isRunning ||
       turnsGoingAway(channel.id) > 0
     ) {
-      throw new Error(
-        "This Bot is still working on something. Wait for it, or stop it first.",
-      );
+      // Its own kind, so a drained queue tries again once the Bot is free (`StillWorkingError`).
+      throw new StillWorkingError();
     }
 
     const turn = {};
@@ -1417,6 +1724,11 @@ export function ChannelChat({
       // does not, and the last turn out is what takes the roster's working indicator down.
       if (turnsRef.current === 0) {
         void setChannelBusy({ channelId: channel.id, busy: false });
+        // A Bot's line said here while the turn went on is read now that it is over.
+        if (readAfterTurn.current) {
+          readAfterTurn.current = false;
+          pullHistoryRef.current?.();
+        }
       }
       turnTokens.current.delete(turn);
       // And the conversation open now, if the person came back, reads what this turn stored.
@@ -1435,13 +1747,24 @@ export function ChannelChat({
      * nine steps into a form) ended the turn with its steps on screen and nothing said. Only a
      * RUN_ERROR counts there: the Bot said it failed, where a Stop ends a run as finished, cancelled.
      */
-    const fail = (message: string, laterRun = false) => {
+    const fail = (
+      message: string,
+      laterRun = false,
+      /** A truer sentence that is still being asked for; nothing is drawn until it answers. */
+      truer?: Promise<string>,
+    ) => {
       if (!awaitingReply.current && !(laterRun && turnsRef.current > 0)) return;
       awaitingReply.current = false;
       // Both halves of one fact: the sentence the transcript shows, and the reason `deliver` throws
       // so the draft behind the turn is restored rather than counted as sent. See `turnFailure`.
       turnFailure.current = message;
-      setRunError(message);
+      if (!truer) return setRunError(message);
+      void truer.then((sentence) => {
+        // The next turn clears the failure; a sentence about the one before it is dropped.
+        if (turnFailure.current !== message) return;
+        turnFailure.current = sentence;
+        setRunError(sentence);
+      });
     };
     const subscription = agent.subscribe?.({
       // Both surfaces fall back to the same sentence, from the same place, so a person who uses
@@ -1461,7 +1784,30 @@ export function ChannelChat({
           streamBroke.current = true;
           return;
         }
-        fail(stoppedReason(error));
+        /*
+         * A LATER RUN OF A TURN STILL GOING HERE, started from this browser with a step's result (a
+         * file it saved). Its failure used to be dropped as if it were Stop, so a turn whose backend
+         * stopped answering part way ended with nothing said. Said now, unless the person stopped it.
+         * See `laterRunFailure`.
+         */
+        if (!awaitingReply.current && turnsRef.current > 0) {
+          if (stoppedHere.current) return;
+          const said = laterRunFailure(error);
+          if (said) fail(said, true);
+          return;
+        }
+        /*
+         * The run request itself was not made. That is the back end out of reach, or the Bot taken
+         * away from this person (the runtime answers 404 for a Bot that is not theirs), and the
+         * runtime client reports both the same way. `failedRunReason` asks the server which.
+         */
+        fail(
+          stoppedReason(error),
+          false,
+          requestNotMade(error)
+            ? failedRunReason(error, runtimeAgentId)
+            : undefined,
+        );
       },
       onRunFinishedEvent: ({ event }) => {
         /*
@@ -1590,6 +1936,7 @@ export function ChannelChat({
   });
   const stopTask = () => {
     awaitingReply.current = false;
+    stoppedHere.current = true;
     stopEpoch.current++;
     copilotkit.stopAgent({ agent });
   };
@@ -1670,10 +2017,11 @@ export function ChannelChat({
             }
             agents={toAgentOptions(agentProfiles, channel.agentIds)}
             channelId={channel.id}
+            attachmentLimits={attachmentLimits}
             starterSuggestions={
               channel.agentIds.length === 1 ? (
                 <StarterSuggestions
-                  agentId={runtimeAgentId}
+                  bot={botProfile}
                   channelId={channel.id}
                   disabled={
                     !channel.active ||
@@ -1712,9 +2060,8 @@ export function ChannelChat({
             commands={skillCommands}
             modelPicker={
               <ModelPicker
-                catalogue={
-                  botProfile?.runsOnOpenBotModel ? models.data : undefined
-                }
+                catalogue={picksModel ? models.data : undefined}
+                defaultModel={runModel.defaultModel}
                 disabled={!channel.active}
                 onChange={runModel.choose}
                 saving={runModel.saving}
@@ -1764,9 +2111,18 @@ export function ChannelChat({
                 />
                 {voiceArchive.error && (
                   <p className="pb-2 text-sm text-destructive" role="alert">
-                    Couldn’t load voice chats. Reload the page.
+                    Couldn’t load voice chats. Try again in a moment.
                   </p>
                 )}
+                {/* The picked model stopped being offered: what this conversation uses now. */}
+                {runModel.notice && channel.active ? (
+                  <p
+                    className="pb-2 text-sm text-muted-foreground"
+                    role="status"
+                  >
+                    {runModel.notice}
+                  </p>
+                ) : null}
                 {voiceContextNotice && (
                   <p
                     className="pb-2 text-sm text-muted-foreground"
@@ -1851,8 +2207,10 @@ export function ChannelChat({
             /*
              * Not while the server carries the conversation on after an approval: this tab has no
              * run of its own for Stop to reach then, and a Stop that does nothing is worse than none.
+             * Nor while the join replays history (`replaying`): the agent reports itself running then
+             * with nothing running.
              */
-            stoppable={agent.isRunning || runsInFlight > 0}
+            stoppable={(agent.isRunning && !replaying) || runsInFlight > 0}
             /*
              * At the END OF THE TRANSCRIPT rather than above the composer, which is where this used to
              * be. A turn that ends without an answer leaves a gap exactly where the reply was going to
@@ -1864,6 +2222,18 @@ export function ChannelChat({
              * run before closing it; see server/src/channels/stall-guard.ts.
              */
             stopped={runError ?? undefined}
+            /*
+             * A turn cut off part way (its backend stopped answering, its run ended unheard, its
+             * stream broke, or the server says its reply came back incomplete or its model's
+             * connection dropped and asks for the Bot to carry on) is carried on with one press: a
+             * short message, as the person, so the Bot picks the work up with everything it did in
+             * front of it.
+             */
+            onCarryOn={
+              runError !== null && carriesOn(runError)
+                ? () => askFromComponent(CARRY_ON)
+                : undefined
+            }
             /*
              * What the server says this conversation waits on: a Bot its Bot asked, a routine.
              * Hidden while this tab's own turn is going, which already shows itself and would

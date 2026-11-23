@@ -6,7 +6,7 @@ import {
   useManagePaths,
 } from "@/lib/manage-paths";
 import { directoryRouteDecision } from "@/lib/plugins/provider-vocabulary";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { appSetupQueryOptions } from "@/lib/apps/queries";
 
 /**
  * A broker's directory, searched rather than listed, behind its guard: it answers only on a
@@ -26,20 +26,20 @@ import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
  */
 export function BrokerDirectoryPage({ provider }: { provider: Broker }) {
   const paths = useManagePaths();
-  const plugins = useQuery(pluginsPageQueryOptions());
+  const setup = useQuery(appSetupQueryOptions());
   /*
    * `data` stays undefined PERMANENTLY on a failed read, not only while loading, so the gate below
    * would answer "pending" forever and draw a blank page. A failure is said, and the directory is
    * not drawn: it would fire a request against a provider nobody has confirmed.
    */
-  if (plugins.isError) {
+  if (setup.isError) {
     return (
       <p className="m-4 text-destructive text-sm" role="alert">
-        Couldn't load the app settings. Reload the page.
+        Couldn't load the app settings. Try again in a moment.
       </p>
     );
   }
-  const decision = directoryRouteDecision(provider, plugins.data);
+  const decision = directoryRouteDecision(provider, setup.data);
   if (decision === "redirect") return <Navigate replace {...paths.plugins()} />;
   if (decision === "pending") return null;
   return <BrokerDirectory provider={provider} />;

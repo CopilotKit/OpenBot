@@ -9,10 +9,7 @@ import {
   relative,
   resolve,
 } from "node:path";
-import {
-  type CliResult,
-  cliEnvironment,
-} from "../server/src/learning/ensure-container";
+import { type CliResult, cliEnvironment } from "./copilotkit-cli";
 
 /** Resolve only installed packages. Discovery must never contact a package registry. */
 export async function localCliEntrypoint(

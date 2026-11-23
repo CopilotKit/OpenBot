@@ -4,6 +4,8 @@ import {
   Outlet,
 } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { RenewalNotices } from "@/components/auth/renewal-notices";
+import { ClientVersionGate } from "@/components/layout/client-version-gate";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -126,8 +128,12 @@ function RootComponent() {
     <div className="min-h-dvh w-full antialiased">
       <ThemeProvider>
         <TooltipProvider>
-          <Outlet />
+          {/* In place of every route when this app and its OpenBot can't work together. */}
+          <ClientVersionGate>
+            <Outlet />
+          </ClientVersionGate>
           <Toaster />
+          <RenewalNotices />
         </TooltipProvider>
       </ThemeProvider>
     </div>

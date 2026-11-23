@@ -3,9 +3,10 @@ import { useSyncExternalStore } from "react";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { queryClient } from "@/query-client";
 import {
+  BOT_GONE,
   type ControlState,
   cancelControl,
-  readControl,
+  readControlOrGone,
   releaseControl,
   takeControl,
 } from "./control";
@@ -35,6 +36,8 @@ function createControlStore(computerId: string): ControlStore {
   let reading: AbortController | undefined;
   /** Reads in a row that could not reach the computer. See `refresh`. */
   let failures = 0;
+  /** The last read answered that the Bot is not this person's to use. See `refresh`. */
+  let gone = false;
   const listeners = new Set<() => void>();
   const publish = (next: Snapshot) => {
     snapshot = next;
@@ -45,13 +48,25 @@ function createControlStore(computerId: string): ControlStore {
     reading?.abort();
     const abort = new AbortController();
     reading = abort;
-    const control = await readControl(
-      computerId,
-      undefined,
-      abort.signal,
-    ).catch(() => null);
+    const answer = await readControlOrGone(computerId, abort.signal).catch(
+      () => null,
+    );
     if (reading === abort) reading = undefined;
     if (abort.signal.aborted || mine !== version || snapshot.busy) return;
+    /*
+     * The Bot is not one this person can use any more: it was deleted, or shared with a team they
+     * were taken out of while this screen was open. Nothing is reconnecting, so nothing says so, and
+     * the read is not asked again every second (it was, 55 times in one capture of an open
+     * conversation). Coming back to the tab asks once more, in case the Bot is theirs again.
+     */
+    gone = answer === BOT_GONE;
+    if (gone) {
+      failures = 0;
+      if (snapshot.control || snapshot.problem)
+        publish({ ...snapshot, control: null, problem: null });
+      return;
+    }
+    const control = answer === BOT_GONE ? null : answer;
     /*
      * One read that did not come back is not news. It used to blank the control state at once, which
      * took the wheel off a person mid-sentence: their keyboard stopped being forwarded and every key
@@ -140,7 +155,7 @@ function createControlStore(computerId: string): ControlStore {
         if (!snapshot.busy) void refresh();
         // Not while the tab is hidden: nobody is looking, and it is read again the moment they are.
         timer = setInterval(() => {
-          if (document.hidden) return;
+          if (document.hidden || gone) return;
           if (!snapshot.busy && !reading) void refresh();
         }, 1000);
         document.addEventListener("visibilitychange", refreshWhenShown);

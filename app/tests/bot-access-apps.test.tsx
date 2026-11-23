@@ -13,7 +13,15 @@ import { cleanup, render, within } from "@testing-library/react";
 import { AppsSections, SkillsSections } from "@/components/bot-profile/access";
 import type { AgentProfile } from "@/lib/agents/queries";
 import type { AppAccess } from "@/lib/app-access/queries";
+import { meResponse } from "./accounts-api";
 import { appAccess } from "./app-access-fixture";
+import {
+  botAppsPath,
+  botAppsResponse,
+  botGrantsPath,
+  botGrantsResponse,
+} from "./bot-grants-api";
+import { answerBotsList } from "./bots-api";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -74,14 +82,14 @@ function serving(options: {
   tools?: ReturnType<typeof tool>[];
 }) {
   const { role = "user", apps = [], tools = [] } = options;
-  global.fetch = (async (input: RequestInfo | URL) => {
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.endsWith("/api/plugins/for/expenses/apps"))
+    if (url.startsWith(botAppsPath("expenses")))
       return apps === "fail"
         ? Response.json({ error: "nope" }, { status: 500 })
-        : Response.json({ apps });
-    if (url.endsWith("/api/plugins/for/expenses"))
-      return Response.json({ tools, skills: [] });
+        : botAppsResponse(apps);
+    if (url.startsWith(botGrantsPath("expenses")))
+      return botGrantsResponse({ tools });
     if (url.includes("/handoff"))
       return Response.json({
         handoff: {
@@ -91,8 +99,9 @@ function serving(options: {
           grantable: false,
         },
       });
-    if (url.includes("/api/agents")) return Response.json({ agents: [] });
-    return Response.json({
+    const bots = answerBotsList(url, init, { visible: [] });
+    if (bots) return bots;
+    return meResponse({
       user: { id: "me", role, email: "me@example.test", name: "Me" },
     });
   }) as unknown as typeof fetch;
@@ -182,13 +191,12 @@ test("an app only an admin can fix offers Request access, and a pending one read
         displayName: "Slack",
         state: "shared_not_connected",
         account: "shared",
-        accountMode: "shared",
         requestKind: "connect_shared",
       }),
       appAccess({
         key: "notion",
         displayName: "Notion",
-        provider: "catalogue",
+        source: "catalogue",
         state: "disabled",
         requestKind: "enable",
         request: {
@@ -238,7 +246,7 @@ test("an app's sentence is never cut short, so who can fix it stays on screen at
     apps: [
       appAccess({
         state: "disabled",
-        unavailable: "composio_unconfigured",
+        unavailable: "directory_unavailable",
         requestKind: "enable",
       }),
     ],
@@ -258,7 +266,7 @@ test("on somebody else's Team Bot, an app on its owner's account says so, and an
       appAccess({
         key: "notion",
         displayName: "Notion",
-        provider: "catalogue",
+        source: "catalogue",
         connect: "oauth",
         state: "reconnect",
         accountHolder: "owner",
@@ -296,7 +304,7 @@ test("when the states cannot be read, the apps are still listed and the failure 
   });
   const view = draw();
   expect((await view.findByRole("alert")).textContent).toContain(
-    "Couldn't check whether each app is ready for you. Reload the page.",
+    "Couldn't check whether each app is ready for you. Try again in a moment.",
   );
   expect(await view.findByText("Google Drive")).toBeTruthy();
 });

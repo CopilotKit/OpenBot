@@ -1,5 +1,18 @@
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import {
+  type InfiniteData,
+  infiniteQueryOptions,
+  type QueryClient,
+  queryOptions,
+} from "@tanstack/react-query";
+import {
+  getConversation,
+  listConversations,
+} from "@/lib/api/generated/conversations/conversations";
+import type {
+  Conversation,
+  ConversationSummary,
+} from "@/lib/api/generated/model";
+import { organizationId } from "@/lib/api/request";
 
 /**
  * A channel as the browser sees it.
@@ -119,6 +132,10 @@ export const channelKeys = {
   /** Every channel read by id, to refetch them together. */
   details: () => ["channels", "detail"] as const,
   detail: (channelId: string) => ["channels", "detail", channelId] as const,
+  /** Every Bot's list of its conversations (the Bots panel), to patch or refetch them together. */
+  byBots: () => ["channels", "bot"] as const,
+  /** One Bot's conversations, as the Bots panel lists them under it. */
+  byBot: (botId: string) => ["channels", "bot", botId] as const,
 };
 
 /** One page of channels, and where the next one starts. */
@@ -141,15 +158,44 @@ export function channelListQueryOptions() {
   return infiniteQueryOptions({
     queryKey: channelKeys.list(),
     initialPageParam: "",
-    queryFn: async ({ pageParam }): Promise<ChannelPage> => {
-      const suffix = pageParam
-        ? `?cursor=${encodeURIComponent(pageParam as string)}`
-        : "";
-      const response = await client(`/api/channels${suffix}`, {
-        fallback: "Couldn't load your conversations.",
-      });
-      return (await response.json()) as ChannelPage;
-    },
+    queryFn: async ({ pageParam }): Promise<ChannelPage> =>
+      channelPageOf(
+        await listConversations(
+          organizationId(),
+          pageParam ? { cursor: pageParam as string } : undefined,
+          { fallback: "Couldn't load your conversations." },
+        ),
+      ),
+    getNextPageParam: (page: ChannelPage) => page.nextCursor ?? undefined,
+    select: (data): ChannelSummary[] =>
+      data.pages.flatMap((page) => page.channels),
+  });
+}
+
+/**
+ * One Bot's conversations, newest first, `limit` at a time: the Bots panel's list under a Bot, read
+ * from the server (`botId` on listConversations) so a Bot's older conversations are there too, not
+ * only the ones the roster happens to have loaded. Group conversations are listed under each Bot.
+ */
+export function botConversationsInfiniteQueryOptions(
+  botId: string,
+  limit: number,
+) {
+  return infiniteQueryOptions({
+    queryKey: channelKeys.byBot(botId),
+    initialPageParam: "",
+    queryFn: async ({ pageParam }): Promise<ChannelPage> =>
+      channelPageOf(
+        await listConversations(
+          organizationId(),
+          {
+            botId,
+            limit,
+            ...(pageParam ? { cursor: pageParam as string } : {}),
+          },
+          { fallback: "Couldn't load this Bot's conversations." },
+        ),
+      ),
     getNextPageParam: (page: ChannelPage) => page.nextCursor ?? undefined,
     select: (data): ChannelSummary[] =>
       data.pages.flatMap((page) => page.channels),
@@ -202,18 +248,18 @@ export function channelSearchInfiniteQueryOptions(
     queryKey: channelKeys.search(normalized, limit),
     enabled: isChannelSearchable(normalized),
     initialPageParam: "",
-    queryFn: async ({ pageParam, signal }): Promise<ChannelPage> => {
-      const params = new URLSearchParams({
-        q: normalized,
-        limit: String(limit),
-      });
-      if (pageParam) params.set("cursor", pageParam as string);
-      const response = await client(`/api/channels/search?${params}`, {
-        fallback: "Couldn't search your conversations.",
-        signal,
-      });
-      return (await response.json()) as ChannelPage;
-    },
+    queryFn: async ({ pageParam, signal }): Promise<ChannelPage> =>
+      channelPageOf(
+        await listConversations(
+          organizationId(),
+          {
+            q: normalized,
+            limit,
+            ...(pageParam ? { cursor: pageParam as string } : {}),
+          },
+          { fallback: "Couldn't search your conversations.", signal },
+        ),
+      ),
     getNextPageParam: (page: ChannelPage) => page.nextCursor ?? undefined,
     select: (data): ChannelSummary[] =>
       data.pages.flatMap((page) => page.channels),
@@ -223,10 +269,59 @@ export function channelSearchInfiniteQueryOptions(
 export function channelQueryOptions(channelId: string) {
   return queryOptions({
     queryKey: channelKeys.detail(channelId),
-    queryFn: async (): Promise<AgentChannel> => {
-      return client(`/api/channels/${channelId}`, "channel", {
-        fallback: "Couldn't load this conversation.",
-      });
-    },
+    queryFn: async (): Promise<AgentChannel> =>
+      channelOf(
+        (
+          await getConversation(organizationId(), channelId, {
+            fallback: "Couldn't load this conversation.",
+          })
+        ).conversation,
+      ),
   });
+}
+
+/**
+ * A conversation as the sidebar's list already holds it, or undefined when the list has not read it.
+ * Nothing is asked: for a screen to name a conversation while its own read is still on its way, as
+ * it is for as long as OpenBot Desktop can't reach the OpenBot it is connected to.
+ */
+export function listedChannel(
+  queryClient: QueryClient,
+  channelId: string,
+): ChannelSummary | undefined {
+  return queryClient
+    .getQueryData<InfiniteData<ChannelPage>>(channelKeys.list())
+    ?.pages.flatMap((page) => page.channels)
+    .find((one) => one.id === channelId);
+}
+
+/**
+ * A conversation as the API answers it, in the names the app's screens and its socket events use:
+ * the API calls a conversation's Bots `botIds`.
+ */
+export function channelOf({ botIds, ...rest }: Conversation): AgentChannel {
+  return { ...rest, agentIds: botIds, work: rest.work as ChannelWork[] };
+}
+
+function channelSummaryOf({
+  botIds,
+  lastMessageBotId,
+  ...rest
+}: ConversationSummary): ChannelSummary {
+  return {
+    ...rest,
+    agentIds: botIds,
+    lastMessageAgentId: lastMessageBotId,
+    work: rest.work as ChannelWork[],
+  };
+}
+
+function channelPageOf(page: {
+  conversations: ConversationSummary[];
+  nextCursor: string | null;
+}): ChannelPage {
+  return {
+    channels: page.conversations.map(channelSummaryOf),
+    nextCursor: page.nextCursor,
+  };
 }

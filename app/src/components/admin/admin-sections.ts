@@ -2,16 +2,25 @@ import {
   IconBrain,
   IconBuildingBank,
   IconBulb,
+  IconCloudCog,
   IconCode,
   IconLayoutGrid,
   IconLockAccess,
   IconShieldCheck,
   IconUsers,
+  IconUsersGroup,
   IconZoomQuestion,
 } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
 import type { LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { managePaths } from "@/lib/manage-paths";
+import { MANAGEMENT_SENTENCE } from "@/lib/management/format";
+import {
+  asksForManagement,
+  managementQueryOptions,
+} from "@/lib/management/queries";
 import { primitive, VAULT } from "@/lib/primitives";
 
 export type AdminEntry = {
@@ -26,9 +35,13 @@ export type AdminSection = { title: string; items: AdminEntry[] };
 
 const team = managePaths("team");
 
+/** The Admin page where an organization sets up its own company sign-in. */
+export const IDENTITY_PROVIDERS_PATH = "/admin/identity-providers";
+
 /**
  * Admin's pages, grouped by the thing a Bot has that each one sets for everybody, in the fixed order
- * of `lib/primitives.ts`, then Vault, then the team itself. The sidebar and the overview both draw
+ * of `lib/primitives.ts`, then Vault, then the organization itself: its people and the teams they are
+ * in, what they may do, and how they sign in. The sidebar and the overview both draw
  * this list, so the two can never disagree about where a page is.
  *
  * Conversations has no group: it is where work happens, not something to set. Memory has none
@@ -144,20 +157,30 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     items: [
       {
         title: team.credentialsLabel,
-        description: "Manage this deployment’s keys and tokens.",
+        description: "Manage this organization’s keys and tokens.",
         icon: VAULT.icon,
         linkOptions: team.credentials(),
       },
     ],
   },
   {
-    title: "Team",
+    title: "Organization",
     items: [
       {
         title: "People",
         description: "Review members, manage admin roles, and remove access.",
         icon: IconUsers,
         linkOptions: { to: "/admin/people" },
+      },
+      {
+        title: "Teams",
+        description: "Put people in teams, and give a team its own Bots.",
+        icon: IconUsersGroup,
+        /*
+         * The page everybody opens at /teams, drawn here in Admin's frame so Admin stays open. An
+         * admin does on it what the server lets an admin do, in either place.
+         */
+        linkOptions: { to: "/admin/teams" },
       },
       {
         title: "Permissions",
@@ -171,7 +194,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
         description:
           "Configure your company’s sign-in provider for each email domain, and require SSO.",
         icon: IconBuildingBank,
-        linkOptions: { to: "/admin/identity-providers" },
+        linkOptions: { to: IDENTITY_PROVIDERS_PATH },
       },
       {
         title: "Providers",
@@ -183,3 +206,57 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     ],
   },
 ];
+
+/**
+^ * Managed updates: connecting a self-hosted OpenBot to CopilotKit's management service. Not in
+ * {@link ADMIN_SECTIONS}, because it applies only where the server says so (the team edition a
+ * company runs itself, in the organization `default`); {@link adminSections} adds it there.
+ */
+export const MANAGEMENT_ENTRY: AdminEntry = {
+  title: "Managed updates",
+  description: MANAGEMENT_SENTENCE,
+  icon: IconCloudCog,
+  linkOptions: { to: "/admin/management" },
+};
+
+/**
+ * Admin's pages, with Managed updates at the end of the organization's when it applies, and without
+ * Identity providers on OpenBot by CopilotKit (`hostedSignIn`): people sign in there with their
+ * CopilotKit account, so an organization has no identity provider of its own to set up.
+ */
+export function adminSections(
+  management: boolean,
+  hosted = false,
+): readonly AdminSection[] {
+  if (!management && !hosted) return ADMIN_SECTIONS;
+  return ADMIN_SECTIONS.map((section) => {
+    if (section.title !== "Organization") return section;
+    const items = hosted
+      ? section.items.filter(
+          (item) =>
+            (item.linkOptions as { to?: string }).to !==
+            IDENTITY_PROVIDERS_PATH,
+        )
+      : section.items;
+    return {
+      ...section,
+      items: management ? [...items, MANAGEMENT_ENTRY] : items,
+    };
+  });
+}
+
+/**
+ * The sections the rail and the overview draw. Management is left out while its answer is loading
+ * or failed, and wherever the server answers that it doesn't apply. Identity providers is left out
+ * where the server says people sign in through OpenBot by CopilotKit; Admin's route has read that
+ * answer before any of its pages draws (`admin/route.tsx`).
+ */
+export function useAdminSections(): readonly AdminSection[] {
+  const capabilities = useQuery(deploymentCapabilitiesQueryOptions());
+  const asks = asksForManagement(capabilities);
+  const management = useQuery({ ...managementQueryOptions(), enabled: asks });
+  return adminSections(
+    asks && management.data?.applies === true,
+    capabilities.data?.hostedSignIn === true,
+  );
+}
