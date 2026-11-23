@@ -711,44 +711,61 @@ test.each([
   },
 );
 
-test("an admin's one press on Notion signs them in, then gives it to the Bot once they're connected", async () => {
-  const before = appAccess({
-    ...NOTION,
-    state: "not_granted",
-    granted: false,
-    requestKind: "grant",
-  });
-  const { view, sent, opened, swap } = mounted(before, undefined, {
-    admin: true,
-    // Turned on with nothing given: its tools come with the admin's sign-in.
-    readAgain: () => before,
-  });
-  fireEvent.click(
-    await view.findByRole("button", { name: "Give Notion to Expenses" }),
-  );
-  await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
-  await view.findByText("Finish in the tab that opened.");
-  const approve = `POST ${botAppPath("expenses", "notion")}/approve`;
-  const posts = () =>
-    sent
-      .filter((call) => call.method === "POST")
-      .map((call) => `${call.method} ${call.url}`);
-  expect(posts()).toEqual([
-    approve,
-    `POST ${myConnectionPath("notion", "connect")}`,
-  ]);
+/** Gmail from the directory, run on each person's own account and signed in through its consent. */
+const GMAIL: Partial<AppAccess> = {
+  key: "composio-gmail",
+  displayName: "Gmail",
+  source: "directory",
+  connect: "consent",
+  account: "personal",
+  connectedAt: null,
+};
 
-  // The admin finished signing in to Notion in the other tab.
-  await swap({ ...before, connectedAt: "2026-11-23T23:10:00.000Z" });
-  await waitFor(() =>
+test.each([
+  ["Notion", NOTION],
+  ["Gmail", GMAIL],
+] as const)(
+  "an admin's one press on %s, which has listed nothing yet, signs them in, then gives it to the Bot once they're connected",
+  async (title, app) => {
+    const before = appAccess({
+      ...app,
+      state: "not_granted",
+      granted: false,
+      requestKind: "grant",
+    });
+    const key = before.key;
+    const { view, sent, opened, swap } = mounted(before, undefined, {
+      admin: true,
+      // Turned on with nothing given: its tools come with the admin's sign-in.
+      readAgain: () => before,
+    });
+    fireEvent.click(
+      await view.findByRole("button", { name: `Give ${title} to Expenses` }),
+    );
+    await waitFor(() => expect(opened).toEqual(["https://gmail.test/consent"]));
+    await view.findByText("Finish in the tab that opened.");
+    const approve = `POST ${botAppPath("expenses", key)}/approve`;
+    const posts = () =>
+      sent
+        .filter((call) => call.method === "POST")
+        .map((call) => `${call.method} ${call.url}`);
     expect(posts()).toEqual([
       approve,
-      `POST ${myConnectionPath("notion", "connect")}`,
-      approve,
-    ]),
-  );
-  expect(view.queryByRole("alert")).toBeNull();
-});
+      `POST ${myConnectionPath(key, "connect")}`,
+    ]);
+
+    // The admin finished signing in in the other tab.
+    await swap({ ...before, connectedAt: "2026-11-23T23:10:00.000Z" });
+    await waitFor(() =>
+      expect(posts()).toEqual([
+        approve,
+        `POST ${myConnectionPath(key, "connect")}`,
+        approve,
+      ]),
+    );
+    expect(view.queryByRole("alert")).toBeNull();
+  },
+);
 
 test("an admin already signed in to Notion gives it in one press, with no sign-in", async () => {
   const { view, sent, opened } = mounted(

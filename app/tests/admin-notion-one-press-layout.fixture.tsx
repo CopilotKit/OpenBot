@@ -48,8 +48,10 @@ import {
  * the server did before it let an admin's own press through without tools: 409, "Notion has no
  * tools to give yet". Otherwise the press turns Notion on with nothing given, and once
  * `window.__signIn()` has recorded the admin's account, the next press gives its read-only tools.
- * `?on=1` starts with Notion already on, `?theme=dark` draws it dark. What the page does is kept in
- * order on `window.__events`.
+ * `?app=gmail` is Gmail from the directory, which signs in through OpenBot's own step before the
+ * vendor's, in place of Notion, the same way: listed nothing until the admin is in. `?on=1` starts
+ * with the app already on, `?theme=dark` draws it dark. What the page does is kept in order on
+ * `window.__events`.
  */
 type Page = Window & { __events: string[]; __signIn: () => void };
 const page = window as unknown as Page;
@@ -61,16 +63,21 @@ if (params.get("theme") === "dark")
   document.documentElement.classList.add("dark");
 const refuses = params.get("server") === "refuses";
 
-const APP = "notion";
+const gmail = params.get("app") === "gmail";
+const APP = gmail ? "composio-gmail" : "notion";
+const TITLE = gmail ? "Gmail" : "Notion";
+const SIGN_IN = gmail
+  ? "https://backend.composio.dev/api/v3/s/gmail-consent"
+  : "https://mcp.notion.com/authorize?client_id=openbot";
 const BOT = "assistant";
 const SIGNED_IN = "2026-11-23T23:10:00.000Z";
 
 const notion = (overrides: Partial<AppAccess>): AppAccess =>
   appAccess({
     key: APP,
-    displayName: "Notion",
-    source: "catalogue",
-    connect: "oauth",
+    displayName: TITLE,
+    source: gmail ? "directory" : "catalogue",
+    connect: gmail ? "consent" : "oauth",
     granted: false,
     requestKind: "grant",
     ...overrides,
@@ -117,8 +124,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       live = notion({ state: "not_granted" });
       return Response.json(
         {
-          detail:
-            "Notion has no tools to give yet. Open its page under Apps to see why, then try again.",
+          detail: `${TITLE} has no tools to give yet. Open its page under Apps to see why, then try again.`,
         },
         { status: 409 },
       );
@@ -133,13 +139,13 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         agentId: BOT,
       }),
       enabled: !wasOn,
-      granted: given ? [`${APP}/notion-search`] : [],
+      granted: given
+        ? [gmail ? `${APP}/GMAIL_FETCH_EMAILS` : `${APP}/notion-search`]
+        : [],
     });
   }
   if (path === myConnectionPath(APP, "connect"))
-    return startResponse({
-      authorizationUrl: "https://mcp.notion.com/authorize?client_id=openbot",
-    });
+    return startResponse({ authorizationUrl: SIGN_IN });
   if (path.startsWith(MY_CONNECTIONS_PATH)) return connectionPage([]);
   if (path === APP_ACCESS_REQUESTS_PATH) return appAccessRequestsResponse([]);
   return Response.json({ error: "Not found." }, { status: 404 });
@@ -164,7 +170,7 @@ window.open = (() => {
 }) as typeof window.open;
 
 const SO_FAR: Message[] = [
-  { id: "asked", role: "user", content: "Now let's connect you to Notion" },
+  { id: "asked", role: "user", content: `Now let's connect you to ${TITLE}` },
   {
     id: "called",
     role: "assistant",
@@ -186,8 +192,8 @@ const SO_FAR: Message[] = [
     toolCallId: "call-1",
     content: connectAppRefusal({
       serverId: APP,
-      title: "Notion",
-      message: "Notion isn't connected yet.",
+      title: TITLE,
+      message: `${TITLE} isn't connected yet.`,
       agentId: BOT,
       reason: "access",
       blocked: true,
@@ -196,8 +202,7 @@ const SO_FAR: Message[] = [
   {
     id: "said",
     role: "assistant",
-    content:
-      "I've put a card in front of you. Give me Notion there and connect your account, and I'll check it works.",
+    content: `I've put a card in front of you. Give me ${TITLE} there and connect your account, and I'll check it works.`,
   },
 ];
 

@@ -13,14 +13,15 @@ import { myConnectionPath } from "./connections-api";
  * hasn't been given Notion. Only an admin can give it.", and Give it answered "Notion has no tools
  * to give yet". Notion lists its tools only for somebody who has signed in, and the press never
  * signed them in. Now the card says what is missing, and its one press turns Notion on, opens the
- * admin's sign-in in a tab claimed on the click, and gives Notion to the Bot once they're in.
+ * admin's sign-in in a tab claimed on the click, and gives Notion to the Bot once they're in. The
+ * same for Gmail from the directory, for any app that has listed nothing before the admin signs in.
  * app-access-card-one-press.test.tsx holds the behaviour; this drives it with a real mouse in the
  * app's stylesheet and looks at each step.
  *
  *   OPENBOT_APP_BROWSER=1 bun test app/tests/admin-notion-one-press-layout.test.tsx
  *
  * Chromium by default, as CI has it. OPENBOT_APP_ENGINES=chromium,webkit adds WebKit. With
- * OPENBOT_APP_SHOTS=<dir> each step is saved as notion-<step>-<engine>-<theme>.png.
+ * OPENBOT_APP_SHOTS=<dir> each step is saved as <app>-<step>-<engine>-<theme>.png.
  */
 const asked = process.env.OPENBOT_APP_BROWSER === "1";
 const shots = process.env.OPENBOT_APP_SHOTS;
@@ -183,7 +184,7 @@ async function open(
 async function shoot(page: Page, step: string, name: string) {
   if (!shots) return;
   mkdirSync(shots, { recursive: true });
-  await page.screenshot({ path: join(shots, `notion-${step}-${name}.png`) });
+  await page.screenshot({ path: join(shots, `${step}-${name}.png`) });
 }
 
 /** The card, once it has read Notion and drawn its button. */
@@ -209,113 +210,139 @@ function fits(page: Page) {
   });
 }
 
-/** What the page did about Notion and its tab, in order, leaving out the conversation's own requests. */
-const events = async (page: Page) =>
+/** What the page did about the app and its tab, in order, leaving out the conversation's own requests. */
+const events = async (page: Page, key: string) =>
   (
     await page.evaluate(
       () => (window as unknown as { __events: string[] }).__events,
     )
-  ).filter((event) => event.includes("notion") || event.startsWith("tab "));
+  ).filter((event) => event.includes(key) || event.startsWith("tab "));
 
-describe.skipIf(!asked)("Notion's card for an admin", () => {
-  for (const engine of engines)
-    for (const theme of ["light", "dark"] as const) {
-      const name = `${engine}-${theme}`;
+/** The two apps: Notion, OpenBot's own, and Gmail from the directory. */
+const APPS = [
+  {
+    query: "",
+    key: "notion",
+    title: "Notion",
+    signIn: "https://mcp.notion.com/authorize?client_id=openbot",
+  },
+  {
+    query: "&app=gmail",
+    key: "composio-gmail",
+    title: "Gmail",
+    signIn: "https://backend.composio.dev/api/v3/s/gmail-consent",
+  },
+] as const;
 
-      test(`one press turns Notion on, signs the admin in, and gives it to the Bot, in ${engine}, ${theme}`, async () => {
-        const page = await open(engine, theme, "");
-        try {
-          const drawn = await card(page);
-          await shoot(page, "card", name);
-          expect(await drawn.innerText()).toContain(
-            "Notion isn't turned on yet.",
+describe.skipIf(!asked)("an app's card for an admin", () => {
+  for (const app of APPS)
+    for (const engine of engines)
+      for (const theme of ["light", "dark"] as const) {
+        const name = `${engine}-${theme}`;
+        const step = (what: string) => `${app.title.toLowerCase()}-${what}`;
+
+        test(`${app.title}: one press turns it on, signs the admin in, and gives it to the Bot, in ${engine}, ${theme}`, async () => {
+          const page = await open(engine, theme, app.query);
+          try {
+            const drawn = await card(page);
+            await shoot(page, step("card"), name);
+            expect(await drawn.innerText()).toContain(
+              `${app.title} isn't turned on yet.`,
+            );
+            expect(await drawn.innerText()).not.toContain("Only an admin");
+            expect(await fits(page)).toEqual({ inside: true, sideways: false });
+
+            await drawn
+              .getByRole("button", {
+                name: `Turn on ${app.title} and give it to General Assistant`,
+              })
+              .click();
+            await page
+              .getByText("Finish in the tab that opened.")
+              .waitFor({ timeout: 15_000 });
+            await style(page);
+            await shoot(page, step("signing-in"), name);
+            expect(await fits(page)).toEqual({ inside: true, sideways: false });
+            expect(await drawn.getByRole("alert").count()).toBe(0);
+
+            // The admin finishes the app's sign-in in the other tab.
+            await page.evaluate(() =>
+              (window as unknown as { __signIn: () => void }).__signIn(),
+            );
+            await page.waitForFunction(
+              () =>
+                document
+                  .querySelector("[data-app-access]")
+                  ?.getAttribute("data-state") === "ready",
+              undefined,
+              { timeout: 15_000 },
+            );
+            await style(page);
+            await shoot(page, step("given"), name);
+            expect(await drawn.getByRole("alert").count()).toBe(0);
+            expect(await events(page, app.key)).toEqual([
+              "tab claimed",
+              `POST ${botAppPath("assistant", app.key)}/approve`,
+              `POST ${myConnectionPath(app.key, "connect")}`,
+              `tab to ${app.signIn}`,
+              `POST ${botAppPath("assistant", app.key)}/approve`,
+            ]);
+          } finally {
+            await page.close();
+          }
+        }, 90_000);
+
+        test(`${app.title} already on: the card says it hasn't been given yet, and its press signs the admin in, in ${engine}, ${theme}`, async () => {
+          const page = await open(engine, theme, `${app.query}&on=1`);
+          try {
+            const drawn = await card(page);
+            await shoot(page, step("on-card"), name);
+            expect(await drawn.innerText()).toContain(
+              `This Bot hasn't been given ${app.title} yet.`,
+            );
+            await drawn
+              .getByRole("button", {
+                name: `Give ${app.title} to General Assistant`,
+              })
+              .click();
+            await page
+              .getByText("Finish in the tab that opened.")
+              .waitFor({ timeout: 15_000 });
+            await style(page);
+            await shoot(page, step("on-signing-in"), name);
+            expect(await drawn.getByRole("alert").count()).toBe(0);
+          } finally {
+            await page.close();
+          }
+        }, 90_000);
+
+        /*
+         * Against the server as rc.3 runs it, which refuses the press for want of tools: the card
+         * still says what is missing and shows the server's sentence beside the button, inside it.
+         */
+        test(`${app.title}: a press the server refuses shows its sentence inside the card, in ${engine}, ${theme}`, async () => {
+          const page = await open(
+            engine,
+            theme,
+            `${app.query}&on=1&server=refuses`,
           );
-          expect(await drawn.innerText()).not.toContain("Only an admin");
-          expect(await fits(page)).toEqual({ inside: true, sideways: false });
-
-          await drawn
-            .getByRole("button", {
-              name: "Turn on Notion and give it to General Assistant",
-            })
-            .click();
-          await page
-            .getByText("Finish in the tab that opened.")
-            .waitFor({ timeout: 15_000 });
-          await style(page);
-          await shoot(page, "signing-in", name);
-          expect(await fits(page)).toEqual({ inside: true, sideways: false });
-          expect(await drawn.getByRole("alert").count()).toBe(0);
-
-          // The admin finishes Notion's sign-in in the other tab.
-          await page.evaluate(() =>
-            (window as unknown as { __signIn: () => void }).__signIn(),
-          );
-          await page.waitForFunction(
-            () =>
-              document
-                .querySelector("[data-app-access]")
-                ?.getAttribute("data-state") === "ready",
-            undefined,
-            { timeout: 15_000 },
-          );
-          await style(page);
-          await shoot(page, "given", name);
-          expect(await drawn.getByRole("alert").count()).toBe(0);
-          expect(await events(page)).toEqual([
-            "tab claimed",
-            `POST ${botAppPath("assistant", "notion")}/approve`,
-            `POST ${myConnectionPath("notion", "connect")}`,
-            "tab to https://mcp.notion.com/authorize?client_id=openbot",
-            `POST ${botAppPath("assistant", "notion")}/approve`,
-          ]);
-        } finally {
-          await page.close();
-        }
-      }, 90_000);
-
-      test(`Notion already on: the card says it hasn't been given yet, and its press signs the admin in, in ${engine}, ${theme}`, async () => {
-        const page = await open(engine, theme, "&on=1");
-        try {
-          const drawn = await card(page);
-          await shoot(page, "on-card", name);
-          expect(await drawn.innerText()).toContain(
-            "This Bot hasn't been given Notion yet.",
-          );
-          await drawn
-            .getByRole("button", { name: "Give Notion to General Assistant" })
-            .click();
-          await page
-            .getByText("Finish in the tab that opened.")
-            .waitFor({ timeout: 15_000 });
-          await style(page);
-          await shoot(page, "on-signing-in", name);
-          expect(await drawn.getByRole("alert").count()).toBe(0);
-        } finally {
-          await page.close();
-        }
-      }, 90_000);
-
-      /*
-       * Against the server as rc.3 runs it, which refuses the press for want of tools: the card still
-       * says what is missing and shows the server's sentence beside the button, inside the card.
-       */
-      test(`a press the server refuses shows its sentence inside the card, in ${engine}, ${theme}`, async () => {
-        const page = await open(engine, theme, "&on=1&server=refuses");
-        try {
-          const drawn = await card(page);
-          await drawn
-            .getByRole("button", { name: "Give Notion to General Assistant" })
-            .click();
-          await drawn.getByRole("alert").waitFor({ timeout: 15_000 });
-          await style(page);
-          await shoot(page, "refused", name);
-          expect(await drawn.getByRole("alert").innerText()).toBe(
-            "Notion has no tools to give yet. Open its page under Apps to see why, then try again.",
-          );
-          expect(await fits(page)).toEqual({ inside: true, sideways: false });
-        } finally {
-          await page.close();
-        }
-      }, 90_000);
-    }
+          try {
+            const drawn = await card(page);
+            await drawn
+              .getByRole("button", {
+                name: `Give ${app.title} to General Assistant`,
+              })
+              .click();
+            await drawn.getByRole("alert").waitFor({ timeout: 15_000 });
+            await style(page);
+            await shoot(page, step("refused"), name);
+            expect(await drawn.getByRole("alert").innerText()).toBe(
+              `${app.title} has no tools to give yet. Open its page under Apps to see why, then try again.`,
+            );
+            expect(await fits(page)).toEqual({ inside: true, sideways: false });
+          } finally {
+            await page.close();
+          }
+        }, 90_000);
+      }
 });
