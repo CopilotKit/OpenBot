@@ -82,11 +82,31 @@ function optionFor(
   return id ? catalogue?.models.find((model) => model.id === id) : undefined;
 }
 
+/**
+ * A Bot's saved default, where the person can run it. It names a kind of connection (`source`), not
+ * one: a Bot is shared and each person runs it on their own. With several connections it applies on
+ * the first one of that kind that can run and lists the model; otherwise, only when that kind is the
+ * one in use. Undefined where it can't apply, so the run takes the default connection's default.
+ */
 export function offeredBotDefault(
   saved: AgentProfile["defaultModel"],
   catalogue: ModelCatalogue | undefined,
 ): ModelPick | undefined {
-  if (!saved || saved.source !== catalogue?.source) return undefined;
+  if (!saved) return undefined;
+  if (pickerGroups(catalogue).length > 0) {
+    for (const connection of pickerGroups(catalogue)) {
+      if (!connection.ready || connection.source !== saved.source) continue;
+      const option = connection.models.find(({ id }) => id === saved.model);
+      if (option)
+        return {
+          model: option.id,
+          effort: accepts(option, saved.effort) ? saved.effort : null,
+          connection: connection.id,
+        };
+    }
+    return undefined;
+  }
+  if (saved.source !== catalogue?.source) return undefined;
   const option = optionFor(catalogue, saved.model);
   if (!option) return undefined;
   return {

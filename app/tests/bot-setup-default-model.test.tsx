@@ -14,6 +14,7 @@ import {
   render,
   within,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { type AgentProfile, agentQueryOptions } from "@/lib/agents/queries";
@@ -23,7 +24,8 @@ import {
   getUpdateBotMockHandler,
 } from "@/lib/api/generated/bots/bots.msw";
 import type { UpdateBotRequest } from "@/lib/api/generated/model";
-import type { ModelCatalogue } from "@/lib/models/queries";
+import { offeredBotDefault } from "@/lib/models/effort";
+import type { CatalogueConnection, ModelCatalogue } from "@/lib/models/queries";
 import { queryClient } from "@/query-client";
 import { catalogueBody } from "./models-api";
 import { settleReactWork } from "./settle-react-work";
@@ -92,11 +94,13 @@ const BOT: AgentProfile = {
 };
 
 let stored: AgentProfile = BOT;
+/** What the catalogue answers: one connection, or several (`connections`). */
+let served: ModelCatalogue = catalogue;
 let patches: UpdateBotRequest[] = [];
 
 const server = setupServer(
   http.get("*/api/v2/organizations/:organizationId/model-catalogue", () =>
-    HttpResponse.json(catalogueBody(catalogue)),
+    HttpResponse.json(catalogueBody(served)),
   ),
   // The Bot answers itself, so a conversation with it takes a model.
   getGetBotDelegationMockHandler(),
@@ -111,7 +115,7 @@ const server = setupServer(
         ? {}
         : {
             defaultModel: body.defaultModel
-              ? { ...body.defaultModel, source: catalogue.source }
+              ? { source: served.source, ...body.defaultModel }
               : null,
           }),
     };
@@ -130,6 +134,7 @@ afterEach(() => {
   queryClient.clear();
   stored = BOT;
   patches = [];
+  served = catalogue;
 });
 afterAll(async () => {
   server.close();
@@ -217,6 +222,132 @@ test("a saved default the catalogue no longer offers says new conversations use 
       "The chosen model isn't available. New conversations use OpenBot's default.",
     ),
   ).toBeTruthy();
+});
+
+/*
+ * Several AI connections (plans/multiple-ai-connections-spec.md, step 5). A Bot is shared and each
+ * person runs it on their own connections, so its default names a kind of connection (`source`),
+ * not one connection: it applies for a person with a connection of that kind that can run.
+ */
+const OPUS = {
+  id: "claude-opus-5-5",
+  label: "Claude Opus 5.5",
+  vendor: "anthropic",
+};
+const SONNET = {
+  id: "claude-sonnet-5-5",
+  label: "Claude Sonnet 5.5",
+  vendor: "anthropic",
+};
+const CHATGPT: CatalogueConnection = {
+  id: "openai",
+  owner: "personal",
+  provider: "openai",
+  login: "api-key",
+  source: "openai",
+  isDefault: true,
+  ready: true,
+  problem: null,
+  default: "gpt-5.5",
+  models: catalogue.models,
+  listed: true,
+};
+const CLAUDE: CatalogueConnection = {
+  ...CHATGPT,
+  id: "anthropic",
+  provider: "anthropic",
+  login: "plan",
+  source: "claude",
+  isDefault: false,
+  default: OPUS.id,
+  models: [OPUS, SONNET],
+};
+const SEVERAL: ModelCatalogue = {
+  ...catalogue,
+  connections: [CHATGPT, CLAUDE],
+};
+
+test("a Bot default of another kind than the default connection applies when that kind is connected and ready", async () => {
+  expect(
+    offeredBotDefault(
+      { model: OPUS.id, effort: null, source: "claude" },
+      SEVERAL,
+    ),
+  ).toEqual({ model: OPUS.id, effort: null, connection: "anthropic" });
+  served = SEVERAL;
+  const view = draw({
+    ...BOT,
+    defaultModel: { model: OPUS.id, effort: null, source: "claude" },
+  });
+  expect(await (await modelSection(view)).findByText(OPUS.label)).toBeTruthy();
+});
+
+test("a Bot default whose kind is connected but stopped falls back to the default connection", () => {
+  const stopped: ModelCatalogue = {
+    ...SEVERAL,
+    connections: [
+      CHATGPT,
+      {
+        ...CLAUDE,
+        ready: false,
+        problem: { code: "sign-in-ended", detail: "Sign in again." },
+      },
+    ],
+  };
+  expect(
+    offeredBotDefault(
+      { model: OPUS.id, effort: null, source: "claude" },
+      stopped,
+    ),
+  ).toBeUndefined();
+});
+
+test("a Bot default whose kind is not connected falls back, as today", () => {
+  expect(
+    offeredBotDefault(
+      { model: OPUS.id, effort: null, source: "claude" },
+      { ...catalogue, connections: [CHATGPT] },
+    ),
+  ).toBeUndefined();
+  expect(
+    offeredBotDefault(
+      { model: OPUS.id, effort: null, source: "claude" },
+      catalogue,
+    ),
+  ).toBeUndefined();
+});
+
+test("saving from the second group sends its source; with one connection none is sent", async () => {
+  served = SEVERAL;
+  const view = draw(BOT);
+  const row = await (await modelSection(view)).findByRole("button", {
+    name: /Default model/,
+  });
+  fireEvent.click(row);
+  const dialog = within(await view.findByRole("dialog"));
+  fireEvent.click(dialog.getByRole("radio", { name: /^Choose a model/ }));
+  const user = userEvent.setup({ document });
+  await user.click(await dialog.findByRole("combobox", { name: /Model:/ }));
+  const popups = await view.findAllByRole("dialog");
+  const popup = within(popups[popups.length - 1] as HTMLElement);
+  await user.click(popup.getByRole("option", { name: /Claude Sonnet 5.5/ }));
+  await act(async () => {
+    fireEvent.click(dialog.getByRole("button", { name: "Save" }));
+  });
+  await settleReactWork();
+  expect(patches[0]?.defaultModel).toEqual({
+    model: SONNET.id,
+    effort: null,
+    source: "claude",
+  });
+
+  cleanup();
+  queryClient.clear();
+  patches = [];
+  served = catalogue;
+  const one = draw(BOT);
+  await chooseAndSave(one, /^Choose a model for this Bot/);
+  expect(patches[0]?.defaultModel).toEqual({ model: "gpt-5.5", effort: null });
 });
 
 test("someone who can't manage the Bot reads its default model and can't change it", async () => {
