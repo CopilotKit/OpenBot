@@ -41,7 +41,10 @@ type Page = {
     run: ((arg: A) => T) | string,
     arg?: A,
   ): Promise<T>;
-  waitForSelector(selector: string): Promise<unknown>;
+  waitForSelector(
+    selector: string,
+    options?: { timeout?: number },
+  ): Promise<unknown>;
   frames(): Frame[];
   mainFrame(): Frame;
   close(): Promise<void>;
@@ -339,8 +342,10 @@ describe.skipIf(!asked)("the workbench's layout watch", () => {
         .mainFrame()
         .getByRole("button", { name: warningText(warning) })
         .hover();
+      // A move late in the run is replayed from the start: about 45 s to 3:52 on a busy machine.
       await page.waitForSelector(
         "[data-workbench-highlight='moved'] [data-highlight-label]",
+        { timeout: 150_000 },
       );
       expect(await page.evaluate(() => window.__workbenchPage?.now())).toBe(
         warning.at,
@@ -364,5 +369,5 @@ describe.skipIf(!asked)("the workbench's layout watch", () => {
     } finally {
       await page.close();
     }
-  }, 180_000);
+  }, 300_000);
 });
