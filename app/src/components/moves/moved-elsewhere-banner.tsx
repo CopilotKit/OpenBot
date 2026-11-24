@@ -2,6 +2,7 @@ import { IconX } from "@tabler/icons-react";
 import { useMutation } from "@tanstack/react-query";
 import { useSwitchOrganization } from "@/components/organizations/use-switch-organization";
 import { Button } from "@/components/ui/button";
+import { failureSaid } from "@/lib/load-failure";
 import { movedElsewhereSaid } from "@/lib/moves/moved-elsewhere";
 import { MoveStopped, moveHereMutationOptions } from "@/lib/moves/mutations";
 import { useMovedElsewhere } from "@/lib/moves/use-moved-elsewhere";
@@ -48,7 +49,7 @@ export function MovedElsewhereBanner() {
       <p className="text-foreground">{movedElsewhereSaid(moved)}</p>
       {moving.error ? (
         <p className="text-destructive" role="alert">
-          {moving.error.message}
+          {failureSaid(moving.error)}
         </p>
       ) : null}
       <span className="flex items-center gap-2">
