@@ -150,9 +150,17 @@ export function AppsSections({ agent }: { agent: AgentProfile }) {
 
 /** A Bot's Skills page: your own skills on it, one switch each, and every skill it holds. */
 export function SkillsSections({ agent }: { agent: AgentProfile }) {
+  /*
+   * In OpenBot Personal the one person runs every Bot, the ones OpenBot made for them included, and
+   * may put any skill on any of them. Elsewhere only on a Bot of their own.
+   */
+  const personal =
+    useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   return (
     <>
-      {agent.mine ? <YourSkills agent={agent} /> : null}
+      {agent.mine || (personal && agent.canManage) ? (
+        <YourSkills agent={agent} />
+      ) : null}
       <Granted agentId={agent.id} kind="skills" mine={agent.mine} />
     </>
   );
@@ -304,7 +312,8 @@ function YourSkills({ agent }: { agent: AgentProfile }) {
   const [adding, setAdding] = useState(false);
   const carried = new Set((held.data?.skills ?? []).map((skill) => skill.slug));
   const skills = (page.data ?? [])
-    .filter((skill) => skill.usableOnYourBots)
+    // In OpenBot Personal any skill, the ones OpenBot ships included: the person is its admin.
+    .filter((skill) => personal || skill.usableOnYourBots)
     // On this Bot first, each half in the list's own order.
     .sort((a, b) => Number(carried.has(b.slug)) - Number(carried.has(a.slug)));
   const notHere = skills.filter((skill) => !carried.has(skill.slug));

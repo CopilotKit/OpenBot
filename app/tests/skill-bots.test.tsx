@@ -287,6 +287,16 @@ describe("a Bot's own skills, in OpenBot Personal", () => {
     expect(sent[0]).toContain('"botIds":["assistant"]');
   });
 
+  test("a Bot OpenBot made for the person has them too", async () => {
+    serving();
+    const view = withData(
+      <SkillsSections agent={{ ...ASSISTANT, mine: false, canManage: true }} />,
+      { skills, held: ["standup", "review"] },
+    );
+    expect(await view.findByRole("switch", { name: "Review" })).toBeTruthy();
+    expect(view.getByRole("button", { name: "Add skills" })).toBeTruthy();
+  });
+
   test("the team edition says nothing about other Bots and has no such menu", async () => {
     serving();
     const view = withData(<SkillsSections agent={ASSISTANT} />, {
