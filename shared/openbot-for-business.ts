@@ -40,6 +40,9 @@ export type BookingCalendarColors = {
  * length, which the step's own words already say, so the narrow column shows the calendar first.
  * `hide_gdpr_banner` drops Calendly's cookie banner, which otherwise sits over the calendar inside
  * the step.
+ * `utm_source=openbot_app` and `utm_medium=in_app` say the call was booked from inside OpenBot,
+ * the web app or Desktop. Calendly keeps an embed address's UTM tags on the booking, so without them
+ * a booking made here counts as a direct one.
  * Colours are the app's own, where they could be read.
  */
 export function bookingCalendarSrc(
@@ -51,6 +54,8 @@ export function bookingCalendarSrc(
   url.searchParams.set("embed_type", "Inline");
   url.searchParams.set("hide_event_type_details", "1");
   url.searchParams.set("hide_gdpr_banner", "1");
+  url.searchParams.set("utm_source", "openbot_app");
+  url.searchParams.set("utm_medium", "in_app");
   if (colors) {
     url.searchParams.set("background_color", colors.background);
     url.searchParams.set("text_color", colors.text);
