@@ -327,7 +327,7 @@
   {
     "input": "/api/v2/keys/obk_Zq3Kp8xZq3Kp8xZq3Kp8xZq3Kp8x",
     "redacted": "/api/v2/keys/[redacted]",
-    "keepingIds": "/api/v2/keys/obk_Zq3Kp8xZq3Kp8xZq3Kp8xZq3Kp8x"
+    "keepingIds": "/api/v2/keys/[redacted]"
   },
   {
     "input": "TypeError: can't read sk-ant-api03-Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_Ab9_ for dana.rivera@example.com",

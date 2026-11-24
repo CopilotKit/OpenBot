@@ -372,3 +372,22 @@ test("a desktop app without save_logs refuses it, and the page saves its own fil
     ]),
   );
 });
+
+test("a desktop app that couldn't save says so, and nothing else is saved", async () => {
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+    transformCallback: () => 0,
+    invoke: async (command: string) => {
+      // The desktop app's own sentence, as Tauri hands a command's Err to the page.
+      if (command.endsWith("|save_logs"))
+        throw "OpenBot couldn't save the troubleshooting logs. Try again.";
+      return null;
+    },
+  };
+  await chooseGetTroubleshootingLogs();
+  await waitFor(() =>
+    expect(toasts()).toEqual([
+      "Couldn't save the troubleshooting logs. Try again.",
+    ]),
+  );
+  expect(downloads).toEqual([]);
+});

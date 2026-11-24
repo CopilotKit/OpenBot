@@ -520,8 +520,9 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
                 r"|ya29\.[0-9A-Za-z_\-]+",
                 r"|npm_[A-Za-z0-9]{36}",
                 r"|hf_[A-Za-z0-9]{30,}",
-                // OpenBot's own: an app's access token (`oba_`) and refresh token (`obr_`).
-                r"|ob[ar]_[A-Za-z0-9_\-]{8,}",
+                // OpenBot's own: an app's access token (`oba_`) and refresh token (`obr_`), and an
+                // API key (`obk_`).
+                r"|ob[akr]_[A-Za-z0-9_\-]{8,}",
                 r"|eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*",
                 r")",
             ),
@@ -784,6 +785,37 @@ mod tests {
         ] {
             let kept = redact_keeping_ids(&line);
             assert!(!kept.contains(secret.as_str()), "{line} -> {kept}");
+        }
+    }
+
+    /// The web app scrubs its own troubleshooting logs with these rules, ported
+    /// (app/src/lib/troubleshooting/redact.ts). Both are held to the same real-world cases, so the
+    /// two can never redact the same line differently.
+    #[test]
+    fn the_web_app_and_this_app_redact_every_shared_case_alike() {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Case {
+            input: String,
+            redacted: String,
+            keeping_ids: String,
+        }
+        let cases: Vec<Case> =
+            serde_json::from_str(include_str!("../../../shared/redaction-cases.json")).unwrap();
+        assert!(cases.len() > 50);
+        for case in &cases {
+            assert_eq!(
+                redact(&case.input),
+                case.redacted,
+                "redact {:?}",
+                case.input
+            );
+            assert_eq!(
+                redact_keeping_ids(&case.input),
+                case.keeping_ids,
+                "redact_keeping_ids {:?}",
+                case.input
+            );
         }
     }
 

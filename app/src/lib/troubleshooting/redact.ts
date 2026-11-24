@@ -114,8 +114,9 @@ const RULES: Rule[] = [
       "|ya29\\.[0-9A-Za-z_\\-]+",
       "|npm_[A-Za-z0-9]{36}",
       "|hf_[A-Za-z0-9]{30,}",
-      // OpenBot's own: an app's access token (`oba_`) and refresh token (`obr_`).
-      "|ob[ar]_[A-Za-z0-9_\\-]{8,}",
+      // OpenBot's own: an app's access token (`oba_`) and refresh token (`obr_`), and an API
+      // key (`obk_`).
+      "|ob[akr]_[A-Za-z0-9_\\-]{8,}",
       "|eyJ[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]*",
       ")",
     ].join(""),

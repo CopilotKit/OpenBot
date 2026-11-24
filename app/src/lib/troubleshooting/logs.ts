@@ -29,6 +29,10 @@ import { redact, redactKeepingIds } from "./redact";
 export const REDACTION_NOTE =
   "Redacted before saving: API keys, tokens, passwords, cookies and email addresses. Request, account and organization ids are kept, so a failure can be found in the server's logs.";
 
+/** OpenBot Desktop's answer to `save_logs` when it has the command and couldn't save the file. */
+export const DESKTOP_COULD_NOT_SAVE =
+  "OpenBot couldn't save the troubleshooting logs. Try again.";
+
 /** What the person reads once the file is saved, after where it was saved. */
 export const REMOVED =
   "Keys, tokens, passwords, cookies and email addresses were removed before it was saved.";
@@ -191,9 +195,12 @@ export async function saveTroubleshootingLogs(
         where: "desktop",
         said: `Saved in OpenBot Desktop's log folder. ${REMOVED}`,
       };
-    } catch {
-      // A desktop app older than the command refuses it, and one that couldn't save says why. Either
-      // way the person still gets a file: this page's own.
+    } catch (error) {
+      // A desktop app that has the command but couldn't save says so in its own sentence, and that
+      // is what the person is told. A desktop app older than the command refuses it in Tauri's
+      // words, and the person still gets a file: this page's own.
+      if (error === DESKTOP_COULD_NOT_SAVE)
+        throw new Error(DESKTOP_COULD_NOT_SAVE);
     }
   }
   const now = problemClockNow();

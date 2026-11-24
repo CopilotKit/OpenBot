@@ -155,6 +155,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   and runs that failed); the relay's recent lines; and the end of the app's log. Keys, tokens,
   passwords, cookies and email addresses are taken out, and nothing anybody wrote is recorded.
   Before, the item was gone while connected, and the log held only the relay's lines.
+- **Get troubleshooting logs in the web app too**, in the menu under your name. In a browser it
+  downloads one file of the last 30 minutes: the app's address and version, the release OpenBot
+  runs, your account and organization ids, and the problems the app met in that time, each failed
+  request with its request id. Keys, tokens, passwords, cookies and email addresses are removed with
+  the same rules OpenBot Desktop uses, and it says so once the file is saved. Inside OpenBot Desktop
+  the same item saves Desktop's own file and shows it.
 - **OpenBot Cloud, first on the first screen.** "Set up OpenBot" opens on OpenBot Cloud: this app on
   your computer, connected to OpenBot Cloud, where your Bots run. Sign in to OpenBot Cloud opens
   your browser to sign in at my.open.bot, or to create an account, then comes straight back to the
