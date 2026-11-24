@@ -40,7 +40,7 @@ export function useConversationBuddyActivity(input: {
 }
 
 /**
- * The conversation's Bot as its buddy, over the conversation's top right corner while the Bot does
+ * The conversation's Bot as its buddy, over the conversation's bottom right corner while the Bot does
  * something: thinking, working, talking, waiting on the person, and a moment after it is done. At
  * rest it is not drawn, so it never sits over the conversation for long. Clicking it chooses another.
  */
@@ -53,7 +53,7 @@ export function ConversationBuddy({
 }) {
   if (activity === "idle") return null;
   return (
-    <div className="fade-in-0 zoom-in-90 animate-in duration-300">
+    <div className="fade-in-0 slide-in-from-bottom-2 zoom-in-90 animate-in duration-300">
       <ChooseBuddyButton agent={bot}>
         <BotBuddy
           activity={activity}

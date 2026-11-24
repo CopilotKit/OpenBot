@@ -143,7 +143,7 @@ export function ConversationView({
    */
   intro?: ReactNode;
   /**
-   * Drawn over the transcript's top right corner: the Bot's buddy while it works
+   * Drawn over the transcript's bottom right corner, just above the composer: the Bot's buddy while it works
    * (`ConversationBuddy`). Only a button in it takes clicks; the rest of its box lets them through to
    * the transcript.
    */
@@ -535,7 +535,7 @@ export function ConversationView({
     <div className="flex flex-col flex-1 min-h-0">
       <div className="relative flex flex-1 min-h-0">
         {corner ? (
-          <div className="pointer-events-none absolute top-2 right-6 z-10 [&_button]:pointer-events-auto">
+          <div className="pointer-events-none absolute right-6 bottom-2 z-10 [&_button]:pointer-events-auto">
             {corner}
           </div>
         ) : null}
