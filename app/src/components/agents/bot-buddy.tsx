@@ -67,9 +67,11 @@ export function BotBuddy({
   const own = useBotBuddy(seed);
   const buddy = given ?? own;
   const reduceMotion = useReducedMotion();
+  // A buddy with no clips (one only drawn, where nothing could animate it) is always its picture.
   const still =
     keepStill ||
     reduceMotion ||
+    Object.keys(buddy.clips).length === 0 ||
     (size <= STILL_MAX_SIZE && activity === "idle");
 
   return (
@@ -175,7 +177,9 @@ function BuddyWebKit({
           <source
             src={clip}
             type={
-              clip.endsWith(".hevc.mp4") ? 'video/mp4; codecs="hvc1"' : undefined
+              clip.endsWith(".hevc.mp4")
+                ? 'video/mp4; codecs="hvc1"'
+                : undefined
             }
           />
         </video>

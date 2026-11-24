@@ -70,7 +70,7 @@ export const ListBuddiesResponse = zod.object({
 });
 
 /**
- * Turn a picture into a buddy: a cartoon character drawn from it, then a short clip for each pose. It takes a few minutes, so the buddy is answered at once with status generating, and getBuddy reads its progress. It is made with the organization's Google AI key when one is connected, otherwise with the keys this OpenBot was given for it; with neither, it answers 409 with the code BUDDY_KEY_MISSING.
+ * Turn a picture into a buddy: a cartoon character drawn from it, then a short clip for each pose. It takes a few minutes, so the buddy is answered at once with status generating, and getBuddy reads its progress. It is made with the organization's own AI where it can do it: the first provider connected with a key that can draw (Google's Gemini API, OpenAI or xAI), its default provider first, draws the character, and the first that can animate (Google or xAI) makes the clips. After those come the keys this OpenBot was given for it. When nothing can animate, as with OpenAI alone, the buddy is its picture: progress.total is 1 and it is ready with no poses. With nothing that can draw, it answers 409 with the code BUDDY_KEY_MISSING.
  * @summary Make a buddy from a picture
  */
 

@@ -14994,7 +14994,7 @@ paths:
         - Buddies
       operationId: createBuddy
       summary: Make a buddy from a picture
-      description: 'Turn a picture into a buddy: a cartoon character drawn from it, then a short clip for each pose. It takes a few minutes, so the buddy is answered at once with status generating, and getBuddy reads its progress. It is made with the organization''s Google AI key when one is connected, otherwise with the keys this OpenBot was given for it; with neither, it answers 409 with the code BUDDY_KEY_MISSING.'
+      description: 'Turn a picture into a buddy: a cartoon character drawn from it, then a short clip for each pose. It takes a few minutes, so the buddy is answered at once with status generating, and getBuddy reads its progress. It is made with the organization''s own AI where it can do it: the first provider connected with a key that can draw (Google''s Gemini API, OpenAI or xAI), its default provider first, draws the character, and the first that can animate (Google or xAI) makes the clips. After those come the keys this OpenBot was given for it. When nothing can animate, as with OpenAI alone, the buddy is its picture: progress.total is 1 and it is ready with no poses. With nothing that can draw, it answers 409 with the code BUDDY_KEY_MISSING.'
       security:
         - webSession: []
         - appOAuth:
@@ -44462,7 +44462,7 @@ components:
                 type: https://open.bot/errors/buddy-key-missing
                 title: Making a buddy needs a key.
                 status: 409
-                detail: Making a buddy needs a Google AI key. Connect Google with an API key under AI providers, or ask an admin.
+                detail: Making a buddy needs an AI that can draw. Connect Google, OpenAI or xAI with an API key under AI providers, or ask an admin.
                 code: BUDDY_KEY_MISSING
                 category: conflict
                 retryable: false

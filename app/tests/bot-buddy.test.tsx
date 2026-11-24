@@ -9,6 +9,7 @@ import {
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
+import { BotBuddy } from "@/components/agents/bot-buddy";
 import { BotLookProvider } from "@/components/agents/bot-look";
 import { BotOrb } from "@/components/agents/bot-orb";
 import { agentListQueryOptions } from "@/lib/agents/queries";
@@ -96,6 +97,30 @@ describe("a Bot drawn as its buddy", () => {
     ).toBe("own:bud_1");
     expect(view.container.querySelector("img")?.getAttribute("src")).toBe(
       made.avatarUrl,
+    );
+  });
+
+  test("is its still picture whatever it does when nothing animated it", () => {
+    const pictureOnly: DrawnBuddy = {
+      key: "own:bud_2",
+      name: "Pebble",
+      avatarUrl: "/api/v2/organizations/default/buddies/bud_2/files/avatar.jpg",
+      clips: {},
+    };
+    const view = render(
+      <QueryClientProvider client={new QueryClient()}>
+        <BotBuddy
+          activity="working"
+          buddy={pictureOnly}
+          name="Knowledge"
+          seed="knowledge"
+          size={96}
+        />
+      </QueryClientProvider>,
+    );
+    expect(view.container.querySelector("video")).toBeNull();
+    expect(view.container.querySelector("img")?.getAttribute("src")).toBe(
+      pictureOnly.avatarUrl,
     );
   });
 });
