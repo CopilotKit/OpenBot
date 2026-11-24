@@ -160,3 +160,39 @@ test("Quit says it is starting the person's Podman again only when OpenBot pause
     "Stopping the software OpenBot runs on",
   );
 });
+
+/**
+ * The journey's spinner is the one on the screen while a Quit runs: the row it is on is marked,
+ * not spun. Both spun at once ("Closing OpenBot's apps" over "Stopping OpenBot · In progress").
+ */
+test("a running Quit shows one spinner: the journey's", () => {
+  const view = render(
+    <ShuttingDown
+      status={{
+        seq: 1,
+        steps: [{ step: "stop-openbot", ok: true, running: true, detail: "" }],
+      }}
+    />,
+  );
+  const spinners = view.container.querySelectorAll(".step-spinner");
+  expect(spinners).toHaveLength(1);
+  expect(spinners[0]?.closest(".journey")).not.toBeNull();
+  expect(view.container.querySelectorAll(".step .step-current")).toHaveLength(
+    1,
+  );
+});
+
+test("a Quit that stopped partway shows no journey, so its rows keep their own marks", () => {
+  const view = render(
+    <ShuttingDown
+      status={{
+        seq: 1,
+        steps: [
+          { step: "stop-openbot", ok: false, running: false, detail: "" },
+        ],
+      }}
+    />,
+  );
+  expect(view.container.querySelector(".journey")).toBeNull();
+  expect(view.container.querySelectorAll(".step-spinner")).toHaveLength(0);
+});
