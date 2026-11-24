@@ -19,9 +19,12 @@ export function SettingsReadCard({
   state,
   reason,
   link,
+  wrapTitle = false,
   children,
 }: {
   title: string;
+  /** A title that is a sentence (a job to do) wraps onto a second line instead of being cut. */
+  wrapTitle?: boolean;
   /** One line under the title. */
   caption?: string;
   icon?: TablerIcon;
@@ -56,7 +59,14 @@ export function SettingsReadCard({
           <Icon aria-hidden className="size-4 text-muted-foreground" />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <p className="truncate font-medium text-sm">{title}</p>
+          <p
+            className={cn(
+              "font-medium text-sm",
+              wrapTitle ? "text-pretty break-words" : "truncate",
+            )}
+          >
+            {title}
+          </p>
           <p
             className={cn(
               "text-muted-foreground text-xs",

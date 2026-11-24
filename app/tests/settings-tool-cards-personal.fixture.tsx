@@ -14,7 +14,7 @@ import { queryClient } from "@/query-client";
 import { approvalInboxResponse } from "./approvals-api";
 
 /**
- * The personal settings cards, `update_my_settings` and `update_my_bot`, in every state a
+ * The personal settings cards, `update_my_settings`, `update_my_bot` and `update_bot_apps`, in every state a
  * conversation draws them in, as a page of its own for settings-tool-cards-personal.test.tsx to
  * bundle and load in a real browser.
  *
@@ -90,6 +90,36 @@ const WAITING = [
           after: { name: "Scout Prime" },
           summary: 'Rename "Scout" to "Scout Prime".',
           changes: [{ label: "Name", before: "Scout", after: "Scout Prime" }],
+        },
+      },
+      policy: {
+        behaviour: "ask",
+        source: "default",
+        reason: "You asked to review changes before they happen.",
+      },
+    },
+  },
+  {
+    id: "approval-apps",
+    action: {
+      botId: "bot-scout",
+      toolRef: "openbot-settings/update_bot_apps",
+      effect: "write",
+      scope: "openbot-settings",
+      threadId: "thread-personal",
+      toolCallId: "call-apps-waiting",
+      args: { app: "gmail", give: ["gmail/GMAIL_SEND_EMAIL"] },
+      target: {
+        serverId: "openbot-settings",
+        toolName: "update_bot_apps",
+        effect: "write",
+        change: {
+          bot: { id: "bot-scout", name: "Scout" },
+          app: { id: "gmail", name: "Gmail" },
+          before: { actions: [] },
+          after: { actions: ["gmail/GMAIL_SEND_EMAIL"] },
+          summary: "Let Scout send email with Gmail.",
+          changes: [{ label: "Send email", before: "Off", after: "On" }],
         },
       },
       policy: {
@@ -198,6 +228,48 @@ const botSaved = answered({
   ],
 });
 
+/** An app's mark, as the catalogue serves one: a picture at an address. */
+const GMAIL_LOGO = `data:image/svg+xml;base64,${btoa(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path fill="#4285F4" d="M6 40h8V21L4 13v24a3 3 0 0 0 2 3z"/><path fill="#34A853" d="M34 40h8a3 3 0 0 0 2-3V13l-10 8z"/><path fill="#FBBC04" d="M34 9v12l10-8V9c0-3-3-5-6-3z"/><path fill="#EA4335" d="M14 21V9l10 8 10-8v12l-10 8z"/><path fill="#C5221F" d="M4 9v4l10 8V9l-4-3c-3-2-6 0-6 3z"/></svg>',
+)}`;
+
+// Scout can now send email with Gmail: one action given, by its name on the app's page.
+const appsSaved = answered({
+  bot: { id: "bot-scout", name: "Scout", avatarSeed: "scout" },
+  app: { id: "gmail", title: "Gmail", logo: GMAIL_LOGO },
+  given: ["gmail/GMAIL_SEND_EMAIL", "gmail/GMAIL_CREATE_EMAIL_DRAFT"],
+  takenAway: ["gmail/GMAIL_DELETE_MESSAGE"],
+  before: {
+    actions: ["gmail/GMAIL_FETCH_EMAILS", "gmail/GMAIL_DELETE_MESSAGE"],
+  },
+  after: {
+    actions: [
+      "gmail/GMAIL_FETCH_EMAILS",
+      "gmail/GMAIL_SEND_EMAIL",
+      "gmail/GMAIL_CREATE_EMAIL_DRAFT",
+    ],
+  },
+  summary:
+    "Let Scout send email and create drafts with Gmail. Stop Scout deleting messages.",
+  changes: [
+    { label: "Send email", before: "Off", after: "On" },
+    { label: "Create email draft", before: "Off", after: "On" },
+    { label: "Delete message", before: "On", after: "Off" },
+  ],
+});
+
+// The whole app taken away from a Bot: one row for the app.
+const appTakenAway = answered({
+  bot: { id: "bot-ledger", name: "Ledger", avatarSeed: "ledger" },
+  app: { id: "notion", title: "Notion", logo: null },
+  given: [],
+  takenAway: [],
+  before: { granted: true },
+  after: { granted: false },
+  summary: "Stop Ledger using Notion.",
+  changes: [{ label: "Notion", before: "Can use", after: "Can't use" }],
+});
+
 const CALLS: {
   part: string;
   tool: string;
@@ -246,6 +318,48 @@ const CALLS: {
     part: "bot-running",
     tool: "update_my_bot",
     args: { botId: "bot-ledger", visibility: "public" },
+  },
+  {
+    part: "apps-done",
+    tool: "update_bot_apps",
+    args: {
+      app: "gmail",
+      give: ["gmail/GMAIL_SEND_EMAIL", "gmail/GMAIL_CREATE_EMAIL_DRAFT"],
+      takeAway: ["gmail/GMAIL_DELETE_MESSAGE"],
+    },
+    result: appsSaved,
+  },
+  {
+    part: "apps-app-done",
+    tool: "update_bot_apps",
+    args: { botId: "bot-ledger", app: "notion", takeAwayApp: true },
+    result: appTakenAway,
+  },
+  {
+    part: "apps-running",
+    tool: "update_bot_apps",
+    args: {
+      botId: "bot-ledger",
+      app: "gmail",
+      give: ["gmail/GMAIL_SEND_EMAIL"],
+      takeAway: ["gmail/GMAIL_DELETE_MESSAGE"],
+    },
+  },
+  {
+    part: "apps-refused",
+    tool: "update_bot_apps",
+    args: {
+      botId: "bot-ledger",
+      app: "gmail",
+      give: ["gmail/GMAIL_SEND_EMAIL"],
+    },
+    result: "Refused. You can't manage this Bot.",
+  },
+  {
+    part: "apps-failed",
+    tool: "update_bot_apps",
+    args: { app: "gmail", need: "send email" },
+    result: "The vendor reported an error: something broke",
   },
 ];
 

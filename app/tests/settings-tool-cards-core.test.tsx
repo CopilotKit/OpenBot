@@ -7,8 +7,9 @@ import { screenLinkLooks } from "./screen-link-style";
 
 /**
  * The cards OpenBot settings' read tools draw in a conversation, in a real browser: the person's
- * settings, their Bots, the organization's settings for an admin, and where to change a setting
- * yourself. Answered, refused and running, from the result as the server writes it.
+ * settings, their Bots, the organization's settings for an admin, where to change a setting
+ * yourself, and how to do a job yourself, click by click. Answered, refused, failed and running,
+ * from the result as the server writes it.
  *
  * Each names its settings in the words of the screen they live on and opens that screen. In the
  * app's stylesheet, light and dark, at a laptop's width and a phone's: nothing scrolls sideways and
@@ -228,7 +229,7 @@ describe.skipIf(!asked)("the settings read cards", () => {
               ),
             ).toBe(false);
             const cards = await read(page);
-            expect(Object.keys(cards)).toHaveLength(6);
+            expect(Object.keys(cards)).toHaveLength(11);
             for (const card of Object.values(cards)) {
               expect(card.inside).toBe(true);
               expect(card.valuesInside).toBe(true);
@@ -338,12 +339,108 @@ describe.skipIf(!asked)("the settings read cards", () => {
             expect(where?.links[0]?.text).toContain("AI connection");
             expect(where?.links[1]?.text).toContain("never in chat");
 
+            // How to do a job yourself, click by click: found in use, a person asked their Bot how
+            // to give one of their Bots a permission and it said it couldn't see its own screens.
+            const guide = cards["guide-done"];
+            expect(guide).toMatchObject({
+              state: "done",
+              title: "Give a Bot permission to use an app's actions",
+              caption: "Here's how to do each one yourself.",
+              // The screens that can be opened; Connections came without one.
+              links: [
+                { text: "Open Scout's Apps", href: "/bots/bot-scout/apps" },
+                {
+                  text: "Open Scout's Approvals",
+                  href: "/bots/bot-scout/approvals",
+                },
+              ],
+            });
+            const steps = await page.evaluate(() =>
+              [
+                ...document.querySelectorAll(
+                  '[data-part="guide-done"] [data-answer]',
+                ),
+              ].map((answer) => ({
+                task: answer.getAttribute("data-answer"),
+                steps: [...answer.querySelectorAll("[data-step]")].map((step) =>
+                  (step.textContent ?? "").replace(/\s+/g, " "),
+                ),
+                bold: [...answer.querySelectorAll("[data-step] strong")].map(
+                  (strong) => strong.textContent,
+                ),
+                botCan: answer.querySelector("[data-bot-can]") !== null,
+              })),
+            );
+            // Opening the screen, then the job on it, numbered in one list.
+            expect(steps[0]).toEqual({
+              task: "Give a Bot permission to use an app's actions",
+              steps: [
+                "1Open Bots in the sidebar.",
+                "2Choose Scout, then open Apps.",
+                "3Find Gmail in the list and turn it on.",
+                "4Open Gmail and turn on each action Scout may use, such as Send email.",
+              ],
+              bold: ["Bots", "Scout", "Apps", "Gmail", "Gmail", "Send email"],
+              botCan: true,
+            });
+            expect(steps.map((answer) => answer.task)).toEqual([
+              "Give a Bot permission to use an app's actions",
+              "Ask before Scout sends email",
+              "Connect your own Gmail account",
+            ]);
+            expect(steps.map((answer) => answer.botCan)).toEqual([
+              true,
+              false,
+              false,
+            ]);
+            // The screen's words are bold, and no asterisk is ever shown.
+            expect(guide?.text).not.toContain("*");
+            expect(guide?.text).toContain("Or ask your Bot to do it for you.");
+
+            const member = cards["guide-member"];
+            expect(member).toMatchObject({
+              state: "done",
+              title: "Let a Bot use an app nobody has turned on",
+              caption: "Here's how to do it yourself.",
+              links: [{ text: "Open Connections", href: "/connections" }],
+            });
+            expect(member?.text).toContain(
+              "Only an admin can turn on an app for everyone.",
+            );
+            expect(member?.text).not.toContain("*");
+
+            expect(cards["guide-running"]).toMatchObject({
+              state: "running",
+              title: "Give Scout permission to send email",
+              caption: "Reading…",
+              links: [],
+            });
+            const guideRefused = cards["guide-refused"];
+            expect(guideRefused).toMatchObject({
+              state: "refused",
+              caption: "Not read",
+              links: [],
+            });
+            expect(guideRefused?.text).toContain("You can't manage this Bot.");
+            expect(guideRefused?.text).not.toContain("Refused.");
+            expect(cards["guide-failed"]).toMatchObject({
+              state: "failed",
+              caption: "Couldn't be read",
+              links: [],
+            });
+            expect(cards["guide-failed"]?.text).toContain(
+              "This didn't work. Ask your Bot to try again.",
+            );
+
             // Every card opens its screen with the same link as the change cards: primary, a chevron.
             const links = await screenLinkLooks(page);
             expect(links.map((link) => link.text)).toEqual([
               "Open Settings",
               "Open Bots",
               "Open Admin",
+              "Open Scout's Apps",
+              "Open Scout's Approvals",
+              "Open Connections",
             ]);
             for (const link of links)
               expect(link).toMatchObject({

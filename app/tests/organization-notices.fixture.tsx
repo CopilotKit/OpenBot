@@ -14,28 +14,33 @@ import { OrganizationBoundary } from "@/components/organizations/organization-bo
 import { TeamDetailPage } from "@/components/teams/team-page";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { signedInUser } from "@/lib/auth/queries";
 import { ProposedBotRender } from "@/lib/copilot/bot-tools";
 import { ReportedErrorComponent } from "@/lib/error-reporting";
 import { queryClient } from "@/query-client";
+import { Route as AuthedRoute } from "@/routes/_authed";
 import { Route as AppRoute } from "@/routes/_authed/_app";
 import { Route as MemoryRoute } from "@/routes/_authed/_app/memory";
 import { Route as RoutinesRoute } from "@/routes/_authed/_app/routines";
 import { Route as TeamsRoute } from "@/routes/_authed/_app/teams";
+import { Route as TermsRoute } from "@/routes/_authed/terms";
 
 /**
- * The app as organization-moving.test.tsx, organization-removed.test.tsx and
- * organization-held-reload.test.tsx load it in a browser:
- * the signed-in gate's first step (who is signed in, and the organization they work in), the
- * organization boundary `_authed` puts around everything, and the app's real frame (`_authed/_app`:
- * the strip, its panels and every bar over the page). Inside it, Routines is the real page; home is
- * a stand-in heading. Memory and Teams are the real pages too, and so are a team's page and the card a
- * Bot proposes a new Bot on (organization-held-actions.test.tsx). OpenBot's API is the test's routes.
+ * The app as organization-moving.test.tsx, organization-removed.test.tsx,
+ * organization-held-reload.test.tsx and organization-held-recovery.test.tsx load it in a browser:
+ * the signed-in gate itself (`_authed`'s own `beforeLoad`: who is signed in and the organization they
+ * work in, then the terms, onboarding and the AI connection), the terms screen it sends people to,
+ * the organization boundary `_authed` puts around everything, and the app's real frame
+ * (`_authed/_app`: the strip, its panels and every bar over the page). The routes keep the app's own
+ * ids, so a screen that reads its own route (the terms screen reads `?next=`) finds it. Inside the
+ * frame, Routines is the real page; home is a stand-in heading. Memory and Teams are the real pages
+ * too, and so are a team's page and the card a Bot proposes a new Bot on
+ * (organization-held-actions.test.tsx). OpenBot's API is the test's routes.
  *
- * `window.openbotRouter` lets the test move between pages as a link does, at any window width.
+ * `window.openbotRouter` lets the test move between pages as a link does, at any window width, and
+ * `window.openbotQueryClient` lets it drop an answer the app kept, as the cache does by itself with
+ * an answer nothing has shown for five minutes.
  */
 const rootRoute = createRootRoute({
-  beforeLoad: () => signedInUser(queryClient),
   component: () => (
     <OrganizationBoundary>
       <Outlet />
@@ -43,9 +48,29 @@ const rootRoute = createRootRoute({
   ),
 });
 
-const appRoute = createRoute({
+// The signed-in gate, as routes/_authed.tsx has it.
+const authedRoute = createRoute({
   getParentRoute: () => rootRoute,
-  id: "app",
+  id: "_authed",
+  beforeLoad: (args) => AuthedRoute.options.beforeLoad?.(args as never),
+  errorComponent: AuthedRoute.options.errorComponent,
+  component: Outlet,
+});
+
+// Where the gate sends somebody with terms to agree to, as routes/_authed/terms.tsx has it.
+const termsRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: "/terms",
+  validateSearch: TermsRoute.options.validateSearch as (
+    search: Record<string, unknown>,
+  ) => { next?: string },
+  beforeLoad: (args) => TermsRoute.options.beforeLoad?.(args as never),
+  component: TermsRoute.options.component as () => ReactNode,
+});
+
+const appRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  id: "_app",
   component: AppRoute.options.component as () => ReactNode,
 });
 
@@ -111,21 +136,28 @@ const proposedBotRoute = createRoute({
 
 const router = createRouter({
   history: createBrowserHistory(),
+  // What every gate is handed, as router.tsx gives it.
+  context: { queryClient },
   // The app's own error boundary, as router.tsx gives every route.
   defaultErrorComponent: ReportedErrorComponent,
   routeTree: rootRoute.addChildren([
-    appRoute.addChildren([
-      homeRoute,
-      routinesRoute,
-      memoryRoute,
-      teamsRoute,
-      teamRoute,
-      proposedBotRoute,
+    authedRoute.addChildren([
+      termsRoute,
+      appRoute.addChildren([
+        homeRoute,
+        routinesRoute,
+        memoryRoute,
+        teamsRoute,
+        teamRoute,
+        proposedBotRoute,
+      ]),
     ]),
   ]),
 });
 
 (window as unknown as { openbotRouter: unknown }).openbotRouter = router;
+(window as unknown as { openbotQueryClient: unknown }).openbotQueryClient =
+  queryClient;
 
 const root = document.getElementById("root");
 if (root)

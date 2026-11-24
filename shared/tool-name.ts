@@ -268,6 +268,23 @@ function settingsAsk(
         typeof change?.bot?.name === "string" ? change.bot.name.trim() : "";
       return name ? `change ${name}'s settings` : "change a Bot's settings";
     }
+    case "update_bot_apps": {
+      // The Bot and the app, by the names its preview gives (`change.bot`, `change.app`).
+      const change =
+        target && typeof target === "object"
+          ? (
+              target as {
+                change?: { bot?: { name?: unknown }; app?: { name?: unknown } };
+              }
+            ).change
+          : undefined;
+      const bot =
+        typeof change?.bot?.name === "string" ? change.bot.name.trim() : "";
+      const app =
+        typeof change?.app?.name === "string" ? change.app.name.trim() : "";
+      const what = `change what ${bot || "a Bot"} can use`;
+      return app ? `${what} in ${app}` : what;
+    }
     case "update_organization_settings":
       return "change your organization's settings";
     case "manage_people":

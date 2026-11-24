@@ -507,6 +507,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   `unknown`. It now comes from the build: a release, a release candidate or an internal build says
   `production`; a development server or a local image build says `development`. Nothing else in the
   events changes. `docs/TELEMETRY.md` says how older events are read.
+- **A Bot's screen is sharp on a high-resolution display.** On a Retina Mac, the Bot's browser in
+  the full-size view looked soft, because the screen showed the page at its own size and the display
+  stretched it. The screen now tells the Bot's computer how large it is drawn, and the computer sends
+  the page at that size, up to 2560 by 1600. A computer from before this release sends the page as
+  it did.
 - **An app's Connect card shows once.** A reply that called two tools of an app you haven't
   connected showed the same card twice. It now shows one card per app. When a later reply asks for
   the same app again, its card moves down to that reply.
