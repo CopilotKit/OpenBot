@@ -6,7 +6,7 @@ export const Route = createFileRoute("/_authed/admin/plugins/")({
   component: AdminPluginsPage,
 });
 
-/** The apps and servers, then the allowlist of MCP servers Bots may call. */
+/** The apps and servers, then Connectors: the allowlist of the apps Bots may call. */
 function AdminPluginsPage() {
   return (
     <PluginsListPage>
