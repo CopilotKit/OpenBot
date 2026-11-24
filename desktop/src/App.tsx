@@ -46,7 +46,7 @@ import {
   ProviderPicker,
   recordedModel,
 } from "./ProviderPicker";
-import { SetupRail, Sections } from "./Sections";
+import { Sections, SetupRail } from "./Sections";
 import { SelfContainedNote, UPDATING_SELF_CONTAINED } from "./SelfContained";
 import {
   engineNow,

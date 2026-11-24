@@ -6,7 +6,7 @@ import { ExternalLink } from "./ExternalLink";
 import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { ButtonMark, Mark } from "./Mark";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
-import { SetupRail, Sections } from "./Sections";
+import { Sections, SetupRail } from "./Sections";
 import {
   type Progress,
   SetupProgress,
