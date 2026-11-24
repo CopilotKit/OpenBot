@@ -147,6 +147,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### OpenBot Desktop
 
+- **Get Troubleshooting Logs… is back while the app is connected to an OpenBot elsewhere**, such as
+  OpenBot Cloud, in the tray and the OpenBot menu beside Open Log Folder. Its file says what the app
+  saw of that OpenBot: its address, whether it answers, its release, and the account and
+  organization ids; the app's own recent problems, recorded as they happen (requests that failed or
+  got no answer, each with the request id that finds it in the server's logs, errors on its pages,
+  and runs that failed); the relay's recent lines; and the end of the app's log. Keys, tokens,
+  passwords, cookies and email addresses are taken out, and nothing anybody wrote is recorded.
+  Before, the item was gone while connected, and the log held only the relay's lines.
+- **Get troubleshooting logs in the web app too**, in the menu under your name. In a browser it
+  downloads one file of the last 30 minutes: the app's address and version, the release OpenBot
+  runs, your account and organization ids, and the problems the app met in that time, each failed
+  request with its request id. Keys, tokens, passwords, cookies and email addresses are removed with
+  the same rules OpenBot Desktop uses, and it says so once the file is saved. Inside OpenBot Desktop
+  the same item saves Desktop's own file and shows it.
 - **OpenBot Cloud, first on the first screen.** "Set up OpenBot" opens on OpenBot Cloud: this app on
   your computer, connected to OpenBot Cloud, where your Bots run. Sign in to OpenBot Cloud opens
   your browser to sign in at my.open.bot, or to create an account, then comes straight back to the
@@ -275,6 +289,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - When an admin asks a Bot for an app it can't use yet, the Bot names the step the admin's own app
   card offers (Give it to, Turn on and give it to, Set it up, or Connect the shared account). It
   used to tell them to ask an administrator, even when they were the organization's only one.
+- **A Bot that needs more of an app it holds puts up that app's card.** Asked to recolour events, a
+  Bot that could only read Google Calendar said an admin could give it more, and the admin had to
+  find the Bot's settings and tick the actions by name. The card now says what the Bot can't do yet.
+  An admin, or the Bot's owner where they may give it, gives exactly those actions in one press, and
+  the conversation carries on. Anybody else presses Request access, and the admin's Requests list
+  names the actions asked for.
+- **A member told only an admin can do something is told who the admins are.** An app's card, a
+  Bot's Apps row, an app's page under Connections and Reconnect your apps name the organization's
+  owners and admins, by name and email, up to three and then how many more. After Request access,
+  Requested says who it was sent to. An admin never sees the list.
 - **Connections offers Add server only to an admin.** A server added by its address is added for
   everyone in the organization, so the button shows only for an admin, and for the one person of
   a personal OpenBot. Anybody else who opens the Add server page is told that only an admin can add
@@ -317,6 +341,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### API
 
+- **Every answer carries `X-Request-Id`, and the server logs each failed request by it.** The spec
+  says so on every response (`RequestId`), and the addresses outside /api/v2, the chat runtime
+  among them, carry it too. A problem's `requestId` is the same id. Each answer of 400 or more is
+  one line in the server's log, `api-request-failed`, with the id, the method, the path and the
+  status, never a query string, a body or a credential, so a failure an app reports can be found.
 - **Anybody signed in searches the app directory, and asks for an app with no Bot named.**
   `listAppDirectory` answers the wider directory (`source=directory`) to every member, not only to
   an admin. Only an admin adds from it. `createAppAccessRequest` takes `botId` as optional: left out,
@@ -407,6 +436,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   optional. 402 `PLAN_REQUIRED` is now declared on every operation that starts a run: `runRoutine`,
   `runCheckIn`, `startCheckInItem`, `workOnCheckInItem`, `runGoal`, `startVoiceCall` and
   `retryTask`, besides `sendConversationMessage`. The plan's descriptions no longer say 30-day trial.
+- **Inviting into an organization that pays for each member.** `createOrganizationInvitation` can
+  answer 402 `SEAT_REQUIRED` when every seat the organization paid for is taken. The problem
+  carries `addSeatUrl`, where an owner or an admin adds a seat in the browser; nothing is invited.
+  `addSeatUrl` is an optional problem property.
 
 ### Kubernetes
 
@@ -444,6 +477,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Smaller changes
 
+- **A sharper look, at the same sizes.** Corners come from one 8px radius, cards are flat with a
+  hairline border you can see in both themes, and shadows show only on what floats: menus and
+  popovers, then dialogs and sheets over the app. The grays are slate, a quiet blue-gray in dark,
+  with CopilotKit's lavender kept for the focus ring and the selected sidebar row. The message box
+  glows while you type in it. On Home, OpenBot's orb sits behind the message box as a pale field
+  with rings of dots that brighten as you type, and the page rises in on the first Home of a visit.
+  Nothing moves when your system asks for less motion. Skins keep their own look.
+- **Product telemetry says which kind of install sent it.** An event's `environment` was read from
+  `NODE_ENV`, which a Compose install and OpenBot Desktop leave empty, so every event said
+  `unknown`. It now comes from the build: a release, a release candidate or an internal build says
+  `production`; a development server or a local image build says `development`. Nothing else in the
+  events changes. `docs/TELEMETRY.md` says how older events are read.
 - **An app's Connect card shows once.** A reply that called two tools of an app you haven't
   connected showed the same card twice. It now shows one card per app. When a later reply asks for
   the same app again, its card moves down to that reply.

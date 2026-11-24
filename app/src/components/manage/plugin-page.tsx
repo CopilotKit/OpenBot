@@ -71,6 +71,12 @@ import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { storeMcpToken } from "@/lib/credentials/mutations";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
 import { atStart, useManagePaths } from "@/lib/manage-paths";
 import { signsInForDirectory } from "@/lib/plugins/directory-state";
 import {
@@ -254,7 +260,7 @@ export function connectionKindFor(
  * buttons — somebody reading with a screen reader has to be told the controls are gone and why,
  * not left to notice their absence.
  */
-function ConnectionStateUnreadable() {
+function ConnectionStateUnreadable({ error }: { error: unknown }) {
   const paths = useManagePaths();
   return (
     <Item size="sm">
@@ -262,9 +268,12 @@ function ConnectionStateUnreadable() {
         <ItemTitle>Your account</ItemTitle>
         <ItemDescription role="alert">
           {/* A hosted OpenBot's logs are OpenBot by CopilotKit's: its admin can't read them. */}
-          {paths.hosted
-            ? "Couldn't load whether you've connected an account here. Try again in a moment."
-            : `Couldn't load whether you've connected an account here. Try again in a moment, or check ${paths.deploymentName}'s logs if it keeps happening.`}
+          {loadFailure(
+            error,
+            paths.hosted
+              ? "Couldn't load whether you've connected an account here. Try again in a moment."
+              : `Couldn't load whether you've connected an account here. Try again in a moment, or check ${paths.deploymentName}'s logs if it keeps happening.`,
+          )}
         </ItemDescription>
       </ItemContent>
     </Item>
@@ -342,7 +351,8 @@ export function PluginPage({
    */
   const connectionsUnreadable = connections.error !== null;
 
-  const [error, setError] = useState<string | null>(null);
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [error, setError] = useState<Failure | null>(null);
   const [dialog, setDialog] = useState<OpenDialog>(null);
   /** Which way the mode-switch confirmation is asking, or null while it is closed. */
   const [modeTarget, setModeTarget] = useState<"personal" | "shared" | null>(
@@ -371,7 +381,7 @@ export function PluginPage({
   } | null>(null);
 
   /* Every write reports into one banner rather than each growing its own handler. */
-  const report = { onError: (thrown: Error) => setError(thrown.message) };
+  const report = { onError: (thrown: Error) => setError(thrown) };
   const addCurated = useMutation({
     ...addCuratedServerMutationOptions(queryClient),
     ...report,
@@ -434,9 +444,10 @@ export function PluginPage({
           ? start.authorizationUrl
           : null;
       if (authorizationUrl === null) {
-        setError(
-          "OpenBot got no consent link back, so nothing was connected. Try again, or check this connector's setup if it keeps happening.",
-        );
+        setError({
+          message:
+            "OpenBot got no consent link back, so nothing was connected. Try again, or check this connector's setup if it keeps happening.",
+        });
         return;
       }
       window.location.href = authorizationUrl;
@@ -519,7 +530,9 @@ export function PluginPage({
     brokered: auth === "brokered",
     configured: setup.data?.directoryAvailable ?? false,
     recorded: shared ? (sharedConnection?.connected ?? false) : youConnected,
-    report: setError,
+    // Words the row says itself, or the error kept whole: either way drawn through the shared rule.
+    report: (said: string | Failure | null) =>
+      setError(typeof said === "string" ? { message: said } : said),
     // Back to this page afterwards, not to the personal settings screen.
     returnTo: "admin",
     serverId: key,
@@ -577,7 +590,7 @@ export function PluginPage({
       setDialog(null);
       return true;
     } catch (thrown) {
-      setError((thrown as Error).message);
+      setError(failureOf(thrown, String(thrown)));
       return false;
     }
   };
@@ -625,7 +638,7 @@ export function PluginPage({
       }
       setDialog(null);
     } catch (thrown) {
-      setError((thrown as Error).message);
+      setError(failureOf(thrown, String(thrown)));
     } finally {
       await invalidatePlugins(queryClient);
       setGranting(null);
@@ -657,9 +670,12 @@ export function PluginPage({
         title={paths.pluginsLabel}
       >
         <p className="mt-12 text-destructive text-sm" role="alert">
-          {personal
-            ? "Couldn't load your apps. Try again in a moment."
-            : "Couldn't load apps. Try again in a moment."}
+          {loadFailure(
+            [plugins.error, catalogue.error],
+            personal
+              ? "Couldn't load your apps. Try again in a moment."
+              : "Couldn't load apps. Try again in a moment.",
+          )}
         </p>
       </PageShell>
     );
@@ -701,7 +717,7 @@ export function PluginPage({
     >
       {error ? (
         <p className="break-words text-destructive text-sm" role="alert">
-          {error}
+          {failureSaid(error)}
         </p>
       ) : null}
 
@@ -1132,7 +1148,7 @@ export function PluginPage({
               <>
                 <Separator />
                 {connectionsUnreadable ? (
-                  <ConnectionStateUnreadable />
+                  <ConnectionStateUnreadable error={connections.error} />
                 ) : server?.sharedOnly && !shared ? (
                   /*
                    * NO PERSONAL CONNECT FOR AN APP THAT CAN ONLY HOLD A SHARED ACCOUNT. It signs in
@@ -1198,7 +1214,7 @@ export function PluginPage({
               <>
                 <Separator />
                 {connectionsUnreadable ? (
-                  <ConnectionStateUnreadable />
+                  <ConnectionStateUnreadable error={connections.error} />
                 ) : (
                   <Item size="sm">
                     <ItemContent>

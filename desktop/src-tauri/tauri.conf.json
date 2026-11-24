@@ -26,7 +26,9 @@
         "create": false
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'sha256-BhsZhiXS5IsSYtGRiQ6sJ1xGtkYCWhV/ddGR9OQz2YI='; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; frame-src https://calendly.com; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
+    }
   },
   "bundle": {
     "active": true,

@@ -25,6 +25,13 @@ import {
   type PlaygroundRecord,
   playgroundListQueryOptions,
 } from "@/lib/components/queries";
+import {
+  type Failure,
+  failureSaid,
+  isHeld,
+  loadFailure,
+} from "@/lib/load-failure";
+import { cn } from "@/lib/utils";
 
 /**
  * Browser-authored components are edited as drafts, previewed in the production sandbox renderer,
@@ -118,9 +125,11 @@ export function validatePlaygroundDraft(draft: Draft): PlaygroundValidation {
 function PlaygroundPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const queryClient = useQueryClient();
-  const { data: components } = useQuery(playgroundListQueryOptions());
+  const saved = useQuery(playgroundListQueryOptions());
+  const components = saved.data;
   const [draft, setDraft] = useState<Draft>(STARTER);
-  const [error, setError] = useState<string | null>(null);
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [error, setError] = useState<Failure | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const set = (field: keyof Draft) => (value: string) => {
@@ -133,7 +142,7 @@ function PlaygroundPage() {
   const sample = validation.ok ? validation.input.sampleArguments : null;
 
   /* Every write here reports into the same banner, so they share one failure handler. */
-  const report = { onError: (thrown: Error) => setError(thrown.message) };
+  const report = { onError: (thrown: Error) => setError(thrown) };
   const saveDraft = useMutation({
     ...savePlaygroundDraftMutationOptions(queryClient),
     ...report,
@@ -154,10 +163,11 @@ function PlaygroundPage() {
     const current = validatePlaygroundDraft(draft);
     if (!current.ok) {
       setNotice(null);
-      setError(
-        Object.values(current.fields)[0] ??
+      setError({
+        message:
+          Object.values(current.fields)[0] ??
           "Fix the JSON fields before saving.",
-      );
+      });
       return null;
     }
     return current.input;
@@ -238,10 +248,16 @@ function PlaygroundPage() {
 
       {error ? (
         <div
-          className="border-border border-b bg-destructive/10 px-6 py-2 text-destructive text-sm"
+          className={cn(
+            "border-border border-b px-6 py-2 text-sm",
+            // OpenBot holding off is news, not a failure: no red band (lib/load-failure.tsx).
+            isHeld(error)
+              ? "bg-muted/40 text-muted-foreground"
+              : "bg-destructive/10 text-destructive",
+          )}
           role="alert"
         >
-          {error}
+          {failureSaid(error)}
         </div>
       ) : null}
       {notice ? (
@@ -334,7 +350,15 @@ function PlaygroundPage() {
             <div className="border-border border-b px-4 py-2 font-medium text-sm">
               Saved here
             </div>
-            {(components ?? []).length === 0 ? (
+            {/* "Nothing saved yet" only once the list has said so: a list that couldn't be read says why. */}
+            {saved.isPending ? null : saved.error ? (
+              <p className="px-4 py-3 text-destructive text-sm" role="alert">
+                {loadFailure(
+                  saved.error,
+                  "Couldn't load the saved components. Try again in a moment.",
+                )}
+              </p>
+            ) : (components ?? []).length === 0 ? (
               <p className="px-4 py-3 text-muted-foreground text-sm">
                 Nothing saved yet. Save a draft to see it here.
               </p>

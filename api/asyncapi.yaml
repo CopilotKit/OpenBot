@@ -147,6 +147,8 @@ channels:
         $ref: "#/components/messages/ScreenInputError"
       screenFrameReceived:
         $ref: "#/components/messages/ScreenFrameReceived"
+      screenViewSize:
+        $ref: "#/components/messages/ScreenViewSize"
       screenMouse:
         $ref: "#/components/messages/ScreenMouse"
       screenWheel:
@@ -482,6 +484,7 @@ operations:
       $ref: "#/channels/botScreen"
     messages:
       - $ref: "#/channels/botScreen/messages/screenFrameReceived"
+      - $ref: "#/channels/botScreen/messages/screenViewSize"
       - $ref: "#/channels/botScreen/messages/screenMouse"
       - $ref: "#/channels/botScreen/messages/screenWheel"
       - $ref: "#/channels/botScreen/messages/screenKey"
@@ -763,6 +766,15 @@ components:
         when hello said frames are confirmed.
       payload:
         $ref: "#/components/schemas/ScreenFrameReceived"
+    ScreenViewSize:
+      name: screenViewSize
+      title: View size
+      summary: >-
+        How large the viewer draws the screen, so frames come sharp at that
+        size and no larger. Sent only when hello said viewSize, again whenever
+        the size changes. A viewer that only watches may send it too.
+      payload:
+        $ref: "#/components/schemas/ScreenViewSize"
     ScreenMouse:
       name: screenMouse
       title: Mouse
@@ -1073,6 +1085,14 @@ components:
           description: >-
             When true, the next frame is sent only after the viewer says it
             received the last.
+        viewSize:
+          type: boolean
+          description: >-
+            When true, the viewer may say how large it draws the screen
+            (view-size), and frames are sent at that size, up to the most
+            detail the screen has. Absent or false, frames come at the
+            screen's own width and height in pixels, and a view-size is not
+            sent.
     ScreenFrame:
       type: object
       required:
@@ -1088,7 +1108,10 @@ components:
           type: string
           contentEncoding: base64
           contentMediaType: image/jpeg
-          description: The picture, a JPEG in base64.
+          description: >-
+            The picture, a JPEG in base64. It can have more pixels than width
+            and height, when the viewer asked for a sharper picture
+            (view-size); it always shows the whole screen.
         width:
           type: number
           description: The screen's width in pixels, which mouse positions are measured in.
@@ -1128,6 +1151,27 @@ components:
         type:
           type: string
           const: frame-received
+    ScreenViewSize:
+      type: object
+      required:
+        - type
+        - width
+        - height
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          const: view-size
+        width:
+          type: number
+          exclusiveMinimum: 0
+          description: >-
+            How wide the viewer draws the screen, in the viewer's own device
+            pixels: its width on the page times the display's pixel ratio.
+        height:
+          type: number
+          exclusiveMinimum: 0
+          description: How tall the viewer draws the screen, in the same pixels.
     ScreenMouse:
       type: object
       required:

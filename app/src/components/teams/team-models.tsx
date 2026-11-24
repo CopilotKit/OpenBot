@@ -30,6 +30,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { enterpriseOverviewQueryOptions } from "@/lib/enterprise/queries";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { markFor } from "@/lib/marks";
 import { effortLabel } from "@/lib/models/effort";
 import { modelNamer } from "@/lib/models/names";
@@ -126,7 +127,7 @@ export function TeamModelsRow({ team }: { team: TeamSummary }) {
   const summary = saved.isPending
     ? null
     : saved.error
-      ? saved.error.message
+      ? failureSaid(saved.error)
       : `${teamModelsSummary(models, nameOf)}${
           notAllowed > 0
             ? `. ${notAllowed === 1 ? "One is" : `${notAllowed} are`} no longer allowed.`
@@ -164,7 +165,9 @@ export function TeamModelsRow({ team }: { team: TeamSummary }) {
       {open && saved.data ? (
         <TeamModelsDialog
           allowed={allowed}
-          failed={listing.error !== null || overview.error !== null}
+          failed={[listing.error, overview.error].filter(
+            (error) => error !== null,
+          )}
           loading={listing.isPending || overview.isPending}
           nameOf={nameOf}
           onClose={() => setOpen(false)}
@@ -190,8 +193,8 @@ function TeamModelsDialog({
   saved: readonly string[] | null;
   /** What the organization allows, or null when there is nothing to choose from. */
   allowed: OrganizationModel[] | null;
-  /** Whether what the organization allows couldn't be read. */
-  failed: boolean;
+  /** Why what the organization allows couldn't be read, empty when it could. */
+  failed: readonly unknown[];
   loading: boolean;
   /** A model's name, for one on the team's list the organization no longer allows. */
   nameOf: (name: string) => string;
@@ -241,9 +244,12 @@ function TeamModelsDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 flex flex-col gap-3 overflow-y-auto">
-          {loading ? null : failed ? (
+          {loading ? null : failed.length > 0 ? (
             <p className="text-destructive text-sm" role="alert">
-              Couldn't load the organization's models. Try again in a moment.
+              {loadFailure(
+                failed,
+                "Couldn't load the organization's models. Try again in a moment.",
+              )}
             </p>
           ) : allowed === null ? (
             <p className="text-muted-foreground text-sm">
@@ -332,7 +338,7 @@ function TeamModelsDialog({
           )}
           {failure ? (
             <p className="text-destructive text-sm" role="alert">
-              {failure.message}
+              {failureSaid(failure)}
             </p>
           ) : null}
         </DialogBody>

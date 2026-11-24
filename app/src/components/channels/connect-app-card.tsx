@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useConnectInNewTab } from "@/components/plugins/connect-in-new-tab";
 import { Button } from "@/components/ui/button";
 import { type CardPlace, useCarryOn } from "@/lib/copilot/carry-on";
+import { failureSaid } from "@/lib/load-failure";
 import {
   connectionsQueryOptions,
   personalConnections,
@@ -149,7 +150,7 @@ export function ConnectAppCard({
           ) : null}
           {error ? (
             <p className="break-words text-destructive text-sm" role="status">
-              {error}
+              {failureSaid(error)}
             </p>
           ) : null}
         </div>

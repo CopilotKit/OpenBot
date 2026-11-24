@@ -26,20 +26,34 @@ export const CONNECT_APP_MARKER = "[connect-app]";
  * `shared` — a Shared app whose one team account is missing, which only an administrator connects.
  * `access` — the Bot asked what the app is for this person (`show_app_access`), with no refusal
  * behind it: switched off, not granted, or any of the above.
+ * `tools` — the Bot holds the app, and the task needs actions of it the Bot wasn't given
+ * (`show_app_access` with what it needs). `actions` names them and `need` says what they do.
  *
  * A HINT, NOT THE STATE. The card asks the server for the app's state for this person and this Bot
  * when it is drawn, and draws that. The one place the hint wins is an account the vendor has lost
  * whose row still stands — a refusal from before the call that found out started deleting the row —
  * where the live state reads `ready` and only the refusal knows otherwise. See `AppAccessCard`.
  */
-export type ConnectReason = "connect" | "reconnect" | "shared" | "access";
+export type ConnectReason =
+  | "connect"
+  | "reconnect"
+  | "shared"
+  | "access"
+  | "tools";
 
 const REASONS: readonly ConnectReason[] = [
   "connect",
   "reconnect",
   "shared",
   "access",
+  "tools",
 ];
+
+/** At most this many actions ride on one prompt: the card asks the server about each. */
+export const MAX_PROMPT_ACTIONS = 50;
+
+/** At most this many characters of `need`: a short phrase, never a paragraph. */
+export const MAX_PROMPT_NEED = 200;
 
 export type ConnectPrompt = {
   /**
@@ -73,6 +87,17 @@ export type ConnectPrompt = {
    * Absent on a `show_app_access` answer from before it was written, which offers nothing.
    */
   blocked?: boolean;
+  /**
+   * On a `tools` prompt, the actions of the app the Bot needs and wasn't given, written
+   * `<app id>/<action name>`. The card reads the app for exactly these (getBotApp's `actions`) and
+   * its one press gives exactly these.
+   */
+  actions?: string[];
+  /**
+   * On a `tools` prompt, what those actions let the Bot do, in the Bot's own few words ("change an
+   * event's colour"). The card says it; the actions' own names are an admin's words, not a person's.
+   */
+  need?: string;
 };
 
 /**
@@ -92,6 +117,8 @@ export const SHOW_APP_ACCESS_TOOL = "show_app_access";
  */
 export function connectAppRefusal(prompt: ConnectPrompt): string {
   const { serverId, title, message, agentId, reason, at, blocked } = prompt;
+  const actions = cleanActions(prompt.actions);
+  const need = cleanNeed(prompt.need);
   return `${CONNECT_APP_MARKER}${JSON.stringify({
     serverId,
     title,
@@ -99,7 +126,40 @@ export function connectAppRefusal(prompt: ConnectPrompt): string {
     ...(reason ? { reason } : {}),
     ...(at ? { at } : {}),
     ...(blocked !== undefined ? { blocked } : {}),
+    ...(actions ? { actions } : {}),
+    ...(need ? { need } : {}),
   })} ${message}`;
+}
+
+/**
+ * The actions as a prompt may carry them: strings with no brace in them (the marker's JSON ends at
+ * its first `}`), at most {@link MAX_PROMPT_ACTIONS}. Undefined for none, so nothing is written.
+ */
+function cleanActions(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const kept = value
+    .filter(
+      (item): item is string =>
+        typeof item === "string" && item.trim() !== "" && !/[{}]/.test(item),
+    )
+    .slice(0, MAX_PROMPT_ACTIONS);
+  return kept.length > 0 ? kept : undefined;
+}
+
+/**
+ * The need as a prompt may carry it: one line, braces read as brackets (the marker's JSON ends at
+ * its first `}`), at most {@link MAX_PROMPT_NEED} characters. Undefined for none.
+ */
+function cleanNeed(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const line = value
+    .replace(/[{]/g, "(")
+    .replace(/[}]/g, ")")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_PROMPT_NEED)
+    .trim();
+  return line || undefined;
 }
 
 /**
@@ -133,14 +193,19 @@ export function readConnectPrompt(
   try {
     const parsed: unknown = JSON.parse(rest.slice(0, end + 1));
     if (!parsed || typeof parsed !== "object") return null;
-    const { serverId, title, agentId, reason, at, blocked } = parsed as {
-      serverId?: unknown;
-      title?: unknown;
-      agentId?: unknown;
-      reason?: unknown;
-      at?: unknown;
-      blocked?: unknown;
-    };
+    const { serverId, title, agentId, reason, at, blocked, actions, need } =
+      parsed as {
+        serverId?: unknown;
+        title?: unknown;
+        agentId?: unknown;
+        reason?: unknown;
+        at?: unknown;
+        blocked?: unknown;
+        actions?: unknown;
+        need?: unknown;
+      };
+    const keptActions = cleanActions(actions);
+    const keptNeed = cleanNeed(need);
     if (typeof serverId !== "string" || typeof title !== "string") return null;
     if (!serverId || !title) return null;
     /*
@@ -160,6 +225,8 @@ export function readConnectPrompt(
         ? { at }
         : {}),
       ...(typeof blocked === "boolean" ? { blocked } : {}),
+      ...(keptActions ? { actions: keptActions } : {}),
+      ...(keptNeed ? { need: keptNeed } : {}),
     };
   } catch {
     return null;

@@ -60,7 +60,7 @@ import {
   directoryAppsQueryOptions,
 } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { mayAddApps } from "@/lib/auth/roles";
 import { useConnectApp } from "@/lib/connections/connect-app";
 import {
   type ConnectionRow,
@@ -73,6 +73,7 @@ import {
   identityProvidersQueryOptions,
   linkedAccountsQueryOptions,
 } from "@/lib/identity/queries";
+import { failureSaid, isHeld, loadFailure } from "@/lib/load-failure";
 import { keyedLookup } from "@/lib/lookup";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
@@ -397,12 +398,12 @@ function RouteComponent() {
    */
   const role = useQuery(currentUserQueryOptions()).data?.role;
   /*
-   * WHO ADDS AN APP, decided by the one rule the app has for it (`isOrganizationAdmin`: an owner or
+   * WHO ADDS AN APP, decided by the one rule the app has for it (`mayAddApps`: an owner or
    * an admin of the organization being worked in), which is the server's `admin` too. On OpenBot
    * Cloud that is usually the one person who made their own organization, and they add and connect
    * an app here in one press, never by way of Admin. A member asks an admin for it.
    */
-  const mayAdd = personal || isOrganizationAdmin(role);
+  const mayAdd = mayAddApps(personal, role);
   const mayAddServer = mayAdd;
   const connectApp = useConnectApp();
   const paths = useManagePaths();
@@ -566,7 +567,7 @@ function RouteComponent() {
             variant="outline"
           >
             <IconPlus />
-            Add server
+            Add custom MCP
           </Button>
         ) : undefined
       }
@@ -611,12 +612,12 @@ function RouteComponent() {
       ) : null}
       {connectApp.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {connectApp.error}
+          {failureSaid(connectApp.error)}
         </p>
       ) : null}
       {press.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {press.error}
+          {failureSaid(press.error)}
         </p>
       ) : null}
       <SignInNote
@@ -652,11 +653,14 @@ function RouteComponent() {
            */
           <div className="mt-4 flex flex-col items-start gap-3" role="alert">
             <p className="text-destructive text-sm">
-              {edition === "team"
-                ? "Couldn't load your connections. Try again, or ask an admin if it keeps happening."
-                : edition === "personal"
-                  ? "Couldn't load your connections. Try again, or check Setup if it keeps happening."
-                  : "Couldn't load your connections. Try again."}
+              {loadFailure(
+                [...appReads.map((read) => read.error), connections.error],
+                edition === "team"
+                  ? "Couldn't load your connections. Try again, or ask an admin if it keeps happening."
+                  : edition === "personal"
+                    ? "Couldn't load your connections. Try again, or check Setup if it keeps happening."
+                    : "Couldn't load your connections. Try again.",
+              )}
             </p>
             <div className="flex gap-2">
               <Button
@@ -730,15 +734,27 @@ function RouteComponent() {
             )}
             {searchesDirectory && directory.error ? (
               <p className="mt-4 text-destructive text-sm" role="alert">
-                {directoryReadFailure(provider)}
+                {loadFailure(directory.error, directoryReadFailure(provider))}
               </p>
             ) : null}
           </>
         )}
-        {links.error || providers.error ? (
+        {/*
+         * OpenBot holding off (a move, a brief outage) is said once: when the list above already
+         * says it, the same sentence is not said again for GitHub and Slack.
+         */}
+        {(links.error || providers.error) &&
+        !(
+          !loading &&
+          (appsError || connections.error) &&
+          isHeld([...appReads.map((read) => read.error), connections.error]) &&
+          isHeld([links.error, providers.error])
+        ) ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            Couldn't load GitHub and Slack, so they aren't listed. Try again in
-            a moment.
+            {loadFailure(
+              [links.error, providers.error],
+              "Couldn't load GitHub and Slack, so they aren't listed. Try again in a moment.",
+            )}
           </p>
         ) : null}
       </PageSection>

@@ -43,7 +43,8 @@ What is about OpenBot on this computer is not there while the app is connected:
 
 | On this computer | Connected to an OpenBot |
 |---|---|
-| Start, Stop and Restart, the Status window, and their tray and menu items | Not shown. The tray and menu have Show Window, Open Log Folder, Sign Out and Quit. |
+| Start, Stop and Restart, the Status window, and their tray and menu items | Not shown. The tray and menu have Show Window, Open Log Folder, Get Troubleshooting Logs…, Sign Out and Quit. |
+| Get Troubleshooting Logs…: the engine, the containers and the server's log on this computer | What the app saw of the OpenBot it is connected to: its address, whether it answers, its release and the account and organization ids; the app's own recent problems (requests that failed or got no answer, each with the request id the server's logs file it under, page errors and failed runs); the relay's recent lines and the end of the app's log. Keys, tokens, passwords, cookies and email addresses are taken out. |
 | Installing and updating OpenBot's services (downloads, the engine, the upgrade at Start) | Never run. The app still updates itself. |
 | The local Intelligence, the account sign-in and the 30-day license | Not asked for. The OpenBot it connects to has its own. |
 | Model keys and model sign-ins kept on this computer | Not shown. That OpenBot's admin sets its models. |

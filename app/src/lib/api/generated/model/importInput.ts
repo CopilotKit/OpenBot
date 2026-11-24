@@ -4,9 +4,16 @@
 
 export interface ImportInput {
   /**
-   * A name for where the bundle comes from, such as the computer's name, shown in the list of imports.
+   * A name for where the bundle comes from, such as the computer's name, shown in the list of imports. For a move from another organization, that organization's name when absent.
    * @minLength 1
    * @maxLength 200
    */
   sourceName?: string;
+  /**
+   * Move what the caller has in another of their organizations (its id or slug) into this one, instead of a bundle from their own computer: their own Bots, each with its conversations and their history, routines, goals, check-ins, memories, skills and files, by the same rules and the same verification as a move from their computer. A starter Bot lands on this organization's own. Apps are connected again here (reconnect). Routines, goals and check-ins don't run in either organization until the move is checked. Once getImportVerification here says everything arrived, all of it is removed from the other organization, apart from a conversation other people are in, which stays there for them. Any organization the caller belongs to other than this one; another is refused with 400.
+   * @minLength 1
+   * @maxLength 128
+   * @pattern ^[A-Za-z0-9_-]+$
+   */
+  fromOrganizationId?: string;
 }

@@ -15,6 +15,7 @@ import {
   ruleCoversBot,
   updateApprovalRuleMutationOptions,
 } from "@/lib/approvals";
+import { failureSaid } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 import { RuleForm, RuleRow } from "./rules";
 
@@ -65,10 +66,10 @@ export function BotApprovalRules({ agentId }: { agentId: string }) {
     >
       {error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {error.message}
+          {failureSaid(error)}
         </p>
       ) : null}
-      {saved === 0 ? (
+      {saved === 0 && inbox.data !== undefined ? (
         <PageEmpty icon={IconChecklist} title="No rules for this Bot" />
       ) : null}
       {saved > 0 || canAdd ? (

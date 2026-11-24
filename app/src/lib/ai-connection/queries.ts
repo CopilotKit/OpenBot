@@ -11,6 +11,7 @@ import { organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
 import { invokeDesktop } from "@/lib/desktop/queries";
 import { desktopShell } from "@/lib/desktop/shell";
+import { unavailableSaid } from "@/lib/load-failure";
 
 /**
  * How OpenBot reaches its AI provider (getAiConnection), and whether the Desktop window this page
@@ -111,6 +112,12 @@ export function needsAiConnection(
  * The same question, for a route's gate. A server that can't answer is read as "not required": a
  * self-hosted OpenBot and an older one never require it, and OpenBot Cloud refuses the run itself
  * with a sentence the chat turns into a way to connect.
+ *
+ * Except a hold: OpenBot moving the organization, or its database out of reach for a moment (503
+ * with its sentence and Retry-After, lib/load-failure.tsx). That says nothing either way, and read as
+ * "not required" it sent somebody on Connect your AI out of onboarding and into the app. It is thrown
+ * on, so the page says the hold calmly ("Back in a moment") and goes on by itself once OpenBot
+ * answers.
  */
 export async function aiConnectionRequired(
   queryClient: QueryClient,
@@ -119,7 +126,8 @@ export async function aiConnectionRequired(
     return needsAiConnection(
       await queryClient.ensureQueryData(personalAiConnectionQueryOptions()),
     );
-  } catch {
+  } catch (error) {
+    if (unavailableSaid(error) !== undefined) throw error;
     return false;
   }
 }

@@ -13,6 +13,7 @@ import {
   accountModePreview,
   setAccountModeMutationOptions,
 } from "@/lib/apps/mutations";
+import { failureSaid } from "@/lib/load-failure";
 import { approvalNamesTeam, describeApproval } from "@/lib/plugins/shared-use";
 import { teamListQueryOptions } from "@/lib/teams/queries";
 
@@ -106,7 +107,7 @@ export function AccountModeDialog({
         ) : null}
         {preview.error || change.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            {(change.error ?? preview.error)?.message}
+            {failureSaid(change.error ?? preview.error)}
           </p>
         ) : null}
         <DialogFooter className="mt-4">

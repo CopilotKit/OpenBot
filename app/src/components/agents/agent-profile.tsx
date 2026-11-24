@@ -7,6 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { agentQueryOptions } from "@/lib/agents/queries";
 import { shownSubtitle } from "@/lib/agents/subtitle";
+import { loadFailure } from "@/lib/load-failure";
 
 function Tag({ children }: { children: ReactNode }) {
   return (
@@ -66,7 +67,7 @@ export function AgentProfile({
   if (agent.error || !agent.data) {
     return (
       <p className="p-8 text-sm text-destructive" role="alert">
-        Couldn't load this Bot.
+        {loadFailure(agent.error, "Couldn't load this Bot.")}
       </p>
     );
   }

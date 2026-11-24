@@ -18,6 +18,7 @@ import {
 } from "@/lib/auth/client";
 import { resumeUrlFor, verifierPathFor } from "@/lib/auth/resume";
 import { appConfig } from "@/lib/generated/application-config";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 import { inNoOrganization } from "@/lib/organizations/in-no-organization";
 import { searchTextEntry } from "@/lib/search-text";
 import { cn } from "@/lib/utils";
@@ -86,7 +87,7 @@ function SignScreen() {
   // Which provider is being opened, rather than whether one is: with three buttons, a single
   // boolean would put "Opening…" on all of them.
   const [opening, setOpening] = useState<AuthProviderId | "sso" | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Failure | null>(null);
   const { data: options } = useQuery(authProvidersQueryOptions());
   const providers = options?.providers ?? [];
   // OpenBot Cloud: its own screen (`CloudSignIn`), and none of the ways in below.
@@ -112,9 +113,10 @@ function SignScreen() {
       );
     } catch (caughtError) {
       setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : "No company sign-in is set up for that address.",
+        failureOf(
+          caughtError,
+          "No company sign-in is set up for that address.",
+        ),
       );
       setOpening(null);
     }
@@ -132,9 +134,10 @@ function SignScreen() {
       );
     } catch (caughtError) {
       setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : `Couldn't open ${providerName(provider)} sign-in. Try again.`,
+        failureOf(
+          caughtError,
+          `Couldn't open ${providerName(provider)} sign-in. Try again.`,
+        ),
       );
       setOpening(null);
     }
@@ -284,7 +287,7 @@ function SignScreen() {
               ) : null}
               {error ? (
                 <p className="mt-3 text-sm text-destructive" role="alert">
-                  {error}
+                  {failureSaid(error)}
                 </p>
               ) : null}
             </>

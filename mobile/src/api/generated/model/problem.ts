@@ -43,4 +43,10 @@ export interface Problem {
    * @nullable
    */
   addCardUrl?: string | null;
+  /**
+   * On SEAT_REQUIRED, where an owner or an admin goes in the browser to add one more seat to the organization's plan. It comes back to OpenBot once the seat is added, and the invitation can be sent then. Null for anyone who can't add a seat.
+   * @maxLength 2048
+   * @nullable
+   */
+  addSeatUrl?: string | null;
 }

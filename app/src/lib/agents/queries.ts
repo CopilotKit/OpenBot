@@ -13,6 +13,7 @@ import type {
 } from "@/lib/api/generated/model";
 import { idempotencyKey, organizationId } from "@/lib/api/request";
 import { ClientError } from "@/lib/client";
+import { type Failure, failureOf } from "@/lib/load-failure";
 
 export type AgentVisibility = BotVisibility;
 
@@ -146,10 +147,13 @@ export function agentHandoffQueryOptions(agentId: string) {
   });
 }
 
-/** What the server said when it tried the endpoint. */
+/**
+ * What the server said when it tried the endpoint. A refusal is kept whole, so a hold (OpenBot
+ * moving the organization) is drawn calmly rather than as an unreachable address (lib/load-failure.tsx).
+ */
 export type ConnectionVerdict =
   | { ok: true; events: string[] }
-  | { ok: false; reason: string };
+  | { ok: false; reason: Failure };
 
 /** What a person reads when the test itself could not be run. */
 const UNTESTED = "The connection could not be tested.";
@@ -179,12 +183,12 @@ export async function testAgentConnection(
       { fallback: UNTESTED },
     );
     if (verdict.ok) return { ok: true, events: verdict.events };
-    return { ok: false, reason: verdict.reason ?? UNTESTED };
+    return { ok: false, reason: { message: verdict.reason ?? UNTESTED } };
   } catch (error) {
     // A refusal carries the server's sentence (or UNTESTED); a request that never arrived does not.
     return {
       ok: false,
-      reason: error instanceof ClientError ? error.message : UNTESTED,
+      reason: failureOf(error instanceof ClientError ? error : null, UNTESTED),
     };
   }
 }

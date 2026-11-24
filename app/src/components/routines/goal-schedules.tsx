@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import {
   deleteRoutineMutationOptions,
   setRoutineEnabledMutationOptions,
@@ -32,6 +33,7 @@ export function GoalSchedules({
   paused = false,
   completed = false,
   routines,
+  error,
 }: {
   /** The goal is paused, so an enabled schedule waits for it to resume. */
   paused?: boolean;
@@ -42,6 +44,8 @@ export function GoalSchedules({
   completed?: boolean;
   /** Undefined when the routines couldn't be read: the section says so, and lists nothing. */
   routines: readonly RoutineRecord[] | undefined;
+  /** Why the routines couldn't be read, when they couldn't. */
+  error?: unknown;
 }) {
   const setEnabled = useMutation(setRoutineEnabledMutationOptions(queryClient));
   const remove = useMutation(deleteRoutineMutationOptions(queryClient));
@@ -53,7 +57,10 @@ export function GoalSchedules({
     return (
       <PageSection title="Schedules">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load this goal's schedules. Try again in a moment.
+          {loadFailure(
+            error,
+            "Couldn't load this goal's schedules. Try again in a moment.",
+          )}
         </p>
       </PageSection>
     );
@@ -148,7 +155,7 @@ export function GoalSchedules({
       </PageRows>
       {setEnabled.error || remove.error ? (
         <p className="mt-2 text-destructive text-sm" role="alert">
-          {setEnabled.error?.message ?? remove.error?.message}
+          {failureSaid(setEnabled.error ?? remove.error)}
         </p>
       ) : null}
     </PageSection>

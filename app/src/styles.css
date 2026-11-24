@@ -356,7 +356,7 @@
  */
 .bot-orb-live .agent-orb {
   /* tokens/src/scheme.ts, light: background (bun run tokens:generate) */
-  --background: oklch(0.983 0.003 286.4);
+  --background: oklch(0.983 0.003 247.9);
   /* end of tokens/src/scheme.ts */
   background-color: var(--background);
   background-image: radial-gradient(
@@ -410,6 +410,42 @@
 
 @media (prefers-reduced-motion: reduce) {
   .business-orb-field {
+    animation: none;
+  }
+}
+
+/*
+ * Home's first view of a visit (`useHomeIntro` in components/home/home-field.tsx): the heading, the
+ * message box and Explore Bots rise in from a slight blur, one after another, while the orb's field
+ * draws itself behind them. Not at all with less motion asked for.
+ */
+@keyframes home-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+.home-intro [data-intro] {
+  animation: home-rise 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.home-intro [data-intro="heading"] {
+  animation-delay: 150ms;
+}
+.home-intro [data-intro="box"] {
+  animation-delay: 300ms;
+  animation-duration: 850ms;
+}
+.home-intro [data-intro="explore"] {
+  animation-delay: 560ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-intro [data-intro] {
     animation: none;
   }
 }

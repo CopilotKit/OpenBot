@@ -28,6 +28,7 @@ import {
 } from "@/lib/channels/queries";
 import { formatHotkey, getHotkey } from "@/lib/hotkeys/hotkeys";
 import { useHotkey } from "@/lib/hotkeys/use-hotkey";
+import { loadFailure, loadFailureText } from "@/lib/load-failure";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
@@ -285,7 +286,7 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
     : searchPending && !conversationResults.length
       ? "Searching conversations…"
       : searchFailed
-        ? "Couldn't search conversations."
+        ? loadFailureText(search.error, "Couldn't search conversations.")
         : `${results.length} ${results.length === 1 ? "result" : "results"}`;
 
   const groups = (["Pages", "Bots", "Conversations"] as const)
@@ -388,7 +389,7 @@ function CommandMenuBody({ onClose }: { onClose: () => void }) {
         </div>
         {/* Outside the list: a button is not an option. The pages and Bots stay whatever this says. */}
         <ConversationsNote
-          failed={searchFailed}
+          failed={searchFailed ? search.error : null}
           hasMore={searching && !searchSettling && search.hasNextPage}
           loadingMore={search.isFetchingNextPage}
           none={
@@ -432,7 +433,8 @@ function ConversationsNote({
   onLoadMore,
 }: {
   pending: boolean;
-  failed: boolean;
+  /** Why the search failed, when it did. */
+  failed: unknown;
   none: boolean;
   shortQuery: boolean;
   hasMore: boolean;
@@ -450,7 +452,7 @@ function ConversationsNote({
     return (
       <div className="flex items-center justify-between gap-2 px-2 py-1.5">
         <p className="text-destructive text-sm">
-          Couldn't search conversations.
+          {loadFailure(failed, "Couldn't search conversations.")}
         </p>
         <Button onClick={onRetry} size="sm" type="button" variant="outline">
           Retry

@@ -62,7 +62,12 @@ import {
   PLAYGROUND_KIND,
 } from "@/lib/components/queries";
 import { RENDERABLE_NAMES } from "@/lib/copilot/gallery-registry";
+import { loadFailure, loadFailureText } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
+
+const BOTS_FAILED = "Couldn't load your Bots. Try again in a moment.";
+const FUNCTIONS_FAILED =
+  "Couldn't load the data functions. Try again in a moment.";
 
 /**
  * Governance for one compiled component: publication, per-Bot grants, the model-facing description,
@@ -109,7 +114,10 @@ function RouteComponent() {
     return (
       <PageShell backButton={BACK} title="Components">
         <p className="mt-8 text-destructive text-sm" role="alert">
-          Couldn't load components. Try again in a moment.
+          {loadFailure(
+            components.error,
+            "Couldn't load components. Try again in a moment.",
+          )}
         </p>
       </PageShell>
     );
@@ -152,9 +160,11 @@ function RouteComponent() {
      * the last one opened would be what a save wrote back.
      */
     <ComponentDetail
-      bots={agents.data ?? []}
+      bots={agents.data}
+      botsError={agents.error}
       component={component}
-      dataFunctions={dataFunctions.data ?? []}
+      dataFunctions={dataFunctions.data}
+      dataFunctionsError={dataFunctions.error}
       key={component.name}
       onPublish={(published) => setPublished.mutate({ name, published })}
       onSaveDraft={(description) =>
@@ -250,16 +260,22 @@ function SheetRow({
  */
 function ComponentDetail({
   component,
-  bots,
-  dataFunctions,
+  bots: botsRead,
+  botsError,
+  dataFunctions: dataFunctionsRead,
+  dataFunctionsError,
   onSetGrant,
   onSetFunction,
   onPublish,
   onSaveDraft,
 }: {
   component: ComponentRecord;
-  bots: { id: string; name: string }[];
-  dataFunctions: DataFunctionSummary[];
+  /** Undefined until the read answers, and when it failed (`botsError`). */
+  bots: { id: string; name: string }[] | undefined;
+  botsError: unknown;
+  /** Undefined until the read answers, and when it failed (`dataFunctionsError`). */
+  dataFunctions: DataFunctionSummary[] | undefined;
+  dataFunctionsError: unknown;
   onSetGrant: (agentId: string, granted: boolean) => void;
   onSetFunction: (functionName: string, granted: boolean) => void;
   onPublish: (published: boolean) => void;
@@ -271,25 +287,40 @@ function ComponentDetail({
   const heldFunctions = new Set(component.functions);
   const renderable =
     RENDERABLE_NAMES.has(component.name) || component.kind === PLAYGROUND_KIND;
+  /*
+   * A read that failed is said, never drawn as an empty list: "No Bots yet" and "no data functions"
+   * were what this page said about an OpenBot that has both when the read didn't answer.
+   */
+  const botsFailed = botsRead === undefined && Boolean(botsError);
+  const functionsFailed =
+    dataFunctionsRead === undefined && Boolean(dataFunctionsError);
+  const bots = botsRead ?? [];
+  const dataFunctions = dataFunctionsRead ?? [];
 
   const granted = bots.filter((bot) => !withheld.has(bot.id));
   const held = dataFunctions.filter((fn) => heldFunctions.has(fn.name));
 
-  const grantSummary =
-    bots.length === 0
-      ? "No Bots yet"
-      : granted.length === bots.length
-        ? `All ${bots.length} Bots`
-        : granted.length === 0
-          ? "No Bots"
-          : `${granted.length} of ${bots.length} Bots`;
+  const grantSummary = botsFailed
+    ? loadFailureText(botsError, BOTS_FAILED)
+    : botsRead === undefined
+      ? ""
+      : bots.length === 0
+        ? "No Bots yet"
+        : granted.length === bots.length
+          ? `All ${bots.length} Bots`
+          : granted.length === 0
+            ? "No Bots"
+            : `${granted.length} of ${bots.length} Bots`;
 
-  const functionSummary =
-    dataFunctions.length === 0
-      ? "This deployment has no data functions"
-      : held.length === 0
-        ? "Nothing. It shows only what the Bot passes it."
-        : held.map((fn) => fn.name).join(", ");
+  const functionSummary = functionsFailed
+    ? loadFailureText(dataFunctionsError, FUNCTIONS_FAILED)
+    : dataFunctionsRead === undefined
+      ? ""
+      : dataFunctions.length === 0
+        ? "This deployment has no data functions"
+        : held.length === 0
+          ? "Nothing. It shows only what the Bot passes it."
+          : held.map((fn) => fn.name).join(", ");
 
   return (
     <PageShell
@@ -482,7 +513,11 @@ function ComponentDetail({
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">
-            {bots.length === 0 ? (
+            {botsFailed ? (
+              <p className="text-destructive text-sm" role="alert">
+                {loadFailure(botsError, BOTS_FAILED)}
+              </p>
+            ) : botsRead === undefined ? null : bots.length === 0 ? (
               <p className="text-muted-foreground text-sm">No Bots yet.</p>
             ) : (
               <div className="flex flex-col">
@@ -533,7 +568,12 @@ function ComponentDetail({
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">
-            {dataFunctions.length === 0 ? (
+            {functionsFailed ? (
+              <p className="text-destructive text-sm" role="alert">
+                {loadFailure(dataFunctionsError, FUNCTIONS_FAILED)}
+              </p>
+            ) : dataFunctionsRead ===
+              undefined ? null : dataFunctions.length === 0 ? (
               <p className="text-muted-foreground text-sm">
                 This deployment has no data functions.
               </p>

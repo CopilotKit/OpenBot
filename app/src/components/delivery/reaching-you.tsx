@@ -56,6 +56,7 @@ import {
   transportsQueryOptions,
 } from "@/lib/delivery";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /**
  * The phone verification waiting for its code, kept for the tab.
@@ -184,7 +185,7 @@ export function ReachingYou({ agentId: fixedBot }: { agentId?: string }) {
       <PageSection title="Connected destinations">
         {listError ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            {listError.message}
+            {failureSaid(listError)}
           </p>
         ) : null}
         {connected.isPending || !destinations ? null : destinations.length ===
@@ -533,7 +534,7 @@ function ConnectDialog({
           ) : null}
           {error ? (
             <p className="text-destructive text-sm" role="alert">
-              {error.message}
+              {failureSaid(error)}
             </p>
           ) : null}
         </DialogBody>

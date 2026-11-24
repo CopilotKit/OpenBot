@@ -28,6 +28,7 @@ import {
   deploymentCapabilitiesQueryOptions,
   useOffersMemory,
 } from "@/lib/deployment/queries";
+import { useOrganizationAudience } from "@/lib/organizations/queries";
 
 /** Just longer than the sheet's 200ms exit, so it has finished sliding away before the page changes. */
 const SHEET_CLOSE_MS = 240;
@@ -43,6 +44,8 @@ function BotsPage() {
   const navigate = Route.useNavigate();
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
+  // The only member of their organization has nobody to share a Bot with them.
+  const alone = useOrganizationAudience().alone === true;
   return (
     <PageShell
       action={
@@ -58,7 +61,7 @@ function BotsPage() {
         </Button>
       }
       description={
-        personal
+        personal || alone
           ? "Your Bots for everyday work."
           : "Manage your Bots and access those shared with you."
       }

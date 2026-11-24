@@ -40,6 +40,7 @@ import {
   actionPolicyQueryOptions,
   policyDryRunQueryOptions,
 } from "@/lib/computers/queries";
+import { type Failure, failureSaid } from "@/lib/load-failure";
 
 /** How long the rule has to rest before it is replayed, as on Add rule. */
 const PREVIEW_DELAY_MS = 400;
@@ -70,7 +71,7 @@ function RulePage() {
       <PageShell backButton={BACK} title="Rule">
         {stored.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {stored.error.message}
+            {failureSaid(stored.error)}
           </p>
         ) : null}
       </PageShell>
@@ -131,7 +132,7 @@ function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
       <PageSection title="Recently stopped">
         {reach.isPending ? null : reach.error ? (
           <p className="mt-4 text-muted-foreground text-sm">
-            {reach.error.message}
+            {failureSaid(reach.error)}
           </p>
         ) : reach.data.scanned === 0 ? (
           <p className="mt-4 text-muted-foreground text-sm">
@@ -179,7 +180,7 @@ function RuleDetail({ policy, rule }: { policy: ActionPolicy; rule: string }) {
           </DialogHeader>
           {savePolicy.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {savePolicy.error.message}
+              {failureSaid(savePolicy.error)}
             </p>
           ) : null}
           <DialogFooter>
@@ -217,7 +218,8 @@ function RuleEditor({ policy, rule }: { policy: ActionPolicy; rule: string }) {
   const savePolicy = useMutation(saveActionPolicyMutationOptions(queryClient));
   const [draft, setDraft] = useState(rule);
   const [written, setWritten] = useState<WrittenRule | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [problem, setProblem] = useState<Failure | null>(null);
 
   const trimmed = draft.trim();
   const changed = trimmed !== rule;
@@ -267,7 +269,7 @@ function RuleEditor({ policy, rule }: { policy: ActionPolicy; rule: string }) {
           ? { authoring: { source: "english" as const, text: written.text } }
           : {}),
       },
-      { onError: (thrown: Error) => setProblem(thrown.message) },
+      { onError: (thrown: Error) => setProblem(thrown) },
     );
   };
 
@@ -320,9 +322,9 @@ function RuleEditor({ policy, rule }: { policy: ActionPolicy; rule: string }) {
         </FieldGroup>
 
         {/* A save refused for the reason the preview already gives says nothing twice. */}
-        {problem && problem !== preview.error?.message ? (
+        {problem && problem.message !== preview.error?.message ? (
           <p className="mt-5 text-destructive text-sm" role="alert">
-            {problem}
+            {failureSaid(problem)}
           </p>
         ) : null}
       </PageCard>

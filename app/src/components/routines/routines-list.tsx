@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import {
   type ResponsibilityRecord,
@@ -279,7 +280,10 @@ export function RoutinesList({
       {/* One read failing leaves the other two listed, and says which part is missing. */}
       {failed.length > 0 ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load your {failed.join(" and ")}. Try again in a moment.
+          {loadFailure(
+            [routines.error, goals.error, checkIns.error],
+            `Couldn't load your ${failed.join(" and ")}. Try again in a moment.`,
+          )}
         </p>
       ) : null}
 

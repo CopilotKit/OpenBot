@@ -51,6 +51,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -113,6 +115,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -170,6 +174,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -215,6 +221,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -259,6 +267,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -329,6 +339,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -387,6 +399,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -434,6 +448,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
         '403':
@@ -484,6 +500,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -515,9 +533,11 @@ paths:
         which happened, so the inviter knows whether to pass the link on
         themselves. The invitation lasts seven days. Inviting an address
         again after its invitation expired or was declined starts a new one.
-        Only an owner or an admin of this organization can. A repeated
-        request with the same Idempotency-Key and body returns the first
-        result.
+        Only an owner or an admin of this organization can. An organization
+        that pays for each member needs a free seat for the person: with
+        none, the invitation is refused with SEAT_REQUIRED and addSeatUrl,
+        and nothing is invited. A repeated request with the same
+        Idempotency-Key and body returns the first result.
       security:
         - webSession: []
         - appOAuth: [organizations:write]
@@ -546,6 +566,8 @@ paths:
               schema:
                 type: string
               example: /api/v2/organizations/Jq3xT9mLw2Vb8RnC5sYd0fKe/invitations
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -557,6 +579,8 @@ paths:
           $ref: '#/components/responses/InvalidOrganizationInvitation'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
+        '402':
+          $ref: '#/components/responses/SeatRequired'
         '403':
           $ref: './common.yaml#/components/responses/AdminOnly'
         '404':
@@ -593,6 +617,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '401':
           $ref: './common.yaml#/components/responses/Unauthenticated'
         '403':
@@ -627,6 +653,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -666,6 +694,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -708,6 +738,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -752,6 +784,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -809,6 +843,13 @@ components:
             session works in, or for an app's token the one its
             OpenBot-Organization header names, else the caller's own. Always
             false for a request made with an API key.
+        canMoveIn:
+          type: boolean
+          description: >-
+            Whether the caller may move their Bots into this organization
+            (createImport): true where the organization lets them use Bots.
+            The server's verdict, by the organization's own rules. Present
+            only where OpenBot takes moves (OpenBot Cloud).
     OrganizationPage:
       type: object
       required: [organizations, canCreate, nextCursor]
@@ -1164,6 +1205,9 @@ components:
   responses:
     InvalidOrganization:
       description: The name or the slug is missing or malformed, or the Idempotency-Key is.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1184,6 +1228,9 @@ components:
       description: >-
         Another organization has that slug. Or the Idempotency-Key was used
         for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1227,6 +1274,9 @@ components:
         The caller already owns as many organizations as this OpenBot allows
         one person. Or the request was refused for the caller, as any request
         can be (SSO_REQUIRED).
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1247,6 +1297,9 @@ components:
       description: >-
         This OpenBot could not finish setting the organization up, so it was
         not created. Nothing of it is left behind.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1267,6 +1320,9 @@ components:
       description: >-
         The caller is not an owner of the organization, or holds no role in
         it.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1288,6 +1344,9 @@ components:
         The organization can't be deleted: it is a person's own organization,
         or it is `default`. Or the Idempotency-Key was used for a different
         request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1330,6 +1389,9 @@ components:
       description: >-
         This OpenBot could not finish deleting the organization, so it was
         not deleted. Asking again may work.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1351,6 +1413,9 @@ components:
         The person stays in the organization: they own it, or this OpenBot's
         settings keep them as an admin of it. The members list says who, as
         removable.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1371,6 +1436,9 @@ components:
       description: >-
         The organization does not exist or is not visible to the caller, or
         it has no such invitation.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1401,6 +1469,9 @@ components:
     InvitationNotFound:
       description: >-
         There is no such invitation, or it was sent to another address.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1421,6 +1492,9 @@ components:
       description: >-
         The invitation expired, was canceled or was already answered. Or the
         Idempotency-Key was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1448,8 +1522,37 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    SeatRequired:
+      description: >-
+        The organization pays for each member, and every seat it has paid for
+        is taken (SEAT_REQUIRED). An owner or an admin adds a seat at
+        addSeatUrl, and the invitation can be sent once it is added. Nothing
+        was invited.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Problem'
+          examples:
+            noFreeSeat:
+              value:
+                type: https://open.bot/errors/seat-required
+                title: This organization needs another seat.
+                status: 402
+                detail: Each member is $5 a month. Add a seat to invite someone.
+                code: SEAT_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                addSeatUrl: /api/auth/hosted/add-seat?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
     InvalidOrganizationInvitation:
       description: The address or the role is missing or malformed, or the Idempotency-Key is.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1470,6 +1573,9 @@ components:
       description: >-
         They are already a member, or already have an invitation waiting. Or
         the Idempotency-Key was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:

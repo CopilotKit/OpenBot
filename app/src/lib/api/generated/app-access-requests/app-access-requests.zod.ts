@@ -94,6 +94,11 @@ export const ListAppAccessRequestsResponse = zod.object({
             .string()
             .nullable()
             .describe("The id of the person who answered or withdrew it."),
+          actions: zod
+            .array(zod.string())
+            .describe(
+              "The actions asked for, written <app id>/<action name>. Empty for a request that names none, which asks for the app itself.",
+            ),
         })
         .describe(
           "A person's request to an administrator about one app, as the person and the administrator both read it.",
@@ -113,7 +118,7 @@ export const ListAppAccessRequestsResponse = zod.object({
 });
 
 /**
- * Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app's state: turning it on, giving it to the Bot, or connecting its shared account. Leave botId out to ask for an app nobody has added yet, for everyone in the organization: the request is to turn it on, and its botId is null. Asking again answers the same request while it is waiting. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask, and anybody signed in may ask for an app alone.
+ * Ask an administrator to make an app usable on a Bot. OpenBot decides what is asked for from the app's state: turning it on, giving it to the Bot, or connecting its shared account. Leave botId out to ask for an app nobody has added yet, for everyone in the organization: the request is to turn it on, and its botId is null. With actions, the request is to give the Bot those actions of the app, including a Bot that already has some of the app, and its kind is grant. Asking again answers the same request while it is waiting, with any new actions added to it. A person may have 20 requests waiting at once. Recorded on the audit trail. Anybody who can use the Bot may ask, and anybody signed in may ask for an app alone.
  * @summary Ask an administrator for an app
  */
 
@@ -144,6 +149,10 @@ export const createAppAccessRequestBodyBotIdRegExp = new RegExp("\\S");
 export const createAppAccessRequestBodyAppIdMax = 200;
 
 export const createAppAccessRequestBodyAppIdRegExp = new RegExp("\\S");
+export const createAppAccessRequestBodyActionsItemMax = 300;
+
+export const createAppAccessRequestBodyActionsItemRegExp = new RegExp("\\S");
+export const createAppAccessRequestBodyActionsMax = 50;
 
 export const CreateAppAccessRequestBody = zod.object({
   botId: zod
@@ -162,6 +171,20 @@ export const CreateAppAccessRequestBody = zod.object({
     .regex(createAppAccessRequestBodyAppIdRegExp)
     .describe(
       "The app's id, or its name. For an app from the directory that nobody has added yet, the slug of its directory entry (the part of its entry id after directory:).",
+    ),
+  actions: zod
+    .array(
+      zod
+        .string()
+        .min(1)
+        .max(createAppAccessRequestBodyActionsItemMax)
+        .regex(createAppAccessRequestBodyActionsItemRegExp),
+    )
+    .min(1)
+    .max(createAppAccessRequestBodyActionsMax)
+    .optional()
+    .describe(
+      "Actions of the app the Bot needs, written <app id>/<action name>, for a Bot that was given the app but not these. Needs botId.",
     ),
 });
 
@@ -196,6 +219,11 @@ export const CreateAppAccessRequestResponse = zod
       .string()
       .nullable()
       .describe("The id of the person who answered or withdrew it."),
+    actions: zod
+      .array(zod.string())
+      .describe(
+        "The actions asked for, written <app id>/<action name>. Empty for a request that names none, which asks for the app itself.",
+      ),
   })
   .describe(
     "A person's request to an administrator about one app, as the person and the administrator both read it.",
@@ -242,7 +270,7 @@ export const DeleteAppAccessRequestHeader = zod.object({
 export const DeleteAppAccessRequestResponse = zod.void();
 
 /**
- * Do what a request asks: turn the app on, give the Bot its actions, or confirm the app's shared account is connected. actions names the actions to give. Without it the Bot gets only the actions that only read. The request is answered before anything changes, so a second answer loses. A change that can't be made puts the request back to wait, and the answer says what is missing. Recorded on the audit trail. Only an administrator may approve.
+ * Do what a request asks: turn the app on, give the Bot its actions, or confirm the app's shared account is connected. actions names the actions to give. Without it the Bot gets the actions the request names, or, for a request that names none, only the actions that only read. The request is answered before anything changes, so a second answer loses. A change that can't be made puts the request back to wait, and the answer says what is missing. Recorded on the audit trail. Only an administrator may approve.
  * @summary Approve a request for an app
  */
 
@@ -332,6 +360,11 @@ export const ApproveAppAccessRequestResponse = zod.object({
         .string()
         .nullable()
         .describe("The id of the person who answered or withdrew it."),
+      actions: zod
+        .array(zod.string())
+        .describe(
+          "The actions asked for, written <app id>/<action name>. Empty for a request that names none, which asks for the app itself.",
+        ),
     })
     .describe(
       "A person's request to an administrator about one app, as the person and the administrator both read it.",
@@ -411,6 +444,11 @@ export const DismissAppAccessRequestResponse = zod
       .string()
       .nullable()
       .describe("The id of the person who answered or withdrew it."),
+    actions: zod
+      .array(zod.string())
+      .describe(
+        "The actions asked for, written <app id>/<action name>. Empty for a request that names none, which asks for the app itself.",
+      ),
   })
   .describe(
     "A person's request to an administrator about one app, as the person and the administrator both read it.",

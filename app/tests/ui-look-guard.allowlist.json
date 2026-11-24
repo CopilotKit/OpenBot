@@ -1,0 +1,287 @@
+{
+  "components/agents/callback-token-panel.tsx": {
+    "cornerStep": 1,
+    "card": 1
+  },
+  "components/agents/custom-agent-cta.tsx": {
+    "cornerStep": 1
+  },
+  "components/agents/harness-mark.tsx": {
+    "cornerStep": 1,
+    "darkColor": 1
+  },
+  "components/app-sidebar/account-label.tsx": {
+    "text": 1
+  },
+  "components/app-sidebar/channel-item-content.tsx": {
+    "text": 3
+  },
+  "components/approvals/question-notice.tsx": {
+    "darkColor": 2
+  },
+  "components/approvals/share-details.tsx": {
+    "cornerStep": 1
+  },
+  "components/approvals/waiting.tsx": {
+    "cornerStep": 1,
+    "text": 1
+  },
+  "components/audit/audit-cells.tsx": {
+    "cornerStep": 1
+  },
+  "components/audit/audit-table.tsx": {
+    "corner": 1,
+    "cornerStep": 2
+  },
+  "components/auth/cloud-sign-in.tsx": {
+    "darkColor": 3
+  },
+  "components/bot-profile/attention.tsx": {
+    "text": 2
+  },
+  "components/bot-profile/sharing.tsx": {
+    "cornerStep": 2
+  },
+  "components/browser/browser-bar.tsx": {
+    "corner": 1,
+    "text": 1,
+    "darkColor": 1
+  },
+  "components/browser/browser-screen.tsx": {
+    "corner": 1,
+    "shadow": 2,
+    "shadowStep": 1,
+    "darkColor": 1
+  },
+  "components/browser/teach-steps.tsx": {
+    "cornerStep": 2,
+    "shadowStep": 2,
+    "text": 5
+  },
+  "components/channels/chat-transcript.tsx": {
+    "cornerStep": 3,
+    "text": 1,
+    "darkColor": 1
+  },
+  "components/channels/coding-tool-cards.tsx": {
+    "corner": 1,
+    "text": 1,
+    "darkColor": 2
+  },
+  "components/channels/composer/attachment-strip.tsx": {
+    "shadowStep": 1
+  },
+  "components/channels/composer/rejected-files.tsx": {
+    "cornerStep": 1
+  },
+  "components/channels/conversation-intro.tsx": {
+    "text": 1
+  },
+  "components/channels/group-chat.tsx": {
+    "cornerStep": 1
+  },
+  "components/channels/transcript-rail.tsx": {
+    "cornerStep": 1,
+    "shadowStep": 1
+  },
+  "components/channels/voice-call-widget.tsx": {
+    "cornerStep": 1,
+    "text": 1,
+    "darkColor": 3,
+    "card": 1
+  },
+  "components/channels/voice-chat-card.tsx": {
+    "cornerStep": 1
+  },
+  "components/computer/activity-log.tsx": {
+    "text": 3
+  },
+  "components/computer/computer-terminal.tsx": {
+    "cornerStep": 1,
+    "darkColor": 1
+  },
+  "components/computer/computer-view.tsx": {
+    "cornerStep": 2,
+    "shadowStep": 1,
+    "darkColor": 1
+  },
+  "components/computer/desktop-illustration.tsx": {
+    "corner": 3,
+    "cornerStep": 2,
+    "card": 1
+  },
+  "components/computer/help-request-card.tsx": {
+    "darkColor": 1
+  },
+  "components/computer/terminal-block.tsx": {
+    "text": 1,
+    "darkColor": 2
+  },
+  "components/decisions/decision-card.tsx": {
+    "darkColor": 1,
+    "card": 1
+  },
+  "components/gallery/activity.tsx": {
+    "cornerStep": 2
+  },
+  "components/gallery/cards.tsx": {
+    "corner": 1,
+    "text": 1
+  },
+  "components/gallery/charts.tsx": {
+    "corner": 3
+  },
+  "components/gallery/frame.tsx": {
+    "darkColor": 3,
+    "card": 1
+  },
+  "components/gallery/preview.tsx": {
+    "text": 1
+  },
+  "components/layout/page-parts.tsx": {
+    "card": 2
+  },
+  "components/manage/plugin-page.tsx": {
+    "cornerStep": 1
+  },
+  "components/navigation/command-menu.tsx": {
+    "cornerStep": 4,
+    "text": 1
+  },
+  "components/needs-you/board-row.tsx": {
+    "text": 3
+  },
+  "components/needs-you/board.tsx": {
+    "text": 2,
+    "darkColor": 1,
+    "card": 1
+  },
+  "components/onboarding/booking-calendar.tsx": {
+    "cornerStep": 1,
+    "card": 1
+  },
+  "components/onboarding/demos/self-host-demo.tsx": {
+    "shadowStep": 1
+  },
+  "components/onboarding/demos/team-demo.tsx": {
+    "shadowStep": 1,
+    "darkColor": 1
+  },
+  "components/onboarding/demos/welcome-demo.tsx": {
+    "cornerStep": 1,
+    "shadow": 1,
+    "darkColor": 1
+  },
+  "components/onboarding/illustration-frame.tsx": {
+    "cornerStep": 1
+  },
+  "components/onboarding/laptop-illustration.tsx": {
+    "cornerStep": 4,
+    "shadow": 4,
+    "shadowStep": 1,
+    "darkColor": 9
+  },
+  "components/onboarding/onboarding-frame.tsx": {
+    "shadow": 1,
+    "darkColor": 2
+  },
+  "components/onboarding/organization-flow.tsx": {
+    "darkColor": 4,
+    "card": 2
+  },
+  "components/plugins/consent-handoff.tsx": {
+    "shadowStep": 1,
+    "card": 1
+  },
+  "components/plugins/plugin-logo.tsx": {
+    "cornerStep": 1,
+    "darkColor": 1
+  },
+  "components/responsibilities/triggers.tsx": {
+    "cornerStep": 1
+  },
+  "components/settings-tools/admin-card-parts.tsx": {
+    "darkColor": 4,
+    "card": 1
+  },
+  "components/settings-tools/manage-people-card.tsx": {
+    "darkColor": 2
+  },
+  "components/settings-tools/screen-link.tsx": {
+    "cornerStep": 1
+  },
+  "components/settings-tools/settings-change-card.tsx": {
+    "darkColor": 1,
+    "card": 1
+  },
+  "components/settings-tools/settings-read-card.tsx": {
+    "darkColor": 1,
+    "card": 1
+  },
+  "components/settings/ai-connection-chooser.tsx": {
+    "cornerStep": 1,
+    "card": 1
+  },
+  "components/settings/api-keys.tsx": {
+    "cornerStep": 1
+  },
+  "components/settings/chatgpt-browser-sign-in.tsx": {
+    "shadowStep": 1,
+    "text": 2
+  },
+  "components/settings/linked-accounts.tsx": {
+    "cornerStep": 1
+  },
+  "components/setup/setup-checklist.tsx": {
+    "cornerStep": 1
+  },
+  "components/tasks/task-row.tsx": {
+    "cornerStep": 1
+  },
+  "components/tasks/task-thread.tsx": {
+    "cornerStep": 2,
+    "darkColor": 6,
+    "card": 3
+  },
+  "components/teams/people-typeahead.tsx": {
+    "shadowStep": 1
+  },
+  "components/what-if/action-chips.tsx": {
+    "text": 1
+  },
+  "components/what-if/what-if-result.tsx": {
+    "cornerStep": 1,
+    "darkColor": 1
+  },
+  "lib/copilot/a2ui-breakdown.tsx": {
+    "corner": 2,
+    "shadowStep": 1
+  },
+  "lib/copilot/generative-ui.ts": {
+    "shadowStep": 1
+  },
+  "routes/_authed/_app/connections.index.tsx": {
+    "darkColor": 1,
+    "card": 1
+  },
+  "routes/_authed/admin/components/$name.tsx": {
+    "cornerStep": 1,
+    "card": 1
+  },
+  "routes/_authed/admin/components/index.tsx": {
+    "card": 1
+  },
+  "routes/_authed/admin/management.tsx": {
+    "cornerStep": 2
+  },
+  "routes/_authed/admin/playground.tsx": {
+    "card": 1
+  },
+  "routes/_authed/settings/components-gallery/$name.tsx": {
+    "cornerStep": 1,
+    "card": 1
+  },
+  "routes/_authed/settings/components-gallery/index.tsx": {
+    "card": 1
+  }
+}

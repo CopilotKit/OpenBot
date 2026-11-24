@@ -27,13 +27,46 @@ mod connected_ipc {
         /// ACL that guards the real commands guards these, and a configuration folder and
         /// credential store of the test's own.
         fn new() -> Self {
-            let stand_in =
+            Self::with_page_plugin(
                 tauri::plugin::Builder::<tauri::test::MockRuntime>::new(desktop_page::PLUGIN)
                     .invoke_handler(|invoke| {
                         invoke.resolver.resolve(());
                         true
                     })
-                    .build();
+                    .build(),
+            )
+        }
+
+        /// The same, with the page plugin's real `record_problem` and `save_logs` in place of the
+        /// stand-in, under the same ACL: what OpenBot's page reaches when it records a problem.
+        /// Under an identifier of its own (`identifier`), so its log folder is the test's and never
+        /// the log folder of whoever runs the tests.
+        fn recording_problems(identifier: &str) -> Self {
+            Self::with_page_plugin_as(
+                tauri::plugin::Builder::<tauri::test::MockRuntime>::new(desktop_page::PLUGIN)
+                    .invoke_handler(tauri::generate_handler![
+                        desktop_page::record_problem,
+                        desktop_page::save_logs
+                    ])
+                    .build(),
+                Some(identifier),
+            )
+        }
+
+        fn with_page_plugin(
+            stand_in: tauri::plugin::TauriPlugin<tauri::test::MockRuntime>,
+        ) -> Self {
+            Self::with_page_plugin_as(stand_in, None)
+        }
+
+        fn with_page_plugin_as(
+            stand_in: tauri::plugin::TauriPlugin<tauri::test::MockRuntime>,
+            identifier: Option<&str>,
+        ) -> Self {
+            let mut context = side_by_side(tauri::generate_context!(test = true));
+            if let Some(identifier) = identifier {
+                context.config_mut().identifier = identifier.to_owned();
+            }
             let app = tauri::test::mock_builder()
                 .plugin(stand_in)
                 .plugin(tauri_plugin_notification::init())
@@ -49,7 +82,7 @@ mod connected_ipc {
                     desktop_connected::use_this_computer,
                     desktop_connected::take_connection_notice,
                 ])
-                .build(side_by_side(tauri::generate_context!(test = true)))
+                .build(context)
                 .unwrap();
             know_app_page_grants(app.handle());
             let window = app.get_webview_window("main").unwrap_or_else(|| {
@@ -87,6 +120,15 @@ mod connected_ipc {
         }
 
         fn ask(&self, from: &str, cmd: &str) -> Result<serde_json::Value, serde_json::Value> {
+            self.ask_with(from, cmd, serde_json::json!({}))
+        }
+
+        fn ask_with(
+            &self,
+            from: &str,
+            cmd: &str,
+            args: serde_json::Value,
+        ) -> Result<serde_json::Value, serde_json::Value> {
             tauri::test::get_ipc_response(
                 &self.window,
                 tauri::webview::InvokeRequest {
@@ -94,7 +136,7 @@ mod connected_ipc {
                     callback: tauri::ipc::CallbackFn(0),
                     error: tauri::ipc::CallbackFn(1),
                     url: from.parse().unwrap(),
-                    body: tauri::ipc::InvokeBody::Json(serde_json::json!({})),
+                    body: tauri::ipc::InvokeBody::Json(args),
                     headers: Default::default(),
                     invoke_key: tauri::test::INVOKE_KEY.into(),
                 },
@@ -752,7 +794,8 @@ mod connected_ipc {
 
     /// The menus of a connected app carry Show Window, the app's log folder, Sign Out and Quit, and
     /// nothing that starts, stops or reports on an OpenBot on this computer. Read as text, as the
-    /// other menu tests are: AppKit's menus cannot be built here.
+    /// other menu tests are: AppKit's menus cannot be built here. Get Troubleshooting Logs… is
+    /// there too: `a_connected_apps_menus_offer_the_troubleshooting_logs`.
     #[test]
     fn a_connected_apps_menus_offer_sign_out_and_the_log_folder_and_no_status() {
         let main = include_str!("main.rs");
@@ -772,7 +815,7 @@ mod connected_ipc {
             ] {
                 assert!(connected.contains(carried), "{entries} lacks {carried}");
             }
-            for absent in ["\"status\"", "\"logs\"", "\"state\"", "\"stop\""] {
+            for absent in ["\"status\"", "\"state\"", "\"stop\""] {
                 assert!(!connected.contains(absent), "{entries} carries {absent}");
             }
         }
@@ -783,8 +826,266 @@ mod connected_ipc {
         assert!(chosen.contains(
             "CONNECTED_SIGN_OUT_MENU_ID => desktop_connected::sign_out_from_menu(app.clone()),"
         ));
-        assert!(chosen
-            .contains("\"stop\" | \"status\" | \"logs\" if desktop_connected::is_connected(app) => {}"));
+        assert!(chosen.contains("\"stop\" | \"status\" if desktop_connected::is_connected(app) => {}"));
+    }
+
+    /**
+    FOUND IN DOGFOODING, OpenBot Desktop 1.2.0-rc.4 signed in to OpenBot Cloud: "Logs are not
+    generating when I use the product. The previous version had a Menu item to generate the logs...
+    That menu item is gone." Connected, both menus carried Open Log Folder in place of Get
+    Troubleshooting Logs…, and a stale menu or a shortcut asking for `logs` did nothing.
+
+    Now both menus carry it beside Open Log Folder, under the same label and the same id as on this
+    computer, and choosing it gathers and saves the file however the app runs OpenBot. Read as text,
+    as the other menu tests are: AppKit's menus cannot be built here.
+    */
+    #[test]
+    fn a_connected_apps_menus_offer_the_troubleshooting_logs() {
+        let main = include_str!("main.rs");
+        let at = |pieces: &[&str]| main.find(&pieces.concat()).unwrap();
+        let menus = &main[at(&["\nfn install", "_menus"])..];
+        let menus = &menus[..menus.find("app.set_menu(").unwrap()];
+        for entries in ["let tray_entries = ", "let window_entries = "] {
+            let built = &menus[menus.find(entries).unwrap()..];
+            let connected = &built[..built.find("return Ok(entries);").unwrap()];
+            let folder = connected
+                .find("CONNECTED_LOG_FOLDER_MENU_ID")
+                .unwrap_or_else(|| panic!("{entries} lacks Open Log Folder"));
+            let logs = connected
+                .find("\"logs\",\n")
+                .unwrap_or_else(|| panic!("{entries} lacks Get Troubleshooting Logs…"));
+            assert!(folder < logs, "{entries}: the logs come after Open Log Folder");
+            assert!(
+                connected[logs..].starts_with("\"logs\",\n")
+                    && connected[logs..].contains("logs_label,")
+                    && connected[logs..].contains("logs_enabled,"),
+                "{entries}: the same item as on this computer, Gathering Logs… included"
+            );
+        }
+        assert_eq!(troubleshooting_menu_item(false), ("Get Troubleshooting Logs…", true));
+        let chosen = &main[at(&["\nfn cho", "se(app"])..];
+        let chosen = &chosen[..chosen.find("\n}\n").unwrap()];
+        let guard = chosen
+            .lines()
+            .find(|line| line.contains("if desktop_connected::is_connected(app) => {}"))
+            .expect("a connected app still refuses Stop and Status");
+        assert!(!guard.contains("\"logs\""), "a connected app swallows the logs: {guard}");
+        assert!(chosen.contains("\"logs\" => save_troubleshooting_logs_from_menu(app.clone()),"));
+    }
+
+    /// An OpenBot stand-in on 127.0.0.1 that answers `GET /health` as a real one does, with a request
+    /// id, for as many requests as it gets until the test ends.
+    fn health_answering() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader, Write};
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                while reader.read_line(&mut line).is_ok_and(|read| read > 2) {
+                    line.clear();
+                }
+                let body = r#"{"status":"ok"}"#;
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nx-request-id: \
+                         req_health\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+        });
+        address
+    }
+
+    /**
+    The whole path, connected: OpenBot's page, through the relay's origin, records a request the
+    server refused with its request id and an error the page threw; then the menu's Get
+    Troubleshooting Logs… saves a file that holds them, with the connected OpenBot's address and
+    what it answered, the relay's recent lines and the end of this app's log, and none of the
+    query's token, the key or the email address the page's words and the log carried. A page on any
+    other origin is refused, and what it sent is nowhere.
+
+    In a process of its own: it points the home folder, and with it this app's log folder, at a
+    folder of the test's own.
+    */
+    #[test]
+    fn a_connected_app_saves_what_its_page_recorded_from_the_menu() {
+        if crate::test_support::isolated_process(
+            "tests::connected_ipc::a_connected_app_saves_what_its_page_recorded_from_the_menu",
+        ) {
+            return;
+        }
+        // Windows finds the local data folder through the system, never the environment, so there
+        // the app's own identifier is what keeps its log folder the test's.
+        let home = temp_root("openbot-connected-logs-home");
+        if !cfg!(windows) {
+            std::env::set_var("HOME", &home);
+            std::env::set_var("XDG_DATA_HOME", home.join(".local/share"));
+        }
+        let identifier = format!(
+            "ai.copilotkit.openbot.desktop.test-{}",
+            std::process::id()
+        );
+        let shell = Connected::recording_problems(&identifier);
+        let address = health_answering();
+        // As Better Auth makes an organization's id: 32 letters and digits, both cases.
+        let organization = "Kd8fJ2pQKd8fJ2pQKd8fJ2pQKd8fJ2pQ";
+        shell.choose(choice::Mode::Connected, &address, Some(organization));
+        desktop_connected::showing_for_test(shell.handle(), RELAY);
+        let folder = logging::folder(shell.handle()).unwrap();
+        assert!(
+            folder.components().any(|part| part.as_os_str() == identifier.as_str()),
+            "{} is not the test's",
+            folder.display()
+        );
+        std::fs::create_dir_all(&folder).unwrap();
+        // This app's log as it reads after a reply broke: the relay's lines among the others.
+        std::fs::write(
+            folder.join("openbot-desktop.log"),
+            "2026-11-24T09:59:58.000Z INFO  [connect] showing the OpenBot at 127.0.0.1\n\
+             2026-11-24T09:59:59.000Z WARN  [relay] the connection to OpenBot closed before it \
+             answered GET /api/v2/organizations/default/control; sending it once more\n\
+             2026-11-24T10:00:00.000Z INFO  [account] signed in as dana.rivera@acme-robotics.io\n",
+        )
+        .unwrap();
+
+        let key = format!("sk-ant-api03-{}", "Ab9_".repeat(12));
+        let recorded = shell.ask_with(
+            RELAY,
+            "plugin:openbot-desktop|record_problem",
+            serde_json::json!({ "problem": {
+                "kind": "request",
+                "method": "POST",
+                "path": format!("/api/v2/organizations/{organization}/conversations?token=Zq3Kp8x7Zq3Kp8x7Zq3Kp8x7&email=dana@acme-robotics.io"),
+                "outcome": "failed",
+                "status": 500,
+                "requestId": "req_5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10",
+                "appVersion": "1.2.0-rc.4",
+            }}),
+        );
+        assert_eq!(recorded, Ok(serde_json::Value::Null));
+        assert_eq!(
+            shell.ask_with(
+                RELAY,
+                "plugin:openbot-desktop|record_problem",
+                serde_json::json!({ "problem": {
+                    "kind": "page-error",
+                    "message": format!("TypeError: Couldn't read {key} for dana.rivera@acme-robotics.io"),
+                    "source": format!("{RELAY}/assets/index-abc.js:12:345"),
+                    "appVersion": "1.2.0-rc.4",
+                }}),
+            ),
+            Ok(serde_json::Value::Null)
+        );
+        // A page anywhere else, which a link in a reply can open in this window, is refused.
+        assert!(shell
+            .ask_with(
+                "http://127.0.0.1:3011/",
+                "plugin:openbot-desktop|record_problem",
+                serde_json::json!({ "problem": {
+                    "kind": "page-error",
+                    "message": "Error: planted by another page",
+                }}),
+            )
+            .is_err());
+
+        // Get Troubleshooting Logs…, as both menus ask for it.
+        save_troubleshooting_logs_from_menu(shell.handle().clone());
+        let mut saved = None;
+        wait_until("the troubleshooting logs were saved", || {
+            saved = std::fs::read_dir(&folder)
+                .unwrap()
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .find(|path| {
+                    path.file_name()
+                        .is_some_and(|name| name.to_string_lossy().starts_with("openbot-troubleshooting-"))
+                });
+            saved.is_some()
+        });
+        // Written whole before it is shown: wait until the gathering says it is done.
+        wait_until("the gathering finished", || {
+            !GATHERING_LOGS.load(std::sync::atomic::Ordering::SeqCst)
+        });
+        let text = std::fs::read_to_string(saved.as_ref().unwrap()).unwrap();
+
+        for expected in [
+            "connected to 127.0.0.1".to_owned(),
+            format!("Address: {address}"),
+            "Health (GET /health): answered 200".to_owned(),
+            format!("Organization id: {organization}"),
+            "Front end: 1.2.0-rc.4".to_owned(),
+            format!(
+                "request POST /api/v2/organizations/{organization}/conversations: answered 500, \
+                 request id req_5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10"
+            ),
+            "page error: TypeError: Couldn't read [redacted] for [email] (at \
+             http://127.0.0.1:49200/assets/index-abc.js:12:345)"
+                .to_owned(),
+            "## Relay (recent lines)".to_owned(),
+            "[relay] the connection to OpenBot closed before it answered GET \
+             /api/v2/organizations/default/control; sending it once more"
+                .to_owned(),
+            "## OpenBot Desktop log (end)".to_owned(),
+            "[account] signed in as [email]".to_owned(),
+        ] {
+            assert!(text.contains(&expected), "{expected:?} not in\n{text}");
+        }
+        for absent in [
+            "Zq3Kp8x7Zq3Kp8x7Zq3Kp8x7",
+            "acme-robotics.io",
+            key.as_str(),
+            "planted by another page",
+            "No container engine",
+        ] {
+            assert!(!text.contains(absent), "{absent:?} in\n{text}");
+        }
+
+        // The web app's own Get troubleshooting logs, inside this app, saves the same file. Another
+        // page may not ask for it.
+        let saved_by_menu = saved.unwrap();
+        std::fs::remove_file(&saved_by_menu).unwrap();
+        assert!(shell
+            .ask(
+                "http://127.0.0.1:3011/",
+                "plugin:openbot-desktop|save_logs"
+            )
+            .is_err());
+        assert!(!saved_by_menu.exists());
+        assert_eq!(
+            shell.ask(RELAY, "plugin:openbot-desktop|save_logs"),
+            Ok(serde_json::Value::Null)
+        );
+        let from_page = std::fs::read_dir(&folder)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name().is_some_and(|name| {
+                    name.to_string_lossy()
+                        .starts_with("openbot-troubleshooting-")
+                })
+            })
+            .expect("the page's ask saved the file");
+        let text = std::fs::read_to_string(from_page).unwrap();
+        assert!(
+            text.contains("request id req_5f0d6c0e-2f1a-4a53-9d51-6f3d6b1f6f10"),
+            "{text}"
+        );
+        assert!(!text.contains(key.as_str()));
+        drop(shell);
+        // The app's own folder under its test identifier, wherever the system put it.
+        if let Some(own) = folder
+            .ancestors()
+            .find(|dir| dir.file_name().is_some_and(|name| name == identifier.as_str()))
+        {
+            let _ = std::fs::remove_dir_all(own);
+        }
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     /// Sign-out sends the browser the sign-in went through to end its session at the OpenBot, when

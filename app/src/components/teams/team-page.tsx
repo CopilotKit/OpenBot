@@ -61,6 +61,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 import { personName } from "@/lib/organizations/words";
 import { SEARCH_MAX } from "@/lib/people/queries";
 import { NO_PARENT, teamDetailsFrom } from "@/lib/teams/form";
@@ -112,7 +113,7 @@ function Team({ teamId, paths }: { teamId: string; paths: TeamPaths }) {
     return (
       <PageShell backButton={backToTeams(paths)} title="Team">
         <p className="text-destructive text-sm" role="alert">
-          {team.error.message}
+          {failureSaid(team.error)}
         </p>
       </PageShell>
     );
@@ -290,7 +291,7 @@ function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
     >
       {failure ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {failure.message}
+          {failureSaid(failure)}
         </p>
       ) : null}
       {/*
@@ -309,7 +310,7 @@ function People({ team, canEdit }: { team: TeamSummary; canEdit: boolean }) {
       ) : null}
       {members.isPending ? null : members.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {members.error.message}
+          {failureSaid(members.error)}
         </p>
       ) : rows.length === 0 && query ? (
         <PageEmpty icon={IconSearch} title="No matches">
@@ -521,7 +522,7 @@ function DetailsDialog({
           </form>
           {update.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {update.error.message}
+              {failureSaid(update.error)}
             </p>
           ) : null}
         </DialogBody>
@@ -613,7 +614,7 @@ function ParentDialog({
           </form>
           {update.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {update.error.message}
+              {failureSaid(update.error)}
             </p>
           ) : null}
         </DialogBody>
@@ -662,7 +663,8 @@ function AddPersonDialog({
   const [added, setAdded] = useState<OrganizationPerson[]>([]);
   // Found to be in the team already when they were chosen.
   const [already, setAlready] = useState<ReadonlySet<string>>(new Set());
-  const [failure, setFailure] = useState<string | null>(null);
+  // The refusal itself, not its words: a hold is drawn calmly (lib/load-failure.tsx).
+  const [failure, setFailure] = useState<Failure | null>(null);
   // Chosen and not yet answered: offered as in the team, and given back if the server refuses.
   const [adding, setAdding] = useState<ReadonlySet<string>>(new Set());
   const taken = new Set([
@@ -690,11 +692,7 @@ function AddPersonDialog({
       });
       setAdded((now) => [person, ...now.filter((one) => one.id !== person.id)]);
     } catch (error) {
-      setFailure(
-        error instanceof Error
-          ? error.message
-          : "Couldn't add them. Try again in a moment.",
-      );
+      setFailure(failureOf(error, "Couldn't add them. Try again in a moment."));
     } finally {
       settle(person.id);
     }
@@ -728,7 +726,7 @@ function AddPersonDialog({
           />
           {failure ? (
             <p className="text-destructive text-sm" role="alert">
-              {failure}
+              {failureSaid(failure)}
             </p>
           ) : null}
           {added.length > 0 ? (
@@ -798,7 +796,7 @@ function LeaveDialog({
         </DialogHeader>
         {leave.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {leave.error.message}
+            {failureSaid(leave.error)}
           </p>
         ) : null}
         <DialogFooter>
@@ -848,7 +846,7 @@ function DeleteDialog({
         </DialogHeader>
         {remove.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {remove.error.message}
+            {failureSaid(remove.error)}
           </p>
         ) : null}
         <DialogFooter>

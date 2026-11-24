@@ -1,7 +1,8 @@
 # MCP servers added by URL
 
 Any remote MCP server OpenBot doesn't list (Figma's, Fireflies', your own) can be added by its
-address from **Connections → Add server**, and given to Bots like any other app.
+address from **Connections → Add custom MCP**, or by an admin from **Admin → Apps → Add custom
+MCP**, and given to Bots like any other app.
 
 OpenBot asks the server, with no credential, how it is reached:
 

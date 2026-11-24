@@ -44,6 +44,7 @@ import {
 } from "@/lib/tasks/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /** Each status's icon. A status a newer server sends that this app doesn't know has a plain circle. */
 const ICONS: Partial<Record<TaskStatus, typeof IconProgress>> = {
@@ -296,7 +297,7 @@ export function TaskRow({
         </ItemFooter>
         {error ? (
           <p className="mt-1 text-destructive text-sm" role="alert">
-            {error.message}
+            {failureSaid(error)}
           </p>
         ) : null}
       </ItemContent>
@@ -416,7 +417,7 @@ export function TaskBoardRow({
           ...held.meta,
           error ? (
             <span className="text-destructive" key="error" role="alert">
-              {error.message}
+              {failureSaid(error)}
             </span>
           ) : null,
         ]}
@@ -461,7 +462,7 @@ export function TaskBoardRow({
         <span key="when">{relativeTime(task.updatedAt)}</span>,
         error ? (
           <span className="text-destructive" key="error" role="alert">
-            {error.message}
+            {failureSaid(error)}
           </span>
         ) : null,
       ]}

@@ -7,6 +7,7 @@ import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { UpdateBanner } from "@/components/layout/update-banner";
 import { MovedAppsBanner } from "@/components/moves/moved-apps-notice";
 import { MovedElsewhereBanner } from "@/components/moves/moved-elsewhere-banner";
+import { LeftOrganizationBanner } from "@/components/organizations/left-organization-banner";
 import { SidebarInset } from "@/components/ui/sidebar";
 import {
   CONVERSATIONS,
@@ -64,6 +65,7 @@ function AppFrame() {
       <AppSidebar />
       <SidebarInset className="min-h-0 overflow-hidden">
         <ConnectionBanner />
+        <LeftOrganizationBanner />
         <PlanBanner />
         <MovedElsewhereBanner />
         <MovedAppsBanner />

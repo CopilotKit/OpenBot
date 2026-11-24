@@ -29,6 +29,7 @@ export const getListAppAccessRequestsResponseMock =
         createdAt: "2026-11-14T09:00:00.000Z",
         resolvedAt: null,
         resolvedBy: null,
+        actions: [],
       },
     ],
     nextCursor: null,
@@ -48,6 +49,7 @@ export const getCreateAppAccessRequestResponseMock = (): AppAccessRequest => ({
   createdAt: "2026-11-14T09:00:00.000Z",
   resolvedAt: null,
   resolvedBy: null,
+  actions: [],
 });
 
 export const getApproveAppAccessRequestResponseMock =
@@ -66,6 +68,7 @@ export const getApproveAppAccessRequestResponseMock =
       createdAt: "2026-11-14T09:00:00.000Z",
       resolvedAt: "2026-11-14T10:00:00.000Z",
       resolvedBy: "user_9a1d",
+      actions: [],
     },
     enabled: false,
     granted: ["notion/notion-fetch", "notion/notion-search"],
@@ -85,6 +88,7 @@ export const getDismissAppAccessRequestResponseMock = (): AppAccessRequest => ({
   createdAt: "2026-11-14T09:00:00.000Z",
   resolvedAt: "2026-11-14T10:00:00.000Z",
   resolvedBy: "user_9a1d",
+  actions: [],
 });
 
 export const getListAppAccessRequestsMockHandler = (

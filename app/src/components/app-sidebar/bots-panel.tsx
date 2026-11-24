@@ -1,11 +1,22 @@
-import { IconChevronDown, IconPlus, IconSearch } from "@tabler/icons-react";
+import {
+  IconChevronDown,
+  IconMessagePlus,
+  IconPlus,
+  IconSearch,
+} from "@tabler/icons-react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
 import { attentionSummary } from "@/components/bot-profile/attention";
 import { SectionPanel } from "@/components/layout/section-panel";
 import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import {
   InputGroup,
   InputGroupAddon,
@@ -20,6 +31,7 @@ import {
   useExpandedBots,
 } from "@/lib/bots/panel";
 import { untitledLine } from "@/lib/channels/label";
+import { loadFailure } from "@/lib/load-failure";
 import {
   botConversationsInfiniteQueryOptions,
   channelListQueryOptions,
@@ -58,8 +70,11 @@ function BotConversations({ botId }: { botId: string }) {
           role="alert"
           className="min-w-0 flex-1 text-muted-foreground text-xs"
         >
-          {conversations.error?.message ||
-            "Couldn't load this Bot's conversations."}
+          {loadFailure(
+            conversations.error,
+            conversations.error?.message ||
+              "Couldn't load this Bot's conversations.",
+          )}
         </p>
         <Button
           disabled={conversations.isFetching}
@@ -120,7 +135,8 @@ function BotConversations({ botId }: { botId: string }) {
 
 /**
  * One Bot: its orb and name, a link to its page, and at the end a dot when something waits on the
- * person from it and the caret that opens and closes its conversations under it.
+ * person from it and the caret that opens and closes its conversations under it. Right-clicking the
+ * Bot offers a new conversation with it, as a conversation's row offers its own actions.
  */
 function BotRow({
   bot,
@@ -134,6 +150,7 @@ function BotRow({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const navigate = useNavigate();
   return (
     <li className="flex flex-col">
       {/*
@@ -141,21 +158,35 @@ function BotRow({
        * its page, and a square caret, transparent until hovered, which opens its conversations.
        */}
       <div className="flex items-center gap-1" data-slot="bot-row">
-        <Link
-          className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg pr-2.5 pl-2.5 text-sm outline-hidden ring-sidebar-ring transition-colors hover:bg-foreground/5 focus-visible:ring-2"
-          params={{ agentId: bot.id }}
-          to="/bots/$agentId"
-        >
-          <BotOrb name={bot.name} seed={bot.avatarSeed} size={24} />
-          <span className="min-w-0 flex-1 truncate">{bot.name}</span>
-          {waiting ? (
-            <span
-              aria-label={waiting}
-              className="size-2 shrink-0 rounded-full bg-primary"
-              role="img"
-            />
-          ) : null}
-        </Link>
+        <ContextMenu>
+          <ContextMenuTrigger className="min-w-0 flex-1">
+            <Link
+              className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg pr-2.5 pl-2.5 text-sm outline-hidden ring-sidebar-ring transition-colors hover:bg-foreground/5 focus-visible:ring-2"
+              params={{ agentId: bot.id }}
+              to="/bots/$agentId"
+            >
+              <BotOrb name={bot.name} seed={bot.avatarSeed} size={24} />
+              <span className="min-w-0 flex-1 truncate">{bot.name}</span>
+              {waiting ? (
+                <span
+                  aria-label={waiting}
+                  className="size-2 shrink-0 rounded-full bg-primary"
+                  role="img"
+                />
+              ) : null}
+            </Link>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem
+              onClick={() =>
+                void navigate({ search: { agent: bot.id }, to: "/channel/new" })
+              }
+            >
+              <IconMessagePlus />
+              New conversation with {bot.name}
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
         <button
           aria-expanded={expanded}
           aria-label={`${expanded ? "Hide" : "Show"} ${bot.name}'s conversations`}
@@ -212,7 +243,7 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
       actions={
         <Button
           aria-label="New Bot"
-          className="hover:bg-foreground/5 dark:hover:bg-foreground/5"
+          className="hover:bg-foreground/5"
           render={(props) => (
             <Link {...props} search={{ new: true }} to="/bots" />
           )}
@@ -249,7 +280,10 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
         ) : !bots.data ? (
           <div className="px-2.5 py-2">
             <p role="alert" className="mb-1 text-muted-foreground text-xs">
-              {bots.error?.message || "Couldn't load your Bots."}
+              {loadFailure(
+                bots.error,
+                bots.error?.message || "Couldn't load your Bots.",
+              )}
             </p>
             <Button
               disabled={bots.isFetching}

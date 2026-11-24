@@ -78,6 +78,12 @@ export const ListOrganizationsResponse = zod.object({
             .describe(
               "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key.",
             ),
+          canMoveIn: zod
+            .boolean()
+            .optional()
+            .describe(
+              "Whether the caller may move their Bots into this organization (createImport): true where the organization lets them use Bots. The server's verdict, by the organization's own rules. Present only where OpenBot takes moves (OpenBot Cloud).",
+            ),
         })
         .describe(
           "One organization, as one of its members sees it. role and active are the server's verdicts about the caller.",
@@ -165,6 +171,12 @@ export const CreateOrganizationResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key.",
+        ),
+      canMoveIn: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether the caller may move their Bots into this organization (createImport): true where the organization lets them use Bots. The server's verdict, by the organization's own rules. Present only where OpenBot takes moves (OpenBot Cloud).",
         ),
     })
     .describe(
@@ -352,6 +364,12 @@ export const UpdateOrganizationResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key.",
+        ),
+      canMoveIn: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether the caller may move their Bots into this organization (createImport): true where the organization lets them use Bots. The server's verdict, by the organization's own rules. Present only where OpenBot takes moves (OpenBot Cloud).",
         ),
     })
     .describe(
@@ -627,7 +645,7 @@ export const ListOrganizationInvitationsResponse = zod.object({
 });
 
 /**
- * Invite the person with this email address to join the organization with a role. They need no account yet: the invitation waits for whoever signs in with that address, and they see it in OpenBot then. Where OpenBot can send email, it also emails them; delivery says which happened, so the inviter knows whether to pass the link on themselves. The invitation lasts seven days. Inviting an address again after its invitation expired or was declined starts a new one. Only an owner or an admin of this organization can. A repeated request with the same Idempotency-Key and body returns the first result.
+ * Invite the person with this email address to join the organization with a role. They need no account yet: the invitation waits for whoever signs in with that address, and they see it in OpenBot then. Where OpenBot can send email, it also emails them; delivery says which happened, so the inviter knows whether to pass the link on themselves. The invitation lasts seven days. Inviting an address again after its invitation expired or was declined starts a new one. Only an owner or an admin of this organization can. An organization that pays for each member needs a free seat for the person: with none, the invitation is refused with SEAT_REQUIRED and addSeatUrl, and nothing is invited. A repeated request with the same Idempotency-Key and body returns the first result.
  * @summary Invite somebody to an organization
  */
 
@@ -1017,6 +1035,12 @@ export const AcceptInvitationResponse = zod.object({
         .boolean()
         .describe(
           "Whether the caller is working in this one: the organization their session works in, or for an app's token the one its OpenBot-Organization header names, else the caller's own. Always false for a request made with an API key.",
+        ),
+      canMoveIn: zod
+        .boolean()
+        .optional()
+        .describe(
+          "Whether the caller may move their Bots into this organization (createImport): true where the organization lets them use Bots. The server's verdict, by the organization's own rules. Present only where OpenBot takes moves (OpenBot Cloud).",
         ),
     })
     .describe(

@@ -7,7 +7,7 @@ import {
   PageSection,
 } from "@/components/layout/page-shell";
 import { copyText } from "@/components/settings/linked-accounts";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogBody,
@@ -55,12 +55,21 @@ import {
   sentInvitationPagesQueryOptions,
 } from "@/lib/organizations/queries";
 import {
+  addSeatAddress,
+  type InviteDraft,
+  keepInviteForSeat,
+  seatRequired,
+  takeInviteAfterSeat,
+} from "@/lib/organizations/seat";
+import {
   invitationLink,
   roleName,
   sentInvitationLine,
 } from "@/lib/organizations/words";
 import { SEARCH_MAX } from "@/lib/people/queries";
+import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /** The API's cap on an address, so the field stops where the server does. */
 const MAX_EMAIL_LENGTH = 320;
@@ -130,6 +139,14 @@ export function SentInvitationsSection({
   const rows =
     invitations.data?.pages.flatMap((page) => page.invitations) ?? [];
   const [inviting, setInviting] = useState(false);
+  // What the dialog opens with: an invitation kept while a seat was added, read once on arrival.
+  const [draft, setDraft] = useState<InviteDraft | null>(null);
+  useEffect(() => {
+    const kept = takeInviteAfterSeat(organization.id);
+    if (!kept) return;
+    setDraft(kept);
+    setInviting(true);
+  }, [organization.id]);
   /*
    * A hosted OpenBot: an invitation is an email from OpenBot by CopilotKit, accepted from that email.
    * Its link carries a one-time ticket that only the email has, so there is no link to copy.
@@ -164,7 +181,7 @@ export function SentInvitationsSection({
       ) : null}
       {invitations.isPending ? null : invitations.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {invitations.error.message}
+          {failureSaid(invitations.error)}
         </p>
       ) : rows.length === 0 && query ? (
         <PageEmpty icon={IconSearch} title="No matches">
@@ -201,8 +218,12 @@ export function SentInvitationsSection({
         </Button>
       ) : null}
       <InviteDialog
+        draft={draft}
         hosted={hosted}
-        onOpenChange={setInviting}
+        onOpenChange={(next) => {
+          setInviting(next);
+          if (!next) setDraft(null);
+        }}
         open={inviting}
         organization={organization}
       />
@@ -268,7 +289,7 @@ function SentInvitationRow({
       ) : null}
       {cancel.error ? (
         <p className="px-4 pb-3 text-destructive text-sm" role="alert">
-          {cancel.error.message}
+          {failureSaid(cancel.error)}
         </p>
       ) : null}
     </>
@@ -279,13 +300,20 @@ function SentInvitationRow({
  * Invites an address with a role, then says what happened in the same dialog: OpenBot emailed the
  * person, or the inviter copies the link and passes it on. A refusal stays in the dialog in the
  * server's own sentence, with the address still typed.
+ *
+ * An organization that pays for each member, with every seat taken, refuses with SEAT_REQUIRED
+ * (`lib/organizations/seat.ts`): the server's sentence, and for an owner or an admin one Add a seat
+ * button in place of Invite. The invitation is kept in the tab as they go, and comes back as
+ * `draft` when they return, so Invite sends it then.
  */
 function InviteDialog({
+  draft,
   hosted,
   onOpenChange,
   open,
   organization,
 }: {
+  draft: InviteDraft | null;
   hosted: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -297,16 +325,18 @@ function InviteDialog({
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<AssignableRole>("member");
   const [sent, setSent] = useState<OrganizationInvitationResponse | null>(null);
+  const seat = seatRequired(invite.error);
 
-  // Each opening starts empty, and what the last one said is not news about this one.
+  // Each opening starts empty, or as it was left to add a seat, and what the last one said is not
+  // news about this one.
   useEffect(() => {
     if (open) {
-      setEmail("");
-      setRole("member");
+      setEmail(draft?.email ?? "");
+      setRole(draft?.role ?? "member");
       setSent(null);
       reset();
     }
-  }, [open, reset]);
+  }, [open, reset, draft]);
 
   const send = async () => {
     try {
@@ -394,8 +424,15 @@ function InviteDialog({
                 </FieldGroup>
               </form>
               {invite.error ? (
-                <p className="mt-4 text-destructive text-sm" role="alert">
-                  {invite.error.message}
+                <p
+                  className={cn(
+                    "mt-4 text-sm text-pretty",
+                    // Not a failure: what a member costs, and the way on below.
+                    seat ? "text-foreground" : "text-destructive",
+                  )}
+                  role="alert"
+                >
+                  {failureSaid(invite.error)}
                 </p>
               ) : null}
             </DialogBody>
@@ -407,14 +444,30 @@ function InviteDialog({
               >
                 Cancel
               </Button>
-              <Button
-                disabled={invite.isPending || !email.trim()}
-                form={formId}
-                size="sm"
-                type="submit"
-              >
-                {invite.isPending ? "Inviting…" : "Invite"}
-              </Button>
+              {seat?.addSeatUrl ? (
+                <a
+                  className={cn(buttonVariants({ size: "sm" }))}
+                  href={addSeatAddress(seat.addSeatUrl)}
+                  onClick={() =>
+                    keepInviteForSeat({
+                      organizationId: organization.id,
+                      email: email.trim(),
+                      role,
+                    })
+                  }
+                >
+                  Add a seat
+                </a>
+              ) : (
+                <Button
+                  disabled={invite.isPending || !email.trim()}
+                  form={formId}
+                  size="sm"
+                  type="submit"
+                >
+                  {invite.isPending ? "Inviting…" : "Invite"}
+                </Button>
+              )}
             </DialogFooter>
           </>
         )}

@@ -55,6 +55,7 @@ import type {
 import { conversationTitle } from "@/lib/channels/label";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { loadFailure } from "@/lib/load-failure";
 import { proactiveSettingsQueryOptions } from "@/lib/proactive";
 import { relativeTime } from "@/lib/relative-time";
 import { routinesQueryOptions } from "@/lib/routines/queries";
@@ -279,6 +280,7 @@ export function BotActivityGlance({ agentId }: { agentId: string }) {
         <AllActivityItem
           activity={activity.data}
           agentId={agentId}
+          error={activity.error}
           groups={groups}
         />
       </PageRows>
@@ -300,6 +302,7 @@ export function BotActivityRow({ agentId }: { agentId: string }) {
       <AllActivityItem
         activity={activity.data}
         agentId={agentId}
+        error={activity.error}
         groups={groups}
         title="Activity"
         withIcon
@@ -311,12 +314,15 @@ export function BotActivityRow({ agentId }: { agentId: string }) {
 function AllActivityItem({
   activity,
   agentId,
+  error,
   groups,
   title = "All activity",
   withIcon = false,
 }: {
   activity: BotActivity | undefined;
   agentId: string;
+  /** Why the activity couldn't be read, when it couldn't. */
+  error?: unknown;
   /** What the Activity page lists, which the summary counts. */
   groups: readonly ActivityGroup[];
   title?: string;
@@ -337,7 +343,7 @@ function AllActivityItem({
         <ItemDescription>
           {activity
             ? activitySummary(activity, groups)
-            : "Couldn't load this Bot's activity."}
+            : loadFailure(error, "Couldn't load this Bot's activity.")}
         </ItemDescription>
       </ItemContent>
       <ItemActions>
@@ -492,7 +498,10 @@ export function BotActivitySections({
     return (
       <PageSection title="Activity">
         <p className="mt-4 text-destructive text-sm" role="alert">
-          Couldn't load this Bot's activity. Try again in a moment.
+          {loadFailure(
+            activity.error,
+            "Couldn't load this Bot's activity. Try again in a moment.",
+          )}
         </p>
       </PageSection>
     );
@@ -505,7 +514,10 @@ export function BotActivitySections({
       {/* The tasks failing to load leaves the rest listed, and says which part is missing. */}
       {taskList.error ? (
         <p className="text-destructive text-sm" role="alert">
-          Couldn't load this Bot's tasks. Try again in a moment.
+          {loadFailure(
+            taskList.error,
+            "Couldn't load this Bot's tasks. Try again in a moment.",
+          )}
         </p>
       ) : null}
       {groups.length === 0 && !taskList.error ? (

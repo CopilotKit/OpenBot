@@ -51,6 +51,7 @@ import {
 } from "@/lib/plugins/shared-use";
 import { relativeTime } from "@/lib/relative-time";
 import { queryClient } from "@/query-client";
+import { failureSaid } from "@/lib/load-failure";
 
 /** What came back for one description, kept beside the words it came from. */
 type WrittenGrants = AppGrantTranslation & { text: string };
@@ -335,7 +336,7 @@ export function DescribeGrants({
         ) : null}
         {checked && preview.error ? (
           <p className="text-destructive text-sm" role="alert">
-            {preview.error.message}
+            {failureSaid(preview.error)}
           </p>
         ) : null}
         {checked && changes ? (
@@ -372,7 +373,7 @@ export function DescribeGrants({
       </FieldGroup>
       {save.error ? (
         <p className="mt-5 text-destructive text-sm" role="alert">
-          {save.error.message}
+          {failureSaid(save.error)}
         </p>
       ) : null}
       {/*
@@ -391,7 +392,7 @@ export function DescribeGrants({
           </DialogBody>
           {save.error ? (
             <p className="mt-4 text-destructive text-sm" role="alert">
-              {save.error.message}
+              {failureSaid(save.error)}
             </p>
           ) : null}
           <DialogFooter className="mt-4">
