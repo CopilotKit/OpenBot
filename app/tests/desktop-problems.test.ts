@@ -397,7 +397,9 @@ test("a long message is cut to 500 characters", () => {
 test("a run that ends with an error is handed over as the sentence the person was shown", async () => {
   const shown: (string | null)[] = [];
   const bot = new FailingBot("run-error");
-  const stop = watchStoppedTurn(bot, "bot", (sentence) => shown.push(sentence));
+  const stop = watchStoppedTurn(bot, "bot", (stopped) =>
+    shown.push(stopped?.message ?? null),
+  );
   await bot.runAgent();
   stop();
   expect(shown.at(-1)).toBe("The model refused the request.");
@@ -418,7 +420,7 @@ test("a run whose request the server refused is handed over with the request id 
     const stop = watchStoppedTurn(
       bot,
       "bot",
-      (sentence) => shown.push(sentence),
+      (stopped) => shown.push(stopped?.message ?? null),
       async () => false,
     );
     await bot.runAgent().catch(() => undefined);

@@ -24,7 +24,10 @@ import { join, relative } from "node:path";
  * - an error's `.message` handed to a state setter (`setError(thrown.message)`,
  *   `setError(error instanceof Error ? error.message : "…")`) or to a prop named for an error
  *   (`error={save.error?.message}`);
- * - a toast that says an error's `.message` as an error without asking `failureToastType`.
+ * - a toast that says an error's `.message` as an error without asking `failureToastType`;
+ * - a press's error answered with the screen's own words in red, the error never asked
+ *   (`{save.error ? (<p className="text-destructive">Couldn't save it.</p>)`), where
+ *   `loadFailure(save.error, "Couldn't save it.")` says the same words and draws a hold calmly.
  */
 const SRC = join(import.meta.dir, "..", "src");
 
@@ -82,12 +85,23 @@ function calls(
   return found;
 }
 
+/**
+ * `{save.error ? (<p className="text-destructive …">Couldn't save it. Try again.</p>)`: a press that
+ * failed, said in the screen's own sentence in red, with the error never asked. Saving a credential,
+ * the AI connection's dialog and the usage-data switch said a move this way, in red.
+ * `loadFailure(save.error, "Couldn't save it. Try again.")` says the same sentence for a failure.
+ */
+const OWN_WORDS_IN_RED =
+  /\{\s*[\w$.?]*\.error\??\s*(?:\?|&&)\s*\(\s*<(\w+)\b[^>]*?text-destructive[^>]*>\s*[^\s<{][^<{]*<\/\1>/g;
+
 /** Every place in `text` that draws or keeps an error's words around the shared rule. */
 function bypasses(text: string): number[] {
   const lines: number[] = [];
   text.split("\n").forEach((line, index) => {
     if (DRAWN.test(line) || PROP.test(line)) lines.push(index + 1);
   });
+  for (const match of text.matchAll(OWN_WORDS_IN_RED))
+    lines.push(text.slice(0, match.index).split("\n").length);
   // A state setter, or a callback that hands a failure on to one (`report`, `onError`).
   for (const { line, argument } of calls(
     text,
@@ -132,6 +146,8 @@ describe("an error's own words", () => {
       '      setFailure(\n        error instanceof Error\n          ? error.message\n          : "Couldn\'t add them. Try again in a moment.",\n      );',
       "      setUnreachable(\n          error instanceof Error && error.message\n            ? error.message\n            : MASTRA_UNREACHABLE,\n        );",
       '          toast.add({\n            id: SWITCH_TOAST,\n            title: error.message,\n            type: "error",\n          }),',
+      '        {createCredential.error ? (\n          <p className="mt-5 text-destructive text-sm" role="alert">\n            Couldn\'t save the credential. Try again.\n          </p>\n        ) : null}',
+      '        {open.error && (\n          <ItemDescription\n            className="line-clamp-none text-destructive"\n            role="alert"\n          >\n            Couldn\'t open the log folder.\n          </ItemDescription>\n        )}',
     ])
       expect({ text, found: bypasses(text).length > 0 }).toEqual({
         text,
@@ -145,6 +161,8 @@ describe("an error's own words", () => {
       '      setExportError(failureOf(error, "Couldn\'t export these events. Try again."));',
       "      setError(GROUP_TAKES_NO_FILES);",
       "          toast.add({\n            title: error.message,\n            type: failureToastType(error),\n          }),",
+      '        {createCredential.error ? (\n          <p className="mt-5 text-destructive text-sm" role="alert">\n            {loadFailure(\n              createCredential.error,\n              "Couldn\'t save the credential. Try again.",\n            )}\n          </p>\n        ) : null}',
+      '        {copy.error ? (\n          <p className="text-muted-foreground text-sm">Couldn\'t copy it.</p>\n        ) : null}',
     ])
       expect({ text, found: bypasses(text).length > 0 }).toEqual({
         text,

@@ -61,7 +61,10 @@ export function AskFirstSwitch() {
       </Item>
       {preferences.error ? (
         <p className="text-sm text-destructive" role="alert">
-          Couldn't change it. Try again, or change it later in Settings.
+          {loadFailure(
+            preferences.error,
+            "Couldn't change it. Try again, or change it later in Settings.",
+          )}
         </p>
       ) : inbox.error ? (
         <p className="text-sm text-muted-foreground" role="status">

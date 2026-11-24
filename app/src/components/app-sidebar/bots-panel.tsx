@@ -4,9 +4,20 @@ import {
   IconPlus,
   IconSearch,
 } from "@tabler/icons-react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { BotOrb } from "@/components/agents/bot-orb";
 import { attentionSummary } from "@/components/bot-profile/attention";
 import { SectionPanel } from "@/components/layout/section-panel";
@@ -31,16 +42,22 @@ import {
   useExpandedBots,
 } from "@/lib/bots/panel";
 import { untitledLine } from "@/lib/channels/label";
-import { loadFailure } from "@/lib/load-failure";
 import {
   botConversationsInfiniteQueryOptions,
+  channelKeys,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
+import { isHeld, loadFailure } from "@/lib/load-failure";
 import { relativeTimeShort } from "@/lib/relative-time";
 import { useMessageListEmphasis } from "@/lib/settings/message-list";
 import { cn } from "@/lib/utils";
 import { Channel } from "./channel";
 import { isUnread, pinnedFirst } from "./conversations-panel";
+
+/** Where a Bot's row hands up that its conversations are held back, by Bot, for the panel to say once. */
+const HeldReads = createContext<(botId: string, held: unknown) => void>(
+  () => {},
+);
 
 /**
  * One Bot's latest conversations, under its row: {@link BOT_CONVERSATIONS_PAGE} at a time, read from
@@ -56,7 +73,21 @@ function BotConversations({ botId }: { botId: string }) {
     strict: false,
     select: (params) => (params as { channelId?: string }).channelId,
   });
+  /*
+   * OpenBot holding off (a move, a brief outage) is the same for every Bot: the panel says it once
+   * above its Bots (`HeldReads`), and the row says nothing of its own. It said it under every Bot.
+   */
+  const reportHeld = useContext(HeldReads);
+  const held =
+    !conversations.data && isHeld(conversations.error)
+      ? conversations.error
+      : undefined;
+  useEffect(() => {
+    reportHeld(botId, held);
+    return () => reportHeld(botId, undefined);
+  }, [reportHeld, botId, held]);
 
+  if (held) return null;
   if (conversations.isPending)
     return (
       <p role="status" className="py-1.5 pl-3 text-muted-foreground text-xs">
@@ -237,6 +268,22 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
     const one = attention.data?.find((each) => each.botId === botId);
     return one ? attentionSummary(one) : "";
   };
+  // Each Bot whose conversations OpenBot is holding back, said once above the list.
+  const queryClient = useQueryClient();
+  const [heldReads, setHeldReads] = useState<ReadonlyMap<string, unknown>>(
+    () => new Map(),
+  );
+  const reportHeld = useCallback((botId: string, held: unknown) => {
+    setHeldReads((now) => {
+      if (held === undefined ? !now.has(botId) : now.get(botId) === held)
+        return now;
+      const next = new Map(now);
+      if (held === undefined) next.delete(botId);
+      else next.set(botId, held);
+      return next;
+    });
+  }, []);
+  const held = heldReads.values().next().value;
 
   return (
     <SectionPanel
@@ -301,17 +348,40 @@ export function BotsPanel({ hidden = false }: { hidden?: boolean }) {
               : "No Bots yet. Make one with New Bot."}
           </p>
         ) : (
-          <ul className="flex flex-col gap-px">
-            {shown.map((bot) => (
-              <BotRow
-                bot={bot}
-                expanded={isExpanded(bot.id)}
-                key={bot.id}
-                onToggle={() => toggle(bot.id)}
-                waiting={waitingOf(bot.id)}
-              />
-            ))}
-          </ul>
+          <HeldReads.Provider value={reportHeld}>
+            {held !== undefined ? (
+              <div className="flex items-center gap-2 px-2.5 pb-1">
+                <p
+                  role="alert"
+                  className="min-w-0 flex-1 text-muted-foreground text-xs"
+                >
+                  {loadFailure(held, "Couldn't load these conversations.")}
+                </p>
+                <Button
+                  onClick={() =>
+                    void queryClient.refetchQueries({
+                      queryKey: channelKeys.byBots(),
+                    })
+                  }
+                  size="sm"
+                  variant="ghost"
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : null}
+            <ul className="flex flex-col gap-px">
+              {shown.map((bot) => (
+                <BotRow
+                  bot={bot}
+                  expanded={isExpanded(bot.id)}
+                  key={bot.id}
+                  onToggle={() => toggle(bot.id)}
+                  waiting={waitingOf(bot.id)}
+                />
+              ))}
+            </ul>
+          </HeldReads.Provider>
         )}
       </SidebarContent>
     </SectionPanel>

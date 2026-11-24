@@ -4,6 +4,10 @@ import { DECLINED_BY_PERSON } from "@openbot/shared/approval-outcomes";
 import { approvalPhrase, ruleTitle } from "@openbot/shared/tool-name";
 import { cleanup, render } from "@testing-library/react";
 import {
+  howDoIAnswers,
+  StepWords,
+} from "@/components/settings-tools/how-do-i-card";
+import {
   settingsResult,
   settingsToolOf,
 } from "@/components/settings-tools/registry";
@@ -12,6 +16,10 @@ import {
   SettingsChangeRows,
   settingsChangeOf,
 } from "@/components/settings-tools/settings-change-card";
+import {
+  actionName,
+  botAppsAsked,
+} from "@/components/settings-tools/update-bot-apps-card";
 import { settleReactWork } from "./settle-react-work";
 
 /**
@@ -95,10 +103,35 @@ test("an approval for a settings change says what it changes, in words a person 
       person: "Tom",
     }),
   ).toBe("take someone out of a team");
+  // What a Bot can use in an app, by the Bot and the app its preview names.
+  expect(
+    asks(
+      "update_bot_apps",
+      { app: "gmail", give: ["gmail/GMAIL_SEND_EMAIL"] },
+      {
+        change: {
+          bot: { id: "bot-scout", name: "Scout" },
+          app: { id: "gmail", name: "Gmail" },
+          summary: "Let Scout send email with Gmail.",
+        },
+      },
+    ),
+  ).toBe("change what Scout can use in Gmail");
+  expect(
+    asks(
+      "update_bot_apps",
+      { app: "gmail" },
+      { change: { bot: { id: "bot-scout", name: "Scout" }, summary: "" } },
+    ),
+  ).toBe("change what Scout can use");
+  expect(asks("update_bot_apps", { app: "gmail" })).toBe(
+    "change what a Bot can use",
+  );
   // Never the app's name tacked on, and never the tool's own name.
   for (const tool of [
     "update_my_settings",
     "update_my_bot",
+    "update_bot_apps",
     "update_organization_settings",
     "manage_people",
     "manage_teams",
@@ -113,6 +146,79 @@ test("an approval for a settings change says what it changes, in words a person 
       scope: "openbot-settings",
     }),
   ).toEqual({ title: "Change your settings", place: true });
+  expect(
+    ruleTitle({
+      toolRef: "openbot-settings/update_bot_apps",
+      scope: "openbot-settings",
+    }),
+  ).toEqual({ title: "Change what a Bot can use", place: true });
+});
+
+test("a step shows the words on the screen in bold and never an asterisk", () => {
+  const view = render(
+    <p>
+      <StepWords text="Open **Bots**, choose **Scout**, then open **Apps**. Press **Save" />
+    </p>,
+  );
+  const text = view.container.textContent ?? "";
+  expect(text).toBe("Open Bots, choose Scout, then open Apps. Press Save");
+  expect(text).not.toContain("*");
+  expect(
+    [...view.container.querySelectorAll("strong")].map(
+      (strong) => strong.textContent,
+    ),
+  ).toEqual(["Bots", "Scout", "Apps"]);
+  // Anything else stays as written: one asterisk is not markdown.
+  const plain = render(<StepWords text="Type * to search, or _this_." />);
+  expect(plain.container.textContent).toBe("Type * to search, or _this_.");
+});
+
+test("how to do a job: opening the screen then the job, three answers at most, only OpenBot's screens linked", () => {
+  const answer = (task: string, path: string | null) => ({
+    task,
+    screen: { topic: "t", title: "Apps", path },
+    open: ["Open **Bots**."],
+    steps: ["Turn on **Gmail**."],
+    tool: null,
+  });
+  const read = howDoIAnswers({
+    answers: [
+      answer("One", "/bots/b/apps"),
+      answer("Two", "https://example.com/apps"),
+      answer("Three", null),
+      answer("Four", "/four"),
+    ],
+  });
+  expect(read.map((each) => each.task)).toEqual(["One", "Two", "Three"]);
+  expect(read.map((each) => each.screen.path)).toEqual([
+    "/bots/b/apps",
+    null,
+    null,
+  ]);
+  expect(read[0]?.steps).toEqual(["Open **Bots**.", "Turn on **Gmail**."]);
+  expect(howDoIAnswers(null)).toEqual([]);
+});
+
+test("what a Bot is asked to use in an app reads as the app's page names each action", () => {
+  expect(actionName("gmail/GMAIL_SEND_EMAIL")).toBe("Send email");
+  expect(actionName("composio-gmail/GMAIL_SEND_EMAIL")).toBe("Send email");
+  expect(
+    botAppsAsked(
+      {
+        app: "gmail",
+        give: ["gmail/GMAIL_SEND_EMAIL"],
+        need: "read my calendar",
+        takeAway: ["gmail/GMAIL_DELETE_MESSAGE"],
+        takeAwayApp: true,
+      },
+      "Gmail",
+    ),
+  ).toEqual([
+    "Send email: On",
+    "Read my calendar",
+    "Delete message: Off",
+    "Gmail: Can't use",
+  ]);
 });
 
 test("a settings call is read by its tool's name", () => {

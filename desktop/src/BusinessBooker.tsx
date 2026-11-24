@@ -3,6 +3,8 @@ import {
   IconAdjustments,
   IconArrowUpRight,
   IconChecks,
+  IconCloudComputing,
+  IconCode,
   IconDeviceDesktop,
   IconHistory,
   IconListCheck,
@@ -30,13 +32,14 @@ import {
   BUSINESS_URL,
   type BusinessFeatureIcon,
   bookingCalendarSrc,
-  DEPLOY_LINE,
 } from "../../shared/openbot-for-business";
 import { CloudMarks } from "./CloudMarks";
 import { ExternalLink } from "./ExternalLink";
 
 /** The same icons the app's OpenBot for Business dialog draws each feature with. */
 const FEATURE_ICONS: Record<BusinessFeatureIcon, Icon> = {
+  deploy: IconCloudComputing,
+  agents: IconCode,
   "sign-in": IconLogin2,
   people: IconUsers,
   "shared-bots": IconUsersGroup,
@@ -63,7 +66,7 @@ export const BUSINESS_WAY_LINES: Record<BusinessWay, string> = {
  * OpenBot for Business, as the first screen's page draws it (`layout` "page", the default): the
  * picked way's line, Book a demo, and what it adds: one row per group, its name beside a sentence
  * that sums it up, then every feature in a short two-column list. Everything shows; nothing opens.
- * At the window's default size (1000x800) all of it fits the page.
+ * The detail pane scrolls when its copy needs more room.
  *
  * Book a demo swaps the page for the booking step: Back, its own heading (which takes the focus),
  * what booking is for, and the calendar sized to the room the page has (`BookingCalendar` `fit`).
@@ -244,7 +247,7 @@ function StackedBooker() {
   return (
     <section className="business-booker" aria-labelledby="business-deploy">
       <p id="business-deploy" className="business-deploy">
-        {DEPLOY_LINE}
+        OpenBot for Business
       </p>
       <div className="business-book">
         <button type="button" onClick={toBooking}>

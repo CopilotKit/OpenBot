@@ -847,6 +847,11 @@ test("picking OpenBot for Business shows its way, what it adds and Book a demo, 
     view.queryByRole("heading", { name: "What this computer needs" }),
   ).toBeNull();
   const page = () => document.querySelector(".sheet") as HTMLElement;
+  expect(
+    view.getByText(
+      "Deploy in your own VPC on AWS, Azure or GCP, on-prem, or on OpenBot Cloud",
+    ),
+  ).toBeTruthy();
   // Cloud's way: we run it, and no clouds' marks on the page.
   expect(
     view.getByText("We run OpenBot for you on OpenBot Cloud."),
@@ -914,6 +919,9 @@ test("picking OpenBot for Business shows its way, what it adds and Book a demo, 
     surface?.firstElementChild?.classList.contains("booking-calendar"),
   ).toBe(true);
   expect(calendar.style.height).toBe("700px");
+  // Keep main's booking attribution alongside the full-height fitting assertions.
+  expect(src.searchParams.get("utm_source")).toBe("openbot_app");
+  expect(src.searchParams.get("utm_medium")).toBe("in_app");
   // Calendly says it is there: the spinner goes.
   await act(async () => {
     window.dispatchEvent(

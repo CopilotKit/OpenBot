@@ -100,6 +100,9 @@ const INPUT_PROBLEM_MS = 4_000;
 /** How far one line of a wheel reported in lines scrolls. */
 const LINE_PIXELS = 40;
 
+/** How long the screen's size has to hold still before the computer is told it, so a window being dragged wider sends one size, not every one on the way. */
+const VIEW_SIZE_SETTLE_MS = 150;
+
 /** Keys that change other keys rather than typing. */
 const MODIFIER_KEYS = new Set(["Alt", "Control", "Meta", "Shift", "AltGraph"]);
 
@@ -272,6 +275,67 @@ export function LiveScreen({
         socket.send(FRAME_RECEIVED);
     };
 
+    /*
+     * How large this screen is drawn, in the device's own pixels, told to the computer so it sends
+     * frames that size.
+     *
+     * The frames used to be the page's own 1280x800 whatever the screen, and a Retina display drew each
+     * of its pixels as four or more, so the Bot's page looked soft beside everything else in the
+     * window. The frame's `width` and `height` stay the page's own size, which clicks are measured in;
+     * only the picture has more pixels. Sent while only watching too, since a watched screen is the
+     * same size as a driven one, and only once the computer has said it understands it: one from
+     * before this would answer a message it does not know with an input error on the screen.
+     */
+    let viewSize = false;
+    let sentViewSize: string | null = null;
+    let viewSizeTimer: ReturnType<typeof setTimeout> | null = null;
+    const tellViewSize = () => {
+      if (viewSizeTimer !== null) clearTimeout(viewSizeTimer);
+      viewSizeTimer = null;
+      const socket = socketRef.current;
+      const canvas = canvasRef.current;
+      if (!viewSize || !canvas || socket?.readyState !== WebSocket.OPEN) return;
+      const width = Math.round(
+        canvas.getBoundingClientRect().width * window.devicePixelRatio,
+      );
+      if (width <= 0) return;
+      // Not the canvas's own height, which is the placeholder's shape until a frame arrives.
+      const page = frameSize.current ?? { width: 1280, height: 800 };
+      const height = Math.round((width * page.height) / page.width);
+      const size = `${width}x${height}`;
+      if (size === sentViewSize) return;
+      sentViewSize = size;
+      socket.send(JSON.stringify({ type: "view-size", width, height }));
+    };
+    const tellViewSizeSoon = () => {
+      if (!viewSize) return;
+      if (viewSizeTimer !== null) clearTimeout(viewSizeTimer);
+      viewSizeTimer = setTimeout(tellViewSize, VIEW_SIZE_SETTLE_MS);
+    };
+    const resized =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(tellViewSizeSoon);
+    if (canvasRef.current) resized?.observe(canvasRef.current);
+    /*
+     * A window moved to a display of another density, or zoomed, changes the device pixels without
+     * changing the screen's size on the page. A media query for the current ratio is the way a page
+     * hears of that; it matches one ratio, so it is asked again for the new one after each change.
+     */
+    let pixelRatio: MediaQueryList | null = null;
+    const onPixelRatio = () => {
+      watchPixelRatio();
+      tellViewSizeSoon();
+    };
+    const watchPixelRatio = () => {
+      pixelRatio?.removeEventListener("change", onPixelRatio);
+      pixelRatio =
+        window.matchMedia?.(`(resolution: ${window.devicePixelRatio}dppx)`) ??
+        null;
+      pixelRatio?.addEventListener("change", onPixelRatio);
+    };
+    watchPixelRatio();
+
     const drawLatestFrame = () => {
       if (!currentPageVisible()) return;
       if (hiddenFrame !== null) {
@@ -327,6 +391,9 @@ export function LiveScreen({
       if (message.type === "hello") {
         confirmFrames =
           (message as { confirmFrames?: unknown }).confirmFrames === true;
+        viewSize = (message as { viewSize?: unknown }).viewSize === true;
+        sentViewSize = null;
+        tellViewSize();
         return;
       }
       if (message.type === "error") {
@@ -366,10 +433,15 @@ export function LiveScreen({
       const canvas = canvasRef.current;
       if (!canvas || closed) return;
 
+      // A page of another shape is drawn at another height, so the computer is told that too.
+      const reshaped =
+        frameSize.current?.width !== width ||
+        frameSize.current?.height !== height;
       frameSize.current = {
         width: message.width ?? 1280,
         height: message.height ?? 800,
       };
+      if (reshaped) tellViewSizeSoon();
       const frame = { data: message.data, width, height };
       latestFrame.current = frame;
       const frameId = ++latestFrameId.current;
@@ -420,8 +492,12 @@ export function LiveScreen({
       onProblem: (problem) => onProblem?.(problem),
       onReconnecting: (reconnecting) => onReconnecting?.(reconnecting),
       onDisconnect: () => {
-        // A new connection says again whether it wants confirmations.
+        // A new connection says again whether it wants confirmations, and whether it takes a size.
         confirmFrames = false;
+        viewSize = false;
+        sentViewSize = null;
+        if (viewSizeTimer !== null) clearTimeout(viewSizeTimer);
+        viewSizeTimer = null;
         frameSize.current = null;
         latestFrame.current = null;
         hiddenFrame = null;
@@ -439,6 +515,9 @@ export function LiveScreen({
       releaseKeys();
       connection.stop();
       document.removeEventListener("visibilitychange", drawLatestFrame);
+      resized?.disconnect();
+      pixelRatio?.removeEventListener("change", onPixelRatio);
+      if (viewSizeTimer !== null) clearTimeout(viewSizeTimer);
       socketRef.current = null;
     };
   }, [computerId, onProblem, onReconnecting, retryKey]);
