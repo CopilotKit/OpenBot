@@ -258,6 +258,28 @@ test("switching an app on for a Bot says the same, with no link to a page the ap
   expect(row.queryByRole("link")).toBeNull();
 });
 
+test("an app asked for from Connections, with no Bot, is added for everyone", async () => {
+  serving({
+    requests: [
+      request({
+        kind: "enable",
+        agentId: null,
+        botName: null,
+        appKey: "slack",
+        appTitle: "Slack",
+      }),
+    ],
+  });
+  const view = draw(() => <AccessRequestsSection />);
+  const row = within(
+    (await view.findByText("Add Slack for everyone")).closest(
+      "[data-request]",
+    ) as HTMLElement,
+  );
+  expect(row.queryByText(/a Bot/)).toBeNull();
+  expect(row.queryByText(/read-only/)).toBeNull();
+});
+
 test("connecting the shared account says nothing about actions", async () => {
   serving({ requests: [request({ kind: "connect_shared" })] });
   const view = draw(() => <AccessRequestsSection app="composio-gmail" />);
