@@ -38,6 +38,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -106,6 +108,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -168,6 +172,9 @@ paths:
       responses:
         '204':
           description: OpenBot is not connecting to CopilotKit management.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -366,6 +373,9 @@ components:
       description: >-
         CopilotKit management doesn't apply here: the personal edition,
         OpenBot Cloud, or an organization other than `default`.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -387,6 +397,9 @@ components:
         This OpenBot is already connected, CopilotKit's management service
         refused to connect it, or the Idempotency-Key was used for a
         different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -416,6 +429,9 @@ components:
                 traceId: trace_example
     ManagementServiceFailed:
       description: CopilotKit's management service couldn't be reached, or answered in a way OpenBot doesn't understand.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:

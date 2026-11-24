@@ -34,6 +34,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -125,6 +127,8 @@ paths:
               schema:
                 type: string
               example: /api/v2/organizations/default/apps/acme-wiki
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -171,6 +175,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -238,6 +244,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -295,6 +303,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -338,6 +348,9 @@ paths:
       responses:
         '204':
           description: The app was removed.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: './common.yaml#/components/responses/InvalidRequest'
         '401':
@@ -384,6 +397,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -459,6 +474,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -521,6 +538,9 @@ paths:
       responses:
         '204':
           description: The client was set.
+          headers:
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
         '400':
           $ref: '#/components/responses/InvalidAppChange'
         '401':
@@ -585,6 +605,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -635,6 +657,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -675,6 +699,8 @@ paths:
           headers:
             Cache-Control:
               $ref: './common.yaml#/components/headers/PrivateNoStore'
+            X-Request-Id:
+              $ref: './common.yaml#/components/headers/RequestId'
           content:
             application/json:
               schema:
@@ -1415,6 +1441,9 @@ components:
   responses:
     AppNotFound:
       description: No app has that id here, or the organization does not exist.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1436,6 +1465,9 @@ components:
         This OpenBot can't add or connect apps from the directory: it isn't
         set up here, or what it was asked for can't be used here. Trying
         again won't help until an administrator changes something.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1456,6 +1488,9 @@ components:
       description: >-
         The service behind an app was asked and didn't answer usefully.
         Nothing here broke; trying again later can succeed.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1477,6 +1512,9 @@ components:
         A field is missing or out of bounds, the directory entry isn't one that
         can be added, the address is refused, the server needs a key nobody
         gave, or the server couldn't be reached or set up for signing in.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1519,6 +1557,9 @@ components:
       description: >-
         Only an administrator may add an app from the directory or give a
         server a key, or the MCP allowlist doesn't approve the address.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1562,6 +1603,9 @@ components:
         A server at that address is already here (appId names it), the app
         was added but couldn't be read back, OpenBot's own records of the app
         disagree, or the Idempotency-Key was used for a different request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1588,6 +1632,9 @@ components:
         OpenBot's own records of the app disagree, so it can't do this until
         they're corrected, or the Idempotency-Key was used for a different
         request.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1601,6 +1648,9 @@ components:
       description: >-
         OpenBot's own records of its apps disagree, so it can't answer until
         they're corrected.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1613,6 +1663,9 @@ components:
         A field is missing or out of bounds, or the change doesn't fit this
         app: an id or address that can't be used, an app that isn't from the
         directory or needs no account, or one that takes no OAuth client.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1655,6 +1708,9 @@ components:
       description: >-
         The caller is not an administrator, or the app is one every Bot always
         has.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
@@ -1687,6 +1743,9 @@ components:
         This OpenBot can't switch whose account an app acts in: shared
         accounts aren't available here, or the app directory isn't set up.
         Trying again won't help until an administrator changes something.
+      headers:
+        X-Request-Id:
+          $ref: './common.yaml#/components/headers/RequestId'
       content:
         application/problem+json:
           schema:
