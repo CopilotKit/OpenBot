@@ -43,7 +43,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import {
   helmLines,
   MANAGEMENT_SENTENCE,
@@ -167,8 +167,13 @@ export function ManagementPage() {
       {cancel.isPending ? "Cancelling…" : "Cancel"}
     </Button>
   );
-  // The not-entitled refusal is the state itself below, so it isn't said twice.
-  const notice = notEntitled ? null : (failure?.message ?? status.lastError);
+  // The not-entitled refusal is the state itself below, so it isn't said twice. A refused press is
+  // drawn through the shared rule, so a hold is said calmly.
+  const notice = notEntitled
+    ? null
+    : failure
+      ? failureSaid(failure)
+      : status.lastError;
 
   return (
     <PageShell description={DESCRIPTION} title={TITLE}>

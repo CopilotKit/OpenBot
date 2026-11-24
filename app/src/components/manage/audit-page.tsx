@@ -47,7 +47,12 @@ import {
 } from "@/lib/audit/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { loadFailure } from "@/lib/load-failure";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import { organizationMembersQueryOptions } from "@/lib/organizations/queries";
@@ -289,7 +294,7 @@ export function AuditPage({
   );
   const nameFor = useBotNames();
   const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<Failure | null>(null);
   const [exportCapped, setExportCapped] = useState<number | null>(null);
 
   /*
@@ -317,9 +322,7 @@ export function AuditPage({
       URL.revokeObjectURL(url);
     } catch (error) {
       setExportError(
-        error instanceof Error
-          ? error.message
-          : "Couldn't export these events. Try again.",
+        failureOf(error, "Couldn't export these events. Try again."),
       );
     } finally {
       setExporting(false);
@@ -511,7 +514,7 @@ export function AuditPage({
                   </div>
                   {exportError ? (
                     <p className="text-destructive text-sm" role="alert">
-                      {exportError}
+                      {failureSaid(exportError)}
                     </p>
                   ) : null}
                   {exportCapped ? (

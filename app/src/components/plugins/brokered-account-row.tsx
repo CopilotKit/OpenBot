@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { vendorNameOf } from "@/lib/apps/vendor-name";
-import { failureSaid } from "@/lib/load-failure";
+import { type Failure, failureInstead, failureSaid } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { type AdminName, withAdmins } from "@/lib/organizations/admin-names";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
@@ -271,9 +271,9 @@ export type BrokeredAccount = {
    * Carried out of the hook as well as reported to the screen's banner, because the form is a
    * modal. The banner is behind its backdrop, so Composio's own sentence — the one this path spends
    * a dropped `cause` to preserve — arrived where the person could not read it, over a form still
-   * holding the key it was about.
+   * holding the key it was about. Drawn through the shared rule, so a hold reads calm (`failureSaid`).
    */
-  submissionError: string | null;
+  submissionError: ReactNode;
   /** Spend one read-only call at the vendor to find out whether the key still works. */
   recheck: () => void;
   rechecking: boolean;
@@ -350,9 +350,10 @@ export function useBrokeredAccount(input: {
    * Where this row's failures go: the screen's own banner.
    *
    * Called with null as an action starts, so the reason the last attempt failed is not left sitting
-   * over the one now in flight.
+   * over the one now in flight. A refusal is handed on whole, not as its words, so the banner can
+   * draw a hold calmly (`failureSaid`).
    */
-  report: (message: string | null) => void;
+  report: (failure: Failure | null) => void;
 }): BrokeredAccount {
   const queryClient = useQueryClient();
   const {
@@ -455,7 +456,9 @@ export function useBrokeredAccount(input: {
   const recheck = useMutation({
     ...recheckBrokeredConnectionMutationOptions(queryClient, shared),
     onError: (thrown: Error) =>
-      report(readableRefusal(thrown.message, RECHECK_FAILED)),
+      report(
+        failureInstead(thrown, readableRefusal(thrown.message, RECHECK_FAILED)),
+      ),
   });
   /*
    * The check's answer is thrown away whenever an action changes the account it was about.
@@ -480,7 +483,7 @@ export function useBrokeredAccount(input: {
 
   const connect = useMutation({
     ...connectAccountMutationOptions(returnTo, shared),
-    onError: (thrown: Error) => report(thrown.message),
+    onError: (thrown: Error) => report(thrown),
     /*
      * A full page navigation, not a fetch. The consent screen is the vendor's own and has to be
      * shown to this person in their own browser; there is deliberately nothing here that could
@@ -524,9 +527,10 @@ export function useBrokeredAccount(input: {
           setKeyInstead(true);
           return;
         }
-        report(
-          "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
-        );
+        report({
+          message:
+            "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
+        });
         return;
       }
       return leaveFor(start.authorizationUrl);
@@ -571,7 +575,7 @@ export function useBrokeredAccount(input: {
   const disconnect = useMutation({
     ...disconnectBrokeredMutationOptions(queryClient, shared),
     onError: (thrown: Error) => {
-      report(thrown.message);
+      report(thrown);
       forgetAnswers();
     },
     onSuccess: forgetAnswers,
@@ -587,7 +591,7 @@ export function useBrokeredAccount(input: {
    */
   const fieldsRequest = useMutation({
     ...brokeredConnectionFieldsMutationOptions(returnTo, shared),
-    onError: (thrown: Error) => report(thrown.message),
+    onError: (thrown: Error) => report(thrown),
   });
 
   /*
@@ -636,7 +640,12 @@ export function useBrokeredAccount(input: {
   const submission = useMutation({
     ...connectBrokeredWithFieldsMutationOptions(queryClient, returnTo, shared),
     onError: (thrown: Error) => {
-      report(readableRefusal(thrown.message, KEY_CHECK_FAILED));
+      report(
+        failureInstead(
+          thrown,
+          readableRefusal(thrown.message, KEY_CHECK_FAILED),
+        ),
+      );
       forgetAnswers();
     },
     onSuccess: forgetAnswers,
@@ -680,7 +689,7 @@ export function useBrokeredAccount(input: {
    */
   const connectAnother = useMutation({
     ...connectAnotherAccountMutationOptions(returnTo),
-    onError: (thrown: Error) => report(thrown.message),
+    onError: (thrown: Error) => report(thrown),
     onSuccess: (start) => {
       forgetConfirmation();
       forgetRecheck();
@@ -689,9 +698,10 @@ export function useBrokeredAccount(input: {
         return;
       }
       if (start === null) {
-        report(
-          "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
-        );
+        report({
+          message:
+            "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
+        });
         return;
       }
       return leaveFor(start.authorizationUrl);
@@ -699,12 +709,12 @@ export function useBrokeredAccount(input: {
   });
   const makeDefault = useMutation({
     ...setDefaultBrokeredAccountMutationOptions(queryClient),
-    onError: (thrown: Error) => report(thrown.message),
+    onError: (thrown: Error) => report(thrown),
   });
   const disconnectAccount = useMutation({
     ...disconnectBrokeredAccountMutationOptions(queryClient),
     onError: (thrown: Error) => {
-      report(thrown.message);
+      report(thrown);
       forgetAnswers();
     },
     onSuccess: forgetAnswers,
@@ -826,7 +836,7 @@ export function useBrokeredAccount(input: {
       submission.mutate({ serverId, values });
     },
     submittingFields: submission.isPending,
-    submissionError: submission.error?.message ?? null,
+    submissionError: failureSaid(submission.error),
     serverId,
     shared,
     fieldsSubmitted: submission.isSuccess,

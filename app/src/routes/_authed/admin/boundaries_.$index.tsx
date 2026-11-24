@@ -40,7 +40,7 @@ import {
   actionPolicyQueryOptions,
   policyDryRunQueryOptions,
 } from "@/lib/computers/queries";
-import { failureSaid } from "@/lib/load-failure";
+import { type Failure, failureSaid } from "@/lib/load-failure";
 
 /** How long the rule has to rest before it is replayed, as on Add rule. */
 const PREVIEW_DELAY_MS = 400;
@@ -218,7 +218,8 @@ function RuleEditor({ policy, rule }: { policy: ActionPolicy; rule: string }) {
   const savePolicy = useMutation(saveActionPolicyMutationOptions(queryClient));
   const [draft, setDraft] = useState(rule);
   const [written, setWritten] = useState<WrittenRule | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [problem, setProblem] = useState<Failure | null>(null);
 
   const trimmed = draft.trim();
   const changed = trimmed !== rule;
@@ -268,7 +269,7 @@ function RuleEditor({ policy, rule }: { policy: ActionPolicy; rule: string }) {
           ? { authoring: { source: "english" as const, text: written.text } }
           : {}),
       },
-      { onError: (thrown: Error) => setProblem(thrown.message) },
+      { onError: (thrown: Error) => setProblem(thrown) },
     );
   };
 
@@ -321,9 +322,9 @@ function RuleEditor({ policy, rule }: { policy: ActionPolicy; rule: string }) {
         </FieldGroup>
 
         {/* A save refused for the reason the preview already gives says nothing twice. */}
-        {problem && problem !== preview.error?.message ? (
+        {problem && problem.message !== preview.error?.message ? (
           <p className="mt-5 text-destructive text-sm" role="alert">
-            {problem}
+            {failureSaid(problem)}
           </p>
         ) : null}
       </PageCard>

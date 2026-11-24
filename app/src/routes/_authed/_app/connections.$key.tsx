@@ -51,7 +51,7 @@ import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { useDropBrokerReturn } from "@/lib/connections/broker-return";
 import { ALWAYS_ON_APP } from "@/lib/connections/rows";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
 import { withAdmins, yourAdmins } from "@/lib/organizations/admin-names";
@@ -259,11 +259,12 @@ function AppConnectionPage({
   const catalogue = useQuery(catalogueQueryOptions());
   const setup = useQuery(appSetupQueryOptions());
   const connections = useQuery(connectionsQueryOptions());
-  const [notice, setNotice] = useState<string | null>(null);
+  // A refusal is kept whole, not as its words, so a hold is drawn calmly (`failureSaid`).
+  const [notice, setNotice] = useState<Failure | null>(null);
 
   const connect = useMutation({
     ...connectAccountMutationOptions(),
-    onError: (thrown: Error) => setNotice(thrown.message),
+    onError: (thrown: Error) => setNotice(thrown),
     /*
      * A full page navigation, not a fetch. The consent screen is the vendor's own and has to be shown
      * to you in your own browser; there is deliberately nothing here that could complete it for you.
@@ -284,9 +285,10 @@ function AppConnectionPage({
           ? start.authorizationUrl
           : null;
       if (authorizationUrl === null) {
-        setNotice(
-          "Couldn't start connecting, so nothing was connected. Try again, or ask an admin if it keeps happening.",
-        );
+        setNotice({
+          message:
+            "Couldn't start connecting, so nothing was connected. Try again, or ask an admin if it keeps happening.",
+        });
         return;
       }
       window.location.href = authorizationUrl;
@@ -365,7 +367,7 @@ function AppConnectionPage({
     paths.edition === "team" &&
     signedIn.isSuccess &&
     !isOrganizationAdmin(role);
-  const noticeNamesAdmin = notice !== null && /\badmin\b/i.test(notice);
+  const noticeNamesAdmin = notice !== null && /\badmin\b/i.test(notice.message);
   const notSetUp =
     setup.data !== undefined &&
     !setup.data.directoryAvailable &&
@@ -379,9 +381,9 @@ function AppConnectionPage({
     member && (noticeNamesAdmin || notSetUp || notOn),
   );
   /* The server's refusal as it said it, and beside it who the admins are where it names one. */
-  const shownNotice =
+  const shownNotice: Failure | null =
     notice !== null && noticeNamesAdmin && yourAdmins(admins)
-      ? `${notice} ${yourAdmins(admins)}`
+      ? { message: `${notice.message} ${yourAdmins(admins)}` }
       : notice;
   const removable =
     paths.edition === "team" &&
@@ -680,7 +682,7 @@ function AppConnectionPage({
       >
         {shownNotice ? (
           <p className="break-words text-destructive text-sm" role="alert">
-            {shownNotice}
+            {failureSaid(shownNotice)}
           </p>
         ) : null}
 
@@ -801,7 +803,7 @@ function AppConnectionPage({
     >
       {shownNotice ? (
         <p className="break-words text-destructive text-sm" role="alert">
-          {shownNotice}
+          {failureSaid(shownNotice)}
         </p>
       ) : null}
 
@@ -862,9 +864,9 @@ function AppConnectionPage({
                          * and changed nothing would report that access had been withdrawn when it
                          * had not, which is the one outcome worse than not offering it.
                          */
-                        setNotice(
-                          `You can't disconnect here yet. To stop access now, remove OpenBot in your ${app.vendor} account's third-party access settings.`,
-                        )
+                        setNotice({
+                          message: `You can't disconnect here yet. To stop access now, remove OpenBot in your ${app.vendor} account's third-party access settings.`,
+                        })
                       }
                       className="whitespace-nowrap"
                       variant="destructive"

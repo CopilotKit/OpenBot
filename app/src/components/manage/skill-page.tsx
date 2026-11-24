@@ -38,7 +38,7 @@ import { toast } from "@/components/ui/toast";
 import { grantRoster } from "@/lib/agents/grant-roster";
 import { useBotListScope } from "@/lib/agents/list-scope";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { loadFailure, failureSaid } from "@/lib/load-failure";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 import {
@@ -67,12 +67,13 @@ export function SkillPage({ slug }: { slug: string }) {
   const { data: agents } = useQuery(agentListQueryOptions(false, scope));
   /* The ones this person has hidden, so a grant one of them holds still has its switch here. */
   const { data: hiddenAgents } = useQuery(agentListQueryOptions(true, scope));
-  const [error, setError] = useState<string | null>(null);
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [error, setError] = useState<Failure | null>(null);
   const [removing, setRemoving] = useState(false);
 
   const setGrant = useMutation({
     ...setPluginGrantMutationOptions(queryClient),
-    onError: (thrown: Error) => setError(thrown.message),
+    onError: (thrown: Error) => setError(thrown),
   });
   const saveSkill = useMutation(saveSkillMutationOptions(queryClient));
   const removeSkill = useMutation(removeSkillMutationOptions(queryClient));
@@ -127,7 +128,7 @@ export function SkillPage({ slug }: { slug: string }) {
     >
       {error ? (
         <p className="text-destructive text-sm" role="alert">
-          {error}
+          {failureSaid(error)}
         </p>
       ) : null}
 

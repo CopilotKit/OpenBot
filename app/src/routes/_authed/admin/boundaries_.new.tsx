@@ -54,6 +54,7 @@ import {
   actionPolicyQueryOptions,
   policyDryRunQueryOptions,
 } from "@/lib/computers/queries";
+import { type Failure, failureSaid } from "@/lib/load-failure";
 
 export const Route = createFileRoute("/_authed/admin/boundaries_/new")({
   component: NewRulePage,
@@ -95,7 +96,8 @@ function NewRulePage() {
    * replace when the rule is written again; anything else in it is the admin's, and stays.
    */
   const [filled, setFilled] = useState({ name: "", description: "" });
-  const [problem, setProblem] = useState<string | null>(null);
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [problem, setProblem] = useState<Failure | null>(null);
 
   const policy = stored.data;
   const trimmed = rule.trim();
@@ -195,7 +197,7 @@ function NewRulePage() {
           : {}),
       },
       {
-        onError: (thrown: Error) => setProblem(thrown.message),
+        onError: (thrown: Error) => setProblem(thrown),
         onSuccess: () => void navigate({ to: "/admin/boundaries" }),
       },
     );
@@ -377,9 +379,9 @@ function NewRulePage() {
                * A save refused for the reason the preview already gives under the rule says nothing
                * twice: the sentence is on screen, beside the rule it is about.
                */}
-              {problem && problem !== preview.error?.message ? (
+              {problem && problem.message !== preview.error?.message ? (
                 <p className="mt-5 text-destructive text-sm" role="alert">
-                  {problem}
+                  {failureSaid(problem)}
                 </p>
               ) : null}
             </PageCard>

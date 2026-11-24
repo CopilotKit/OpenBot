@@ -39,7 +39,12 @@ import {
 import { useBotTakesModelChoice } from "@/lib/bot-agents/queries";
 import { fallbackBot, useStartChannel } from "@/lib/channels/start";
 import { useAttachmentLimits } from "@/lib/deployment/queries";
-import { loadFailure } from "@/lib/load-failure";
+import {
+  type Failure,
+  failureOf,
+  failureSaid,
+  loadFailure,
+} from "@/lib/load-failure";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useDraftModel } from "@/lib/models/run-model";
 import {
@@ -137,7 +142,7 @@ function NewConversation({ composition }: { composition: string }) {
   } = useQuery(agentListQueryOptions());
   /** Who OpenBot can send to when nobody is in To:. Undefined only when the person has no Bot. */
   const fallback = fallbackBot(profiles);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Failure | null>(null);
   /** Enter or Send was pressed with no Bot to send to at all. Said until a Bot is chosen. */
   const [askedForBot, setAskedForBot] = useState(false);
   const pickerInput = useRef<HTMLInputElement>(null);
@@ -265,9 +270,7 @@ function NewConversation({ composition }: { composition: string }) {
       // The words stay in the box, with the reason under them.
       setSent(null);
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "Couldn't start the conversation. Try again.",
+        failureOf(caught, "Couldn't start the conversation. Try again."),
       );
       throw caught;
     }
@@ -284,7 +287,7 @@ function NewConversation({ composition }: { composition: string }) {
       // A group's messages carry words only, in this first message as in every later one. Files
       // held before a second Bot was added are refused out loud and stay on the strip.
       if (draft.attachments.length > 0) {
-        setError(GROUP_TAKES_NO_FILES);
+        setError({ message: GROUP_TAKES_NO_FILES });
         throw new Error(GROUP_TAKES_NO_FILES);
       }
       setError(null);
@@ -296,11 +299,7 @@ function NewConversation({ composition }: { composition: string }) {
           draft.agentId,
         );
       } catch (caught) {
-        setError(
-          caught instanceof Error
-            ? caught.message
-            : "Couldn't start the group. Try again.",
-        );
+        setError(failureOf(caught, "Couldn't start the group. Try again."));
         throw caught;
       }
       return;
@@ -325,9 +324,7 @@ function NewConversation({ composition }: { composition: string }) {
       // Preserve the unsent draft when channel creation fails.
       setSent(null);
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "Couldn't start the conversation. Try again.",
+        failureOf(caught, "Couldn't start the conversation. Try again."),
       );
       throw caught;
     }
@@ -452,9 +449,10 @@ function NewConversation({ composition }: { composition: string }) {
                 });
             })
             .catch(() => {
-              setError(
-                "Your Bot was created, but could not be selected. Choose it from the recipient list.",
-              );
+              setError({
+                message:
+                  "Your Bot was created, but could not be selected. Choose it from the recipient list.",
+              });
             });
         }}
       />
@@ -522,7 +520,7 @@ function NewConversation({ composition }: { composition: string }) {
         notice={
           loadError || error ? (
             <p className="px-3.5 pb-2 text-sm text-destructive" role="alert">
-              {loadError ?? error}
+              {loadError ?? failureSaid(error)}
             </p>
           ) : askedForBot && recipients.length === 0 ? (
             <p

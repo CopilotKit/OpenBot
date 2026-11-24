@@ -23,6 +23,7 @@ import {
 } from "@/lib/browser/mutations";
 import type { ClientError } from "@/lib/client";
 import { settledRefusal } from "@/lib/computers/refusal";
+import { type Failure, failureSaid } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 import {
   AddressBar,
@@ -207,7 +208,7 @@ export function ScreenBrowser({
                   className="border-b border-border bg-background px-3 py-2 text-destructive text-sm"
                   role="alert"
                 >
-                  {failure.message}
+                  {failureSaid(failure)}
                 </p>
               ) : null}
               <Screen
@@ -316,7 +317,8 @@ export function OpeningBrowser({
   children,
 }: {
   heading?: ReactNode;
-  problem?: string;
+  /** Why it hasn't opened, kept whole so a hold is drawn calmly (`failureSaid`). */
+  problem?: Failure | null;
   blocked?: ClientError | null;
   onRetry?: () => void;
   children?: ReactNode;
@@ -355,7 +357,7 @@ export function OpeningBrowser({
             ) : problem ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-sm">
                 <p className="text-destructive" role="alert">
-                  {problem}
+                  {failureSaid(problem)}
                 </p>
                 {onRetry ? (
                   <Button onClick={onRetry} size="sm" variant="outline">

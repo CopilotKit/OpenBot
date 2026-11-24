@@ -36,7 +36,7 @@ import {
 } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
-import { loadFailure } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import {
   type DirectoryAppState,
@@ -196,7 +196,7 @@ export function BrokerDirectory({
       <PageSection description={description.search} title="Apps">
         {press.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            {press.error}
+            {failureSaid(press.error)}
           </p>
         ) : null}
 

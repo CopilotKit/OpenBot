@@ -12,6 +12,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { failureSaid } from "@/lib/load-failure";
 import { useCurrentOrganizationId } from "@/lib/organizations/current";
 import {
   acceptInvitationMutationOptions,
@@ -25,7 +26,6 @@ import {
 import { receivedInvitationLine } from "@/lib/organizations/words";
 import { queryClient } from "@/query-client";
 import { useSwitchOrganization } from "./use-switch-organization";
-import { failureSaid } from "@/lib/load-failure";
 
 /**
  * One invitation as the person it was sent to sees it, in whatever state it is in.
@@ -124,7 +124,7 @@ export function InvitationRow({
       </Item>
       {failure ? (
         <p className="px-4 pb-3 text-destructive text-sm" role="alert">
-          {failure.message}
+          {failureSaid(failure)}
         </p>
       ) : null}
     </>

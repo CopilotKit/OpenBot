@@ -43,7 +43,7 @@ import { grantSummary } from "@/lib/agents/grant-summary";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { browserStateQueryOptions } from "@/lib/browser/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { useManagePaths } from "@/lib/manage-paths";
 import { removeSkillMutationOptions } from "@/lib/skills/mutations";
 import { type Skill, skillListQueryOptions } from "@/lib/skills/queries";
@@ -82,10 +82,11 @@ export function SkillsSettingsPage({
   const { data: agents } = useQuery(agentListQueryOptions());
   const { data: hiddenAgents } = useQuery(agentListQueryOptions(true));
   const browser = useQuery(browserStateQueryOptions());
-  const [error, setError] = useState<string | null>(null);
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [error, setError] = useState<Failure | null>(null);
   const removeSkill = useMutation({
     ...removeSkillMutationOptions(queryClient),
-    onError: (thrown: Error) => setError(thrown.message),
+    onError: (thrown: Error) => setError(thrown),
     onSuccess: () => setError(null),
   });
 
@@ -217,7 +218,7 @@ export function SkillsSettingsPage({
       >
         {error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
-            {error}
+            {failureSaid(error)}
           </p>
         ) : null}
         {loaded && !writtenKnown ? (

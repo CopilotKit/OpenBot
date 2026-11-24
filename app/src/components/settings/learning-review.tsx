@@ -32,8 +32,8 @@ import {
   personalProposalQueryOptions,
   personalReviewQueryOptions,
 } from "@/lib/learning/queries";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
-import { failureSaid } from "@/lib/load-failure";
 
 /** What a proposal would do to the Skills, in the person's words. */
 function operationLabel(proposal: LearningProposal): string {
@@ -73,7 +73,8 @@ export function latestRunLine(
 type StartState = {
   pending: boolean;
   started: { from: string | null } | null;
-  error: string | null;
+  /** Kept whole, so a hold is said calmly (lib/load-failure.tsx). */
+  error: Failure | null;
 };
 
 /** Whether a run is going for one group: one it started and has not seen finish, or one the review shows running. */
@@ -106,7 +107,7 @@ function GroupError({ state }: { state: StartState | undefined }) {
   if (!state || state.pending || !state.error) return null;
   return (
     <p className="mt-4 text-destructive text-sm" role="alert">
-      {state.error}
+      {failureSaid(state.error)}
     </p>
   );
 }
@@ -131,16 +132,7 @@ export function LearningReview() {
   );
   // One Learn now covers a whole group: every source is tried, and the button waits for all of them.
   // Each group keeps its own state, keyed by label. `from` is the group's latest run when it started.
-  const [starting, setStarting] = useState<
-    Record<
-      string,
-      {
-        pending: boolean;
-        started: { from: string | null } | null;
-        error: string | null;
-      }
-    >
-  >({});
+  const [starting, setStarting] = useState<Record<string, StartState>>({});
   // When a refetch finds fewer proposals waiting, some were approved on their own: Your skills shows them now.
   const waitingCount = review.data?.spaces.reduce(
     (count, source) =>
@@ -262,13 +254,13 @@ export function LearningReview() {
       [group.label]: { pending: true, started: null, error: null },
     }));
     let started = false;
-    let error: string | null = null;
+    let error: Failure | null = null;
     for (const container of group.containers) {
       try {
         await learnNow.mutateAsync(container);
         started = true;
       } catch (failure) {
-        error = failure instanceof Error ? failure.message : String(failure);
+        error = failureOf(failure, String(failure));
       }
     }
     setStarting((all) => ({
