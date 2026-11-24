@@ -8623,6 +8623,18 @@ header, which has no sidebar beside it, and every place the page marks `data-des
 app sidebar's strip and panel, a skin's top bar and rail). The
 sidebar renders after the page loads and again on navigation, so new headers are marked as they
 appear, at most once a frame. Run on macOS only: Windows has its own title bar to drag.
+
+The top strip of the app's, Admin's and Settings' shells moves the window across its whole width,
+over the page as well as over the sidebar, as a Mac window's title bar does. MEASURED: only the top
+of the sidebar moved it; a press over the page beside it (the bars over the page, the page's own top
+bar, the window's tint above them) did nothing. Over the page the strip reaches as far down as the
+sidebar's top row, and past any bars over the page to the bottom of the page's first row
+(`TOP_ROW`, as tall as the bar `PageShell` draws); over the sidebar, to its top row. Every page
+draws a different top bar, so the strip is a height, not a mark on each page's bar: a press in it
+is lent the mark on what it landed on, for Tauri's own drag script to move the window from (and
+zoom it on a double-click), and the mark is given back on release. A control in the strip (a
+button, a link, a field, anything Tauri treats as one) is never lent it, and stays a control. Below
+the strip, nothing changes.
 */
 const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
   document.documentElement.dataset.desktopTitlebar = "overlay";
@@ -8650,9 +8662,96 @@ const OVERLAY_TITLE_BAR_PAGE: &str = r#"(() => {
     for (const main of document.querySelectorAll('[data-slot="sidebar-wrapper"] > main')) {
       const beside = main.parentElement.querySelector(':scope > [data-slot="sidebar"]');
       if (!beside || beside.dataset.state === "collapsed") main.setAttribute(DRAG, "");
-      else main.removeAttribute(DRAG);
+      else if (main !== lent) main.removeAttribute(DRAG);
     }
   };
+  // The page's first row under the bars over it: the height of the bar `PageShell` draws.
+  const TOP_ROW = 56;
+  // What Tauri's drag script (tauri 2.12, window/scripts/drag.js) treats as a control.
+  const CONTROL_TAGS = new Set(["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA", "LABEL", "SUMMARY"]);
+  const CONTROL_ROLES = new Set(["button", "link", "menuitem", "tab", "checkbox", "radio", "switch", "option"]);
+  const control = (el) =>
+    CONTROL_TAGS.has(el.tagName) ||
+    (el.hasAttribute("contenteditable") && el.getAttribute("contenteditable") !== "false") ||
+    (el.hasAttribute("tabindex") && el.getAttribute("tabindex") !== "-1") ||
+    CONTROL_ROLES.has(el.getAttribute("role"));
+  // Where the shell's top strip ends: over the sidebar, at its top row; over the page, at that or
+  // at the page's first row under the bars over it, whichever is lower.
+  const stripBottom = (wrapper, overSidebar) => {
+    let bottom = 0;
+    const rows = wrapper.querySelectorAll(
+      '[data-slot="sidebar-header"], [data-slot="section-panel"] > [data-desktop-drag]',
+    );
+    for (const row of rows) {
+      const box = row.getBoundingClientRect();
+      if (box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+    // The strip of sections, with no panel beside it: the room it leaves for the window's buttons.
+    for (const strip of wrapper.querySelectorAll('[data-slot="strip"]')) {
+      const box = strip.getBoundingClientRect();
+      if (box.height > 0)
+        bottom = Math.max(bottom, box.top + parseFloat(getComputedStyle(strip).paddingTop));
+    }
+    const main = overSidebar ? null : wrapper.querySelector(":scope > main");
+    if (main) {
+      const style = getComputedStyle(main);
+      let top =
+        main.getBoundingClientRect().top +
+        parseFloat(style.borderTopWidth) +
+        parseFloat(style.paddingTop);
+      for (const child of main.children) {
+        if (child.tagName !== "ASIDE") break;
+        top = Math.max(top, child.getBoundingClientRect().bottom);
+      }
+      bottom = Math.max(bottom, top + TOP_ROW);
+    }
+    return bottom;
+  };
+  // The element a press in the top strip was lent the mark on, and the mark it had before, until
+  // the press is released.
+  let lent = null;
+  let lentOver = null;
+  const giveBack = () => {
+    if (!lent) return;
+    if (lent.getAttribute(DRAG) === "deep") {
+      if (lentOver === null) lent.removeAttribute(DRAG);
+      else lent.setAttribute(DRAG, lentOver);
+    }
+    lent = null;
+    mark();
+  };
+  // Capturing on the window, so the mark is there before Tauri's script, on the document, looks.
+  window.addEventListener(
+    "mousedown",
+    (event) => {
+      giveBack();
+      if (event.button !== 0 || !(event.target instanceof Element)) return;
+      const wrapper = event.target.closest('[data-slot="sidebar-wrapper"]');
+      if (!wrapper) return;
+      const overSidebar = event.target.closest('[data-slot="sidebar-container"]') !== null;
+      if (event.clientY >= stripBottom(wrapper, overSidebar)) return;
+      // What Tauri walks from: the element pressed, or what holds a picture's lines (an icon).
+      let held = null;
+      for (const el of event.composedPath()) {
+        if (!(el instanceof HTMLElement)) continue;
+        held = held || el;
+        const attr = el.getAttribute(DRAG);
+        if (attr === "false") return;
+        // Tauri moves the window from here already.
+        if (attr === "deep" || ((attr === "" || attr === "true") && el === event.target)) return;
+        if (attr === null && control(el)) return;
+      }
+      if (!held) return;
+      // "deep" rather than bare, so a press on an icon's lines, which Tauri walks past, drags too.
+      lentOver = held.getAttribute(DRAG);
+      held.setAttribute(DRAG, "deep");
+      lent = held;
+    },
+    true,
+  );
+  // After Tauri's script has seen the release, which is when a double-click zooms on macOS. A press
+  // that moved the window may never see its release here: the next press takes the mark back.
+  window.addEventListener("mouseup", giveBack);
   let queued = false;
   new MutationObserver(() => {
     if (queued) return;
