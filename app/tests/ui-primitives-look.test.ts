@@ -120,4 +120,19 @@ describe("the primitives keep the look", () => {
     expect(inset).toContain("md:peer-data-[variant=inset]:border");
     expect(inset.filter((name) => name.includes(":shadow-"))).toEqual([]);
   });
+
+  test("no primitive overrides a color in dark: the token carries both", () => {
+    const found = FILES.flatMap((file) =>
+      offences(source(file)).darkColor.map((name) => `${file}: ${name}`),
+    );
+    expect(found).toEqual([]);
+  });
+
+  test.each(["input.tsx", "textarea.tsx", "select.tsx", "input-group.tsx"])(
+    "%s stays a visible field in both themes: border-input on a surface",
+    (file) => {
+      expect(has(file, "border-input")).toBe(true);
+      expect(has(file, "bg-card")).toBe(true);
+    },
+  );
 });
