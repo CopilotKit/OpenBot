@@ -89,11 +89,14 @@ Where the setup page puts its page and the page's first two lines, in a client a
 `height` physical pixels at `scale`, so the cover's heading sits where the page's will. Setup is a
 sidebar on the ground with the step as an inset page beside it (`main > .rail + .sheet` in
 styles.css): the sidebar 320px wide (`--rail-width`), 248px in a window 860px wide or less; the
-page 10px in from the window's top, right and bottom edges (`margin: 10px 10px 10px 0`), with
-corners of 14px (`calc(var(--radius) * 1.4)`), 48px of padding at the side (`--sheet-pad`) and
-56px at the top (32px and 40px in the narrow window), its lines no wider than 36rem; then the h1's
-line (22.5px at 1.3) and the gap after it (8px), and the lede's line (22px). Rectangles are left,
-top, right, bottom.
+page 10px in from the window's top, right and bottom edges (`margin: 10px 10px 10px 0`) inside a
+1px edge, with corners of 14px (`calc(var(--radius) * 1.4)`). Its column is 36rem at most
+(`--measure`), centred in the page with at least 48px each side (`--sheet-pad`, 32px in the narrow
+window). Its heading shares a line with the sidebar's title: under Windows' own title bar the
+sidebar starts 24px down (`--rail-top`), then the 32px lockup and the 20px gap under it, so 76px
+(`--head-top`); in a window 640px tall or less 20px, 32px and 12px, so 64px. Then the h1's line
+(22.5px at 1.3) and the gap after it (8px), and the lede's line (22px). Rectangles are left, top,
+right, bottom.
 */
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Sheet {
@@ -108,19 +111,28 @@ pub struct Sheet {
 #[cfg_attr(not(windows), allow(dead_code))]
 pub fn sheet(width: i32, height: i32, scale: f64) -> Sheet {
     let px = |css: f64| (css * scale).round() as i32;
-    let narrow = f64::from(width) / scale <= 860.0;
-    let (rail, pad, pad_top) = if narrow {
-        (248.0, 32.0, 40.0)
+    let (css_width, css_height) = (f64::from(width) / scale, f64::from(height) / scale);
+    let (rail, pad) = if css_width <= 860.0 {
+        (248.0, 32.0)
     } else {
-        (320.0, 48.0, 56.0)
+        (320.0, 48.0)
+    };
+    let head_top = if css_height <= 640.0 {
+        20.0 + 32.0 + 12.0
+    } else {
+        24.0 + 32.0 + 20.0
     };
     let left = px(rail).min(width);
     let right = (width - px(10.0)).max(left);
     let top = px(10.0);
     let bottom = (height - px(10.0)).max(top);
-    let text_left = left + px(pad);
-    let text_right = (text_left + px(576.0)).min(right - px(pad)).max(text_left);
-    let heading_top = top + px(pad_top);
+    // The column, centred in what the page has inside its margins and edges, or the page's padding.
+    let inline = ((css_width - rail - 12.0 - 576.0) / 2.0).max(pad);
+    let text_left = left + px(1.0 + inline);
+    let text_right = (text_left + px(576.0))
+        .min(right - px(1.0 + pad))
+        .max(text_left);
+    let heading_top = px(head_top);
     let heading_bottom = heading_top + px(22.5 * 1.3);
     let line_top = heading_bottom + px(8.0);
     let line_bottom = line_top + px(22.0);
@@ -852,11 +864,17 @@ mod tests {
             "--rail-width: 248px;",
             "margin: 10px 10px 10px 0;",
             "--sheet-pad: 48px;",
-            "--sheet-ground: var(--card);",
-            "padding-top: 56px;",
             "--sheet-pad: 32px;",
-            "padding-top: 40px;",
-            "max-width: 36rem;",
+            "--sheet-ground: var(--card);",
+            "--measure: 36rem;",
+            "calc((100% - 12px - var(--measure)) / 2)",
+            "padding: calc(var(--head-top) - 11px) var(--page-inline) var(--sheet-pad);",
+            "--head-top: calc(var(--rail-top) + 32px + var(--lockup-gap));",
+            "--rail-top: 24px;",
+            "--lockup-gap: 20px;",
+            "@media (max-height: 640px) {",
+            "--rail-top: 20px;",
+            "--lockup-gap: 12px;",
             "--radius: 0.625rem;",
             "border-radius: calc(var(--radius) * 1.4);",
             "--text-2xl: 1.40625rem; /* 22.5px */",
@@ -874,21 +892,23 @@ mod tests {
         assert!(include_str!("../../src/App.tsx").contains(&format!("<h1>{HEADING}</h1>")));
         assert_eq!(LINE, "This can take a minute.");
         // Box H's window, 1000 by 838 at 100%: the page beside the 320px sidebar, 10px in from
-        // the other edges, its heading 48px in and 56px down.
+        // the other edges; its heading 76px down, on the sidebar title's line, and 49px in (its
+        // 48px padding and 1px edge), since the column is wider than what the page has.
         let at = sheet(1000, 838, 1.0);
         assert_eq!(at.card, [320, 10, 990, 828]);
-        assert_eq!(at.heading[..2], [368, 66]);
+        assert_eq!(at.heading[..2], [369, 76]);
+        assert_eq!(at.heading[2], 990 - 49);
         assert_eq!((at.heading_px, at.line_px, at.radius), (23, 15, 14));
-        // Its lines stop at the page's padding, which at this width is nearer than 36rem.
-        assert_eq!(at.heading[2], 990 - 48);
-        // On a wide window they stop at 36rem.
-        assert_eq!(sheet(1600, 1000, 1.0).heading[2], 320 + 48 + 576);
+        // A wide window: the 36rem column centred in the page.
+        let wide = sheet(1600, 1000, 1.0);
+        assert_eq!(wide.heading[0], 320 + 1 + (1280 - 12 - 576) / 2);
+        assert_eq!(wide.heading[2] - wide.heading[0], 576);
         // At 150% the same page in physical pixels.
         assert_eq!(sheet(1500, 1257, 1.5).card[..3], [480, 15, 1485]);
-        // The window's least width: the narrow sidebar, and the page's narrow padding.
-        let narrow = sheet(720, 560, 1.0);
-        assert_eq!(narrow.card[..3], [248, 10, 710]);
-        assert_eq!(narrow.heading[..2], [280, 50]);
+        // The window's least size: the narrow sidebar and padding, and the short window's line.
+        let least = sheet(720, 560, 1.0);
+        assert_eq!(least.card[..3], [248, 10, 710]);
+        assert_eq!(least.heading[..2], [281, 64]);
     }
 
     /// A fresh Mac in Dark Mode opened setup on the light ground: before OpenBot's page has said
