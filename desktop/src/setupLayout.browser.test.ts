@@ -1035,13 +1035,13 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
             sideways: card.scrollWidth - card.clientWidth <= 0,
             focused: document.activeElement?.id === "book-a-demo-title",
             heading: !!heading && heading.top >= view.top,
-            // Under its heading, inside the page, as tall as Calendly's month needs at least.
+            // The calendar fills its reserved surface below the heading.
             calendar:
               !!frame &&
               !!heading &&
               frame.top >= heading.bottom &&
               frame.bottom <= view.bottom &&
-              frame.height >= 530,
+              Math.abs(frame.height - 340) <= 1,
             features: !!document.querySelector(".business-features"),
             // The sidebar never scrolls: only the page does, when anything does.
             railScrolls: rail.scrollHeight > rail.clientHeight + 1,
@@ -1114,8 +1114,8 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
    * OpenBot for Business books a call: either of its two ways to run, picked, is its own page, what
    * that way means, Book a demo and what it adds, where it used to show an address field. All of it
    * fits the window at 1000x760, the default size less a title bar, and the booking step does too:
-   * the calendar takes the room left under its heading, never more than Calendly reports. At the
-   * window's least size, 720x560, the page may scroll, but Book a demo is in view.
+   * the calendar fills a reserved surface below its heading. At the
+   * window's least size, 720x560, the body may scroll while Back remains in its footer.
    */
   for (const [width, height] of [
     [1000, 760],
@@ -1239,16 +1239,11 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
         expect(booking.page).toBe(true);
         expect(booking.sideways).toBeLessThanOrEqual(0);
         expect(booking.focused).toBe(true);
-        if (roomy) {
-          // Held to the room left, which is less than the 660 the stand-in reports.
-          expect(booking.cardScrolls).toBe(false);
-          expect(booking.frame).toBeGreaterThanOrEqual(530);
-          expect(booking.frame).toBeLessThan(660);
-        } else {
-          // Too little room for Calendly's month: it takes what it reports, and the page scrolls.
-          expect(booking.cardScrolls).toBe(true);
-          expect(booking.frame).toBe(660);
-        }
+        // The sheet stays fixed; the reserved surface scrolls inside its body when needed.
+        expect(booking.cardScrolls).toBe(false);
+        expect(
+          Math.abs(booking.frame - (roomy ? 340 : 266)),
+        ).toBeLessThanOrEqual(1);
         // Back to the features, and the way to connect is still under the rows.
         await page.getByRole("button", { name: "Back", exact: true }).click();
         await page.locator(".business-features").waitFor();
@@ -1270,12 +1265,16 @@ describe.skipIf(!asked)("the first screen at the window's default size", () => {
  * Calendly, as far as the window can tell: a page in the calendar's frame that says its height, as
  * Calendly's inline embed does once it is drawn. The real one is on the web, which a test never is.
  */
-async function routeCalendar(page: Page) {
+async function routeCalendar(page: Page, automatic = true) {
   await page.route("https://calendly.com/**", (route) =>
     route.fulfill({
       contentType: "text/html",
       body: `<!doctype html><body style="margin:0;height:660px;background:#fff;font:14px sans-serif;color:#555;display:grid;place-items:center">Booking calendar (stand-in for Calendly)<script>
-        parent.postMessage({ event: "calendly.page_height", payload: { height: "660px" } }, "*");
+        window.addEventListener("message", (message) => {
+          if (message.source === parent && message.data?.testCalendar)
+            { parent.postMessage(message.data.testCalendar, "*"); parent.postMessage({testCalendarAck: true}, "*"); }
+        });
+        ${automatic ? 'parent.postMessage({ event: "calendly.page_height", payload: { height: "660px" } }, "*");' : ""}
       </script></body>`,
     }),
   );
@@ -5815,4 +5814,325 @@ describe.skipIf(!asked)("approved layout: finishing", () => {
           await page.close();
         }
       }, 60_000);
+});
+
+describe.skipIf(!asked)("approved layout: booking", () => {
+  const calendarMessage = async (
+    page: Page,
+    event: string,
+    reportedHeight?: string,
+  ) => {
+    await page.evaluate(
+      ({ event, reportedHeight }) =>
+        new Promise<void>((resolve, reject) => {
+          const frame = document.querySelector<HTMLIFrameElement>(
+            'iframe[title="Booking calendar"]',
+          )!;
+          const send = () =>
+            frame.contentWindow!.postMessage(
+              { testCalendar: { event, payload: { height: reportedHeight } } },
+              "*",
+            );
+          const receive = (message: MessageEvent) => {
+            if (
+              message.origin === "https://calendly.com" &&
+              message.source === frame.contentWindow &&
+              message.data?.testCalendarAck
+            ) {
+              clearInterval(retry);
+              clearTimeout(timeout);
+              window.removeEventListener("message", receive);
+              resolve();
+            }
+          };
+          window.addEventListener("message", receive);
+          const retry = setInterval(send, 25);
+          const timeout = setTimeout(() => {
+            clearInterval(retry);
+            window.removeEventListener("message", receive);
+            reject(new Error("calendar fixture did not acknowledge message"));
+          }, 5000);
+          send();
+        }),
+      { event, reportedHeight },
+    );
+    await settled(page);
+  };
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const)
+    for (const colorScheme of ["light", "dark"] as const) {
+      test(`${width}x${height} ${colorScheme}: loading, ready and fallback reserve the same surface and Back`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        const shot = async (state: string) => {
+          await settled(page);
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/booking-${state}-${width}x${height}-${colorScheme}.png`,
+            });
+        };
+        const geometry = () =>
+          page.evaluate(() => {
+            const owner = document.querySelector<HTMLElement>(".booking-step")!;
+            const body = owner.querySelector<HTMLElement>(".setup-body")!;
+            const surface = owner.querySelector<HTMLElement>(
+              ".setup-booking-surface",
+            )!;
+            const footer = owner.querySelector<HTMLElement>(".setup-footer")!;
+            const back = footer.querySelector<HTMLElement>("button")!;
+            const box = (element: HTMLElement) => {
+              const { x, y, width, height } = element.getBoundingClientRect();
+              return { x, y, width, height };
+            };
+            const b = back.getBoundingClientRect();
+            const hit = document.elementFromPoint(
+              b.x + b.width / 2,
+              b.y + b.height / 2,
+            );
+            return {
+              surface: box(surface),
+              footer: box(footer),
+              back: box(back),
+              header: box(
+                owner.querySelector<HTMLElement>(".setup-header-block")!,
+              ),
+              body: box(body),
+              titleY: owner.querySelector("h2")!.getBoundingClientRect().y,
+              railY: document
+                .querySelector(".rail-title")!
+                .getBoundingClientRect().y,
+              pageHeight: document.documentElement.scrollHeight,
+              pageWidth: document.documentElement.scrollWidth,
+              sideways: [
+                ...owner.querySelectorAll<HTMLElement>(
+                  ".setup-body, .setup-booking-surface, .setup-footer",
+                ),
+              ].some(
+                (element) => element.scrollWidth > element.clientWidth + 1,
+              ),
+              hit: hit === back || back.contains(hit),
+            };
+          });
+        const check = async () => {
+          const now = await geometry();
+          expect(now.pageHeight).toBeLessThanOrEqual(height);
+          expect(now.pageWidth).toBeLessThanOrEqual(width);
+          expect(now.sideways).toBe(false);
+          expect(
+            Math.abs(now.surface.height - (width === 1000 ? 390 : 300)),
+          ).toBeLessThanOrEqual(1);
+          expect(now.hit).toBe(true);
+          expect(Math.abs(now.titleY - now.railY)).toBeLessThanOrEqual(1);
+          expect(now.body.y).toBeGreaterThanOrEqual(
+            now.header.y + now.header.height - 1,
+          );
+          expect(now.body.y + now.body.height).toBeLessThanOrEqual(
+            now.footer.y + 1,
+          );
+          expect(now.back.y + now.back.height).toBeLessThanOrEqual(height);
+          // The body may scroll at 720x560. Its clip, rather than the offscreen surface bottom,
+          // is the boundary that keeps the calendar from covering Back.
+          return now;
+        };
+        try {
+          await routeCalendar(page, false);
+          await open(page, "", cloudBuilt);
+          await page.locator('label:has(input[value="business"])').click();
+          await page
+            .getByRole("button", { name: "Book a demo", exact: true })
+            .click();
+          await page
+            .getByText("Loading available times…", { exact: true })
+            .waitFor();
+          await shot("loading");
+          const initial = await check();
+          expect(await page.evaluate(() => document.activeElement?.id)).toBe(
+            "book-a-demo-title",
+          );
+          // Parent-origin and wrong-source messages must not mark the calendar ready.
+          await page.evaluate(() => {
+            window.postMessage(
+              { event: "calendly.page_height", payload: { height: "1000px" } },
+              "*",
+            );
+            window.dispatchEvent(
+              new MessageEvent("message", {
+                origin: "https://calendly.com",
+                source: window,
+                data: {
+                  event: "calendly.page_height",
+                  payload: { height: "1000px" },
+                },
+              }),
+            );
+          });
+          await settled(page);
+          expect(
+            await page.locator(".booking-calendar[data-ready]").count(),
+          ).toBe(0);
+          const protocol = await page.evaluate(() => {
+            const frame = document.querySelector<HTMLIFrameElement>(
+              'iframe[title="Booking calendar"]',
+            )!;
+            const url = new URL(frame.src);
+            return {
+              origin: url.origin,
+              path: url.pathname,
+              embed: url.searchParams.get("embed_type"),
+              domain: url.searchParams.get("embed_domain"),
+              details: url.searchParams.get("hide_event_type_details"),
+              gdpr: url.searchParams.get("hide_gdpr_banner"),
+              sandbox: frame.getAttribute("sandbox"),
+              referrer: frame.referrerPolicy,
+            };
+          });
+          expect(protocol.origin).toBe("https://calendly.com");
+          expect(protocol.path).toBe("/d/dwfr-k64-8d2/openbot-for-business");
+          expect(protocol.embed).toBe("Inline");
+          expect(protocol.domain).toBe("openbot.test");
+          expect(protocol.details).toBe("1");
+          expect(protocol.gdpr).toBe("1");
+          expect(protocol.sandbox).toBe(
+            "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox",
+          );
+          expect(protocol.referrer).toBe("strict-origin-when-cross-origin");
+          await calendarMessage(page, "calendly.page_height", "26px");
+          expect(
+            await page.locator(".booking-calendar[data-ready]").count(),
+          ).toBe(0);
+          await shot("first-height");
+          const first = await check();
+          await calendarMessage(page, "calendly.event_type_viewed");
+          await page.locator(".booking-calendar[data-ready]").waitFor();
+          const viewed = await check();
+          await calendarMessage(page, "calendly.page_height", "660px");
+          await page.locator(".booking-calendar[data-ready]").waitFor();
+          await page
+            .getByText("Loading available times…", { exact: true })
+            .waitFor({ state: "hidden" });
+          await shot("ready");
+          const ready = await check();
+          await calendarMessage(page, "calendly.page_height", "1200px");
+          const tall = await check();
+          await page.evaluate(() =>
+            document
+              .querySelector('iframe[title="Booking calendar"]')!
+              .dispatchEvent(new Event("error")),
+          );
+          await page
+            .getByText(
+              "Couldn't load the calendar. Book a demo opens it in your browser.",
+              { exact: true },
+            )
+            .waitFor();
+          await shot("fallback");
+          const failed = await check();
+          for (const now of [first, viewed, ready, tall, failed])
+            for (const key of ["surface", "footer", "back"] as const)
+              for (const dimension of ["x", "y", "width", "height"] as const)
+                expect(
+                  Math.abs(now[key][dimension] - initial[key][dimension]),
+                ).toBeLessThanOrEqual(1);
+          expect(
+            await page.locator('iframe[title="Booking calendar"]').count(),
+          ).toBe(0);
+          expect(await page.evaluate(() => document.activeElement?.id)).toBe(
+            "book-a-demo-title",
+          );
+          // Reach fallback and Back through the keyboard, starting from the focused heading.
+          let reachedBack = false;
+          let reachedFallback = false;
+          for (let index = 0; index < 12; index++) {
+            await page.keyboard.press("Tab");
+            const focus = await page.evaluate(() => ({
+              back: document.activeElement?.classList.contains("booking-back"),
+              fallback:
+                document.activeElement?.closest(".book-a-demo-fallback") !==
+                null,
+            }));
+            if (focus.fallback) {
+              reachedFallback = true;
+              const link = await page.evaluate(() => {
+                const element = document.activeElement as HTMLAnchorElement;
+                const box = element.getBoundingClientRect();
+                const hit = document.elementFromPoint(
+                  box.x + box.width / 2,
+                  box.y + box.height / 2,
+                );
+                return {
+                  href: element.href,
+                  hit: element === hit || element.contains(hit),
+                };
+              });
+              expect(link).toEqual({
+                href: "https://open.bot/business",
+                hit: true,
+              });
+              await page.keyboard.press("Enter");
+              expect(
+                await page.evaluate(() => globalThis.__fake!.opened),
+              ).toEqual(["https://open.bot/business"]);
+            }
+            if (focus.back) {
+              reachedBack = true;
+              break;
+            }
+          }
+          expect(reachedFallback).toBe(true);
+          expect(reachedBack).toBe(true);
+          await check();
+          await page.keyboard.press("Enter");
+          await page.locator(".business-features").waitFor();
+          expect(
+            await page.evaluate(() => document.activeElement?.textContent),
+          ).toBe("Book a demo");
+        } finally {
+          await page.close();
+        }
+      }, 30_000);
+
+      test(`${width}x${height} ${colorScheme}: card embed retains reported height`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        try {
+          await routeCalendar(page, false);
+          await open(page, "#move-choice", cloudBuilt);
+          await page.locator('label:has(input[value="business"])').click();
+          await page.locator('iframe[title="Booking calendar"]').waitFor();
+          const size = () =>
+            page.evaluate(() => ({
+              height: document
+                .querySelector('iframe[title="Booking calendar"]')!
+                .getBoundingClientRect().height,
+              reserved: document.querySelectorAll(".setup-booking-surface")
+                .length,
+              pageHeight: document.documentElement.scrollHeight,
+              pageWidth: document.documentElement.scrollWidth,
+            }));
+          expect((await size()).height).toBe(700);
+          for (const reported of [660, 1100]) {
+            await calendarMessage(
+              page,
+              "calendly.page_height",
+              `${reported}px`,
+            );
+            await page.locator(".booking-calendar[data-ready]").waitFor();
+            await settled(page);
+            const now = await size();
+            expect(now.height).toBe(reported);
+            expect(now.reserved).toBe(0);
+            expect(now.pageHeight).toBeLessThanOrEqual(height);
+            expect(now.pageWidth).toBeLessThanOrEqual(width);
+          }
+        } finally {
+          await page.close();
+        }
+      }, 30_000);
+    }
 });
