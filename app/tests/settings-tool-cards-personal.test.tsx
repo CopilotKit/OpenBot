@@ -6,8 +6,8 @@ import { compile } from "tailwindcss";
 import { screenLinkLooks } from "./screen-link-style";
 
 /**
- * The cards a Bot's personal settings changes are drawn as, in a real browser: `update_my_settings`
- * and `update_my_bot`, saved, refused and still running, drawn by the call's name and result as the
+ * The cards a Bot's personal settings changes are drawn as, in a real browser: `update_my_settings`,
+ * `update_my_bot` and `update_bot_apps`, saved, refused and still running, drawn by the call's name and result as the
  * transcript draws them, from the result as the server writes it.
  *
  * Each saved card is titled with what changed (your settings, your approvals, the Bot by its name),
@@ -308,7 +308,7 @@ describe.skipIf(!asked)("the personal settings cards", () => {
             );
             expect(sideways).toBe(false);
             const cards = await read(page);
-            expect(Object.keys(cards)).toHaveLength(7);
+            expect(Object.keys(cards)).toHaveLength(12);
             for (const card of Object.values(cards)) {
               expect(card.inside).toBe(true);
               expect(card.valuesInside).toBe(true);
@@ -393,6 +393,8 @@ describe.skipIf(!asked)("the personal settings cards", () => {
               "Open Settings",
               "Open Approvals",
               "Open Setup",
+              "Open Apps",
+              "Open Apps",
             ]);
             for (const link of links)
               expect(link).toMatchObject({
@@ -407,6 +409,91 @@ describe.skipIf(!asked)("the personal settings cards", () => {
             expect(await approvalTitles(page)).toEqual({
               "approval-settings": "Change your settings",
               "approval-bot": "Change Scout's settings",
+              "approval-apps": "Change what Scout can use in Gmail",
+            });
+            // While it waits, what Scout would be able to do in Gmail, row by row.
+            expect(
+              await page.evaluate(() =>
+                [
+                  ...document.querySelectorAll(
+                    '[data-part="approval-apps"] [data-setting]',
+                  ),
+                ].map((row) => (row.textContent ?? "").replace(/\s+/g, " ")),
+              ),
+            ).toEqual(["Send emailOffOn"]);
+
+            // What a Bot can use in an app: titled with the Bot, the app by its logo and name,
+            // each action as the app's page names it, and the Bot's Apps page to open.
+            const apps = cards["apps-done"];
+            expect(apps).toMatchObject({
+              state: "done",
+              title: "Scout",
+              badge: "Changed",
+              link: { text: "Open Apps", href: "/bots/bot-scout/apps" },
+            });
+            expect(apps?.rows).toEqual([
+              { label: "Send email", was: "Off", now: "On" },
+              { label: "Create email draft", was: "Off", now: "On" },
+              { label: "Delete message", was: "On", now: "Off" },
+            ]);
+            const appLines = await page.evaluate(() =>
+              Object.fromEntries(
+                [...document.querySelectorAll("[data-part^='apps-']")].map(
+                  (part) => {
+                    const app = part.querySelector("[data-app]");
+                    const logo = app?.querySelector("img");
+                    return [
+                      part.getAttribute("data-part"),
+                      app
+                        ? {
+                            name: app.getAttribute("data-app"),
+                            logo: Boolean(
+                              logo?.getAttribute("src")?.startsWith("data:"),
+                            ),
+                          }
+                        : null,
+                    ];
+                  },
+                ),
+              ),
+            );
+            expect(appLines).toEqual({
+              "apps-done": { name: "Gmail", logo: true },
+              // No logo: the app's initial, as the Apps page draws it.
+              "apps-app-done": { name: "Notion", logo: false },
+              "apps-running": { name: "Gmail", logo: false },
+              "apps-refused": { name: "Gmail", logo: false },
+              "apps-failed": { name: "Gmail", logo: false },
+            });
+            expect(cards["apps-app-done"]).toMatchObject({
+              state: "done",
+              title: "Ledger",
+              rows: [{ label: "Notion", was: "Can use", now: "Can't use" }],
+              link: { text: "Open Apps", href: "/bots/bot-ledger/apps" },
+            });
+            // Still running: the Bot the call names, and what it asks for, in the rows' words.
+            expect(cards["apps-running"]).toMatchObject({
+              state: "running",
+              title: "Ledger",
+              badge: "Changing",
+              link: null,
+              rows: [],
+              asked: ["Send email: On", "Delete message: Off"],
+            });
+            expect(cards["apps-refused"]).toMatchObject({
+              state: "refused",
+              title: "Ledger",
+              badge: "Not changed",
+              link: null,
+              rows: [],
+            });
+            expect(cards["apps-refused"]?.text).toContain(
+              "You can't manage this Bot.",
+            );
+            expect(cards["apps-failed"]).toMatchObject({
+              state: "failed",
+              badge: "Didn't work",
+              link: null,
             });
 
             expect(cards["bot-refused"]).toMatchObject({
