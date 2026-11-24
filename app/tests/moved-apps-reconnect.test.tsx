@@ -14,6 +14,10 @@ import {
   ConnectAppResponse,
   ListConnectionsResponse,
 } from "@/lib/api/generated/connections/connections.zod";
+import {
+  CreateCredentialBody,
+  CreateCredentialResponse,
+} from "@/lib/api/generated/credentials/credentials.zod";
 import type {
   Import,
   PersonalAiConnection,
@@ -266,6 +270,18 @@ const S4_ORDERS_HERE = {
   url: "https://orders.s4.test/mcp",
   signIn: false,
 };
+/** An entry of OpenBot's own catalogue reached with a key an admin gives for everybody. */
+const EXA_ENTRY = {
+  key: "exa",
+  title: "Exa",
+  vendor: "Exa",
+  summary: "Search the web.",
+  auth: "deployment-bearer" as const,
+};
+const EXA: ReconnectApp = { appId: "exa", appName: "Exa" };
+/** The id the vault gives the nth credential saved in a test: a UUID, as the API's are. */
+const credentialId = (n: number) =>
+  `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 /** A directory app on the organization's one shared account, connected. */
 const NOTION_SHARED = {
   ...directoryApp("notion", "Notion", "Read and write pages."),
@@ -347,6 +363,8 @@ class FakeServer {
   apps: AppsFixture = { ...APPS, servers: [...(APPS.servers ?? [])] };
   /** Every app added, by the entry it was asked for. */
   added: string[] = [];
+  /** The ids of every credential an admin saved. */
+  credentials: string[] = [];
   role: "member" | "admin";
   /**
    * The person's own AI on OpenBot Cloud, where one is required: null where the server answers
@@ -503,6 +521,25 @@ class FakeServer {
           code: "LINKED_ACCOUNTS_UNAVAILABLE",
         },
       };
+    // A key an admin types for an app reached with one: kept, and answered without its secret.
+    if (path === `${ORGANIZATION}/credentials` && method === "POST") {
+      expect(this.role).toBe("admin");
+      const sent = CreateCredentialBody.parse(request.postDataJSON());
+      const id = credentialId(this.credentials.length + 1);
+      this.credentials.push(id);
+      return {
+        status: 201,
+        json: CreateCredentialResponse.parse({
+          id,
+          kind: sent.kind,
+          provider: sent.provider,
+          keyId: sent.keyId,
+          metadata: sent.metadata ?? {},
+          createdAt: "2026-11-24T12:00:00.000Z",
+          revokedAt: null,
+        }),
+      };
+    }
     if (path === `${ORGANIZATION}/apps` && method === "POST") {
       expect(request.headers()["idempotency-key"]?.length ?? 0).toBeGreaterThan(
         0,
@@ -527,6 +564,22 @@ class FakeServer {
       expect(sent.from).toBe("directory");
       const entry = String(sent.directoryEntryId);
       this.added.push(entry);
+      // An entry of OpenBot's own catalogue: added as its key, with the key it was given, if any.
+      const listed = (this.apps.catalogue ?? []).find(
+        (item) => `catalogue:${item.key}` === entry,
+      );
+      if (listed) {
+        if (listed.auth === "deployment-bearer")
+          expect(this.credentials).toContain(String(sent.credentialId));
+        const server = {
+          id: listed.key,
+          title: listed.title,
+          provenance: "first-party",
+          url: `https://${listed.key}.vendor.test/mcp`,
+        };
+        this.apps.servers = [...(this.apps.servers ?? []), server];
+        return { status: 201, json: CreateAppResponse.parse(appBody(server)) };
+      }
       // Slack is in the directory; nothing else asked for here is.
       if (entry !== "directory:slack")
         return {
@@ -1217,6 +1270,53 @@ describe.skipIf(!asked)("apps to reconnect after a move", () => {
         ).toBe(0);
       } finally {
         await asMember.close();
+      }
+    }, 90_000);
+
+  /*
+   * Every kind of app is one press. Reconnect on an app of OpenBot's own catalogue that the
+   * organization hasn't added asked the directory for it, which refused, and the row said "Couldn't
+   * turn Google Drive on here." Now it is added from the catalogue, as the catalogue's own page adds
+   * it, and its sign-in starts; one reached with a key opens its own page with the key form open, and
+   * once saved comes back to the list, done.
+   */
+  for (const engine of engines)
+    test(`an admin's Reconnect on an app of OpenBot's catalogue adds it from there, or opens its key form, in ${engine}`, async () => {
+      const server = new FakeServer(
+        [finishedMove([DRIVE, EXA, GMAIL])],
+        "admin",
+      );
+      server.apps.catalogue = [DRIVE_ENTRY, EXA_ENTRY];
+      const page = await open("/reconnect", server, engine);
+      try {
+        // Signed in to as each person: added from the catalogue, then straight to its sign-in.
+        await row(page, "gdrive")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        await page.waitForURL(`${SIGN_IN}/gdrive`);
+        expect(server.added).toEqual(["catalogue:gdrive"]);
+        expect(server.connects).toEqual([{ appId: "gdrive", key: false }]);
+
+        // Reached with a key an admin gives: its own page, with that form open on arrival.
+        await page.goto(`${ORIGIN}/reconnect`);
+        await row(page, "exa")
+          .getByRole("button", { name: "Reconnect" })
+          .click();
+        await page.waitForURL((url) => url.pathname === "/admin/plugins/exa");
+        const form = page.getByRole("dialog", { name: "Access token for Exa" });
+        await form.getByLabel("Access token").fill("exa-key");
+        // Styled, so the dialog's backdrop sits behind its buttons as in the app.
+        await style(page);
+        await shoot(page, "catalogue-key", engine, "light", WIDE);
+        await form.getByRole("button", { name: "Save" }).click();
+        // Back on the list, and done: reached with the organization's key, nobody connects it.
+        await page.waitForURL(`${ORIGIN}/reconnect`);
+        await row(page, "exa").getByText("Reconnected").waitFor();
+        expect(server.added).toEqual(["catalogue:gdrive", "catalogue:exa"]);
+        expect(server.credentials).toEqual([credentialId(1)]);
+        expect(await page.getByText(/Couldn't turn/).count()).toBe(0);
+      } finally {
+        await page.close();
       }
     }, 90_000);
 

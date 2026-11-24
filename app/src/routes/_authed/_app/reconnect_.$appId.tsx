@@ -2,7 +2,10 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { PageShell } from "@/components/layout/page-shell";
-import { addDirectoryAppMutationOptions } from "@/lib/apps/mutations";
+import {
+  addCuratedServerMutationOptions,
+  addDirectoryAppMutationOptions,
+} from "@/lib/apps/mutations";
 import {
   appsQueryOptions,
   catalogueQueryOptions,
@@ -21,12 +24,16 @@ import { queryClient } from "@/query-client";
  * never Reconnect and then the page's own Connect.
  *
  * `$appId` is the app as the move named it, which is not always its id here (`cloudAppFor`). An app
- * the organization hasn't added yet is added first when the person may add apps (an admin): from the
- * directory, as the directory's own page does, when the directory lists it. One the directory
- * doesn't list, nor OpenBot's own catalogue, is a server the person added by its address on their
- * computer: the admin goes to Add custom MCP with its name filled in, and comes back to the list once
- * it's added. Anybody else, or an add that is refused, goes back to the list, whose row says what is
- * needed. Never an "App not found" page, and never home.
+ * the organization hasn't added yet is added first when the person may add apps (an admin), the way
+ * its own page adds it, whatever kind it is:
+ * - one the directory lists, from the directory;
+ * - an entry of OpenBot's own catalogue, from the catalogue, or, where it needs its instance host or
+ *   its access token typed first, on the catalogue entry's own page with that form open, which comes
+ *   back here once it's added;
+ * - anything else is a server the person added by its address on their computer: Add custom MCP,
+ *   with its name filled in, which comes back to the list once it's added.
+ * Anybody else, or an add that is refused, goes back to the list, whose row says what is needed.
+ * Never an "App not found" page, and never home.
  *
  * A plain path with no search, because OpenBot Desktop opens it too, straight from its move screen,
  * and Desktop opens only plain paths. The list's Reconnect buttons use the same path.
@@ -43,6 +50,9 @@ function ReconnectOne() {
   const user = useQuery(currentUserQueryOptions());
   const moved = useMovedApps();
   const add = useMutation(addDirectoryAppMutationOptions(queryClient));
+  const addCatalogue = useMutation(
+    addCuratedServerMutationOptions(queryClient),
+  );
   const started = React.useRef(false);
 
   const here = apps.data ? cloudAppFor(appId, apps.data) : undefined;
@@ -88,19 +98,36 @@ function ReconnectOne() {
     if (!moved.ready || directory.isPending || catalogue.isPending) return;
     started.current = true;
     if (directory.error || catalogue.error) return back();
-    const listed =
-      directory.data.some((entry) => entry.id === `directory:${appId}`) ||
-      (catalogue.data ?? []).some((entry) => entry.key === appId);
-    if (!listed)
-      return void navigate({
-        to: "/connections/new",
-        search: { title: name, reconnect: appId },
-        replace: true,
-      });
-    add.mutate(
-      { directoryEntryId: `directory:${appId}` },
-      { onSuccess: open, onError: back },
-    );
+    if (directory.data.some((entry) => entry.id === `directory:${appId}`))
+      return add.mutate(
+        { directoryEntryId: `directory:${appId}` },
+        { onSuccess: open, onError: back },
+      );
+    const entry = (catalogue.data ?? []).find((item) => item.key === appId);
+    // OpenBot's own catalogue: what it needs typed first opens on its own page, else it's added now.
+    if (entry) {
+      const needs = entry.perInstance
+        ? ("instance" as const)
+        : entry.auth === "deployment-bearer"
+          ? ("token" as const)
+          : null;
+      if (needs)
+        return void navigate({
+          to: "/admin/plugins/$key",
+          params: { key: entry.key },
+          search: { add: needs, reconnect: appId },
+          replace: true,
+        });
+      return addCatalogue.mutate(
+        { key: entry.key },
+        { onSuccess: (app) => open(app.id), onError: back },
+      );
+    }
+    navigate({
+      to: "/connections/new",
+      search: { title: name, reconnect: appId },
+      replace: true,
+    });
   }, [
     apps,
     user,
@@ -111,6 +138,7 @@ function ReconnectOne() {
     admin,
     name,
     add,
+    addCatalogue,
     appId,
     navigate,
   ]);

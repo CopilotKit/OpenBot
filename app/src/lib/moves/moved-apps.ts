@@ -1,5 +1,10 @@
 import { NOTICE_ID_PATTERN } from "@openbot/shared/notices";
-import type { App, Import, ReconnectApp } from "@/lib/api/generated/model";
+import type {
+  App,
+  CatalogueAppEntryAuth,
+  Import,
+  ReconnectApp,
+} from "@/lib/api/generated/model";
 
 /**
  * THE APPS A MOVE TO OPENBOT CLOUD LEFT FOR THE PERSON TO CONNECT AGAIN, AND THE RULES FOR WHEN ONE
@@ -99,8 +104,10 @@ export function cloudAppFor<
  * Whether an app here needs no account of the person's, as listApps says of it, so it is done for
  * them once the organization has it: a server added by its address that doesn't sign each person in
  * (it is reached with the organization's key, or needs none), a directory app on the organization's
- * one shared account once that account is connected, and a directory app that connects with
- * nothing. Every other app waits for the person's own connection.
+ * one shared account once that account is connected, a directory app that connects with nothing,
+ * and an entry of OpenBot's own catalogue that its listing (`catalogueAuth`, listAppDirectory's
+ * `auth`) says needs nothing, is reached with a key an admin gives for everybody, or runs inside
+ * OpenBot. Every other app waits for the person's own connection.
  */
 export function needsNoAccountOfYours(
   app: Pick<
@@ -110,14 +117,20 @@ export function needsNoAccountOfYours(
     | "accountMode"
     | "sharedAccountConnected"
     | "connectsWith"
+    | "entraScope"
   >,
+  catalogueAuth?: CatalogueAppEntryAuth,
 ): boolean {
-  if (app.source === "address") return !app.signIn;
+  if (app.source === "address") return !app.signIn && !app.entraScope;
   if (app.source === "directory")
     return app.accountMode === "shared"
       ? app.sharedAccountConnected
       : app.connectsWith === "nothing";
-  return false;
+  return (
+    catalogueAuth !== undefined &&
+    catalogueAuth !== "user-oauth" &&
+    !app.entraScope
+  );
 }
 
 /**

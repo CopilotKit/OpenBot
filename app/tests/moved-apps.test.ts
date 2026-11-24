@@ -191,8 +191,14 @@ describe("the apps a move left to connect again", () => {
         personal,
         noAuth,
         catalogue,
-      ].map(needsNoAccountOfYours),
+      ].map((app) => needsNoAccountOfYours(app)),
     ).toEqual([true, false, true, false, false, true, false]);
+    // A catalogue app, by how the catalogue says it is reached.
+    expect(
+      (["deployment-bearer", "none", "builtin", "user-oauth"] as const).map(
+        (auth) => needsNoAccountOfYours(catalogue, auth),
+      ),
+    ).toEqual([true, true, true, false]);
 
     const here = [byKey, signsIn];
     const cloudIdOf = (appId: string) => cloudAppFor(appId, here)?.id;

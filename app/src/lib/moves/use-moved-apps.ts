@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { appsQueryOptions } from "@/lib/apps/queries";
+import { appsQueryOptions, catalogueQueryOptions } from "@/lib/apps/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
@@ -51,6 +51,8 @@ export function useMovedApps() {
   const connections = useQuery({ ...connectionsQueryOptions(), enabled: any });
   // Which app each one is here: a move names an app as the computer knew it (`cloudAppFor`).
   const cloudApps = useQuery({ ...appsQueryOptions(), enabled: any });
+  // How each catalogue app is reached, which says whether it needs an account of the person's.
+  const catalogue = useQuery({ ...catalogueQueryOptions(), enabled: any });
   const preferences = useUserPreferences();
   const user = useQuery(currentUserQueryOptions());
   const dismiss = useMutation(
@@ -65,10 +67,15 @@ export function useMovedApps() {
   );
   const cloudIdOf = (appId: string) =>
     cloudAppFor(appId, cloudApps.data ?? [])?.id;
-  // Done once it is here, for an app that needs no account of the person's: what listApps says.
+  /*
+   * Done once it is here, for an app that needs no account of the person's: what listApps says of
+   * it, and for a catalogue app what the catalogue says of how it is reached. A catalogue that
+   * couldn't be read says nothing, so such an app waits for the person's own connection.
+   */
   const doneHere = (cloudId: string) => {
     const app = (cloudApps.data ?? []).find((each) => each.id === cloudId);
-    return app !== undefined && needsNoAccountOfYours(app);
+    const entry = (catalogue.data ?? []).find((item) => item.key === cloudId);
+    return app !== undefined && needsNoAccountOfYours(app, entry?.auth);
   };
   // Settled once the deployment has answered (an answer that failed reads as not hosted, as every
   // capability does) and, where it takes moves, the moves have.
@@ -78,6 +85,7 @@ export function useMovedApps() {
     (!any ||
       (connections.isSuccess &&
         cloudApps.isSuccess &&
+        (catalogue.isSuccess || catalogue.isError) &&
         (preferences.isSuccess || preferences.isError)));
   const apps: MovedApp[] = ready
     ? movedAppsInView(
