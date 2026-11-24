@@ -436,6 +436,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   optional. 402 `PLAN_REQUIRED` is now declared on every operation that starts a run: `runRoutine`,
   `runCheckIn`, `startCheckInItem`, `workOnCheckInItem`, `runGoal`, `startVoiceCall` and
   `retryTask`, besides `sendConversationMessage`. The plan's descriptions no longer say 30-day trial.
+- **Inviting into an organization that pays for each member.** `createOrganizationInvitation` can
+  answer 402 `SEAT_REQUIRED` when every seat the organization paid for is taken. The problem
+  carries `addSeatUrl`, where an owner or an admin adds a seat in the browser; nothing is invited.
+  `addSeatUrl` is an optional problem property.
 
 ### Kubernetes
 

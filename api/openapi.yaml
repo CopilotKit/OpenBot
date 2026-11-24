@@ -11970,7 +11970,7 @@ paths:
         - Organizations
       operationId: createOrganizationInvitation
       summary: Invite somebody to an organization
-      description: 'Invite the person with this email address to join the organization with a role. They need no account yet: the invitation waits for whoever signs in with that address, and they see it in OpenBot then. Where OpenBot can send email, it also emails them; delivery says which happened, so the inviter knows whether to pass the link on themselves. The invitation lasts seven days. Inviting an address again after its invitation expired or was declined starts a new one. Only an owner or an admin of this organization can. A repeated request with the same Idempotency-Key and body returns the first result.'
+      description: 'Invite the person with this email address to join the organization with a role. They need no account yet: the invitation waits for whoever signs in with that address, and they see it in OpenBot then. Where OpenBot can send email, it also emails them; delivery says which happened, so the inviter knows whether to pass the link on themselves. The invitation lasts seven days. Inviting an address again after its invitation expired or was declined starts a new one. Only an owner or an admin of this organization can. An organization that pays for each member needs a free seat for the person: with none, the invitation is refused with SEAT_REQUIRED and addSeatUrl, and nothing is invited. A repeated request with the same Idempotency-Key and body returns the first result.'
       security:
         - webSession: []
         - appOAuth:
@@ -12013,6 +12013,8 @@ paths:
           $ref: '#/components/responses/InvalidOrganizationInvitation'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '402':
+          $ref: '#/components/responses/SeatRequired'
         '403':
           $ref: '#/components/responses/AdminOnly'
         '404':
@@ -26520,6 +26522,13 @@ components:
           format: uri-reference
           maxLength: 2048
           description: On PLAN_REQUIRED, where an owner or an admin goes in the browser to add a card, or to update it after a failed payment. Null for a member, who asks an admin.
+        addSeatUrl:
+          type:
+            - string
+            - 'null'
+          format: uri-reference
+          maxLength: 2048
+          description: On SEAT_REQUIRED, where an owner or an admin goes in the browser to add one more seat to the organization's plan. It comes back to OpenBot once the seat is added, and the invitation can be sent then. Null for anyone who can't add a seat.
     ConversationJoinToken:
       type: object
       description: 'What a client needs to watch a conversation live: a token, and the socket and topic to use it on (the threadStream channel of api/asyncapi.yaml).'
@@ -44586,6 +44595,28 @@ components:
                 retryable: false
                 requestId: req_example
                 traceId: trace_example
+    SeatRequired:
+      description: The organization pays for each member, and every seat it has paid for is taken (SEAT_REQUIRED). An owner or an admin adds a seat at addSeatUrl, and the invitation can be sent once it is added. Nothing was invited.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noFreeSeat:
+              value:
+                type: https://open.bot/errors/seat-required
+                title: This organization needs another seat.
+                status: 402
+                detail: Each member is $5 a month. Add a seat to invite someone.
+                code: SEAT_REQUIRED
+                category: permission
+                retryable: false
+                requestId: req_example
+                traceId: trace_example
+                addSeatUrl: /api/auth/hosted/add-seat?organizationId=Jq3xT9mLw2Vb8RnC5sYd0fKe
     OrganizationInvitationConflict:
       description: They are already a member, or already have an invitation waiting. Or the Idempotency-Key was used for a different request.
       headers:
