@@ -133,10 +133,16 @@ export function appAccessSentence(
     case "disabled":
       return disabledSentence(access, edition, admins);
     case "not_granted":
-      return withAdmins(
-        `This Bot hasn't been given ${name}. Only an admin can give it.`,
-        admins,
-      );
+      // Open to Bot owners unless an admin closed it: then the Bot's owner can give it too.
+      return access.ownerGrants === "any"
+        ? withAdmins(
+            `This Bot hasn't been given ${name}. Its owner can give it, or an admin.`,
+            admins,
+          )
+        : withAdmins(
+            `This Bot hasn't been given ${name}. Only an admin can give it.`,
+            admins,
+          );
     case "owner_grantable": {
       const yours = access.account === "personal" ? `your ${name}` : name;
       const ask = `Let ${bot ?? "this Bot"} use ${yours}?`;
