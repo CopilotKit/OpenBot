@@ -1282,25 +1282,23 @@ export function LocalIntelligence({
   const { at, running, stopped, problem } = sequence;
   const tooSmall = stopped ? sequence.blocked?.shortfall : undefined;
   const plan = usePodmanPlan(tooSmall);
-  // While it runs, one journey says what is happening and how far along the whole Start is. The
-  // rows then say which part is done and which is left, and nothing twice.
-  // Paused for room: its row says so, with Try again, and no time left counts down.
+  // The journey owns the current operation. Only finished work belongs in its quiet milestones;
+  // update notes and recovery directions stay visible separately, without claiming completion.
   const journeying = offerStart && running && !stopped && !sequence.held;
-  // Its download's bar is the journey's too: the running row keeps only what is particular to it.
   const releasing = open.some((row) => row.step === "release" && row.running);
+  const detail = at === "start" && releasing ? RELEASE_SAID : sequence.detail;
+  const completed = (row: Progress) =>
+    row.ok &&
+    !row.running &&
+    !row.waiting &&
+    !row.paused &&
+    !row.pending &&
+    !row.note;
+  const notices = journeying
+    ? sequence.steps.filter((row) => !completed(row) && !row.running)
+    : [];
   const rows = journeying
-    ? sequence.steps.map((row) =>
-        row.running
-          ? {
-              ...row,
-              downloads: undefined,
-              // The journey says how far along the whole Start is: a row's own "Step 1 of 4"
-              // beside it counted something else, and read as the Start starting over.
-              position: undefined,
-              detail: at === "start" && releasing ? RELEASE_SAID : row.detail,
-            }
-          : row,
-      )
+    ? sequence.steps.filter(completed)
     : waitingOn && stopped
       ? sequence.steps.map((row) =>
           row.ok ? row : { ...row, ok: true, waiting: true, detail: waitingOn },
@@ -1328,12 +1326,16 @@ export function LocalIntelligence({
           releaseDue={releaseDue}
         />
       )}
-      {/* While the journey runs, its bar is the one thing that spins: the row it is on is marked,
-          not spun. Two spinners on Finishing setup read as two waits. */}
+      {journeying && detail && <p>{detail}</p>}
+      {notices.length > 0 && (
+        <SetupProgress steps={notices} presentation="focus" />
+      )}
       <SetupProgress
         steps={rows}
         showElapsed={!journeying}
-        quiet={journeying}
+        presentation={
+          offerStart ? (journeying ? "milestones" : "focus") : "list"
+        }
       />
       {handOff && !journeying && <StatusLine>{handOff}</StatusLine>}
       <LocalNeeds sequence={sequence} />

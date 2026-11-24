@@ -298,6 +298,20 @@ function expectJourney(view: ReturnType<typeof render>, said: string) {
   expect(journey.querySelector("progress")).not.toBeNull();
 }
 
+/** Only work already finished belongs below the current Start journey. */
+function expectCompletedMilestones(
+  view: ReturnType<typeof render>,
+  names: string[],
+) {
+  const local = within(
+    view.getByRole("region", { name: "OpenBot on this computer" }),
+  );
+  const rows = local.queryAllByRole("listitem");
+  expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual(names);
+  for (const row of rows)
+    expect(within(row).getByText("Complete")).toBeTruthy();
+}
+
 /** A status line that is still working: its words, with the setup rows' spinner beside them. */
 function expectWorking(view: ReturnType<typeof render>, said: string) {
   const status = view
@@ -325,6 +339,52 @@ async function steadied(payload: ProgressEvent) {
   setSystemTime(new Date(Date.now() + 3_500));
   await emitProgress(payload);
 }
+
+test("approved install layout keeps focused progress in the body and recovery actions in the footer", async () => {
+  const { view, preparation, retry } = await beginPendingInstallation();
+  const heading = view.getByRole("heading", { name: "Installing OpenBot" });
+  const sheet = heading.closest(".sheet");
+  expect(sheet?.matches(".setup-layout.install-layout")).toBe(true);
+  expect(heading.parentElement?.matches(".setup-header-block")).toBe(true);
+  expect(heading.parentElement?.parentElement).toBe(sheet);
+  const body = sheet?.querySelector(":scope > .setup-body");
+  const content = body?.querySelector(":scope > .setup-content");
+  const progress = content?.querySelector(".setup-progress-focus");
+  expect(progress).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Cancel" })).toBeNull();
+  await emitProgress({
+    step: "engine",
+    ok: true,
+    detail: "Docker is answering.",
+  });
+  await emitProgress({
+    step: "images",
+    ok: true,
+    running: true,
+    detail: "Downloading local software.",
+    downloads: { done: 1, total: 5, bytes: 1_200_000_000, size: 3_400_000_000 },
+  });
+  expect(progress?.firstElementChild?.getAttribute("aria-label")).toBe(
+    "Downloading OpenBot",
+  );
+  expect(progress?.textContent).toContain("1.2 GB of 3.4 GB");
+  expect(progress?.textContent).toContain("Preparing this computer");
+  await act(async () =>
+    preparation.reject({ said: "The download was interrupted." }),
+  );
+  expect(content?.contains(view.getByRole("alert"))).toBe(true);
+  const footer = sheet?.querySelector(":scope > .setup-footer");
+  expect(footer?.contains(view.getByRole("button", { name: "Back" }))).toBe(
+    true,
+  );
+  expect(
+    footer?.contains(view.getByRole("button", { name: "Retry installation" })),
+  ).toBe(true);
+  const next = await retry();
+  expect(view.queryByRole("alert")).toBeNull();
+  await act(async () => next.resolve());
+  await view.findByRole("heading", { name: "Connect your AI" });
+});
 
 /*
  * The install's rows say their time so far, counted from when the install began. Windows F showed
@@ -3210,12 +3270,24 @@ test("a start that wakes the computer's software and updates OpenBot says it in 
   });
   const beats: Beat[] = [];
   const view = await renderApp();
-  const seen = (beat: string) =>
+  const seen = (beat: string) => {
+    if (beat !== "running on the version it had") {
+      expect(
+        view.queryByRole("listitem", { name: "Getting OpenBot ready" }),
+      ).toBeNull();
+      expectCompletedMilestones(view, [
+        "Setting up OpenBot",
+        "Connecting OpenBot",
+      ]);
+      expect(view.getAllByRole("progressbar")).toHaveLength(1);
+      expect(view.container.querySelectorAll(".step-spinner")).toHaveLength(1);
+    }
     beats.push({
       beat,
       text: view.container.textContent ?? "",
       behind: behindNow(view),
     });
+  };
   await view.findByRole("heading", { name: "Starting OpenBot" });
   await emitProgress({
     step: "start-machine",
@@ -3252,10 +3324,8 @@ test("a start that wakes the computer's software and updates OpenBot says it in 
   expect(said["waking the software"]).toContain(
     "Starting the software OpenBot runs onAbout a minute left · 0s so far",
   );
-  // The row the journey is on says it is in progress, and no step count beside the journey's.
-  expect(said["waking the software"]).toContain(
-    "Getting OpenBot readyIn progress",
-  );
+  // The journey owns the current operation, without a duplicate row or step count.
+  expect(said["waking the software"]).not.toContain("In progress");
   for (const beat of [
     "waking the software",
     "updating",
@@ -3266,16 +3336,16 @@ test("a start that wakes the computer's software and updates OpenBot says it in 
     "Getting the update readyAbout 2 minutes left",
   );
   expect(said.updating).toContain(
-    "Getting OpenBot readyIn progressUpdating OpenBot. Your Bots and data stay as they are.",
+    "Updating OpenBot. Your Bots and data stay as they are.",
   );
-  // The download is the journey's: what is happening, and its measure beside the time left. The row
-  // keeps what this part is, and has no measure of its own.
+  // The download is the journey's: its measure is beside the time left, said only once.
+  // The update's data reassurance stays visible below it.
   expect(said["downloading the update"]).toMatch(
     /Downloading the update · 300\.0 MB of 900\.0 MB(About \d+ minutes|About a minute|Less than a minute) left · \d+s so far/,
   );
   expect(said["downloading the update"].match(/MB of/g)).toHaveLength(1);
   expect(said["downloading the update"]).toContain(
-    "Getting OpenBot readyIn progressUpdating OpenBot. Your Bots and data stay as they are.",
+    "Updating OpenBot. Your Bots and data stay as they are.",
   );
   expect(said["running on the version it had"]).toContain(KEPT_RELEASE);
 });
@@ -3657,13 +3727,13 @@ test("Continue during setup shows Finishing setup, which starts and opens OpenBo
   await chooseOpenAi(view);
   await view.findByRole("heading", { name: "Finishing setup" });
   expect(stepLabel(view)).toBe("Start");
-  // The journey says how far along the whole Start is, and is the one spinner on the screen. The
-  // row it is on is marked, not spun, and has no "Step 1 of 4" of its own.
-  const row = view.getByRole("listitem", { name: "Setting up OpenBot" });
-  expect(row.querySelector(".step-status")?.textContent).toBe("In progress");
-  expect(row.textContent).not.toMatch(/Step \d of \d/);
-  expect(row.querySelector(".step-spinner")).toBeNull();
-  expect(row.querySelector(".step-current")).not.toBeNull();
+  // The journey owns the current setup operation; no work has finished yet.
+  expect(
+    view.queryByRole("listitem", { name: "Setting up OpenBot" }),
+  ).toBeNull();
+  expectCompletedMilestones(view, []);
+  expectJourney(view, "Checking this computer");
+  expect(view.getAllByRole("progressbar")).toHaveLength(1);
   const journey = view.getByRole("region", { name: "How far along" });
   expect(
     [...view.container.querySelectorAll(".step-spinner")].map((spinner) =>
@@ -4422,10 +4492,13 @@ test("relaunch with Docker Desktop quit opens it, says so, and starts once it an
   await view.findByRole("heading", { name: "Starting OpenBot" });
   await emitDockerHandOff();
   expectJourney(view, DOCKER_HAND_OFF);
-  // The row it waits on is the one in progress; the journey above it says how far along.
-  const row = view.getByRole("listitem", { name: "Getting OpenBot ready" });
-  expect(row.querySelector(".step-status")?.textContent).toBe("In progress");
-  expect(row.querySelector(".step-spinner")).toBeNull();
+  // The hand-off is the journey's current operation, above only completed milestones.
+  expect(
+    view.queryByRole("listitem", { name: "Getting OpenBot ready" }),
+  ).toBeNull();
+  expectCompletedMilestones(view, ["Setting up OpenBot", "Connecting OpenBot"]);
+  expect(view.getAllByRole("progressbar")).toHaveLength(1);
+  expect(view.container.querySelectorAll(".step-spinner")).toHaveLength(1);
   expect(localSequence()).toEqual([]);
   // Docker answers: the hand-off goes, and the back end and OpenBot start.
   await emitDockerSettled(true, "Docker Desktop is running.");
@@ -5649,13 +5722,22 @@ test("the journey says the update step running now, never one that finished, on 
     const value = Number(bars[0]?.getAttribute("value"));
     expect(value).toBeGreaterThanOrEqual(fraction);
     fraction = value;
-    // No row of its own for the update: the start's row says what this part is.
+    // The journey owns the update; its reassurance stays visible without a duplicate current row.
     expect(view.queryByRole("list", { name: "Update progress" })).toBeNull();
     expect(
-      view.getByRole("listitem", { name: "Opening OpenBot" }).textContent,
-    ).toContain(
-      "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
-    );
+      view.getByText(
+        "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
+      ),
+    ).toBeTruthy();
+    expect(
+      view.queryByRole("listitem", { name: "Opening OpenBot" }),
+    ).toBeNull();
+    expectCompletedMilestones(view, [
+      "Setting up OpenBot",
+      "Connecting OpenBot",
+      "Getting OpenBot ready",
+    ]);
+    expect(view.container.querySelectorAll(".step-spinner")).toHaveLength(1);
   }
   // Nothing an earlier step said is left on the screen.
   for (const finished of [

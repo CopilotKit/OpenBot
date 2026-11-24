@@ -124,6 +124,8 @@ function deferred<T>() {
 type Startable = { apiUrl: string; gatewayWsUrl: string; notice?: string };
 
 type Props = {
+  offerStart?: boolean;
+  open?: import("./SetupProgress").Progress[];
   stack?: string | null;
   connected?: boolean;
   /** Gives the go-ahead on arrival. Without it, Start OpenBot does. */
@@ -163,8 +165,9 @@ function Holder(props: Props) {
       {(props.prepare || props.status) && <LocalStatus sequence={sequence} />}
       <LocalIntelligence
         sequence={sequence}
-        offerStart
+        offerStart={props.offerStart ?? true}
         handOff={props.handOff}
+        open={props.open}
       />
     </>
   );
@@ -218,18 +221,15 @@ function journeyOf(screen: ReturnType<typeof view>) {
   return screen.getByRole("region", { name: "How far along" });
 }
 
-/**
- * A row the journey is on, while the journey runs: marked as the current one, never spun, and
- * without its own "Step 1 of 4". The journey's bar is the one thing that spins, and it says how
- * far along the whole Start is.
- */
-function expectQuietRunning(screen: ReturnType<typeof view>, name: string) {
-  const now = row(screen, name);
-  expect(now.querySelector(".step-status")?.textContent).toBe("In progress");
-  expect(now.textContent).not.toMatch(/Step \d of \d/);
-  expect(now.querySelector(".step-spinner")).toBeNull();
-  expect(now.querySelector(".step-current")).not.toBeNull();
+/** The journey is the only current operation; completed rows are quiet milestones. */
+function expectJourneyOnly(screen: ReturnType<typeof view>, name: string) {
+  expect(screen.queryByRole("listitem", { name })).toBeNull();
   expect(journeyOf(screen).querySelector(".step-spinner")).not.toBeNull();
+  const local = screen.getByRole("region", {
+    name: "OpenBot on this computer",
+  });
+  expect(local.querySelectorAll(".step-spinner")).toHaveLength(1);
+  expect(local.querySelectorAll(".step-current")).toHaveLength(0);
 }
 
 const SETUP = "Setting up OpenBot";
@@ -284,24 +284,68 @@ test("the whole sequence runs by itself: set up, connect, wait for ready and val
   expect(screen.queryByRole("button", { name: /Connect/ })).toBeNull();
 });
 
-/*
- * Finishing setup showed two spinners at once, the journey's and the running row's, and the row's
- * own "Step 1 of 4" beside the journey read as the Start starting over. While the journey runs it
- * is the one spinner on the screen; the row it is on is marked, not spun, and says no step count.
- */
-test("while the journey runs, it is the one spinner and its rows say no step of their own", async () => {
+test("the journey is the sole current operation above completed milestones and Cancel still recovers", async () => {
+  const connecting = deferred<LocalConnection>();
   invokeHandler = answers({
-    set_up_local_eval: [new Promise(() => {})],
+    set_up_local_eval: [report()],
+    connect_local_eval: [connecting.promise],
     local_eval_download: [null],
     cancel_local_eval: [null],
   });
   const screen = view();
   await waitFor(() =>
-    expect(row(screen, SETUP).textContent).toContain("In progress"),
+    expect(row(screen, SETUP).textContent).toContain("Complete"),
   );
-  expectQuietRunning(screen, SETUP);
-  expect(screen.container.querySelectorAll(".step-spinner")).toHaveLength(1);
-  expect(screen.container.textContent).not.toMatch(/Step \d of \d/);
+  expectJourneyOnly(screen, CONNECT);
+  const milestones = screen.getByRole("list", { name: "Setup progress" });
+  expect(milestones.classList.contains("setup-milestones")).toBe(true);
+  expect(within(milestones).getAllByRole("listitem")).toEqual([
+    row(screen, SETUP),
+  ]);
+  expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("region", { name: "How far along" })).toBeNull(),
+  );
+  const stopped = row(screen, CONNECT);
+  expect(
+    stopped.parentElement?.classList.contains("setup-progress-focus"),
+  ).toBe(true);
+  expect(stopped.parentElement?.firstElementChild).toBe(stopped);
+  await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() =>
+    expect(
+      commands().filter((command) => command === "connect_local_eval"),
+    ).toHaveLength(2),
+  );
+  expectJourneyOnly(screen, CONNECT);
+});
+
+test("the journey keeps the release's data reassurance and last-step cancellation restriction", async () => {
+  invokeHandler = answers({ run_local_eval: [ready] });
+  const opening = deferred<StartOutcome>();
+  const screen = view({
+    stack: "local-abc123",
+    connected: true,
+    onStart: () => opening.promise,
+    open: [
+      { step: "release", ok: true, running: true, detail: "Updating OpenBot." },
+    ],
+  });
+  await waitFor(() =>
+    expect(
+      screen.getByText(
+        "Updating OpenBot. Your Bots, sign-ins and data stay as they are.",
+      ),
+    ).toBeTruthy(),
+  );
+  expectJourneyOnly(screen, START);
+  expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+  expect(
+    screen.getByText(
+      "You can't cancel this last step. Stopping it partway could leave the update half done.",
+    ),
+  ).toBeTruthy();
 });
 
 /**
@@ -321,10 +365,8 @@ test("a first setup shows its download on the journey and on the screen in front
     throw new Error(`unexpected ${command}`);
   };
   const screen = view({ prepare: true });
-  await waitFor(() =>
-    expect(row(screen, SETUP).textContent).toContain("In progress"),
-  );
-  expectQuietRunning(screen, SETUP);
+  await waitFor(() => expect(journeyOf(screen)).toBeTruthy());
+  expectJourneyOnly(screen, SETUP);
   arrived = { done: 245_000_000, total: 690_000_000 };
   await waitFor(
     () =>
@@ -333,9 +375,8 @@ test("a first setup shows its download on the journey and on the screen in front
   );
   const journey = within(journeyOf(screen));
   expect(journey.getByText("Downloading the rest of OpenBot")).toBeTruthy();
-  // One bar on Start: the journey's. The row says only which step it is.
-  expect(within(row(screen, SETUP)).queryByRole("progressbar")).toBeNull();
-  expect(row(screen, SETUP).textContent).not.toContain("MB");
+  // One bar on Start; the screen in front keeps its separate download below.
+  expectJourneyOnly(screen, SETUP);
   // The screen in front (Install, or Connect your AI) shows the same download while it runs.
   const behind = within(screen.getByRole("list", { name: "OpenBot download" }));
   expect(
@@ -414,11 +455,7 @@ test("a backend an older app installed is updated to this app's release before O
     },
   });
   // One plain line while it runs, on the back end's own row.
-  await waitFor(() =>
-    expect(row(screen, WAIT).textContent).toContain(
-      "Updating OpenBot. Your Bots and data stay as they are.",
-    ),
-  );
+  await waitFor(() => expect(screen.getByText(UPDATING_SAID)).toBeTruthy());
   expect(started).toEqual([]);
   updating.resolve(onRelease("0.16.0-rc.9", null));
   await waitFor(() => expect(started).toEqual([startableUrls]));
@@ -571,7 +608,7 @@ test("a services update the CLI refuses is a note on their own row while the Sta
     name: "Updating OpenBot's services",
   });
   // OpenBot's own start, its update included, is still running: the journey on its row.
-  expectQuietRunning(screen, START);
+  expectJourneyOnly(screen, START);
   const said =
     "OpenBot's services couldn't update, so they run the version they had. Your data is kept, and OpenBot tries again the next time it starts.";
   const isNote = () => {
@@ -581,6 +618,8 @@ test("a services update the CLI refuses is a note on their own row while the Sta
     expect(now.querySelector(".detail")?.textContent).toBe(said);
   };
   isNote();
+  expect(services.closest(".setup-milestones")).toBeNull();
+  expect(services.closest(".setup-progress-focus")).not.toBeNull();
   expect(services.textContent).not.toContain("Failed");
   expect(
     screen.queryByRole("listitem", { name: "Updating OpenBot" }),
@@ -763,7 +802,7 @@ test("an update that fails before updating the data still says the services run 
  */
 const UPDATING_SAID = "Updating OpenBot. Your Bots and data stay as they are.";
 
-test("a running update says what it is doing on the journey, and a failed part at once on its row", async () => {
+test("a running update says what it is doing on the journey, and a failed part at once below it", async () => {
   const updating = deferred<LocalReport>();
   invokeHandler = async (command, args) => {
     if (command === "cancel_local_eval") return null;
@@ -777,9 +816,7 @@ test("a running update says what it is doing on the journey, and a failed part a
       : onRelease("0.16.0-rc.9", "0.16.0-rc.10");
   };
   const screen = view({ stack: "local-abc123", connected: true });
-  await waitFor(() =>
-    expect(row(screen, WAIT).textContent).toContain(UPDATING_SAID),
-  );
+  await waitFor(() => expect(screen.getByText(UPDATING_SAID)).toBeTruthy());
   // Waiting on its databases: everything before them finished.
   localSteps = {
     ended: [
@@ -813,8 +850,8 @@ test("a running update says what it is doing on the journey, and a failed part a
     { timeout: 3_000 },
   );
   // Said once: the row does not repeat the step or its time.
-  expect(row(screen, WAIT).textContent).not.toContain("so far");
-  expect(row(screen, WAIT).textContent).not.toContain("where OpenBot keeps");
+  expect(screen.getByText(UPDATING_SAID)).toBeTruthy();
+  expectJourneyOnly(screen, WAIT);
   // In the chart's Jobs: a failed one at once, not ten minutes later. Its name is the log's.
   updateStep = {
     step: "jobs",
@@ -824,12 +861,14 @@ test("a running update says what it is doing on the journey, and a failed part a
   };
   await waitFor(
     () =>
-      expect(row(screen, WAIT).textContent).toContain(
-        `${UPDATING_SAID} Part of the update didn't work, so it will stop. OpenBot waits up to 10 minutes for it first. Your data is kept.`,
-      ),
+      expect(
+        screen.getByText(
+          `${UPDATING_SAID} Part of the update didn't work, so it will stop. OpenBot waits up to 10 minutes for it first. Your data is kept.`,
+        ),
+      ).toBeTruthy(),
     { timeout: 3_000 },
   );
-  expect(row(screen, WAIT).textContent).not.toContain("cpki");
+  expect(screen.container.textContent).not.toContain("cpki");
   // It asked about the update's own call.
   const update = invokeCalls.find(
     (call) => (call.args as { action?: string })?.action === "update",
@@ -1243,11 +1282,7 @@ test("an update says how much of its download has arrived, so a slow line reads 
       return "started";
     },
   });
-  await waitFor(() =>
-    expect(row(screen, WAIT).textContent).toContain(
-      "Updating OpenBot. Your Bots and data stay as they are.",
-    ),
-  );
+  await waitFor(() => expect(screen.getByText(UPDATING_SAID)).toBeTruthy());
   arrived = { done: 48_200_000, total: 147_000_000 };
   await waitFor(
     () =>
@@ -1261,21 +1296,16 @@ test("an update says how much of its download has arrived, so a slow line reads 
   expect(screen.getAllByRole("progressbar")).toEqual([
     journey.getByRole("progressbar", { name: "How far along" }),
   ]);
-  const waiting = within(row(screen, WAIT));
-  expect(row(screen, WAIT).textContent).toContain(
-    "Updating OpenBot. Your Bots and data stay as they are.",
-  );
-  expect(row(screen, WAIT).textContent).not.toContain("MB");
-  // Downloaded: the CLI's update runs, the measure goes, and the row says the same.
+  expectJourneyOnly(screen, WAIT);
+  expect(screen.getByText(UPDATING_SAID)).toBeTruthy();
+  // Downloaded: the measure goes, while the update's data reassurance stays visible.
   arrived = null;
   await waitFor(
     () => expect(journeyOf(screen).textContent).not.toContain("MB"),
     { timeout: 3_000 },
   );
-  expect(row(screen, WAIT).textContent).toContain(
-    "Updating OpenBot. Your Bots and data stay as they are.",
-  );
-  expect(waiting.queryByRole("progressbar")).toBeNull();
+  expect(screen.getByText(UPDATING_SAID)).toBeTruthy();
+  expectJourneyOnly(screen, WAIT);
   updating.resolve(onRelease("0.16.0-rc.9", null));
   await waitFor(() => expect(started).toEqual([startableUrls]));
   const asked = invokeCalls.find(
@@ -1834,6 +1864,8 @@ test("a setup paused for room on its drive says so calmly and carries on by itse
   expect(setup.textContent).not.toContain("elapsed");
   expect(setup.querySelector(".step-spinner")).toBeNull();
   expect(within(setup).getByRole("button", { name: "Try again" })).toBeTruthy();
+  expect(setup.closest(".setup-progress-focus")).not.toBeNull();
+  expect(screen.queryByRole("region", { name: "How far along" })).toBeNull();
   // Not an error: no stop, no Retry, no logs.
   expect(screen.queryByText("Setup stopped")).toBeNull();
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
@@ -2683,11 +2715,13 @@ test("the screen in front hears nothing while Intelligence works, and a stop int
     set_up_local_eval: [new Promise(() => {})],
     cancel_local_eval: [null],
   });
-  const working = view({ prepare: true });
+  const working = view({ prepare: true, offerStart: false });
   await waitFor(() =>
-    expect(row(working, SETUP).textContent).toContain("In progress"),
+    expect(row(working, SETUP).textContent).toContain("Step 1 of 4"),
   );
   expect(working.queryByRole("alert", { name: "Setup" })).toBeNull();
+  expect(row(working, SETUP).parentElement?.className).toBe("steps");
+  expect(working.queryByRole("region", { name: "How far along" })).toBeNull();
   cleanup();
   invokeCalls = [];
 

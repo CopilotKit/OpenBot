@@ -1544,60 +1544,70 @@ function LocalSetup({ address, choose }: { address: string; choose: boolean }) {
         <SetupRail>
           <Sections at="Install" />
         </SetupRail>
-        <div className="sheet">
-          <h1>
-            {installationReady ? "Installation complete" : "Installing OpenBot"}
-          </h1>
-          <p className="lede">
-            {installationReady
-              ? "OpenBot’s local software is ready. Next, connect your AI."
-              : INSTALL_BLURB}
-          </p>
-          {/* Intelligence sets itself up alongside, once the install has Docker answering. Its
+        <div className="sheet setup-layout install-layout">
+          <div className="setup-header-block">
+            <h1>
+              {installationReady
+                ? "Installation complete"
+                : "Installing OpenBot"}
+            </h1>
+            <p className="lede">
+              {installationReady
+                ? "OpenBot’s local software is ready. Next, connect your AI."
+                : INSTALL_BLURB}
+            </p>
+          </div>
+          <div className="setup-body">
+            <div className="setup-content">
+              {/* Intelligence sets itself up alongside, once the install has Docker answering. Its
               download is the list's third step, once the second is done. */}
-          <SetupProgress steps={installRows} />
-          {/* The person closed macOS's password prompt: said, with Try again. */}
-          {goAhead && <PodmanGoAhead asking={goAhead} />}
-          {pauseCard}
-          <LocalStatus sequence={local} download={false} />
-          {/* The first screen's downloads, until a row of Install's own shows the one it waits on. */}
-          {!steps.some((row) => row.running && row.downloads) && (
-            // Install's running row is the step's own wait: the line beside it is still.
-            <EarlyDownloadsLine quiet={installRows.some(spins)} />
-          )}
-          {displayedFailure && <Failure problem={displayedFailure} />}
-          {!busy && (
-            <div className="row">
-              <button
-                type="button"
-                className="quiet"
-                onClick={() => setStep("welcome")}
-              >
-                Back
-              </button>
-              {installationReady ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSteps([]);
-                    setStep("model");
-                  }}
-                >
-                  Continue to sign in
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled={!root.trim()}
-                  onClick={() => installLocally()}
-                >
-                  {preparation?.status === "failed"
-                    ? "Retry installation"
-                    : "Install OpenBot"}
-                </button>
+              <SetupProgress steps={installRows} presentation="focus" />
+              {/* The person closed macOS's password prompt: said, with Try again. */}
+              {goAhead && <PodmanGoAhead asking={goAhead} />}
+              {pauseCard}
+              <LocalStatus sequence={local} download={false} />
+              {/* The first screen's downloads, until a row of Install's own shows the one it waits on. */}
+              {!steps.some((row) => row.running && row.downloads) && (
+                // Install's running row is the step's own wait: the line beside it is still.
+                <EarlyDownloadsLine quiet={installRows.some(spins)} />
               )}
+              {displayedFailure && <Failure problem={displayedFailure} />}
             </div>
-          )}
+          </div>
+          <div className="setup-footer">
+            {!busy && (
+              <div className="row">
+                <button
+                  type="button"
+                  className="quiet"
+                  onClick={() => setStep("welcome")}
+                >
+                  Back
+                </button>
+                {installationReady ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSteps([]);
+                      setStep("model");
+                    }}
+                  >
+                    Continue to sign in
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!root.trim()}
+                    onClick={() => installLocally()}
+                  >
+                    {preparation?.status === "failed"
+                      ? "Retry installation"
+                      : "Install OpenBot"}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </main>
     );
