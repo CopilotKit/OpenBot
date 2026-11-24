@@ -164,6 +164,11 @@ export const ListAppsResponse = zod.object({
             .describe(
               "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
             ),
+          everyBot: zod
+            .boolean()
+            .describe(
+              "Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.",
+            ),
           addedBy: zod
             .string()
             .nullable()
@@ -488,6 +493,11 @@ export const CreateAppResponse = zod
       .describe(
         "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
       ),
+    everyBot: zod
+      .boolean()
+      .describe(
+        "Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.",
+      ),
     addedBy: zod
       .string()
       .nullable()
@@ -707,6 +717,11 @@ export const GetAppResponse = zod
       ])
       .describe(
         "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+      ),
+    everyBot: zod
+      .boolean()
+      .describe(
+        "Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.",
       ),
     addedBy: zod
       .string()
@@ -988,6 +1003,11 @@ export const ReplaceAppResponse = zod
       .describe(
         "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
       ),
+    everyBot: zod
+      .boolean()
+      .describe(
+        "Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.",
+      ),
     addedBy: zod
       .string()
       .nullable()
@@ -1068,8 +1088,8 @@ export const ReplaceAppResponse = zod
   );
 
 /**
- * Change who may give the app to a Bot: any Bot's owner, for their own Bot (any), only an administrator (admin), or null for the default for the app's account. Recorded on the audit trail. When owners stop deciding, the approvals to use the app's shared account that their gifts made are withdrawn. What they gave stays, for an administrator to keep or take back. Only an administrator may.
- * @summary Change who may give an app to a Bot
+ * Change who may give the app to a Bot: any Bot's owner, for their own Bot (any), only an administrator (admin), or null for the default for the app's account. Recorded on the audit trail. When owners stop deciding, the approvals to use the app's shared account that their gifts made are withdrawn. What they gave stays, for an administrator to keep or take back. everyBot gives the app to every Bot in the organization, Bots made later included, or takes back what giving it to every Bot gave, with one row on the audit trail for the change. Only an administrator may.
+ * @summary Change who may give an app to a Bot, or give it to every Bot
  */
 
 export const updateAppPathAppIdMax = 200;
@@ -1119,6 +1139,12 @@ export const UpdateAppBody = zod
       .optional()
       .describe(
         "Who may give the app to a Bot, or null for the default for its account.",
+      ),
+    everyBot: zod
+      .boolean()
+      .optional()
+      .describe(
+        "True gives the app to every Bot in the organization, and to every Bot made later. False takes back what giving it to every Bot gave. What a Bot was given any other way stays.",
       ),
   })
   .describe("The changes to make. At least one.");
@@ -1237,6 +1263,11 @@ export const UpdateAppResponse = zod
       ])
       .describe(
         "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+      ),
+    everyBot: zod
+      .boolean()
+      .describe(
+        "Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.",
       ),
     addedBy: zod
       .string()
@@ -1509,6 +1540,11 @@ export const RefreshAppResponse = zod
       ])
       .describe(
         "What an administrator chose for ownerGrants, or null where the default for the app's account applies.",
+      ),
+    everyBot: zod
+      .boolean()
+      .describe(
+        "Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's.",
       ),
     addedBy: zod
       .string()

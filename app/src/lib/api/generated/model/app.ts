@@ -63,6 +63,8 @@ export interface App {
   ownerGrants: AppOwnerGrants;
   /** What an administrator chose for ownerGrants, or null where the default for the app's account applies. */
   ownerGrantsChosen: AppOwnerGrants | null;
+  /** Whether an administrator gave the app to every Bot in the organization, Bots made later included. Every Bot can use all of its actions, with the same approvals as any other Bot's actions. Where each person connects their own account, a Bot uses the account of whoever is asking, never its owner's. */
+  everyBot: boolean;
   /**
    * The email address of whoever added the app, where OpenBot knows it.
    * @nullable
