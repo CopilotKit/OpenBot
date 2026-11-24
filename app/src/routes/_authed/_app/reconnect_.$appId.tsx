@@ -13,6 +13,8 @@ import { queryClient } from "@/query-client";
 /**
  * Connect one moved app again: remembers the reconnect list as where to come back to, then opens
  * the app's own page here, which offers the way back and takes the person back once it is connected.
+ * The page starts the connect as it opens: the sign-in, or the key form. So Reconnect is one press,
+ * never Reconnect and then the page's own Connect.
  *
  * `$appId` is the app as the move named it, which is not always its id here (`cloudAppFor`). An app
  * the organization hasn't added yet is added first when the person may add apps (an admin), as the
@@ -44,10 +46,12 @@ function ReconnectOne() {
         search: { notAdded: appId },
         replace: true,
       });
+    // With the connect started on arrival (`?connect=true`): one Reconnect is the whole press.
     const open = (key: string) =>
       void navigate({
         to: "/connections/$key",
         params: { key },
+        search: { connect: true },
         replace: true,
       });
     if (apps.error) return back();

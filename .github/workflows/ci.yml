@@ -440,6 +440,15 @@ jobs:
             --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=webkit \
             "$PLAYWRIGHT_IMAGE" \
             bun test app/tests/connect-your-ai.test.tsx -t "copies with one press"
+      # The Reconnect list after a move to OpenBot Cloud, in both engines: one press of Reconnect is
+      # the whole connect (the sign-in, or the key form), and back to the list once it's connected.
+      - run: |
+          docker run --rm --ipc=host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --volume "$(command -v bun):/usr/local/bin/bun:ro" \
+            --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
+            "$PLAYWRIGHT_IMAGE" \
+            bun test app/tests/moved-apps-reconnect.test.tsx
 
   # The desktop setup window's, for the same reason as the list above: the AI step's form holding
   # still while the install behind it comes and goes. It bundles the window from the desktop's own

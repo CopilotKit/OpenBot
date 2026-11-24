@@ -8,7 +8,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IdentityConnectionPage } from "@/components/connections/identity-connection-page";
 import {
   PageEmpty,
@@ -137,8 +137,9 @@ export const Route = createFileRoute("/_authed/_app/connections/$key")({
     ...searchTextEntry("linked", search.linked),
     ...searchTextEntry("action", search.action),
     /*
-     * `?connect=true` is Browse apps sending somebody here to finish adding an app that takes a
-     * key: the page opens with the key form. Read once and dropped, so a reload does not reopen it.
+     * `?connect=true` starts connecting on arrival: the key form for an app that takes a key (Browse
+     * apps, a Bot's card), the sign-in for one that signs in (the reconnect list's Reconnect). Read
+     * once and dropped, so a reload, or coming back from the sign-in, does not start it again.
      */
     ...(search.connect === true || search.connect === "true"
       ? { connect: true as const }
@@ -334,6 +335,35 @@ function AppConnectionPage({
   }).data;
   const isAdmin = isOrganizationAdmin(me?.role);
   const appNames = [key, server?.title ?? key];
+
+  /*
+   * THE SIGN-IN ON ARRIVAL, for an app OpenBot signs in to itself: one added by its address that
+   * signs each person in, or a built-in one. The same press as this page's Connect below, made for
+   * the person who already pressed Reconnect on the list (`startConnect`). Once per visit, only once
+   * every read has answered, and never over an account that is already connected. A directory app's
+   * row starts its own (`BrokeredAccountRow`).
+   */
+  const signedInHere =
+    entry?.auth === "user-oauth" ||
+    (server?.source === "address" && server.signIn === true);
+  const signInOnArrival =
+    startConnect &&
+    plugins.isSuccess &&
+    catalogue.isSuccess &&
+    setup.isSuccess &&
+    connections.isSuccess &&
+    enabled &&
+    !brokered &&
+    !sharedHere &&
+    signedInHere &&
+    connection === undefined;
+  const signInStarted = useRef(false);
+  const { mutate: startSignIn } = connect;
+  useEffect(() => {
+    if (!signInOnArrival || signInStarted.current) return;
+    signInStarted.current = true;
+    startSignIn(key);
+  }, [signInOnArrival, startSignIn, key]);
 
   /* Everything the brokered row below reads and does. See `brokered-account-row.tsx`. */
   const brokeredAccount = useBrokeredAccount({

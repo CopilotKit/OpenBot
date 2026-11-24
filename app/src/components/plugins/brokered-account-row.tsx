@@ -204,6 +204,14 @@ export type BrokeredAccount = {
   kind: BrokeredAccountKind;
   /** Leave for the vendor's consent screen. */
   connect: () => void;
+  /**
+   * The same, started by the page rather than by a press of Connect (`startConnect`). Where the app
+   * turns out to take a key after all, `keyInstead` is set rather than a refusal said, so the row
+   * opens the key form: nobody is asked to press Connect a second time.
+   */
+  connectOnArrival: () => void;
+  /** A connect started on arrival answered with a key form, not a sign-in. */
+  keyInstead: boolean;
   /** End the account at Composio, not only here. */
   disconnect: () => void;
   connecting: boolean;
@@ -463,6 +471,10 @@ export function useBrokeredAccount(input: {
    */
   const forgetRecheck = recheck.reset;
 
+  /* Whether the connect in flight was started on arrival: see `connectOnArrival`. */
+  const onArrival = useRef(false);
+  const [keyInstead, setKeyInstead] = useState(false);
+
   const connect = useMutation({
     ...connectAccountMutationOptions(returnTo, shared),
     onError: (thrown: Error) => report(thrown.message),
@@ -499,8 +511,16 @@ export function useBrokeredAccount(input: {
        * open the form, but a screen that quietly repaired a disagreement between the two lists
        * would leave nobody any reason to correct it — and the sentence names the one act that ends
        * the state, which is a reload against a deployment whose app has caught up.
+       *
+       * EXCEPT A CONNECT THE PAGE STARTED ITSELF: nobody pressed a sign-in button there, so the
+       * row opens the key form the app asked for (`keyInstead`) and there is nothing to report.
        */
       if (start === null) {
+        if (onArrival.current) {
+          onArrival.current = false;
+          setKeyInstead(true);
+          return;
+        }
         report(
           "This app connects with a key, not a sign-in page, so nothing was connected. Open this app again from Connections and press Connect.",
         );
@@ -762,8 +782,15 @@ export function useBrokeredAccount(input: {
     configured,
     connect: () => {
       report(null);
+      onArrival.current = false;
       connect.mutate(serverId);
     },
+    connectOnArrival: () => {
+      report(null);
+      onArrival.current = true;
+      connect.mutate(serverId);
+    },
+    keyInstead,
     connecting: connect.isPending,
     disconnect: () => {
       report(null);
@@ -1071,8 +1098,9 @@ export function BrokeredAccountRow({
   title,
 }: {
   /**
-   * Open the key form on arrival, once, for an app that takes a key and isn't connected: Browse
-   * apps sends somebody here straight after adding one. A sign-in app is started where it was added.
+   * Start connecting on arrival, once, for an app that isn't connected: the key form for an app that
+   * takes a key (Browse apps sends somebody here straight after adding one), the sign-in for one
+   * that signs in (the reconnect list's Reconnect).
    */
   startConnect?: boolean;
   /**
@@ -1160,14 +1188,21 @@ export function BrokeredAccountRow({
     if (account.fieldsSubmitted) setAsking(false);
   }, [account.fieldsSubmitted]);
 
-  /* The key form on arrival, when asked for: see `startConnect`. Once per visit. */
+  /*
+   * The connect on arrival, when asked for: see `startConnect`. Once per visit. The key form for an
+   * app that takes a key, the sign-in for one that signs in, nothing for one that needs no account.
+   */
   const started = useRef(false);
-  const { requestFields } = account;
+  const { requestFields, connectOnArrival } = account;
   useEffect(() => {
     if (!startConnect || started.current) return;
-    if (!account.configured || account.connected || account.kind !== "fields")
+    if (!account.configured || account.connected || account.kind === "no-auth")
       return;
     started.current = true;
+    if (account.kind === "consent") {
+      connectOnArrival();
+      return;
+    }
     setAsking(true);
     requestFields();
   }, [
@@ -1176,7 +1211,17 @@ export function BrokeredAccountRow({
     account.connected,
     account.kind,
     requestFields,
+    connectOnArrival,
   ]);
+  /* A sign-in started on arrival that turned out to want a key: the form, as for a key app. */
+  const { keyInstead } = account;
+  const keyOpened = useRef(false);
+  useEffect(() => {
+    if (!keyInstead || keyOpened.current) return;
+    keyOpened.current = true;
+    setAsking(true);
+    requestFields();
+  }, [keyInstead, requestFields]);
 
   /*
    * THE PERSON'S ACCOUNTS AT THE APP, BY NAME, once the row is connected. While the list is loading
