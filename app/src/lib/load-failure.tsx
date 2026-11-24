@@ -12,8 +12,9 @@
  * Only with `Retry-After`: a 503 without one is something that broke or isn't there (a proxy, a
  * service OpenBot depends on, "Service unavailable."), and the screen's own sentence says it better.
  *
- * Such a 503 is asked again once, by itself, after its `Retry-After` (query-client.ts), so the screen
- * fills in when OpenBot is back without the person doing anything.
+ * Such a 503 is asked again by itself after its `Retry-After`, and again after each refusal while the
+ * hold lasts (query-client.ts), so the screen fills in when OpenBot is back without the person doing
+ * anything.
  *
  * AND IT IS NOT DRAWN AS A FAILURE. The app keeps the destructive red for what failed or deletes. A
  * move or a brief outage is neither: it is temporary, and OpenBot is already waiting it out. So the
@@ -189,7 +190,8 @@ export function loadFailureText(
 
 /**
  * How long to wait before asking again, when the refusal is a 503 that said (`Retry-After`): the
- * read is then asked again once by itself after that long, and not retried at once before.
+ * read is then asked again by itself after that long, each time it is refused, and not retried at
+ * once before.
  */
 export function askAgainAfterMs(error: unknown): number | undefined {
   return error instanceof ClientError && error.status === 503
