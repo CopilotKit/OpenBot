@@ -22,6 +22,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { relativeTime } from "@/lib/relative-time";
 import type { ListedTask } from "@/lib/tasks/groups";
 import { taskLine } from "@/lib/tasks/line";
@@ -233,7 +234,11 @@ export function TaskRow({
           {canTryAgain({ ...task, status }) ? (
             <Button
               disabled={busy}
-              onClick={() => again.mutate(task.id)}
+              onClick={() => {
+                // Bots can't run until a card is added: the dialog says why, in place of a run.
+                if (stopIfNeedsCard()) return;
+                again.mutate(task.id);
+              }}
               size="sm"
             >
               {again.isPending ? "Starting…" : "Try again"}
@@ -424,7 +429,11 @@ export function TaskBoardRow({
         canTryAgain({ ...task, status }) ? (
           <Button
             disabled={busy}
-            onClick={() => again.mutate(task.id)}
+            onClick={() => {
+              // Bots can't run until a card is added: the dialog says why, in place of a run.
+              if (stopIfNeedsCard()) return;
+              again.mutate(task.id);
+            }}
             size="sm"
           >
             {again.isPending ? "Starting…" : "Try again"}

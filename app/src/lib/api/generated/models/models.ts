@@ -102,7 +102,7 @@ export const getGetModelCatalogueUrl = (
 };
 
 /**
- * Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot's model, the provider or a gateway in front of it, read in the background. They are narrowed only once an administrator turns on the model allowlist and allows at least one; an empty allowlist means every model. With view=all, every model listed before that narrowing, for an administrator choosing which to allow. When the listing can't be read, the catalogue holds the deployment's own model and nothing to pick.
+ * Return the models a person may pick for a conversation, with how hard each can think, the one a run uses when nobody picked, and who serves them. The models come from whatever serves OpenBot's model, the provider or a gateway in front of it, read in the background. They are narrowed for the caller in two ways. The organization's: only once an administrator turns on the model allowlist and allows at least one; an empty allowlist means every model. And the caller's teams': when any team they are in, or a team above one, lists models (getTeamModels), only the models one of those lists names, within what the organization allows. The default is then one of those when any can run, and nothing is left to pick when none can. With view=all, every model listed before either narrowing, for an administrator choosing which to allow. When the listing can't be read, the catalogue holds the deployment's own model and nothing to pick.
  * @summary Read the models Bots can run on
  */
 export const getModelCatalogue = async (

@@ -1,4 +1,5 @@
 import type { AppSetup } from "@/lib/api/generated/model";
+import { vendorNameOf } from "@/lib/apps/vendor-name";
 
 /**
  * The words an admin Plugins screen uses for the directory's ACTIVE service, and nothing of the
@@ -208,7 +209,7 @@ export function brokeredConnectionDescription(
     return "Each person connects their own account through OpenBot.";
   if (personal.kind === "no-auth")
     return `${capitalised(personal.title)} works through OpenBot without an account.`;
-  return `Connect your ${personal.title} account through OpenBot.`;
+  return `Connect your ${vendorNameOf(personal.title)} account through OpenBot.`;
 }
 
 /**
@@ -247,7 +248,7 @@ export function brokeredReach(
       kind === "consent"
         ? `You sign in to ${title} in your browser. OpenBot never sees your password.`
         : kind === "fields"
-          ? `You connect with a key from your ${title} account. Your Bots use it as you.`
+          ? `You connect with a key from your ${vendorNameOf(title)} account. Your Bots use it as you.`
           : "There's nothing to sign in to.",
     badge,
   };

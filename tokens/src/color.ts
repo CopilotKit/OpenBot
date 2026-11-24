@@ -20,13 +20,14 @@ export function parseOklch(color: string) {
   };
 }
 
-/** sRGB's transfer function, from a linear channel. */
+/**
+ * sRGB's transfer function, from a linear channel. The channel is clipped first: a color outside
+ * sRGB has a channel below 0, and a negative number to a fractional power is NaN.
+ */
 function encode(linear: number) {
-  const v =
-    Math.abs(linear) <= 0.0031308
-      ? 12.92 * linear
-      : 1.055 * linear ** (1 / 2.4) - 0.055;
-  return Math.round(Math.min(1, Math.max(0, v)) * 255);
+  const c = Math.min(1, Math.max(0, linear));
+  const v = c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055;
+  return Math.round(v * 255);
 }
 
 export function oklchToRgb(color: string): Rgb {

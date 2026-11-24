@@ -24,6 +24,7 @@ import {
   useBrokeredAccount,
 } from "@/components/plugins/brokered-account-row";
 import { GrantList } from "@/components/plugins/grant-list";
+import { KeyVersionOffer } from "@/components/plugins/key-version";
 import { RoutinesConnectionPage } from "@/components/routines/routines-connection-page";
 import { Button } from "@/components/ui/button";
 import {
@@ -54,6 +55,7 @@ import { useManagePaths } from "@/lib/manage-paths";
 import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
 import { useBackAfterConnect } from "@/lib/plugins/connect-return";
 import { useConnectionEnding } from "@/lib/plugins/connection-ending";
+import { signsInForDirectory } from "@/lib/plugins/directory-state";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
   directoryProvider,
@@ -158,7 +160,15 @@ function RouteComponent() {
   const personal =
     useQuery(deploymentCapabilitiesQueryOptions()).data?.edition === "personal";
   // Held for this visit, keyed on the app, and dropped from the address below.
-  const [arrival] = useState(() => ({ key, connect: connect === true }));
+  const [arrival, setArrival] = useState(() => ({
+    key,
+    connect: connect === true,
+  }));
+  /*
+   * Arriving at another app's page from this one (an app's page offering its key version opens that
+   * app's key form) keeps this component, so the arrival is read again for the new app.
+   */
+  if (arrival.key !== key) setArrival({ key, connect: connect === true });
   const startConnect = arrival.key === key && arrival.connect;
   const navigate = Route.useNavigate();
   useEffect(() => {
@@ -669,6 +679,15 @@ function AppConnectionPage({
             />
             {switchRow}
           </PageRows>
+          {/*
+           * The same app with its key, for an app the directory lists as a sign-in in place of its
+           * key, offered to somebody who may add apps: adding it here connects it, as Browse apps
+           * does from Connections.
+           */}
+          {signsInForDirectory(server) &&
+          (paths.edition === "personal" || isOrganizationAdmin(role)) ? (
+            <KeyVersionOffer appId={key} mode="connect" title={server.title} />
+          ) : null}
         </PageSection>
 
         {perActionGrants ? (

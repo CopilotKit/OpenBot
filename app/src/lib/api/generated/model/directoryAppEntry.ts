@@ -3,6 +3,7 @@
  */
 import type { DirectoryAppEntryConnectsWith } from "./directoryAppEntryConnectsWith";
 import type { DirectoryAppEntrySource } from "./directoryAppEntrySource";
+import type { DirectoryKeyVersion } from "./directoryKeyVersion";
 
 /**
  * An app from the wider app directory.
@@ -50,4 +51,5 @@ export interface DirectoryAppEntry {
   scopedActionCount: number | null;
   /** How a person connects the app once it is added. */
   connectsWith: DirectoryAppEntryConnectsWith;
+  keyVersion?: DirectoryKeyVersion;
 }

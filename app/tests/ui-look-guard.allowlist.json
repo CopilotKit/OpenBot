@@ -39,6 +39,9 @@
   "components/bot-profile/attention.tsx": {
     "text": 2
   },
+  "components/bot-profile/sharing.tsx": {
+    "cornerStep": 2
+  },
   "components/browser/browser-bar.tsx": {
     "corner": 1,
     "text": 1,
@@ -57,7 +60,8 @@
   },
   "components/channels/chat-transcript.tsx": {
     "cornerStep": 3,
-    "text": 1
+    "text": 1,
+    "darkColor": 1
   },
   "components/channels/coding-tool-cards.tsx": {
     "corner": 1,

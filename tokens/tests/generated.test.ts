@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { scheme as phone } from "../../mobile/src/scheme";
 import { oklchToHex, oklchToRgb } from "../src/color";
 import { fillRegions, generate } from "../src/generate";
 import { scheme, TOKENS } from "../src/scheme";
@@ -33,11 +34,51 @@ describe("the scheme", () => {
   });
 });
 
+describe("the phone app's copy", () => {
+  // The web app's own tokens, as its stylesheet declares them.
+  const web = (mode: "light" | "dark") => {
+    const css = readFileSync(join(root, "app/src/theme.css"), "utf8");
+    const block = mode === "light" ? /:root\s*{([^}]*)}/ : /\.dark\s*{([^}]*)}/;
+    const body = block.exec(css)?.[1] ?? "";
+    return (name: string) =>
+      new RegExp(`--${name}:\\s*([^;]+);`).exec(body)?.[1]?.trim();
+  };
+
+  test("every color is a hex React Native can draw", () => {
+    for (const mode of ["light", "dark"] as const) {
+      for (const name of TOKENS) {
+        expect(`${mode} ${name}: ${phone[mode][name]}`).toMatch(
+          /: #[0-9a-f]{6}([0-9a-f]{2})?$/,
+        );
+      }
+    }
+  });
+
+  test("warning is the web app's warning", () => {
+    for (const mode of ["light", "dark"] as const) {
+      const token = web(mode)("warning");
+      expect(token).toMatch(/^oklch\(/);
+      const drawn: string = phone[mode].warning;
+      expect(drawn).toBe(oklchToHex(token as string));
+    }
+    expect(phone.light.warning).toBe("#bb4d00");
+    expect(phone.dark.warning).toBe("#ffb900");
+  });
+});
+
 describe("oklch to hex", () => {
   test("white, black and a translucent color", () => {
     expect(oklchToHex("oklch(1 0 0)")).toBe("#ffffff");
     expect(oklchToHex("oklch(0 0 0)")).toBe("#000000");
     expect(oklchToHex("oklch(1 0 0 / 50%)")).toBe("#ffffff80");
+  });
+
+  // A channel outside sRGB clips to 0, never NaN: warning's blue was "#bb4dNaN" on the phone.
+  // Cross-checked with culori 4.0.2: clampRgb, then formatHex.
+  test("clips a channel outside sRGB", () => {
+    expect(oklchToHex("oklch(0.555 0.163 49)")).toBe("#bb4d00");
+    expect(oklchToHex("oklch(0.828 0.189 84.4)")).toBe("#ffb900");
+    expect(oklchToHex("oklch(0.792 0.121 16.4)")).toBe("#ff9aa0");
   });
 
   // The values OpenBot Desktop's first paint was drawn with before the scheme was generated.

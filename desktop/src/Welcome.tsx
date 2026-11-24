@@ -23,8 +23,11 @@ export const SELF_CONTAINED_SUMMARY =
 /** The way to OpenBot (Self-Contained) at the foot of the first screen, with OpenBot Cloud on. */
 export const SELF_CONTAINED_ASIDE = "Want everything to run on this computer?";
 
+/** How OpenBot Cloud starts for somebody new, said wherever it is offered. Never the number of runs. */
+export const CLOUD_TRIAL = "Free usage-based trial.";
+
 /** What the second choice is: OpenBot as we run it, signed in to from here and on the web. */
-export const CLOUD_SUMMARY = "Use OpenBot here. Your Bots run in our cloud.";
+export const CLOUD_SUMMARY = `Your Bots run in our cloud. ${CLOUD_TRIAL}`;
 
 /** OpenBot for Business: on a company's own cloud or on-prem, which books a demo. */
 export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a demo.";

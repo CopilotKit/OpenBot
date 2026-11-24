@@ -200,6 +200,7 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
   "team.member_added": "Add a person to a team",
   "team.member_role_changed": "Change a person's role in a team",
   "team.member_removed": "Remove a person from a team",
+  "team.models_changed": "Change a team's models",
   "audit.exported": "Export events",
   "audit.asked": "Ask the audit trail",
   "what_if.asked": "Ask what would happen",

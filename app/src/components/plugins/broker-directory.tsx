@@ -9,6 +9,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import type { ConnectInNewTab } from "@/components/plugins/connect-in-new-tab";
+import { KeyVersionLine } from "@/components/plugins/key-version";
 import { AppInitial, LOGO_TILE } from "@/components/plugins/plugin-logo";
 import {
   type DirectoryPressMode,
@@ -141,6 +142,26 @@ export function BrokerDirectory({
       servers: plugins.data,
       connections: connections.data?.connections,
     });
+
+  /*
+   * WHERE AN ADDED KEY VERSION'S PAGE IS, beside the sign-in it was offered under. Its key form opens
+   * on arrival while this person hasn't connected it, as Connect on a key app's own row does.
+   */
+  const keyVersionLink = (keyAppId: string | null): LinkOptions | null => {
+    if (keyAppId === null) return null;
+    if (!ownPages) return paths.plugin(keyAppId);
+    const keyState = directoryAppState(
+      { appId: keyAppId, connectsWith: "key" },
+      { servers: plugins.data, connections: connections.data?.connections },
+    );
+    return {
+      to: "/connections/$key",
+      params: { key: keyAppId },
+      ...(keyState.kind === "not_connected"
+        ? { search: { connect: true } }
+        : {}),
+    };
+  };
 
   const signedIn =
     signingIn !== null &&
@@ -276,6 +297,15 @@ export function BrokerDirectory({
                         {entry.appId !== null ? null : (
                           <BreadthNote app={entry} />
                         )}
+                        {entry.keyVersion ? (
+                          <KeyVersionLine
+                            keyVersion={entry.keyVersion}
+                            link={keyVersionLink(entry.keyVersion.appId)}
+                            mode={mode}
+                            onPress={() => press.pressKey(entry)}
+                            pending={press.addingKey.has(entry.id)}
+                          />
+                        ) : null}
                         {mine ? (
                           <SignInNote name={entry.title} tab={tab} />
                         ) : null}

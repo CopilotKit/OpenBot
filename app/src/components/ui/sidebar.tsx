@@ -5,6 +5,7 @@ import { useRender } from "@base-ui/react/use-render";
 import { IconLayoutSidebar } from "@tabler/icons-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
+import * as ReactDOM from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -356,6 +357,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
   const { toggleSidebar, state, isMobile } = useSidebar();
   const resize = React.useContext(SidebarResizeContext);
   const drag = React.useRef<{
+    panel: HTMLElement;
     startX: number;
     startWidth: number;
     min: number;
@@ -383,6 +385,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         const startWidth = panel.getBoundingClientRect().width;
         const min = narrowest(panel);
         drag.current = {
+          panel,
           startX: event.clientX,
           startWidth,
           min,
@@ -411,6 +414,16 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         drag.current = null;
         if (!current?.moved || !resize) return;
         dragged.current = true;
+        /*
+         * Drawn at the released width before the sidebar eases again. The last move's width may not
+         * be drawn yet (a busy window, or a browser handing over a held-back move just ahead of the
+         * release), and drawn together with the easing coming back, the sidebar eased the last few
+         * pixels after the pointer instead of being where it was let go. Reading the panel's box makes
+         * the browser lay it out at that width now, while it does not ease, so turning the easing back
+         * on leaves nothing to ease.
+         */
+        ReactDOM.flushSync(() => resize.setWidth(current.width));
+        current.panel.getBoundingClientRect();
         resize.setResizing(false);
         resize.commitWidth(current.width);
       }}

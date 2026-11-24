@@ -53,6 +53,7 @@ import {
   type ProactiveSetting,
   proactiveSettingsQueryOptions,
 } from "@/lib/proactive";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import {
@@ -218,9 +219,11 @@ export function CheckInPage({
             render={
               <button
                 disabled={!setting.enabled || !!blocked || change.isPending}
-                onClick={() =>
-                  change.mutate({ setting, change: { kind: "run" } })
-                }
+                onClick={() => {
+                  // Bots can't run until a card is added: the dialog says why, in place of a run.
+                  if (stopIfNeedsCard()) return;
+                  change.mutate({ setting, change: { kind: "run" } });
+                }}
                 type="button"
               />
             }

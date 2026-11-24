@@ -357,7 +357,9 @@ jobs:
       # screen with a Bot's page in a window of any width, the team screens and a Bot's
       # Publish dialog holding their layout wide, narrow and on a phone, the composer's model picker
       # naming every model whole on a phone, and the Admin screens
-      # where a rule or a grant names a team holding theirs wide and on a phone, an unticked
+      # where a rule or a grant names a team holding theirs wide and on a phone, an admin setting a
+      # team's models and a member reading them, wide and on a phone, a refused turn read as the
+      # app's notice with no rail beside a conversation that fits, an unticked
       # tickbox's edge standing 3:1 from what it is drawn on in light and dark, a Needs you row read
       # whole at a phone's width and a chat's with its answers on a line of their own, a Bot's maths
       # drawn as formulas in KaTeX's font with a wide one scrolling in its own block, a delegated
@@ -382,7 +384,7 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 \
             "$PLAYWRIGHT_IMAGE" \
-            bun test --parallel app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/compact-avatar-layout.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/model-picker-phone-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx app/tests/audit-computer-limit-layout.test.tsx app/tests/ai-connection-dialog.test.tsx app/tests/connect-your-ai.test.tsx app/tests/admin-providers-connection.test.tsx app/tests/admin-people-remove-layout.test.tsx
+            bun test --parallel app/tests/tool-line-reduced-motion.test.tsx app/tests/onboarding-window-buttons.test.tsx app/tests/onboarding-orb-room.test.tsx app/tests/transcript-rail-clearance.test.tsx app/tests/a2ui-frame.test.tsx app/tests/update-banner-layout.test.tsx app/tests/composer-dictation-notice-layout.test.tsx app/tests/conversation-intro-halo.test.tsx app/tests/transcript-room.test.tsx app/tests/skins-window-buttons.test.tsx app/tests/opendots-rail-badge.test.tsx app/tests/account-version-layout.test.tsx app/tests/organization-menu-names.test.tsx app/tests/bot-orb-one-color.test.tsx app/tests/compact-avatar-layout.test.tsx app/tests/theme-follows-system.test.tsx app/tests/desktop-window-theme.test.tsx app/tests/bot-screen-record-layout.test.tsx app/tests/teams-screens-layout.test.tsx app/tests/team-grants-screens-layout.test.tsx app/tests/team-models-screens-layout.test.tsx app/tests/conversation-refusal-layout.test.tsx app/tests/model-picker-phone-layout.test.tsx app/tests/needs-you-board-layout.test.tsx app/tests/checkbox-contrast.test.tsx app/tests/maths-rendering.test.tsx app/tests/task-report-chip.test.tsx app/tests/consent-handoff.test.tsx app/tests/large-picture-tile.test.tsx app/tests/audit-computer-limit-layout.test.tsx app/tests/ai-connection-dialog.test.tsx app/tests/connect-your-ai.test.tsx app/tests/admin-providers-connection.test.tsx app/tests/admin-people-remove-layout.test.tsx
 
   # Dictation in the Desktop window on a Mac whose recognizer has no English (United Kingdom) on
   # the device, in Chromium and in WebKit, the engine the Mac window draws with: it listens in the
@@ -407,7 +409,9 @@ jobs:
   # by loading the page once, else OpenBot's own error screen with Reload, the details and the log
   # folder. And a Bot's answer reading as stored after the person switches to another conversation
   # while it is written and comes back, in both engines. And the lists of people with a long name in
-  # them, whose words stay clear of the row's controls. In the image, as above: WebKit's
+  # them, whose words stay clear of the row's controls. And every list of people paging and
+  # searching on the server (Members, Invitations, Teams, a team's people), and each place a person
+  # is picked offering only the organization's own members. In the image, as above: WebKit's
   # system packages are about 94 MB, which took nine minutes from the mirror on a slow day.
   app-browser-webkit:
     name: app (real browser, WebKit)
@@ -431,7 +435,7 @@ jobs:
             --volume "$(command -v bun):/usr/local/bin/bun:ro" \
             --env OPENBOT_APP_BROWSER=1 --env OPENBOT_APP_ENGINES=chromium,webkit \
             "$PLAYWRIGHT_IMAGE" \
-            bun test app/tests/chunk-recovery.test.tsx app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx app/tests/move-to-cloud-settings.test.tsx app/tests/moved-elsewhere.test.tsx app/tests/home-no-answer.test.tsx app/tests/section-strip-routines.test.tsx app/tests/organization-members-remove.test.tsx app/tests/settings-tool-cards-admin-layout.test.tsx app/tests/settings-tool-cards-personal.test.tsx app/tests/settings-tool-cards-core.test.tsx app/tests/one-press-connect-layout.test.tsx app/tests/admin-notion-one-press-layout.test.tsx app/tests/team-connections-directory-layout.test.tsx app/tests/conversation-switch.test.tsx app/tests/member-rows-long-names.test.tsx
+            bun test app/tests/chunk-recovery.test.tsx app/tests/composer-dictation-language.test.tsx app/tests/sidebar-zoom-drag.test.tsx app/tests/service-terms.test.tsx app/tests/move-to-cloud-settings.test.tsx app/tests/moved-elsewhere.test.tsx app/tests/home-no-answer.test.tsx app/tests/section-strip-routines.test.tsx app/tests/organization-members-remove.test.tsx app/tests/settings-tool-cards-admin-layout.test.tsx app/tests/settings-tool-cards-personal.test.tsx app/tests/settings-tool-cards-core.test.tsx app/tests/one-press-connect-layout.test.tsx app/tests/admin-notion-one-press-layout.test.tsx app/tests/team-connections-directory-layout.test.tsx app/tests/conversation-switch.test.tsx app/tests/member-rows-long-names.test.tsx app/tests/people-lists.test.tsx
       # Connect your AI's sign-in code, copied with one press and read back from WebKit's clipboard.
       # Only that test: the rest of the file runs in Chromium in the job above.
       - run: |

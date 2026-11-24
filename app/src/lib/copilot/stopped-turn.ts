@@ -1,6 +1,7 @@
 import { type AbstractAgent, useAgent } from "@copilotkit/react-core/v2";
 import { useEffect, useState } from "react";
 import { botNoLongerUsable } from "@/lib/agents/queries";
+import { isPlanRequired, showCardNeeded } from "@/lib/plan/card-needed";
 
 /**
  * Why the last turn ended without an answer, for a surface that has to say so itself.
@@ -30,6 +31,7 @@ export function stoppedReason(reported: unknown): string {
       : typeof reported === "string"
         ? reported
         : "";
+  notePlanRefusal(reported, said);
   const refused = refusalForPerson(said);
   if (refused) return refused;
   const unreachable = backEndUnreachable(said);
@@ -130,8 +132,50 @@ export function laterRunFailure(reported: unknown): string | null {
  */
 const REST_REQUEST_FAILED = /^REST (\w+) request failed\b:?\s*/;
 
+/** The body of a REST failure the runtime's client reported, parsed, or null when there is none. */
+function refusedBody(said: string): unknown {
+  const match = REST_REQUEST_FAILED.exec(said.trim());
+  if (!match) return null;
+  try {
+    return JSON.parse(said.trim().slice(match[0].length));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A run refused for want of a plan opens the dialog that says why (`lib/plan/card-needed.ts`), on
+ * top of the sentence said under the turn, so a run no screen checked first still tells the person.
+ * Through Intelligence the refusal is the problem in the client's words; over the plain event stream
+ * the error keeps the response's status, 402.
+ */
+function notePlanRefusal(reported: unknown, said: string): void {
+  const status =
+    reported instanceof Error
+      ? (reported as Error & { status?: unknown }).status
+      : undefined;
+  const body = refusedBody(said);
+  if (isPlanRequired(body)) showCardNeeded(body);
+  else if (status === 402) showCardNeeded({});
+}
+
 /** Where OpenBot's own problems (RFC 9457) say what kind they are: `https://open.bot/errors/<code>`. */
 const OPENBOT_PROBLEM = "https://open.bot/errors/";
+
+/**
+ * Whether a run failed because OpenBot's server refused it for the person, on a rule they can't
+ * change by sending again (a model their teams don't allow, a switch an admin turned off, a card
+ * the organization needs): its own problem, with a sentence for them. See `refusalForPerson`.
+ */
+export function refusedForPerson(reported: unknown): boolean {
+  const said =
+    reported instanceof Error
+      ? reported.message
+      : typeof reported === "string"
+        ? reported
+        : "";
+  return refusalForPerson(said) !== null;
+}
 
 /**
  * The sentence OpenBot's server wrote for the person, when a REST failure is its refusal.
@@ -143,14 +187,7 @@ const OPENBOT_PROBLEM = "https://open.bot/errors/";
  * included, is not, and is still the backend failing.
  */
 function refusalForPerson(said: string): string | null {
-  const match = REST_REQUEST_FAILED.exec(said.trim());
-  if (!match) return null;
-  let body: unknown;
-  try {
-    body = JSON.parse(said.trim().slice(match[0].length));
-  } catch {
-    return null;
-  }
+  const body = refusedBody(said);
   if (!body || typeof body !== "object") return null;
   const { type, status, detail } = body as Record<string, unknown>;
   return typeof type === "string" &&
