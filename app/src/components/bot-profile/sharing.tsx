@@ -50,9 +50,11 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { countLabel } from "@/lib/agents/bot-summaries";
+import { publicSharingWords } from "@/lib/agents/public-words";
 import type { AgentProfile } from "@/lib/agents/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { useOrganizationAudience } from "@/lib/organizations/queries";
 import {
   assignTeamBotMutationOptions,
   publishTeamBotMutationOptions,
@@ -86,9 +88,12 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
   const teams = useQuery(teamListQueryOptions()).data?.teams;
   const me = useQuery(currentUserQueryOptions()).data;
   const unpublish = useMutation(unpublishTeamBotMutationOptions(queryClient));
+  const audience = useOrganizationAudience();
   const [copied, setCopied] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  if (data.isPending) return null;
+  // Who a public Bot reaches waits for whether the person is the organization's only member.
+  if (data.isPending || (agent.visibility === "public" && audience.pending))
+    return null;
   if (data.error) {
     return (
       <p className="mt-6 text-destructive text-sm" role="alert">
@@ -99,6 +104,7 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
   const published = data.data.find((bot) => bot.botId === agent.id);
   // A Bot is its owner's to publish, and one missing from the published list isn't published yet.
   const publishable = agent.mine && published === undefined;
+  const publicWords = publicSharingWords(audience);
 
   return (
     <>
@@ -168,26 +174,25 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
               </ItemActions>
             </Item>
           </PageRows>
+        ) : agent.visibility === "public" ? (
+          // Public: who can use it, said once. Never "not published" beside "public".
+          <PageEmpty icon={IconShare} title={publicWords.title}>
+            {publicWords.description}
+          </PageEmpty>
         ) : (
-          <PageEmpty
-            icon={IconShare}
-            title={
-              agent.visibility === "public"
-                ? "Not published to the organization"
-                : "Not published"
-            }
-          >
-            {agent.visibility === "public"
-              ? "It's public, so everyone on OpenBot can already use it."
-              : agent.mine
-                ? "Only you can use it."
-                : null}
+          <PageEmpty icon={IconShare} title="Not published">
+            {agent.mine ? "Only you can use it." : null}
           </PageEmpty>
         )}
       </PageSection>
       {agent.mine && (published || publishable) ? (
         <PageSection
-          description="Only the people and teams you publish it to can use it. You can unpublish at any time."
+          description={
+            // A public Bot is everyone's in the organization already: publishing it doesn't narrow that.
+            agent.visibility === "public"
+              ? "It's public already. Publish it to get a link to share."
+              : "Only the people and teams you publish it to can use it. You can unpublish at any time."
+          }
           title={published ? "Who it is published to" : "Publish"}
         >
           {/* More than one value (an audience, then people and teams), so a summary row and a
@@ -204,7 +209,9 @@ export function SharingSections({ agent }: { agent: AgentProfile }) {
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>Audience</ItemTitle>
-                <ItemDescription>{audienceSummary(published)}</ItemDescription>
+                <ItemDescription>
+                  {audienceSummary(published, agent.visibility === "public")}
+                </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <IconChevronRight className="size-4 text-muted-foreground" />
@@ -270,8 +277,13 @@ function publishedTo(
 }
 
 /** The current answer on the Audience row: who it is published to, as a count. */
-function audienceSummary(current: TeamBot | undefined): string {
-  if (!current) return "Not published";
+function audienceSummary(
+  current: TeamBot | undefined,
+  isPublic: boolean,
+): string {
+  // Never "not published" beside a public Bot, which everyone in the organization can use.
+  if (!current)
+    return isPublic ? "Choose who to publish it to" : "Not published";
   if (current.audience === "team") return EVERYONE_WORDS;
   const parts = [
     countLabel(current.people?.length ?? 0, "person", "people", ""),

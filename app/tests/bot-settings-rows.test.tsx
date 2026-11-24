@@ -182,8 +182,10 @@ test("the owner sees Sharing, and each row opens its own page", async () => {
   expect(view.getByText("Setup").closest("a")?.getAttribute("href")).toBe(
     "/bots/expenses/setup",
   );
-  // Public and unpublished: everyone can already use it.
-  expect(await view.findByText("Everyone (public)")).toBeTruthy();
+  // Public and unpublished: everyone in the organization can already use it.
+  expect(
+    await view.findByText("Everyone in the organization (public)"),
+  ).toBeTruthy();
 });
 
 test("someone who neither owns the Bot nor administers the deployment does not see Sharing", async () => {

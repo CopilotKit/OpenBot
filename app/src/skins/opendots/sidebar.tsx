@@ -164,7 +164,12 @@ export function latestChannelWith(
 /** The Bots a person can talk to, pinned and assigned first, then their own, then shared ones. */
 export function dotOrder(agents: readonly AgentProfile[]): AgentProfile[] {
   const roster = groupRoster(agents);
-  return [...roster.pinned, ...roster.yours, ...roster.shared];
+  return [
+    ...roster.pinned,
+    ...roster.yours,
+    ...roster.shared,
+    ...roster.included,
+  ];
 }
 
 function BotsSection({
