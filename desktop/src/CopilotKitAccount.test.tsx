@@ -79,6 +79,21 @@ async function startSigningIn() {
   );
 }
 
+test("checking keeps the heading outside the scrollable account interaction", async () => {
+  invokeHandler = async () => new Promise(() => {});
+  const screen = await startSigningIn();
+  const heading = screen.getByRole("heading", { name: "Your OpenBot account" });
+  const sheet = heading.closest(".sheet");
+  expect(sheet?.classList.contains("account-layout")).toBe(true);
+  expect(sheet?.classList.contains("setup-layout")).toBe(true);
+  expect(heading.closest(".setup-header-block")?.parentElement).toBe(sheet);
+  const status = screen.getByText("Checking your OpenBot account…");
+  expect(status.closest(".setup-body")?.parentElement).toBe(sheet);
+  expect(status.closest(".setup-content > .setup-panel")).not.toBeNull();
+  expect(!!sheet?.querySelector(".setup-panel > .row:empty")).toBe(false);
+  expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+});
+
 /** OpenBot's own engine check: a Docker short of disk is caught here, before Start fails on it. */
 test("an engine short of disk says how to raise it, and Try again checks again", async () => {
   invokeHandler = alreadySignedIn(async ({ command }) => {
@@ -373,6 +388,16 @@ test("Cancel stops the CLI's sign-in and goes back to the start of the step", as
   waitingSignIn();
   const screen = await startSigningIn();
   await screen.findByText(PAGE.userCode);
+  const panel = screen.getByText(PAGE.userCode).closest(".setup-panel");
+  expect(panel).not.toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Cancel" }).closest(".setup-panel"),
+  ).toBe(panel);
+  const explanation = screen.getByText(/Signing in gets your free license key/);
+  expect(explanation.nextElementSibling).toBe(panel);
+  expect(explanation.parentElement?.classList.contains("setup-content")).toBe(
+    true,
+  );
   await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
   expect(
@@ -385,6 +410,11 @@ test("Cancel stops the CLI's sign-in and goes back to the start of the step", as
       name: "Sign in for a free local license key",
     }),
   ).toBeTruthy();
+  expect(
+    screen
+      .getByRole("button", { name: "Sign in for a free local license key" })
+      .closest(".setup-panel"),
+  ).not.toBeNull();
   expect(screen.queryByText(PAGE.userCode)).toBeNull();
   // The stopped sign-in is not reported as a failure.
   await new Promise((settle) => setTimeout(settle, 50));

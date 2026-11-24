@@ -419,6 +419,174 @@ export function CopilotKitAccount({
             ? "The rest of the install starts after you sign in and accept the license agreement."
             : "The rest of the install starts after you accept the license agreement.",
   );
+  const header = (
+    <>
+      <h1>
+        {agreement
+          ? "Accept the license agreement"
+          : connecting
+            ? "Setting up your apps"
+            : appsFailed
+              ? "Connect your apps"
+              : refused
+                ? refused.switchEngine
+                  ? "Switch to Docker Desktop or Podman"
+                  : "Change this computer's setup"
+                : waitingForEngine
+                  ? "Setting up this computer"
+                  : checkingAccount
+                    ? "Your OpenBot account"
+                    : "Get your free license key"}
+      </h1>
+      {!checkingAccount && (
+        <p className="lede">
+          {agreement
+            ? // The organization and the agreement's version are the log's: on Windows F the
+              // lede ended "for CopilotKit🪁." and the link read "(developer-edition-2026-10-01-web)".
+              "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement."
+            : connecting || appsFailed
+              ? "OpenBot uses your account to set up apps like Gmail and Slack."
+              : refused
+                ? refused.said
+                : waitingForEngine
+                  ? SETTING_UP_ENGINE
+                  : LICENSE_KEY}
+        </p>
+      )}
+    </>
+  );
+  const explanation = (
+    <>
+      {/* Said where signing in is what the step is about, not once it is done. */}
+      {!agreement &&
+        !connecting &&
+        !appsFailed &&
+        !refused &&
+        !waitingForEngine &&
+        !checkingAccount && (
+          // What signing in does. Never "only gets the license key": once signed in, this step
+          // also sets up apps. Nothing broader, such as "no data leaves this computer": setup and
+          // usage telemetry, the AI provider and connected apps all reach the network.
+          <p className="footnote">{WHAT_SIGNING_IN_SENDS}</p>
+        )}
+    </>
+  );
+  const interaction = (
+    <>
+      {refused?.switchEngine && (
+        <ol className="blocker-steps">
+          <li>
+            Open Docker Desktop. To use Podman instead, quit the app you use now
+            and start Podman.
+          </li>
+          <li>
+            If Docker still uses the other app, run this in a terminal to switch
+            it to Docker Desktop:
+            <Command lines={["docker context use desktop-linux"]} />
+          </li>
+          <li>Choose Try again.</li>
+        </ol>
+      )}
+      {refused && !refused.switchEngine && (
+        <p className="footnote">Make the change, then choose Try again.</p>
+      )}
+      {/* The agreement waits on the engine. While it does, this says what Install is doing to bring
+          it up, as Install's own row says it. While Docker Desktop starts or a password prompt is
+          coming or up, it says what the person may have to do in that window, whatever the step
+          is at. Nobody is asked to click before a prompt: a closed one has its card, with Try
+          again. */}
+      {asking && <PodmanGoAhead asking={goAhead} />}
+      {pauseOffer && <PausePodman key={pauseOffer} offer={pauseOffer} />}
+      {/* Not while setup's failure is shown: the install that brings the engine up has stopped,
+          and a spinner saying it is coming waited forever under it. Its Try again starts it. */}
+      {waitingForEngine
+        ? !behind &&
+          !failure && (
+            <StatusLine>
+              {engine ?? handOff ?? "Preparing this computer…"}
+            </StatusLine>
+          )
+        : handOff && !behind && <StatusLine>{handOff}</StatusLine>}
+      {seen.at === "checking" && !handOff && !asking && (
+        <StatusLine>Checking your OpenBot account…</StatusLine>
+      )}
+      {seen.at === "signing-in" && (
+        <CopilotKitSignInWait
+          attempt={seen.attempt}
+          before="Checking your OpenBot account…"
+          waiting="Finish signing in to OpenBot in your browser…"
+          onPage={() => setSignInPage(true)}
+          onCancel={cancelSignIn}
+        />
+      )}
+      {seen.at === "apps" && <StatusLine>Connecting your apps…</StatusLine>}
+      {seen.at === "apps-failed" && (
+        <>
+          <InlineFailure problem={seen.problem} />
+          <p className="footnote">
+            You can continue without them. OpenBot tries again each time it
+            starts.
+          </p>
+        </>
+      )}
+      {agreement && (
+        <p className="footnote">
+          <ExternalLink href={agreement.url}>
+            Read the license agreement
+          </ExternalLink>
+        </p>
+      )}
+      {seen.at === "failed" && (
+        <p className="footnote inline-error">{seen.said}</p>
+      )}
+      {failure}
+    </>
+  );
+  const actions = (seen.at === "signed-out" ||
+    agreement ||
+    appsFailed ||
+    ((seen.at === "failed" || refused) && !failure)) && (
+    <div className="row">
+      {seen.at === "signed-out" && (
+        <button type="button" onClick={signIn}>
+          Sign in for a free local license key
+        </button>
+      )}
+      {agreement && (
+        <button type="button" onClick={() => connectApps(agreement.version)}>
+          Accept
+        </button>
+      )}
+      {seen.at === "apps-failed" && (
+        <>
+          <button type="button" onClick={() => connectApps(seen.version)}>
+            Connect apps
+          </button>
+          <button
+            type="button"
+            className="quiet"
+            onClick={() => finish(seen.version)}
+          >
+            Continue
+          </button>
+        </>
+      )}
+      {/* One Try again: setup's failure card has its own, which asks this again too. */}
+      {seen.at === "failed" && !failure && (
+        <button
+          type="button"
+          onClick={() => (seen.retry === "sign-in" ? signIn() : check())}
+        >
+          Try again
+        </button>
+      )}
+      {refused && !failure && (
+        <button type="button" onClick={check}>
+          Try again
+        </button>
+      )}
+    </div>
+  );
   return (
     <>
       {/* OpenBot is what is being set up, so its mark heads the sidebar here as on every step, and
@@ -439,166 +607,29 @@ export function CopilotKitAccount({
       >
         <Sections at="Account" />
       </SetupRail>
-      <div className="sheet">
-        <h1>
-          {agreement
-            ? "Accept the license agreement"
-            : connecting
-              ? "Setting up your apps"
-              : appsFailed
-                ? "Connect your apps"
-                : refused
-                  ? refused.switchEngine
-                    ? "Switch to Docker Desktop or Podman"
-                    : "Change this computer's setup"
-                  : waitingForEngine
-                    ? "Setting up this computer"
-                    : checkingAccount
-                      ? "Your OpenBot account"
-                      : "Get your free license key"}
-        </h1>
-        {!checkingAccount && (
-          <p className="lede">
-            {agreement
-              ? // The organization and the agreement's version are the log's: on Windows F the
-                // lede ended "for CopilotKit🪁." and the link read "(developer-edition-2026-10-01-web)".
-                "To run OpenBot on this computer, accept the OpenBot by CopilotKit license agreement."
-              : connecting || appsFailed
-                ? "OpenBot uses your account to set up apps like Gmail and Slack."
-                : refused
-                  ? refused.said
-                  : waitingForEngine
-                    ? SETTING_UP_ENGINE
-                    : LICENSE_KEY}
-          </p>
-        )}
-        {refused?.switchEngine && (
-          <ol className="blocker-steps">
-            <li>
-              Open Docker Desktop. To use Podman instead, quit the app you use
-              now and start Podman.
-            </li>
-            <li>
-              If Docker still uses the other app, run this in a terminal to
-              switch it to Docker Desktop:
-              <Command lines={["docker context use desktop-linux"]} />
-            </li>
-            <li>Choose Try again.</li>
-          </ol>
-        )}
-        {refused && !refused.switchEngine && (
-          <p className="footnote">Make the change, then choose Try again.</p>
-        )}
-        {/* Said where signing in is what the step is about, not once it is done. */}
-        {!agreement &&
-          !connecting &&
-          !appsFailed &&
-          !refused &&
-          !waitingForEngine &&
-          !checkingAccount && (
-            // What signing in does. Never "only gets the license key": once signed in, this step
-            // also sets up apps. Nothing broader, such as "no data leaves this computer": setup and
-            // usage telemetry, the AI provider and connected apps all reach the network.
-            <p className="footnote">{WHAT_SIGNING_IN_SENDS}</p>
-          )}
-
-        {/* The agreement waits on the engine. While it does, this says what Install is doing to bring
-          it up, as Install's own row says it. While Docker Desktop starts or a password prompt is
-          coming or up, it says what the person may have to do in that window, whatever the step
-          is at. Nobody is asked to click before a prompt: a closed one has its card, with Try
-          again. */}
-        {asking && <PodmanGoAhead asking={goAhead} />}
-        {pauseOffer && <PausePodman key={pauseOffer} offer={pauseOffer} />}
-        {/* Not while setup's failure is shown: the install that brings the engine up has stopped,
-          and a spinner saying it is coming waited forever under it. Its Try again starts it. */}
-        {waitingForEngine
-          ? !behind &&
-            !failure && (
-              <StatusLine>
-                {engine ?? handOff ?? "Preparing this computer…"}
-              </StatusLine>
-            )
-          : handOff && !behind && <StatusLine>{handOff}</StatusLine>}
-        {seen.at === "checking" && !handOff && !asking && (
-          <StatusLine>Checking your OpenBot account…</StatusLine>
-        )}
-        {seen.at === "signing-in" && (
-          <CopilotKitSignInWait
-            attempt={seen.attempt}
-            before="Checking your OpenBot account…"
-            waiting="Finish signing in to OpenBot in your browser…"
-            onPage={() => setSignInPage(true)}
-            onCancel={cancelSignIn}
-          />
-        )}
-        {seen.at === "apps" && <StatusLine>Connecting your apps…</StatusLine>}
-        {seen.at === "apps-failed" && (
+      <div
+        className={agreement ? "sheet" : "sheet setup-layout account-layout"}
+      >
+        {agreement ? (
           <>
-            <InlineFailure problem={seen.problem} />
-            <p className="footnote">
-              You can continue without them. OpenBot tries again each time it
-              starts.
-            </p>
+            {header}
+            {interaction}
+            <StepFooter>{actions}</StepFooter>
+          </>
+        ) : (
+          <>
+            <header className="setup-header-block">{header}</header>
+            <div className="setup-body">
+              <div className="setup-content">
+                {explanation}
+                <div className="setup-panel">
+                  {interaction}
+                  {actions}
+                </div>
+              </div>
+            </div>
           </>
         )}
-        {agreement && (
-          <p className="footnote">
-            <ExternalLink href={agreement.url}>
-              Read the license agreement
-            </ExternalLink>
-          </p>
-        )}
-        {seen.at === "failed" && (
-          <p className="footnote inline-error">{seen.said}</p>
-        )}
-        {failure}
-
-        {/* The step's actions and the background install, pinned in view (`StepFooter`). */}
-        <StepFooter>
-          <div className="row">
-            {seen.at === "signed-out" && (
-              <button type="button" onClick={signIn}>
-                Sign in for a free local license key
-              </button>
-            )}
-            {agreement && (
-              <button
-                type="button"
-                onClick={() => connectApps(agreement.version)}
-              >
-                Accept
-              </button>
-            )}
-            {seen.at === "apps-failed" && (
-              <>
-                <button type="button" onClick={() => connectApps(seen.version)}>
-                  Connect apps
-                </button>
-                <button
-                  type="button"
-                  className="quiet"
-                  onClick={() => finish(seen.version)}
-                >
-                  Continue
-                </button>
-              </>
-            )}
-            {/* One Try again: setup's failure card has its own, which asks this again too. */}
-            {seen.at === "failed" && !failure && (
-              <button
-                type="button"
-                onClick={() => (seen.retry === "sign-in" ? signIn() : check())}
-              >
-                Try again
-              </button>
-            )}
-            {refused && !failure && (
-              <button type="button" onClick={check}>
-                Try again
-              </button>
-            )}
-          </div>
-        </StepFooter>
       </div>
     </>
   );
