@@ -569,6 +569,21 @@ test("after a move, the same summary offers no second move", async () => {
 });
 
 /*
+ * One spinner at a time. The native side offers the move only while the disk is short
+ * (`Summary::move_to` is kept only in the short state), and starts no download while the disk
+ * moves (`early_downloads::moving`). So a download that starts drops the move's line with its
+ * offer: the line downloading and the move running never spin side by side.
+ */
+test("a download that starts ends the move's line: one spinner, the download's", async () => {
+  const view = await lineSaying(SHORT_ON_C);
+  await userEvent.click(view.getByRole("button", { name: MOVE_TO_F }));
+  expect(view.container.querySelectorAll(".step-spinner")).toHaveLength(1);
+  await said({ state: "downloading", bytes: 0, size: 2.9 * GB });
+  expect(view.queryByText("Moving OpenBot's storage to F:…")).toBeNull();
+  expect(view.container.querySelectorAll(".step-spinner")).toHaveLength(1);
+});
+
+/*
  * Install's own row spins beside the line when it runs with no download of its own (checking the
  * release, before the images): the line keeps its words and its bar, and does not spin as well.
  */

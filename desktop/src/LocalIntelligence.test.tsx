@@ -137,6 +137,8 @@ type Props = {
   installAgain?: () => Promise<boolean>;
   pollDelays?: number[];
   roomEveryMs?: number;
+  /** What Docker Desktop's window wants meanwhile (`handOffNow`), as the window passes it. */
+  handOff?: string | null;
 };
 
 /** The window's part: it holds the sequence, and a screen shows it. */
@@ -159,7 +161,11 @@ function Holder(props: Props) {
   return (
     <>
       {(props.prepare || props.status) && <LocalStatus sequence={sequence} />}
-      <LocalIntelligence sequence={sequence} offerStart />
+      <LocalIntelligence
+        sequence={sequence}
+        offerStart
+        handOff={props.handOff}
+      />
     </>
   );
 }
@@ -1841,6 +1847,30 @@ test("a setup paused for room on its drive says so calmly and carries on by itse
   expect(
     invokeCalls.filter((call) => call.command === "local_eval_room"),
   ).toHaveLength(2);
+});
+
+/*
+ * One spinner at a time. While the setup is paused for room no journey runs, so the hand-off to
+ * Docker Desktop's window is said in its own line, which spins. The paused row beside it is marked,
+ * not spun: it waits for room, not on work.
+ */
+test("a setup paused for room beside Docker Desktop's hand-off shows one spinner, the hand-off's", async () => {
+  invokeHandler = answers({
+    set_up_local_eval: [notStartedOnC],
+    local_eval_room: [shortOnC],
+    local_eval_download: [null],
+  });
+  // As `docker_desktop::HAND_OFF` says it.
+  const handOff =
+    "Docker Desktop is starting in its own window. If it asks you to accept its terms or sign in, do that there. OpenBot comes back when Docker is ready.";
+  const screen = view({ roomEveryMs: 60_000, handOff });
+  const setup = await screen.findByRole("listitem", { name: SETUP });
+  await waitFor(() =>
+    expect(within(setup).getByText("Step 1 of 4 · Paused")).toBeTruthy(),
+  );
+  const spinners = screen.container.querySelectorAll(".step-spinner");
+  expect(spinners).toHaveLength(1);
+  expect(spinners[0]?.closest(".status-line")?.textContent).toBe(handOff);
 });
 
 /** Try again looks at once, rather than at the next look. */
