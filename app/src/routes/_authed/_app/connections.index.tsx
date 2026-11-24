@@ -73,7 +73,7 @@ import {
   identityProvidersQueryOptions,
   linkedAccountsQueryOptions,
 } from "@/lib/identity/queries";
-import { loadFailure } from "@/lib/load-failure";
+import { failureSaid, loadFailure } from "@/lib/load-failure";
 import { keyedLookup } from "@/lib/lookup";
 import { useManagePaths } from "@/lib/manage-paths";
 import { useReturnToReconnectList } from "@/lib/moves/use-moved-apps";
@@ -612,12 +612,12 @@ function RouteComponent() {
       ) : null}
       {connectApp.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {connectApp.error}
+          {failureSaid(connectApp.error)}
         </p>
       ) : null}
       {press.error ? (
         <p className="mt-4 text-destructive text-sm" role="alert">
-          {press.error}
+          {failureSaid(press.error)}
         </p>
       ) : null}
       <SignInNote

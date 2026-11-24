@@ -12,23 +12,23 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { isOrganizationAdmin } from "@/lib/auth/roles";
-import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
-import { desktopShell } from "@/lib/desktop/shell";
 import {
   type AddServerByUrlOutcome,
   addServerByUrlMutationOptions,
 } from "@/lib/apps/mutations";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
+import { isOrganizationAdmin } from "@/lib/auth/roles";
+import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
+import { desktopShell } from "@/lib/desktop/shell";
 import { setEnterpriseSettingMutationOptions } from "@/lib/enterprise/mutations";
 import { enterpriseOverviewQueryOptions } from "@/lib/enterprise/queries";
+import { type Failure, failureOf, failureSaid } from "@/lib/load-failure";
 import {
   type AddServerFormValues,
   addServerFormSchema,
 } from "@/lib/plugins/form";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import { queryClient } from "@/query-client";
-import { failureSaid } from "@/lib/load-failure";
 
 type Refusal = Extract<AddServerByUrlOutcome, { added: false }>;
 
@@ -90,7 +90,11 @@ export function AddServerPage({
     } catch (thrown) {
       setSigningIn(null);
       // Added, and the sign-in could not start: its page says so and offers Connect again.
-      setRefusal({ added: false, error: (thrown as Error).message, serverId });
+      setRefusal({
+        added: false,
+        error: failureOf(thrown, "Couldn't connect that account."),
+        serverId,
+      });
       return;
     }
     if (!start || !("authorizationUrl" in start)) {
@@ -340,9 +344,12 @@ function RefusalNotice({
   busy: boolean;
   onApprove: () => void;
 }) {
-  const sentence =
+  const sentence: Failure =
     refusal.code === "needs-key" && !mayGiveKey
-      ? "This server needs a key, and only an admin can add one. Ask an admin to add it."
+      ? {
+          message:
+            "This server needs a key, and only an admin can add one. Ask an admin to add it.",
+        }
       : refusal.error;
   return (
     <div
@@ -350,7 +357,7 @@ function RefusalNotice({
       data-testid="add-server-refusal"
     >
       <p className="break-words text-destructive text-sm" role="alert">
-        {sentence}
+        {failureSaid(sentence)}
       </p>
       {refusal.code === "not-approved" && mayGiveKey ? (
         <Button

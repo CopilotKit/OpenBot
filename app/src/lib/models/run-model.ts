@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import type { AgentProfile } from "@/lib/agents/queries";
+import { failureToastType } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 import { canChoose, everyModel } from "./connections";
 import {
@@ -205,7 +206,8 @@ export function useConversationModel(
             toast.add({
               id: SAVE_FAILED_TOAST,
               title: error.message,
-              type: "error",
+              // OpenBot holding off for now is news, not a failure (lib/load-failure.tsx).
+              type: failureToastType(error),
             });
           },
         },

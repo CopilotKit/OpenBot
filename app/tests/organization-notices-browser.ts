@@ -19,9 +19,18 @@ import type { Browser, BrowserType, Page, Request } from "playwright-core";
 import { compile } from "tailwindcss";
 import { ListCheckInsResponse } from "@/lib/api/generated/check-ins/check-ins.zod";
 import { ListGoalsResponse } from "@/lib/api/generated/goals/goals.zod";
-import { ListOrganizationsResponse } from "@/lib/api/generated/organizations/organizations.zod";
+import {
+  ListOrganizationMembersResponse,
+  ListOrganizationsResponse,
+} from "@/lib/api/generated/organizations/organizations.zod";
 import { GetPreferencesResponse } from "@/lib/api/generated/people/people.zod";
 import { ListRoutinesResponse } from "@/lib/api/generated/routines/routines.zod";
+import {
+  GetTeamModelsResponse,
+  GetTeamResponse,
+  ListTeamMembersResponse,
+  ListTeamsResponse,
+} from "@/lib/api/generated/teams/teams.zod";
 import { personBody } from "./accounts-api";
 import { conversationPage, problemBody } from "./conversations-api";
 
@@ -115,6 +124,13 @@ export class FakeServer {
   holdSaid: string = MOVING;
   /** A hold that lasts this long from the first request it refuses, however long that takes to come. */
   private holdFromFirstRefusalMs: number | undefined;
+  /**
+   * Hold only what writes: every read about Northwind is answered, and a press (create a Bot, add
+   * somebody to a team) is refused with the hold, as it is when the move begins after the page opened.
+   */
+  holdWrites = false;
+  /** Each write asked of Northwind, as `METHOD /path`, in order. */
+  wrote: string[] = [];
 
   /** Hold Northwind from now, until `ms` after the first request the hold refuses. */
   holdFromFirstRefusal(ms: number): void {
@@ -162,7 +178,12 @@ export class FakeServer {
       };
     if (organization === NORTHWIND.id && this.removed === "403")
       return { status: 403, json: { error: LEFT_REFUSAL } };
-    if (organization === NORTHWIND.id && Date.now() < this.movingUntil) {
+    if (organization === NORTHWIND.id && method !== "GET")
+      this.wrote.push(`${method} ${rest}`);
+    if (
+      organization === NORTHWIND.id &&
+      (Date.now() < this.movingUntil || (this.holdWrites && method !== "GET"))
+    ) {
       if (this.holdFromFirstRefusalMs !== undefined) {
         this.movingUntil = Date.now() + this.holdFromFirstRefusalMs;
         this.holdFromFirstRefusalMs = undefined;
@@ -242,6 +263,43 @@ export class FakeServer {
           status: 200,
           json: { attention: [], lastPingId: null, nextCursor: null },
         };
+      // One team, which Dana may add people to, and one person in the organization to add.
+      case "/teams":
+        return {
+          status: 200,
+          json: ListTeamsResponse.parse({
+            teams: [TEAM],
+            canCreate: true,
+            nextCursor: null,
+          }),
+        };
+      case `/teams/${TEAM.id}`:
+        return { status: 200, json: GetTeamResponse.parse({ team: TEAM }) };
+      case `/teams/${TEAM.id}/members`:
+        return {
+          status: 200,
+          json: ListTeamMembersResponse.parse({
+            members: url.searchParams.get("search") ? [] : [TEAM_MEMBER],
+            nextCursor: null,
+          }),
+        };
+      case `/teams/${TEAM.id}/models`:
+        return {
+          status: 200,
+          json: GetTeamModelsResponse.parse({
+            models: null,
+            updatedBy: null,
+            updatedAt: null,
+          }),
+        };
+      case "/members":
+        return {
+          status: 200,
+          json: ListOrganizationMembersResponse.parse({
+            members: [PRIYA],
+            nextCursor: null,
+          }),
+        };
       default:
         return this.notFound();
     }
@@ -272,6 +330,43 @@ export class FakeServer {
     };
   }
 }
+
+/** Northwind's one team: Dana keeps it, so she may add people to it. */
+export const TEAM = {
+  id: "team_ops",
+  name: "Operations",
+  description: null,
+  parentTeamId: null,
+  source: "openbot" as const,
+  memberCount: 1,
+  role: "maintainer" as const,
+  canManage: true,
+  canMove: false,
+  canDelete: false,
+  createdAt: "2026-11-20T09:00:00.000Z",
+};
+
+const TEAM_MEMBER = {
+  id: "dana",
+  email: "dana@example.com",
+  name: "Dana Whitfield",
+  image: null,
+  role: "maintainer" as const,
+  isCaller: true,
+  joinedAt: "2026-11-20T09:00:00.000Z",
+};
+
+/** Somebody in Northwind who isn't in the team yet. */
+export const PRIYA = {
+  removable: true,
+  assignableRoles: [],
+  id: "priya",
+  email: "priya@example.com",
+  name: "Priya Shah",
+  image: null,
+  role: "member",
+  joinedAt: "2026-11-20T09:00:00.000Z",
+};
 
 const DEPLOYMENT = {
   generativeUi: true,

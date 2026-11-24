@@ -50,7 +50,7 @@ import {
 } from "@/lib/channels/queries";
 import { useOffersMemory } from "@/lib/deployment/queries";
 import { appConfig } from "@/lib/generated/application-config";
-import { loadFailure } from "@/lib/load-failure";
+import { type Failure, failureSaid, loadFailure } from "@/lib/load-failure";
 import { memoriesQueryOptions } from "@/lib/memory";
 import { isNavigationLink, useNavigationItems } from "@/lib/navigation";
 import { routinesQueryOptions } from "@/lib/routines/queries";
@@ -303,7 +303,7 @@ function ThreadRow({
   const navigate = useNavigate();
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
-  const [pinProblem, setPinProblem] = useState<string | null>(null);
+  const [pinProblem, setPinProblem] = useState<Failure | null>(null);
   const unread = isUnread(channel, open ? channel.id : undefined);
   const title = channel.summary || untitledLine(channel) || channel.name;
   const link: LinkProps =
@@ -353,7 +353,7 @@ function ThreadRow({
               setPinProblem(null);
               setPinned.mutate(
                 { channelId: channel.id, pinned: !channel.pinned },
-                { onError: (thrown) => setPinProblem(thrown.message) },
+                { onError: (thrown) => setPinProblem(thrown) },
               );
             }}
           >
@@ -371,7 +371,7 @@ function ThreadRow({
       </ContextMenu>
       {pinProblem ? (
         <p className="px-3 pb-1 text-[11px] text-destructive" role="alert">
-          {pinProblem}
+          {failureSaid(pinProblem)}
         </p>
       ) : null}
       <DeleteConversationDialog

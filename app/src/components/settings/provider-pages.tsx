@@ -52,6 +52,7 @@ import {
   personalAiConnectionQueryOptions,
 } from "@/lib/ai-connection/queries";
 import { desktopShell } from "@/lib/desktop/shell";
+import { failureSaid } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 import { AiModelSection } from "./ai-connection";
 import {
@@ -369,7 +370,7 @@ function ProviderDetails({
           </PageRows>
           {makeDefault.error ? (
             <p className="mt-3 text-destructive text-sm" role="alert">
-              {makeDefault.error.message}
+              {failureSaid(makeDefault.error)}
             </p>
           ) : null}
         </PageSection>
@@ -443,7 +444,7 @@ function ProviderDetails({
           </PageRows>
           {remove.error ? (
             <p className="mt-3 text-destructive text-sm" role="alert">
-              {remove.error.message}
+              {failureSaid(remove.error)}
             </p>
           ) : null}
         </PageSection>

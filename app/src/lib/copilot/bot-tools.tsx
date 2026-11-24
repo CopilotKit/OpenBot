@@ -116,7 +116,7 @@ export function BotTools() {
  * saw the roster as it was when the grant arrived, which was before it loaded, so a coworker named
  * like an existing one was never flagged.
  */
-function ProposedBotRender(props: {
+export function ProposedBotRender(props: {
   args: Partial<ProposedBot>;
   respond?: (result: unknown) => Promise<void>;
   result?: string;

@@ -75,6 +75,43 @@ export function failureSaid(
 }
 
 /**
+ * A failure kept to be drawn later through {@link failureSaid}: what a press that failed keeps in its
+ * state, in place of the words alone.
+ *
+ * A press (export the audit log, add someone to a team, create a Bot) used to keep only the error's
+ * words in its state and draw them in red later. The words alone can't say whether
+ * they were a hold's, so a move or a brief outage was drawn as a failure. Kept as one of these, the
+ * server's own refusal is kept whole and `failureSaid` draws it calmly; anything else draws as before.
+ */
+export type Failure = { readonly message: string };
+
+/**
+ * What a press keeps when it fails: the error itself, so `failureSaid` can tell a hold from a
+ * failure and draw the error's own words for a real one, or `otherwise` when what was thrown isn't
+ * an error with words of its own.
+ */
+export function failureOf(thrown: unknown, otherwise: string): Failure {
+  return thrown instanceof Error && thrown.message
+    ? thrown
+    : { message: otherwise };
+}
+
+/**
+ * What a press keeps when it fails and says so in its own sentence: the server's refusal, kept whole,
+ * when it is a hold (to be drawn calmly), and `own` for anything else.
+ */
+export function failureInstead(thrown: unknown, own: string): Failure {
+  return unavailableSaid(thrown) === undefined
+    ? { message: own }
+    : (thrown as ClientError);
+}
+
+/** A toast's type for `error`: a hold is told calmly, as news, and only a failure as an error. */
+export function failureToastType(error: unknown): "error" | "info" {
+  return unavailableSaid(error) === undefined ? "error" : "info";
+}
+
+/**
  * The same choice as {@link loadFailure}, as plain words, for a place that takes a string (a title,
  * a prop typed `string`). A place that draws it should draw a held 503 calmly too.
  */

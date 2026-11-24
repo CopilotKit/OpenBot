@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
 import { removePluginServerMutationOptions } from "@/lib/apps/mutations";
+import { type Failure, failureSaid } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 /**
@@ -39,10 +40,11 @@ export function OrganizationAppSwitch({
   title: string;
 }) {
   const navigate = useNavigate();
-  const [error, setError] = useState<string | null>(null);
+  // The error itself, not its words, so a hold is drawn calmly (lib/load-failure.tsx).
+  const [error, setError] = useState<Failure | null>(null);
   const remove = useMutation({
     ...removePluginServerMutationOptions(queryClient),
-    onError: (thrown: Error) => setError(thrown.message),
+    onError: (thrown: Error) => setError(thrown),
     onSuccess: async () => {
       await navigate({ to: "/connections" });
     },
@@ -68,7 +70,7 @@ export function OrganizationAppSwitch({
       {error ? (
         <ItemFooter>
           <p className="text-destructive text-sm" role="alert">
-            {error}
+            {failureSaid(error)}
           </p>
         </ItemFooter>
       ) : null}

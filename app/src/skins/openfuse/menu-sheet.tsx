@@ -203,10 +203,7 @@ export function MenuSheet({ onClose }: { onClose: () => void }) {
             >
               Sign out
             </FuseButton>
-            <ErrorNotice
-              error={signOut.error?.message}
-              held={unavailableSaid(signOut.error) !== undefined}
-            />
+            <ErrorNotice failure={signOut.error} />
           </>
         ) : null}
       </div>
@@ -320,10 +317,7 @@ function ConversationRow({
           Delete
         </FuseButton>
       </div>
-      <ErrorNotice
-        error={setPinned.error?.message}
-        held={unavailableSaid(setPinned.error) !== undefined}
-      />
+      <ErrorNotice failure={setPinned.error} />
       <DeleteConversationDialog
         channelId={channel.id}
         leave={channel.id === openId ? () => navigate({ to: "/" }) : undefined}
