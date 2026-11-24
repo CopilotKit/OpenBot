@@ -1,9 +1,4 @@
 {
-  "components/agents/agent-card.tsx": {
-    "cornerStep": 1,
-    "darkColor": 2,
-    "card": 2
-  },
   "components/agents/callback-token-panel.tsx": {
     "cornerStep": 1,
     "card": 1
@@ -41,9 +36,6 @@
   "components/bot-profile/attention.tsx": {
     "text": 2
   },
-  "components/bots/bot-roster.tsx": {
-    "text": 1
-  },
   "components/browser/browser-bar.tsx": {
     "corner": 1,
     "text": 1,
@@ -75,9 +67,6 @@
   },
   "components/channels/conversation-intro.tsx": {
     "text": 1
-  },
-  "components/channels/conversation-view.tsx": {
-    "cornerStep": 1
   },
   "components/channels/group-chat.tsx": {
     "cornerStep": 1
@@ -237,9 +226,6 @@
   "components/setup/setup-checklist.tsx": {
     "cornerStep": 1
   },
-  "components/tasks/task-details.tsx": {
-    "cornerStep": 1
-  },
   "components/tasks/task-row.tsx": {
     "cornerStep": 1
   },
@@ -264,9 +250,6 @@
   },
   "lib/copilot/generative-ui.ts": {
     "shadowStep": 1
-  },
-  "routes/_authed/_app/channel/new.tsx": {
-    "darkColor": 1
   },
   "routes/_authed/_app/connections.index.tsx": {
     "darkColor": 1,

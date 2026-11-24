@@ -214,6 +214,23 @@ const CLEAN = [
   "components/app-sidebar/bots-panel.tsx",
   "components/app-sidebar/channel.tsx",
   "components/app-sidebar/channel-item-content.tsx",
+  // The message box.
+  "components/channels/composer/composer.tsx",
+  // Home, and a Bot's tile on it and on Bots.
+  "routes/_authed/_app/index.tsx",
+  "components/agents/agent-card.tsx",
+  // Choosing a Bot for a new conversation.
+  "routes/_authed/_app/channel/new.tsx",
+  "components/channels/recipient-field.tsx",
+  "components/channels/conversation-view.tsx",
+  // A conversation.
+  "routes/_authed/_app/channel/$channelId.tsx",
+  "components/tasks/task-details.tsx",
+  // Bots.
+  "routes/_authed/_app/bots.index.tsx",
+  "components/bots/bot-roster.tsx",
+  // Settings.
+  "routes/_authed/settings/index.tsx",
 ];
 
 test("the files the look has been applied to keep every rule", () => {

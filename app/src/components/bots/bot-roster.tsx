@@ -240,7 +240,7 @@ function RosterRow({
       </ItemContent>
       <ItemActions>
         {waiting > 0 ? (
-          <span className="rounded-full bg-primary px-1.5 text-[11px] font-medium text-primary-foreground tabular-nums">
+          <span className="rounded-full bg-primary px-1.5 text-xs font-medium text-primary-foreground tabular-nums">
             {waiting}
           </span>
         ) : null}

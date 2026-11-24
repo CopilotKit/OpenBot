@@ -312,7 +312,7 @@ function NewConversation({ composition }: { composition: string }) {
         >
           <ComboboxChips
             ref={anchor}
-            className="flex-1 border-none bg-transparent! focus-within:ring-0 dark:bg-transparent!"
+            className="flex-1 border-none bg-transparent! focus-within:ring-0"
           >
             {selected.map((profile) => (
               <ComboboxChip

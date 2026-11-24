@@ -381,7 +381,7 @@ function RouteComponent() {
           {loading || capabilities.isPending ? (
             <>
               <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Skeleton className="mt-4 h-[140px]" />
+              <Skeleton className="mt-4 h-36" />
             </>
           ) : explore?.length ? (
             // Wins over `failed`: a failed background refetch does not clear TanStack Query's
@@ -404,7 +404,7 @@ function RouteComponent() {
                   </Link>
                 ) : null}
               </div>
-              <ul className="mt-4 grid min-h-[140px] grid-cols-1 content-start gap-3 sm:grid-cols-2">
+              <ul className="mt-4 grid min-h-36 grid-cols-1 content-start gap-3 sm:grid-cols-2">
                 {explore.slice(0, EXPLORE_SHOWN).map((agent) => (
                   <li className="min-w-0" key={agent.id}>
                     <Link search={{ agent: agent.id }} to="/channel/new">
@@ -425,7 +425,7 @@ function RouteComponent() {
             // working off that same, successfully loaded `agents`) proves.
             <>
               <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Empty className="mt-4 h-[140px] border border-dashed border-destructive">
+              <Empty className="mt-4 h-36 border border-dashed border-destructive">
                 <EmptyHeader>
                   <EmptyTitle className="text-destructive">
                     Couldn't load the Bots shared with you.
@@ -439,7 +439,7 @@ function RouteComponent() {
             // plain copy for both: an empty roster is a fact, not an error.
             <>
               <h2 className="font-semibold text-base">Explore Bots</h2>
-              <Empty className="mt-4 h-[140px] border border-dashed">
+              <Empty className="mt-4 h-36 border border-dashed">
                 <EmptyHeader>
                   <EmptyTitle className="text-muted-foreground">
                     Nobody has shared a Bot with you yet.
