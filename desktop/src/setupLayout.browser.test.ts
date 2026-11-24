@@ -4059,8 +4059,14 @@ describe.skipIf(!asked)("approved layout: account", () => {
             now.contentHeight + (width === 1000 ? 60 : 36) <=
             now.bodyHeight
           ) {
-            expect(Math.abs(now.centerOffset)).toBeLessThanOrEqual(1);
-            expect(now.contentTop - now.headerBottom).toBeGreaterThan(29);
+            if (width === 720) {
+              expect(
+                Math.abs(now.contentTop - now.bodyTop - 18),
+              ).toBeLessThanOrEqual(1);
+            } else {
+              expect(Math.abs(now.centerOffset)).toBeLessThanOrEqual(1);
+              expect(now.contentTop - now.headerBottom).toBeGreaterThan(29);
+            }
           } else {
             expect(now.bodyScroll).toBeGreaterThan(now.bodyClient);
           }
@@ -4257,6 +4263,299 @@ describe.skipIf(!asked)("approved layout: account", () => {
           await page
             .getByRole("heading", { name: "Connect your AI" })
             .waitFor();
+        } finally {
+          await page.close();
+        }
+      }, 30_000);
+    }
+  }
+});
+
+/** The approved agreement keeps the document, explanation, Read and Accept in one centered group. */
+describe.skipIf(!asked)("approved layout: agreement", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const) {
+    for (const colorScheme of ["dark", "light"] as const) {
+      test(`${width}x${height} ${colorScheme}: agreement is whole and centered`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        try {
+          await open(page, "#licence-installing");
+          await page
+            .getByRole("button", { name: "Install", exact: true })
+            .click();
+          await page
+            .getByRole("heading", { name: "Accept the license agreement" })
+            .waitFor();
+          await settled(page);
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/license-${width}-${colorScheme}.png`,
+            });
+          const geometry = await page.evaluate(() => {
+            const sheet =
+              document.querySelector<HTMLElement>(".account-layout")!;
+            const bodyElement =
+              sheet.querySelector<HTMLElement>(".setup-body")!;
+            const body = bodyElement.getBoundingClientRect();
+            const panel = sheet.querySelector<HTMLElement>(".agreement-panel")!;
+            const box = panel.getBoundingClientRect();
+            const heading = sheet
+              .querySelector<HTMLElement>("h1")!
+              .getBoundingClientRect();
+            const rail = document
+              .querySelector<HTMLElement>(".rail-title")!
+              .getBoundingClientRect();
+            const link = panel
+              .querySelector<HTMLAnchorElement>("a")!
+              .parentElement!.getBoundingClientRect();
+            const action = panel
+              .querySelector<HTMLButtonElement>("button")!
+              .getBoundingClientRect();
+            const icon = panel
+              .querySelector<SVGElement>("svg")
+              ?.getBoundingClientRect();
+            const explanation = panel
+              .querySelector<HTMLElement>("p")!
+              .getBoundingClientRect();
+            const children = [
+              ...panel.querySelectorAll<HTMLElement>("p, a, button, svg"),
+            ].map((element) => element.getBoundingClientRect());
+            return {
+              narrowTopOffset:
+                box.top -
+                body.top -
+                Number.parseFloat(getComputedStyle(bodyElement).paddingTop),
+              panelWidth: box.width,
+              horizontalCenterOffset:
+                (box.left + box.right - body.left - body.right) / 2,
+              contentWhole: children.every(
+                (child) =>
+                  child.left >= box.left &&
+                  child.right <= box.right &&
+                  child.top >= box.top &&
+                  child.bottom <= box.bottom,
+              ),
+              iconWidth: icon?.width,
+              iconHeight: icon?.height,
+              iconDecorative: panel
+                .querySelector<SVGElement>("svg")
+                ?.getAttribute("aria-hidden"),
+              iconVisibleBeforeExplanation:
+                !!icon &&
+                icon.width > 0 &&
+                icon.height > 0 &&
+                icon.bottom <= explanation.top,
+              explanationBeforeRead: explanation.bottom <= link.top,
+              pageWidth: document.documentElement.scrollWidth,
+              pageHeight: document.documentElement.scrollHeight,
+              headingOffset: heading.y - rail.y,
+              centerOffset: (box.top + box.bottom - body.top - body.bottom) / 2,
+              gap: action.top - link.bottom,
+              whole: box.top >= body.top && box.bottom <= body.bottom,
+              overflow: panel.scrollWidth > panel.clientWidth,
+              documentIcons: panel.querySelectorAll("svg").length,
+              explanationColor: getComputedStyle(
+                panel.querySelector<HTMLElement>("p")!,
+              ).color,
+              headingColor: getComputedStyle(
+                sheet.querySelector<HTMLElement>("h1")!,
+              ).color,
+            };
+          });
+          expect(geometry.pageWidth).toBeLessThanOrEqual(width);
+          expect(geometry.pageHeight).toBeLessThanOrEqual(height);
+          expect(Math.abs(geometry.headingOffset)).toBeLessThanOrEqual(1);
+          if (width === 720)
+            expect(Math.abs(geometry.narrowTopOffset)).toBeLessThanOrEqual(1);
+          else expect(Math.abs(geometry.centerOffset)).toBeLessThanOrEqual(1);
+          expect(geometry.gap).toBeCloseTo(24, 0);
+          expect(geometry.whole).toBe(true);
+          expect(geometry.overflow).toBe(false);
+          expect(geometry.panelWidth).toBeLessThanOrEqual(480);
+          expect(Math.abs(geometry.horizontalCenterOffset)).toBeLessThanOrEqual(
+            1,
+          );
+          expect(geometry.contentWhole).toBe(true);
+          expect(geometry.explanationBeforeRead).toBe(true);
+          const acceptY = (await page
+            .getByRole("button", { name: "Accept", exact: true })
+            .boundingBox())!.y;
+          for (const progress of [
+            {
+              step: "images",
+              ok: true,
+              running: true,
+              detail: "Downloading OpenBot.",
+              downloads: {
+                done: 1,
+                total: 5,
+                bytes: 300_000_000,
+                size: 1_100_000_000,
+                bytesPerSecond: 9_000_000,
+              },
+            },
+            {
+              step: "engine",
+              ok: true,
+              running: true,
+              elsewhere: true,
+              detail: DOCKER_STARTING,
+            },
+          ]) {
+            await emitProgress(page, progress);
+            await settled(page);
+            expect(
+              (await page
+                .getByRole("button", { name: "Accept", exact: true })
+                .boundingBox())!.y,
+            ).toBe(acceptY);
+          }
+          await page.evaluate(() =>
+            (globalThis.__fake!.finishInstall as () => void)(),
+          );
+          await page
+            .getByText(/The rest of the install starts after you accept/)
+            .waitFor();
+          await settled(page);
+          expect(
+            (await page
+              .getByRole("button", { name: "Accept", exact: true })
+              .boundingBox())!.y,
+          ).toBe(acceptY);
+          // Reading never consents: the native legal URL is opened and Accept keeps keyboard order.
+          await page.evaluate(() =>
+            document
+              .querySelector<HTMLAnchorElement>(".agreement-panel a")!
+              .focus(),
+          );
+          await page.keyboard.press("Enter");
+          expect(await page.evaluate(() => globalThis.__fake!.opened)).toEqual([
+            "https://copilotkit.ai/legal/developer-edition",
+          ]);
+          expect(
+            await page.evaluate(() =>
+              globalThis
+                .__workbench!.calls()
+                .some((call) => call.command === "connect_copilotkit_apps"),
+            ),
+          ).toBe(false);
+          await page.keyboard.press("Tab");
+          expect(
+            await page.evaluate(() => document.activeElement?.textContent),
+          ).toBe("Accept");
+          const reachable = async (selector: string) => {
+            const seen = await page.evaluate((selector) => {
+              const element = document.querySelector<HTMLElement>(selector)!;
+              element.scrollIntoView({ block: "nearest" });
+              element.focus();
+              const box = element.getBoundingClientRect();
+              const body = element
+                .closest(".setup-body")!
+                .getBoundingClientRect();
+              const hit = document.elementFromPoint(
+                box.x + box.width / 2,
+                box.y + box.height / 2,
+              );
+              return {
+                focused: document.activeElement === element,
+                hit: hit === element || element.contains(hit),
+                whole:
+                  box.top >= body.top - 1 &&
+                  box.bottom <= body.bottom + 1 &&
+                  box.left >= 0 &&
+                  box.right <= innerWidth,
+              };
+            }, selector);
+            expect(seen).toEqual({ focused: true, hit: true, whole: true });
+          };
+          await reachable(".agreement-panel button");
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("connect_copilotkit_apps", {
+              mode: "fail",
+              problem: {
+                said:
+                  "Connection failed. " +
+                  "Check your connection and organization settings before trying again. ".repeat(
+                    20,
+                  ),
+                detail: "Connection reset.",
+              },
+            }),
+          );
+          await page.keyboard.press("Enter");
+          await page
+            .getByRole("heading", { name: "Connect your apps" })
+            .waitFor();
+          await settled(page);
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/license-error-${width}-${colorScheme}.png`,
+            });
+          const recovery = await page.evaluate(() => {
+            const body = document.querySelector<HTMLElement>(
+              ".account-layout .setup-body",
+            )!;
+            return {
+              pageHeight: document.documentElement.scrollHeight,
+              pageWidth: document.documentElement.scrollWidth,
+              scrollable: body.scrollHeight > body.clientHeight,
+              bodyOverflow: body.scrollWidth > body.clientWidth,
+              headingY: document
+                .querySelector<HTMLElement>(".account-layout h1")!
+                .getBoundingClientRect().y,
+              railY: document
+                .querySelector<HTMLElement>(".rail-title")!
+                .getBoundingClientRect().y,
+            };
+          });
+          expect(recovery.pageHeight).toBeLessThanOrEqual(height);
+          expect(recovery.pageWidth).toBeLessThanOrEqual(width);
+          expect(recovery.bodyOverflow).toBe(false);
+          expect(recovery.scrollable).toBe(true);
+          expect(recovery.headingY).toBe(recovery.railY);
+          await reachable(".setup-panel .row button");
+          await page.keyboard.press("Tab");
+          expect(
+            await page.evaluate(() => document.activeElement?.textContent),
+          ).toBe("Continue");
+          await reachable(".setup-panel .row button.quiet");
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/license-recovery-${width}-${colorScheme}.png`,
+            });
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("connect_copilotkit_apps", {
+              mode: "value",
+              value: null,
+            }),
+          );
+          await page
+            .getByRole("button", { name: "Connect apps", exact: true })
+            .click();
+          await page
+            .getByRole("heading", { name: "Connect your AI" })
+            .waitFor();
+          expect(
+            await page.evaluate(
+              () =>
+                globalThis
+                  .__workbench!.calls()
+                  .filter((call) => call.command === "connect_copilotkit_apps")
+                  .length,
+            ),
+          ).toBe(2);
+          // Preserve the reference's visible document hierarchy; do not relax these for missing source styling.
+          expect(geometry.documentIcons).toBe(1);
+          expect(geometry.iconVisibleBeforeExplanation).toBe(true);
+          expect(geometry.iconWidth).toBe(28);
+          expect(geometry.iconHeight).toBe(28);
+          expect(geometry.iconDecorative).toBe("true");
+          expect(geometry.explanationColor).toBe(geometry.headingColor);
         } finally {
           await page.close();
         }
