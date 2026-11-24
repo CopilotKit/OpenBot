@@ -44,7 +44,8 @@ import { queryClient } from "@/query-client";
  * A GRANT IS READ-ONLY UNTIL SOMEBODY CHOOSES MORE. One press is not a decision about every action an
  * app offers — Gmail's include sending and deleting mail — so approving gives the Bot the app's
  * read-only actions and nothing else, and an app with none is refused with a sentence pointing at the
- * Bot's page. The row says so before the press, and links to that page where it can.
+ * Bot's page. The row says so before the press, and links to that page where it can. A request a
+ * Bot's card filed for actions it needs names them, and approving gives those and nothing else.
  *
  * REQUESTS, NOT CONNECTIONS. Each row names who asked, because they asked; nothing here says who has
  * connected what, which stays private to each person (see the note on `admin/plugins/$key.tsx`).
@@ -95,8 +96,13 @@ export function askedFor(request: AppAccessRequest): string {
       return request.agentId === null
         ? `Add ${request.appTitle} for everyone`
         : `Turn on ${request.appTitle} for ${bot}`;
-    case "grant":
+    case "grant": {
+      // Asked from a card a Bot that holds the app put up for actions it wasn't given.
+      const count = request.actions.length;
+      if (count > 0)
+        return `Give ${bot} ${count} more ${request.appTitle} ${count === 1 ? "action" : "actions"}`;
       return `Give ${request.appTitle} to ${bot}`;
+    }
     case "connect_shared":
       return `Connect the shared ${request.appTitle} account`;
   }
@@ -166,6 +172,9 @@ function AccessRequestRow({ request }: { request: AppAccessRequest }) {
  * What approving gives a Bot, for a request that grants one: the app's read-only actions, with the
  * rest chosen on the Bot's page under the app. Linked there for a grant, whose app is already on
  * and so has that page; an app still to be switched on has none until the press that switches it on.
+ *
+ * A request that names actions gives exactly those, listed by their own names: this is an admin's
+ * page, and the admin is deciding about those actions, not about the app.
  */
 function GrantNote({ request }: { request: AppAccessRequest }) {
   const paths = useManagePaths();
@@ -178,12 +187,30 @@ function GrantNote({ request }: { request: AppAccessRequest }) {
     ) : (
       where
     );
+  if (request.actions.length > 0)
+    return (
+      <>
+        Approving gives {bot} only {actionNames(request.actions)}. Choose any
+        others on {page}.
+      </>
+    );
   return (
     <>
       Approving gives {bot} only {request.appTitle}'s read-only actions. Choose
       any others on {page}.
     </>
   );
+}
+
+/** The actions' own names, without the app id each is written under: "A, B and C". */
+function actionNames(actions: readonly string[]): string {
+  const names = actions.map((action) => {
+    const slash = action.indexOf("/");
+    return slash < 0 ? action : action.slice(slash + 1);
+  });
+  return names.length > 1
+    ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+    : (names[0] ?? "");
 }
 
 /**

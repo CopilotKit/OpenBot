@@ -179,13 +179,19 @@ function disabledSentence(
  * - the three an administrator fixes — Request access, which files the request the server decides
  *   the kind of, and then Requested with a way to withdraw it. Pressed by an administrator, it would
  *   be a request to themselves, so they get the fix itself instead: see `AdminAction`.
+ *
+ * `actions` are the actions of the app a Bot that holds it needs and wasn't given, from a card the
+ * Bot put up for them (`AppAccessCard`, a `tools` prompt). Every press below then gives, or asks
+ * for, exactly those, where without them it gives the app's read-only actions.
  */
 export function AppAccessAction({
   agentId,
   access,
+  actions,
 }: {
   agentId: string;
   access: AppAccess;
+  actions?: string[];
 }) {
   /*
    * WHO IS LOOKING decides only which button is drawn, never what is allowed: the server answers
@@ -216,7 +222,14 @@ export function AppAccessAction({
    */
   return (
     <>
-      {appAccessButton({ access, agentId, personal, role: me?.role, tab })}
+      {appAccessButton({
+        access,
+        actions,
+        agentId,
+        personal,
+        role: me?.role,
+        tab,
+      })}
       {tab.consentStep}
     </>
   );
@@ -329,12 +342,14 @@ function signsInFirst(access: AppAccess): boolean {
 /** Which of the buttons below an app's state calls for, or nothing where it is ready. */
 function appAccessButton({
   access,
+  actions,
   agentId,
   personal,
   role,
   tab,
 }: {
   access: AppAccess;
+  actions: string[] | undefined;
   agentId: string;
   personal: boolean;
   role: string | null | undefined;
@@ -342,8 +357,13 @@ function appAccessButton({
 }) {
   if (access.state === "ready" || access.state === "shared_not_approved")
     return null;
+  /*
+   * The personal edition's Connect is for an app not turned on yet. Actions not given, of an app the
+   * Bot already holds, are the give itself, which the one person takes as an admin does.
+   */
   if (
     personal &&
+    !(actions && access.state === "not_granted") &&
     (access.state === "not_granted" ||
       (access.state === "disabled" &&
         (access.unavailable === null || access.unavailable === "absent")))
@@ -357,10 +377,24 @@ function appAccessButton({
     return <ConnectAction access={access} tab={tab} />;
   // Theirs to give, admin or not: an owner's grant keeps every call on the asker's own account.
   if (access.state === "owner_grantable")
-    return <OwnerGiveAction access={access} agentId={agentId} tab={tab} />;
+    return (
+      <OwnerGiveAction
+        access={access}
+        actions={actions}
+        agentId={agentId}
+        tab={tab}
+      />
+    );
   if (isOrganizationAdmin(role))
-    return <AdminAction agentId={agentId} access={access} tab={tab} />;
-  return <RequestAction agentId={agentId} access={access} />;
+    return (
+      <AdminAction
+        access={access}
+        actions={actions}
+        agentId={agentId}
+        tab={tab}
+      />
+    );
+  return <RequestAction access={access} actions={actions} agentId={agentId} />;
 }
 
 /**
@@ -384,14 +418,21 @@ function appAccessButton({
  * nobody connected all need something only typed or consented to on the app's admin page. That page
  * opens in a new tab so the conversation stays where it is, and the card reads the app again when
  * this tab has the focus back.
+ *
+ * NAMED ACTIONS ARE GIVEN AS NAMED. With `actions` the press gives exactly those, and never waits
+ * for a sign-in first: the actions are already known, so there is no list to wait for. A sign-in
+ * the admin still owes comes after, as above, and an app they have already connected is given with
+ * no tab opened at all.
  */
 function AdminAction({
   agentId,
   access,
+  actions,
   tab,
 }: {
   agentId: string;
   access: AppAccess;
+  actions: string[] | undefined;
   tab: ConnectInNewTab;
 }) {
   const paths = useManagePaths();
@@ -421,7 +462,7 @@ function AdminAction({
     stopWaiting();
     // Its tools are listed now, so this press gives them. A refusal is drawn from `approve.error`.
     approve
-      .mutateAsync({ agentId, app: access.key })
+      .mutateAsync({ agentId, app: access.key, actions })
       .then(() => queryClient.invalidateQueries())
       .catch(() => queryClient.invalidateQueries());
   }, [signedIn, access.state]);
@@ -472,15 +513,16 @@ function AdminAction({
           disabled={approve.isPending || tab.pending}
           onClick={() => {
             approve.reset();
-            pending.current = signsInFirst(access);
+            pending.current = !actions && signsInFirst(access);
             /*
              * Awaited, not given callbacks: turning it on refetches this app and can swap this
              * button for another, and TanStack Query drops a `mutate()` callback once nothing is
              * listening. A refusal is drawn from `approve.error`.
              */
             const turnOn = () =>
-              approve.mutateAsync({ agentId, app: access.key });
-            if (access.connect === "key")
+              approve.mutateAsync({ agentId, app: access.key, actions });
+            // Named actions with no sign-in owed: given, and no tab is claimed only to be closed.
+            if (access.connect === "key" || (actions && !signsInFirst(access)))
               connectOnceOn.withoutTab(access.key, turnOn);
             else connectOnceOn.claimingTab(access.key, turnOn);
           }}
@@ -552,14 +594,18 @@ function AdminAction({
  *
  * AND THEN THE TASK CARRIES ON. Every query is read again once the app is given, so the card sees the
  * app ready and carries the conversation on (`lib/copilot/carry-on.ts`).
+ *
+ * With `actions`, the press gives exactly those, for a Bot that holds the app and needs them too.
  */
 function OwnerGiveAction({
   agentId,
   access,
+  actions,
   tab,
 }: {
   agentId: string;
   access: AppAccess;
+  actions: string[] | undefined;
   tab: ConnectInNewTab;
 }) {
   const bot = useQuery(agentQueryOptions(agentId)).data?.name ?? "this Bot";
@@ -571,7 +617,7 @@ function OwnerGiveAction({
 
   const giveNow = () =>
     give.mutate(
-      { agentId, app: access.key },
+      { agentId, app: access.key, actions },
       { onSuccess: () => void queryClient.invalidateQueries() },
     );
 
@@ -895,13 +941,18 @@ function ConnectAction({
   );
 }
 
-/** A step only an administrator can take: ask for it, and withdraw the ask. */
+/**
+ * A step only an administrator can take: ask for it, and withdraw the ask. With `actions`, the
+ * request asks for exactly those, and approving it gives them.
+ */
 function RequestAction({
   agentId,
   access,
+  actions,
 }: {
   agentId: string;
   access: AppAccess;
+  actions: string[] | undefined;
 }) {
   const request = useMutation(requestAppAccessMutationOptions(queryClient));
   const cancel = useMutation(
@@ -981,7 +1032,7 @@ function RequestAction({
           onClick={() => {
             cancel.reset();
             pressed.current = true;
-            request.mutate({ agentId, app: access.key }, refocus);
+            request.mutate({ agentId, app: access.key, actions }, refocus);
           }}
           ref={control}
           size="sm"
