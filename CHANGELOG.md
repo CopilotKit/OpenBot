@@ -399,6 +399,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   absent in every other state.
 - The introduction and the descriptions of `createOrganization`, `revokePersonAccess` and
   `restorePersonAccess` no longer say everybody has an organization of their own.
+- **A free allowance of runs on an organization's plan.** `OrganizationPlan.status` can be `free`:
+  the organization isn't on the plan and the person reading has free runs left. `none` still means
+  a card is needed. `freeRunsUsedPercent` (0 to 100) says how much of the reading person's own
+  allowance is used, while a plan is required and the organization is neither `active` nor
+  `trialing`. `freeRunsAllowance`, the allowance's size, is sent only once it is used up. Both are
+  optional. 402 `PLAN_REQUIRED` is now declared on every operation that starts a run: `runRoutine`,
+  `runCheckIn`, `startCheckInItem`, `workOnCheckInItem`, `runGoal`, `startVoiceCall` and
+  `retryTask`, besides `sendConversationMessage`. The plan's descriptions no longer say 30-day trial.
 
 ### Kubernetes
 
