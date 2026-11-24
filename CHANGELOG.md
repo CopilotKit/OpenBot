@@ -275,7 +275,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   list), never swapped for another.
 - **The model catalogue offers only what can run.** With Only allowed models on, the
   organization's default model is offered only when it is on the list; otherwise the default is
-  the newest allowed model. Before, it was offered and every run on it was refused.
+  the newest allowed model. Before, it was offered and every run on it was refused. A model a
+  person or a Bot chose that the organization's allowlist leaves out is refused before the run
+  too, never swapped for the default.
+- **Refused turns stay in the conversation.** `listRefusedTurns`
+  (`conversations/{conversationId}/refused-turns`) lists the caller's turns refused before they
+  ran (a model they may not run, a permission they lack, no plan), with the message each was for,
+  where it came in the thread (`afterMessageId`) and the refusal's code and words, so a reopened
+  conversation still shows them. Nothing of a refused turn reaches the thread itself.
 - **Search invitations, teams and a team's people.** `listOrganizationInvitations`, `listTeams`
   and `listTeamMembers` take an optional `search`, which narrows each list to the invitations
   whose address holds it, the teams whose name holds it, or the people whose name or address holds

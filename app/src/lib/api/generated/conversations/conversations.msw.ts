@@ -19,6 +19,7 @@ import type {
   ConversationThread,
   ConversationThreadStatus,
   CreateConversationRequest,
+  RefusedTurnPage,
   RouteMessageRequest,
   RoutedMessage,
   SendConversationMessageRequest,
@@ -149,6 +150,25 @@ export const getListConversationMessagesResponseMock =
 
 export const getSendConversationMessageResponseMock =
   (): SentConversationMessage => ({ id: "m1", queued: true });
+
+export const getListRefusedTurnsResponseMock = (): RefusedTurnPage => ({
+  refusedTurns: [
+    {
+      id: "6f1c2b7e-3a4d-4e9b-8c21-5d0a9e7f4b13",
+      botId: "research-assistant",
+      threadId: "thread_9k2m",
+      afterMessageId: "msg_7d1e",
+      message: { id: "msg_8a2f", text: "Summarize the Q3 pipeline." },
+      initiator: "person",
+      code: "MODEL_NOT_ALLOWED",
+      detail:
+        "This Bot uses GPT-4.1, which your team's models don't include. Ask an admin to change your team's models.",
+      model: "openai/gpt-4.1",
+      createdAt: "2026-11-23T16:20:05.000Z",
+    },
+  ],
+  nextCursor: null,
+});
 
 export const getUploadConversationAttachmentResponseMock = (): Attachment => ({
   id: "0b1c6f0e-7f0e-4c1e-9d55-2f4a8c1b6e21",
@@ -686,6 +706,39 @@ export const getSendConversationMessageMockHandler = (
   );
 };
 
+export const getListRefusedTurnsMockHandler = (
+  overrideResponse?:
+    | RefusedTurnPage
+    | ((
+        info: Parameters<
+          HttpResponseResolver<{
+            organizationId: string;
+            conversationId: string;
+          }>
+        >[0],
+      ) => Promise<RefusedTurnPage> | RefusedTurnPage),
+  options?: RequestHandlerOptions,
+) => {
+  return http.get<{ organizationId: string; conversationId: string }>(
+    "*/api/v2/organizations/:organizationId/conversations/:conversationId/refused-turns",
+    async (
+      info: Parameters<
+        HttpResponseResolver<{ organizationId: string; conversationId: string }>
+      >[0],
+    ) => {
+      return HttpResponse.json(
+        overrideResponse !== undefined
+          ? typeof overrideResponse === "function"
+            ? await overrideResponse(info)
+            : overrideResponse
+          : getListRefusedTurnsResponseMock(),
+        { status: 200 },
+      );
+    },
+    options,
+  );
+};
+
 export const getUploadConversationAttachmentMockHandler = (
   overrideResponse?:
     | Attachment
@@ -880,6 +933,7 @@ export const getConversationsMock = () => [
   getRemoveConversationMemberMockHandler(),
   getListConversationMessagesMockHandler(),
   getSendConversationMessageMockHandler(),
+  getListRefusedTurnsMockHandler(),
   getUploadConversationAttachmentMockHandler(),
   getGetAttachmentMockHandler(),
   getDeleteAttachmentMockHandler(),

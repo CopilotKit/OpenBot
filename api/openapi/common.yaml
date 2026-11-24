@@ -201,6 +201,7 @@ paths:
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/members: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1members' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/members/{memberId}: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1members~1{memberId}' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/messages: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1messages' }
+  /api/v2/organizations/{organizationId}/conversations/{conversationId}/refused-turns: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1refused-turns' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/attachments: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1attachments' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/voice-calls: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1voice-calls' }
   /api/v2/organizations/{organizationId}/conversations/{conversationId}/voice-sessions: { $ref: './conversations.yaml#/paths/~1api~1v2~1organizations~1{organizationId}~1conversations~1{conversationId}~1voice-sessions' }
