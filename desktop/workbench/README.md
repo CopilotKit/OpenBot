@@ -611,7 +611,10 @@ Run these commands in the `desktop` folder:
 ```sh
 bun test workbench src/fakeNative
 bun run typecheck
+bun run typecheck:workbench
 ```
+
+`bun run typecheck` checks the desktop without the workbench. The desktop's build jobs install only the `desktop` folder, and the workbench uses the app's components, whose packages only the `app` folder installs. `bun run typecheck:workbench` checks the workbench with `workbench/tsconfig.json`, which maps `@/` to `app/src`. CI runs it in the static job, where both folders are installed. `workbench/desktopOnlyInstall.test.ts` fails if the desktop's typecheck or its test preloads need the app's packages.
 
 Run these commands in the `app` folder:
 

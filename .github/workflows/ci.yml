@@ -100,6 +100,13 @@ jobs:
       - run: bun run format:check
       - run: bun run lint
       - run: bun run typecheck
+      # The desktop workbench draws with the app's components, so its types are checked here, where
+      # app/ is installed too, and not by the desktop's own typecheck: the desktop's build jobs
+      # install only desktop/ (desktop/workbench/desktopOnlyInstall.test.ts).
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - run: bun run typecheck:workbench
+        working-directory: desktop
       - name: Desktop version tracks the release version
         run: bun desktop/scripts/desktop-version.ts check
       # What each recorded OpenBot Desktop launch hands Compose, read with this tree's

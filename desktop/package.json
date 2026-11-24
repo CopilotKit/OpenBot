@@ -11,6 +11,7 @@
     "workbench:check": "bun workbench/shot.ts --all --check --out workbench-shots/check",
     "workbench:import": "bun workbench/importLog.ts",
     "typecheck": "tsc --noEmit",
+    "typecheck:workbench": "tsc --noEmit -p workbench",
     "tauri": "tauri"
   },
   "dependencies": {
