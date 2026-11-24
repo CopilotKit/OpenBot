@@ -38,6 +38,7 @@ import type {
   ImportVerification,
   InvalidRequestResponse,
   ListImportsParams,
+  MoveNotAllowedResponse,
   MoveUnavailableResponse,
   PayloadTooLargeResponse,
   RangeNotSatisfiableResponse,
@@ -1029,6 +1030,10 @@ export const getCreateImportUrl = (organizationId: string) => {
  * Start an import of what the caller is moving from an OpenBot on their own computer into this organization, the caller's own organization by default. Everything imported belongs to the caller, in this organization only. The answer carries recipientKey, a public key made for this import alone: pass it to createExport, and a model key in the bundle is sealed to it, readable only by this import. The answer also says how big a bundle and a part may be. Then upload the export's parts with uploadImportPart and apply them with applyImport.
  *
  * Importing is safe to repeat: an import of the same OpenBot into the same organization (an export made again, or a new import after a dropped one) adds only what isn't here yet and duplicates nothing. Served only by OpenBot Cloud; elsewhere it answers 404 with the code MOVE_UNAVAILABLE. A person starts at most 10 imports a day.
+ *
+ * With fromOrganizationId, the import moves what the caller has in another of their organizations into this one, and OpenBot Cloud packs it up there itself: no part is uploaded, the import answers ready, and applyImport starts it. See ImportInput.
+ *
+ * Moving in follows this organization's own rules: a caller it doesn't let use Bots is answered 403 with the code MOVE_NOT_ALLOWED before anything moves. The caller's list of organizations says this ahead of time (Organization.canMoveIn).
  * @summary Start importing a bundle into this organization
  */
 export const createImport = async (
@@ -1076,6 +1081,7 @@ export const getCreateImportMutationOptions = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
+    | MoveNotAllowedResponse
     | MoveUnavailableResponse
     | IdempotencyConflictResponse
     | TooManyMovesResponse
@@ -1124,6 +1130,7 @@ export type CreateImportMutationBody = ImportInput | undefined;
 export type CreateImportMutationError =
   | InvalidRequestResponse
   | UnauthenticatedResponse
+  | MoveNotAllowedResponse
   | MoveUnavailableResponse
   | IdempotencyConflictResponse
   | TooManyMovesResponse
@@ -1142,6 +1149,7 @@ export const useCreateImport = <
   TError =
     | InvalidRequestResponse
     | UnauthenticatedResponse
+    | MoveNotAllowedResponse
     | MoveUnavailableResponse
     | IdempotencyConflictResponse
     | TooManyMovesResponse
@@ -1746,6 +1754,8 @@ export const getApplyImportUrl = (organizationId: string, importId: string) => {
  * Once every part has arrived, import the bundle into this organization in the background: every id is given a new one here, everything is owned by the caller, and nothing reaches another organization. Every file is stored where a file uploaded here is, in this organization's own place in OpenBot's file store, and the uploaded parts are removed once the import is done. Read getImport until status is imported or failed. Applying again while it runs, or after it finished, changes nothing and answers where it stands; applying a failed import tries again from where it stopped, and nothing already imported is imported twice. A missing part answers 409 with IMPORT_INCOMPLETE.
  *
  * What OpenBot Cloud doesn't have comes in differently, and the summary says so in notes: a Bot that ran on its own isolated computer comes in as an ordinary Bot; a feature that needs the Business plan, in an organization that isn't on it, is left out. A model key in the bundle becomes the caller's own AI connection, unless they have one here already, which is kept.
+ *
+ * For a move from another organization (fromOrganizationId), applying packs up what the caller has there, imports it here and checks it here as getImportVerification does. Only once that check says everything arrived is it removed from the other organization, and only then is the import imported. A check that doesn't match leaves the other organization as it was, and the import failed: applying again goes on from there and adds nothing twice.
  * @summary Import the uploaded bundle
  */
 export const applyImport = async (
