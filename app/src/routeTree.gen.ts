@@ -100,6 +100,7 @@ import { Route as AuthedAdminPluginsIndexRouteImport } from './routes/_authed/ad
 import { Route as AuthedAdminPluginsKeyRouteImport } from './routes/_authed/admin/plugins/$key'
 import { Route as AuthedAdminPluginsArcadeRouteImport } from './routes/_authed/admin/plugins/arcade'
 import { Route as AuthedAdminPluginsComposioRouteImport } from './routes/_authed/admin/plugins/composio'
+import { Route as AuthedAdminPluginsNewRouteImport } from './routes/_authed/admin/plugins/new'
 import { Route as AuthedAdminSkillsSlugRouteImport } from './routes/_authed/admin/skills_.$slug'
 import { Route as AuthedAdminSkillsNewRouteImport } from './routes/_authed/admin/skills_.new'
 import { Route as AuthedAdminTeamsTeamIdRouteImport } from './routes/_authed/admin/teams_.$teamId'
@@ -613,6 +614,11 @@ const AuthedAdminPluginsComposioRoute =
     path: '/plugins/composio',
     getParentRoute: () => AuthedAdminRouteRoute,
   } as any)
+const AuthedAdminPluginsNewRoute = AuthedAdminPluginsNewRouteImport.update({
+  id: '/plugins/new',
+  path: '/plugins/new',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
 const AuthedAdminSkillsSlugRoute = AuthedAdminSkillsSlugRouteImport.update({
   id: '/skills_/$slug',
   path: '/skills/$slug',
@@ -914,6 +920,7 @@ export interface FileRoutesByFullPath {
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/admin/plugins/new': typeof AuthedAdminPluginsNewRoute
   '/admin/skills/$slug': typeof AuthedAdminSkillsSlugRoute
   '/admin/skills/new': typeof AuthedAdminSkillsNewRoute
   '/admin/teams/$teamId': typeof AuthedAdminTeamsTeamIdRoute
@@ -1039,6 +1046,7 @@ export interface FileRoutesByTo {
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/admin/plugins/new': typeof AuthedAdminPluginsNewRoute
   '/admin/skills/$slug': typeof AuthedAdminSkillsSlugRoute
   '/admin/skills/new': typeof AuthedAdminSkillsNewRoute
   '/admin/teams/$teamId': typeof AuthedAdminTeamsTeamIdRoute
@@ -1170,6 +1178,7 @@ export interface FileRoutesById {
   '/_authed/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/_authed/admin/plugins/arcade': typeof AuthedAdminPluginsArcadeRoute
   '/_authed/admin/plugins/composio': typeof AuthedAdminPluginsComposioRoute
+  '/_authed/admin/plugins/new': typeof AuthedAdminPluginsNewRoute
   '/_authed/admin/skills_/$slug': typeof AuthedAdminSkillsSlugRoute
   '/_authed/admin/skills_/new': typeof AuthedAdminSkillsNewRoute
   '/_authed/admin/teams_/$teamId': typeof AuthedAdminTeamsTeamIdRoute
@@ -1299,6 +1308,7 @@ export interface FileRouteTypes {
     | '/admin/plugins/$key'
     | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
+    | '/admin/plugins/new'
     | '/admin/skills/$slug'
     | '/admin/skills/new'
     | '/admin/teams/$teamId'
@@ -1424,6 +1434,7 @@ export interface FileRouteTypes {
     | '/admin/plugins/$key'
     | '/admin/plugins/arcade'
     | '/admin/plugins/composio'
+    | '/admin/plugins/new'
     | '/admin/skills/$slug'
     | '/admin/skills/new'
     | '/admin/teams/$teamId'
@@ -1554,6 +1565,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/plugins/$key'
     | '/_authed/admin/plugins/arcade'
     | '/_authed/admin/plugins/composio'
+    | '/_authed/admin/plugins/new'
     | '/_authed/admin/skills_/$slug'
     | '/_authed/admin/skills_/new'
     | '/_authed/admin/teams_/$teamId'
@@ -2247,6 +2259,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminPluginsComposioRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/admin/plugins/new': {
+      id: '/_authed/admin/plugins/new'
+      path: '/plugins/new'
+      fullPath: '/admin/plugins/new'
+      preLoaderRoute: typeof AuthedAdminPluginsNewRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/admin/skills_/$slug': {
       id: '/_authed/admin/skills_/$slug'
       path: '/skills/$slug'
@@ -2538,6 +2557,7 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminPluginsKeyRoute: typeof AuthedAdminPluginsKeyRoute
   AuthedAdminPluginsArcadeRoute: typeof AuthedAdminPluginsArcadeRoute
   AuthedAdminPluginsComposioRoute: typeof AuthedAdminPluginsComposioRoute
+  AuthedAdminPluginsNewRoute: typeof AuthedAdminPluginsNewRoute
   AuthedAdminSkillsSlugRoute: typeof AuthedAdminSkillsSlugRoute
   AuthedAdminSkillsNewRoute: typeof AuthedAdminSkillsNewRoute
   AuthedAdminTeamsTeamIdRoute: typeof AuthedAdminTeamsTeamIdRoute
@@ -2577,6 +2597,7 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminPluginsKeyRoute: AuthedAdminPluginsKeyRoute,
   AuthedAdminPluginsArcadeRoute: AuthedAdminPluginsArcadeRoute,
   AuthedAdminPluginsComposioRoute: AuthedAdminPluginsComposioRoute,
+  AuthedAdminPluginsNewRoute: AuthedAdminPluginsNewRoute,
   AuthedAdminSkillsSlugRoute: AuthedAdminSkillsSlugRoute,
   AuthedAdminSkillsNewRoute: AuthedAdminSkillsNewRoute,
   AuthedAdminTeamsTeamIdRoute: AuthedAdminTeamsTeamIdRoute,
