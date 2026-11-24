@@ -1915,7 +1915,12 @@ export function ChannelChat({
    * question it waits on.
    */
   const buddyActivity = useConversationBuddyActivity({
-    busy: agent.isRunning || turnsInFlight > 0 || turnsAway > 0 || carryingOn,
+    // Not the replay that loads the conversation: the buddy came out on every open, then "finished".
+    busy:
+      (agent.isRunning && !replaying) ||
+      turnsInFlight > 0 ||
+      turnsAway > 0 ||
+      carryingOn,
     waiting: Boolean(question),
     messages: agent.messages,
   });
