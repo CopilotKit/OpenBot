@@ -421,6 +421,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - Reconnecting an app after moving to OpenBot Cloud takes one press.
 - A Bot shows one connect card per app, and no longer says an app's tools are ready before it's
   connected.
+- On OpenBot Cloud, Connections leads to every app in the directory, and searching it finds apps you
+  haven't added yet.
 - Connecting an app whose maker offers a sign-in, like PostHog or Fireflies, now takes you to that
   sign-in instead of asking for a key.
 - Signing in to an app's own server works with servers that identify OpenBot by its published
