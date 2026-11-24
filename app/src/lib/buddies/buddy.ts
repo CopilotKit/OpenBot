@@ -8,6 +8,12 @@ export type DrawnBuddy = {
   name: string;
   avatarUrl: string;
   clips: Record<string, string>;
+  /**
+   * Each clip's transparent HEVC copy, for WebKit, which draws a WebM clip's transparency as black.
+   * Only stock buddies have them, and only where the app was built on a Mac
+   * (scripts/fetch-stock-buddies.ts); a missing one shows the still picture.
+   */
+  webkitClips?: Record<string, string>;
 };
 
 /** What a Bot is doing, as the pose its buddy plays. */
@@ -48,6 +54,9 @@ export function stockBuddy(stock: StockBuddy): DrawnBuddy {
     avatarUrl: `${base}/avatar.png`,
     clips: Object.fromEntries(
       STOCK_POSES.map((pose) => [pose, `${base}/${pose}.webm`]),
+    ),
+    webkitClips: Object.fromEntries(
+      STOCK_POSES.map((pose) => [pose, `${base}/${pose}.hevc.mp4`]),
     ),
   };
 }

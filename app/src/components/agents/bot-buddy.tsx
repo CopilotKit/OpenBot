@@ -109,7 +109,89 @@ function BuddyStill({ buddy, size }: { buddy: DrawnBuddy; size: number }) {
   );
 }
 
+/**
+ * Whether the page is drawn by WebKit: Safari, and the window OpenBot Desktop draws on a Mac. WebKit
+ * draws a WebM clip's transparency as black, so a buddy plays its HEVC copies there instead.
+ */
+function isWebKit(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const agent = navigator.userAgent;
+  return (
+    /AppleWebKit/.test(agent) &&
+    !/Chrome|Chromium|CriOS|Edg|Firefox|FxiOS|Android/.test(agent)
+  );
+}
+
+const WEBKIT = isWebKit();
+
 function BuddyLive({
+  buddy,
+  size,
+  activity,
+}: {
+  buddy: DrawnBuddy;
+  size: number;
+  activity: BuddyActivity;
+}) {
+  if (WEBKIT)
+    return <BuddyWebKit activity={activity} buddy={buddy} size={size} />;
+  return <BuddyRenderer activity={activity} buddy={buddy} size={size} />;
+}
+
+/**
+ * A buddy's pose in WebKit: the clip's HEVC copy, with the still picture as its poster, so where
+ * there is no copy (a stock buddy built off a Mac, or the person's own transparent one) the picture
+ * shows instead of a black box. The person's own opaque clips play as they are.
+ */
+function BuddyWebKit({
+  buddy,
+  size,
+  activity,
+}: {
+  buddy: DrawnBuddy;
+  size: number;
+  activity: BuddyActivity;
+}) {
+  const pose = poseFor(buddy, activity);
+  const clip = pose
+    ? (buddy.webkitClips?.[pose] ?? buddy.clips[pose])
+    : undefined;
+  return (
+    <span
+      className="relative block overflow-hidden rounded-full bg-(--buddy-bg) ring-1 ring-foreground/10"
+      style={{ height: size, width: size }}
+    >
+      {clip ? (
+        <video
+          autoPlay
+          className="size-full object-cover"
+          key={clip}
+          loop
+          muted
+          playsInline
+          poster={buddy.avatarUrl}
+          preload="auto"
+        >
+          <source
+            src={clip}
+            type={
+              clip.endsWith(".hevc.mp4") ? 'video/mp4; codecs="hvc1"' : undefined
+            }
+          />
+        </video>
+      ) : (
+        <img
+          alt=""
+          className="size-full object-cover"
+          draggable={false}
+          src={buddy.avatarUrl}
+        />
+      )}
+    </span>
+  );
+}
+
+function BuddyRenderer({
   buddy,
   size,
   activity,
