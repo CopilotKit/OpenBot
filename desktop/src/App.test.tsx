@@ -1456,8 +1456,8 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     expect(order()).toEqual([
       "cloud",
       "business",
-      "Use OpenBot (Self-Contained)",
       "Connect to it",
+      "Use OpenBot (Self-Contained)",
       "Sign in to OpenBot Cloud",
     ]);
     // Self-Contained is a line with a link at the sidebar's foot, under the choices: not a row, not

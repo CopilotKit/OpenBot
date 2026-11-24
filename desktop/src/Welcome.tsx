@@ -102,7 +102,7 @@ export type Hosting = "this-computer" | "connect";
  * OpenBot Cloud shows only in a build that turns it on (`VITE_OPENBOT_CLOUD_ENABLED`, `cloudEnabled`).
  * There the screen steers to OpenBot Cloud and OpenBot for Business. They are the two rows, Cloud
  * first and picked to begin with, then the link to connect to a company's own OpenBot, then what the
- * choice shows. OpenBot (Self-Contained) is a line at the very foot of the card, below all of that:
+ * choice shows. OpenBot (Self-Contained) is a line at the very foot of the sidebar, below all of that:
  * never picked to begin with, never the way back from anywhere. Opened, it shows what this computer
  * needs and Install there, and neither row is picked. The one exception is a setup on this computer
  * that failed: the failure is Self-Contained's to show, so it opens there. The order on screen is
@@ -269,7 +269,10 @@ export function Welcome({
         heading
         label="Where OpenBot runs"
         foot={
+          // Main's order: the way to connect to a company's OpenBot, then OpenBot
+          // (Self-Contained) last of all, never the way back from anywhere.
           <>
+            {connectAside}
             {cloudOn && (
               <section
                 className="this-computer-foot"
@@ -298,7 +301,6 @@ export function Welcome({
                 )}
               </section>
             )}
-            {connectAside}
           </>
         }
       >
