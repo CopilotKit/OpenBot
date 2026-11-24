@@ -238,13 +238,18 @@ things are drawn, not how big they are.
 7. **Rows.** One card of rows with hairline dividers (`PageRows`). The leading icon is a 16px
    glyph in `muted-foreground` on a 32px tile with a hairline ring.
 8. **The message box** is a flat card at rest. While someone types in it, it glows in `ring`. It
-   is the only thing that glows.
+   is the only control that glows.
 9. **Icons.** Tabler, at their usual sizes. The default line is 1.75, set once in `theme.css`. An
    icon that needs another line says why in a comment.
 10. **Widths** come from `PageShell`. A screen sets no `max-w-*` of its own without a comment.
 11. **Cards.** A card is `PageRows`, `PageCard` or `Card` (`components/ui/card.tsx`). No screen
     draws a bordered `bg-card` box by hand.
 12. **One class, both themes.** No `dark:` override of a color: the token carries both values.
+13. **Home's orb.** Behind Home's message box, OpenBot's orb is spread out as a pale field with
+    rings of dots (`components/home/home-field.tsx`), and typing lights it. It is the app's one
+    decoration: no other screen draws one. On the first Home of a visit the field draws itself in
+    while the heading, the box and Explore Bots rise in; coming back to Home shows it in place.
+    Nothing moves when less motion is asked for, and a skin has no field.
 
 [`app/tests/ui-look-guard.test.ts`](../app/tests/ui-look-guard.test.ts) fails when a screen breaks
 rules 2, 3, 5, 11 or 12. Screens drawn before these rules are counted in its allowlist, which only
