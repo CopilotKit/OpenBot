@@ -83,14 +83,19 @@ export type BusinessFeatureIcon =
 
 /**
  * What the team edition has and the personal edition does not, one short line each, in the three
- * things a team gets: its people, where its Bots work, and control over both.
+ * things a team gets: its people, where its Bots work, and control over both. Each group's
+ * `summary` says the group in one sentence: Desktop's OpenBot for Business page shows it beside the
+ * group's name, over the full list.
  */
 export const BUSINESS_FEATURE_GROUPS: readonly {
   title: string;
+  summary: string;
   features: readonly { title: string; icon: BusinessFeatureIcon }[];
 }[] = [
   {
     title: "For your whole organization",
+    summary:
+      "Everyone signs in with single sign-on, has a role, and shares Bots and learning with the organization.",
     features: [
       {
         title: "Sign-in with Google, Microsoft or custom SSO",
@@ -106,6 +111,8 @@ export const BUSINESS_FEATURE_GROUPS: readonly {
   },
   {
     title: "Where your Bots work",
+    summary:
+      "Your Bots work in Slack and Microsoft Teams, each on a computer of its own.",
     features: [
       { title: "Bots in Slack and Microsoft Teams", icon: "chat" },
       { title: "A computer for each Bot", icon: "computer" },
@@ -113,6 +120,8 @@ export const BUSINESS_FEATURE_GROUPS: readonly {
   },
   {
     title: "In control",
+    summary:
+      "You govern models, apps and networks with rules and policies in plain English, and keep a full audit trail.",
     features: [
       { title: "Controls over models, apps and networks", icon: "controls" },
       { title: "Rules every Bot follows", icon: "rules" },

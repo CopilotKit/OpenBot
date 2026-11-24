@@ -3132,6 +3132,129 @@ main > .rail + .sheet > * {
   margin-top: 0;
 }
 
+/*
+ * OpenBot for Business's page: what the picked way means, Book a demo, then what it adds as three
+ * rows under hairlines, each group's name beside its sentence, and every feature under them in two
+ * quiet columns. Plain lines, no icons, everything showing, so all of it fits the window's default
+ * size.
+ */
+.business-page {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.business-way {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.business-way p {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+.business-page .business-book {
+  margin-top: 0;
+}
+
+.business-features {
+  border-top: 1px solid var(--border);
+}
+
+.business-row {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  column-gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+  line-height: 20px;
+}
+
+.business-row h3 {
+  margin: 0;
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.business-row p {
+  margin: 0;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+.business-all {
+  columns: 2;
+  column-gap: 28px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+  line-height: 18px;
+  color: var(--text-secondary);
+}
+
+.business-all li {
+  break-inside: avoid;
+  padding-bottom: 4px;
+}
+
+/*
+ * Book a demo as its own step: Back, the step's heading in the page heading's size, its line, then
+ * the calendar, held to the room left in the page (`BookingCalendar` `fit`).
+ */
+.book-a-demo.booking-step {
+  gap: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* The calendar's own frame ends the page, so the page's foot needs less room under it. */
+main > .rail + .sheet:has(> .booking-step) {
+  padding-bottom: 24px;
+}
+
+button.text-link.booking-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-start;
+  margin: -4px 0 12px -4px;
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+button.text-link.booking-back:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.booking-back svg {
+  width: 16px;
+  height: 16px;
+}
+
+.booking-step h2 {
+  margin: 0 0 6px;
+  font-size: var(--text-3xl);
+  line-height: 36px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.booking-step .book-a-demo-line {
+  margin-bottom: 20px;
+}
+
 /* Narrower windows (the window's least is 720 px): a narrower sidebar, its rows' lines left out. */
 @media (max-width: 860px) {
   main:has(> .rail) {
@@ -3146,6 +3269,12 @@ main > .rail + .sheet > * {
   .rail .tile-summary,
   .rail .cloud-marks {
     display: none;
+  }
+
+  /* The group's name above its features: the page is too narrow for both side by side. */
+  .business-row {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 4px;
   }
 }
 
