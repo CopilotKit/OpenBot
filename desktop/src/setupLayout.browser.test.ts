@@ -1611,13 +1611,15 @@ describe.skipIf(!asked)("the offer to pause the person's Podman", () => {
         const behind = page.getByRole("listitem", {
           name: "Preparing OpenBot",
         });
-        const foot = await page.locator(".step-footer").boundingBox();
+        const foot = await page
+          .locator(".account-layout .setup-body")
+          .boundingBox();
         expect(box).not.toBeNull();
         expect(foot).not.toBeNull();
         if (box && foot) {
-          // In the window, and not under the step's pinned foot: seen at 720x560, cut in half.
+          // In the window, and inside the account step's scrollable body: seen at 720x560, cut in half.
           expect(box.y).toBeGreaterThanOrEqual(0);
-          expect(box.y + box.height).toBeLessThanOrEqual(foot.y);
+          expect(box.y + box.height).toBeLessThanOrEqual(foot.y + foot.height);
           expect(box.x + box.width).toBeLessThanOrEqual(width);
         }
         expect(await behind.textContent()).toContain(
@@ -1634,7 +1636,26 @@ describe.skipIf(!asked)("the offer to pause the person's Podman", () => {
           await page.screenshot({
             path: `${shots}/pause-podman-${width}x${height}.png`,
           });
-        await button.click();
+        expect(
+          await page.evaluate(() => {
+            const button = [
+              ...document.querySelectorAll<HTMLButtonElement>("button"),
+            ].find(
+              (button) => button.textContent?.trim() === "Pause my Podman",
+            )!;
+            button.focus();
+            const b = button.getBoundingClientRect();
+            const hit = document.elementFromPoint(
+              b.x + b.width / 2,
+              b.y + b.height / 2,
+            );
+            return (
+              document.activeElement === button && !!hit && button.contains(hit)
+            );
+          }),
+        ).toBe(true);
+        if (width === 720) await page.keyboard.press("Enter");
+        else await button.click();
         expect(
           await page.evaluate(() =>
             (
@@ -1929,7 +1950,7 @@ describe.skipIf(!asked)(
  * rows come one at a time. It was on screen and could be clicked from the step's first moment, and
  * then moved down 49 px three times in about three seconds as the second, third and fourth rows
  * arrived, 147 px in all. A click aimed at it landed on nothing, and the box stayed ticked. The
- * choice sits above the rows now, under the step's own words, and holds its place for the whole step.
+ * choice sits in its own footer now and holds its place for the whole step.
  * `OPENBOT_APP_SHOTS=<folder>` keeps a screenshot of the step's first and last moments at each size.
  */
 describe.skipIf(!asked)("Finishing setup's usage data choice", () => {
@@ -1973,7 +1994,8 @@ describe.skipIf(!asked)("Finishing setup's usage data choice", () => {
           });
           return { x: at?.x, y: at?.y, reached };
         };
-        const rows = () => page.locator(".steps > .step").count();
+        const rows = () =>
+          page.locator(".finishing-layout .steps > .step").count();
         const shots = process.env.OPENBOT_APP_SHOTS;
         const keep = async (moment: string) => {
           if (shots)
@@ -1982,12 +2004,10 @@ describe.skipIf(!asked)("Finishing setup's usage data choice", () => {
             });
         };
 
-        // The step's first moment: one row, setting up, and the choice already there to click.
-        await page
-          .getByRole("listitem", { name: "Setting up OpenBot" })
-          .waitFor();
+        // The step's first moment: one current journey, setting up, and the choice already there to click.
+        await page.locator(".journey").waitFor();
         const first = await where();
-        expect(await rows()).toBe(1);
+        expect(await rows()).toBe(0);
         expect(first.y).toBeGreaterThan(0);
         expect(first.reached).toBe(true);
         await keep("first-row");
@@ -1998,9 +2018,9 @@ describe.skipIf(!asked)("Finishing setup's usage data choice", () => {
             globalThis as unknown as { __fake: { finishSetUp: () => void } }
           ).__fake.finishSetUp(),
         );
-        await page.getByRole("listitem", { name: "Opening OpenBot" }).waitFor();
+        await page.locator(".cannot-cancel").waitFor();
         await page.waitForTimeout(600);
-        expect(await rows()).toBe(4);
+        expect(await rows()).toBe(3);
         await keep("last-row");
         expect(await where()).toEqual(first);
 
@@ -5196,4 +5216,603 @@ describe.skipIf(!asked)("approved layout: install", () => {
       }, 60_000);
     }
   }
+});
+
+describe.skipIf(!asked)("approved layout: finishing", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const)
+    for (const colorScheme of ["light", "dark"] as const)
+      test(`${width}x${height} ${colorScheme}: current phases, cancellation and reachable recovery`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        const shot = async (state: string) => {
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/finish-${width}-${colorScheme}-${state}.png`,
+            });
+        };
+        const geometry = () =>
+          page.evaluate(() => {
+            const sheet =
+              document.querySelector<HTMLElement>(".finishing-layout")!;
+            const body = sheet.querySelector<HTMLElement>(".setup-body")!;
+            const content = body.querySelector<HTMLElement>(".setup-content")!;
+            const footer = sheet.querySelector<HTMLElement>(
+              ":scope > .setup-footer",
+            )!;
+            const checkbox = footer.querySelector<HTMLInputElement>(
+              'input[type="checkbox"]',
+            )!;
+            const b = body.getBoundingClientRect(),
+              c = content.getBoundingClientRect(),
+              f = footer.getBoundingClientRect(),
+              a = checkbox.getBoundingClientRect();
+            const hit = document.elementFromPoint(
+              a.x + a.width / 2,
+              a.y + a.height / 2,
+            );
+            const memory = globalThis as unknown as {
+              finishingConsent?: Element;
+            };
+            memory.finishingConsent ??= checkbox;
+            return {
+              sameConsent: memory.finishingConsent === checkbox,
+              settingsReads: globalThis
+                .__workbench!.calls()
+                .filter(
+                  (call) =>
+                    call.command === "plugin:openbot-desktop|usage_data",
+                ).length,
+              pageWidth: document.documentElement.scrollWidth,
+              pageHeight: document.documentElement.scrollHeight,
+              horizontalOverflow: body.scrollWidth > body.clientWidth,
+              bodyBottom: b.bottom,
+              footerTop: f.top,
+              checkbox: { x: a.x, y: a.y },
+              checkboxWhole: a.top >= 0 && a.bottom <= innerHeight,
+              checkboxHit: hit === checkbox,
+              contentWidth: c.width,
+              centerX: (c.left + c.right - b.left - b.right) / 2,
+              centerY: (c.top + c.bottom - b.top - b.bottom) / 2,
+              topOffset:
+                c.top -
+                b.top +
+                body.scrollTop -
+                Number.parseFloat(getComputedStyle(body).paddingTop),
+              fits: body.scrollHeight <= body.clientHeight + 1,
+              spinners: sheet.querySelectorAll(".step-spinner").length,
+              journey: sheet.querySelectorAll(".journey").length,
+              milestones: [
+                ...sheet.querySelectorAll(".setup-milestones > .step"),
+              ].map((row) => ({
+                running: row.querySelector(".step-spinner") !== null,
+                text: row.textContent ?? "",
+              })),
+            };
+          });
+        let consent: { x: number; y: number } | undefined;
+        let settingsReads: number | undefined;
+        const check = async (journey: boolean, state: string) => {
+          await settled(page);
+          const now = await geometry();
+          expect(now.sameConsent).toBe(true);
+          if (settingsReads === undefined) settingsReads = now.settingsReads;
+          expect(now.settingsReads).toBe(settingsReads);
+          expect(now.settingsReads).toBeGreaterThan(0);
+          expect(now.pageWidth).toBeLessThanOrEqual(width);
+          expect(now.pageHeight).toBeLessThanOrEqual(height);
+          expect(now.horizontalOverflow).toBe(false);
+          expect(now.bodyBottom).toBeLessThanOrEqual(now.footerTop + 1);
+          expect(now.checkboxWhole).toBe(true);
+          expect(now.checkboxHit).toBe(true);
+          expect(now.contentWidth).toBeLessThanOrEqual(480);
+          expect(Math.abs(now.centerX)).toBeLessThanOrEqual(1);
+          if (width === 720)
+            expect(Math.abs(now.topOffset)).toBeLessThanOrEqual(1);
+          else if (now.fits)
+            expect(Math.abs(now.centerY)).toBeLessThanOrEqual(1);
+          if (consent) expect(now.checkbox).toEqual(consent);
+          else consent = now.checkbox;
+          expect(now.journey).toBe(journey ? 1 : 0);
+          expect(now.spinners).toBe(journey ? 1 : 0);
+          if (journey)
+            for (const row of now.milestones) {
+              expect(row.running).toBe(false);
+              expect(row.text).not.toMatch(/Failed|Waiting|Paused/);
+              expect(row.text).toContain("Complete");
+            }
+          await page.evaluate(() => {
+            document.querySelector<HTMLElement>(
+              ".finishing-layout .setup-body",
+            )!.scrollTop = 0;
+          });
+          await shot(state);
+        };
+        const reach = async (name: string) => {
+          const button = page
+            .locator(".finishing-layout")
+            .getByRole("button", { name, exact: true });
+          await button.waitFor();
+          const result = await page.evaluate((name) => {
+            const button = [
+              ...document.querySelectorAll<HTMLButtonElement>(
+                ".finishing-layout button",
+              ),
+            ].find((button) => button.textContent?.trim() === name)!;
+            button.scrollIntoView({ block: "nearest" });
+            button.focus();
+            const a = button.getBoundingClientRect();
+            const body = button
+              .closest<HTMLElement>(".setup-body")!
+              .getBoundingClientRect();
+            const hit = document.elementFromPoint(
+              a.x + a.width / 2,
+              a.y + a.height / 2,
+            );
+            return {
+              focused: document.activeElement === button,
+              whole: a.top >= body.top - 1 && a.bottom <= body.bottom + 1,
+              hit: hit !== null && button.contains(hit),
+            };
+          }, name);
+          expect(result).toEqual({ focused: true, whole: true, hit: true });
+        };
+        const releaseSetup = async () =>
+          page.evaluate(() => (globalThis.__fake!.finishSetUp as () => void)());
+        const hold = async (command: string) =>
+          page.evaluate(
+            (command) =>
+              globalThis.__workbench!.setAnswer(command, { mode: "never" }),
+            command,
+          );
+        try {
+          await toTheAiStep(page);
+          await hold("connect_local_eval");
+          await hold("run_local_eval");
+          await hold("start_stack");
+          await page.getByText("Anthropic", { exact: true }).click();
+          await page
+            .getByRole("tab", { name: "Use an API key", exact: true })
+            .click();
+          await page
+            .getByLabel("Anthropic API key", { exact: true })
+            .fill("a-key-for-this-test");
+          await page
+            .getByRole("button", { name: "Continue", exact: true })
+            .click();
+          await page
+            .getByRole("heading", { name: "Finishing setup" })
+            .waitFor();
+          await page.locator(".journey").waitFor();
+          await check(true, "setup");
+          await reach("Cancel");
+          await page
+            .getByRole("button", { name: "Cancel", exact: true })
+            .click();
+          await reach("Retry");
+          await check(false, "cancelled");
+          expect(
+            await page.evaluate(() =>
+              globalThis
+                .__workbench!.calls()
+                .some((call) => call.command === "cancel_local_eval"),
+            ),
+          ).toBe(true);
+          await page
+            .getByRole("button", { name: "Retry", exact: true })
+            .click();
+          await page.locator(".journey").waitFor();
+          await check(true, "setup-retry");
+          await releaseSetup();
+          await page
+            .getByText("Connecting OpenBot to its services", { exact: true })
+            .waitFor();
+          await check(true, "connect");
+          // Use recorded setup report instead of calling the paused run_local_eval command.
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("connect_local_eval", {
+              mode: "value",
+              value: {
+                outcome: "completed",
+                stack: { id: "local-abc123" },
+                reason: null,
+                conflicted: false,
+              },
+            }),
+          );
+          await page
+            .getByRole("listitem", { name: "Connecting OpenBot", exact: true })
+            .waitFor();
+          await check(true, "wait");
+          await reach("Cancel");
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("run_local_eval", {
+              mode: "value",
+              value: {
+                outcome: "completed",
+                stack: {
+                  id: "local-abc123",
+                  installedRelease: "0.16.0-rc.10",
+                  step: "ready",
+                  urls: {
+                    api: "http://127.0.0.1:64770",
+                    dashboard: "http://127.0.0.1:64771",
+                    gateway: "ws://127.0.0.1:64772",
+                  },
+                  hasFailedStep: false,
+                  updateInProgress: false,
+                  unfinishedUpdate: null,
+                  observed: null,
+                },
+                reason: null,
+                readiness: "ready",
+                licence: "valid",
+                licenceExpiresAt: null,
+                checksPassed: false,
+              },
+            }),
+          );
+          await page.locator(".cannot-cancel").waitFor();
+          expect(
+            await page
+              .getByRole("button", { name: "Cancel", exact: true })
+              .count(),
+          ).toBe(0);
+          expect(await page.locator(".cannot-cancel").textContent()).toContain(
+            "half started",
+          );
+          await check(true, "start");
+          // Exercise a real failure and Retry from the native Start call.
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("start_stack", {
+              mode: "fail",
+              problem: {
+                said: "OpenBot could not start. Retry, and copy the logs if it stops again.",
+              },
+            }),
+          );
+          await reach("Retry");
+          const logActions = await page.evaluate(() =>
+            [...document.querySelectorAll(".finishing-layout button")]
+              .filter((button) =>
+                ["Copy logs", "Save to a file"].includes(
+                  button.textContent?.trim() ?? "",
+                ),
+              )
+              .map((button) => button.textContent?.trim()),
+          );
+          // Check every offered log action before the exact-count assertion below.
+          const logsReachable = await page.evaluate(() =>
+            [
+              ...document.querySelectorAll<HTMLElement>(
+                ".finishing-layout button",
+              ),
+            ]
+              .filter((button) =>
+                ["Copy logs", "Save to a file"].includes(
+                  button.textContent?.trim() ?? "",
+                ),
+              )
+              .map((button) => {
+                button.scrollIntoView({ block: "nearest" });
+                button.focus();
+                const a = button.getBoundingClientRect(),
+                  b = button
+                    .closest<HTMLElement>(".setup-body")!
+                    .getBoundingClientRect();
+                const hit = document.elementFromPoint(
+                  a.x + a.width / 2,
+                  a.y + a.height / 2,
+                );
+                return {
+                  focused: document.activeElement === button,
+                  whole: a.top >= b.top - 1 && a.bottom <= b.bottom + 1,
+                  hit: !!hit && button.contains(hit),
+                };
+              }),
+          );
+          for (const reachable of logsReachable)
+            expect(reachable).toEqual({
+              focused: true,
+              whole: true,
+              hit: true,
+            });
+          await reach("Back");
+          await check(false, "failure");
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("start_stack", { mode: "never" }),
+          );
+          await page
+            .getByRole("button", { name: "Retry", exact: true })
+            .click();
+          await page.locator(".journey").waitFor();
+          await check(true, "retry");
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("start_stack", {
+              mode: "fail",
+              problem: {
+                said: "OpenBot found data from a previous installation.",
+                leftover_reset: [
+                  "openbot_agent-profiles",
+                  "openbot-workspace-general-assistant",
+                ],
+                leftover_containers: ["openbot-agent-computer-1"],
+              },
+            }),
+          );
+          await page
+            .getByRole("heading", {
+              name: "A previous OpenBot installation left data here",
+            })
+            .waitFor();
+          await reach("Start fresh");
+          await reach("Back");
+          expect(
+            await page
+              .getByRole("button", { name: "Retry", exact: true })
+              .count(),
+          ).toBe(0);
+          await check(false, "leftover");
+          await page.evaluate(() =>
+            document
+              .querySelector<HTMLInputElement>(
+                '.usage-choice input[type="checkbox"]',
+              )!
+              .focus(),
+          );
+          await page.keyboard.press("Space");
+          await settled(page);
+          expect(
+            await page.evaluate(() =>
+              globalThis
+                .__workbench!.calls()
+                .filter(
+                  (call) =>
+                    call.command === "plugin:openbot-desktop|set_usage_data",
+                )
+                .map((call) => call.args?.share),
+            ),
+          ).toEqual([false]);
+          expect(
+            await page.evaluate(
+              () =>
+                document.querySelector<HTMLInputElement>(
+                  '.usage-choice input[type="checkbox"]',
+                )!.checked,
+            ),
+          ).toBe(false);
+          await check(false, "consent-changed");
+          expect(logActions).toEqual(["Copy logs", "Save to a file"]);
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
+});
+
+describe.skipIf(!asked)("approved layout: finishing", () => {
+  for (const [width, height] of [
+    [1000, 800],
+    [720, 560],
+  ] as const)
+    for (const colorScheme of ["light", "dark"] as const)
+      test(`${width}x${height} ${colorScheme}: held setup, lost backend and Start fresh`, async () => {
+        const page = await browser.newPage({
+          viewport: { width, height },
+          colorScheme,
+        });
+        const state = async () => {
+          await settled(page);
+          return page.evaluate(() => {
+            const sheet =
+              document.querySelector<HTMLElement>(".finishing-layout")!;
+            const body = sheet.querySelector<HTMLElement>(".setup-body")!;
+            const footer = sheet.querySelector<HTMLElement>(
+              ":scope > .setup-footer",
+            )!;
+            const checkbox = footer.querySelector<HTMLInputElement>(
+              'input[type="checkbox"]',
+            )!;
+            const b = body.getBoundingClientRect(),
+              f = footer.getBoundingClientRect(),
+              a = checkbox.getBoundingClientRect();
+            const memory = globalThis as unknown as { heldConsent?: Element };
+            memory.heldConsent ??= checkbox;
+            return {
+              sameConsent: memory.heldConsent === checkbox,
+              settingsReads: globalThis
+                .__workbench!.calls()
+                .filter(
+                  (call) =>
+                    call.command === "plugin:openbot-desktop|usage_data",
+                ).length,
+              width: document.documentElement.scrollWidth,
+              height: document.documentElement.scrollHeight,
+              overflow: body.scrollWidth > body.clientWidth,
+              overlap: b.bottom > f.top + 1,
+              consent: { x: a.x, y: a.y },
+              consentWhole: a.top >= 0 && a.bottom <= innerHeight,
+              consentHit:
+                document.elementFromPoint(
+                  a.x + a.width / 2,
+                  a.y + a.height / 2,
+                ) === checkbox,
+              spinners: sheet.querySelectorAll(".step-spinner").length,
+              journeys: sheet.querySelectorAll(".journey").length,
+            };
+          });
+        };
+        const reach = async (name: string) => {
+          expect(
+            await page.evaluate((name) => {
+              const button = [
+                ...document.querySelectorAll<HTMLButtonElement>(
+                  ".finishing-layout button",
+                ),
+              ].find((button) => button.textContent?.trim() === name)!;
+              button.scrollIntoView({ block: "nearest" });
+              button.focus();
+              const b = button.getBoundingClientRect(),
+                body = button
+                  .closest<HTMLElement>(".setup-body")!
+                  .getBoundingClientRect();
+              const hit = document.elementFromPoint(
+                b.x + b.width / 2,
+                b.y + b.height / 2,
+              );
+              return {
+                focused: document.activeElement === button,
+                whole: b.top >= body.top - 1 && b.bottom <= body.bottom + 1,
+                hit: hit !== null && button.contains(hit),
+              };
+            }, name),
+          ).toEqual({ focused: true, whole: true, hit: true });
+        };
+        const shot = async (name: string) => {
+          await page.evaluate(() => {
+            document.querySelector<HTMLElement>(
+              ".finishing-layout .setup-body",
+            )!.scrollTop = 0;
+          });
+          if (process.env.OPENBOT_APP_SHOTS)
+            await page.screenshot({
+              path: `${process.env.OPENBOT_APP_SHOTS}/finish-${width}-${colorScheme}-${name}.png`,
+            });
+        };
+        try {
+          await open(page);
+          await page.getByRole("heading", { name: "Set up OpenBot" }).waitFor();
+          await page.evaluate(() => {
+            const shortfall = {
+              podman: true,
+              cpu: false,
+              memory: false,
+              disk: true,
+              diskGb: "7.4",
+              freeOnDrive: true,
+              mac: true,
+              neededGb: "13",
+            };
+            globalThis.__workbench!.setAnswer("set_up_local_eval", {
+              mode: "value",
+              value: {
+                outcome: "blocked",
+                stack: null,
+                reason: "resources-short",
+                readiness: "unknown",
+                licence: "unknown",
+                licenceExpiresAt: null,
+                checksPassed: false,
+                shortfall,
+              },
+            });
+            globalThis.__workbench!.setAnswer("local_eval_room", {
+              mode: "value",
+              value: shortfall,
+            });
+          });
+          await page
+            .getByRole("button", { name: "Install", exact: true })
+            .click();
+          await page
+            .getByRole("heading", { name: "Connect your AI" })
+            .waitFor();
+          await page.getByText("Anthropic", { exact: true }).click();
+          await page
+            .getByRole("tab", { name: "Use an API key", exact: true })
+            .click();
+          await page
+            .getByLabel("Anthropic API key", { exact: true })
+            .fill("a-key-for-this-test");
+          await page
+            .getByRole("button", { name: "Continue", exact: true })
+            .click();
+          await page
+            .getByRole("heading", { name: "Finishing setup" })
+            .waitFor();
+          await page
+            .getByRole("button", { name: "Try again", exact: true })
+            .waitFor();
+          await reach("Try again");
+          await reach("Cancel");
+          const held = await state();
+          expect(held.width).toBeLessThanOrEqual(width);
+          expect(held.height).toBeLessThanOrEqual(height);
+          expect(held.overflow).toBe(false);
+          expect(held.overlap).toBe(false);
+          expect(held.sameConsent).toBe(true);
+          expect(held.settingsReads).toBeGreaterThan(0);
+          expect(held.consentWhole).toBe(true);
+          expect(held.consentHit).toBe(true);
+          expect(held.spinners).toBe(0);
+          expect(held.journeys).toBe(0);
+          await shot("held");
+          await page.evaluate(() => {
+            globalThis.__workbench!.setAnswer("local_eval_room", {
+              mode: "value",
+              value: null,
+            });
+            globalThis.__workbench!.setAnswer("set_up_local_eval", {
+              mode: "value",
+              value: {
+                outcome: "failed",
+                stack: null,
+                reason: "stack-lost",
+                readiness: "unknown",
+                licence: "unknown",
+                licenceExpiresAt: null,
+                checksPassed: false,
+              },
+            });
+          });
+          await page
+            .getByRole("button", { name: "Try again", exact: true })
+            .click();
+          await page
+            .getByRole("button", { name: "Start fresh", exact: true })
+            .waitFor();
+          await reach("Start fresh");
+          await reach("Back");
+          expect(
+            await page
+              .getByRole("button", { name: "Retry", exact: true })
+              .count(),
+          ).toBe(0);
+          const lost = await state();
+          expect(lost).toEqual(held);
+          await shot("stack-lost");
+          // A real Tab traversal reaches diagnostics from the last recovery action.
+          await page.keyboard.press("Tab");
+          expect(
+            await page.evaluate(() =>
+              document.activeElement?.matches(
+                '.usage-choice input[type="checkbox"]',
+              ),
+            ),
+          ).toBe(true);
+          await page.evaluate(() =>
+            globalThis.__workbench!.setAnswer("set_up_local_eval", {
+              mode: "never",
+            }),
+          );
+          await page
+            .getByRole("button", { name: "Start fresh", exact: true })
+            .click();
+          await page.locator(".finishing-layout .journey").waitFor();
+          const resumed = await state();
+          expect(resumed.journeys).toBe(1);
+          expect(resumed.spinners).toBe(1);
+          expect(resumed.consent).toEqual(held.consent);
+          expect(resumed.sameConsent).toBe(true);
+          expect(resumed.settingsReads).toBe(held.settingsReads);
+          expect(resumed.overlap).toBe(false);
+          expect(resumed.overflow).toBe(false);
+          await shot("fresh-recovery");
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
 });
