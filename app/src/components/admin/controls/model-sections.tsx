@@ -157,7 +157,6 @@ export function ProviderSection() {
           <CatalogueProviderRow />
         ) : listed ? (
           <AiConnectionRows
-            inDesktop={support.data === "in-place"}
             list={listed}
             organizationWide={cloud}
             scope="organization"
@@ -232,7 +231,7 @@ function ViewerAiSection({ personal }: { personal: PersonalAiConnection }) {
       title="Your AI"
     >
       <PageRows>
-        <Item render={<Link hash="your-ai" to="/settings" />} size="sm">
+        <Item render={<Link to="/settings/providers" />} size="sm">
           {described ? (
             <ProviderTile
               provider={providerById(personal.connection.provider)}

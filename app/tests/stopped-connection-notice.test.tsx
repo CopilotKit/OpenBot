@@ -155,7 +155,7 @@ test("a refused run with stopped set draws the sentence, Reconnect and Choose an
   expect(choiceReads).toBeGreaterThan(0);
   const reconnect = view.getByRole("link", { name: "Reconnect" });
   expect(reconnect.getAttribute("href")).toBe(
-    "/settings?connection=anthropic&owner=personal",
+    "/settings/providers/anthropic?owner=personal",
   );
   await userEvent
     .setup({ document })
@@ -176,16 +176,14 @@ test("a member on the organization's connection gets no Reconnect", async () => 
   ).toBeTruthy();
 });
 
-test("an admin on the organization's connection gets Reconnect to /settings?connection=<id>", async () => {
+test("an admin on the organization's connection gets Reconnect to its page in Settings → Providers", async () => {
   serve({ owner: "organization", role: "admin", stopped: true });
   const view = render(
     <StoppedConnectionNotice channelId={CHANNEL} onChooseModel={() => {}} />,
     { wrapper },
   );
   const reconnect = await view.findByRole("link", { name: "Reconnect" });
-  expect(reconnect.getAttribute("href")).toBe(
-    "/settings?connection=anthropic&owner=organization",
-  );
+  expect(reconnect.getAttribute("href")).toBe("/settings/providers/anthropic");
 });
 
 test("a refused run with stopped null draws nothing here", async () => {
@@ -257,7 +255,7 @@ test("no default: it says to choose one, with Choose a default into Settings for
   );
   await view.findByText(NO_DEFAULT);
   const link = view.getByRole("link", { name: "Choose a default" });
-  expect(link.getAttribute("href")).toBe("/settings?owner=personal");
+  expect(link.getAttribute("href")).toBe("/settings/providers");
   expect(view.queryByRole("link", { name: "Reconnect" })).toBeNull();
   expect(
     view.getByRole("button", { name: "Choose another model" }),

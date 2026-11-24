@@ -1,6 +1,7 @@
 import {
   IconArrowLeft,
   IconBell,
+  IconBrain,
   IconBuilding,
   IconKey,
   IconLayoutGrid,
@@ -65,7 +66,8 @@ type SettingsSidebarItem = {
  *
  * - You: your account, where updates reach you, your Vault, the organization you work in, and
  *   your API keys.
- * - Every Bot: what is set once for all of them, in the fixed order of `lib/primitives.ts`.
+ * - Every Bot: the AI they run on (Providers), then what is set once for all of them, in the fixed
+ *   order of `lib/primitives.ts`.
  *   Conversations is not here: it is where work happens, not something to set. Routines, Memory,
  *   Skills and Apps (Connections) are things you make and come back to, so they are in the main
  *   menu (`lib/navigation.ts`).
@@ -111,6 +113,16 @@ export const SETTINGS_SIDEBAR_ITEMS: SettingsSidebarItem[] = [
     title: "API keys",
     icon: IconKey,
     linkOptions: { to: "/settings/api-keys" },
+  },
+  {
+    /*
+     * The AI every Bot runs on: each provider connected, with a page of its own. The same mark as
+     * Admin → Providers, which shows the organization's from the admin's side.
+     */
+    group: "every-bot",
+    title: "Providers",
+    icon: IconBrain,
+    linkOptions: { to: "/settings/providers" },
   },
   {
     /* The computer Bots work on, folders, what OpenBot runs here, and your Recorder browsers. */

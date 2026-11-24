@@ -1,10 +1,11 @@
 /**
- * Settings: several AI connections at once (plans/multiple-ai-connections-spec.md, step 2).
+ * Settings → Providers: several AI connections at once (plans/multiple-ai-connections-spec.md,
+ * step 2), each on a page of its own (`openbot-screen-layout`, Screens, Not Dialogs).
  *
- * The AI model section (the organization's) and Your AI (a person's own, on OpenBot Cloud) list one
- * row per connection, tag the default once there are two, add another with the shared chooser, make
- * one the default, and disconnect one. Against a server older than the list (404) they draw the one
- * row they drew before.
+ * The list (the organization's, and a person's own on OpenBot Cloud) has one row per connection,
+ * each a link to its page, tags the default once there are two, and links to the page that connects
+ * another. A provider's page makes it the default, changes it and disconnects it. Against a server
+ * older than the list (404) the section draws the one row it drew before.
  *
  * `fetch` is a fake of the API at /api/v2/organizations/default: every answer is parsed with the
  * generated response schema and every body with the generated request schema, so a request the
@@ -21,6 +22,14 @@ import {
 } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
@@ -43,8 +52,16 @@ import { settleReactWork } from "./settle-react-work";
 import { vendoredMarkFor } from "./vendored-marks";
 
 mock.module("@/lib/marks", () => ({ markFor: vendoredMarkFor }));
-const { AiModelSection } = await import("@/components/settings/ai-connection");
-const { YourAiSection } = await import("@/components/settings/your-ai");
+const {
+  ChangeProviderPage,
+  ConnectProviderPage,
+  ProviderPage,
+  ProvidersSettingsPage,
+} = await import("@/components/settings/provider-pages");
+const { providerSearch, scopeOf } = await import("@/lib/ai-connection/paths");
+const { reconnectPath } = await import(
+  "@/components/channels/stopped-connection-notice"
+);
 
 const NativeResponse = globalThis.Response;
 const ORG = "/api/v2/organizations/default";
@@ -163,6 +180,12 @@ async function fakeFetch(input: RequestInfo | URL, init?: RequestInit) {
           list?.find((one) => one.provider === input.provider)?.isDefault ??
           (list ?? []).length === 0,
       });
+      // One per provider: connecting one already there replaces it.
+      if (list) {
+        const at = list.findIndex((one) => one.provider === input.provider);
+        if (at >= 0) list.splice(at, 1, added);
+        else list.push(added);
+      }
       return json(201, ConnectAiConnectionResponse.parse(added));
     }
     const makeDefault = new RegExp(`^${base}/([^/]+)/make-default$`).exec(path);
@@ -209,7 +232,7 @@ beforeEach(() => {
     preconnect: originalFetch.preconnect,
   }) as typeof fetch;
   window.open = (() => null) as typeof window.open;
-  window.history.replaceState(null, "", "/settings");
+  window.history.replaceState(null, "", "/settings/providers");
 });
 afterEach(() => {
   cleanup();
@@ -221,26 +244,68 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-function renderOrganization() {
-  return render(
+/** The Providers screens at `path`, as Settings routes them. */
+function renderAt(path: string) {
+  const root = createRootRoute({ component: Outlet });
+  const list = createRoute({
+    getParentRoute: () => root,
+    path: "/settings/providers",
+    component: ProvidersSettingsPage,
+  });
+  const connect = createRoute({
+    getParentRoute: () => root,
+    path: "/settings/providers/new",
+    validateSearch: providerSearch,
+    component: function Connect() {
+      return <ConnectProviderPage scope={scopeOf(connect.useSearch())} />;
+    },
+  });
+  const one = createRoute({
+    getParentRoute: () => root,
+    path: "/settings/providers/$provider",
+    validateSearch: providerSearch,
+    component: function One() {
+      const { provider } = one.useParams();
+      // The test's own router isn't the app's registered one: read the search as the app's does.
+      const search = providerSearch(one.useSearch() as Record<string, unknown>);
+      return (
+        <ProviderPage
+          connected={search.connected}
+          id={provider}
+          scope={scopeOf(search)}
+        />
+      );
+    },
+  });
+  const change = createRoute({
+    getParentRoute: () => root,
+    path: "/settings/providers/$provider/change",
+    validateSearch: providerSearch,
+    component: function Change() {
+      const { provider } = change.useParams();
+      return (
+        <ChangeProviderPage id={provider} scope={scopeOf(change.useSearch())} />
+      );
+    },
+  });
+  const router = createRouter({
+    history: createMemoryHistory({ initialEntries: [path] }),
+    routeTree: root.addChildren([list, connect, one, change]),
+  });
+  const view = render(
     <QueryClientProvider client={queryClient}>
-      <AiModelSection />
+      <RouterProvider router={router as never} />
     </QueryClientProvider>,
   );
-}
-
-function renderPersonal() {
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <YourAiSection />
-    </QueryClientProvider>,
-  );
+  return { view, router };
 }
 
 const writes = () => calls.filter((call) => call.method !== "GET");
+const at = (router: ReturnType<typeof renderAt>["router"]) =>
+  `${router.state.location.pathname}${router.state.location.searchStr}`;
 
 test("404 for the list draws today's single row, for the organization", async () => {
-  const view = renderOrganization();
+  const { view } = renderAt("/settings/providers");
   await view.findByText("Anthropic");
   expect(view.queryByText("Connect another AI")).toBeNull();
   expect(calls.some((call) => call.path === `${ORG}/ai-connections`)).toBe(
@@ -250,33 +315,64 @@ test("404 for the list draws today's single row, for the organization", async ()
 
 test("404 for the list draws today's single row, for a person's own AI", async () => {
   personal = PERSONAL;
-  const view = renderPersonal();
-  await view.findByText("Anthropic");
+  const { view } = renderAt("/settings/providers");
+  await view.findByText("Your AI");
+  expect((await view.findAllByText("Anthropic")).length).toBeGreaterThan(0);
   expect(view.queryByText("Connect another AI")).toBeNull();
+  expect(view.queryByText("Connect your AI")).toBeNull();
 });
 
 test("one connection: one row, no Default tag, and Connect another AI", async () => {
   orgList = [entry("anthropic", { isDefault: true })];
-  const view = renderOrganization();
+  const { view } = renderAt("/settings/providers");
   await view.findByText("Claude plan");
-  expect(view.getByText("Connect another AI")).toBeDefined();
+  const add = view.getByRole("link", { name: /Connect another AI/ });
+  expect(add.getAttribute("href")).toBe("/settings/providers/new");
   expect(view.queryByText("Default")).toBeNull();
 });
 
-test("two connections: the default is tagged and Make default on the other sends makeAiConnectionDefault", async () => {
+test("each row is a link to its provider's page, a person's own named as theirs", async () => {
+  orgList = [entry("anthropic", { isDefault: true }), entry("openai")];
+  personal = PERSONAL;
+  personalList = [entry("anthropic", { isDefault: true })];
+  const { view } = renderAt("/settings/providers");
+  await view.findByText("Organization's AI");
+  await view.findByRole("link", { name: /OpenAI API key/ });
+  const hrefs = view
+    .getAllByRole("link", { name: /Claude plan|OpenAI API key/ })
+    .map((link) => link.getAttribute("href"));
+  expect(hrefs.sort()).toEqual([
+    "/settings/providers/anthropic",
+    "/settings/providers/anthropic?owner=personal",
+    "/settings/providers/openai",
+  ]);
+  // No dialog anywhere on these screens.
+  expect(view.queryByRole("dialog")).toBeNull();
+});
+
+test("a conversation's Reconnect leads to the same pages", () => {
+  expect(reconnectPath("openai")).toBe("/settings/providers/openai");
+  expect(reconnectPath("anthropic", "personal")).toBe(
+    "/settings/providers/anthropic?owner=personal",
+  );
+  expect(reconnectPath("anthropic", "organization")).toBe(
+    "/settings/providers/anthropic",
+  );
+});
+
+test("two connections: the default is tagged, and Make default on the other's page sends makeAiConnectionDefault", async () => {
   orgList = [
     entry("anthropic", { isDefault: true }),
     entry("openai", { connectedAt: "2026-11-21T09:00:00.000Z" }),
   ];
   const user = userEvent.setup({ document });
-  const view = renderOrganization();
-  const claude = await view.findByRole("button", { name: /Claude plan/ });
+  const { view, router } = renderAt("/settings/providers");
+  const claude = await view.findByRole("link", { name: /Claude plan/ });
   expect(within(claude).getByText("Default")).toBeDefined();
-  await user.click(view.getByRole("button", { name: /OpenAI API key/ }));
-  const dialog = await view.findByRole("dialog");
-  await user.click(
-    within(dialog).getByRole("button", { name: "Make default" }),
-  );
+  await user.click(view.getByRole("link", { name: /OpenAI API key/ }));
+  await view.findByRole("heading", { name: "OpenAI API key" });
+  expect(at(router)).toBe("/settings/providers/openai");
+  await user.click(view.getByRole("button", { name: "Make default" }));
   await waitFor(() =>
     expect(writes()).toEqual([
       { method: "POST", path: `${ORG}/ai-connections/openai/make-default` },
@@ -284,38 +380,35 @@ test("two connections: the default is tagged and Make default on the other sends
   );
 });
 
-test("disconnecting the default asks which takes over, and sends make-default before the remove", async () => {
+test("disconnecting the default asks on its page which takes over, and sends make-default before the remove", async () => {
   orgList = [
     entry("anthropic", { isDefault: true }),
     entry("openai"),
     entry("google", { login: "endpoint", model: "gemini-3.8-flash" }),
   ];
   const user = userEvent.setup({ document });
-  const view = renderOrganization();
-  await user.click(await view.findByRole("button", { name: /Claude plan/ }));
-  const dialog = await view.findByRole("dialog");
-  await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
-  const google = await within(dialog).findByRole("radio", {
-    name: /Google Gemini API key/,
-  });
-  await user.click(google);
-  await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  const { view, router } = renderAt("/settings/providers/anthropic");
+  await view.findByText(
+    "It's the default AI. Choose which one Bots use when nobody picked a model.",
+  );
+  await user.click(view.getByRole("radio", { name: /Google Gemini API key/ }));
+  await user.click(view.getByRole("button", { name: "Disconnect" }));
   await waitFor(() =>
     expect(writes().map((call) => `${call.method} ${call.path}`)).toEqual([
       `POST ${ORG}/ai-connections/google/make-default`,
       `DELETE ${ORG}/ai-connections/anthropic`,
     ]),
   );
+  await waitFor(() => expect(at(router)).toBe("/settings/providers"));
 });
 
-test("connections with no default: the notice shows and a ready row offers Make default", async () => {
+test("connections with no default: the notice shows and a ready connection's page offers Make default", async () => {
   orgList = [entry("openai")];
   const user = userEvent.setup({ document });
-  const view = renderOrganization();
+  const { view } = renderAt("/settings/providers");
   await view.findByText("No default AI. Choose one so Bots can start work.");
-  await user.click(view.getByRole("button", { name: /OpenAI API key/ }));
-  const dialog = await view.findByRole("dialog");
-  const make = within(dialog).getByRole("button", { name: "Make default" });
+  await user.click(view.getByRole("link", { name: /OpenAI API key/ }));
+  const make = await view.findByRole("button", { name: "Make default" });
   expect((make as HTMLButtonElement).disabled).toBe(false);
 });
 
@@ -331,27 +424,29 @@ test("a stopped connection shows its sentence, and Make default is disabled", as
     }),
   ];
   const user = userEvent.setup({ document });
-  const view = renderOrganization();
+  const { view } = renderAt("/settings/providers");
   await view.findByText(sentence);
-  await user.click(view.getByRole("button", { name: /Google sign-in/ }));
-  const dialog = await view.findByRole("dialog");
-  const make = within(dialog).getByRole("button", { name: "Make default" });
+  await user.click(view.getByRole("link", { name: /Google sign-in/ }));
+  const alert = await view.findByRole("alert");
+  expect(alert.textContent).toBe(sentence);
+  const make = view.getByRole("button", { name: "Make default" });
   expect((make as HTMLButtonElement).disabled).toBe(true);
 });
 
-test("Connect another AI marks connected providers and posts connectAiConnection, not replace", async () => {
+test("Connect another AI is a page: it marks connected providers and posts connectAiConnection, not replace", async () => {
   orgList = [entry("anthropic", { isDefault: true })];
   const user = userEvent.setup({ document });
-  const view = renderOrganization();
+  const { view, router } = renderAt("/settings/providers");
   await user.click(
-    await view.findByRole("button", { name: /Connect another AI/ }),
+    await view.findByRole("link", { name: /Connect another AI/ }),
   );
-  const dialog = await view.findByRole("dialog");
-  const anthropic = within(dialog).getByRole("button", { name: /Anthropic/ });
+  await view.findByRole("heading", { name: "Connect another AI" });
+  expect(at(router)).toBe("/settings/providers/new");
+  const anthropic = view.getByRole("button", { name: /Anthropic/ });
   expect(within(anthropic).getByText("Connected")).toBeDefined();
-  await user.click(within(dialog).getByRole("button", { name: /^OpenAI/ }));
-  await user.type(within(dialog).getByLabelText(/API key/), "sk-example");
-  await user.click(within(dialog).getByRole("button", { name: /Connect/ }));
+  await user.click(view.getByRole("button", { name: /^OpenAI/ }));
+  await user.type(view.getByLabelText(/API key/), "sk-example");
+  await user.click(view.getByRole("button", { name: /Connect/ }));
   await waitFor(() =>
     expect(writes()).toEqual([
       {
@@ -361,34 +456,33 @@ test("Connect another AI marks connected providers and posts connectAiConnection
       },
     ]),
   );
+  // Then the new connection's own page, saying what connecting it did.
+  await waitFor(() =>
+    expect(at(router)).toBe("/settings/providers/openai?connected=added"),
+  );
+  expect(
+    await view.findByText(/Pick one of its models in a conversation/),
+  ).toBeDefined();
 });
 
 test("a provider missing from signIns offers only its key", async () => {
   orgList = [entry("openai", { isDefault: true })];
   orgSignIns = [];
   const user = userEvent.setup({ document });
-  const view = renderOrganization();
-  await user.click(
-    await view.findByRole("button", { name: /Connect another AI/ }),
-  );
-  const dialog = await view.findByRole("dialog");
-  await user.click(within(dialog).getByRole("button", { name: /Anthropic/ }));
-  expect(within(dialog).queryByText("Sign in with my plan")).toBeNull();
-  expect(within(dialog).getByLabelText(/API key/)).toBeDefined();
+  const { view } = renderAt("/settings/providers/new");
+  await user.click(await view.findByRole("button", { name: /Anthropic/ }));
+  expect(view.queryByText("Sign in with my plan")).toBeNull();
+  expect(view.getByLabelText(/API key/)).toBeDefined();
 });
 
 test("the organization's list signs in through startAiSignIn when signIns names the provider", async () => {
   orgList = [entry("openai", { isDefault: true })];
   orgSignIns = ["anthropic"];
   const user = userEvent.setup({ document });
-  const view = renderOrganization();
+  const { view } = renderAt("/settings/providers/new");
+  await user.click(await view.findByRole("button", { name: /Anthropic/ }));
   await user.click(
-    await view.findByRole("button", { name: /Connect another AI/ }),
-  );
-  const dialog = await view.findByRole("dialog");
-  await user.click(within(dialog).getByRole("button", { name: /Anthropic/ }));
-  await user.click(
-    within(dialog).getByRole("button", { name: /Sign in with Anthropic/ }),
+    view.getByRole("button", { name: /Sign in with Anthropic/ }),
   );
   await waitFor(() =>
     expect(writes()[0]?.path).toBe(`${ORG}/ai-connection-sign-ins`),
@@ -419,21 +513,18 @@ test("every provider connected hides Connect another AI", async () => {
       endpointHost: provider === "openai-compatible" ? "llm.example.com" : null,
     }),
   );
-  const view = renderOrganization();
+  const { view } = renderAt("/settings/providers");
   await view.findByText("llm.example.com");
   expect(view.queryByText("Connect another AI")).toBeNull();
 });
 
-test("a person's own list posts to their own connections", async () => {
+test("a person's own connection's page posts to their own connections", async () => {
   personal = PERSONAL;
   personalList = [entry("anthropic", { isDefault: true }), entry("openai")];
+  orgList = [entry("openai", { isDefault: true })];
   const user = userEvent.setup({ document });
-  const view = renderPersonal();
-  await user.click(await view.findByRole("button", { name: /OpenAI API key/ }));
-  const dialog = await view.findByRole("dialog");
-  await user.click(
-    within(dialog).getByRole("button", { name: "Make default" }),
-  );
+  const { view } = renderAt("/settings/providers/openai?owner=personal");
+  await user.click(await view.findByRole("button", { name: "Make default" }));
   await waitFor(() =>
     expect(writes()).toEqual([
       {
@@ -444,37 +535,7 @@ test("a person's own list posts to their own connections", async () => {
   );
 });
 
-test("the address's connection opens that row's dialog", async () => {
-  orgList = [entry("anthropic", { isDefault: true }), entry("openai")];
-  window.history.replaceState(null, "", "/settings?connection=openai");
-  const view = renderOrganization();
-  const dialog = await view.findByRole("dialog");
-  expect(within(dialog).getByText(/OpenAI API key/)).toBeDefined();
-});
-
-test("a connection the address names for a person's own AI opens only in Your AI, not the organization's list", async () => {
-  orgList = [entry("anthropic", { isDefault: true }), entry("openai")];
-  personal = PERSONAL;
-  personalList = [entry("anthropic", { isDefault: true })];
-  window.history.replaceState(
-    null,
-    "",
-    "/settings?connection=anthropic&owner=personal",
-  );
-  const view = render(
-    <QueryClientProvider client={queryClient}>
-      <YourAiSection />
-      <AiModelSection organizationWide />
-    </QueryClientProvider>,
-  );
-  await view.findByRole("dialog", { hidden: true });
-  await view.findByText("Organization's AI");
-  // A modal dialog hides the page under it from role queries: count the hidden ones too.
-  await settleReactWork();
-  expect(view.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
-});
-
-test("a stopped sign-in leads with Sign in again, which opens its provider ready to sign in", async () => {
+test("a stopped sign-in leads with Sign in again, a page that opens its provider ready to sign in", async () => {
   orgSignIns = ["google"];
   orgList = [
     entry("anthropic", { isDefault: true }),
@@ -486,23 +547,18 @@ test("a stopped sign-in leads with Sign in again, which opens its provider ready
     }),
   ];
   const user = userEvent.setup({ document });
-  const view = renderOrganization();
-  await user.click(await view.findByRole("button", { name: /Google sign-in/ }));
-  const dialog = await view.findByRole("dialog");
-  await user.click(
-    within(dialog).getByRole("button", { name: "Sign in again" }),
-  );
+  const { view, router } = renderAt("/settings/providers/google");
+  await user.click(await view.findByRole("link", { name: /Sign in again/ }));
   expect(
-    await within(dialog).findByRole("heading", {
-      name: "Reconnect Google sign-in",
-    }),
+    await view.findByRole("heading", { name: "Reconnect Google sign-in" }),
   ).toBeDefined();
+  expect(at(router)).toBe("/settings/providers/google/change");
   expect(
-    within(dialog).getByRole("button", { name: "Sign in with Google" }),
+    view.getByRole("button", { name: "Sign in with Google" }),
   ).toBeDefined();
 });
 
-test("a stopped key leads with Replace key, which opens its provider's key field", async () => {
+test("a stopped key leads with Replace key, a page that opens its provider's key field", async () => {
   orgList = [
     entry("anthropic", { isDefault: true }),
     entry("openai", {
@@ -511,34 +567,27 @@ test("a stopped key leads with Replace key, which opens its provider's key field
     }),
   ];
   const user = userEvent.setup({ document });
-  const view = renderOrganization();
-  await user.click(await view.findByRole("button", { name: /OpenAI API key/ }));
-  const dialog = await view.findByRole("dialog");
-  await user.click(within(dialog).getByRole("button", { name: "Replace key" }));
+  const { view } = renderAt("/settings/providers/openai");
+  await user.click(await view.findByRole("link", { name: /Replace key/ }));
   expect(
-    await within(dialog).findByRole("heading", {
-      name: "Reconnect OpenAI API key",
-    }),
+    await view.findByRole("heading", { name: "Reconnect OpenAI API key" }),
   ).toBeDefined();
-  expect(within(dialog).getByLabelText(/API key/)).toBeDefined();
+  expect(view.getByLabelText(/API key/)).toBeDefined();
 });
 
 test("removing a person's last own connection says what happens next, and sends them to connect one when it is required", async () => {
   personal = PERSONAL;
   personalList = [entry("anthropic", { isDefault: true })];
   const user = userEvent.setup({ document });
-  const view = renderPersonal();
-  await user.click(await view.findByRole("button", { name: /Claude plan/ }));
-  const dialog = await view.findByRole("dialog");
-  await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  const { view } = renderAt("/settings/providers/anthropic?owner=personal");
   expect(
-    await within(dialog).findByText(
+    await view.findByText(
       "Remove it and Bots can't work for you until you connect another.",
     ),
   ).toBeDefined();
   // After the removal the server says the person has no AI, and one is required.
   personal = { ...PERSONAL, uses: "none" };
-  await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  await user.click(view.getByRole("button", { name: "Disconnect" }));
   await waitFor(() =>
     expect(`${window.location.pathname}${window.location.search}`).toBe(
       "/onboarding?step=ai",
@@ -552,31 +601,20 @@ test("removing a person's last own connection where the organization has an AI s
     organization: { ready: true, provider: "openai" },
   };
   personalList = [entry("anthropic", { isDefault: true })];
-  const user = userEvent.setup({ document });
-  const view = renderPersonal();
-  await user.click(await view.findByRole("button", { name: /Claude plan/ }));
-  const dialog = await view.findByRole("dialog");
-  await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  const { view } = renderAt("/settings/providers/anthropic?owner=personal");
   expect(
-    await within(dialog).findByText(
+    await view.findByText(
       "Remove it and Bots use your organization's AI for you.",
     ),
   ).toBeDefined();
 });
 
 test("disconnecting the organization's last connection on OpenBot Cloud says Bots work only for people with their own", async () => {
+  personal = PERSONAL;
   orgList = [entry("anthropic", { isDefault: true })];
-  const user = userEvent.setup({ document });
-  const view = render(
-    <QueryClientProvider client={queryClient}>
-      <AiModelSection organizationWide />
-    </QueryClientProvider>,
-  );
-  await user.click(await view.findByRole("button", { name: /Claude plan/ }));
-  const dialog = await view.findByRole("dialog");
-  await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  const { view } = renderAt("/settings/providers/anthropic");
   expect(
-    await within(dialog).findByText(
+    await view.findByText(
       "Disconnect it and Bots work only for people who connected their own AI.",
     ),
   ).toBeDefined();
@@ -585,17 +623,14 @@ test("disconnecting the organization's last connection on OpenBot Cloud says Bot
 test("disconnecting the default with exactly one other left removes it alone, and says which becomes the default", async () => {
   orgList = [entry("anthropic", { isDefault: true }), entry("openai")];
   const user = userEvent.setup({ document });
-  const view = renderOrganization();
-  await user.click(await view.findByRole("button", { name: /Claude plan/ }));
-  const dialog = await view.findByRole("dialog");
-  await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  const { view } = renderAt("/settings/providers/anthropic");
   expect(
-    await within(dialog).findByText(
+    await view.findByText(
       "Bots will use OpenAI API key when nobody picked a model.",
     ),
   ).toBeDefined();
-  expect(within(dialog).queryByRole("radio")).toBeNull();
-  await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  expect(view.queryByRole("radio")).toBeNull();
+  await user.click(view.getByRole("button", { name: "Disconnect" }));
   // The server makes the one left the default; the app asks for nothing else.
   await waitFor(() =>
     expect(writes().map((call) => `${call.method} ${call.path}`)).toEqual([
@@ -604,27 +639,20 @@ test("disconnecting the default with exactly one other left removes it alone, an
   );
 });
 
-async function connectWithKey(
-  view: ReturnType<typeof renderOrganization>,
-  provider: RegExp,
-) {
+async function connectWithKey(provider: RegExp) {
+  const { view, router } = renderAt("/settings/providers/new");
   const user = userEvent.setup({ document });
-  await user.click(
-    await view.findByRole("button", { name: /Connect another AI/ }),
-  );
-  const dialog = await view.findByRole("dialog");
-  await user.click(within(dialog).getByRole("button", { name: provider }));
-  await user.type(within(dialog).getByLabelText(/API key/), "sk-example");
-  await user.click(within(dialog).getByRole("button", { name: /Connect/ }));
-  return dialog;
+  await user.click(await view.findByRole("button", { name: provider }));
+  await user.type(view.getByLabelText(/API key/), "sk-example");
+  await user.click(view.getByRole("button", { name: /Connect/ }));
+  return { view, router };
 }
 
 test("after connecting, it says what the server answered: beside the default, even with no default", async () => {
   orgList = [entry("openai")];
-  const view = renderOrganization();
-  const dialog = await connectWithKey(view, /Anthropic/);
+  const { view } = await connectWithKey(/Anthropic/);
   expect(
-    await within(dialog).findByText(/Pick one of its models in a conversation/),
+    await view.findByText(/Pick one of its models in a conversation/),
   ).toBeDefined();
 });
 
@@ -633,9 +661,7 @@ test("after connecting the provider that is the default again, it says the next 
     entry("openai", { isDefault: true }),
     entry("anthropic", { login: "api-key" }),
   ];
-  const view = renderOrganization();
-  const dialog = await connectWithKey(view, /^OpenAI/);
-  expect(
-    await within(dialog).findByText(/Your next message runs on it/),
-  ).toBeDefined();
+  const { view, router } = await connectWithKey(/^OpenAI/);
+  expect(await view.findByText(/Your next message runs on it/)).toBeDefined();
+  expect(at(router)).toBe("/settings/providers/openai?connected=in-use");
 });

@@ -307,7 +307,7 @@ test("a stopped connection of the person's own offers Reconnect in its group; th
   const { popup } = await open(view, "Model: GPT-6.2 Sol");
   expect(
     within(popup).getByRole("link", { name: "Reconnect" }).getAttribute("href"),
-  ).toBe("/settings?connection=anthropic&owner=personal");
+  ).toBe("/settings/providers/anthropic?owner=personal");
   cleanup();
   const theirs = render(
     <ModelPicker

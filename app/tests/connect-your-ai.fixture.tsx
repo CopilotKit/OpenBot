@@ -23,10 +23,10 @@ import { queryClient } from "@/query-client";
 import type { RouterContext } from "@/router-context";
 import { Route as AuthedRoute } from "@/routes/_authed";
 import { Route as OnboardingRoute } from "@/routes/_authed/onboarding";
-import { Route as GeneralRoute } from "@/routes/_authed/settings/index";
+import { Route as SettingsProvidersRoute } from "@/routes/_authed/settings/providers";
 
 /**
- * The signed-in gate, onboarding and Settings → General, for connect-your-ai.test.tsx to bundle and
+ * The signed-in gate, onboarding and Settings → Providers, for connect-your-ai.test.tsx to bundle and
  * load in a browser. The gate is `_authed`'s own `beforeLoad`, and onboarding is its own route, so
  * where a person is sent is what the app does. The app behind the gate is a page that says Home:
  * this is about getting there. What the server answers comes from the test's routes.
@@ -127,8 +127,8 @@ const router = createRouter({
       settingsRoute.addChildren([
         createRoute({
           getParentRoute: () => settingsRoute,
-          path: "/settings",
-          component: component(GeneralRoute),
+          path: "/settings/providers",
+          component: component(SettingsProvidersRoute),
         }),
       ]),
       createRoute({

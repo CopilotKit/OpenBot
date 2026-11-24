@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { PROVIDERS_ADDRESS, providerAddress } from "@/lib/ai-connection/paths";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin } from "@/lib/auth/roles";
 import { connectionOf } from "@/lib/models/connections";
@@ -18,17 +19,16 @@ export function openComposerModelPicker(): void {
 }
 
 /**
- * Where a connection is fixed: its row's dialog in Settings, opened by the address. `owner` says
- * whose list it is in: on OpenBot Cloud a person's own and the organization's may share an id.
+ * Where a connection is fixed: its own page in Settings → Providers. `owner` says whose list it is
+ * in: on OpenBot Cloud a person's own and the organization's may share an id.
  */
 export function reconnectPath(connectionId: string, owner?: string): string {
-  const whose = owner ? `&owner=${encodeURIComponent(owner)}` : "";
-  return `/settings?connection=${encodeURIComponent(connectionId)}${whose}`;
+  return providerAddress(connectionId, owner);
 }
 
-/** Where a default is chosen: the list in Settings, named by whose it is. */
-export function chooseDefaultPath(owner?: string): string {
-  return owner ? `/settings?owner=${encodeURIComponent(owner)}` : "/settings";
+/** Where a default is chosen: Settings → Providers, which says when there is none. */
+export function chooseDefaultPath(): string {
+  return PROVIDERS_ADDRESS;
 }
 
 /**
@@ -41,7 +41,7 @@ export function chooseDefaultPath(owner?: string): string {
  * server's sentence varies by connection, and an OpenBot older than several connections sends no
  * `stopped`, which draws nothing here.
  *
- * Reconnect is a whole page load into Settings, as the other ways to fix an AI from a conversation
+ * Reconnect is a whole page load into Settings → Providers, as the other ways to fix an AI from a conversation
  * are (add-model-key-link.tsx). It is left out for a member whose runs use the organization's
  * connection: only an admin can fix that one. Named query client, as everything drawn inside a
  * conversation.
@@ -89,7 +89,7 @@ export function StoppedConnectionNotice({
             href={
               stopped.connection
                 ? reconnectPath(stopped.connection, owner)
-                : chooseDefaultPath(owner)
+                : chooseDefaultPath()
             }
           >
             {stopped.connection ? "Reconnect" : "Choose a default"}
