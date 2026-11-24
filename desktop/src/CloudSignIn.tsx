@@ -62,6 +62,9 @@ export function cloudHost(address = cloudWebAddress()): string {
   }
 }
 
+/** How a new account starts, as the web's Cloud sign-in says it. Never the number of runs. */
+export const CLOUD_NEW = "New accounts start with a free usage-based trial.";
+
 /** The button that signs in. */
 export const SIGN_IN_TO_CLOUD = "Sign in to OpenBot Cloud";
 
@@ -101,7 +104,7 @@ export function CloudSignIn({
     <section className="cloud-sign-in" aria-label="OpenBot Cloud">
       <p className="lede">
         This app connects to OpenBot Cloud, where your Bots run. Your account,
-        Bots and conversations are the same here and at {host}.
+        Bots and conversations are the same here and at {host}. {CLOUD_NEW}
       </p>
       {phase === "waiting" ? (
         <>

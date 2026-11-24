@@ -11,6 +11,7 @@ import { createRoot } from "react-dom/client";
 import { ChatTranscript } from "@/components/channels/chat-transcript";
 import { PlanBanner } from "@/components/layout/plan-banner";
 import { OrganizationSettingsPage } from "@/components/organizations/organization-settings-page";
+import { CardNeededDialog } from "@/components/plan/card-needed-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { authKeys } from "@/lib/auth/queries";
 import { deploymentKeys } from "@/lib/deployment/queries";
@@ -22,10 +23,11 @@ import { queryClient } from "@/query-client";
 /**
  * The places an organization's plan shows, as a page of their own for plan-notices-layout.test.tsx
  * to bundle and load in Chromium: the bar over every page, the Plan row on the organization's
- * settings, and the chat when a run is refused for want of a plan. Every answer the screens read is
- * put in the cache first, as the server would answer it, and nothing is fetched.
+ * settings, the chat when a run is refused for want of a plan, and the dialog once the free trial
+ * is used up. Every answer the screens read is put in the cache first, as the server would answer
+ * it, and nothing is fetched.
  *
- * `?scene=shell|settings|chat`, `?plan=<status>`, `?admin=1` for an owner, `?theme=dark`.
+ * `?scene=shell|settings|chat|dialog`, `?plan=<status>`, `?admin=1` for an owner, `?theme=dark`.
  */
 const query = new URLSearchParams(location.search);
 const scene = query.get("scene") ?? "shell";
@@ -41,13 +43,17 @@ const DAY = 24 * 60 * 60 * 1000;
 const plan: PlanStatus = {
   required: status !== "not_required",
   status,
-  trialEndsAt:
-    status === "trialing"
-      ? new Date(Date.now() + 23 * DAY - 60_000).toISOString()
-      : null,
+  // As the server sends it: the share used while runs are left, and the allowance once they're gone.
+  ...(status === "free" ? { freeRunsUsedPercent: 42 } : {}),
+  ...(status === "none"
+    ? { freeRunsUsedPercent: 100, freeRunsAllowance: 500 }
+    : {}),
+  trialEndsAt: null,
   renewsAt:
     status === "active" ? new Date(Date.now() + 12 * DAY).toISOString() : null,
-  addCardUrl: admin && status !== "not_required" ? ADD_CARD : null,
+  // Only while a card is needed, and only for an admin: never on the free allowance.
+  addCardUrl:
+    admin && (status === "none" || status === "past_due") ? ADD_CARD : null,
 };
 
 // Nothing else is fetched: every other answer is in the cache, and stays the answer. The plan is
@@ -129,14 +135,22 @@ const REFUSED =
   status === "past_due"
     ? "This organization's last payment didn't go through, so Bots can't run until the card is updated."
     : plan.addCardUrl !== null
-      ? "Bots in this organization can't run until a card is added. Add a card to start your 30-day free trial."
-      : "Bots in this organization can't run until an admin adds a card.";
+      ? "You've used your free trial. Add a card to keep your Bots running, $5 a month."
+      : "This organization's free trial is used up. Ask an admin to add a card.";
 const ASKED: Message[] = [
   { id: "u1", role: "user", content: "Summarize this week's signups for me" },
 ];
 
 function Scene() {
   if (scene === "settings") return <OrganizationSettingsPage />;
+  // The dialog over the page it opens on, as the signed-in layout mounts it.
+  if (scene === "dialog")
+    return (
+      <>
+        <OrganizationSettingsPage />
+        <CardNeededDialog />
+      </>
+    );
   if (scene === "chat")
     return (
       <div className="flex min-h-0 flex-1 flex-col">

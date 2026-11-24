@@ -24,9 +24,12 @@ import { cn } from "@/lib/utils";
 /** The sign-in screen's heading on OpenBot Cloud. */
 export const CLOUD_SIGN_IN_TITLE = "Sign in to OpenBot Cloud";
 
-/** Under the heading: who runs it, and that signing in is also how somebody new starts. */
+/**
+ * Under the heading: who runs it, and that signing in is also how somebody new starts, on a free
+ * trial measured by use. Never the number of runs.
+ */
 export const CLOUD_SIGN_IN_LINE =
-  "We run OpenBot for you. New here? Signing in creates your account.";
+  "We run OpenBot for you. New here? Signing in creates your account, with a free usage-based trial.";
 
 /** OpenBot for Business, in the words OpenBot Desktop's first screen gives it. */
 export const BUSINESS_SUMMARY = "Your own cloud or on-prem. Book a demo.";

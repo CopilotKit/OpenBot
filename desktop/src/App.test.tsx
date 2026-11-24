@@ -1413,7 +1413,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     const view = await renderApp();
     const radios = view.getAllByRole("radio") as HTMLInputElement[];
     expect(radios.map((radio) => radio.closest("label")?.textContent)).toEqual([
-      "OpenBot CloudUse OpenBot here. Your Bots run in our cloud.",
+      "OpenBot CloudUse OpenBot here. Your Bots run in our cloud. Free usage-based trial.",
       "OpenBot for BusinessYour own cloud or on-prem. Book a demo.",
     ]);
     expect(radios.map((radio) => [radio.value, radio.checked])).toEqual([
@@ -1446,7 +1446,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     // Cloud's sign-in is what the screen opens on: nothing to type.
     expect(
       view.getByText(
-        "This app connects to OpenBot Cloud, where your Bots run. Your account, Bots and conversations are the same here and at my.open.bot.",
+        "This app connects to OpenBot Cloud, where your Bots run. Your account, Bots and conversations are the same here and at my.open.bot. New accounts start with a free usage-based trial.",
       ),
     ).toBeTruthy();
     expect(view.queryByLabelText("Your company's OpenBot address")).toBeNull();
@@ -1648,7 +1648,7 @@ describe("with OpenBot Cloud on in this build (VITE_OPENBOT_CLOUD_ENABLED=true)"
     ).toBeNull();
     expect(
       view.getByText(
-        "This app connects to OpenBot Cloud, where your Bots run. Your account, Bots and conversations are the same here and at my.open.bot.",
+        "This app connects to OpenBot Cloud, where your Bots run. Your account, Bots and conversations are the same here and at my.open.bot. New accounts start with a free usage-based trial.",
       ),
     ).toBeTruthy();
     expect(

@@ -34,7 +34,12 @@ import {
   StatusLine,
   StepFooter,
 } from "./SetupProgress";
-import { BUSINESS_SUMMARY, CloudMarks, HostingMark } from "./Welcome";
+import {
+  BUSINESS_SUMMARY,
+  CLOUD_TRIAL,
+  CloudMarks,
+  HostingMark,
+} from "./Welcome";
 
 /**
  * Whether this window offers the move to OpenBot Cloud, as the shell answers `move_offer`. `due`:
@@ -686,6 +691,7 @@ function Choice({
           <span className="tile-summary">
             {WHAT_MOVES} move to your OpenBot Cloud account.
             {footprintBytes != null && ` ${removesSaid(footprintBytes)}`}
+            {` ${CLOUD_TRIAL}`}
           </span>
         </label>
         {/* The first screen's OpenBot for Business row: a company's own cloud or on-prem. */}

@@ -40,6 +40,11 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import {
+  Progress,
+  ProgressLabel,
+  ProgressValue,
+} from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { isOrganizationAdmin, type KnownRole } from "@/lib/auth/roles";
@@ -68,7 +73,7 @@ import {
 } from "@/lib/organizations/words";
 import { SEARCH_MAX } from "@/lib/people/queries";
 import { needsCard, usePlan } from "@/lib/plan/queries";
-import { cardAction, planSummary } from "@/lib/plan/words";
+import { cardAction, planSummary, trialUsed } from "@/lib/plan/words";
 import { cn } from "@/lib/utils";
 import { queryClient } from "@/query-client";
 import { PersonAvatar } from "./person-avatar";
@@ -181,10 +186,41 @@ function NameRow({
  * plan, a failed payment, or none yet. Read-only, with the way to add or update the card for an
  * owner or an admin while Bots can't run (`addCardUrl`, the server's verdict). Nothing, and no
  * divider, where no plan is needed or while it is read.
+ *
+ * On the free trial it shows how much of it is used, as a bar and a percentage
+ * (`freeRunsUsedPercent`, the person's own share). Never a count or a limit: the server sends
+ * neither while runs are left.
  */
 function PlanRow() {
   const plan = usePlan();
   if (!plan?.required) return null;
+  const used =
+    plan.status === "free" && typeof plan.freeRunsUsedPercent === "number"
+      ? plan.freeRunsUsedPercent
+      : null;
+  if (used !== null)
+    return (
+      <>
+        <Separator />
+        <Item size="sm">
+          {/* Level with the title, as beside a row's description. */}
+          <ItemMedia className="translate-y-0.5 self-start" variant="icon">
+            <IconCreditCard />
+          </ItemMedia>
+          <ItemContent className="min-w-0">
+            <ItemTitle>Plan</ItemTitle>
+            <Progress className="mt-0.5 gap-x-3 gap-y-2" value={used}>
+              <ProgressLabel className="font-normal text-muted-foreground text-xs">
+                Free trial
+              </ProgressLabel>
+              <ProgressValue className="text-xs">
+                {() => trialUsed(used)}
+              </ProgressValue>
+            </Progress>
+          </ItemContent>
+        </Item>
+      </>
+    );
   return (
     <>
       <Separator />

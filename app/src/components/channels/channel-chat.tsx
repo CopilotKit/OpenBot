@@ -118,6 +118,7 @@ import {
 } from "@/lib/desktop/connection-lost";
 import { modelCatalogueQueryOptions } from "@/lib/models/queries";
 import { useConversationModel } from "@/lib/models/run-model";
+import { stopIfNeedsCard } from "@/lib/plan/queries";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
 import {
   askChannelAgent,
@@ -2013,6 +2014,8 @@ export function ChannelChat({
    * is still holding, and the failed turn is already reported by `runError` under the transcript.
    */
   const askFromComponent = useCallback((text: string) => {
+    // Carry on, or a button a Bot drew: Bots can't run until a card is added, and the dialog says why.
+    if (stopIfNeedsCard()) return;
     void sayRef.current(text).catch(() => undefined);
   }, []);
 
