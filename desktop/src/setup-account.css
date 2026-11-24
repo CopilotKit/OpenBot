@@ -1,3 +1,7 @@
+.account-layout .setup-content > .footnote:has(+ .setup-panel) {
+  margin: 0 0 16px;
+}
+
 /* The browser sign-in status, comparison code and recovery actions form one group. */
 .account-layout .sign-in-wait {
   display: flex;
