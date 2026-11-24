@@ -68,11 +68,12 @@ import { connectionsQueryOptions } from "@/lib/plugins/queries";
  * Adding one is account-wide, and it still reads nothing. Every app here is reached as whoever is
  * asking, so a person's own connection is what makes their own mail or messages readable.
  *
- * WHERE IT IS OPENED DECIDES WHAT A PRESS DOES (`place`). From Connections, a person is finding an
- * app to use: somebody who may add apps (the personal edition's one person, or an admin of their
- * organization, which is OpenBot Cloud's usual case) adds it and connects their own account in one
- * press, and a member asks an admin to add it. From Admin, adding is the admin's act for everybody,
- * and each person connects their own account afterwards.
+ * ONE PRESS, WHEREVER IT IS OPENED. Somebody who may add apps (the personal edition's one person, or
+ * an admin of their organization, which is OpenBot Cloud's usual case) presses Connect: the app is
+ * added for everybody and their own sign-in or key form follows on the same press, from Connections
+ * and from Admin alike. Admin's Browse apps used to stop at "Add", and the row then asked for a
+ * second press to Connect; "turn it on, then connect it" was a step nobody read as one. A member
+ * asks an admin for it. `place` decides only where the back button and the app's page go.
  *
  * A COMPONENT AND NOT A ROUTE, so every directory route is the same screen rather than several that
  * drift. A route file importing another route file is how that drift starts, so none does. Every
@@ -86,14 +87,16 @@ const LOADING_ROWS = ["a", "b", "c", "d", "e", "f"];
 /** Where the directory was opened from: a person's Connections, or Admin's Apps. */
 export type DirectoryPlace = "connections" | "admin";
 
-/** What a press does for this person, opened from `place`. */
+/**
+ * What a press does for this person, opened from `place`. Admin is opened only by an admin, so
+ * there it is always Connect.
+ */
 export function directoryPressMode(input: {
   edition: "team" | "personal";
   place: DirectoryPlace;
   role: string | null | undefined;
 }): DirectoryPressMode {
-  if (input.edition === "personal") return "connect";
-  if (input.place === "admin") return "add";
+  if (input.edition === "personal" || input.place === "admin") return "connect";
   return isOrganizationAdmin(input.role) ? "connect" : "request";
 }
 
@@ -322,9 +325,9 @@ export function BrokerDirectory({
                         </span>
                         {/*
                          * An app this deployment already has says where it stands rather than
-                         * offering Add again. A second Add would ask the server to record an app it
-                         * already holds, and there is nothing on the row to suggest that would be
-                         * harmless.
+                         * offering to add it again. A second add would ask the server to record an
+                         * app it already holds, and there is nothing on the row to suggest that
+                         * would be harmless.
                          */}
                         {state.kind === "addable" && mode === "request" ? (
                           requested.has(slug) ? (
@@ -345,13 +348,20 @@ export function BrokerDirectory({
                             </Button>
                           )
                         ) : state.kind === "addable" ? (
+                          /*
+                           * Connect, never Add: the press adds the app and goes straight on to this
+                           * person's own sign-in or key form (`useDirectoryPress`).
+                           */
                           <Button
+                            aria-label={
+                              isAdding ? undefined : `Connect ${entry.title}`
+                            }
                             disabled={isAdding || (mine && tab.pending)}
                             onClick={() => press.press(entry)}
                             size="sm"
                             variant="outline"
                           >
-                            {isAdding ? "Adding…" : "Add"}
+                            {isAdding ? "Connecting…" : "Connect"}
                           </Button>
                         ) : (
                           <DirectoryRowState

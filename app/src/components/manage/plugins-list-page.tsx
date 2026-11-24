@@ -290,7 +290,7 @@ export function PluginsListPage({
           </PageSection>
 
           <PageSection
-            description="Reviewed, first-party servers. Open one to add it."
+            description="Reviewed, first-party servers. Open one to connect it."
             title="Explore apps"
           >
             {explore.length === 0 ? (
@@ -319,7 +319,7 @@ export function PluginsListPage({
                             count={requestCounts?.byApp[entry.key] ?? 0}
                           />
                           <span className="text-muted-foreground text-xs">
-                            Not added
+                            Not connected
                           </span>
                           <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
                         </ItemActions>

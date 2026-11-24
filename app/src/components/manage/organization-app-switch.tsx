@@ -15,18 +15,23 @@ import { type Failure, failureSaid } from "@/lib/load-failure";
 import { queryClient } from "@/query-client";
 
 /**
- * The words of the switch that turns an app on or off for the whole organization, in the team edition.
+ * The words of the switch that turns an app off for the whole organization, in the team edition.
  * Admin's page for the app draws them, and so does the app's page under Connections for an admin, so
  * the two say the same thing about the same decision.
+ *
+ * DRAWN ONLY ONCE THE APP IS ADDED, and worded as what switching it does: turning it off for
+ * everyone. Adding the app is never a step of its own: Connect adds it and goes on to the admin's own
+ * account in one press. "Enable for this organization" was a step before Connect, and nobody reads
+ * "turn it on, then connect it" as one thing.
  */
 export const ORGANIZATION_SWITCH = {
-  title: "Enable for this organization",
-  on: "Bots can be given its tools. Turning this off removes it and every Bot's access to its tools.",
-  label: (title: string) => `Enable ${title} for this organization`,
+  title: "On for everyone",
+  on: "Everyone in the organization can connect it, and Bots can be given its tools. Turning this off removes it for everyone, along with every Bot's access to its tools.",
+  label: (title: string) => `${title} on for everyone in the organization`,
 } as const;
 
 /**
- * Admin's "Enable for this organization" row, for an app that is on, drawn on the app's page under
+ * Admin's "On for everyone" row, for an app that is on, drawn on the app's page under
  * Connections for an organization's owner or admin. Turning it off removes the app for everybody, as
  * it does in Admin, and goes back to Connections, where the app is no longer listed. Then a person
  * who runs their own organization (OpenBot Cloud's usual case) adds and removes an app without
